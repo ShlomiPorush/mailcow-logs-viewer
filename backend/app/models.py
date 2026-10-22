@@ -6,7 +6,7 @@ SIMPLIFIED VERSION:
 - Removed old generate_correlation_key function
 - Correlation key is now SHA256 of Message-ID
 """
-from sqlalchemy import Column, Integer, BigInteger, String, Float, DateTime, Boolean, Text, Index, JSON, UniqueConstraint, ForeignKey, func
+from sqlalchemy import Column, Integer, BigInteger, String, Float, DateTime, Boolean, Text, Index, JSON, UniqueConstraint, ForeignKey, func, Uuid
 from sqlalchemy.dialects.postgresql import JSONB
 from datetime import datetime
 
@@ -795,6 +795,8 @@ class SecurityAlert(Base):
     metric_value = Column(Float)                 # observed value (messages, failures, ...)
     baseline_value = Column(Float)               # expected/baseline value for context
     acknowledged = Column(Boolean, default=False, index=True)
+    # The receipt of the dismissal that acknowledged it (Undo re-opens by it); Alembic 0020
+    ack_batch = Column(Uuid, nullable=True, index=True)
 
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
 

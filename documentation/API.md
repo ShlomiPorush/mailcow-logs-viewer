@@ -2271,13 +2271,14 @@ Alerts, newest first.
 {
   "enabled": true,
   "unacknowledged_count": 2,
+  "unacknowledged_ids": [12, 9],
   "alerts": [
     {"id": 12, "alert_type": "volume_spike", "severity": "critical", "subject": "user@example.com", "title": "Outbound volume spike: user@example.com", "detail": "Mailbox user@example.com sent 240 messages in the last 15 minutes...", "metric_value": 240.0, "baseline_value": 4.2, "acknowledged": false, "created_at": "2026-07-14T09:12:00Z"}
   ]
 }
 ```
 
-`enabled` reflects `ANOMALY_DETECTION_ENABLED` only; alerts are still listed and can be acknowledged while it is off. `unacknowledged_count` counts every unacknowledged alert, whatever the filter. `alert_type` is `volume_spike`, `auth_failure_burst` or `smtp_abuse_block`; `severity` is `warning` or `critical`.
+`enabled` reflects `ANOMALY_DETECTION_ENABLED` only; alerts are still listed and can be acknowledged while it is off. `unacknowledged_count` counts every unacknowledged alert, whatever the filter. `unacknowledged_ids` lists them, newest first, up to 10,000: the ids to send to acknowledge-all. `alert_type` is `volume_spike`, `auth_failure_burst` or `smtp_abuse_block`; `severity` is `warning` or `critical`.
 
 ### GET /api/security-alerts/{alert_id}/activity
 
@@ -2290,11 +2291,15 @@ The history behind an alert, for its **Show activity** window: outbound messages
 
 ### POST /api/security-alerts/{alert_id}/acknowledge
 
-Acknowledges one alert, which removes it from **Needs attention**. Returns `{ "status": "success" }`; an unknown ID returns 404.
+Acknowledges one alert, which removes it from **Needs attention**. Returns `{ "status": "success", "acknowledged": 1, "ids": [12], "receipt": "<uuid>" }`. An alert that was already acknowledged gives `"acknowledged": 0` and `"receipt": null`. An unknown ID returns 404.
 
 ### POST /api/security-alerts/acknowledge-all
 
-Acknowledges every open alert: `{ "status": "success", "acknowledged": 3 }`.
+With a body `{ "ids": [12, 9] }` (1 to 10,000 ids, usually the list's `unacknowledged_ids`), acknowledges those that are still open; an alert that arrived after the list is not touched. With no body, acknowledges every open alert. Returns `{ "status": "success", "acknowledged": 2, "ids": [9, 12], "receipt": "<uuid>" }` (`receipt` is null when nothing changed).
+
+### POST /api/security-alerts/acknowledgements/{receipt}/undo
+
+Re-opens the alerts that the acknowledgement with this receipt changed and that are still acknowledged: `{ "status": "success", "restored": 2, "ids": [9, 12] }`. A second undo, an unknown receipt, or an alert acknowledged again since (it has a new receipt) changes nothing. A receipt that is not a UUID returns 422.
 
 ---
 

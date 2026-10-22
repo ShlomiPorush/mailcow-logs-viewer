@@ -2181,6 +2181,7 @@ html body .ui-main .ui-set-choice-opt > input[type="radio"] { accent-color: var(
     border-radius: var(--ui-radius-sm); background: var(--ui-bg); color: var(--ui-ink); box-shadow: 0 10px 30px rgba(0, 0, 0, .16); }
 .ui-toast p { flex: 1; margin: 1px 0 0; font-size: var(--ui-fs-sm); overflow-wrap: anywhere; }
 .ui-toast .ui-icon-btn { margin-block: -4px 0; margin-inline: 0 -2px; font-size: 18px; line-height: 1; }
+.ui-toast .ui-toast-action { margin-block: -4px; flex: none; }
 .ui-toast-icon { font-weight: 800; color: var(--ui-info); }
 .ui-toast-success { border-inline-start-color: var(--ui-ok); }
 .ui-toast-success .ui-toast-icon { color: var(--ui-ok); }

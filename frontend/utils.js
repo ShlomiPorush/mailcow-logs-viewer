@@ -647,9 +647,14 @@ function copyableText(text, extraClasses) {
     return `<span class="copyable${cls}" onclick="copyToClipboard('${safeText}', event)" title="Click to copy"><bdi>${escaped}</bdi><svg class="copy-icon w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg></span>`;
 }
 
-function showToast(message, type = 'info') {
+// options.action: { label, ariaLabel, onAction } a button that runs onAction and
+// closes the toast (Undo, Retry); options.duration: how long it stays (ms; Infinity
+// keeps it until closed). One toast at a time: a new one replaces the last, and
+// the keyboard's place moves with it if it was in the one replaced.
+function showToast(message, type = 'info', options = {}) {
     // Remove existing toast if any
     const existingToast = document.getElementById('toast-notification');
+    const focusWasInIt = !!existingToast && existingToast.contains(document.activeElement);
     if (existingToast) {
         existingToast.remove();
     }
@@ -669,14 +674,23 @@ function showToast(message, type = 'info') {
     toast.innerHTML = `
         <span class="ui-toast-icon" aria-hidden="true">${icons[kind]}</span>
         <p>${escapeHtml(message)}</p>
+        ${options.action ? `<button type="button" class="ui-btn ui-btn-sm ui-toast-action"${options.action.ariaLabel ? ` aria-label="${escapeHtml(options.action.ariaLabel)}"` : ''}>${escapeHtml(options.action.label)}</button>` : ''}
         <button type="button" onclick="this.parentElement.remove()" class="ui-icon-btn" title="Close" aria-label="Close">×</button>
     `;
+    if (options.action) {
+        toast.querySelector('.ui-toast-action').addEventListener('click', () => {
+            toast.remove();
+            options.action.onAction();
+        });
+    }
 
     document.body.appendChild(toast);
+    if (focusWasInIt) toast.querySelector('button').focus({ preventScroll: true });
+    if (options.duration === Infinity) return;
 
-    // It goes after 4 seconds, but waits while the pointer or the focus is on it,
-    // and then gives the rest of its time (at least 1.5 seconds) to read it
-    let left = 4000;
+    // It goes after 4 seconds (or its own duration), but waits while the pointer or the
+    // focus is on it, and then gives the rest of its time (at least 1.5 seconds) to read it
+    let left = options.duration || 4000;
     let started = Date.now();
     let timer = null;
     const hold = () => toast.matches(':hover') || toast.contains(document.activeElement);
