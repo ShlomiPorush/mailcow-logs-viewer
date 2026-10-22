@@ -428,7 +428,8 @@
 .ui-md-relay-host bdi { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ui-md-relay-host[data-tip] bdi { text-decoration: underline dotted var(--ui-muted); text-underline-offset: 3px; }
 /* Under the host, above the pinned timeline head; a tap shows it on a touch screen */
-.ui-md-relay-host[data-tip]:hover::after, .ui-md-relay-host[data-tip].is-tip::after { content: attr(data-tip); position: absolute; top: calc(100% + 6px); left: 0; z-index: 6;
+.ui-md-relay-host[data-tip]:hover::after, .ui-md-relay-host[data-tip].is-tip::after,
+.ui-md-relay-host[data-tip]:focus-visible::after, .ui-md-rrow:focus-visible .ui-md-relay-host[data-tip]::after { content: attr(data-tip); position: absolute; top: calc(100% + 6px); left: 0; z-index: 6;
     white-space: nowrap; padding: 6px 8px; border-radius: 6px; background: var(--ui-ink); color: var(--ui-bg); font: 600 12px/1.3 var(--ui-font, inherit); pointer-events: none; }
 .ui-md-relay-port { flex: none; padding: 0 6px; border-radius: 5px; background: var(--ui-bg); color: var(--ui-muted); font-size: 12px; font-weight: 600; line-height: 1.6; }
 .ui-md-recipients { display: grid; gap: 2px; max-height: 8rem; overflow-y: auto; }

@@ -470,35 +470,52 @@ function relayParts(relay) {
 }
 
 // A relay: the host (to copy in the strip; a recipient's row opens on a click),
-// its IP in a tooltip, the port beside it. The tooltip names the host too when
-// the host is cut (mdRelayTip).
+// its IP in a tooltip, the port beside it. The tooltip is fitted when it shows
+// (mdRelayTipFit): it names the host too when the host is cut. The strip's host
+// takes the focus to show it; a row shows its relay's tooltip while focused.
 function renderRelay(relay, copy = true) {
     const { host, ip, port } = relayParts(relay);
     const named = ip && ip !== host;
     // No browser title on top of the IP's tooltip
     const name = host === 'none' || !copy ? `<bdi>${escapeHtml(host)}</bdi>` : copyableText(host).replace(' title="Click to copy"', '');
-    const tip = named ? ` data-ip="${escapeHtml(ip)}" data-tip="IP ${escapeHtml(ip)}" onpointerup="mdRelayTipTap(event, this)"` : '';
+    const tip = named ? ` data-ip="${escapeHtml(ip)}" data-tip="IP ${escapeHtml(ip)}"` : '';
     return `<span class="ui-md-relay">
-        <span class="ui-md-relay-host${ip && !named ? ' ui-mono' : ''}" data-host="${escapeHtml(host)}"${tip}>${name}${named ? `<span class="ui-sr-only">, IP ${escapeHtml(ip)}</span>` : ''}</span>
+        <span class="ui-md-relay-host${ip && !named ? ' ui-mono' : ''}" data-host="${escapeHtml(host)}"${tip}${copy ? ' tabindex="0"' : ''} onpointerenter="mdRelayTipFit(this)" onfocus="mdRelayTipFit(this)" onpointerup="mdRelayTipTap(event, this)">${name}${named ? `<span class="ui-sr-only">, IP ${escapeHtml(ip)}</span>` : ''}</span>
         ${port ? `<span class="ui-md-relay-port">:${escapeHtml(port)}</span>` : ''}
     </span>`;
 }
 
+// The tooltip for the width the host has now: the IP, and the host too when it is cut
+function mdRelayTipFit(el) {
+    const name = el.querySelector('bdi');
+    const cut = !!name && name.scrollWidth > name.clientWidth;
+    const { host, ip } = el.dataset;
+    const tip = cut ? (ip ? `${host} · IP ${ip}` : host) : (ip ? `IP ${ip}` : '');
+    if (tip) el.dataset.tip = tip;
+    else delete el.dataset.tip;
+}
+
 // A touch screen has no hover: a tap shows the tooltip for a moment.
 // On the wrapper, as a click on the host copies it and stops there.
+let mdRelayTapAt = 0;
 function mdRelayTipTap(event, el) {
     if (event.pointerType === 'mouse') return;
+    mdRelayTipFit(el);
+    if (!el.dataset.tip) return;
+    mdRelayTapAt = Date.now();
     el.classList.add('is-tip');
     clearTimeout(el.tipTimer);
     el.tipTimer = setTimeout(() => el.classList.remove('is-tip'), 2500);
 }
 
+// A tap that just showed a row's relay tooltip does not also open the row
+function mdRelayTapped(event) {
+    const host = event.target && event.target.closest ? event.target.closest('.ui-md-relay-host') : null;
+    return !!host && host.classList.contains('is-tip') && Date.now() - mdRelayTapAt < 800;
+}
+
 function mdRelayTip(root) {
-    root.querySelectorAll('.ui-md-relay-host').forEach(el => {
-        const name = el.querySelector('bdi');
-        if (!name || name.scrollWidth <= name.clientWidth) return;
-        el.dataset.tip = el.dataset.ip ? `${el.dataset.host} · IP ${el.dataset.ip}` : el.dataset.host;
-    });
+    root.querySelectorAll('.ui-md-relay-host').forEach(mdRelayTipFit);
 }
 
 // =============================================================================
@@ -805,7 +822,7 @@ function renderRecipientRows() {
         const sub = !r.last ? `<span>${r.status === 'none' ? 'No delivery logged yet' : 'No delivery attempt logged'}</span>`
             : `${host ? `<span class="ui-md-rrow-via">via ${renderRelay(r.relay, false)}</span>` : `<span>${escapeHtml(info.word)}</span>`}${r.delivered.length ? `<span>· to <bdi>${escapeHtml(r.delivered.join(', '))}</bdi></span>` : ''}${r.attempts > 1 ? `<span>· ${r.attempts} attempts</span>` : ''}${r.last.time ? `<span>· ${escapeHtml(formatTime(r.last.time))}</span>` : ''}`;
         return `
-            <div class="ui-md-rrow" role="button" tabindex="0" data-row-open data-md-focus="row-${index}" aria-pressed="${mdView.picked === index}" title="Show the logs of ${escapeHtml(r.address)}" onclick="if (!uiRowHeld(event)) pickMessageRecipient(${index}, true)">
+            <div class="ui-md-rrow" role="button" tabindex="0" data-row-open data-md-focus="row-${index}" aria-pressed="${mdView.picked === index}" title="Show the logs of ${escapeHtml(r.address)}" onclick="if (!uiRowHeld(event) && !mdRelayTapped(event)) pickMessageRecipient(${index}, true)">
                 <span class="ui-md-rrow-addr">${copyableText(r.address)}</span>${uiTag(info.word, info.tone)}
                 <span class="ui-md-rrow-sub">${sub}</span>
                 ${r.reason ? `<span class="ui-md-rrow-why ${info.tone && info.tone !== 'ok' ? `ui-text-${info.tone}` : 'ui-muted'}">${escapeHtml(r.reason)}</span>` : ''}

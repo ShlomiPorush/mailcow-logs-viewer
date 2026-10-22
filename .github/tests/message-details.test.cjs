@@ -32,6 +32,8 @@ function harness(data, ok = true) {
     const context = vm.createContext({ document, window: { disabledFeatures: [] }, console: { log() {}, error() {} },
         authenticatedFetch: async url => { requests.push(url); return { ok, status: 500, statusText: 'Test failure', json: async () => data }; },
         renderGeoIPInfo: () => '', appTimezone: 'UTC',
+        // Timers never fire here: a test sees the state a timer would undo
+        setTimeout: () => 0, clearTimeout: () => {},
     });
     vm.runInContext(fs.readFileSync(path.join(frontend, 'utils.js'), 'utf8'), context);
     // Stable timestamp display keeps rendering assertions independent of host locale.
@@ -408,6 +410,8 @@ test('a message to many names its one server in the strip, and each recipient it
     await h.context.viewMessageDetails('example-key');
     h.context.switchModalTab('postfix');
     const strip = h.element('message-modal-content').innerHTML.split('id="md-rcpts"')[0];
+    // d@ has no line yet: a recipient not tried went to no server, so the one
+    // server every tried recipient went through still names the message's
     assert.match(strip, /<span>Relay<\/span>[\s\S]*data-host="mx\.example\.net" data-ip="192\.0\.2\.9"/);
     // A row names its server, port and IP; a click on the row opens it, not a copy
     const rows = h.context.renderRecipientRows();
@@ -435,6 +439,9 @@ test('the Recipients list filters the timeline too, and a picked recipient or a 
     // A status: the bounced recipient's line and the shared one
     h.context.filterMessageRecipients('bounced');
     assert.deepEqual(timelineLines(timeline()), { all: 2, shared: 1 });
+    const rows = () => timeline().split('id="log-timeline-entries"')[1];
+    assert.match(rows(), /to=&lt;c@example\.net&gt;/);
+    assert.doesNotMatch(rows(), /to=&lt;[ab]@example\.net&gt;/, 'which lines, not only how many');
     assert.match(timeline(), /2 of 5 entries/);
     assert.match(timeline(), /<bdi>Bounced \(1\)<\/bdi>/);
     assert.match(timeline(), /aria-label="Show every recipient"/);
@@ -463,4 +470,45 @@ test('the Recipients list filters the timeline too, and a picked recipient or a 
     assert.equal(view().picked, -1);
     // (the tab draws itself whole: the timeline is in the tab's content)
     assert.deepEqual(timelineLines(h.element('message-modal-content').innerHTML), { all: 3, shared: 1 });
+});
+
+test('a relay tooltip fits the width it has, shows on a tap or the focus, and a tap on it does not open the row', async () => {
+    const h = harness(messageToMany());
+    const host = (dataset, scrollWidth, clientWidth) => {
+        const classes = new Set();
+        return { dataset, querySelector: () => ({ scrollWidth, clientWidth }), tipTimer: null,
+            classList: { add: c => classes.add(c), remove: c => classes.delete(c), contains: c => classes.has(c) } };
+    };
+    // Cut: the host and its IP; whole again after a resize: the IP alone
+    const el = host({ host: 'mail-protection.example.com', ip: '192.0.2.9', tip: 'IP 192.0.2.9' }, 300, 120);
+    h.context.mdRelayTipFit(el);
+    assert.equal(el.dataset.tip, 'mail-protection.example.com · IP 192.0.2.9');
+    el.querySelector = () => ({ scrollWidth: 300, clientWidth: 300 });
+    h.context.mdRelayTipFit(el);
+    assert.equal(el.dataset.tip, 'IP 192.0.2.9');
+    // A cut socket path has a tooltip too, and a whole one none
+    const socket = host({ host: 'private/dovecot-lmtp-with-a-long-name' }, 300, 120);
+    h.context.mdRelayTipFit(socket);
+    assert.equal(socket.dataset.tip, 'private/dovecot-lmtp-with-a-long-name');
+    socket.querySelector = () => ({ scrollWidth: 120, clientWidth: 120 });
+    h.context.mdRelayTipFit(socket);
+    assert.equal(socket.dataset.tip, undefined);
+
+    // Every host fits its tooltip on hover and focus and shows it on a tap; only the strip's takes the focus
+    for (const relay of ['mx.example.net[192.0.2.9]:25', 'private/dovecot-lmtp']) {
+        assert.match(h.context.renderRelay(relay), /tabindex="0" onpointerenter="mdRelayTipFit\(this\)" onfocus="mdRelayTipFit\(this\)" onpointerup="mdRelayTipTap\(event, this\)"/);
+        assert.doesNotMatch(h.context.renderRelay(relay, false), /tabindex/);
+    }
+
+    // A tap shows the tooltip; the click that follows it does not open the row
+    const tapped = host({ host: 'mx.example.net', ip: '192.0.2.9', tip: 'IP 192.0.2.9' }, 100, 100);
+    h.context.mdRelayTipTap({ pointerType: 'touch' }, tapped);
+    assert.ok(tapped.classList.contains('is-tip'));
+    assert.equal(h.context.mdRelayTapped({ target: { closest: () => tapped } }), true);
+    assert.equal(h.context.mdRelayTapped({ target: { closest: () => null } }), false, 'a tap elsewhere in the row opens it');
+    const hovered = host({ host: 'mx.example.net', ip: '192.0.2.9' }, 100, 100);
+    h.context.mdRelayTipTap({ pointerType: 'mouse' }, hovered);
+    assert.equal(h.context.mdRelayTapped({ target: { closest: () => hovered } }), false, 'a mouse click opens the row');
+    await h.context.viewMessageDetails('example-key');
+    assert.match(h.context.renderRecipientRows(), /onclick="if \(!uiRowHeld\(event\) && !mdRelayTapped\(event\)\) pickMessageRecipient/);
 });
