@@ -51,6 +51,9 @@ def list_security_alerts(
 ):
     """List security alerts (newest first), plus an unacknowledged count."""
     try:
+        # One snapshot for the rows and the ids: an alert committed between the two
+        # queries is in neither, so Dismiss all never takes one the list did not show
+        db.connection(execution_options={"isolation_level": "REPEATABLE READ"})
         q = db.query(SecurityAlert)
         if acknowledged is not None:
             q = q.filter(SecurityAlert.acknowledged == acknowledged)

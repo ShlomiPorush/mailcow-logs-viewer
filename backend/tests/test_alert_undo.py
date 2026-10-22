@@ -185,3 +185,29 @@ def test_the_migration_adds_the_receipt_on_an_existing_install_and_runs_again_sa
         isolated.dispose()
         with engine.begin() as conn:
             conn.execute(text(f'DROP SCHEMA {schema} CASCADE'))
+
+
+def test_the_list_and_its_ids_come_from_one_snapshot(db_ready):
+    """An alert committed between the list's two queries is in neither."""
+    from sqlalchemy import event
+    from app.database import engine
+    c = _client()
+    _add(2)
+    late, busy = [], []
+
+    def between(conn, cursor, statement, parameters, context, executemany):
+        # Right after the list's first read of the alerts, another connection commits a new one
+        if busy or late or not statement.lstrip().upper().startswith('SELECT') or 'security_alerts' not in statement:
+            return
+        busy.append(1)
+        try:
+            late.extend(_add(1, subject=f'between-{MARK}@alerts.example'))
+        finally:
+            busy.clear()
+    event.listen(engine, 'after_cursor_execute', between)
+    try:
+        listed = c.get('/api/security-alerts', params={'acknowledged': 'false', 'limit': 20}).json()
+    finally:
+        event.remove(engine, 'after_cursor_execute', between)
+    assert late, 'the alert was committed during the request'
+    assert late[0] not in listed['unacknowledged_ids'] and late[0] not in [a['id'] for a in listed['alerts']]

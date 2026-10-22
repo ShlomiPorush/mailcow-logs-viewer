@@ -2006,7 +2006,7 @@ async function loadDashboardSecurityAlerts() {
     const dismissAll = document.getElementById('dashboard-dismiss-all');
     try {
         const response = await authenticatedFetch('/api/security-alerts?acknowledged=false&limit=20');
-        if (!response.ok) { container.classList.add('hidden'); updateAttentionState(); return; }
+        if (!response.ok) { container.classList.add('hidden'); updateAttentionState(); return false; }
         const data = await response.json();
         const alerts = data.alerts || [];
         dashboardAlerts.clear();
@@ -2024,7 +2024,7 @@ async function loadDashboardSecurityAlerts() {
             uiReplaceKeepingFocus(container, '');
             if (dismissAll) dismissAll.classList.add('is-off');
             updateAttentionState();
-            return;
+            return true;
         }
 
         uiReplaceKeepingFocus(container, alerts.map(a => {
@@ -2051,8 +2051,11 @@ async function loadDashboardSecurityAlerts() {
     } catch (e) {
         console.warn('Failed to load security alerts:', e);
         container.classList.add('hidden');
+        updateAttentionState();
+        return false;
     }
     updateAttentionState();
+    return true;
 }
 
 // A Needs attention row whose action opens a popup opens it from anywhere on
@@ -2697,18 +2700,32 @@ function offerAlertUndo(receipt, message, undoName) {
     showToast(message, 'success', { duration: 10000, action: { label: 'Undo', ariaLabel: undoName, onAction: () => undoAlertDismissal(receipt, undoName) } });
 }
 
+function offerAlertsRefresh(message) {
+    showToast(message, 'warning', { duration: Infinity, action: { label: 'Refresh', ariaLabel: 'Refresh Needs attention', onAction: async () => {
+        if (!(await loadDashboardSecurityAlerts())) offerAlertsRefresh('Needs attention could not be refreshed. Try again.');
+    } } });
+}
+
 // Re-open what a dismissal changed. A failure says so and offers Retry until closed.
 async function undoAlertDismissal(receipt, undoName) {
     try {
         const res = await authenticatedFetch(`/api/security-alerts/acknowledgements/${encodeURIComponent(receipt)}/undo`, { method: 'POST' });
         if (!res.ok) throw new Error(`the server answered ${res.status}`);
         const done = await res.json();
-        await loadDashboardSecurityAlerts();
-        // The keyboard goes to the first alert back (its Dismiss), else to Needs attention
-        const row = done.ids && done.ids.map(id => document.querySelector(`#dashboard-security-alerts [data-key="alert-${Number(id)}"]`)).find(Boolean);
-        const target = row ? [...row.querySelectorAll('button')].find(b => b.textContent.trim() === 'Dismiss') : document.getElementById('dashboard-attention-scroll');
-        if (target) target.focus({ preventScroll: false });
-        showToast(done.restored ? `${uiCountLabel(done.restored, 'alert', 'alerts')} back in Needs attention` : 'Nothing to undo: dismissed again since', done.restored ? 'success' : 'info');
+        const shown = await loadDashboardSecurityAlerts();
+        const back = done.restored ? `${uiCountLabel(done.restored, 'alert', 'alerts')} back` : '';
+        if (!shown) {
+            offerAlertsRefresh(back ? `${back}, but Needs attention could not be refreshed.` : 'Needs attention could not be refreshed.');
+            return;
+        }
+        // On the Dashboard the keyboard goes to the first alert back (its Dismiss), else to
+        // Needs attention; on another page it stays with the message
+        if (typeof currentTab === 'undefined' || currentTab === 'dashboard') {
+            const row = done.ids && done.ids.map(id => document.querySelector(`#dashboard-security-alerts [data-key="alert-${Number(id)}"]`)).find(Boolean);
+            const target = row ? [...row.querySelectorAll('button')].find(b => b.textContent.trim() === 'Dismiss') : document.getElementById('dashboard-attention-scroll');
+            if (target) target.focus({ preventScroll: false });
+        }
+        showToast(back ? `${back} in Needs attention` : 'Nothing to undo: dismissed again since', back ? 'success' : 'info');
     } catch (e) {
         showToast(`Could not undo: ${e.message || 'no answer'}.`, 'error', { duration: Infinity, action: { label: 'Retry', ariaLabel: `Retry: ${undoName}`, onAction: () => undoAlertDismissal(receipt, undoName) } });
     }

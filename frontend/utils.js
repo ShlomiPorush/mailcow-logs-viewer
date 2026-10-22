@@ -678,15 +678,25 @@ function showToast(message, type = 'info', options = {}) {
         <button type="button" onclick="this.parentElement.remove()" class="ui-icon-btn" title="Close" aria-label="Close">×</button>
     `;
     if (options.action) {
-        toast.querySelector('.ui-toast-action').addEventListener('click', () => {
-            toast.remove();
-            options.action.onAction();
+        const button = toast.querySelector('.ui-toast-action');
+        let busy = false;
+        button.addEventListener('click', () => {
+            if (busy) return;
+            const result = options.action.onAction();
+            if (!result || typeof result.then !== 'function') { toast.remove(); return; }
+            // Until it is done the toast stays, with the keyboard in it: what comes next
+            // (a message, Retry) takes the keyboard over from here
+            busy = true;
+            button.setAttribute('aria-disabled', 'true');
+            Promise.resolve(result).catch(() => {}).finally(() => { if (toast.isConnected) toast.remove(); });
         });
     }
 
     document.body.appendChild(toast);
-    if (focusWasInIt) toast.querySelector('button').focus({ preventScroll: true });
-    if (options.duration === Infinity) return;
+    if (options.duration === Infinity) {
+        if (focusWasInIt) toast.querySelector('button').focus({ preventScroll: true });
+        return;
+    }
 
     // It goes after 4 seconds (or its own duration), but waits while the pointer or the
     // focus is on it, and then gives the rest of its time (at least 1.5 seconds) to read it
@@ -720,7 +730,8 @@ function showToast(message, type = 'info', options = {}) {
     toast.addEventListener('focusin', pause);
     toast.addEventListener('mouseleave', () => setTimeout(resume, 0));
     toast.addEventListener('focusout', () => setTimeout(resume, 0));
-    run();
+    if (focusWasInIt) toast.querySelector('button').focus({ preventScroll: true });
+    if (!hold()) run();
 }
 
 // =============================================================================

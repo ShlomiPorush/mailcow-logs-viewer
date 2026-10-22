@@ -89,3 +89,29 @@ test('a toast without an action is as before', () => {
     assert.equal(toast.querySelector('.ui-toast-action'), null);
     assert.equal(toast.querySelectorAll('button').length, 1);
 });
+
+test('a toast that takes the keyboard over from the one it replaced stays while it has it', async () => {
+    const w = page();
+    w.showToast('Alert dismissed', 'success', { duration: 120, action: { label: 'Undo', onAction() {} } });
+    w.document.querySelector('#toast-notification .ui-toast-action').focus();
+    w.showToast('2 alerts dismissed', 'success', { duration: 120, action: { label: 'Undo', onAction() {} } });
+    await wait(500);
+    assert.ok(w.document.getElementById('toast-notification'), 'still there');
+    assert.ok(w.document.getElementById('toast-notification').contains(w.document.activeElement));
+});
+
+test('an action that takes time keeps its toast and the keyboard, and a failure hands the keyboard to Retry', async () => {
+    const w = page();
+    w.showToast('Alert dismissed', 'success', { duration: 10000, action: { label: 'Undo', onAction: () => new w.Promise(resolve => setTimeout(() => {
+        w.showToast('Could not undo: the server answered 500.', 'error', { duration: Infinity, action: { label: 'Retry', onAction() {} } });
+        resolve();
+    }, 50)) } });
+    const undo = w.document.querySelector('#toast-notification .ui-toast-action');
+    undo.focus();
+    undo.click();
+    assert.ok(w.document.getElementById('toast-notification'), 'the toast waits for the action');
+    assert.equal(undo.getAttribute('aria-disabled'), 'true');
+    await wait(150);
+    assert.equal(w.document.activeElement.textContent, 'Retry');
+    assert.equal(w.document.getElementById('toast-notification').getAttribute('role'), 'alert');
+});
