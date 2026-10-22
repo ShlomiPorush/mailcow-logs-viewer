@@ -132,6 +132,7 @@ async function viewMessageDetails(correlationKey) {
         currentModalData = data;
         currentModalTab = 'overview';
         mdRecipients = messageRecipients(data);
+        mdOwners = mdAddressOwners(data);
         Object.assign(mdView, { status: '', query: '', all: false, picked: -1, source: '' });
         if (typeof uiPickers !== 'undefined') delete uiPickers.query['md-rcpt-pick'];
 
@@ -328,7 +329,13 @@ function renderLogTimeline(postfixLogs, dovecotLogs) {
     // One source, and for a message to many one recipient: its own lines and
     // the ones every recipient shares
     const picked = mdRecipients.length > 1 && mdView.picked >= 0 ? mdRecipients[mdView.picked] : null;
-    const lineFor = e => String(e.log.recipient || '').trim().toLowerCase();
+    // A line counts for the address the sender wrote (an alias), Dovecot's
+    // lines through the mailbox they name
+    const lineFor = e => {
+        if (!e.log.recipient) return '';
+        const key = mdAddressKey(e.dovecot ? e.log.recipient : mdLineAddress(e.log));
+        return e.dovecot ? (mdOwners.get(key) || key) : key;
+    };
     const shown = entries.filter(e => (!mdView.source || timelineSource(e) === mdView.source)
         && (!picked || !lineFor(e) || lineFor(e) === picked.key));
     const own = picked ? shown.filter(e => lineFor(e) === picked.key).length : 0;
@@ -461,6 +468,7 @@ function relayHost(relay) {
 // a status filter, a search, the whole list or its first rows, the recipient
 // whose lines the timeline shows (-1: all) and the timeline's source
 let mdRecipients = [];
+let mdOwners = new Map();
 const mdView = { status: '', query: '', all: false, picked: -1, source: '' };
 const MD_RCPT_ROWS = 6;
 
@@ -490,34 +498,99 @@ function mdFailureReason(log) {
     return paren ? paren[1].trim() : '';
 }
 
+const mdAddressKey = address => String(address || '').trim().toLowerCase();
+
+// The address the sender wrote for one Postfix delivery line: orig_to when
+// Postfix expanded an alias or a forward, else the address it delivered to.
+// Read only from the fixed start of the line, as the server parses it
+// (correlation.py): an address cannot supply it.
+const MD_PF_ADDR = '(?:"(?:[^"\\\\]|\\\\.)*"|[^>"])*';
+const MD_ORIG_TO_RE = new RegExp(`^[0-9A-F]+: to=<${MD_PF_ADDR}>, orig_to=<(${MD_PF_ADDR})>, `);
+function mdLineAddress(log) {
+    const orig = String(log.message || '').match(MD_ORIG_TO_RE);
+    return (orig && orig[1]) || log.recipient || '';
+}
+
+// Which written address each delivered address belongs to (alias -> mailbox)
+function mdAddressOwners(data) {
+    const owners = new Map();
+    (data.postfix || []).forEach(log => {
+        if (log.recipient) owners.set(mdAddressKey(log.recipient), mdAddressKey(mdLineAddress(log)));
+    });
+    return owners;
+}
+
+// Dovecot's verdict for one recipient, as the server resolves a delivery
+// (resolve_session_verdicts): a store cancels a pending discard ("discarded if
+// not explicitly delivered"), and the most severe definite verdict wins. The
+// pending marker is told by the end of its line, which Dovecot writes.
+const MD_DOVECOT_SEVERITY = { stored: 0, forwarded: 1, failed: 2, discarded: 3, rejected: 4 };
+const MD_DISCARD_MARK_RE = /: marked message to be discarded[^<>:]*$/i;
+function mdMailboxVerdict(lines) {
+    const marker = log => log.verdict === 'discarded' && MD_DISCARD_MARK_RE.test(String(log.message || ''));
+    const definite = lines.filter(log => MD_DOVECOT_SEVERITY[log.verdict] !== undefined && !marker(log));
+    if (definite.length) {
+        return definite.reduce((a, log) => {
+            const s = MD_DOVECOT_SEVERITY[log.verdict], sa = MD_DOVECOT_SEVERITY[a.verdict];
+            return s > sa || (s === sa && (log.time || '') >= (a.time || '')) ? log : a;
+        }).verdict;
+    }
+    return lines.some(marker) ? 'discarded' : null;
+}
+
 // Every recipient with the outcome of its own delivery: the recipients Rspamd
-// saw, in their order, then any address only Postfix logged. The outcome is the
-// last status Postfix logged for the address; none yet reads as "not logged".
+// saw, in their order, then any address only Postfix logged. A delivery to an
+// alias counts for the alias, with the mailboxes it reached. The outcome is the
+// last status Postfix logged for the address (for an alias, its worst mailbox);
+// none yet reads as "not logged", and a message that expired in the queue
+// expires every recipient still waiting.
 function messageRecipients(data) {
     const byKey = new Map();
     const add = address => {
-        const key = String(address || '').trim().toLowerCase();
+        const key = mdAddressKey(address);
         if (!key) return null;
         if (!byKey.has(key)) byKey.set(key, { address: String(address).trim(), key, logs: [], dovecot: [] });
         return byKey.get(key);
     };
-    (data.recipients || []).forEach(add);
-    (data.postfix || []).forEach(log => { if (log.recipient) add(log.recipient).logs.push(log); });
+    const owners = mdAddressOwners(data);
+    const written = new Set(owners.values());
+    // A mailbox an alias expanded to is not a recipient of its own
+    const expanded = new Set([...owners].filter(([to, owner]) => to !== owner).map(([to]) => to));
+    (data.recipients || []).forEach(address => {
+        const key = mdAddressKey(address);
+        if (!expanded.has(key) || written.has(key)) add(address);
+    });
+    (data.postfix || []).forEach(log => { if (log.recipient) add(mdLineAddress(log)).logs.push(log); });
     if (!byKey.size && data.recipient) add(data.recipient);
     ((data.dovecot && data.dovecot.logs) || []).forEach(log => {
-        const recipient = byKey.get(String(log.recipient || '').trim().toLowerCase());
+        const key = mdAddressKey(log.recipient);
+        const recipient = byKey.get(owners.get(key) || key);
         if (recipient) recipient.dovecot.push(log);
     });
+    const expiry = (data.postfix || []).filter(log => !log.recipient && String(log.status || '').toLowerCase() === 'expired').length > 0;
+    const rank = status => mdStatusInfo(status).rank;
     return [...byKey.values()].map(r => {
-        const attempts = r.logs.filter(log => log.status);
-        const last = attempts.reduce((a, log) => (!a || (log.time || '') >= (a.time || '') ? log : a), null);
-        const raw = last ? String(last.status).toLowerCase() : 'none';
-        const status = raw === 'delivered' ? 'sent' : raw === 'reject' ? 'rejected' : raw;
+        // Per mailbox reached (one, unless an alias expanded): its last status
+        const reached = new Map();
+        r.logs.filter(log => log.status).forEach(log => {
+            const to = mdAddressKey(log.recipient);
+            const seen = reached.get(to) || { address: log.recipient, attempts: 0, last: null };
+            seen.attempts += 1;
+            if (!seen.last || (log.time || '') >= (seen.last.time || '')) seen.last = log;
+            reached.set(to, seen);
+        });
+        const statusOf = log => { const raw = String(log.status).toLowerCase(); return raw === 'delivered' ? 'sent' : raw === 'reject' ? 'rejected' : raw; };
+        const worst = [...reached.values()].reduce((a, t) => (!a || rank(statusOf(t.last)) < rank(statusOf(a.last))
+            || (rank(statusOf(t.last)) === rank(statusOf(a.last)) && (t.last.time || '') >= (a.last.time || '')) ? t : a), null);
+        const last = worst ? worst.last : null;
+        let status = last ? statusOf(last) : 'none';
+        if (expiry && (status === 'deferred' || status === 'none')) status = 'expired';
         // Postfix handed it to Dovecot, which may still have dropped it
-        const mailbox = r.dovecot.map(log => log.verdict).filter(v => v && v !== 'stored' && DOVECOT_VERDICTS[v]).pop();
-        const reason = status !== 'sent' && status !== 'none' ? mdFailureReason(last)
-            : mailbox ? `Mailbox delivery: ${DOVECOT_VERDICTS[mailbox].label}` : '';
-        return { ...r, status, last, attempts: attempts.length, relay: last ? last.relay : '', reason };
+        const mailbox = mdMailboxVerdict(r.dovecot);
+        const reason = last && status !== 'sent' ? mdFailureReason(last)
+            : status === 'sent' && mailbox && mailbox !== 'stored' ? `Mailbox delivery: ${DOVECOT_VERDICTS[mailbox].label}` : '';
+        const delivered = [...reached.keys()].filter(to => to !== r.key).map(to => reached.get(to).address);
+        return { ...r, status, last, attempts: worst ? worst.attempts : 0, relay: last ? last.relay : '', reason, delivered };
     });
 }
 
@@ -623,8 +696,8 @@ function renderRecipientRows() {
     const row = ({ r, index }) => {
         const info = mdStatusInfo(r.status);
         const host = relayHost(r.relay);
-        const sub = r.status === 'none' ? '<span>No delivery logged yet</span>'
-            : `<span>${host ? `via ${escapeHtml(host)}` : escapeHtml(info.word)}</span>${r.attempts > 1 ? `<span>· ${r.attempts} attempts</span>` : ''}${r.last && r.last.time ? `<span>· ${escapeHtml(formatTime(r.last.time))}</span>` : ''}`;
+        const sub = !r.last ? `<span>${r.status === 'none' ? 'No delivery logged yet' : 'No delivery attempt logged'}</span>`
+            : `<span>${host ? `via ${escapeHtml(host)}` : escapeHtml(info.word)}</span>${r.delivered.length ? `<span>· to <bdi>${escapeHtml(r.delivered.join(', '))}</bdi></span>` : ''}${r.attempts > 1 ? `<span>· ${r.attempts} attempts</span>` : ''}${r.last.time ? `<span>· ${escapeHtml(formatTime(r.last.time))}</span>` : ''}`;
         return `
             <div class="ui-md-rrow" role="button" tabindex="0" data-row-open data-md-focus="row-${index}" aria-pressed="${mdView.picked === index}" title="Show the logs of ${escapeHtml(r.address)}" onclick="if (!uiRowHeld(event)) pickMessageRecipient(${index}, true)">
                 <span class="ui-md-rrow-addr"><bdi>${escapeHtml(r.address)}</bdi></span>${uiTag(info.word, info.tone)}
@@ -727,7 +800,7 @@ function buildDeliverySteps(data) {
     const recipients = messageRecipients(data);
     const many = recipients.length > 1;
     for (const log of data.postfix || []) {
-        if (many && log.status && log.recipient && !/NOQUEUE: reject/i.test(log.message || '')) continue;
+        if (many && log.status && !/NOQUEUE: reject/i.test(log.message || '')) continue;
         const message = log.message || '';
         const program = log.program || 'postfix';
         if (/NOQUEUE: reject/i.test(message)) {
@@ -857,14 +930,19 @@ function renderPostfixTab(content, data) {
     const dovecotLogs = (data.dovecot && data.dovecot.logs) ? data.dovecot.logs : [];
 
     if (!data.postfix || data.postfix.length === 0) {
+        // The header and What happened link to the recipients: they are here too
         content.innerHTML = dovecotLogs.length ? `
             <div class="ui-md-fill">
                 <p class="ui-muted">No Postfix delivery logs available</p>
+                ${renderRecipientsSection()}
                 <div id="md-timeline-slot">${renderLogTimeline([], dovecotLogs)}</div>
             </div>
         ` : `
-            <div class="ui-empty">
-                <b>No Postfix delivery logs available</b>
+            <div class="ui-md-fill">
+                <div class="ui-empty">
+                    <b>No Postfix delivery logs available</b>
+                </div>
+                ${renderRecipientsSection()}
             </div>
         `;
         return;

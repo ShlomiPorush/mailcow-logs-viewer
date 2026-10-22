@@ -242,3 +242,77 @@ test('a recipient address from the logs is text, and its row opens it by positio
     assert.doesNotMatch(html, /[^\\]'\);alert\(1\)/, 'a status from the logs never closes a handler argument');
     assert.match(html, /pickMessageRecipient\(\d+, true\)/);
 });
+
+const smtp = (s, to, status, extra = '') => ({ time: `2026-01-01T00:00:0${s}Z`, program: 'postfix/smtp', recipient: to, status, relay: 'mx.example.net[192.0.2.9]:25',
+    // A queue ID is hex, as the server reads it
+    message: `4F1A2B3C9D: to=<${to}>, ${extra}relay=mx.example.net[192.0.2.9]:25, delay=1, delays=0/0/0/1, dsn=${status === 'sent' ? '2.0.0' : '4.0.0'}, status=${status} (host mx said: 451 4.7.1 Try later (in reply to RCPT TO command))` });
+
+test('a delivery to an alias counts for the alias, not as another recipient', async () => {
+    // Rspamd saw the alias; Postfix delivered to the mailbox and logged the alias as orig_to
+    const one = { ...message(), recipients: ['team@example.com'], postfix: [smtp(1, 'dana@example.com', 'sent', 'orig_to=<team@example.com>, ')] };
+    const h = harness(one);
+    await h.context.viewMessageDetails('example-key');
+    assert.doesNotMatch(h.element('message-modal-header').innerHTML, /recipients/, 'one recipient, not two');
+    h.context.switchModalTab('postfix');
+    assert.doesNotMatch(h.element('message-modal-content').innerHTML, /id="md-rcpts"/);
+
+    const two = { ...messageToMany(), recipients: ['team@example.com', 'b@example.net'],
+        postfix: [smtp(1, 'dana@example.com', 'sent', 'orig_to=<team@example.com>, '), smtp(2, 'b@example.net', 'sent')] };
+    const h2 = harness(two);
+    await h2.context.viewMessageDetails('example-key');
+    assert.match(h2.element('message-modal-header').innerHTML, /Delivered to all 2 recipients/);
+    h2.context.switchModalTab('postfix');
+    const logs = h2.element('message-modal-content').innerHTML;
+    assert.match(logs, /<bdi>team@example\.com<\/bdi><\/span><span class="ui-tag ui-tag-ok">Delivered/);
+    assert.match(logs, /· to <bdi>dana@example\.com<\/bdi>/);
+    // The alias's line is its own in the timeline
+    const team = vm.runInContext("mdRecipients.findIndex(r => r.key === 'team@example.com')", h2.context);
+    h2.context.pickMessageRecipient(team, true);
+    assert.match(h2.element('md-timeline-slot').innerHTML, /1 for this recipient, 0 shared/);
+});
+
+test('a message that expired in the queue expires the recipients still waiting', async () => {
+    const data = { ...messageToMany(), final_status: 'expired', recipients: ['a@example.net', 'b@example.net', 'c@example.net'],
+        postfix: [smtp(1, 'a@example.net', 'sent'), smtp(2, 'b@example.net', 'deferred'), smtp(3, 'b@example.net', 'deferred'),
+            { time: '2026-01-01T00:00:09Z', program: 'postfix/qmgr', status: 'expired', message: 'TEST123: from=<sender@example.com>, status=expired, returned to sender' }] };
+    const h = harness(data);
+    await h.context.viewMessageDetails('example-key');
+    const header = h.element('message-modal-header').innerHTML;
+    assert.match(header, /Delivered to 1 of 3 recipients/);
+    assert.match(header, />2 expired</);
+    assert.doesNotMatch(header, /deferred|not logged/);
+    const overview = h.element('message-modal-content').innerHTML;
+    assert.match(overview, /Expired for 2 recipients/);
+    assert.doesNotMatch(overview, /try again/i);
+});
+
+test('the recipients are listed with no Postfix lines, where the header links to them', async () => {
+    const data = { ...messageToMany(), postfix: [] };
+    const h = harness(data);
+    await h.context.viewMessageDetails('example-key');
+    assert.match(h.element('message-modal-header').innerHTML, /All 4 recipients/);
+    h.context.switchModalTab('postfix');
+    const logs = h.element('message-modal-content').innerHTML;
+    assert.match(logs, /No Postfix delivery logs available/);
+    assert.match(logs, /id="md-rcpts"/);
+    assert.match(logs, /<bdi>d@example\.net<\/bdi>/);
+});
+
+test('a store cancels a pending Sieve discard; an explicit discard still shows', async () => {
+    const lmtp = to => ({ ...smtp(1, to, 'sent'), program: 'postfix/lmtp', relay: 'dovecot[172.22.1.250]:24' });
+    const line = (to, verdict, action) => ({ time: '2026-01-01T00:00:02Z', recipient: to, verdict, message: `lmtp(${to})<1><S>: sieve: msgid=<m@x>: ${action}` });
+    const data = { ...messageToMany(), recipients: ['a@example.com', 'b@example.com'], postfix: [lmtp('a@example.com'), lmtp('b@example.com')],
+        dovecot: { status: 'stored', mailbox: 'INBOX', logs: [
+            line('a@example.com', 'discarded', 'marked message to be discarded if not explicitly delivered (discard action)'),
+            line('a@example.com', 'stored', "stored mail into mailbox 'INBOX'"),
+            line('b@example.com', 'stored', "stored mail into mailbox 'INBOX'"),
+            line('b@example.com', 'discarded', 'discarded message'),
+        ] } };
+    const h = harness(data);
+    await h.context.viewMessageDetails('example-key');
+    h.context.switchModalTab('postfix');
+    const rows = h.element('message-modal-content').innerHTML;
+    const row = address => rows.split('ui-md-rrow"').find(r => r.includes(`<bdi>${address}</bdi>`));
+    assert.doesNotMatch(row('a@example.com'), /Mailbox delivery/);
+    assert.match(row('b@example.com'), /Mailbox delivery: Discarded by Sieve/);
+});
