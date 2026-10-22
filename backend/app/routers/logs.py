@@ -658,6 +658,9 @@ async def _security_addresses(db: Session, hours: int):
     found = security_addresses.cached(hours)
     if found is None:
         f2b = await mailcow_api.get_fail2ban()
+        # An error answer is no answer: its missing lists are not empty ones
+        if not security_addresses.fail2ban_answered(f2b):
+            f2b = None
         addresses = await run_in_threadpool(security_addresses.collect, db, f2b, None, hours)
         security_addresses.remember(addresses, f2b is not None, hours)
         found = (addresses, f2b is not None)

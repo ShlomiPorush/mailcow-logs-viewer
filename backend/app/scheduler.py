@@ -337,6 +337,7 @@ job_status = {
     'update_final_status': {'last_run': None, 'status': 'idle', 'error': None},
     'expire_correlations': {'last_run': None, 'status': 'idle', 'error': None},
     'feature_data_sweep': {'last_run': None, 'status': 'idle', 'error': None},
+    'trend_samples': {'last_run': None, 'status': 'idle', 'error': None},
     'correlate_dovecot': {'last_run': None, 'status': 'idle', 'error': None},
     'cleanup_logs': {'last_run': None, 'status': 'idle', 'error': None},
     'cleanup_dmarc_reports': {'last_run': None, 'status': 'idle', 'error': None},
@@ -3907,6 +3908,20 @@ def cleanup_disabled_feature_data(db: Optional[Session] = None) -> Dict[str, str
 FEATURE_DATA_SWEEP_MINUTES = 10
 
 
+async def trend_samples_job():
+    """Hourly: sample the figures with a trend (services/figures.py). A source that does
+    not answer leaves a gap in its trend; the job fails only on its own error."""
+    update_job_status('trend_samples', 'running')
+    try:
+        from .services.figures import run_trend_samples
+        written = await run_trend_samples()
+        logger.info(f"[TRENDS] {written} figure(s) sampled")
+        update_job_status('trend_samples', 'success')
+    except Exception as e:
+        logger.error(f"[TRENDS] Sampling failed: {e}")
+        update_job_status('trend_samples', 'failed', str(e))
+
+
 async def feature_data_sweep_job(load_spam_blocks: bool = True):
     """Keep features that are off without data, and load the Suppressions feature's blocks
     back once it is on again.
@@ -4049,6 +4064,17 @@ def start_scheduler():
         else:
             logger.info("   [DOVECOT] Delivery correlation inactive - needs raw log "
                         "collection with the 'dovecot' service enabled")
+
+        # Hourly samples of the dashboard figures that show a trend, the first a minute after start
+        scheduler.add_job(
+            trend_samples_job,
+            trigger=every(hours=1),
+            id='trend_samples',
+            name='Trend Samples',
+            replace_existing=True,
+            max_instances=1,
+            next_run_time=datetime.now(timezone.utc) + timedelta(minutes=1)
+        )
 
         # Job 6: Cleanup old logs (daily at 2 AM)
         scheduler.add_job(

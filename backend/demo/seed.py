@@ -165,6 +165,45 @@ async def ingest():
     await _step("anomaly_detection", scheduler.anomaly_detection_job)
     created = await _step("dmarc_reports", asyncio.to_thread, import_reports)
     logger.warning(f"[DEMO] Imported {created} DMARC and TLS reports")
+    # The figures as they are now, then a fictional week before them for the trends
+    await _step("trend_samples", scheduler.trend_samples_job)
+    await _step("trend_history", asyncio.to_thread, seed_trend_history)
+
+
+def seed_trend_history(days=7):
+    """A fictional week of hourly samples ending at each figure as it is now (the
+    demo starts with an empty database, and a trend needs a past to show)."""
+    import random
+    from datetime import timedelta
+    from app.database import get_db_context
+    from app.models import MetricSnapshot
+
+    rnd = random.Random(int(time.time()) // 86400)
+    with get_db_context() as db:
+        latest = {}
+        for row in db.query(MetricSnapshot).order_by(MetricSnapshot.slot).all():
+            latest[row.name] = row
+        written = 0
+        for name, row in latest.items():
+            value = row.value or 0.0
+            # Walking back from now: storage a little lower each day, the counts drifting
+            # now and then and staying a while
+            walk = value
+            for hours_back in range(1, days * 24):
+                slot = row.slot - timedelta(hours=hours_back)
+                if name == 'storage_used':
+                    past = max(0.0, value - hours_back * 0.02)
+                elif name in ('security_review', 'security_banned'):
+                    if rnd.random() < 0.06:
+                        walk = max(0.0, walk + rnd.choice((-1, 1)))
+                    past = float(walk)
+                else:
+                    past = value
+                db.add(MetricSnapshot(name=name, slot=slot, value=past, of=row.of, as_of=slot + timedelta(minutes=1)))
+                written += 1
+        db.commit()
+    logger.warning(f"[DEMO] Seeded {written} trend samples")
+    return written
 
 
 def run_ingest_blocking():

@@ -441,9 +441,10 @@ async def get_status_summary():
         import asyncio
         
         # Fetch all status info in parallel
+        from ..services.figures import storage_figure
         containers_data, storage_data, mailcow_info = await asyncio.gather(
             _get_containers_status_internal(),
-            get_storage_status(),
+            storage_figure(),
             get_mailcow_info(),
             return_exceptions=True
         )
@@ -452,7 +453,7 @@ async def get_status_summary():
         if isinstance(containers_data, Exception):
             containers_data = {"summary": {"running": 0, "stopped": 0, "total": 0}}
         if isinstance(storage_data, Exception):
-            storage_data = {"used_percent": "0%"}
+            storage_data = {"used_percent": "0%", "valid": False}
         if isinstance(mailcow_info, Exception):
             mailcow_info = {"domains": {"total": 0}, "mailboxes": {"total": 0}, "aliases": {"total": 0}}
         
@@ -461,7 +462,9 @@ async def get_status_summary():
             "storage": {
                 "used_percent": storage_data.get("used_percent", "0%"),
                 "used": storage_data.get("used", "0"),
-                "total": storage_data.get("total", "0")
+                "total": storage_data.get("total", "0"),
+                # False when mailcow did not tell it: the card says Unknown, not 0%
+                "known": bool(storage_data.get("valid")),
             },
             "system": {
                 "domains": mailcow_info.get("domains", {}).get("total", 0),

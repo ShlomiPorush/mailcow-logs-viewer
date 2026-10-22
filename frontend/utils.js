@@ -2118,6 +2118,53 @@ function uiRedrawKeepingFocus(container, draw) {
 }
 
 // =============================================================================
+// A small trend beside a figure: its hourly samples over the last days as a
+// line (a gap where an hour has no sample), the latest point marked. Until the
+// samples span a day: nothing (an empty string). The words (aria-label and
+// title) say the trend's start and end and when it was read.
+//   uiSparkline(points, { days, now, format }) -> SVG markup, or ''
+//     points: [{ slot, value, as_of }] oldest first (slot, as_of: ISO); format(value) -> words
+// =============================================================================
+function uiSparkline(points, { days = 7, now = Date.now(), format = v => String(v), label = 'Trend' } = {}) {
+    const W = 72, H = 18, pad = 2;
+    const from = now - days * 86400000;
+    const hourly = (points || []).filter(p => p.value !== null && p.value !== undefined && Date.parse(p.slot) >= from)
+        .sort((a, b) => Date.parse(a.slot) - Date.parse(b.slot));
+    // The words use the samples as read: the first and the latest
+    const firstRead = hourly.length ? Number(hourly[0].value) : null, lastRead = hourly.length ? Number(hourly[hourly.length - 1].value) : null;
+    const when = t => `${formatDay(t)}, ${formatInZone(t, { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }, 'en-US')}`;
+    // Nothing until the samples span a day: a dot or a stub says nothing yet (the place stays, the card keeps its size)
+    if (hourly.length < 2 || Date.parse(hourly[hourly.length - 1].slot) - Date.parse(hourly[0].slot) < 86400000) return '';
+    // Runs of samples with no missing hour between them (an hour and a half or more
+    // apart breaks the line); within a run, six hours to a point over a week (their
+    // average, at their mean time): a line, not a comb; the latest reading itself ends it
+    const step = days > 2 ? 6 * 3600000 : 3600000;
+    const pts = [];
+    let group = null;
+    const flush = () => { if (group) pts.push({ t: group.t / group.n, v: group.v / group.n, start: group.start }); group = null; };
+    hourly.forEach((p, i) => {
+        const t = Date.parse(p.slot), v = Number(p.value);
+        const gap = i === 0 || t - Date.parse(hourly[i - 1].slot) > 5400000;
+        const key = Math.floor(t / step);
+        if (gap || !group || group.key !== key) { const start = gap; flush(); group = { key, t: 0, v: 0, n: 0, start }; }
+        group.t += t; group.v += v; group.n += 1;
+    });
+    flush();
+    const last = hourly[hourly.length - 1];
+    pts.push({ t: Date.parse(last.slot), v: Number(last.value), start: false });
+    const values = pts.map(p => p.v);
+    const lo = Math.min(...values), hi = Math.max(...values);
+    const x = t => pad + (Math.max(from, Math.min(now, t)) - from) / (now - from) * (W - 2 * pad);
+    const y = v => (hi === lo ? H / 2 : H - pad - (v - lo) / (hi - lo) * (H - 2 * pad));
+    const d = pts.map(p => `${p.start ? 'M' : 'L'}${x(p.t).toFixed(1)} ${y(p.v).toFixed(1)}`).join(' ');
+    // A run of one point draws no line: a dot shows it (the latest reading has its own mark)
+    const lone = pts.filter((p, i) => p.start && i < pts.length - 1 && pts[i + 1].start)
+        .map(p => `<circle class="is-lone" cx="${x(p.t).toFixed(1)}" cy="${y(p.v).toFixed(1)}" r="1.2"/>`).join('');
+    const words = `${label}, last ${days} days: from ${format(firstRead)} to ${format(lastRead)}, as of ${when(Date.parse(last.as_of || last.slot))}`;
+    return `<svg class="ui-spark-svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="${escapeHtml(words)}"><title>${escapeHtml(words)}</title><path d="${d}"/>${lone}<circle cx="${x(Date.parse(last.slot)).toFixed(1)}" cy="${y(Number(last.value)).toFixed(1)}" r="1.8"/></svg>`;
+}
+
+// =============================================================================
 // Overview strip under a zoomable chart: the whole period in small bars, with a
 // window over the span the chart shows. Drag the window to move it, drag an
 // edge to resize it, click beside it to center it there. Its two edges are
