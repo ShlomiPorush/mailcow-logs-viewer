@@ -225,9 +225,10 @@ test('one recipient keeps its strip and error box, with no recipient list', asyn
     assert.match(logs, /Delivery Error/);
     assert.doesNotMatch(logs, /id="md-rcpts"/);
     assert.doesNotMatch(h.element('message-modal-header').innerHTML, /All \d+ recipients/);
-    // The sender shows; the queue ID stays in Overview only
-    assert.match(logs, /sender@example\.com/);
-    assert.doesNotMatch(logs, /Queue ID/);
+    // The sender and the queue ID stay in the header and Overview, not in the strip
+    const strip = logs.split('md-timeline-slot')[0];
+    assert.doesNotMatch(strip, /<span>From<\/span>/);
+    assert.doesNotMatch(strip, /Queue ID/);
     // The relay in its parts: the host, its IP in a tooltip, the port beside it
     assert.match(logs, /data-host="mx\.example\.net" data-ip="192\.0\.2\.9" data-tip="IP 192\.0\.2\.9"/);
     assert.match(logs, /<bdi>mx\.example\.net<\/bdi>/);
