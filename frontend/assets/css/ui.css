@@ -1354,11 +1354,11 @@ body { font-family: var(--ui-font); background: var(--ui-bg); color: var(--ui-in
 .ui-attn-win-head { display: flex; align-items: center; gap: 8px; padding-block: 10px; padding-inline: var(--ui-pad-x) 10px; }
 .ui-attn-win-title { margin: 0; margin-inline-end: auto; font-size: 15px; font-weight: 700; }
 .ui-attn-win-title .ui-count { font-weight: 500; }
-.ui-attn-win-head > .ui-btn { flex: none; gap: 0; }
+#attn-win-dismiss-all { flex: none; gap: 0; }
 .ui-attn-scroll.ui-attn-win-list { max-height: none; }
 .ui-attn-win-foot { padding: 10px var(--ui-pad-x); border-top: 1px solid var(--ui-line); }
-.ui-attn-win-go { font-weight: 600; font-size: 13px; }
-@media (hover: hover) { .ui-attn-win-go:hover { text-decoration: underline; } }
+.ui-attn-win-foot .ui-attn-win-go { font-weight: 600; font-size: 13px; }
+@media (hover: hover) { .ui-attn-win-foot .ui-attn-win-go:hover { text-decoration: underline; } }
 :is(.ui-attn-win, #attn-sheet) .ui-alert { display: grid; grid-template-columns: 4px minmax(0, 1fr); column-gap: 14px; row-gap: 8px; }
 :is(.ui-attn-win, #attn-sheet) .ui-alert-bar { grid-row: 1 / span 2; }
 :is(.ui-attn-win, #attn-sheet) :is(.ui-alert > .ui-btn, .ui-alert-acts) { grid-column: 2; justify-self: start; align-self: start; margin-inline-start: 0; }
