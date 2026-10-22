@@ -1265,8 +1265,53 @@ body { font-family: var(--ui-font); background: var(--ui-bg); color: var(--ui-in
 .ui-dash-clear { margin: 0; padding: var(--ui-pad-y) var(--ui-pad-x); border-top: 1px solid var(--ui-line); color: var(--ui-muted); }
 
 .ui-flow { padding: 0 var(--ui-pad-x) 14px; }
-.ui-flow-actions { display: inline-flex; align-items: center; gap: 12px; }
-.ui-flow:empty { display: none; }
+/* Needs attention: a fixed height, its items scroll inside; a fade while more is below (not over a focused item) */
+/* One height whatever it holds: a new item goes inside, "all clear" too */
+.ui-attn-scroll { height: 380px; overflow-y: auto; overscroll-behavior: contain; }
+.ui-attn-scroll .ui-dash-clear { border-top: 0; }
+/* The head stays one line: in a narrow panel the button says Dismiss all (its name keeps alerts) */
+#dashboard-attention-panel { container-type: inline-size; }
+#dashboard-attention-panel > .ui-panel-head { flex-wrap: nowrap; }
+#dashboard-attention-panel > .ui-panel-head > button { flex: none; }
+@container (max-width: 360px) { .ui-attn-wide { display: none; } }
+.ui-attn-scroll.has-more:not(:focus-within) { mask-image: linear-gradient(to bottom, #000 calc(100% - 40px), transparent); }
+.ui-attn-scroll:focus-visible { outline: 2px solid var(--ui-focus); outline-offset: -2px; }
+.ui-attn-more { margin: 0; padding: 8px var(--ui-pad-x); border-top: 1px solid var(--ui-line); color: var(--ui-muted); font-size: 12.5px; }
+.ui-attn-more.is-off { visibility: hidden; }
+@media (max-width: 760px) { .ui-attn-scroll { height: 340px; } }
+/* The mail flow: a period picker, bars that zoom in time (utils.js uiTimeZoom) */
+#dashboard-flow-period { margin-inline-start: auto; }
+.ui-flow-view { position: relative; overflow: hidden; }
+.ui-flow-bars { touch-action: pan-y; user-select: none; }
+.ui-flow-bar.is-partial i { opacity: .55; }
+.ui-flow-band { position: absolute; top: 0; bottom: 0; background: color-mix(in srgb, var(--ui-accent) 14%, transparent); border-inline: 1px solid var(--ui-accent); pointer-events: none; }
+.ui-flow-band.hidden { display: none; }
+.ui-flow-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin-top: 10px; }
+.ui-flow-foot .ui-flow-legend { margin-top: 0; }
+.ui-flow-zoom { display: inline-flex; align-items: center; gap: 4px; }
+.ui-flow-zoom .ui-icon-btn { border: 1px solid var(--ui-line); font-size: 16px; line-height: 1; color: var(--ui-ink); }
+.ui-flow-zoom .ui-icon-btn:disabled { opacity: .35; cursor: default; }
+/* One size in every state: the title and the lines under the figures stay on one line,
+   what is not in use keeps its place (is-off), the chart's frame holds a failure too */
+#dashboard-flow-panel { container-type: inline-size; }
+#dashboard-flow-title { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@container (max-width: 680px) {
+    #dashboard-flow-title { flex-basis: 100%; white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-height: 1.3; height: 2.6em; }
+}
+#dashboard-flow-panel .ui-stat small { line-height: 1.45; min-height: 1.45em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#dashboard-flow-panel #stat-messages-note { min-height: 2.9em; }
+#stat-messages-note span { display: block; overflow: hidden; text-overflow: ellipsis; }
+#dashboard-flow-panel .is-off, #dashboard-attention-panel .is-off { visibility: hidden; }
+.ui-flow-view { height: 120px; }
+.ui-flow-axis { height: 17px; }
+.ui-flow-failed { display: grid; place-items: center; height: 100%; margin: 0; }
+.ui-flow-gone { position: absolute; top: 0; bottom: 0; left: 0; display: grid; place-items: center; overflow: hidden; pointer-events: none;
+    background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--ui-ink) 7%, transparent) 0 6px, transparent 6px 12px); border-right: 1px dashed var(--ui-line); }
+.ui-flow-gone span { padding: 2px 6px; border-radius: 4px; background: var(--ui-bg); color: var(--ui-muted); font-size: 11.5px; white-space: nowrap; }
+.ui-flow-actions { display: inline-flex; align-items: center; gap: 12px; margin-inline-start: auto; }
+.ui-flow-actions .ui-more { border: 0; background: none; padding: 0; color: inherit; font: inherit; font-size: 13px; font-weight: 600; text-decoration: underline; cursor: pointer; }
+.ui-flow-foot .ui-flow-zoom { margin-inline-start: auto; }
+.ui-aa-chart ~ .ui-flow-foot .is-off { visibility: hidden; }
 .ui-flow-bars { display: flex; align-items: flex-end; gap: 3px; height: 120px; }
 .ui-flow-bar { flex: 1; display: flex; flex-direction: column; justify-content: flex-end; gap: 2px; height: 100%; min-width: 0;
     padding: 0; border: 0; border-radius: 3px; background: none; cursor: pointer; }
@@ -1302,6 +1347,7 @@ body { font-family: var(--ui-font); background: var(--ui-bg); color: var(--ui-in
     .ui-mrow { grid-template-columns: 44px 8px minmax(0, 1fr); row-gap: 2px; }
     .ui-mrow-sub { grid-column: 3; }
     .ui-flow-bars { height: 90px; gap: 2px; }
+    .ui-flow-view { height: 90px; }
     .ui-flow-axis { gap: 2px; }
     .ui-flow-axis .is-minor { visibility: hidden; }
 }
@@ -2776,6 +2822,12 @@ button.ui-dm-node { cursor: pointer; }
 .ui-aa-grid i span { position: absolute; inset-inline-start: -34px; top: -8px; width: 28px; text-align: end; font-size: 11px; color: var(--ui-muted); }
 .ui-aa-cols { position: absolute; inset: 0; display: flex; align-items: flex-end; gap: 1px; }
 .ui-aa-col { position: relative; flex: 1; height: 100%; display: flex; align-items: flex-end; }
+/* The alert's columns are buttons: a click picks one; the chart zooms (uiTimeZoom) */
+button.ui-aa-col { min-width: 0; padding: 0; border: 0; background: none; font: inherit; cursor: pointer; }
+button.ui-aa-col:focus-visible { outline: 2px solid var(--ui-focus); outline-offset: 1px; }
+.ui-aa-cols { touch-action: pan-y; user-select: none; }
+.ui-aa-cols.has-pick .ui-aa-col[aria-pressed="false"] i { opacity: .3; }
+.ui-aa-picked { margin: 8px 0 0; font-size: 13px; }
 .ui-aa-col i { display: block; width: 100%; background: color-mix(in srgb, var(--ui-ink) 55%, transparent); border-radius: 1px 1px 0 0; }
 .ui-aa-col.is-alert i { background: var(--ui-fail); }
 @media (hover: hover) { .ui-aa-col:hover i { filter: brightness(1.3); } }
@@ -2803,7 +2855,10 @@ button.ui-dm-node { cursor: pointer; }
 .ui-aa-subj { display: flex; justify-content: space-between; gap: 10px; padding: 8px 14px; border-bottom: 1px solid var(--ui-line); font-size: 13px; }
 .ui-aa-subj small { color: var(--ui-muted); white-space: nowrap; }
 .ui-aa-note { margin: 0; font-size: 12.5px; }
+/* The actions inside a window's content (Mailbox Stats' activity) */
 .ui-aa-acts { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+#alert-activity-foot { flex: none; }
+.ui-aa-open { display: contents; }
 @media (max-width: 760px) {
     .ui-aa-strip { grid-template-columns: 1fr 1fr; }
     .ui-aa-strip > div:nth-child(n+3) { border-top: 1px solid var(--ui-line); }

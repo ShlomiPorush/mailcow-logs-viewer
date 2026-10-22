@@ -82,10 +82,6 @@
             -webkit-overflow-scrolling: touch;
         }
 
-        #recent-activity::-webkit-scrollbar {
-            display: none;
-        }
-
         /* Slim, rounded scrollbars matching both themes instead of the
            browser default */
         * {
@@ -594,7 +590,6 @@
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
                                 </svg>
                             </button></h1>
-                        <p class="ui-muted" id="dashboard-subtitle">The last 24 hours, with the last 7 days for comparison</p>
                     </div>
                 </div>
 
@@ -603,18 +598,19 @@
                         <!-- Needs attention: server checks and the security alerts (anomaly detection) -->
                         <section class="ui-panel" id="dashboard-attention-panel">
                             <div class="ui-panel-head">Needs attention <span id="dashboard-attention-count" class="ui-count"></span>
-                                <button type="button" id="dashboard-dismiss-all" onclick="acknowledgeAllSecurityAlerts()" class="hidden ui-btn ui-btn-sm ui-head-actions">Dismiss all alerts</button></div>
-                            <div id="dashboard-attention"></div>
-                            <div id="dashboard-security-alerts" class="hidden"></div>
-                            <p id="dashboard-attention-clear" class="hidden ui-dash-clear">Nothing needs attention right now.</p>
+                                <button type="button" id="dashboard-dismiss-all" onclick="acknowledgeAllSecurityAlerts()" class="is-off ui-btn ui-btn-sm ui-head-actions" aria-label="Dismiss all alerts">Dismiss all<span class="ui-attn-wide"> alerts</span></button></div>
+                            <!-- A fixed height; the items scroll inside it -->
+                            <div id="dashboard-attention-scroll" class="ui-attn-scroll" role="region" aria-label="Needs attention" tabindex="0">
+                                <div id="dashboard-attention"></div>
+                                <div id="dashboard-security-alerts" class="hidden"></div>
+                                <p id="dashboard-attention-clear" class="hidden ui-dash-clear">Nothing needs attention right now.</p>
+                            </div>
+                            <p id="dashboard-attention-more" class="ui-attn-more is-off">&nbsp;</p>
                         </section>
 
-                        <section class="ui-panel">
-                            <div class="ui-panel-head"><span id="dashboard-flow-title">Mail flow, last 24 hours</span>
-                                <span class="ui-head-actions ui-flow-actions">
-                                    <button type="button" id="dashboard-flow-view" class="ui-btn ui-btn-sm hidden" onclick="openMailFlowHourMessages()">View these messages</button>
-                                    <button type="button" id="dashboard-flow-reset" class="ui-more hidden" onclick="pickMailFlowHour(null)">All 24 hours</button>
-                                </span></div>
+                        <section class="ui-panel" id="dashboard-flow-panel">
+                            <div class="ui-panel-head"><span id="dashboard-flow-title" aria-live="polite">Mail flow, last 24 hours</span>
+                                <span id="dashboard-flow-period" class="ui-seg" role="group" aria-label="Period"><button type="button" data-period="24h" aria-pressed="true" onclick="setDashFlowPeriod('24h')">24 hours</button><button type="button" data-period="7d" aria-pressed="false" onclick="setDashFlowPeriod('7d')">7 days</button><button type="button" data-period="30d" aria-pressed="false" onclick="setDashFlowPeriod('30d')">30 days</button></span></div>
                             <div class="ui-stats">
                                 <div class="ui-stat" title="Each message counts once, as on the Messages page; a message to three recipients is one message and three deliveries"><span>Messages</span><b id="stat-messages-24h">0</b><small id="stat-messages-note"></small></div>
                                 <div class="ui-stat"><span>Blocked</span><b id="stat-blocked-24h" class="ui-text-fail">0</b><small id="stat-blocked-note"></small></div>
@@ -624,11 +620,6 @@
                             <div id="dashboard-flow-chart" class="ui-flow"></div>
                         </section>
 
-                        <section class="ui-panel">
-                            <div class="ui-panel-head">Latest messages
-                                <button type="button" class="ui-more" onclick="navigateTo('messages')">View all</button></div>
-                            <div id="recent-activity"><div class="ui-loading" role="status"><div class="loading"></div><p>Loading...</p></div></div>
-                        </section>
                     </div>
 
                     <div class="ui-col">
@@ -1615,6 +1606,11 @@
                 <button onclick="closeAlertActivity()" class="ui-icon-btn" title="Close" aria-label="Close"><svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg></button>
             </div>
             <div id="alert-activity-content" class="ui-dialog-body"></div>
+            <!-- The actions stay at the bottom of the window while its content scrolls -->
+            <div class="ui-dialog-foot" id="alert-activity-foot">
+                <button type="button" id="alert-activity-dismiss" class="hidden ui-btn" title="Dismiss the alert">Dismiss</button>
+                <span id="alert-activity-open" class="ui-aa-open"></span>
+            </div>
         </div>
     </div>
 

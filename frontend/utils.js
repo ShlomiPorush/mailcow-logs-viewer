@@ -553,6 +553,15 @@ function formatTime(isoString) {
     });
 }
 
+// A day as formatTime writes it (its date part), and its day and month alone (a chart's axis)
+function formatDay(value) {
+    return formatInZone(value, { day: '2-digit', month: '2-digit', year: 'numeric' });
+}
+
+function formatDayMonth(value) {
+    return formatInZone(value, { day: '2-digit', month: '2-digit' });
+}
+
 function formatDate(isoString) {
     if (!isoString) return '-';
     // Use formatTime for consistent date/time formatting
@@ -1823,6 +1832,246 @@ function uiFilterBarSync() {
     uiPickerRefocus();
 }
 
+// =============================================================================
+// Time zoom on a bar chart: drag across the bars to zoom into that span (a
+// mouse), pinch on the chart (a touch screen), Ctrl+wheel or a trackpad pinch
+// (which Chromium sends as a Ctrl wheel) to zoom at the pointer, one finger or
+// a drag to move a zoomed chart; a tap or click on a bar stays a pick. Buttons
+// beside the chart do the same without a gesture (uiTimeZoomStep).
+//   uiTimeZoom(box, { bars, span, limits, preview, change }) -> { destroy, busy }
+//     bars():   the bar elements in time order, each with data-start / data-end (ms)
+//     span():   the visible { from, to } (ms); limits(): { from, to, min }
+//     preview(span, kind): during a gesture (kind: 'pinch' | 'pan' | 'select' | 'wheel')
+//     change(span): at its end; cancel() when it is called off
+// The chart keeps touch-action: pan-y, so the page still scrolls up and down
+// under a finger; a pinch and a sideways drag come to the chart.
+// =============================================================================
+function uiTimeZoomClamp(span, limits) {
+    const want = span.to - span.from;
+    const len = Math.max(limits.min, Math.min(want, limits.to - limits.from));
+    // Made longer or shorter around its middle, then kept inside the data
+    const from = Math.max(limits.from, Math.min(span.from - (len - want) / 2, limits.to - len));
+    return { from, to: from + len };
+}
+
+// A step from the buttons: in (0.5), out (2), earlier (-1) or later (+1) by half the span
+function uiTimeZoomStep(span, limits, step) {
+    const len = span.to - span.from;
+    if (step === 'in' || step === 'out') {
+        const mid = (span.from + span.to) / 2;
+        const next = step === 'in' ? len / 2 : len * 2;
+        return uiTimeZoomClamp({ from: mid - next / 2, to: mid + next / 2 }, limits);
+    }
+    const by = (step === 'later' ? 1 : -1) * len / 2;
+    return uiTimeZoomClamp({ from: span.from + by, to: span.to + by }, limits);
+}
+
+function uiTimeZoom(box, opts) {
+    const pointers = new Map();   // pointerId -> { x, y }
+    let state = 'idle';           // idle | pressing | selecting | panning | pinching
+    let start = null;             // what the gesture started from
+    let shown = null;             // the span previewed so far
+    let swallow = false;          // the click that ends a gesture is not a pick
+    let wheelTimer = null;
+    // Where the chart sits in the page, without the stretch a preview puts on
+    // it (offsets ignore transforms): a pinch or a wheel keeps one frame
+    const rect = () => {
+        const parent = box.offsetParent;
+        if (!parent || !box.offsetWidth) return box.getBoundingClientRect();
+        const p = parent.getBoundingClientRect();
+        return { left: p.left + parent.clientLeft + box.offsetLeft, width: box.offsetWidth };
+    };
+    const timeAt = (x, span) => {
+        const r = rect();
+        return span.from + Math.max(0, Math.min(1, (x - r.left) / (r.width || 1))) * (span.to - span.from);
+    };
+    // The bar under an x, or the nearest one: its own edges, not a straight line through time
+    const barAt = x => {
+        const bars = opts.bars();
+        let best = null, gap = Infinity;
+        for (const bar of bars) {
+            const b = bar.getBoundingClientRect();
+            const d = x < b.left ? b.left - x : x > b.right ? x - b.right : 0;
+            if (d < gap) { gap = d; best = bar; }
+        }
+        return best;
+    };
+    const zoomed = () => { const s = opts.span(), l = opts.limits(); return s.to - s.from < l.to - l.from - 1; };
+    const preview = (span, kind) => { shown = span; opts.preview(span, kind); };
+    const finish = () => {
+        const done = shown;
+        state = 'idle'; start = null; shown = null;
+        if (done) { swallow = true; opts.change(done); }
+    };
+    const cancel = () => {
+        const was = state !== 'idle' && state !== 'pressing';
+        state = 'idle'; start = null; shown = null;
+        if (was && opts.cancel) opts.cancel();
+    };
+    const twoFingers = () => {
+        const [a, b] = [...pointers.values()];
+        return { mid: (a.x + b.x) / 2, dist: Math.max(8, Math.hypot(a.x - b.x, a.y - b.y)) };
+    };
+    const beginPinch = () => {
+        const f = twoFingers();
+        state = 'pinching';
+        start = { span: shown || opts.span(), mid: f.mid, dist: f.dist };
+    };
+    const beginPan = p => { state = 'panning'; start = { span: shown || opts.span(), x: p.x }; };
+
+    const onDown = event => {
+        if (event.pointerType === 'mouse' && event.button !== 0) return;
+        pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+        if (pointers.size === 2) {
+            // A second finger: a pinch, from wherever the first one got to
+            try { box.setPointerCapture(event.pointerId); } catch (e) { /* the pointer may be gone */ }
+            beginPinch();
+        } else if (pointers.size === 1) {
+            state = 'pressing';
+            start = { x: event.clientX, y: event.clientY };
+        }
+    };
+    const onMove = event => {
+        if (!pointers.has(event.pointerId)) return;
+        pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+        const p = pointers.get(event.pointerId);
+        if (state === 'pressing') {
+            const dx = p.x - start.x, dy = p.y - start.y;
+            if (Math.hypot(dx, dy) < 6) return;
+            // Mostly up or down: the page scrolls, the chart lets it
+            if (Math.abs(dy) > Math.abs(dx)) { state = 'idle'; pointers.delete(event.pointerId); return; }
+            try { box.setPointerCapture(event.pointerId); } catch (e) { /* ignore */ }
+            if (zoomed()) beginPan({ x: start.x });
+            else { state = 'selecting'; start = { x: start.x, span: opts.span() }; }
+        }
+        if (state === 'pinching' && pointers.size >= 2) {
+            const f = twoFingers();
+            const s = start.span, len = s.to - s.from;
+            const anchor = timeAt(start.mid, s);
+            const next = len * start.dist / f.dist;
+            const ratio = (anchor - s.from) / len;
+            // The time under the fingers stays under them, and follows their middle
+            const shift = (f.mid - start.mid) / (rect().width || 1) * next;
+            preview(uiTimeZoomClamp({ from: anchor - ratio * next - shift, to: anchor - ratio * next - shift + next }, opts.limits()), 'pinch');
+        } else if (state === 'panning') {
+            const s = start.span, len = s.to - s.from;
+            const by = -(p.x - start.x) / (rect().width || 1) * len;
+            preview(uiTimeZoomClamp({ from: s.from + by, to: s.to + by }, opts.limits()), 'pan');
+        } else if (state === 'selecting') {
+            const a = barAt(start.x), b = barAt(p.x);
+            if (!a || !b) return;
+            const from = Math.min(Number(a.dataset.start), Number(b.dataset.start));
+            const to = Math.max(Number(a.dataset.end), Number(b.dataset.end));
+            preview({ from, to, x1: Math.min(start.x, p.x), x2: Math.max(start.x, p.x) }, 'select');
+        }
+    };
+    const onUp = event => {
+        if (!pointers.has(event.pointerId)) return;
+        pointers.delete(event.pointerId);
+        if (state === 'pinching') {
+            if (pointers.size === 1) { beginPan([...pointers.values()][0]); return; }   // two fingers to one: it moves on, no jump
+            if (pointers.size === 0) finish();
+            return;
+        }
+        if (pointers.size) return;
+        if (state === 'selecting') {
+            // A span of one bar or more: zoom to it (at least the shortest span)
+            if (shown && shown.to - shown.from >= opts.limits().min) { const { from, to } = shown; shown = uiTimeZoomClamp({ from, to }, opts.limits()); finish(); }
+            else cancel();
+            return;
+        }
+        if (state === 'panning') { finish(); return; }
+        state = 'idle';   // a press without a move: a click picks the bar
+    };
+    // The browser took a finger away: the gesture is called off, a pinch too
+    // when only one of its fingers goes (the other ends it as a plain lift)
+    const onCancel = event => {
+        pointers.delete(event.pointerId);
+        if (!pointers.size || state === 'pinching') cancel();
+    };
+    // A finger lifted lets go of its capture: that is expected and ends nothing.
+    // A bar handing a touch's own capture over to the box bubbles up here too:
+    // only the box losing it while the gesture is on calls the gesture off
+    const onLost = event => {
+        if (event.target === box && pointers.has(event.pointerId) && state !== 'idle') onCancel(event);
+    };
+    const onClick = event => {
+        if (!swallow) return;
+        swallow = false;
+        event.preventDefault();
+        event.stopPropagation();
+    };
+    const onWheel = event => {
+        if (!event.ctrlKey) return;
+        event.preventDefault();
+        const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? 400 : 1;
+        const s = shown || opts.span(), len = s.to - s.from;
+        const anchor = timeAt(event.clientX, s), ratio = (anchor - s.from) / len;
+        const next = len * Math.exp(event.deltaY * unit * 0.004);
+        preview(uiTimeZoomClamp({ from: anchor - ratio * next, to: anchor - ratio * next + next }, opts.limits()), 'wheel');
+        clearTimeout(wheelTimer);
+        wheelTimer = setTimeout(() => { if (shown) { swallow = false; const done = shown; shown = null; opts.change(done); } }, 220);
+    };
+    box.addEventListener('pointerdown', onDown);
+    box.addEventListener('pointermove', onMove);
+    box.addEventListener('pointerup', onUp);
+    box.addEventListener('pointercancel', onCancel);
+    box.addEventListener('lostpointercapture', onLost);
+    box.addEventListener('click', onClick, true);
+    box.addEventListener('wheel', onWheel, { passive: false });
+    return {
+        // A gesture is on: a redraw waits, an answer on its way is set aside
+        busy: () => state !== 'idle' && state !== 'pressing' || !!wheelTimer && !!shown,
+        destroy() {
+            clearTimeout(wheelTimer);
+            box.removeEventListener('pointerdown', onDown);
+            box.removeEventListener('pointermove', onMove);
+            box.removeEventListener('pointerup', onUp);
+            box.removeEventListener('pointercancel', onCancel);
+            box.removeEventListener('lostpointercapture', onLost);
+            box.removeEventListener('click', onClick, true);
+            box.removeEventListener('wheel', onWheel);
+        },
+    };
+}
+
+// Redraw a chart without losing the keyboard's place: focus goes back to the
+// same bar or column (by its start), else the button of the same name in the
+// same group, else the bar that was picked, else the first button of that
+// group. A focus outside the container is left alone.
+function uiRedrawKeepingFocus(container, draw) {
+    const active = document.activeElement;
+    const inside = !!active && active !== container && container.contains(active);
+    const name = el => el.getAttribute('aria-label') || el.textContent.trim();
+    const was = inside ? {
+        start: active.dataset ? active.dataset.start : undefined,
+        name: name(active),
+        group: active.closest('[role="group"]')?.getAttribute('aria-label') || null,
+        picked: container.querySelector('[data-start][aria-pressed="true"]')?.dataset.start,
+    } : null;
+    draw();
+    if (!was) return;
+    // A button kept in its place but hidden (visibility) takes no focus
+    // (visibility checked by itself: older browsers have checkVisibility without that option)
+    const shown = b => getComputedStyle(b).visibility !== 'hidden' && (typeof b.checkVisibility !== 'function' || b.checkVisibility());
+    const enabled = sel => [...container.querySelectorAll(sel)].filter(b => !b.disabled && shown(b));
+    const inGroup = was.group ? [...container.querySelectorAll('[role="group"]')].find(g => g.getAttribute('aria-label') === was.group) : null;
+    // A bar that is gone (zoomed past, or bars of another length): the one holding its time, else the nearest
+    const nearestBar = t => {
+        const bars = [...container.querySelectorAll('[data-start][data-end]')];
+        return bars.find(b => Number(b.dataset.start) <= t && t < Number(b.dataset.end))
+            || bars.reduce((best, b) => (!best || Math.abs(b.dataset.start - t) < Math.abs(best.dataset.start - t) ? b : best), null);
+    };
+    // A bar goes by its time (bars have no names of their own); a button by its name
+    const target = was.start !== undefined
+        ? container.querySelector(`[data-start="${CSS.escape(was.start)}"]`) || nearestBar(Number(was.start))
+        : enabled(inGroup ? '[role="group"] button' : 'button').find(b => name(b) === was.name && (!inGroup || inGroup.contains(b)))
+            || (was.picked !== undefined && container.querySelector(`[data-start="${CSS.escape(was.picked)}"]`))
+            || (inGroup && enabled('button').find(b => inGroup.contains(b)))
+            || null;
+    if (target) target.focus({ preventScroll: true });
+}
+
 // Phones: every dialog opens like the help sheet, at four fifths of the
 // screen; it rises with the reader's scroll to the full screen, and a pull down
 // on its head, or on its content scrolled to the top, closes it
@@ -1854,8 +2103,25 @@ function uiDialogSheet(backdrop) {
     // A drag on its fixed top part (head, header, tabs) moves the sheet itself: up
     // grows it to the full screen, as scrolling does; down pulls it closed
     let startY = null, startHeight = 0, fixedPart = false, pulled = 0;
+    // A touch that starts on a chart that zooms ([data-zoom]), or a second
+    // finger, is no pull: it neither moves nor closes the sheet, until every
+    // finger is lifted
+    let ignore = false;
     const closeButton = () => dialog.querySelector('.ui-dialog-head [aria-label="Close"], .ui-dialog-head .ui-icon-btn');
+    const cancelPull = () => {
+        startY = null;
+        pulled = 0;
+        dialog.classList.remove('is-held');
+        dialog.style.transition = 'transform .2s ease';
+        dialog.style.transform = '';
+    };
     dialog.addEventListener('touchstart', event => {
+        if (event.touches.length > 1 || (event.target instanceof Element && event.target.closest('[data-zoom]'))) {
+            ignore = true;
+            cancelPull();
+            return;
+        }
+        if (ignore) return;
         startY = null;
         if (!active()) return;
         fixedPart = !event.target.closest('.ui-dialog-body');
@@ -1871,7 +2137,7 @@ function uiDialogSheet(backdrop) {
         dialog.classList.toggle('is-held', fixedPart);
     }, { passive: true });
     dialog.addEventListener('touchmove', event => {
-        if (startY === null) return;
+        if (ignore || startY === null) return;
         const moved = event.touches[0].clientY - startY;
         if (moved < 0 && fixedPart) {
             const height = Math.min(window.innerHeight, startHeight - moved);
@@ -1882,7 +2148,11 @@ function uiDialogSheet(backdrop) {
         pulled = closeButton() ? Math.max(0, moved) : 0;
         dialog.style.transform = pulled ? `translateY(${pulled}px)` : '';
     }, { passive: true });
-    const end = () => {
+    const end = event => {
+        if (ignore) {
+            if (!event || !event.touches || event.touches.length === 0) ignore = false;
+            return;
+        }
         dialog.classList.remove('is-held');
         if (startY === null) return;
         startY = null;

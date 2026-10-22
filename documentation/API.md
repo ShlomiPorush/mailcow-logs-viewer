@@ -1010,6 +1010,21 @@ A read failure can return HTTP 200 with `error` and zero values, so check `error
 
 ---
 
+### GET /stats/flow
+
+The Dashboard's mail flow: counts per bar, in the app's time zone. Give either `period`, or `from`, `to` and `bucket`.
+
+| Parameter | Type | Default | Constraints and purpose |
+| --- | --- | --- | --- |
+| `period` | string | none | `24h` (24 hourly bars), `7d` (28 bars of 6 hours) or `30d` (30 daily bars), the last one up to now |
+| `previous` | boolean | `false` | With `period`: the same number of bars right before it |
+| `from`, `to` | string | none | A range of instants (ISO 8601), at most 62 days; it snaps to the nearest bar edges, at least one bar, and stops at now |
+| `bucket` | string | none | With `from` and `to`: `hour`, `6h` or `day` |
+
+Bars follow the app zone's clock, so a day can be 23 or 25 hours long. Each bar in `buckets` has `start`, `end`, `end_inclusive` (its last microsecond), `partial` (still running), `messages` (each message once, in the bar of its earliest delivery in the range), `deliveries`, `blocked` (bounced, rejected or spam), `deferred`, `auth_failures`, and Rspamd `clean` and `spam`. The answer also has `totals`, `from`, `to`, `to_inclusive`, `bucket`, `zone`, `as_of`, `older_may_be_gone` (the range starts before the retention period, so older logs may be deleted) and `kept_from` (where the retention period starts). A bad parameter returns 422.
+
+---
+
 ### GET /stats/timeline
 
 | Parameter | Type | Default | Constraints and purpose |
@@ -2268,7 +2283,7 @@ Alerts, newest first.
 
 The history behind an alert, for its **Show activity** window: outbound messages of the mailbox for a `volume_spike` or `smtp_abuse_block`, failed logins of the username for an `auth_failure_burst`. An unknown alert returns 404.
 
-- `buckets`: `[{start, count}]` per `bucket_minutes` (15), from `baseline_days` before the alert to two hours after it; the first bucket starts on the hour.
+- `buckets`: `[{start, count, partial}]` per `bucket_minutes` (15), from `baseline_days` before the alert to two hours after it, or to now for a recent alert; the first bucket starts on the hour. `partial` marks the bucket that ends at now. `data_end` is where the buckets end.
 - `window_minutes`, `baseline_days`: the check window and baseline the alert was raised with, not today's settings. For `volume_spike` and `auth_failure_burst` they come from the alert's detail; for `smtp_abuse_block`, the window comes from its abuse action. `window_minutes` is null when unknown; `baseline_days` falls back to today's setting.
 - `around`: from the window (an hour when it is null) before the alert to an hour after it (`from`, `to`): `total`, and for sent mail `recipient_domains`, `results` and `subjects`, for failed logins `addresses`, `countries`, `networks` and `address_count` (every source address, not only the listed ones). Each list is `[{name, count}]`, most first, up to 6 entries (`subjects` up to 5).
 - `alert`: the alert itself.

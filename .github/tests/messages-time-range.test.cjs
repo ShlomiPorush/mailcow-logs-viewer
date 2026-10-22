@@ -29,8 +29,7 @@ function harness(filters, appTimezone = 'Europe/Berlin') {
         currentFilters: { messages: filters },
         currentPage: { messages: 1 },
         lastDataCache: {},
-        mailFlowSlots: [],
-        mailFlowPicked: null,
+        dashFlow: { data: null, pick: null, zoom: null },   // the dashboard's mail flow
         document: { getElementById: element },
         authenticatedFetch: async url => { calls.urls.push(url); return { ok: true, json: async () => ({ data: [] }) }; },
         hasDataChanged: () => true,
@@ -58,6 +57,8 @@ function harness(filters, appTimezone = 'Europe/Berlin') {
         extract('messagesPresetStart'),
         extract('selectMessagesDatePreset'),
         extract('mailFlowHour'),
+        extract('mailFlowSpan'),
+        extract('openMessagesRange'),
         extract('openMailFlowHourMessages'),
     ].join('\n'), context);
     return { calls, element, context, run: expression => vm.runInContext(expression, context) };
@@ -152,16 +153,35 @@ test('the Dashboard hour opens Messages on that hour, with its day in the app zo
         const h = harness({}, zone);
         // 23:00 UTC on 2026-10-24 (01:00 on the 25th in Berlin, 19:00 on the 24th in New York)
         const t = Date.parse('2026-10-24T23:00:00Z');
-        h.run(`mailFlowSlots = [{ t: ${t} }]; mailFlowPicked = ${t}; openMailFlowHourMessages()`);
+        // The bar as /api/stats/flow sends it: its start and its last microsecond
+        h.run(`dashFlow.data = { buckets: [{ start: '2026-10-24T23:00:00.000000Z', end_inclusive: '2026-10-24T23:59:59.999999Z' }] };
+            dashFlow.pick = ${t}; openMailFlowHourMessages()`);
         const day = zone === 'UTC' ? '2026-10-24' : '2026-10-25';
         assert.equal(h.element('messages-date-range-start').value, day, zone);
         assert.equal(h.element('messages-date-range-end').value, day, zone);
         assert.equal(h.element('messages-date-range-label').textContent,
-            zone === 'UTC' ? 'Oct 24, 23:00 to 00:00' : 'Oct 25, 01:00 to 02:00', zone);
-        assert.equal(h.element('messages-start-date').value, '2026-10-24T23:00:00.000Z');
+            `${h.run(`formatDay(Date.parse('${day}T12:00:00Z'))`)}, ${zone === 'UTC' ? '23:00 to 00:00' : '01:00 to 02:00'}`, zone);
+        assert.equal(h.element('messages-start-date').value, '2026-10-24T23:00:00.000000Z');
+        assert.equal(h.element('messages-end-date').value, '2026-10-24T23:59:59.999999Z');
         // Apply on the filled day covers the hour
         h.run('applyMessagesCustomDateRange()');
         assert.ok(Date.parse(h.element('messages-start-date').value) <= t, zone);
         assert.ok(Date.parse(h.element('messages-end-date').value) >= t + 3600000 - 1, zone);
     }
+});
+
+test('the Dashboard chart with no bar picked opens Messages on the span shown', () => {
+    const h = harness({}, 'Europe/Berlin');
+    h.run(`dashFlow.data = { buckets: [], from: '2026-10-21T04:00:00.000000Z', to_inclusive: '2026-10-21T09:59:59.999999Z' };
+        dashFlow.zoom = { from: 1, to: 2 }; dashFlow.pick = null; openMailFlowHourMessages()`);
+    assert.equal(h.element('messages-start-date').value, '2026-10-21T04:00:00.000000Z');
+    assert.equal(h.element('messages-end-date').value, '2026-10-21T09:59:59.999999Z');
+    assert.equal(h.element('messages-date-range-label').textContent, `${h.run("formatDay(Date.parse('2026-10-21T12:00:00Z'))")}, 06:00 to 12:00`);
+    assert.deepEqual(h.calls.navigated, [['messages']]);
+    // Not zoomed and nothing picked: the whole period shown
+    const plain = harness({}, 'UTC');
+    plain.run(`dashFlow.data = { buckets: [], from: '2026-10-20T12:00:00.000000Z', to_inclusive: '2026-10-21T11:59:59.999999Z' }; openMailFlowHourMessages()`);
+    assert.equal(plain.element('messages-start-date').value, '2026-10-20T12:00:00.000000Z');
+    assert.equal(plain.element('messages-end-date').value, '2026-10-21T11:59:59.999999Z');
+    assert.deepEqual(plain.calls.navigated, [['messages']]);
 });

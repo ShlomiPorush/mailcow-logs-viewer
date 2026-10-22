@@ -30,7 +30,7 @@ function load(elementId) {
     for (const file of ['utils.js', 'app.js', 'smtp-abuse.js', 'protection.js', 'security.js']) {
         vm.runInContext(fs.readFileSync(path.join(frontend, file), 'utf8'), context);
     }
-    const element = { innerHTML: '', textContent: '', classList: { add() {}, remove() {}, toggle() {} } };
+    const element = { innerHTML: '', textContent: '', dataset: {}, closest: () => null, classList: { add() {}, remove() {}, toggle() {} } };
     context.document = { getElementById: id => (id === elementId ? element : null), querySelectorAll: () => [] };
     return { context, element };
 }

@@ -140,6 +140,8 @@ def test_an_smtp_block_opens_on_the_mailboxs_sent_mail(env):
     assert around['total'] == 30
     assert around['recipient_domains'][0] == {'name': 'a.example', 'count': 20}
     assert around['subjects'] == [{'name': 'Win a prize', 'count': 30}]
+    # To the microsecond, so Open in Messages asks for exactly this span
+    assert all(len(around[key].rstrip('Z').split('.')[-1]) == 6 for key in ('from', 'to'))
 
 
 def _minutes_around(around):

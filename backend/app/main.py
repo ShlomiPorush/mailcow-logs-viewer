@@ -68,6 +68,7 @@ logger = logging.getLogger(__name__)
 # Messages APIs (which is what the old try/except ImportError did).
 from .routers import status as status_router
 from .routers import messages as messages_router
+from .routers import stats_flow as stats_flow_router
 from .routers import settings as settings_router
 
 
@@ -372,6 +373,7 @@ app.add_middleware(SlowRequestLogMiddleware)
 app.include_router(auth_router.router, prefix="/api", tags=["Authentication"])
 app.include_router(logs.router, prefix="/api", tags=["Logs"])
 app.include_router(stats.router, prefix="/api", tags=["Statistics"])
+app.include_router(stats_flow_router.router, prefix="/api", tags=["Statistics"])
 app.include_router(reporting.router, prefix="/api", tags=["Reporting"])
 app.include_router(export_router.router, prefix="/api", tags=["Export"])
 if status_router:

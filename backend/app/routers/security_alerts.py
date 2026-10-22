@@ -5,7 +5,7 @@ auth attack) surfaced on the dashboard.
 import logging
 import re
 from collections import Counter
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Query, HTTPException
@@ -183,10 +183,15 @@ def alert_activity(alert_id: int, db: Session = Depends(get_db)):
 
         step = timedelta(minutes=BUCKET_MINUTES)
         counts = Counter(int((row[0] - start) / step) for row in rows if row[0])
+        # Data only up to now: for a recent alert the hours after it have not
+        # happened yet, and are no quiet hours
+        seen_to = min(end, datetime.utcnow())
         buckets = []
         t, i = start, 0
-        while t < end:
-            buckets.append({'start': format_datetime_utc(t), 'count': counts.get(i, 0)})
+        while t < seen_to:
+            buckets.append({'start': format_datetime_utc(t), 'count': counts.get(i, 0),
+                            # The last one ends at now, part of its 15 minutes
+                            'partial': t + step > seen_to})
             t += step
             i += 1
 
@@ -212,7 +217,11 @@ def alert_activity(alert_id: int, db: Session = Depends(get_db)):
             'window_minutes': window,
             'baseline_days': baseline_days,
             'buckets': buckets,
-            'around': {'from': format_datetime_utc(around_from), 'to': format_datetime_utc(around_to), 'total': len(near), **around},
+            # The exact end of the data (now, for a recent alert)
+            'data_end': seen_to.isoformat(timespec='microseconds') + 'Z',
+            # To the microsecond, as the database keeps them: Open in Messages asks for exactly this span
+            'around': {'from': around_from.isoformat(timespec='microseconds') + 'Z', 'to': around_to.isoformat(timespec='microseconds') + 'Z',
+                       'total': len(near), **around},
         }
     except HTTPException:
         raise
