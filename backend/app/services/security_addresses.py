@@ -260,6 +260,16 @@ def panels(addresses: List[dict], countries: int = 10, networks: int = 8) -> Tup
     return top(by_country, countries), top(by_network, networks)
 
 
+def fail2ban_answered(f2b) -> bool:
+    """mailcow's Fail2ban settings, not an error answer that came with HTTP 200
+    ({"type": "danger", "msg": ...}): only then are its bans and lists known."""
+    if not isinstance(f2b, dict):
+        return False
+    if str(f2b.get('type', '')).lower() in ('danger', 'error'):
+        return False
+    return any(key in f2b for key in ('active_bans', 'perm_bans', 'ban_time', 'max_attempts'))
+
+
 def collect(db: Session, f2b: Optional[dict], now: Optional[datetime] = None, hours: int = 24) -> List[dict]:
     """Every address on one of the lists, newest activity first.
 

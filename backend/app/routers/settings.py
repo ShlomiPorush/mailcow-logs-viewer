@@ -921,10 +921,13 @@ def update_settings(body: Dict[str, Any], request: Request = None, response: Res
     # One save at a time from the state it starts from to its transition token:
     # two saves at once must not each take the list for kept and one leave its
     # token over the other's
+    from ..services.figures import features_off, note_feature_switches
     with _LIST_TRANSITION_LOCK:
         list_was_kept, switches_before = spam_list_kept(), _spam_list_switches()
+        trends_off_before = features_off()
         save_config_overrides_to_db(db, allowed)
         reload_settings(db)
+        note_feature_switches(trends_off_before, features_off())
         rspamd_off_transition = _record_list_transition(
             db, list_was_kept, spam_list_kept(), switched=_spam_list_switches() != switches_before)
     if _session_bound_values() != prev_sign_in:

@@ -57,6 +57,26 @@ def bump_feature_epoch(feature: str) -> None:
         _epochs[feature] = _epochs.get(feature, 0) + 1
 
 
+def note_feature_switches(off_before, off_after) -> None:
+    """A save that switches a feature with a trend (on or off) moves its epoch under
+    the lock, so a sample read before the switch is not written after it, also
+    when the feature goes off and on again before its data is deleted."""
+    from ..database import get_db_context
+    changed = {f for f in set(METRICS.values()) if f and ((f in off_before) != (f in off_after))}
+    if not changed:
+        return
+    with get_db_context() as db:
+        db.execute(text("SET LOCAL lock_timeout = '10s'"))
+        lock_metric_rows(db)
+        for feature in changed:
+            bump_feature_epoch(feature)
+        db.commit()
+
+
+def features_off() -> set:
+    return {f for f in set(METRICS.values()) if f and not settings.is_feature_enabled(f)}
+
+
 def lock_metric_rows(db: Session) -> None:
     """Held to the end of the transaction: a purge and a collector's write never interleave."""
     db.execute(text('SELECT pg_advisory_xact_lock(:key)'), {'key': _LOCK_KEY})
@@ -141,8 +161,11 @@ def security_figures(addresses, fail2ban_known: bool) -> dict:
 
 
 def _in_session(fn):
+    """In a session of its own whose statements stop at the source's time budget
+    (a wait_for on a thread does not stop the thread's query)."""
     from ..database import get_db_context
     with get_db_context() as db:
+        db.execute(text(f"SET LOCAL statement_timeout = '{SOURCE_TIMEOUT - 5}s'"))
         return fn(db)
 
 
@@ -173,7 +196,7 @@ async def collect_figures() -> Dict[str, dict]:
         from ..mailcow_api import mailcow_api
         from . import security_addresses
         f2b = await bounded(mailcow_api.get_fail2ban(), 'Fail2ban')
-        if f2b is not None:
+        if security_addresses.fail2ban_answered(f2b):
             addresses = await bounded(asyncio.to_thread(_in_session, lambda db: security_addresses.collect(db, f2b, None, 24)), 'security addresses')
             if addresses is not None:
                 points.update(security_figures(addresses, True))
@@ -192,7 +215,15 @@ def write_points(points: Dict[str, dict], epochs: Dict[str, int], slot: datetime
     from ..models import MetricSnapshot
     written = 0
     with get_db_context() as db:
-        lock_metric_rows(db)
+        try:
+            # A purge holding the lock longer than this: the hour is a gap, the job is no failure
+            db.execute(text("SET LOCAL lock_timeout = '10s'"))
+            db.execute(text("SET LOCAL statement_timeout = '30s'"))
+            lock_metric_rows(db)
+        except Exception as e:
+            db.rollback()
+            logger.warning(f"Trend samples left out this hour: the samples are busy ({e})")
+            return 0
         for name, figure in points.items():
             feature = METRICS.get(name)
             if feature and (not settings.is_feature_enabled(feature) or feature_epoch(feature) != epochs.get(feature, 0)):

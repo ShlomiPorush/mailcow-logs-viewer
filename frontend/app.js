@@ -5079,8 +5079,10 @@ async function loadDashboardBlacklistSummary() {
         const hosts = data.hosts || [];
         const listedHosts = hosts.filter(h => h.status === 'listed');
         const checked = data.checked_at ? `checked ${formatAgo(data.checked_at)}` : '';
+        const fig = data.figure && data.figure.valid ? data.figure : null;
         if (data.status === 'listed') {
-            setDashKpi('dash-kpi-blocklists', `${listedHosts.length || data.hosts_listed || 1} of ${hosts.length || 1} listed`, 'fail',
+            // The figure its trend samples: listed of all monitored addresses
+            setDashKpi('dash-kpi-blocklists', fig ? `${fig.value} of ${fig.of} listed` : `${listedHosts.length || data.hosts_listed || 1} of ${hosts.length || 1} listed`, 'fail',
                 listedHosts.map(h => `${h.hostname} on ${h.listed_count} of ${h.total_blacklists || '?'}`).join(', '));
         } else if (data.status === 'error') {
             setDashKpi('dash-kpi-blocklists', 'Check error', 'warn', checked);

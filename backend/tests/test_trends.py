@@ -233,3 +233,34 @@ def test_the_migration_creates_the_table_on_an_existing_install_and_runs_again_s
         isolated.dispose()
         with engine.begin() as conn:
             conn.execute(text(f'DROP SCHEMA {schema} CASCADE'))
+
+
+def test_an_error_answer_from_fail2ban_is_no_answer(db_ready, monkeypatch):
+    from app.services.security_addresses import fail2ban_answered
+    assert fail2ban_answered({'active_bans': [], 'ban_time': 600})
+    assert not fail2ban_answered({'type': 'danger', 'msg': 'unavailable'})
+    assert not fail2ban_answered(None) and not fail2ban_answered([])
+    figures = _fake_sources(monkeypatch)
+    async def danger():
+        return {'type': 'danger', 'msg': 'unavailable'}
+    monkeypatch.setattr(mailcow_api, 'get_fail2ban', danger)
+    asyncio.run(figures.run_trend_samples())
+    assert not _rows('security_review') and not _rows('security_banned') and _rows('storage_used')
+
+
+def test_a_quick_off_and_on_through_settings_drops_a_running_sample(db_ready, monkeypatch):
+    """Off and on again before any purge: the switch itself moves the epoch."""
+    figures = _fake_sources(monkeypatch)
+    epochs = {f: figures.feature_epoch(f) for f in set(figures.METRICS.values()) if f}
+    points = asyncio.run(figures.collect_figures())
+    figures.note_feature_switches(set(), {'netfilter'})
+    figures.note_feature_switches({'netfilter'}, set())
+    figures.write_points(points, epochs, figures.slot_of(datetime.utcnow()))
+    assert not _rows('security_review') and _rows('storage_used')
+
+
+def test_a_sources_queries_stop_at_its_time_budget(db_ready):
+    from sqlalchemy import text
+    from app.services import figures
+    seen = figures._in_session(lambda db: db.execute(text('SHOW statement_timeout')).scalar())
+    assert seen == f'{figures.SOURCE_TIMEOUT - 5}s'
