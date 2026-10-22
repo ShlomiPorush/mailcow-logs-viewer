@@ -2489,7 +2489,7 @@ html .markdown-body .markdown-alert-caution .markdown-alert-title { color: var(-
 .ui-sort-btn-icon.is-set::after { content: ""; position: absolute; top: -4px; inset-inline-end: -4px; width: 10px; height: 10px; border-radius: 50%;
     background: var(--ui-accent); box-shadow: 0 0 0 2px var(--ui-panel); }
 :is(.ui-list-summary, .ui-dm-card > header) .ui-sort-btn-icon { width: 30px; height: 30px; }
-:is(.ui-sort-slot, .ui-msg-sort) .ui-popover { inset-inline-start: auto; inset-inline-end: 0; width: 240px; }
+.ui-sort-slot .ui-popover { inset-inline-start: auto; inset-inline-end: 0; width: 240px; }
 .ui-sort-panel { display: grid; gap: 12px; padding: 12px; max-height: min(460px, 70vh); overflow-y: auto; font-weight: 400; }
 .ui-sort-group { display: grid; gap: 2px; margin: 0; padding: 0; border: 0; min-width: 0; }
 .ui-sort-group legend { padding: 0 0 4px; color: var(--ui-muted); font-size: 11.5px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
