@@ -361,6 +361,28 @@ test('a store cancels a pending Sieve discard; an explicit discard still shows',
     assert.match(row('b@example.com'), /Mailbox delivery: Discarded by Sieve/);
 });
 
+// Regression: the message delivered twice to one mailbox, as a mailing list
+// copy does; Sieve stored the first and dropped the second. Each LMTP session
+// is its own delivery, as on the server, so the store hides no discard.
+test('a store in one LMTP session does not cancel a discard in another', async () => {
+    const lmtp = to => ({ ...smtp(1, to, 'sent'), program: 'postfix/lmtp', relay: 'dovecot[172.22.1.250]:24' });
+    const line = (prefix, session, verdict, action) => ({ time: '2026-01-01T00:00:02Z', recipient: 'a@example.com', verdict,
+        message: `${prefix}lmtp(a@example.com)<1234><${session}>: sieve: msgid=<m@x>: ${action}` });
+    for (const prefix of ['', 'dovecot: ']) {
+        const data = { ...messageToMany(), recipients: ['a@example.com', 'b@example.com'], postfix: [lmtp('a@example.com'), lmtp('b@example.com')],
+            dovecot: { status: 'discarded', mailbox: null, logs: [
+                line(prefix, 'S1', 'stored', "stored mail into mailbox 'INBOX'"),
+                line(prefix, 'S2', 'discarded', 'marked message to be discarded if not explicitly delivered (discard action)'),
+            ] } };
+        const h = harness(data);
+        await h.context.viewMessageDetails('example-key');
+        h.context.switchModalTab('postfix');
+        const rows = h.element('message-modal-content').innerHTML;
+        const row = rows.split('ui-md-rrow"').find(r => r.includes('<bdi>a@example.com</bdi>'));
+        assert.match(row, /Mailbox delivery: Discarded by Sieve/, `prefix "${prefix}"`);
+    }
+});
+
 // Round 2: an alias reaching several mailboxes, a mailbox two aliases reach,
 // and a mailbox Rspamd named itself
 test('aliases and their mailboxes keep each delivery\'s own Dovecot verdict', async () => {
