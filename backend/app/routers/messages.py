@@ -6,7 +6,7 @@ FIXED: All timestamps now sent with proper UTC timezone ('Z' suffix)
 import logging
 from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy.orm import Session
-from sqlalchemy import or_, and_, desc, func, select
+from sqlalchemy import or_, and_, desc, func, select, tuple_, literal
 from datetime import datetime, timedelta, timezone
 import re
 from typing import List, Optional
@@ -154,14 +154,32 @@ def _group_postfix_by_recipient(postfix_logs) -> dict:
     return grouped
 
 
+# Every character Python's str.strip() removes around an address (str.isspace),
+# so the SQL match hides exactly what is_blacklisted hid
+BLANKS = "".join(chr(c) for c in range(0x110000) if chr(c).isspace())
+
+
+def message_sort_time():
+    """The time the Messages list sorts by: first seen, else when stored (a
+    delivery may lack it), else the epoch. The list, its cursor, the leg that
+    stands for a message and the CSV export all use it."""
+    return func.coalesce(MessageCorrelation.first_seen, MessageCorrelation.created_at, literal(datetime(1970, 1, 1)))
+
+
 def _filtered_messages_query(db, search=None, sender=None, recipient=None, direction=None, status=None,
                              user=None, ip=None, start_date=None, end_date=None):
     """The message legs matching the Messages filters. Shared by the list and
     its facet counts, so a count always equals what the list shows for it."""
     query = db.query(MessageCorrelation)
-    
+
     # Exclude blacklisted correlations
     query = query.filter(MessageCorrelation.correlation_key != "BLACKLISTED")
+    # Addresses hidden with Blacklist Emails, here in the query, so pages,
+    # totals and facet counts leave them out alike (no page comes out empty)
+    hidden = settings.blacklist_emails_list
+    if hidden:
+        for column in (MessageCorrelation.sender, MessageCorrelation.recipient):
+            query = query.filter(or_(column.is_(None), func.lower(func.btrim(column, BLANKS)).notin_(hidden)))
     
     # Apply filters
     if search:
@@ -248,7 +266,8 @@ def _filtered_messages_query(db, search=None, sender=None, recipient=None, direc
 
 def _count_messages(query):
     """Messages, not legs, in a filtered leg query (the rule of the list)."""
-    group_key = func.coalesce(MessageCorrelation.message_id, MessageCorrelation.correlation_key)
+    # As the list groups them: an empty Message-ID is none
+    group_key = func.coalesce(func.nullif(MessageCorrelation.message_id, ""), MessageCorrelation.correlation_key)
     legs = query.with_entities(
         func.row_number().over(
             partition_by=group_key,
@@ -334,11 +353,22 @@ def get_unified_messages(
     start_date: Optional[RangeStart] = Query(None, description="Start date"),
     end_date: Optional[RangeEnd] = Query(None, description="End date"),
     order: str = Query("desc", pattern="^(asc|desc)$", description="By time first seen: desc newest first, asc oldest first"),
+    cursor: Optional[str] = Query(None, max_length=80, description="The next_cursor of the page before: the messages after it, instead of a page number"),
     db: Session = Depends(get_db)
 ):
     """
     Get unified messages view (combines Postfix + Rspamd)
     """
+    # A cursor is the last message shown (its time first seen and its leg's id):
+    # the next page starts right after it, so a message removed or added in
+    # between (retention, new mail) neither skips nor repeats one
+    after = None
+    if isinstance(cursor, str) and cursor:   # a direct call (tests) leaves the Query default
+        try:
+            at, leg = cursor.rsplit("|", 1)
+            after = (datetime.fromisoformat(at), int(leg))
+        except ValueError:
+            raise HTTPException(status_code=422, detail="Invalid cursor")
     try:
         query = _filtered_messages_query(db, search, sender, recipient, direction, status, user, ip, start_date, end_date)
 
@@ -348,15 +378,17 @@ def get_unified_messages(
         # always shows the leg that matched it. A correlation without a
         # Message-ID falls back to its own key and is never merged with another.
         group_key = func.coalesce(
-            MessageCorrelation.message_id, MessageCorrelation.correlation_key
+            func.nullif(MessageCorrelation.message_id, ""), MessageCorrelation.correlation_key
         )
         legs = query.with_entities(
             MessageCorrelation.id.label("leg_id"),
             MessageCorrelation.first_seen.label("first_seen"),
+            # The time the list sorts by: first seen, else stored (a leg may lack it)
+            message_sort_time().label("sort_time"),
             func.row_number().over(
                 partition_by=group_key,
                 order_by=(
-                    MessageCorrelation.first_seen.asc(),
+                    message_sort_time().asc(),
                     MessageCorrelation.id.asc()
                 )
             ).label("leg_rank")
@@ -367,16 +399,23 @@ def get_unified_messages(
             legs.c.leg_rank == 1
         ).scalar() or 0
 
-        # Apply pagination
-        offset = (page - 1) * limit
-        messages = db.query(MessageCorrelation).join(
+        # A page: after the cursor when there is one, else by its number. One
+        # row more than the page says whether another page follows
+        rows = db.query(MessageCorrelation, legs.c.sort_time).join(
             legs, MessageCorrelation.id == legs.c.leg_id
         ).filter(
             legs.c.leg_rank == 1
-        ).order_by(
+        )
+        if after:
+            mark = tuple_(legs.c.sort_time, legs.c.leg_id)
+            rows = rows.filter(mark > tuple_(*after) if order == "asc" else mark < tuple_(*after))
+        found = rows.order_by(
             # The leg's id settles messages first seen at the same moment, so pages never overlap or skip
-            *((legs.c.first_seen.asc(), legs.c.leg_id.asc()) if order == "asc" else (desc(legs.c.first_seen), desc(legs.c.leg_id)))
-        ).offset(offset).limit(limit * 2).all()
+            *((legs.c.sort_time.asc(), legs.c.leg_id.asc()) if order == "asc" else (desc(legs.c.sort_time), desc(legs.c.leg_id)))
+        ).offset(0 if after else (page - 1) * limit).limit(limit + 1).all()
+        more = len(found) > limit
+        found = found[:limit]
+        messages = [msg for msg, _ in found]
 
         # How many deliveries the message has in total, which is what the row
         # reports - not only the legs the current filters matched
@@ -392,13 +431,9 @@ def get_unified_messages(
                 ).group_by(MessageCorrelation.message_id).all()
             )
 
-        # Filter out blacklisted emails and build response
+        # Build the response (hidden addresses are already left out by the query)
         result_messages = []
         for msg in messages:
-            # Check blacklist
-            if is_blacklisted(msg.sender) or is_blacklisted(msg.recipient):
-                continue
-            
             # Get Rspamd log for additional info
             rspamd_log = None
             if msg.rspamd_log_id:
@@ -426,17 +461,15 @@ def get_unified_messages(
                 "user": rspamd_log.user if rspamd_log else None,
                 "ip": rspamd_log.ip if rspamd_log else None
             })
-            
-            # Stop when we have enough messages
-            if len(result_messages) >= limit:
-                break
-        
+
         return {
             "total": total_before_filter,
             "page": page,
             "limit": limit,
             "pages": (total_before_filter + limit - 1) // limit if total_before_filter > 0 else 0,
-            "data": result_messages
+            "data": result_messages,
+            # Where the next page starts, or null at the end
+            "next_cursor": f"{found[-1][1].isoformat()}|{found[-1][0].id}" if more and found else None,
         }
     except Exception as e:
         logger.error(f"Error fetching unified messages: {e}")

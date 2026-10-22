@@ -199,8 +199,9 @@ def _representative_legs(db: Session, address_column, emails_lower: list,
     marked leg_rank = 1 and lends the message its status and direction.
     """
     email = func.lower(address_column)
+    # An empty Message-ID is none, as in the Messages list
     message_key = func.coalesce(
-        MessageCorrelation.message_id, MessageCorrelation.correlation_key
+        func.nullif(MessageCorrelation.message_id, ""), MessageCorrelation.correlation_key
     )
     status_rank = case(
         *[(MessageCorrelation.final_status == status, rank)

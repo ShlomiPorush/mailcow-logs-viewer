@@ -184,7 +184,8 @@ def get_timeline_stats(
         ).all()
 
         corr_hour = func.date_trunc('hour', MessageCorrelation.first_seen).label('hour')
-        message_key = func.coalesce(MessageCorrelation.message_id, MessageCorrelation.correlation_key)
+        # As the Messages list groups them: an empty Message-ID is none
+        message_key = func.coalesce(func.nullif(MessageCorrelation.message_id, ""), MessageCorrelation.correlation_key)
         # Messages as the Messages page counts them in that hour (one per message), beside the deliveries
         unique = dict(db.query(corr_hour, func.count(func.distinct(message_key))).filter(
             MessageCorrelation.first_seen >= cutoff, MessageCorrelation.correlation_key != "BLACKLISTED"
