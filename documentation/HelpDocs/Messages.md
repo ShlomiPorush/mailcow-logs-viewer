@@ -40,7 +40,7 @@ Repeated steps, such as deferred retries, appear once with the attempt count. A 
 
 **Delivery Error** gives the remote server's response or Postfix's reason for failure. Repeated identical errors appear once with an attempt count.
 
-A message to several recipients lists them under **Recipients** instead, problems first, each with the last status Postfix logged for it and the reason. **Not logged** means Postfix has no delivery line for that address yet. Click a recipient, or pick one under **Recipient**, to see only its lines; lines that belong to every recipient stay, dimmed and marked **All recipients**.
+A message to several recipients lists them under **Recipients** instead, problems first, each with the last status Postfix logged for it and the reason. **Not logged** means Postfix has no delivery line for that address yet. Click a recipient, or pick one under **Recipient**, to see only its lines; lines that belong to every recipient stay, dimmed and marked **All recipients**. A status or a search in the list narrows the timeline the same way, to the recipients it shows.
 
 The timeline combines Postfix lines for the queue ID with Dovecot delivery lines in time order. **No Postfix delivery logs available** means no Postfix lines were linked to this delivery.
 

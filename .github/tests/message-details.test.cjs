@@ -25,7 +25,7 @@ function harness(data, ok = true) {
     };
     const requests = [];
     const document = {
-        body: { style: {} }, getElementById: element,
+        body: { style: {} }, getElementById: element, querySelector: () => null,
         querySelectorAll: () => ['overview', 'postfix', 'spam', 'netfilter'].map(tab => element('modal-tab-' + tab)),
         addEventListener: (name, handler) => { listeners[name] = handler; },
     };
@@ -423,4 +423,44 @@ test('a message to many names its one server in the strip, and each recipient it
     h2.context.switchModalTab('postfix');
     assert.doesNotMatch(h2.element('message-modal-content').innerHTML.split('id="md-rcpts"')[0], /<span>Relay<\/span>/);
     assert.match(h2.context.renderRecipientRows(), /data-host="mx2\.example\.org"/);
+});
+
+test('the Recipients list filters the timeline too, and a picked recipient or a clear wins', async () => {
+    const h = harness(messageToMany());
+    await h.context.viewMessageDetails('example-key');
+    h.context.switchModalTab('postfix');
+    const timeline = () => h.element('md-timeline-slot').innerHTML;
+    const view = () => JSON.parse(JSON.stringify(vm.runInContext('mdView', h.context)));
+
+    // A status: the bounced recipient's line and the shared one
+    h.context.filterMessageRecipients('bounced');
+    assert.deepEqual(timelineLines(timeline()), { all: 2, shared: 1 });
+    assert.match(timeline(), /2 of 5 entries/);
+    assert.match(timeline(), /<bdi>Bounced \(1\)<\/bdi>/);
+    assert.match(timeline(), /aria-label="Show every recipient"/);
+
+    // A search, with the status cleared: b@'s two lines and the shared one
+    h.context.filterMessageRecipients('');
+    h.context.searchMessageRecipients('b@');
+    assert.deepEqual(timelineLines(timeline()), { all: 3, shared: 1 });
+    assert.match(timeline(), /<bdi>&quot;b@&quot; \(1\)<\/bdi>/);
+
+    // A picked recipient wins over the list's filter
+    const a = vm.runInContext("mdRecipients.findIndex(r => r.key === 'a@example.net')", h.context);
+    h.context.pickMessageRecipient(a);
+    assert.deepEqual(timelineLines(timeline()), { all: 2, shared: 1 });
+
+    // "All recipients" clears the pick and the list's filter
+    h.context.pickMessageRecipient(-1);
+    assert.equal(view().query, '');
+    assert.equal(view().status, '');
+    assert.match(timeline(), /5 entries/);
+    assert.deepEqual(timelineLines(timeline()), { all: 5, shared: 0 });
+
+    // A count in the header shows its recipients, not one picked before
+    h.context.pickMessageRecipient(a);
+    h.context.showMessageRecipients('deferred');
+    assert.equal(view().picked, -1);
+    // (the tab draws itself whole: the timeline is in the tab's content)
+    assert.deepEqual(timelineLines(h.element('message-modal-content').innerHTML), { all: 3, shared: 1 });
 });

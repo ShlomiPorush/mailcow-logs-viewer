@@ -326,26 +326,32 @@ function renderLogTimeline(postfixLogs, dovecotLogs) {
         </div>
     ` : '';
 
-    // One source, and for a message to many one recipient: its own lines and
-    // the ones every recipient shares
+    // One source, and for a message to many one recipient, or the ones the
+    // Recipients list shows: their own lines and the ones every recipient shares
     const picked = mdRecipients.length > 1 && mdView.picked >= 0 ? mdRecipients[mdView.picked] : null;
+    const query = mdView.query.trim();
+    const listed = !picked && mdRecipients.length > 1 && (mdView.status || query)
+        ? new Set(mdListedRecipients().map(({ r }) => r.key)) : null;
+    const narrowed = !!(picked || listed);
     // A line counts for the address the sender wrote (an alias), Dovecot's
     // lines for every address that reached the mailbox they name
     const ownersOf = e => mdLineOwners(e.log, e.dovecot);
+    const ownLine = owners => (picked ? owners.includes(picked.key) : owners.some(key => listed.has(key)));
     const shown = entries.filter(e => (!mdView.source || timelineSource(e) === mdView.source)
-        && (!picked || !ownersOf(e).length || ownersOf(e).includes(picked.key)));
+        && (!narrowed || !ownersOf(e).length || ownLine(ownersOf(e))));
+    const listName = listed ? `${[mdView.status ? mdStatusInfo(mdView.status).word : '', query ? `"${query}"` : ''].filter(Boolean).join(' ')} (${listed.size})` : '';
     const count = shown.length === entries.length ? `${entries.length} entries` : `${shown.length} of ${entries.length} entries`;
     const picker = mdRecipients.length > 1 ? `
         ${uiPicker({
-            id: 'md-rcpt-pick', label: 'Recipient', set: !!picked, search: 'Find a recipient', panelLabel: 'Show the logs of', panelClass: 'ui-md-rcpt-panel',
-            value: picked ? `<bdi>${escapeHtml(picked.address)}</bdi>` : 'All recipients',
-            options: [{ label: 'All recipients', value: -1, selected: !picked, onclick: 'pickMessageRecipient(-1)' }]
+            id: 'md-rcpt-pick', label: 'Recipient', set: narrowed, search: 'Find a recipient', panelLabel: 'Show the logs of', panelClass: 'ui-md-rcpt-panel',
+            value: picked ? `<bdi>${escapeHtml(picked.address)}</bdi>` : listed ? `<bdi>${escapeHtml(listName)}</bdi>` : 'All recipients',
+            options: [{ label: 'All recipients', value: -1, selected: !narrowed, onclick: 'pickMessageRecipient(-1)' }]
                 .concat(mdRecipients.map((r, i) => ({ r, i })).sort((a, b) => mdRecipientOrder(a.r, b.r)).map(({ r, i }) => {
                     const status = mdStatusInfo(r.status);
                     return { label: r.address, hint: status.word, dot: status.tone, value: i, selected: mdView.picked === i, onclick: `pickMessageRecipient(${i})` };
                 })),
         })}
-        ${picked ? `<button type="button" class="ui-icon-btn ui-icon-btn-sm" onclick="pickMessageRecipient(-1)" title="Show every recipient" aria-label="Show every recipient"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg></button>` : ''}` : '';
+        ${narrowed ? `<button type="button" class="ui-icon-btn ui-icon-btn-sm" onclick="pickMessageRecipient(-1)" title="Show every recipient" aria-label="Show every recipient"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg></button>` : ''}` : '';
 
     return `
         <div class="ui-md-timeline" id="md-timeline">
@@ -355,7 +361,7 @@ function renderLogTimeline(postfixLogs, dovecotLogs) {
             </div>
             <div class="ui-md-timeline-entries" id="log-timeline-entries">
                 ${shown.length ? shown.map(e => {
-                    const shared = !!picked && !ownersOf(e).length;
+                    const shared = narrowed && !ownersOf(e).length;
                     return `<div data-log-source="${escapeHtml(timelineSource(e))}">${e.dovecot ? renderDovecotTimelineRow(e.log, shared) : renderPostfixTimelineRow(e.log, shared)}</div>`;
                 }).join('') : '<p class="ui-muted">No log lines for this filter</p>'}
             </div>
@@ -699,7 +705,7 @@ function recipientsVerdict(data, recipients) {
 
 // The header's link, a status count and a "View" in What happened open the list
 function showMessageRecipients(status) {
-    Object.assign(mdView, { status: status || '', query: '', all: !status });
+    Object.assign(mdView, { status: status || '', query: '', all: !status, picked: -1 });
     switchModalTab('postfix');
     mdReveal('md-rcpts');
 }
@@ -736,16 +742,26 @@ function mdRedrawTimeline() {
     mdRedraw('md-timeline-slot', renderLogTimeline(data.postfix, (data.dovecot && data.dovecot.logs) || []));
 }
 
+// The list's status and search filter the timeline too
 function searchMessageRecipients(query) {
     mdView.query = query;
     mdView.all = false;
     mdRedrawRecipients();
+    mdRedrawTimeline();
 }
 
 function filterMessageRecipients(status) {
     mdView.status = status;
     mdView.all = false;
     mdRedrawRecipients();
+    mdRedrawTimeline();
+}
+
+// The recipients the list shows, by its status and search
+function mdListedRecipients() {
+    const query = mdView.query.trim().toLowerCase();
+    return mdRecipients.map((r, index) => ({ r, index }))
+        .filter(({ r }) => (!mdView.status || r.status === mdView.status) && (!query || r.address.toLowerCase().includes(query)));
 }
 
 function moreMessageRecipients() {
@@ -753,20 +769,23 @@ function moreMessageRecipients() {
     mdRedrawRecipients();
 }
 
-// A row shows its recipient's lines in the timeline; a second click shows all
-// again. The picker in the timeline's head sets the same (-1: all).
+// A row shows its recipient's lines in the timeline; a second click shows the
+// list's again. The picker in the timeline's head sets the same; its "All
+// recipients" and the clear button (-1) clear the list's filter as well.
 function pickMessageRecipient(index, toggle = false) {
     mdView.picked = toggle && mdView.picked === index ? -1 : index;
+    if (index < 0) {
+        Object.assign(mdView, { status: '', query: '' });
+        const search = document.querySelector('#md-rcpts input[type="search"]');
+        if (search) search.value = '';
+    }
     mdRedrawRecipients();
     mdRedrawTimeline();
     if (mdView.picked >= 0) mdReveal('md-timeline');
 }
 
 function renderRecipientRows() {
-    const query = mdView.query.trim().toLowerCase();
-    const rows = mdRecipients.map((r, index) => ({ r, index }))
-        .filter(({ r }) => (!mdView.status || r.status === mdView.status) && (!query || r.address.toLowerCase().includes(query)))
-        .sort((a, b) => mdRecipientOrder(a.r, b.r));
+    const rows = mdListedRecipients().sort((a, b) => mdRecipientOrder(a.r, b.r));
     const shown = mdView.all ? rows : rows.slice(0, MD_RCPT_ROWS);
     const chip = (status, word, count) => `<button type="button" class="ui-chip" data-md-focus="status-${escapeHtml(status)}" aria-pressed="${mdView.status === status}" onclick="filterMessageRecipients('${escapeJsArg(status)}')">${escapeHtml(word)} <small>${count}</small></button>`;
     const row = ({ r, index }) => {
