@@ -4,12 +4,14 @@ auth attack) surfaced on the dashboard.
 """
 import logging
 import re
+import uuid
 from collections import Counter
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import List, Optional
 
-from fastapi import APIRouter, Depends, Query, HTTPException
-from sqlalchemy import func
+from fastapi import APIRouter, Body, Depends, Query, HTTPException
+from pydantic import BaseModel, Field
+from sqlalchemy import func, update
 from sqlalchemy.orm import Session
 
 from ..database import get_db
@@ -21,6 +23,9 @@ from ..utils import internal_error, format_datetime_for_api as format_datetime_u
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+# Dismiss all takes at most this many ids (the list hands out as many)
+MAX_ACK_IDS = 10000
 
 
 def _serialize(a: SecurityAlert) -> dict:
@@ -46,12 +51,20 @@ def list_security_alerts(
 ):
     """List security alerts (newest first), plus an unacknowledged count."""
     try:
+        # One snapshot for the rows and the ids: an alert committed between the two
+        # queries is in neither, so Dismiss all never takes one the list did not show
+        db.connection(execution_options={"isolation_level": "REPEATABLE READ"})
         q = db.query(SecurityAlert)
         if acknowledged is not None:
             q = q.filter(SecurityAlert.acknowledged == acknowledged)
         alerts = q.order_by(SecurityAlert.created_at.desc()).limit(limit).all()
 
-        unacked = db.query(SecurityAlert).filter(
+        # Every alert still open as this answer sees it (newest first): Dismiss all
+        # sends these back, so one committed after this answer is not touched
+        open_ids = [row[0] for row in db.query(SecurityAlert.id).filter(
+            SecurityAlert.acknowledged == False  # noqa: E712
+        ).order_by(SecurityAlert.created_at.desc(), SecurityAlert.id.desc()).limit(MAX_ACK_IDS + 1).all()]
+        unacked = len(open_ids) if len(open_ids) <= MAX_ACK_IDS else db.query(SecurityAlert).filter(
             SecurityAlert.acknowledged == False  # noqa: E712
         ).count()
 
@@ -59,22 +72,40 @@ def list_security_alerts(
             "enabled": settings.anomaly_detection_enabled,
             "alerts": [_serialize(a) for a in alerts],
             "unacknowledged_count": unacked,
+            "unacknowledged_ids": open_ids[:MAX_ACK_IDS],
         }
     except Exception as e:
         logger.error(f"Error listing security alerts: {e}")
         raise internal_error(e)
 
 
+def _acknowledge(db: Session, condition) -> dict:
+    """Acknowledge the open alerts matching condition in one statement, all under
+    one new receipt; an alert already acknowledged is left as it is (its own
+    receipt stays), so the receipt names only what this call changed."""
+    receipt = uuid.uuid4()
+    ids = [row[0] for row in db.execute(
+        update(SecurityAlert)
+        .where(condition, SecurityAlert.acknowledged == False)  # noqa: E712
+        .values(acknowledged=True, ack_batch=receipt)
+        .returning(SecurityAlert.id)
+    ).all()]
+    db.commit()
+    return {"status": "success", "acknowledged": len(ids), "ids": sorted(ids), "receipt": str(receipt) if ids else None}
+
+
+class AcknowledgeIds(BaseModel):
+    ids: List[int] = Field(..., min_length=1, max_length=MAX_ACK_IDS)
+
+
 @router.post("/security-alerts/{alert_id}/acknowledge")
 def acknowledge_alert(alert_id: int, db: Session = Depends(get_db)):
-    """Mark a single alert as acknowledged."""
+    """Mark a single alert as acknowledged. The answer's receipt undoes it; an
+    alert that was already acknowledged (by another tab) gives no receipt."""
     try:
-        alert = db.query(SecurityAlert).filter(SecurityAlert.id == alert_id).first()
-        if not alert:
+        if not db.query(SecurityAlert.id).filter(SecurityAlert.id == alert_id).first():
             raise HTTPException(status_code=404, detail="Alert not found")
-        alert.acknowledged = True
-        db.commit()
-        return {"status": "success"}
+        return _acknowledge(db, SecurityAlert.id == alert_id)
     except HTTPException:
         raise
     except Exception as e:
@@ -84,17 +115,35 @@ def acknowledge_alert(alert_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/security-alerts/acknowledge-all")
-def acknowledge_all_alerts(db: Session = Depends(get_db)):
-    """Acknowledge every outstanding alert."""
+def acknowledge_all_alerts(body: Optional[AcknowledgeIds] = Body(None), db: Session = Depends(get_db)):
+    """Acknowledge the open alerts whose ids are given (the list's
+    unacknowledged_ids), or, with no body, every open alert. The answer's
+    receipt undoes exactly what changed."""
     try:
-        updated = db.query(SecurityAlert).filter(
-            SecurityAlert.acknowledged == False  # noqa: E712
-        ).update({"acknowledged": True}, synchronize_session=False)
-        db.commit()
-        return {"status": "success", "acknowledged": updated}
+        condition = SecurityAlert.id.in_(set(body.ids)) if body else SecurityAlert.id.isnot(None)
+        return _acknowledge(db, condition)
     except Exception as e:
         db.rollback()
         logger.error(f"Error acknowledging all alerts: {e}")
+        raise internal_error(e)
+
+
+@router.post("/security-alerts/acknowledgements/{receipt}/undo")
+def undo_acknowledgement(receipt: uuid.UUID, db: Session = Depends(get_db)):
+    """Re-open the alerts a dismissal acknowledged, by its receipt: only those
+    still acknowledged under it (a second undo changes nothing)."""
+    try:
+        ids = [row[0] for row in db.execute(
+            update(SecurityAlert)
+            .where(SecurityAlert.ack_batch == receipt, SecurityAlert.acknowledged == True)  # noqa: E712
+            .values(acknowledged=False, ack_batch=None)
+            .returning(SecurityAlert.id)
+        ).all()]
+        db.commit()
+        return {"status": "success", "restored": len(ids), "ids": sorted(ids)}
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error undoing an acknowledgement: {e}")
         raise internal_error(e)
 
 

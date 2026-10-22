@@ -1995,21 +1995,36 @@ async function loadDashboard() {
     }
 }
 
+// The alerts Needs attention shows (by id, for the words of an Undo), and every
+// open alert the last list had: Dismiss all changes those and no alert that came after
+const dashboardAlerts = new Map();
+let dashboardOpenAlertIds = [];
+
 async function loadDashboardSecurityAlerts() {
     const container = document.getElementById('dashboard-security-alerts');
     if (!container) return;
     const dismissAll = document.getElementById('dashboard-dismiss-all');
     try {
         const response = await authenticatedFetch('/api/security-alerts?acknowledged=false&limit=20');
-        if (!response.ok) { container.classList.add('hidden'); updateAttentionState(); return; }
+        if (!response.ok) { container.classList.add('hidden'); updateAttentionState(); return false; }
         const data = await response.json();
         const alerts = data.alerts || [];
+        dashboardAlerts.clear();
+        alerts.forEach(a => dashboardAlerts.set(Number(a.id), a));
+        dashboardOpenAlertIds = data.unacknowledged_ids || alerts.map(a => Number(a.id));
+        if (dismissAll) {
+            const count = dashboardOpenAlertIds.length, n = count.toLocaleString();
+            // "Dismiss all 25 alerts"; one alone is "Dismiss 1 alert" (a narrow panel drops the last word)
+            const words = count === 1 ? ['Dismiss 1', ' alert'] : [`Dismiss all ${n}`, ' alerts'];
+            dismissAll.innerHTML = `${words[0]}<span class="ui-attn-wide">${words[1]}</span>`;
+            dismissAll.setAttribute('aria-label', words.join(''));
+        }
         if (alerts.length === 0) {
             container.classList.add('hidden');
             uiReplaceKeepingFocus(container, '');
             if (dismissAll) dismissAll.classList.add('is-off');
             updateAttentionState();
-            return;
+            return true;
         }
 
         uiReplaceKeepingFocus(container, alerts.map(a => {
@@ -2036,8 +2051,11 @@ async function loadDashboardSecurityAlerts() {
     } catch (e) {
         console.warn('Failed to load security alerts:', e);
         container.classList.add('hidden');
+        updateAttentionState();
+        return false;
     }
     updateAttentionState();
+    return true;
 }
 
 // A Needs attention row whose action opens a popup opens it from anywhere on
@@ -2642,22 +2660,76 @@ function openMailFlowHourMessages() {
     else openMessagesRange({ start: d.from, endInclusive: d.to_inclusive });
 }
 
+// Dismissing acts at once; the answer's receipt lets Undo re-open exactly what it
+// changed, for 10 seconds (longer while the pointer or the focus is on the toast)
 async function acknowledgeSecurityAlert(alertId) {
+    const alert = dashboardAlerts.get(Number(alertId)) || (typeof alertActivity !== 'undefined' && alertActivity && Number(alertActivity.alert.id) === Number(alertId) ? alertActivity.alert : null);
+    // Its title, with the mailbox or username when the title does not already name it
+    const name = !alert ? 'the alert' : alert.subject && !String(alert.title).includes(alert.subject) ? `${alert.title}: ${alert.subject}` : alert.title;
     try {
-        await authenticatedFetch(`/api/security-alerts/${alertId}/acknowledge`, { method: 'POST' });
+        const res = await authenticatedFetch(`/api/security-alerts/${alertId}/acknowledge`, { method: 'POST' });
+        if (!res.ok) throw new Error(res.status === 404 ? 'it is gone' : `the server answered ${res.status}`);
+        const done = await res.json();
         loadDashboardSecurityAlerts();
+        if (!done.receipt) { showToast('Already dismissed', 'info'); return; }
+        offerAlertUndo(done.receipt, 'Alert dismissed', `Undo dismissing ${name}`);
     } catch (e) {
-        showToast('Failed to dismiss alert', 'error');
+        showToast(`Could not dismiss the alert: ${e.message || 'no answer'}. Try again.`, 'error');
     }
 }
 
 async function acknowledgeAllSecurityAlerts() {
+    const ids = dashboardOpenAlertIds.slice();
+    if (!ids.length) return;
     try {
-        await authenticatedFetch('/api/security-alerts/acknowledge-all', { method: 'POST' });
+        const res = await authenticatedFetch('/api/security-alerts/acknowledge-all', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids }),
+        });
+        if (!res.ok) throw new Error(`the server answered ${res.status}`);
+        const done = await res.json();
         loadDashboardSecurityAlerts();
-        showToast('All security alerts dismissed', 'success');
+        if (!done.receipt) { showToast('Already dismissed', 'info'); return; }
+        const words = `${uiCountLabel(done.acknowledged, 'alert', 'alerts')} dismissed`;
+        offerAlertUndo(done.receipt, words, `Undo dismissing ${uiCountLabel(done.acknowledged, 'alert', 'alerts')}`);
     } catch (e) {
-        showToast('Failed to dismiss alerts', 'error');
+        showToast(`Could not dismiss the alerts: ${e.message || 'no answer'}. Try again.`, 'error');
+    }
+}
+
+function offerAlertUndo(receipt, message, undoName) {
+    showToast(message, 'success', { duration: 10000, action: { label: 'Undo', ariaLabel: undoName, onAction: () => undoAlertDismissal(receipt, undoName) } });
+}
+
+function offerAlertsRefresh(message) {
+    showToast(message, 'warning', { duration: Infinity, action: { label: 'Refresh', ariaLabel: 'Refresh Needs attention', onAction: async () => {
+        // The next message takes the keyboard over from this one, whether it worked or not
+        if (!(await loadDashboardSecurityAlerts())) offerAlertsRefresh('Needs attention could not be refreshed. Try again.');
+        else showToast('Needs attention is up to date', 'success');
+    } } });
+}
+
+// Re-open what a dismissal changed. A failure says so and offers Retry until closed.
+async function undoAlertDismissal(receipt, undoName) {
+    try {
+        const res = await authenticatedFetch(`/api/security-alerts/acknowledgements/${encodeURIComponent(receipt)}/undo`, { method: 'POST' });
+        if (!res.ok) throw new Error(`the server answered ${res.status}`);
+        const done = await res.json();
+        const shown = await loadDashboardSecurityAlerts();
+        const back = done.restored ? `${uiCountLabel(done.restored, 'alert', 'alerts')} back` : '';
+        if (!shown) {
+            offerAlertsRefresh(back ? `${back}, but Needs attention could not be refreshed.` : 'Needs attention could not be refreshed.');
+            return;
+        }
+        // On the Dashboard the keyboard goes to the first alert back (its Dismiss), else to
+        // Needs attention; on another page it stays with the message
+        if (typeof currentTab === 'undefined' || currentTab === 'dashboard') {
+            const row = done.ids && done.ids.map(id => document.querySelector(`#dashboard-security-alerts [data-key="alert-${Number(id)}"]`)).find(Boolean);
+            const target = row ? [...row.querySelectorAll('button')].find(b => b.textContent.trim() === 'Dismiss') : document.getElementById('dashboard-attention-scroll');
+            if (target) target.focus({ preventScroll: false });
+        }
+        showToast(back ? `${back} in Needs attention` : 'Nothing to undo: dismissed again since', back ? 'success' : 'info');
+    } catch (e) {
+        showToast(`Could not undo: ${e.message || 'no answer'}.`, 'error', { duration: Infinity, action: { label: 'Retry', ariaLabel: `Retry: ${undoName}`, onAction: () => undoAlertDismissal(receipt, undoName) } });
     }
 }
 

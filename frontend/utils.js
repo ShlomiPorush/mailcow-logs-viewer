@@ -647,9 +647,14 @@ function copyableText(text, extraClasses) {
     return `<span class="copyable${cls}" onclick="copyToClipboard('${safeText}', event)" title="Click to copy"><bdi>${escaped}</bdi><svg class="copy-icon w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg></span>`;
 }
 
-function showToast(message, type = 'info') {
+// options.action: { label, ariaLabel, onAction } a button that runs onAction and
+// closes the toast (Undo, Retry); options.duration: how long it stays (ms; Infinity
+// keeps it until closed). One toast at a time: a new one replaces the last, and
+// the keyboard's place moves with it if it was in the one replaced.
+function showToast(message, type = 'info', options = {}) {
     // Remove existing toast if any
     const existingToast = document.getElementById('toast-notification');
+    const focusWasInIt = !!existingToast && existingToast.contains(document.activeElement);
     if (existingToast) {
         existingToast.remove();
     }
@@ -669,24 +674,50 @@ function showToast(message, type = 'info') {
     toast.innerHTML = `
         <span class="ui-toast-icon" aria-hidden="true">${icons[kind]}</span>
         <p>${escapeHtml(message)}</p>
+        ${options.action ? `<button type="button" class="ui-btn ui-btn-sm ui-toast-action"${options.action.ariaLabel ? ` aria-label="${escapeHtml(options.action.ariaLabel)}"` : ''}>${escapeHtml(options.action.label)}</button>` : ''}
         <button type="button" onclick="this.parentElement.remove()" class="ui-icon-btn" title="Close" aria-label="Close">×</button>
     `;
+    // An action still running holds the toast like the pointer or the keyboard does
+    let busy = false;
+    // Set below where the toast has a timer (not for one that stays until closed)
+    let holdNow = () => {};
+    if (options.action) {
+        const button = toast.querySelector('.ui-toast-action');
+        button.addEventListener('click', () => {
+            if (busy) return;
+            const result = options.action.onAction();
+            if (!result || typeof result.then !== 'function') { toast.remove(); return; }
+            // Until it is done the toast stays, with the keyboard in it: what comes next
+            // (a message, Retry) takes the keyboard over from here
+            busy = true;
+            holdNow();
+            button.setAttribute('aria-disabled', 'true');
+            Promise.resolve(result).catch(() => {}).finally(() => { if (toast.isConnected) toast.remove(); });
+        });
+    }
 
     document.body.appendChild(toast);
+    if (options.duration === Infinity) {
+        if (focusWasInIt) toast.querySelector('button').focus({ preventScroll: true });
+        return;
+    }
 
-    // It goes after 4 seconds, but waits while the pointer or the focus is on it,
-    // and then gives the rest of its time (at least 1.5 seconds) to read it
-    let left = 4000;
+    // It goes after 4 seconds (or its own duration), but waits while the pointer or the
+    // focus is on it, and then gives the rest of its time (at least 1.5 seconds) to read it
+    let left = options.duration || 4000;
     let started = Date.now();
     let timer = null;
-    const hold = () => toast.matches(':hover') || toast.contains(document.activeElement);
+    const hold = () => busy || toast.matches(':hover') || toast.contains(document.activeElement);
     let fading = false;
+    let removing = null;
     const fade = () => {
         if (!toast.parentElement) return;
+        // An action still running: the toast waits for it (its end removes the toast)
+        if (busy) { timer = null; return; }
         fading = true;
         toast.style.opacity = '0';
         toast.style.transition = 'opacity 0.3s';
-        setTimeout(() => toast.remove(), 300);
+        removing = setTimeout(() => toast.remove(), 300);
     };
     const run = () => {
         clearTimeout(timer);
@@ -694,7 +725,17 @@ function showToast(message, type = 'info') {
         timer = setTimeout(fade, left);
     };
     const pause = () => {
-        if (timer === null || fading) return;
+        // Caught while it fades (the pointer, the keyboard, a click on its action): it comes back
+        if (fading) {
+            clearTimeout(removing);
+            fading = false;
+            timer = null;
+            left = 1500;
+            toast.style.opacity = '';
+            toast.style.transition = '';
+            return;
+        }
+        if (timer === null) return;
         clearTimeout(timer);
         timer = null;
         left = Math.max(1500, left - (Date.now() - started));
@@ -702,11 +743,13 @@ function showToast(message, type = 'info') {
         toast.style.transition = '';
     };
     const resume = () => { if (timer === null && !hold()) run(); };
+    holdNow = pause;
     toast.addEventListener('mouseenter', pause);
     toast.addEventListener('focusin', pause);
     toast.addEventListener('mouseleave', () => setTimeout(resume, 0));
     toast.addEventListener('focusout', () => setTimeout(resume, 0));
-    run();
+    if (focusWasInIt) toast.querySelector('button').focus({ preventScroll: true });
+    if (!hold()) run();
 }
 
 // =============================================================================

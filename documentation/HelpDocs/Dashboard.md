@@ -21,7 +21,7 @@ The Dashboard shows up to 20 undismissed alerts, newest first:
 - **Authentication failure burst** means many failed logins for one username in a short time.
 - **SMTP disabled (abuse protection)** means outgoing spam protection stopped the mailbox from sending. See [Outgoing spam](Abuse_Protection.md).
 
-Dismissal hides an alert. A later incident can raise another after the cooldown. Volume spike and login burst alerts also go by email and to destinations that receive security alerts; see [Notifications](../Notifications.md).
+Dismissal hides an alert; **Undo** in the message that follows brings it back for 10 seconds. **Dismiss all** dismisses every alert that was open when the list was loaded, not one that arrives later. A later incident can raise another after the cooldown. Volume spike and login burst alerts also go by email and to destinations that receive security alerts; see [Notifications](../Notifications.md).
 
 ### Show activity
 
