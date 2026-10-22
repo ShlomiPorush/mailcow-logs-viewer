@@ -27,6 +27,8 @@ The list shows up to 8 items, most urgent first, and the remaining count:
 ![A domain on DMARC & TLS](../../images/docs/dmarc-domain-light.webp#gh-light-mode-only)
 ![A domain on DMARC & TLS](../../images/docs/dmarc-domain-dark.webp#gh-dark-mode-only)
 
+**Pass rate per day** has a square for each day over the reports kept (see [How long reports are kept](#how-long-reports-are-kept); a year when that is set to 365 days). Its color follows the day's DMARC pass rate and grows stronger with more mail; an outline is a day without reports, and a hatched square is a day before the retention period, whose reports may already be gone. Select a day to open it.
+
 In **Mail flow**, each box's color follows its pass rate and each line is as wide as the volume it carries. It shows up to 8 senders and 8 receivers. On a phone it is left out, because the Senders table shows the same.
 
 **Senders** group by network organization, failing groups first, then by volume. MaxMind supplies network and country. Unknown networks stay as individual IPs; without MaxMind every IP stands alone. See [Settings](Settings.md).

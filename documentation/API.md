@@ -1610,6 +1610,14 @@ The list is cached for 5 minutes. Uploads, IMAP imports, deletions, retention cl
 
 ---
 
+### GET /api/dmarc/domains/{domain}/calendar
+
+| Parameter | Type | Default | Constraints and purpose |
+| --- | --- | --- | --- |
+| `days` | integer | the DMARC retention | Whole days back from today, 1 to 400 |
+
+Messages and DMARC passes per day of the app's time zone, for the domain's calendar: `domain`, `from` and `to` (the first day and today), `retention_days`, `maybe_incomplete_before` (reports are kept by import date, so a day before it may miss some) and `days`: `[{date, total, pass, fail}]` for the days with reports. A day has the same bounds as its own view (`/reports/{date}/details`); a pass is SPF or DKIM passing, as in the overview.
+
 ### GET /api/dmarc/domains/{domain}/overview
 
 | Parameter | Type | Default | Constraints and purpose |
