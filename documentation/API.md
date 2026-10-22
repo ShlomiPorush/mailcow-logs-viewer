@@ -1154,7 +1154,7 @@ Total and active counts from mailcow: `{ "domains": {"total": 5, "active": 5}, "
 
 ### GET /status/summary
 
-Containers, storage and mailcow counts in one call, for the dashboard: `containers` (the summary of `GET /status/containers`), `storage` (`used_percent`, `used`, `total`, and `known`: false when mailcow did not tell it, so the zeros are not a reading) and `system` (`domains`, `mailboxes`, `aliases` totals). A part that cannot be read falls back to zeros.
+Containers, storage and mailcow counts in one call, for the dashboard: `containers` (the summary of `GET /status/containers`), `containers_known` (false when mailcow did not answer, or nothing is running, so the counts come from containers seen before and are not a reading), `storage` (`used_percent`, `used`, `total`, and `known`: false when mailcow did not tell it, so the zeros are not a reading) and `system` (`domains`, `mailboxes`, `aliases` totals). A part that cannot be read falls back to zeros.
 
 ---
 
@@ -2293,6 +2293,7 @@ Alerts, newest first.
 {
   "enabled": true,
   "unacknowledged_count": 2,
+  "unacknowledged_critical": 1,
   "unacknowledged_ids": [12, 9],
   "alerts": [
     {"id": 12, "alert_type": "volume_spike", "severity": "critical", "subject": "user@example.com", "title": "Outbound volume spike: user@example.com", "detail": "Mailbox user@example.com sent 240 messages in the last 15 minutes...", "metric_value": 240.0, "baseline_value": 4.2, "acknowledged": false, "created_at": "2026-07-14T09:12:00Z"}
@@ -2300,7 +2301,7 @@ Alerts, newest first.
 }
 ```
 
-`enabled` reflects `ANOMALY_DETECTION_ENABLED` only; alerts are still listed and can be acknowledged while it is off. `unacknowledged_count` counts every unacknowledged alert, whatever the filter. `unacknowledged_ids` lists them, newest first, up to 10,000: the ids to send to acknowledge-all. `alert_type` is `volume_spike`, `auth_failure_burst` or `smtp_abuse_block`; `severity` is `warning` or `critical`.
+`enabled` reflects `ANOMALY_DETECTION_ENABLED` only; alerts are still listed and can be acknowledged while it is off. `unacknowledged_count` counts every unacknowledged alert, whatever the filter; `unacknowledged_critical` counts those with severity `critical`, also past `limit`. `unacknowledged_ids` lists them, newest first, up to 10,000: the ids to send to acknowledge-all. `alert_type` is `volume_spike`, `auth_failure_burst` or `smtp_abuse_block`; `severity` is `warning` or `critical`.
 
 ### GET /api/security-alerts/{alert_id}/activity
 

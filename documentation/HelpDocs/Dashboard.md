@@ -5,6 +5,8 @@
 
 ## Needs attention
 
+The bell in the header opens the same list from other pages. On a wide screen the Messages page has no header bar, so no bell.
+
 Server checks cover an unreachable mailcow API, blocklisted sending addresses, stopped containers, DMARC recommendations and available app or mailcow updates. An unreachable API means logs and server data may be out of date.
 
 DMARC attention means a stricter policy is recommended, the pass rate is low or new failing senders were found.
