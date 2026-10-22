@@ -1317,24 +1317,28 @@ function messagesQueryParams(cursor = null) {
     return params;
 }
 
-// The Messages list's order, by the time each message was first seen: its Sort
-// button beside the search offers newest first (as it arrives) or oldest first.
+// The Messages list's order, by the time each message was first seen: newest
+// first (as it arrives) or oldest first. Its Sort button beside the search turns
+// the order around, and its arrow shows which one is in use.
 // An order is not a filter: clearing the filters keeps it.
 let messagesOrder = 'desc';
+const MESSAGES_ORDER_ICONS = {
+    desc: '<svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4.5h14M3 9h10M3 13.5h7m7.5-4.5v11m0 0l-3.5-3.5m3.5 3.5l3.5-3.5"></path></svg>',
+    asc: '<svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4.5h14M3 9h10M3 13.5h7m7.5 6.5V9m0 0l-3.5 3.5M17.5 9l3.5 3.5"></path></svg>',
+};
 function renderMessagesSort() {
     const slot = document.getElementById('messages-sort');
     if (!slot) return;
-    if (!slot.querySelector('.ui-picker')) {
-        const choice = (value, text) => `<label class="ui-sort-opt"><input type="radio" name="messages-order" value="${value}" onchange="setMessagesOrder(this.value)"><span>${text}</span></label>`;
-        slot.innerHTML = uiPicker({ id: 'messages-sort-menu', label: 'Sort', icon: true, panelLabel: 'Sort messages', panelClass: 'ui-sort-panel',
-            panel: `<fieldset class="ui-sort-group"><legend>Time</legend>${choice('desc', 'Newest first')}${choice('asc', 'Oldest first')}</fieldset>` });
+    let button = slot.querySelector('button');
+    if (!button) {
+        slot.innerHTML = `<button type="button" class="ui-icon-btn ui-sort-btn-icon" onclick="setMessagesOrder(messagesOrder === 'asc' ? 'desc' : 'asc')"></button>`;
+        button = slot.querySelector('button');
     }
-    const said = `Sort: ${messagesOrder === 'asc' ? 'Oldest first' : 'Newest first'}`;
-    const button = slot.querySelector('.ui-picker-btn');
-    button.setAttribute('aria-label', said);
-    button.title = said;
-    button.classList.toggle('is-set', messagesOrder === 'asc');
-    slot.querySelectorAll('input[name="messages-order"]').forEach(r => { r.checked = r.value === messagesOrder; });
+    const asc = messagesOrder === 'asc';
+    button.innerHTML = MESSAGES_ORDER_ICONS[asc ? 'asc' : 'desc'];
+    button.setAttribute('aria-label', `Sort: ${asc ? 'Oldest first' : 'Newest first'}`);
+    button.title = asc ? 'Oldest first. Click for newest first' : 'Newest first. Click for oldest first';
+    button.classList.toggle('is-set', asc);
 }
 // Shown with the page, before its list arrives
 document.addEventListener('DOMContentLoaded', renderMessagesSort);
