@@ -2087,6 +2087,7 @@ function uiRedrawKeepingFocus(container, draw) {
 //     limits(): { from, to, min }; span(): { from, to } shown; snap(t): t on an edge
 //     step(t, dir, big): the next edge from t (dir -1 or 1); label(t): the words for t
 //     change(span): after a drag ends, or a moment after the last key
+//     idle(): optional, when a drag or keys end with no new span (or a drag is called off)
 // The caller draws the bars inside box; this adds the window and its edges.
 // =============================================================================
 
@@ -2105,14 +2106,16 @@ function uiOverviewEdge(span, edge, t, limits, snap = t => t) {
     const at = x => (x >= limits.to - 1 ? limits.to : x <= limits.from + 1 ? limits.from : Math.max(limits.from, Math.min(limits.to, snap(x))));
     if (edge === 'start') {
         const most = span.to - limits.min;
-        let from = at(Math.max(limits.from, Math.min(t, most)));
-        if (from > most) from = Math.max(limits.from, most);
-        return { from, to: span.to };
+        let x = Math.max(limits.from, Math.min(t, most));
+        let from = at(x);
+        for (let i = 0; i < 8 && from > most && x > limits.from; i++) { x -= from - most + 60000; from = at(Math.max(limits.from, x)); }
+        return { from: Math.min(from, Math.max(limits.from, most)), to: span.to };
     }
     const least = span.from + limits.min;
-    let to = at(Math.min(limits.to, Math.max(t, least)));
-    if (to < least) to = Math.min(limits.to, least);
-    return { from: span.from, to };
+    let x = Math.min(limits.to, Math.max(t, least));
+    let to = at(x);
+    for (let i = 0; i < 8 && to < least && x < limits.to; i++) { x += least - to + 60000; to = at(Math.min(limits.to, x)); }
+    return { from: span.from, to: Math.max(to, Math.min(limits.to, least)) };
 }
 
 // The span centered at t, same length, inside the limits
@@ -2121,11 +2124,23 @@ function uiOverviewCenter(span, t, limits, snap = t => t) {
     return uiOverviewMove(span, t - len / 2 - span.from, limits, snap);
 }
 
-// A whole hour of the app's zone nearest to t (a zone off by half an hour has its hours there too)
+// The nearest edge of an hour of the app's zone to t, found as the server finds its
+// hour bars: walking UTC in quarter hours to where the zone's hour (or its offset,
+// on the night the clocks go back) changes. A zone off by half an hour, or whose
+// clocks move by half an hour, has its edges where they really are.
 function uiNearestLocalHour(t) {
-    const p = zonedParts(t);
-    const floor = t - (p.minute * 60000 + p.second * 1000 + (t % 1000 + 1000) % 1000);
-    return t - floor < 1800000 ? floor : floor + 3600000;
+    const Q = 900000;
+    const key = x => {
+        const p = zonedParts(x);
+        const offset = Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second) - Math.floor(x / 1000) * 1000;
+        return `${p.year}-${p.month}-${p.day}-${p.hour}/${offset}`;
+    };
+    const k = key(t);
+    let start = Math.floor(t / Q) * Q;
+    for (let i = 0; i < 12 && key(start - Q) === k; i++) start -= Q;
+    let next = start + Q;
+    for (let i = 0; i < 12 && key(next) === k; i++) next += Q;
+    return t - start <= next - t ? start : next;
 }
 
 function uiTimeOverview(box, opts) {
@@ -2176,7 +2191,7 @@ function uiTimeOverview(box, opts) {
         const before = opts.span();
         shown = null;
         if (span && (span.from !== before.from || span.to !== before.to)) opts.change(span);
-        else draw(opts.span());
+        else { draw(opts.span()); if (opts.idle) opts.idle(); }
     };
     draw(opts.span());
 
@@ -2216,6 +2231,7 @@ function uiTimeOverview(box, opts) {
         drag = null;
         shown = null;
         draw(opts.span());
+        if (opts.idle) opts.idle();
     };
     const onKey = event => {
         const el = event.target.closest && event.target.closest('.ui-ov-thumb');

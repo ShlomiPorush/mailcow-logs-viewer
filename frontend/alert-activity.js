@@ -205,17 +205,30 @@ function alertActivitySnap(data) {
     };
 }
 
+// A span as the chart shows it: its columns start on the first quarter at or after its start
+function alertActivityShown(data, span) {
+    const l = alertActivityLimits(data), quarter = data.bucket_minutes * 60000;
+    return { from: Math.min(span.to, l.from + Math.ceil((span.from - l.from) / quarter) * quarter), to: span.to };
+}
+
 // Show a span: snapped to the quarters (at least the shortest span); the pressed range's own span is no zoom
 function alertActivityShow(data, next) {
     const l = alertActivityLimits(data), snap = alertActivitySnap(data);
     let from = snap(next.from), to = snap(next.to);
     if (to - from < l.min) {
         to = Math.min(l.to, snap(from + l.min));
-        if (to - from < l.min) from = Math.max(l.from, to - l.min);
+        if (to - from < l.min) {
+            // Back from the end to a quarter at least the shortest span before it
+            const quarter = data.bucket_minutes * 60000;
+            from = Math.max(l.from, l.from + Math.floor((to - l.min - l.from) / quarter) * quarter);
+        }
     }
-    // The range is counted back from the data's end, off the quarters: compared as it snaps
-    const range = alertActivityRangeSpan(data);
-    alertActivityZoom = range && Math.abs(snap(range.from) - from) <= 1 && Math.abs(snap(range.to) - to) <= 1 ? null : { from, to };
+    // The range is counted back from the data's end, off the quarters: compared as the chart shows it
+    // (asked as it is, its start snaps to the nearest quarter; as the strip shows it, to the next one)
+    const raw = alertActivityRangeSpan(data);
+    const range = raw && alertActivityShown(data, raw);
+    const isRange = !!raw && Math.abs(range.to - to) <= 1 && (Math.abs(range.from - from) <= 1 || Math.abs(snap(raw.from) - from) <= 1);
+    alertActivityZoom = isRange ? null : { from, to };
     alertActivityPick = null;
     renderAlertActivity();
 }
@@ -241,7 +254,8 @@ function alertActivityOverview(data, span) {
     const fmt = t => `${formatDay(t)}, ${formatInZone(t, { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }, 'en-US')}`;
     alertActivityOverviewer = uiTimeOverview(strip, {
         limits: () => l,
-        span: () => span,
+        // Its edges where the chart's columns are
+        span: () => alertActivityShown(data, span),
         snap: alertActivitySnap(data),
         // One step is one bar of the strip, a big step a day
         step: (t, dir, big) => (big ? t + dir * 86400000

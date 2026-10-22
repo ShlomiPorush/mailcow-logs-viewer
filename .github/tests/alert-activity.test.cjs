@@ -160,6 +160,14 @@ test('a zoom snaps to the quarters, the end of the data is an edge, and the rang
     h.context.__span = { from: last - 8 * Q, to: last + 6 * 60000 };
     h.run('alertActivityShow(alertActivity, __span)');
     assert.equal(h.run('alertActivityZoom.to'), last + 7 * 60000);
+    // The shortest span at the end of the data starts on a quarter: a whole hour of columns, not 55 minutes
+    const end = last + 7 * 60000;
+    h.context.__span = { from: end - 20 * 60000, to: end };
+    h.run('alertActivityShow(alertActivity, __span)');
+    const z = h.run('alertActivityZoom');
+    assert.equal(z.to, end);
+    assert.equal((z.from - first) % Q, 0, 'on a quarter');
+    assert.ok(z.to - z.from >= 3600000, 'at least an hour');
     // The pressed range's own span: no zoom
     h.run('__span = alertActivityRangeSpan(alertActivity); alertActivityShow(alertActivity, __span)');
     assert.equal(h.run('alertActivityZoom'), null);

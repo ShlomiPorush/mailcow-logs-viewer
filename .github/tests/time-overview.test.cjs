@@ -133,3 +133,21 @@ test('a drag of the window moves it; a press beside it centers it there; a mostl
     box.fire('pointerup', { pointerId: 3, clientX: 193, clientY: 40 });
     assert.equal(changes.length, 2, 'the page scrolled, nothing moved');
 });
+
+test('an edge at its limit stays on the grid: back to the edge before, never past the shortest span', () => {
+    const c = load();
+    // The data ends at 10:10, inside a quarter; the start pushed as late as it goes
+    const limits = { from: 0, to: 10 * H + 10 * 60000, min: H };
+    const quarter = t => Math.round(t / Q) * Q;
+    const span = { from: 8 * H, to: limits.to };
+    assert.deepEqual(plain(c.uiOverviewEdge(span, 'start', 99 * H, limits, quarter)), { from: 9 * H, to: limits.to }, '09:00, not 09:10 off the grid nor 09:15 past the shortest span');
+});
+
+test('the hour\'s edge where the clocks move by half an hour (Lord Howe, 4 October 2026)', () => {
+    // 02:00 local (+10:30) becomes 02:30 (+11:00) at 15:30 UTC on 3 October: that hour runs 02:30 to 03:00
+    const lordHowe = load('Australia/Lord_Howe');
+    assert.equal(lordHowe.uiNearestLocalHour(Date.parse('2026-10-03T15:35:00Z')), Date.parse('2026-10-03T15:30:00Z'));
+    assert.equal(lordHowe.uiNearestLocalHour(Date.parse('2026-10-03T15:50:00Z')), Date.parse('2026-10-03T16:00:00Z'));
+    // Kathmandu is UTC+5:45: its hours start at :15 UTC
+    assert.equal(load('Asia/Kathmandu').uiNearestLocalHour(Date.parse('2026-10-21T10:20:00Z')), Date.parse('2026-10-21T10:15:00Z'));
+});

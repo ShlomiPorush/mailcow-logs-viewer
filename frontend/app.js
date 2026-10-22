@@ -2210,6 +2210,8 @@ const dashFlow = {
     view: 0,         // the view revision: up one at every change of period or zoom
     periodGen: 0, periodControl: null, zoomGen: 0, zoomControl: null,
     loadedAt: 0, zoomer: null, overview: null, previewing: false,
+    stale: false,    // an answer was set aside under a gesture: ask again when it ends
+    dataView: -1,    // the view revision the chart shows
     failed: false,   // the last load failed: the next refresh tries again, zoomed or not
 };
 
@@ -2281,6 +2283,7 @@ function dashFlowZoom(span) {
     dashFlow.zoom = !span || (l && span.from <= l.from + 1 && span.to >= l.to - 1) ? null : { from: span.from, to: span.to };
     dashFlow.pick = null;
     dashFlow.view++;
+    dashFlow.stale = false;
     // Back to the whole period: its answer is here already
     if (!dashFlow.zoom && dashFlow.full) {
         dashFlow.zoomGen++;
@@ -2298,6 +2301,11 @@ function mailFlowBusy() {
     return dashFlow.previewing || !!(dashFlow.overview && dashFlow.overview.busy());
 }
 
+// A gesture or a strip drag ended with no new span: what was set aside under it is asked for now
+function mailFlowSettle() {
+    if (dashFlow.stale && !mailFlowBusy()) loadMailFlowChart();
+}
+
 function mailFlowGet(query, control) {
     return authenticatedFetch(`/api/stats/flow?${query}`, control ? { signal: control.signal } : {}).then(res => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -2310,8 +2318,9 @@ function mailFlowFailed() {
     if (!chart) return;
     dashFlow.failed = true;
     const failed = '<p class="ui-empty ui-text-fail ui-flow-failed">Could not load the mail flow. It tries again on the next refresh.</p>';
-    // In the chart's own frame, so the panel keeps its size
+    // In the chart's own frame, so the panel keeps its size; no gesture outlives the chart it was on
     if (dashFlow.zoomer) { dashFlow.zoomer.destroy(); dashFlow.zoomer = null; }
+    dashFlow.previewing = false;
     const view = chart.querySelector('.ui-flow-view');
     if (view) view.innerHTML = failed;
     else chart.innerHTML = mailFlowFrame(failed);
@@ -2322,6 +2331,7 @@ function loadMailFlowChart() {
     if (!chart) return;
     // A gesture is on: it asks again when it ends
     if (mailFlowBusy()) return;
+    dashFlow.stale = false;
     // Before the first answer: the chart's whole frame, so the panel has its size from the start
     if (!chart.querySelector('.ui-flow-view')) chart.innerHTML = mailFlowFrame('<p class="ui-empty ui-flow-failed" role="status">Loading...</p>');
     if (dashFlow.zoom && dashFlow.full) loadMailFlowZoom();
@@ -2345,8 +2355,8 @@ async function loadMailFlowPeriod() {
         dashFlow.loadedAt = Date.now();
         dashFlow.limits = { from: Date.parse(data.from), to: Date.parse(data.to), min: 3600000 };
         if (!dashFlow.zoom) {
-            // A gesture is on: the answer waits in full; the gesture's end draws
-            if (mailFlowBusy()) return;
+            // A gesture is on: the answer waits in full; the gesture's end draws (or asks again)
+            if (mailFlowBusy()) { dashFlow.stale = true; return; }
             dashFlow.data = data;
             dashFlow.failed = false;
             renderMailFlowChart();
@@ -2354,10 +2364,15 @@ async function loadMailFlowPeriod() {
         }
         const l = dashFlow.limits, z = dashFlow.zoom;
         const from = Math.max(z.from, l.from), to = Math.min(z.to, l.to);
+        if (mailFlowBusy()) { dashFlow.stale = true; return; }
         if (from !== z.from || to !== z.to) { dashFlowZoom(to - from >= l.min ? { from, to } : null); return; }
-        if (!mailFlowBusy()) renderMailFlowOverview(true);
+        // A zoom made before this period's answer came (a period switch, then Zoom in): its own answer now
+        if (dashFlow.dataView !== dashFlow.view) { loadMailFlowZoom(); return; }
+        renderMailFlowOverview(true);
     } catch (error) {
         if (gen !== dashFlow.periodGen || (error && error.name === 'AbortError')) return;
+        // Under a gesture nothing is drawn: the gesture's end asks again
+        if (mailFlowBusy()) { dashFlow.failed = true; dashFlow.stale = true; return; }
         // Zoomed, the strip keeps its last picture; the next refresh tries again
         if (!dashFlow.zoom) mailFlowFailed();
     }
@@ -2374,7 +2389,8 @@ async function loadMailFlowZoom() {
     const iso = t => new Date(t).toISOString();
     try {
         const data = await mailFlowGet(`from=${iso(z.from)}&to=${iso(z.to)}&bucket=${mailFlowBucketFor(z.to - z.from)}`, control);
-        if (gen !== dashFlow.zoomGen || view !== dashFlow.view || mailFlowBusy()) return;
+        if (gen !== dashFlow.zoomGen || view !== dashFlow.view) return;
+        if (mailFlowBusy()) { dashFlow.stale = true; return; }
         dashFlow.data = data;
         dashFlow.failed = false;
         dashFlow.zoom = { from: Date.parse(data.from), to: Date.parse(data.to) };
@@ -2385,6 +2401,7 @@ async function loadMailFlowZoom() {
         renderMailFlowChart();
     } catch (error) {
         if (gen !== dashFlow.zoomGen || view !== dashFlow.view || (error && error.name === 'AbortError')) return;
+        if (mailFlowBusy()) { dashFlow.failed = true; dashFlow.stale = true; return; }
         mailFlowFailed();
     }
 }
@@ -2425,6 +2442,7 @@ function renderMailFlowOverview(alone = false) {
                 : dir > 0 ? (edges.find(e => e > t + 1) ?? l.to) : ([...edges].reverse().find(e => e < t - 1) ?? l.from)),
             label: t => `${formatDay(t)}, ${mailFlowHour(t)}`,
             change: span => dashFlowZoom(span),
+            idle: mailFlowSettle,
         });
     };
     if (alone) uiRedrawKeepingFocus(strip, draw);
@@ -2473,6 +2491,7 @@ function renderMailFlowChart() {
         return (n <= 10 || (i % 5 === 0 && i < n - 5)) ? `<span class="is-major">${escapeHtml(formatDayMonth(b.s))}</span>` : '<span></span>';
     };
     const zoomed = !!dashFlow.zoom;
+    dashFlow.dataView = dashFlow.view;
     const shown = { from: Date.parse(d.from), to: Date.parse(d.to) };
     // The part older than the logs kept (retention): shaded, so empty bars there do not read as quiet
     const kept = d.kept_from ? Date.parse(d.kept_from) : null;
