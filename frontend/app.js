@@ -3093,7 +3093,7 @@ async function showQuarantineDetails(itemId) {
     modal.className = 'ui-dialog-backdrop';
     modal.setAttribute('role', 'dialog');
     modal.setAttribute('aria-label', 'Quarantine Item Details');
-    modal.onclick = event => { if (event.target === modal) closeQuarantineDetails(); };
+    modal.onclick = event => { if (uiBackdropClick(event)) closeQuarantineDetails(); };
     modal.innerHTML = `
         <div class="ui-dialog ui-dialog-fit">
             <div class="ui-dialog-head">
@@ -3674,7 +3674,7 @@ async function testQuarantineRules() {
         document.body.insertAdjacentHTML('beforeend', html);
         // Results only, nothing typed: a click outside closes it
         const testModal = document.getElementById('qrule-test-modal');
-        testModal.addEventListener('click', e => { if (e.target === testModal) testModal.remove(); });
+        testModal.addEventListener('click', e => { if (uiBackdropClick(e)) testModal.remove(); });
     } catch (err) {
         showToast('Test failed: ' + err.message, 'error');
     }
@@ -5173,7 +5173,7 @@ document.addEventListener('DOMContentLoaded', function () {
     const changelogModal = document.getElementById('changelog-modal');
     if (changelogModal) {
         changelogModal.addEventListener('click', function (e) {
-            if (e.target.id === 'changelog-modal') {
+            if (uiBackdropClick(e)) {
                 closeChangelogModal();
             }
         });
@@ -5278,6 +5278,9 @@ let containerLogsInterval = null;
 async function fetchContainerLogs(silent = false) {
     const content = document.getElementById('container-logs-content');
 
+    // The refresh leaves the log as it is while the user selects text in it
+    if (content && silent && uiTextHeld(content)) return;
+
     if (content && !silent) {
         content.textContent = 'Loading logs...';
     }
@@ -5291,6 +5294,7 @@ async function fetchContainerLogs(silent = false) {
         const data = await response.json();
 
         if (content && data.logs) {
+            if (silent && uiTextHeld(content)) return;
             const isScrolledToBottom = content.parentElement
                 ? (content.parentElement.scrollHeight - content.parentElement.scrollTop === content.parentElement.clientHeight)
                 : true;
@@ -5298,7 +5302,12 @@ async function fetchContainerLogs(silent = false) {
             if (data.logs.length === 0) {
                 if (!silent) content.textContent = 'No logs available.';
             } else {
-                content.textContent = data.logs.join('');
+                content.replaceChildren(...data.logs.join('').replace(/\r?\n$/, '').split(/\r?\n/).map(text => {
+                    const line = document.createElement('span');
+                    line.className = 'ui-log-line';
+                    line.textContent = text;
+                    return line;
+                }));
             }
 
             // Auto-scroll to bottom if it was already at bottom or if it's the first load

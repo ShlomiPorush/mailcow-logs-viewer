@@ -1049,7 +1049,7 @@ async function showDmarcSyncHistory() {
     modal.classList.remove('hidden');
 
     const closeOnBackdrop = (e) => {
-        if (e.target === modal) {
+        if (uiBackdropClick(e)) {
             closeDmarcSyncHistoryModal();
             modal.removeEventListener('click', closeOnBackdrop);
         }

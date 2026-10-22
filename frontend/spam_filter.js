@@ -763,7 +763,7 @@ async function showBlockDetails(id, more) {
             '<button type="button" class="ui-btn" onclick="document.getElementById(\'block-details-modal\').remove()">Close</button>');
         modal.querySelector('.ui-dialog').classList.replace('ui-dialog-sm', 'ui-dialog-md');
         // Escape closes the top dialog only (router.js): a message opened from here closes first
-        modal.addEventListener('click', () => modal.remove());
+        modal.addEventListener('click', e => { if (uiBackdropClick(e)) modal.remove(); });
     }
     const body = document.getElementById('block-details-body');
     if (!body) return;

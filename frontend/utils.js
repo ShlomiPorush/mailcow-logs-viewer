@@ -749,7 +749,7 @@ function showConfirmModal({ title = 'Confirm', message = 'Are you sure?', confir
             resolve(result);
         }
         // Escape (through the layers in router.js) and a click outside cancel
-        overlay.addEventListener('click', (e) => { if (e.target === overlay) cleanup(false); });
+        overlay.addEventListener('click', (e) => { if (uiBackdropClick(e)) cleanup(false); });
         cancelBtn.addEventListener('click', () => cleanup(false));
         okBtn.addEventListener('click', () => cleanup(true));
         setTimeout(() => (focusCancel ? cancelBtn : okBtn).focus(), 100);
@@ -790,7 +790,7 @@ function showChoiceModal({ title, message, choices, cancelText = 'Cancel' }) {
             resolve(result);
         }
         choiceModalClose = done;
-        overlay.addEventListener('click', (e) => { if (e.target === overlay) done(null); });
+        overlay.addEventListener('click', (e) => { if (uiBackdropClick(e)) done(null); });
         overlay.querySelector('[data-cancel]').addEventListener('click', () => done(null));
         overlay.querySelectorAll('[data-choice]').forEach(btn => btn.addEventListener('click', () => done(choices[Number(btn.dataset.choice)].value)));
         setTimeout(() => overlay.querySelector('[data-cancel]').focus(), 50);
@@ -1207,14 +1207,36 @@ document.addEventListener('keydown', event => {
 // row's click handler asks uiRowHeld(event) first. A plain click, also on text
 // already selected, and Enter or Space (a click with no mouse, detail 0) still
 // open it.
-let uiRowPress = null;
-document.addEventListener('mousedown', event => { uiRowPress = { x: event.clientX, y: event.clientY }; }, true);
+let uiPress = null;
+document.addEventListener('mousedown', event => {
+    uiPress = { x: event.clientX, y: event.clientY, target: event.target, down: true };
+    // The first click of a double click selected a whole log line; clear it so
+    // the browser selects the word (Shift keeps the selection it extends)
+    if (event.detail > 1 && !event.shiftKey && event.target instanceof Element && event.target.closest('[data-line-select]')) window.getSelection().removeAllRanges();
+}, true);
+const uiPressEnd = () => { if (uiPress) uiPress.down = false; };
+document.addEventListener('mouseup', uiPressEnd, true);
+// A release outside the window never reaches the page: moving back with no
+// button down, or leaving the window, ends the press too
+document.addEventListener('mousemove', event => { if (!event.buttons) uiPressEnd(); }, true);
+if (typeof window.addEventListener === 'function') window.addEventListener('blur', uiPressEnd);
+function uiPressMoved(event) {
+    return Boolean(uiPress) && Math.hypot(event.clientX - uiPress.x, event.clientY - uiPress.y) > 3;
+}
 function uiRowHeld(event) {
     if (!event || !event.detail || !(event.currentTarget instanceof Element)) return false;
     const selection = window.getSelection && window.getSelection();
     if (!selection || !selection.rangeCount || !String(selection) || !selection.getRangeAt(0).intersectsNode(event.currentTarget)) return false;
-    const dragged = uiRowPress && Math.hypot(event.clientX - uiRowPress.x, event.clientY - uiRowPress.y) > 3;
-    return Boolean(dragged) || event.detail > 1 || event.shiftKey;
+    return uiPressMoved(event) || event.detail > 1 || event.shiftKey;
+}
+
+// A click on a dialog's backdrop closes it only when the press started on the
+// backdrop too. A drag that selects text in the dialog and ends outside it reaches
+// the backdrop as a click, and leaves the dialog open. A click with no mouse
+// (detail 0) is taken as it is.
+function uiBackdropClick(event, backdrop = event.currentTarget) {
+    if (event.target !== backdrop) return false;
+    return !event.detail || !uiPress || uiPress.target === backdrop;
 }
 
 // Phones hide a list's header row, so a list without a sort control of its own
@@ -1308,6 +1330,87 @@ document.addEventListener('DOMContentLoaded', () => {
     }).observe(document.body, { subtree: true, childList: true });
     uiRefreshTableSorts();
 });
+
+// A log box with data-line-select="<line selector>": a plain click on a line
+// selects the whole line and puts a Copy button at its end. A drag, a double or
+// triple click and Shift+click select as usual.
+const UI_COPY_PATH = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path>';
+document.addEventListener('click', event => {
+    const box = event.target instanceof Element && event.target.closest('[data-line-select]');
+    if (!box || event.target.closest('button, a') || event.detail !== 1 || event.shiftKey || uiPressMoved(event)) return;
+    const line = event.target.closest(box.dataset.lineSelect);
+    if (!line || !box.contains(line)) return;
+    uiLineCopyRemove();
+    const range = document.createRange();
+    range.selectNodeContents(line);
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+    // After the range, so the button is not part of the selection
+    const copy = document.createElement('button');
+    copy.type = 'button';
+    copy.className = 'ui-line-copy';
+    copy.title = 'Copy line';
+    copy.setAttribute('aria-label', 'Copy line');
+    copy.innerHTML = `<svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">${UI_COPY_PATH}</svg>`;
+    // A press on the button keeps the line selected
+    copy.addEventListener('mousedown', e => e.preventDefault());
+    copy.addEventListener('click', e => { e.stopPropagation(); uiLineCopy(line, copy); });
+    line.appendChild(copy);
+});
+
+function uiLineCopyRemove() {
+    document.querySelectorAll('.ui-line-copy').forEach(button => button.remove());
+}
+
+// The Copy button goes once its line is no longer the selection
+document.addEventListener('selectionchange', () => {
+    const copy = document.querySelector('.ui-line-copy');
+    if (!copy) return;
+    const line = copy.parentElement;
+    if (!line || String(window.getSelection()).trim() !== line.textContent.trim()) copy.remove();
+});
+
+async function uiLineCopy(line, button) {
+    const text = line.textContent;
+    let copied = false;
+    try {
+        if (navigator.clipboard) { await navigator.clipboard.writeText(text); copied = true; }
+    } catch (e) { /* falls back to the selection below */ }
+    // Without HTTPS the browser offers no clipboard API: copy the line's text
+    // through a hidden field, then put the line selection back
+    if (!copied) {
+        const field = document.createElement('textarea');
+        field.value = text;
+        field.setAttribute('readonly', '');
+        field.style.cssText = 'position:fixed;top:0;left:0;opacity:0;pointer-events:none';
+        document.body.appendChild(field);
+        field.select();
+        try { copied = document.execCommand('copy'); } catch (e) { copied = false; }
+        field.remove();
+        if (line.isConnected) {
+            const range = document.createRange();
+            range.selectNodeContents(line);
+            range.setEndBefore(button);
+            const selection = window.getSelection();
+            selection.removeAllRanges();
+            selection.addRange(range);
+        }
+    }
+    if (!copied) { showToast('Could not copy. Press Ctrl+C to copy the selected line.', 'error'); return; }
+    showToast('Line copied', 'success');
+    button.classList.add('is-copied');
+    button.querySelector('svg').innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>';
+}
+
+// True while the user selects or has selected text in box, so live updates
+// leave that text where it is
+function uiTextHeld(box) {
+    if (!box) return false;
+    if (uiPress && uiPress.down && uiPress.target instanceof Node && box.contains(uiPress.target)) return true;
+    const selection = window.getSelection();
+    return Boolean(selection && selection.rangeCount && String(selection) && selection.getRangeAt(0).intersectsNode(box));
+}
 
 // =============================================================================
 // SHEET - a panel from the bottom of the screen on phones. Its handle and head
