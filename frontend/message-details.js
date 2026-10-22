@@ -469,11 +469,20 @@ function renderRelay(relay) {
     const named = ip && ip !== host;
     // No browser title on top of the IP's tooltip
     const name = host === 'none' ? escapeHtml(host) : copyableText(host).replace(' title="Click to copy"', '');
-    const tip = named ? ` data-ip="${escapeHtml(ip)}" data-tip="IP ${escapeHtml(ip)}"` : '';
+    const tip = named ? ` data-ip="${escapeHtml(ip)}" data-tip="IP ${escapeHtml(ip)}" onpointerup="mdRelayTipTap(event, this)"` : '';
     return `<div class="ui-md-relay">
         <span class="ui-md-relay-host${ip && !named ? ' ui-mono' : ''}" data-host="${escapeHtml(host)}"${tip}>${name}${named ? `<span class="ui-sr-only">, IP ${escapeHtml(ip)}</span>` : ''}</span>
         ${port ? `<span class="ui-md-relay-port">:${escapeHtml(port)}</span>` : ''}
     </div>`;
+}
+
+// A touch screen has no hover: a tap shows the tooltip for a moment.
+// On the wrapper, as a click on the host copies it and stops there.
+function mdRelayTipTap(event, el) {
+    if (event.pointerType === 'mouse') return;
+    el.classList.add('is-tip');
+    clearTimeout(el.tipTimer);
+    el.tipTimer = setTimeout(() => el.classList.remove('is-tip'), 2500);
 }
 
 function mdRelayTip(root) {
