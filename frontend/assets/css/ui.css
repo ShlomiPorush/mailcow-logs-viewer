@@ -462,7 +462,7 @@
 .ui-md-rrow-sub > span { flex: none; }
 .ui-md-rrow-sub > span:first-child { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* The host cuts itself, so the IP's tooltip is not clipped with it */
-.ui-md-rrow-sub > .ui-md-rrow-via { display: inline-flex; align-items: baseline; gap: 4px; overflow: visible; }
+.ui-md-rrow-sub > span.ui-md-rrow-via { display: inline-flex; align-items: baseline; gap: 4px; overflow: visible; }
 .ui-md-rrow-via .ui-md-relay { display: inline-flex; gap: 4px; }
 .ui-md-rrow .ui-md-relay-port { padding: 0 5px; background: var(--ui-panel); font-size: 11.5px; }
 .ui-md-rrow-why { grid-column: 1 / -1; font-family: var(--ui-mono); font-size: 11.5px; line-height: 1.45; overflow-wrap: anywhere; }
