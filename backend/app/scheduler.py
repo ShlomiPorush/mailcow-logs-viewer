@@ -343,6 +343,7 @@ job_status = {
     'check_app_version': {'last_run': None, 'status': 'idle', 'error': None},
     'dns_check': {'last_run': None, 'status': 'idle', 'error': None},
     'update_geoip': {'last_run': None, 'status': 'idle', 'error': None},
+    'check_credentials': {'last_run': None, 'status': 'idle', 'error': None},
     'dmarc_imap_sync': {'last_run': None, 'status': 'idle', 'error': None},
     'mailbox_stats': {'last_run': None, 'status': 'idle', 'error': None},
     'alias_stats': {'last_run': None, 'status': 'idle', 'error': None},
@@ -1952,6 +1953,53 @@ def _persist_geoip_license_status():
             "valid": True,
             "error": None
         })
+
+
+CREDENTIAL_CHECK_HOURS = 6
+_credential_check_runs = 0  # the latest run reports the status, not an older one finishing late
+# What a failed check says on Status, by credential
+_CREDENTIAL_LABELS = {'mailcow_rw_key': 'Read-Write API key', 'rspamd_password': 'Rspamd password'}
+
+
+async def check_credentials_job():
+    """Check that mailcow accepts the Read-Write API key and Rspamd the
+    password, the same check as Validate in Settings > Mailcow, for each one
+    that is set (also from the environment). The result is kept for the
+    current key or password, so the page shows it without a click; a key
+    revoked in mailcow shows as a problem on Status within hours. Changes
+    nothing in mailcow."""
+    from .routers.settings import _CREDENTIAL_CHECKS, _validate_credential
+    global _credential_check_runs
+    names = [name for name, check in _CREDENTIAL_CHECKS.items() if check["configured"]()]
+    if not names:
+        return
+    _credential_check_runs += 1
+    run = _credential_check_runs
+    update_job_status('check_credentials', 'running')
+    failed = []
+    for name in names:
+        try:
+            result = await _validate_credential(name)
+        except Exception as e:
+            logger.warning(f"[CREDENTIALS] Could not check the {_CREDENTIAL_LABELS[name]}: {e}")
+            failed.append(f"the {_CREDENTIAL_LABELS[name]} could not be checked")
+            continue
+        if result.get("stale"):
+            continue  # changed meanwhile: the check of the new value says it
+        if result.get("configured") and not result.get("valid"):
+            reason = {'connection': 'could not be reached', 'rejected': 'was rejected',
+                      'read_only': 'has no write access'}.get(result.get("error"), 'was not accepted')
+            failed.append(f"the {_CREDENTIAL_LABELS[name]} {reason}")
+    if run != _credential_check_runs:
+        # A newer run (a manual one, say) started meanwhile: its result is the one to show
+        return JOB_STATUS_SET
+    if failed:
+        message = '; '.join(failed)
+        update_job_status('check_credentials', 'failed', message[0].upper() + message[1:] + '. See Settings > Mailcow.')
+    else:
+        update_job_status('check_credentials', 'success')
+    # A manual run keeps this status (a rejected key stays failed)
+    return JOB_STATUS_SET
 
 
 async def update_geoip_database():
@@ -4032,6 +4080,18 @@ def start_scheduler():
             replace_existing=True,
             max_instances=1,
             next_run_time=datetime.now(timezone.utc)
+        )
+
+        # The Read-Write key and the Rspamd password are checked soon after a
+        # start, without waiting for a click on Validate
+        scheduler.add_job(
+            check_credentials_job,
+            trigger=every(hours=CREDENTIAL_CHECK_HOURS),
+            id='check_credentials',
+            name='Credential Checks',
+            replace_existing=True,
+            max_instances=1,
+            next_run_time=datetime.now(timezone.utc) + timedelta(seconds=30)
         )
         
         # Job 7c: SMTP abuse protection (enforcement - needs a RW API key)

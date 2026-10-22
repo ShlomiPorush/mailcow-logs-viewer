@@ -44,7 +44,7 @@ All features are on by default. A feature that is off disappears from the menu, 
 
 ## Mailcow
 
-**Validate** in the **Status** panel checks the read-write API key and the Rspamd password without changing anything in mailcow. Saving a new key or password runs the check by itself.
+**Validate** in the **Status** panel checks the read-write API key and the Rspamd password without changing anything in mailcow. Saving a new key or password runs the check by itself, and so does the app soon after it starts and every 6 hours, also for a key or password set in the environment (the **Credential Checks** job on Status). A key revoked in mailcow then shows as a problem on Status.
 
 ## Logs
 

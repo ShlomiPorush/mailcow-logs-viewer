@@ -72,10 +72,19 @@ function aboutHealthCards(info, mailcow, rw, health) {
                 : mailcow.connected ? `Logs are read from ${mono(config.mailcow_url)}.`
                     : `No new logs until ${mono(config.mailcow_url)} can be reached.`, settingsBtn('mailcow')));
 
+    // A saved key or password, with the last check of it (Credential Checks runs it by itself)
+    const checked = (name, status, works) => {
+        if (!status || !status.configured) return { tone: 'ok', value: 'Configured', detail: `${works} It has not been checked yet.` };
+        if (status.valid) return { tone: 'ok', value: 'Accepted', detail: works };
+        const known = typeof credentialCheckError === 'function' ? credentialCheckError(name, status) : ['Not accepted', ''];
+        return { tone: 'fail', value: known[0], detail: escapeHtml(known[1]) };
+    };
+
     const rwOn = rw ? rw.rw_configured : mailcowRwConfigured;
-    cards.push(card('Read-write API key', rwOn ? 'ok' : 'warn', rwOn ? 'Configured' : 'Not configured',
-        rwOn ? 'You can ban addresses, release messages and edit maps in mailcow from here.'
-            : 'View only. Add a read-write key to ban, release and edit from here.', settingsBtn('mailcow')));
+    const rwCheck = rwOn && checked('mailcow_rw_key', config.mailcow_rw_key_status,
+        'You can ban addresses, release messages and edit maps in mailcow from here.');
+    cards.push(card('Read-write API key', rwOn ? rwCheck.tone : 'warn', rwOn ? rwCheck.value : 'Not configured',
+        rwOn ? rwCheck.detail : 'View only. Add a read-write key to ban, release and edit from here.', settingsBtn('mailcow')));
 
     const smtpOn = smtp.enabled && smtp.configured !== false;
     cards.push(card('Email alerts (SMTP)', smtpOn ? 'ok' : '', smtpOn ? 'Configured' : 'Not set up',
@@ -101,8 +110,10 @@ function aboutHealthCards(info, mailcow, rw, health) {
     }
     cards.push(card('MaxMind GeoIP', geoTone, geoValue, geoDetail, settingsBtn('maxmind')));
 
-    cards.push(card('Rspamd', config.rspamd_configured ? 'ok' : '', config.rspamd_configured ? 'Configured' : 'Not set up',
-        config.rspamd_configured ? 'Spam Filter maps are read and kept in sync.'
+    const rspamdCheck = config.rspamd_configured && checked('rspamd_password', config.rspamd_password_status,
+        'Spam Filter maps are read and kept in sync.');
+    cards.push(card('Rspamd', config.rspamd_configured ? rspamdCheck.tone : '', config.rspamd_configured ? rspamdCheck.value : 'Not set up',
+        config.rspamd_configured ? rspamdCheck.detail
             : 'Add the Rspamd password to see and sync the Spam Filter maps.', settingsBtn('mailcow')));
 
     // Basic Auth names its user, OAuth2 its provider

@@ -2536,6 +2536,15 @@ async function validateCredential(name, toastNow) {
         console.error('Failed to check the ' + check.label + ':', error); // nosemgrep: javascript.lang.security.audit.unsafe-formatstring.unsafe-formatstring
         result = { configured: true, valid: false, error: 'connection' };
     }
+    if (result.stale) {
+        // Changed while it was checked: this answer is about the old one, and
+        // the check of the new one says what holds now
+        show('status', renderCredentialStatus(name, null));
+        show('checked', 'Changed while it was checked. Validate again.');
+        const toast = [`The ${check.label} changed while it was checked. Validate it again.`, 'info'];
+        if (toastNow) showToast(...toast);
+        return null;
+    }
     show('status', renderCredentialStatus(name, result));
     show('checked', credentialCheckedAt(result.configured ? { ...result, checked_at: new Date().toISOString() } : result));
     if (!result.configured) return null;
