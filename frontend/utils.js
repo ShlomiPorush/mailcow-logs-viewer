@@ -688,6 +688,7 @@ function showToast(message, type = 'info', options = {}) {
             // Until it is done the toast stays, with the keyboard in it: what comes next
             // (a message, Retry) takes the keyboard over from here
             busy = true;
+            pause();
             button.setAttribute('aria-disabled', 'true');
             Promise.resolve(result).catch(() => {}).finally(() => { if (toast.isConnected) toast.remove(); });
         });
@@ -706,6 +707,7 @@ function showToast(message, type = 'info', options = {}) {
     let timer = null;
     const hold = () => busy || toast.matches(':hover') || toast.contains(document.activeElement);
     let fading = false;
+    let removing = null;
     const fade = () => {
         if (!toast.parentElement) return;
         // An action still running: the toast waits for it (its end removes the toast)
@@ -713,7 +715,7 @@ function showToast(message, type = 'info', options = {}) {
         fading = true;
         toast.style.opacity = '0';
         toast.style.transition = 'opacity 0.3s';
-        setTimeout(() => toast.remove(), 300);
+        removing = setTimeout(() => toast.remove(), 300);
     };
     const run = () => {
         clearTimeout(timer);
@@ -721,7 +723,17 @@ function showToast(message, type = 'info', options = {}) {
         timer = setTimeout(fade, left);
     };
     const pause = () => {
-        if (timer === null || fading) return;
+        // Caught while it fades (the pointer, the keyboard, a click on its action): it comes back
+        if (fading) {
+            clearTimeout(removing);
+            fading = false;
+            timer = null;
+            left = 1500;
+            toast.style.opacity = '';
+            toast.style.transition = '';
+            return;
+        }
+        if (timer === null) return;
         clearTimeout(timer);
         timer = null;
         left = Math.max(1500, left - (Date.now() - started));

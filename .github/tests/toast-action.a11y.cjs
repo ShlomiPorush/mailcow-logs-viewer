@@ -130,3 +130,19 @@ test('an action still running holds its toast after the pointer and the keyboard
     await wait(50);
     assert.equal(toast.isConnected, false, 'gone once it is done');
 });
+
+test('an action clicked while its toast fades keeps the toast until it is done', async () => {
+    const w = page();
+    let finish;
+    w.showToast('Alert dismissed', 'success', { duration: 60, action: { label: 'Undo', onAction: () => new w.Promise(r => { finish = r; }) } });
+    const toast = w.document.getElementById('toast-notification');
+    await wait(120);   // the fade has begun
+    assert.equal(toast.style.opacity, '0');
+    toast.querySelector('.ui-toast-action').click();
+    await wait(600);
+    assert.ok(toast.isConnected, 'not removed while the action runs');
+    assert.equal(toast.style.opacity, '', 'back in full');
+    finish();
+    await wait(50);
+    assert.equal(toast.isConnected, false);
+});
