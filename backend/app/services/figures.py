@@ -1,7 +1,8 @@
-"""The dashboard figures that have a trend, and their hourly samples.
+"""The dashboard figures, and the hourly samples of those with a trend.
 
-One function per figure, used by the card's own endpoint and by the hourly
-collector, so a trend's last point is what the card showed at that moment.
+One function per figure, used by the card's own endpoint and, for a figure with
+a trend, by the hourly collector, so a trend's last point is what the card
+showed at that moment.
 Each returns {value, of, valid, as_of, ...}: valid is False when its source
 did not answer (mailcow unreachable, Fail2ban unknown, no fresh blocklist
 check, the database failing), and then no sample is written: the trend shows
@@ -35,8 +36,6 @@ logger = logging.getLogger(__name__)
 # The trends, by name, and the feature each belongs to (None: always on)
 METRICS: Dict[str, Optional[str]] = {
     'storage_used': None,
-    'linking_rate': None,
-    'blocklists_listed': 'blacklist',
     'security_review': 'netfilter',
     'security_banned': 'netfilter',
 }
@@ -242,15 +241,6 @@ async def collect_figures() -> Dict[str, dict]:
     storage = await bounded(storage_figure(), 'mail storage')
     if storage and storage['valid']:
         points['storage_used'] = storage
-    linking = await bounded(asyncio.to_thread(_in_session, linking_figure), 'message linking')
-    if linking and linking['valid']:
-        points['linking_rate'] = linking
-    if metric_on('blocklists_listed'):
-        from ..routers.blacklist import blacklist_summary_data
-        summary = await bounded(asyncio.to_thread(_in_session, blacklist_summary_data), 'blocklists')
-        figure = blocklists_figure(summary) if summary else None
-        if figure and figure['valid']:
-            points['blocklists_listed'] = figure
     if metric_on('security_review'):
         from ..mailcow_api import mailcow_api
         from . import security_addresses
@@ -292,6 +282,8 @@ def write_points(points: Dict[str, dict], epochs: Dict[str, int], slot: datetime
                 index_elements=['name', 'slot'], set_={'value': row['value'], 'of': row['of'], 'as_of': row['as_of']}))
             written += 1
         db.query(MetricSnapshot).filter(MetricSnapshot.slot < _now() - timedelta(days=KEEP_DAYS)).delete(synchronize_session=False)
+        # A figure that no longer has a trend keeps no samples
+        db.query(MetricSnapshot).filter(MetricSnapshot.name.notin_(list(METRICS))).delete(synchronize_session=False)
         db.commit()
     return written
 

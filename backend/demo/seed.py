@@ -187,15 +187,12 @@ def seed_trend_history(days=7):
         for name, row in latest.items():
             value = row.value or 0.0
             # Walking back from now: storage a little lower each day, the counts drifting
-            # now and then and staying a while, linking near its rate; blocklists as they are
+            # now and then and staying a while
             walk = value
             for hours_back in range(1, days * 24):
                 slot = row.slot - timedelta(hours=hours_back)
                 if name == 'storage_used':
                     past = max(0.0, value - hours_back * 0.02)
-                elif name == 'linking_rate':
-                    walk = min(100.0, max(95.0, walk + rnd.uniform(-0.15, 0.15)))
-                    past = walk
                 elif name in ('security_review', 'security_banned'):
                     if rnd.random() < 0.06:
                         walk = max(0.0, walk + rnd.choice((-1, 1)))

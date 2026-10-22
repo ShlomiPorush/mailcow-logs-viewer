@@ -77,7 +77,7 @@ def _fake_sources(monkeypatch, storage='45%', fail2ban=True, blocklists=None):
     monkeypatch.setattr(mailcow_api, 'get_fail2ban', f2b)
     monkeypatch.setattr(security_addresses, 'collect', lambda db, f, now=None, hours=24: [{'list': 'review'}, {'list': 'review'}, {'list': 'banned'}])
     import app.routers.blacklist as blacklist
-    monkeypatch.setattr(blacklist, 'blacklist_summary_data', lambda session=None: blocklists or {
+    monkeypatch.setattr(blacklist, 'blacklist_summary_data', lambda: blocklists or {
         'has_data': True, 'status': 'listed', 'hosts': [{'status': 'listed'}, {'status': 'clean'}, {'status': 'clean'}]})
     return figures
 
@@ -110,12 +110,10 @@ def test_storage_unknown_when_mailcow_does_not_tell_it(db_ready, monkeypatch):
 
 
 def test_a_run_samples_what_answered_and_leaves_a_gap_for_what_did_not(db_ready, monkeypatch):
-    figures = _fake_sources(monkeypatch, storage=Exception, fail2ban=False)
+    figures = _fake_sources(monkeypatch, storage=Exception)
     written = asyncio.run(figures.run_trend_samples())
     names = {r.name for r in _rows()}
-    assert names == {'linking_rate', 'blocklists_listed'} and written == 2, names
-    blocklists = _rows('blocklists_listed')[0]
-    assert (blocklists.value, blocklists.of) == (1.0, 3.0)
+    assert names == {'security_review', 'security_banned'} and written == 2, names
     # Everything answers: one sample each in this hour; a second run in the same hour replaces it
     _fake_sources(monkeypatch)
     asyncio.run(figures.run_trend_samples())
@@ -280,15 +278,23 @@ def test_a_sources_queries_stop_together_at_its_time_budget(db_ready):
     assert seen.endswith('ms') and 19000 <= int(seen[:-2]) <= 20000
 
 
-def test_the_blocklist_figure_reads_in_the_bounded_session(db_ready):
-    """In the collector's session its query errors are the source's failure, not an empty list."""
-    from app.routers.blacklist import blacklist_summary_data
-
-    class Broken:
-        def query(self, *a, **k):
-            raise RuntimeError('canceling statement due to statement timeout')
-    with pytest.raises(RuntimeError):
-        blacklist_summary_data(Broken())
+def test_only_storage_and_the_security_counts_have_a_trend_and_others_samples_go(db_ready, monkeypatch):
+    """Message linking and Blocklists have no trend: not sampled, not served, and
+    samples kept from before are deleted at the next run."""
+    from app.database import get_db_context
+    from app.models import MetricSnapshot
+    figures = _fake_sources(monkeypatch)
+    assert set(figures.METRICS) == {'storage_used', 'security_review', 'security_banned'}
+    slot = figures.slot_of(datetime.utcnow()) - timedelta(hours=3)
+    with get_db_context() as db:
+        for name in ('linking_rate', 'blocklists_listed'):
+            db.add(MetricSnapshot(name=name, slot=slot, value=1.0, as_of=slot))
+        db.commit()
+    asyncio.run(figures.run_trend_samples())
+    assert {r.name for r in _rows()} == set(figures.METRICS)
+    from app.main import app
+    from fastapi.testclient import TestClient
+    assert TestClient(app).get('/api/stats/trends?names=linking_rate').status_code == 422
 
 
 def test_a_save_of_the_feature_list_that_cannot_have_the_samples_lock_changes_nothing(db_ready, monkeypatch):

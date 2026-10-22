@@ -2119,10 +2119,10 @@ function uiRedrawKeepingFocus(container, draw) {
 
 // =============================================================================
 // A small trend beside a figure: its hourly samples over the last days as a
-// line (a gap where an hour has no sample), the latest point marked. Fewer
-// than two samples: a dashed line, "Collecting since". The words (aria-label
-// and title) say the trend's start and end and when it was read.
-//   uiSparkline(points, { days, now, format }) -> SVG markup
+// line (a gap where an hour has no sample), the latest point marked. Until the
+// samples span a day: nothing (an empty string). The words (aria-label and
+// title) say the trend's start and end and when it was read.
+//   uiSparkline(points, { days, now, format }) -> SVG markup, or ''
 //     points: [{ slot, value, as_of }] oldest first (slot, as_of: ISO); format(value) -> words
 // =============================================================================
 function uiSparkline(points, { days = 7, now = Date.now(), format = v => String(v), label = 'Trend' } = {}) {
@@ -2133,11 +2133,8 @@ function uiSparkline(points, { days = 7, now = Date.now(), format = v => String(
     // The words use the samples as read: the first and the latest
     const firstRead = hourly.length ? Number(hourly[0].value) : null, lastRead = hourly.length ? Number(hourly[hourly.length - 1].value) : null;
     const when = t => `${formatDay(t)}, ${formatInZone(t, { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }, 'en-US')}`;
-    if (hourly.length < 2) {
-        // Since the first sample as read (not the six hours it falls in)
-        const since = hourly.length ? `Collecting since ${when(Date.parse(hourly[0].slot))}` : 'Collecting: the first samples come within the hour';
-        return `<svg class="ui-spark-svg is-collecting" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="${escapeHtml(`${label}: ${since}`)}"><title>${escapeHtml(since)}</title><line x1="${pad}" y1="${H / 2}" x2="${W - pad}" y2="${H / 2}"/></svg>`;
-    }
+    // Nothing until the samples span a day: a dot or a stub says nothing yet (the place stays, the card keeps its size)
+    if (hourly.length < 2 || Date.parse(hourly[hourly.length - 1].slot) - Date.parse(hourly[0].slot) < 86400000) return '';
     // Runs of samples with no missing hour between them (an hour and a half or more
     // apart breaks the line); within a run, six hours to a point over a week (their
     // average, at their mean time): a line, not a comb; the latest reading itself ends it

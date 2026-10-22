@@ -74,7 +74,7 @@ To zoom in time, drag across bars, use Ctrl and the mouse wheel or a trackpad pi
 - **Blocklists** uses the last check. **Unknown** or **No check yet** is not a clean result.
 - **Update check failed** means the app could not reach GitHub to check its version.
 
-Mail storage, Message linking, Blocklists, To review and Banned now show their last 7 days as a small line under the figure. The app samples them once an hour and keeps 90 days. A break in the line is an hour whose source did not answer; a dashed line means the first samples are still being collected. **Unknown** on Mail storage or Message linking means mailcow, or the count, did not answer.
+Mail storage, To review and Banned now show their last 7 days as a small line under the figure. The app samples them once an hour and keeps 90 days; the line appears once there is a day of samples. A break in the line is an hour whose source did not answer. **Unknown** on Mail storage or Message linking means mailcow, or the count, did not answer.
 
 See [Status](Status.md) and [About](About.md) for details.
 

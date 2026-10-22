@@ -178,7 +178,7 @@ def get_blacklist_summary() -> Dict[str, Any]:
     return summary
 
 
-def blacklist_summary_data(session=None) -> Dict[str, Any]:
+def blacklist_summary_data() -> Dict[str, Any]:
     """
     Get compact blacklist status summary for dashboard.
 
@@ -191,9 +191,9 @@ def blacklist_summary_data(session=None) -> Dict[str, Any]:
     from sqlalchemy import func
     from app.services.blacklist_service import aggregate_blacklist_summary
 
-    # In the given session (the trend collector's, whose statements stop at its budget), else in one of its own
-    def _rows(db):
-            host_rows = []
+    host_rows = []
+    try:
+        with get_db_context() as db:
             hosts = db.query(MonitoredHost.hostname, MonitoredHost.source).filter(
                 MonitoredHost.active == True
             ).order_by(MonitoredHost.id).all()
@@ -240,19 +240,8 @@ def blacklist_summary_data(session=None) -> Dict[str, Any]:
                     "total_blacklists": check.total_blacklists if check else None,
                     "checked_at": check.checked_at if check else None
                 })
-            return host_rows
-
-    host_rows = []
-    try:
-        if session is None:
-            with get_db_context() as own:
-                host_rows = _rows(own)
-        else:
-            host_rows = _rows(session)
     except Exception as e:
         logger.error(f"Error building blacklist summary: {e}")
-        if session is not None:
-            raise
         host_rows = []
 
     return aggregate_blacklist_summary(host_rows, server_ip=get_cached_server_ip())

@@ -1016,10 +1016,10 @@ The hourly samples behind the Dashboard's small trend lines.
 
 | Parameter | Type | Default | Constraints and purpose |
 | --- | --- | --- | --- |
-| `names` | string | required | Comma-separated, 1 to 10 of `storage_used`, `linking_rate`, `blocklists_listed`, `security_review`, `security_banned` |
+| `names` | string | required | Comma-separated, 1 to 10 of `storage_used`, `security_review`, `security_banned` |
 | `days` | integer | `7` | 1 to 90 |
 
-Returns `{ "days": 7, "trends": { "storage_used": [ {"slot": "2026-10-22T10:00:00Z", "value": 45.0, "of": 100.0, "as_of": "2026-10-22T10:00:31Z"} ] } }`, oldest first. An hour whose source did not answer has no sample. The trends of a feature that is off (`blocklists_listed` with the blocklist monitor, the `security_*` ones with Security) are left out of the answer. An unknown name returns 422.
+Returns `{ "days": 7, "trends": { "storage_used": [ {"slot": "2026-10-22T10:00:00Z", "value": 45.0, "of": 100.0, "as_of": "2026-10-22T10:00:31Z"} ] } }`, oldest first. An hour whose source did not answer has no sample. The trends of a feature that is off (the `security_*` ones with Security) are left out of the answer. An unknown name returns 422.
 
 ---
 

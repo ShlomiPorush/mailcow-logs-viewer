@@ -1,7 +1,7 @@
 // A small trend beside a figure (utils.js uiSparkline): runs of hourly samples
 // broken where an hour is missing, six hours to a point within a run, the latest
-// reading as the line's end and its mark, the dashed "Collecting" line with fewer
-// than two samples, and words that say where it went and when it was read
+// reading as the line's end and its mark, nothing until the samples span a day,
+// and words that say where it went and when it was read
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -44,14 +44,14 @@ test('hours with no sample break the line, also inside one six hours: a gap, nev
     const c = load();
     c.__p = [...hours(NOW - 7 * 24 * H, NOW - 4 * 24 * H, () => 50), ...hours(NOW - 3 * 24 * H, NOW, () => 50)];
     assert.equal((pathOf(vm.runInContext(`uiSparkline(__p, { days: 7, now: ${NOW} })`, c)).match(/M/g) || []).length, 2);
-    // 00:00, then 05:00 and 06:00: four hours missing in between
-    c.__p = ['2026-10-22T00:00:00Z', '2026-10-22T05:00:00Z', '2026-10-22T06:00:00Z'].map(s => ({ slot: s, value: 5, as_of: s }));
-    assert.equal((pathOf(vm.runInContext(`uiSparkline(__p, { days: 7, now: ${NOW} })`, c)).match(/M/g) || []).length, 2);
+    // A day before, then 00:00, then 05:00 and 06:00: four hours missing in between
+    c.__p = ['2026-10-21T00:00:00Z', '2026-10-22T00:00:00Z', '2026-10-22T05:00:00Z', '2026-10-22T06:00:00Z'].map(s => ({ slot: s, value: 5, as_of: s }));
+    assert.equal((pathOf(vm.runInContext(`uiSparkline(__p, { days: 7, now: ${NOW} })`, c)).match(/M/g) || []).length, 3);
 });
 
 test('a sample with no neighbour is a dot: three lone samples are three marks', () => {
     const c = load();
-    c.__p = ['2026-10-22T00:00:00Z', '2026-10-22T05:00:00Z', '2026-10-22T10:00:00Z'].map((s, i) => ({ slot: s, value: i, as_of: s }));
+    c.__p = ['2026-10-21T00:00:00Z', '2026-10-21T12:00:00Z', '2026-10-22T10:00:00Z'].map((s, i) => ({ slot: s, value: i, as_of: s }));
     const svg = vm.runInContext(`uiSparkline(__p, { days: 7, now: ${NOW} })`, c);
     assert.equal((svg.match(/<circle class="is-lone"/g) || []).length, 2, 'the two before the latest');
     assert.equal((svg.match(/<circle /g) || []).length, 3, 'and the mark of the latest reading');
@@ -62,23 +62,22 @@ test('a sample with no neighbour is a dot: three lone samples are three marks', 
 
 test('the mark is the latest reading where it was read, not a six hours\' average', () => {
     const c = load();
-    c.__p = [0, 0, 0, 0, 0, 60].map((v, i) => ({ slot: new Date(Date.parse('2026-10-22T00:00:00Z') + i * H).toISOString(), value: v, as_of: '' }));
+    c.__p = [...hours(NOW - 30 * H, NOW - H, () => 0), { slot: new Date(NOW - H).toISOString(), value: 60, as_of: '' }];
     const svg = vm.runInContext(`uiSparkline(__p, { days: 7, now: ${NOW} })`, c);
     const cy = Number(svg.match(/<circle cx="[\d.]+" cy="([\d.]+)"/)[1]);
     assert.equal(cy, 2, 'at the top: the line\'s highest value is the latest reading');
     assert.ok(pathOf(svg).endsWith(' 2.0'), 'the line ends there');
 });
 
-test('two samples are a line already; fewer is a dashed line that says it is collecting', () => {
+test('nothing until the samples span a day: no dot, no stub; a day of them is a line', () => {
     const c = load();
-    const none = vm.runInContext(`uiSparkline([], { now: ${NOW}, label: 'Messages linked' })`, c);
-    assert.match(none, /is-collecting/);
-    assert.match(none, /aria-label="Messages linked: Collecting: the first samples come within the hour"/);
-    c.__p = hours(NOW - H, NOW, () => 99);
-    const one = vm.runInContext(`uiSparkline(__p, { now: ${NOW}, label: 'Messages linked' })`, c);
-    assert.ok(one.includes(`Collecting since ${day(c, '2026-10-22T11:00:00Z')}, 11:00`), one);
-    c.__p = hours(NOW - 6 * H, NOW - 4 * H, () => 99);
-    assert.doesNotMatch(vm.runInContext(`uiSparkline(__p, { now: ${NOW} })`, c), /is-collecting/);
+    assert.equal(vm.runInContext(`uiSparkline([], { now: ${NOW}, label: 'Mail storage used' })`, c), '');
+    c.__p = hours(NOW - H, NOW, () => 9);
+    assert.equal(vm.runInContext(`uiSparkline(__p, { now: ${NOW} })`, c), '', 'one sample');
+    c.__p = hours(NOW - 23 * H, NOW, () => 9);
+    assert.equal(vm.runInContext(`uiSparkline(__p, { now: ${NOW} })`, c), '', 'under a day');
+    c.__p = hours(NOW - 25 * H, NOW, () => 9);
+    assert.match(vm.runInContext(`uiSparkline(__p, { now: ${NOW} })`, c), /<path d="M/);
 });
 
 test('words are escaped', () => {

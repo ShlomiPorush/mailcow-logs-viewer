@@ -2738,8 +2738,6 @@ async function undoAlertDismissal(receipt, undoName) {
 // into each figure's place, and again whenever a card is drawn anew
 const DASH_TRENDS = {
     storage_used: { label: 'Mail storage used', format: v => `${Math.round(v)}%` },
-    linking_rate: { label: 'Messages linked', format: v => `${Math.round(v * 10) / 10}%` },
-    blocklists_listed: { label: 'Addresses listed', format: v => `${Math.round(v)}`, feature: 'blacklist' },
     security_review: { label: 'Addresses to review', format: v => `${Math.round(v)}`, feature: 'netfilter' },
     security_banned: { label: 'Addresses banned', format: v => `${Math.round(v)}`, feature: 'netfilter' },
 };
