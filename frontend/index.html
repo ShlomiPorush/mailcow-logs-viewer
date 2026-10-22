@@ -599,7 +599,7 @@
                         <section class="ui-panel" id="dashboard-attention-panel">
                             <div class="ui-panel-head">Needs attention <span id="dashboard-attention-count" class="ui-count"></span>
                                 <button type="button" id="dashboard-dismiss-all" onclick="acknowledgeAllSecurityAlerts()" class="is-off ui-btn ui-btn-sm ui-head-actions" aria-label="Dismiss all alerts">Dismiss all<span class="ui-attn-wide">&nbsp;alerts</span></button></div>
-                            <!-- A fixed height; the items scroll inside it -->
+                            <!-- As tall as its items up to a cap; past it they scroll inside -->
                             <div id="dashboard-attention-scroll" class="ui-attn-scroll" role="region" aria-label="Needs attention" tabindex="0">
                                 <div id="dashboard-attention"></div>
                                 <div id="dashboard-security-alerts" class="hidden"></div>

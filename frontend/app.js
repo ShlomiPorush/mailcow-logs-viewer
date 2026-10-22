@@ -2083,7 +2083,7 @@ function updateAttentionState() {
     scroll.classList.toggle('has-more', overflows && scroll.scrollTop + scroll.clientHeight < scroll.scrollHeight - 2);
     scroll.tabIndex = overflows ? 0 : -1;
     if (more) {
-        // Always in its place, so the panel keeps its size; seen only when more is below
+        // Only while the items pass the cap; otherwise it takes no room
         more.classList.toggle('is-off', !overflows);
         more.textContent = overflows ? `${uiCountLabel(rows, 'item', 'items')}. Scroll the list for the rest` : '\u00a0';
     }

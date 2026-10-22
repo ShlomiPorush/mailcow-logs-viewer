@@ -1315,9 +1315,9 @@ body { font-family: var(--ui-font); background: var(--ui-bg); color: var(--ui-in
 .ui-dash-clear { margin: 0; padding: var(--ui-pad-y) var(--ui-pad-x); border-top: 1px solid var(--ui-line); color: var(--ui-muted); }
 
 .ui-flow { padding: 0 var(--ui-pad-x) 14px; }
-/* Needs attention: a fixed height, its items scroll inside; a fade while more is below (not over a focused item) */
-/* One height whatever it holds: a new item goes inside, "all clear" too */
-.ui-attn-scroll { height: 380px; overflow-y: auto; overscroll-behavior: contain; }
+/* Needs attention: as tall as its items, up to a cap; past it they scroll inside, with a fade while more is below (not over a focused item).
+   At its end the page scrolls on, so Mail flow stays in reach */
+.ui-attn-scroll { max-height: 380px; overflow-y: auto; }
 .ui-attn-scroll .ui-dash-clear { border-top: 0; }
 /* The head stays one line: in a narrow panel the button says Dismiss all (its name keeps alerts) */
 #dashboard-attention-panel { container-type: inline-size; }
@@ -1329,8 +1329,8 @@ body { font-family: var(--ui-font); background: var(--ui-bg); color: var(--ui-in
 .ui-attn-scroll.has-more:not(:focus-within) { mask-image: linear-gradient(to bottom, #000 calc(100% - 40px), transparent); }
 .ui-attn-scroll:focus-visible { outline: 2px solid var(--ui-focus); outline-offset: -2px; }
 .ui-attn-more { margin: 0; padding: 8px var(--ui-pad-x); border-top: 1px solid var(--ui-line); color: var(--ui-muted); font-size: 12.5px; }
-.ui-attn-more.is-off { visibility: hidden; }
-@media (max-width: 760px) { .ui-attn-scroll { height: 340px; } }
+.ui-attn-more.is-off { display: none; }
+@media (max-width: 760px) { .ui-attn-scroll { max-height: 340px; } }
 /* The mail flow: a period picker, bars that zoom in time (utils.js uiTimeZoom) */
 #dashboard-flow-period { margin-inline-start: auto; }
 .ui-flow-view { position: relative; overflow: hidden; }
