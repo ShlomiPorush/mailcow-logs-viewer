@@ -116,20 +116,13 @@ function showBasicAuthVerifyModal() {
         cancelBtn.addEventListener('click', doCancel);
         confirmBtn.addEventListener('click', doConfirm);
 
-        // Allow Enter to confirm, Escape to cancel
+        // Enter confirms. Escape cancels through the layers (router.js); a click
+        // outside does nothing, since the fields hold what was typed
         overlay.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape') {
-                e.preventDefault();
-                doCancel();
-            } else if (e.key === 'Enter') {
+            if (e.key === 'Enter') {
                 e.preventDefault();
                 doConfirm();
             }
-        });
-
-        // Click outside to cancel
-        overlay.addEventListener('click', (e) => {
-            if (e.target === overlay) doCancel();
         });
     });
 }
@@ -183,9 +176,9 @@ function showFeatureDisableConfirmModal(featureIds) {
         cancelBtn.addEventListener('click', () => { cleanup(); resolve(false); });
         confirmBtn.addEventListener('click', () => { cleanup(); resolve(true); });
 
+        // Enter confirms; Escape cancels through the layers (router.js)
         overlay.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape') { e.preventDefault(); cleanup(); resolve(false); }
-            else if (e.key === 'Enter') { e.preventDefault(); cleanup(); resolve(true); }
+            if (e.key === 'Enter') { e.preventDefault(); cleanup(); resolve(true); }
         });
 
         overlay.addEventListener('click', (e) => {
@@ -2131,6 +2124,8 @@ async function showGeoIPSetupModal(reloadPage = false) {
     const overlay = document.createElement('div');
     overlay.id = 'geoip-setup-overlay';
     overlay.className = 'ui-dialog-backdrop';
+    overlay.setAttribute('role', 'dialog');
+    overlay.setAttribute('aria-label', 'GeoIP Database Setup');
     overlay.style.animation = 'fadeIn 0.2s ease-out';
     
     overlay.innerHTML = `
@@ -2612,7 +2607,7 @@ function renderGeoIPDbStatus(geoipConfig) {
 // =============================================================================
 
 async function testSmtpConnection() {
-    showConnectionTestModal('SMTP Connection Test', 'Testing SMTP connection...');
+    const run = showConnectionTestModal('SMTP Connection Test', 'Testing SMTP connection...');
 
     try {
         const response = await authenticatedFetch('/api/settings/test/smtp', {
@@ -2627,18 +2622,18 @@ async function testSmtpConnection() {
 
         // Ensure logs is an array
         const logs = result.logs || ['No logs available'];
-        updateConnectionTestModal(result.success ? 'success' : 'error', logs);
+        updateConnectionTestModal(result.success ? 'success' : 'error', logs, run);
 
     } catch (error) {
         updateConnectionTestModal('error', [
             'Failed to test SMTP connection',
             `Error: ${error.message}`
-        ]);
+        ], run);
     }
 }
 
 async function testImapConnection() {
-    showConnectionTestModal('IMAP Connection Test', 'Testing IMAP connection...');
+    const run = showConnectionTestModal('IMAP Connection Test', 'Testing IMAP connection...');
 
     try {
         const response = await authenticatedFetch('/api/settings/test/imap', {
@@ -2653,17 +2648,22 @@ async function testImapConnection() {
 
         // Ensure logs is an array
         const logs = result.logs || ['No logs available'];
-        updateConnectionTestModal(result.success ? 'success' : 'error', logs);
+        updateConnectionTestModal(result.success ? 'success' : 'error', logs, run);
 
     } catch (error) {
         updateConnectionTestModal('error', [
             'Failed to test IMAP connection',
             `Error: ${error.message}`
-        ]);
+        ], run);
     }
 }
 
+// One test window at a time. Each opening is a new run: a reply that comes back
+// after its window was closed, or after another test opened, is dropped
+let connectionTestRun = 0;
 function showConnectionTestModal(title, message) {
+    document.getElementById('connection-test-modal')?.remove();
+    connectionTestRun += 1;
     const modal = document.createElement('div');
     modal.id = 'connection-test-modal';
     modal.className = 'ui-dialog-backdrop';
@@ -2696,11 +2696,12 @@ function showConnectionTestModal(title, message) {
     });
 
     document.body.appendChild(modal);
+    return connectionTestRun;
 }
 
-function updateConnectionTestModal(status, logs) {
+function updateConnectionTestModal(status, logs, run) {
     const content = document.getElementById('connection-test-content');
-    if (!content) return;
+    if (!content || (run !== undefined && run !== connectionTestRun)) return;
 
     // Ensure logs is an array
     if (!Array.isArray(logs)) {

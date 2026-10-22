@@ -748,19 +748,8 @@ async function showBlockDetails(id, more) {
         const modal = suppressionDialog('block-details-modal', 'Block details', '<div id="block-details-body"><div class="ui-loading"><div class="loading"></div></div></div>',
             '<button type="button" class="ui-btn" onclick="document.getElementById(\'block-details-modal\').remove()">Close</button>');
         modal.querySelector('.ui-dialog').classList.replace('ui-dialog-sm', 'ui-dialog-md');
+        // Escape closes the top dialog only (router.js): a message opened from here closes first
         modal.addEventListener('click', () => modal.remove());
-        // Escape closes the top dialog only: a message opened from here closes
-        // first. This runs in the capture phase, before that dialog's own handler
-        const onKey = e => {
-            if (e.key !== 'Escape') return;
-            if (!modal.isConnected) { document.removeEventListener('keydown', onKey, true); return; }
-            const above = [...document.querySelectorAll('.ui-dialog-backdrop')]
-                .some(d => d !== modal && getComputedStyle(d).display !== 'none');
-            if (above) return;
-            modal.remove();
-            document.removeEventListener('keydown', onKey, true);
-        };
-        document.addEventListener('keydown', onKey, true);
     }
     const body = document.getElementById('block-details-body');
     if (!body) return;
@@ -843,7 +832,7 @@ function showAddSuppressionModal(prefillEmail, queueId) {
             </label>
         </div>
     `, `
-        <button onclick="document.getElementById('add-suppression-modal').remove()" class="ui-btn">Cancel</button>
+        <button onclick="uiCancelDialog('add-suppression-modal')" class="ui-btn">Cancel</button>
         <button onclick="createSuppression()" class="ui-btn ui-btn-primary">Add Suppression</button>
     `);
 
@@ -853,6 +842,7 @@ function showAddSuppressionModal(prefillEmail, queueId) {
         document.getElementById('new-suppression-notes').value = 'Added from queue page';
     }
 
+    uiGuardDialog(document.getElementById('add-suppression-modal'));
     document.getElementById('new-suppression-email').focus();
 }
 
@@ -941,7 +931,7 @@ async function createSuppression() {
         }
         
         showToast(`Suppression added: ${email}`, 'success');
-        document.getElementById('add-suppression-modal')?.remove();
+        uiCloseSavedDialog('add-suppression-modal');
         loadSuppressions();
         loadSuppressionStats();
         // Fix #4: Auto-sync to Rspamd after changes
@@ -995,9 +985,10 @@ function showEditSuppressionModal(s) {
             </div>
         </div>
     `, `
-        <button onclick="document.getElementById('edit-suppression-modal').remove()" class="ui-btn">Cancel</button>
+        <button onclick="uiCancelDialog('edit-suppression-modal')" class="ui-btn">Cancel</button>
         <button onclick="saveEditSuppression(${Number(s.id)})" class="ui-btn ui-btn-primary">Save Changes</button>
     `);
+    uiGuardDialog(document.getElementById('edit-suppression-modal'));
 }
 
 function toggleEditExpiryField() {
@@ -1052,7 +1043,7 @@ async function saveEditSuppression(id) {
         if (!response.ok) throw await suppressionFailure(response, 'Failed to update');
         
         showToast('Suppression updated', 'success');
-        document.getElementById('edit-suppression-modal')?.remove();
+        uiCloseSavedDialog('edit-suppression-modal');
         loadSuppressions();
         loadSuppressionStats();
         autoSyncToRspamd();

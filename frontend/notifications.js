@@ -181,6 +181,7 @@ function renderNotificationChannelModal() {
             </form>
         </div>`;
     document.body.appendChild(modal);
+    uiGuardDialog(modal);
     document.getElementById('nc-name')?.focus();
 }
 
@@ -206,9 +207,17 @@ function _collectChannelForm() {
     return notificationEditing;
 }
 
-function closeNotificationChannelModal() {
-    document.getElementById('notification-channel-modal')?.remove();
-    notificationEditing = null;
+// Close, Cancel, Escape and Back ask before dropping typed changes; a save closes at once
+function closeNotificationChannelModal(saved = false) {
+    const modal = document.getElementById('notification-channel-modal');
+    const close = () => {
+        modal?.remove();
+        notificationEditing = null;
+    };
+    if (saved || !modal) {
+        uiDialogSaved(modal);
+        close();
+    } else uiCloseGuarded(modal, close);
 }
 
 async function saveNotificationChannel(event) {
@@ -235,7 +244,7 @@ async function saveNotificationChannel(event) {
             return;
         }
         showToast(isNew ? 'Destination added' : 'Destination updated', 'success');
-        closeNotificationChannelModal();
+        closeNotificationChannelModal(true);
         loadNotificationChannels();
     } catch (e) {
         showToast('Could not save destination', 'error');
@@ -262,20 +271,20 @@ async function deleteNotificationChannel(channelId) {
 }
 
 async function testNotificationChannel(channelId) {
-    showConnectionTestModal('Notification Test', 'Sending test notification...');
+    const run = showConnectionTestModal('Notification Test', 'Sending test notification...');
     try {
         const response = await authenticatedFetch(`/api/notifications/channels/${channelId}/test`, { method: 'POST' });
         const result = await response.json();
-        updateConnectionTestModal(result.success ? 'success' : 'error', result.logs || ['No logs available']);
+        updateConnectionTestModal(result.success ? 'success' : 'error', result.logs || ['No logs available'], run);
         loadNotificationChannels();
     } catch (e) {
-        updateConnectionTestModal('error', ['Failed to send test notification', `Error: ${e.message}`]);
+        updateConnectionTestModal('error', ['Failed to send test notification', `Error: ${e.message}`], run);
     }
 }
 
 async function testNotificationChannelDraft() {
     const data = _collectChannelForm();
-    showConnectionTestModal('Notification Test', 'Sending test notification...');
+    const run = showConnectionTestModal('Notification Test', 'Sending test notification...');
     try {
         const response = await authenticatedFetch('/api/notifications/test', {
             method: 'POST',
@@ -283,8 +292,8 @@ async function testNotificationChannelDraft() {
             body: JSON.stringify({ channel_type: data.channel_type, config: data.config })
         });
         const result = await response.json();
-        updateConnectionTestModal(result.success ? 'success' : 'error', result.logs || ['No logs available']);
+        updateConnectionTestModal(result.success ? 'success' : 'error', result.logs || ['No logs available'], run);
     } catch (e) {
-        updateConnectionTestModal('error', ['Failed to send test notification', `Error: ${e.message}`]);
+        updateConnectionTestModal('error', ['Failed to send test notification', `Error: ${e.message}`], run);
     }
 }

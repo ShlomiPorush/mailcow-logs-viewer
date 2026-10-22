@@ -107,7 +107,7 @@ test('shared list hints remain available and escape folder names', () => {
     assert.equal(h.context.renderDeliveriesChip({ deliveries: 1 }), '');
 });
 
-test('message listeners close on backdrop and Escape', async () => {
+test('message listeners close on backdrop, and on Escape when docked', async () => {
     const h = harness(message());
     h.listeners.DOMContentLoaded();
     await h.context.viewMessageDetails('example-key');
@@ -115,7 +115,12 @@ test('message listeners close on backdrop and Escape', async () => {
     assert.equal(h.element('message-modal').classList.contains('hidden'), false);
     h.listeners['message-modal:click']({ target: { id: 'message-modal' } });
     assert.equal(h.element('message-modal').classList.contains('hidden'), true);
+    // As a dialog, Escape belongs to the layers (router.js, layers.a11y.cjs)
     await h.context.viewMessageDetails('example-key');
+    h.listeners.keydown({ key: 'Escape' });
+    assert.equal(h.element('message-modal').classList.contains('hidden'), false);
+    // Docked beside the list, Escape closes it
+    h.element('message-modal').classList.add('ui-docked');
     h.listeners.keydown({ key: 'Escape' });
     assert.equal(h.element('message-modal').classList.contains('hidden'), true);
     assert.equal(h.document.body.style.overflow, '');

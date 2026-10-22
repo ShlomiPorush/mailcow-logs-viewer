@@ -3450,6 +3450,7 @@ function _showQuarantineRuleModal(rule, prefill) {
 
     document.body.insertAdjacentHTML('beforeend', html); // nosemgrep: typescript.react.security.audit.react-unsanitized-method.react-unsanitized-method
     updateQRuleMatchHelp();
+    uiGuardDialog(document.getElementById('quarantine-rule-modal-overlay'));
 }
 
 function qrulePrefill(matchType, value) {
@@ -3477,9 +3478,14 @@ function updateQRuleMatchHelp() {
     helpEl.textContent = hints[mode] || '';
 }
 
-function closeQuarantineRuleModal() {
+// Close, Cancel, Escape and Back ask before dropping typed changes; a save closes at once
+function closeQuarantineRuleModal(saved = false) {
     const overlay = document.getElementById('quarantine-rule-modal-overlay');
-    if (overlay) overlay.remove();
+    if (!overlay) return;
+    if (saved) {
+        uiDialogSaved(overlay);
+        overlay.remove();
+    } else uiCloseGuarded(overlay, () => overlay.remove());
 }
 
 async function saveQuarantineRule(ruleId) {
@@ -3526,7 +3532,7 @@ async function _submitQuarantineRule(ruleId, body, doneMessage) {
             throw new Error(err.detail || `HTTP ${res.status}`);
         }
         
-        closeQuarantineRuleModal();
+        closeQuarantineRuleModal(true);
         showToast(doneMessage || (isEdit ? 'Rule updated' : 'Rule created'), 'success');
         await loadQuarantineRules();
     } catch (err) {
@@ -3572,6 +3578,7 @@ async function toggleQuarantineRule(ruleId) {
 }
 
 async function testQuarantineRules() {
+    const opener = layerLastAction || document.activeElement;
     try {
         showToast('Testing rules against quarantine...', 'info');
         const res = await authenticatedFetch('/api/quarantine/rules/test', { method: 'POST' });
@@ -3618,6 +3625,8 @@ async function testQuarantineRules() {
         const activeCount = data.matches.length - disabledCount;
         const noMatches = data.total_matches === 0;
 
+        document.getElementById('qrule-test-modal')?.remove();
+        uiLayerOpener(opener);
         const html = `
         <div class="ui-dialog-backdrop" id="qrule-test-modal" role="dialog" aria-label="Test Results">
             <div class="ui-dialog ui-dialog-fit ui-dialog-sm">
@@ -3639,6 +3648,9 @@ async function testQuarantineRules() {
             </div>
         </div>`;
         document.body.insertAdjacentHTML('beforeend', html);
+        // Results only, nothing typed: a click outside closes it
+        const testModal = document.getElementById('qrule-test-modal');
+        testModal.addEventListener('click', e => { if (e.target === testModal) testModal.remove(); });
     } catch (err) {
         showToast('Test failed: ' + err.message, 'error');
     }
@@ -5133,16 +5145,6 @@ initDarkMode();
 // =============================================================================
 
 document.addEventListener('DOMContentLoaded', function () {
-    // ESC key to close modal
-    document.addEventListener('keydown', function (e) {
-        if (e.key === 'Escape') {
-            const changelogModal = document.getElementById('changelog-modal');
-            if (changelogModal && !changelogModal.classList.contains('hidden')) {
-                closeChangelogModal();
-            }
-        }
-    });
-
     // Changelog modal event listeners
     const changelogModal = document.getElementById('changelog-modal');
     if (changelogModal) {
@@ -5199,6 +5201,8 @@ function helpDocMarkdown(markdown, docName) {
 
 // title: the name the page shows, when it is not the document's file name
 async function showHelpModal(docName, title) {
+    // The window opens after the request; the focus goes back to this Help button
+    const opener = layerLastAction || document.activeElement;
     try {
         const response = await authenticatedFetch(`/api/docs/${docName}`);
 
@@ -5207,6 +5211,7 @@ async function showHelpModal(docName, title) {
         }
 
         const markdown = helpDocMarkdown(await response.text(), docName);
+        uiLayerOpener(opener);
         // Else the document's file name, read as words: Mailbox_Stats is Mailbox Stats
         showMarkdownModal(`Help - ${title || docName.replace(/_/g, ' ')}`, markdown);
 

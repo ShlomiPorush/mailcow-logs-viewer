@@ -585,13 +585,6 @@ function closeDmarcRecordModal() {
     document.getElementById('dmarc-record-modal').classList.add('hidden');
 }
 
-// Esc closes the record window, like the other dialogs
-document.addEventListener('keydown', event => {
-    if (event.key !== 'Escape') return;
-    const modal = document.getElementById('dmarc-record-modal');
-    if (modal && !modal.classList.contains('hidden')) closeDmarcRecordModal();
-});
-
 function dmarcCopyBlock(text) {
     return `<div class="ui-dm-code"><span>${escapeHtml(text)}</span><button type="button" class="ui-btn ui-btn-sm" onclick="copyToClipboard('${escapeJsArg(text)}', event)">Copy</button></div>`;
 }
@@ -1125,10 +1118,8 @@ function sortReportsManagement(key, dir) {
 
 async function showReportsManagementModal() {
     const modal = document.getElementById('dmarc-reports-management-modal');
+    // It has a search field, so a click outside does not close it; Close, Escape and Back do
     modal.classList.remove('hidden');
-    modal.onclick = (event) => {
-        if (event.target === modal) closeReportsManagementModal();
-    };
     clearTimeout(reportsManagementState.searchTimer);
     reportsManagementState.search = '';
     reportsManagementState.sort = { ...REPORTS_DEFAULT_SORT };

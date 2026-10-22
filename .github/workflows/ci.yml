@@ -116,12 +116,13 @@ jobs:
             exit 1
           fi
 
-      # The shared drop-down (utils.js, uiPicker) in a real DOM: keyboard, focus and
-      # ARIA after the WAI-ARIA listbox and dialog patterns, and axe-core
-      - name: Accessibility of the pickers
+      # In a real DOM: the shared drop-down (utils.js, uiPicker) after the WAI-ARIA
+      # listbox and dialog patterns with axe-core, and the layers (router.js):
+      # Escape, Back, focus and inert for dialogs and sheets
+      - name: Accessibility of the pickers and the layers
         run: |
           npm install --silent --no-save --prefix /tmp/a11y jsdom@30.1.2 axe-core@4.14.0
-          A11Y_MODULES=/tmp/a11y/node_modules node --test .github/tests/pickers.a11y.cjs
+          A11Y_MODULES=/tmp/a11y/node_modules node --test .github/tests/*.a11y.cjs
 
   image-smoke:
     name: Image build and smoke test

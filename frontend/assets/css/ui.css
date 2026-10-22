@@ -382,6 +382,8 @@
 
 .ui-dialog-backdrop { position: fixed; inset: 0; z-index: 50; display: flex; align-items: center; justify-content: center; padding: 16px;
     background: rgb(0 0 0 / .45); }
+/* A dialog or a heading that only holds the focus for a screen reader draws no ring (router.js layers) */
+[data-layer-panel]:focus, :is(h1, h2)[tabindex="-1"]:focus { outline: none; }
 .ui-dialog { display: flex; flex-direction: column; width: min(1100px, 100%); height: 90%; overflow: hidden; border-radius: var(--ui-radius);
     background: var(--ui-bg); color: var(--ui-ink); font-size: var(--ui-fs); box-shadow: 0 24px 60px rgb(0 0 0 / .25); }
 .ui-dialog-head { display: flex; align-items: center; gap: 10px; padding: 10px 10px 10px var(--ui-pad-x); border-bottom: 1px solid var(--ui-line); }
