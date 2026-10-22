@@ -337,7 +337,7 @@ function renderLogTimeline(postfixLogs, dovecotLogs) {
     const count = shown.length === entries.length ? `${entries.length} entries` : `${shown.length} of ${entries.length} entries`;
     const picker = mdRecipients.length > 1 ? `
         ${uiPicker({
-            id: 'md-rcpt-pick', label: 'Recipient', set: !!picked, search: 'Find a recipient', panelLabel: 'Show the logs of',
+            id: 'md-rcpt-pick', label: 'Recipient', set: !!picked, search: 'Find a recipient', panelLabel: 'Show the logs of', panelClass: 'ui-md-rcpt-panel',
             value: picked ? `<bdi>${escapeHtml(picked.address)}</bdi>` : 'All recipients',
             options: [{ label: 'All recipients', value: -1, selected: !picked, onclick: 'pickMessageRecipient(-1)' }]
                 .concat(mdRecipients.map((r, i) => ({ r, i })).sort((a, b) => mdRecipientOrder(a.r, b.r)).map(({ r, i }) => {
@@ -463,18 +463,19 @@ function relayParts(relay) {
     return m ? { host: m[1], ip: m[2], port: m[3] || '' } : { host: String(relay || ''), ip: '', port: '' };
 }
 
-// The strip's relay: the host to copy, its IP in a tooltip, the port beside it.
-// The tooltip names the host too when the host is cut (mdRelayTip).
-function renderRelay(relay) {
+// A relay: the host (to copy in the strip; a recipient's row opens on a click),
+// its IP in a tooltip, the port beside it. The tooltip names the host too when
+// the host is cut (mdRelayTip).
+function renderRelay(relay, copy = true) {
     const { host, ip, port } = relayParts(relay);
     const named = ip && ip !== host;
     // No browser title on top of the IP's tooltip
-    const name = host === 'none' ? escapeHtml(host) : copyableText(host).replace(' title="Click to copy"', '');
+    const name = host === 'none' || !copy ? `<bdi>${escapeHtml(host)}</bdi>` : copyableText(host).replace(' title="Click to copy"', '');
     const tip = named ? ` data-ip="${escapeHtml(ip)}" data-tip="IP ${escapeHtml(ip)}" onpointerup="mdRelayTipTap(event, this)"` : '';
-    return `<div class="ui-md-relay">
+    return `<span class="ui-md-relay">
         <span class="ui-md-relay-host${ip && !named ? ' ui-mono' : ''}" data-host="${escapeHtml(host)}"${tip}>${name}${named ? `<span class="ui-sr-only">, IP ${escapeHtml(ip)}</span>` : ''}</span>
         ${port ? `<span class="ui-md-relay-port">:${escapeHtml(port)}</span>` : ''}
-    </div>`;
+    </span>`;
 }
 
 // A touch screen has no hover: a tap shows the tooltip for a moment.
@@ -726,6 +727,8 @@ function mdRedraw(id, html) {
 
 function mdRedrawRecipients() {
     mdRedraw('md-rcpt-results', renderRecipientRows());
+    const list = document.getElementById('md-rcpt-results');
+    if (list) mdRelayTip(list);
 }
 
 function mdRedrawTimeline() {
@@ -770,7 +773,7 @@ function renderRecipientRows() {
         const info = mdStatusInfo(r.status);
         const host = relayHost(r.relay);
         const sub = !r.last ? `<span>${r.status === 'none' ? 'No delivery logged yet' : 'No delivery attempt logged'}</span>`
-            : `<span>${host ? `via ${escapeHtml(host)}` : escapeHtml(info.word)}</span>${r.delivered.length ? `<span>· to <bdi>${escapeHtml(r.delivered.join(', '))}</bdi></span>` : ''}${r.attempts > 1 ? `<span>· ${r.attempts} attempts</span>` : ''}${r.last.time ? `<span>· ${escapeHtml(formatTime(r.last.time))}</span>` : ''}`;
+            : `${host ? `<span class="ui-md-rrow-via">via ${renderRelay(r.relay, false)}</span>` : `<span>${escapeHtml(info.word)}</span>`}${r.delivered.length ? `<span>· to <bdi>${escapeHtml(r.delivered.join(', '))}</bdi></span>` : ''}${r.attempts > 1 ? `<span>· ${r.attempts} attempts</span>` : ''}${r.last.time ? `<span>· ${escapeHtml(formatTime(r.last.time))}</span>` : ''}`;
         return `
             <div class="ui-md-rrow" role="button" tabindex="0" data-row-open data-md-focus="row-${index}" aria-pressed="${mdView.picked === index}" title="Show the logs of ${escapeHtml(r.address)}" onclick="if (!uiRowHeld(event)) pickMessageRecipient(${index}, true)">
                 <span class="ui-md-rrow-addr">${copyableText(r.address)}</span>${uiTag(info.word, info.tone)}
@@ -1118,11 +1121,15 @@ function renderPostfixTab(content, data) {
         toFact = mdFact(`To (${data.recipients.length})`, data.recipients.length === 1 ? copyableText(data.recipients[0]) : `${data.recipients.length} recipients`);
     }
 
+    // A message to many names its server when all its recipients went through one;
+    // otherwise each recipient's row does
+    const relays = [...new Set(mdRecipients.map(r => r.relay).filter(Boolean))];
+    const stripRelay = many ? (relays.length === 1 ? relays[0] : '') : relay;
     const stripFacts = [
         toFact,
         finalStatus && !many ? mdFact('Final Status', uiStatusTag(finalStatus)) : '',
         clientIp ? mdFact('Client IP', `<span class="ui-mono">${copyableText(clientIp)}</span>`) : '',
-        relay && !many ? mdFact('Relay', renderRelay(relay)) : '',
+        stripRelay ? mdFact('Relay', renderRelay(stripRelay)) : '',
     ].join('');
 
     content.innerHTML = `

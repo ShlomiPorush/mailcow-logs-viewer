@@ -450,7 +450,10 @@
 .ui-md-rcpts { display: grid; gap: 10px; }
 .ui-md-rcpts-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; }
 .ui-md-rcpts-head .ui-input { width: 240px; max-width: 100%; }
-.ui-md-rlist { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px; overflow: hidden; border: 1px solid var(--ui-line); border-radius: var(--ui-radius); background: var(--ui-line); }
+/* Rounded by its first and last rows, not clipped: a relay's tooltip shows past a row */
+.ui-md-rlist { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px; border: 1px solid var(--ui-line); border-radius: var(--ui-radius); background: var(--ui-line); }
+.ui-md-rlist > :first-child { border-start-start-radius: calc(var(--ui-radius) - 1px); border-start-end-radius: calc(var(--ui-radius) - 1px); }
+.ui-md-rlist > :last-child { border-end-start-radius: calc(var(--ui-radius) - 1px); border-end-end-radius: calc(var(--ui-radius) - 1px); }
 .ui-md-rrow { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 2px 12px; padding: 9px 12px; background: var(--ui-bg); cursor: pointer; }
 @media (hover: hover) { .ui-md-rrow:hover { background: color-mix(in srgb, var(--ui-ink) 4%, var(--ui-bg)); } }
 .ui-md-rrow[aria-pressed="true"] { background: color-mix(in srgb, var(--ui-info) 10%, var(--ui-bg)); box-shadow: inset 3px 0 0 var(--ui-info); }
@@ -458,6 +461,10 @@
 .ui-md-rrow-sub { grid-column: 1 / -1; display: flex; gap: 6px; min-width: 0; color: var(--ui-muted); font-size: 12px; }
 .ui-md-rrow-sub > span { flex: none; }
 .ui-md-rrow-sub > span:first-child { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The host cuts itself, so the IP's tooltip is not clipped with it */
+.ui-md-rrow-sub > .ui-md-rrow-via { display: inline-flex; align-items: baseline; gap: 4px; overflow: visible; }
+.ui-md-rrow-via .ui-md-relay { display: inline-flex; gap: 4px; }
+.ui-md-rrow .ui-md-relay-port { padding: 0 5px; background: var(--ui-panel); font-size: 11.5px; }
 .ui-md-rrow-why { grid-column: 1 / -1; font-family: var(--ui-mono); font-size: 11.5px; line-height: 1.45; overflow-wrap: anywhere; }
 .ui-md-rnone { padding: 14px 12px; background: var(--ui-bg); color: var(--ui-muted); font-size: var(--ui-fs-sm); }
 .ui-md-rmore { justify-self: start; }
@@ -3026,6 +3033,11 @@ button.ui-aa-col:focus-visible { outline: 2px solid var(--ui-focus); outline-off
 .ui-picker-btn[aria-expanded="true"] .ui-select-arrow { transform: rotate(180deg); }
 .ui-picker-search { width: 100%; }
 .ui-picker-list { display: grid; gap: 1px; max-height: min(320px, 45vh); overflow-y: auto; }
+/* A long option is cut, never scrolled sideways; its hint stays whole */
+.ui-picker-list, .ui-picker-panel[role="listbox"] { overflow-x: hidden; }
+.ui-picker-panel [role="option"].ui-fct > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ui-picker-panel [role="option"].ui-fct > small { flex: none; white-space: nowrap; }
+.ui-picker-panel.ui-md-rcpt-panel { width: min(400px, calc(100vw - 16px)); }
 .ui-picker-none { padding: 4px 8px; font-size: 12.5px; }
 .ui-picker-none.hidden { display: none; }
 .ui-ms-dropdown { width: min(320px, calc(100vw - 16px)); }

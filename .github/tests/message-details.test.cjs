@@ -402,3 +402,25 @@ test('a mailbox Rspamd named stays a recipient though an alias also reached it',
     await h2.context.viewMessageDetails('example-key');
     assert.doesNotMatch(h2.element('message-modal-header').innerHTML, /To \(2\)/);
 });
+
+test('a message to many names its one server in the strip, and each recipient its own server', async () => {
+    const h = harness(messageToMany());
+    await h.context.viewMessageDetails('example-key');
+    h.context.switchModalTab('postfix');
+    const strip = h.element('message-modal-content').innerHTML.split('id="md-rcpts"')[0];
+    assert.match(strip, /<span>Relay<\/span>[\s\S]*data-host="mx\.example\.net" data-ip="192\.0\.2\.9"/);
+    // A row names its server, port and IP; a click on the row opens it, not a copy
+    const rows = h.context.renderRecipientRows();
+    assert.match(rows, /class="ui-md-rrow-via">via <span class="ui-md-relay">\s*<span class="ui-md-relay-host" data-host="mx\.example\.net" data-ip="192\.0\.2\.9" data-tip="IP 192\.0\.2\.9"[^>]*><bdi>mx\.example\.net<\/bdi>/);
+    assert.match(rows, /class="ui-md-relay-port">:25</);
+    assert.doesNotMatch(rows, /copyToClipboard\('mx\.example\.net'/);
+
+    // Two servers: the strip leaves the server to the rows
+    const data = messageToMany();
+    data.postfix.find(l => l.recipient === 'a@example.net').relay = 'mx2.example.org[198.51.100.7]:25';
+    const h2 = harness(data);
+    await h2.context.viewMessageDetails('example-key');
+    h2.context.switchModalTab('postfix');
+    assert.doesNotMatch(h2.element('message-modal-content').innerHTML.split('id="md-rcpts"')[0], /<span>Relay<\/span>/);
+    assert.match(h2.context.renderRecipientRows(), /data-host="mx2\.example\.org"/);
+});
