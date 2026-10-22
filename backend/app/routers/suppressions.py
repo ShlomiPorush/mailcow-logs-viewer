@@ -132,7 +132,7 @@ def migrate_manual_map_line(line: str) -> str:
     return line
 
 
-# Rows loaded back from the app's section of the Rspamd map when Spam Filter
+# Rows loaded back from the app's section of the Rspamd map when Suppressions
 # was turned on again: permanent, and no automatic path changes them
 RSPAMD_SOURCE = 'rspamd'
 # Longest value a row holds (spam_suppressions.email)
@@ -464,7 +464,7 @@ def get_suppression_config():
         "suppression_enabled": settings.suppression_enabled,
         "suppression_auto_detect": settings.suppression_auto_detect,
         "suppression_rspamd_sync": settings.suppression_rspamd_sync,
-        # The app keeps a list (Spam Filter and Sync with Rspamd on): the Queue page offers Suppress
+        # The app keeps a list (Suppressions and Sync with Rspamd on): the Queue page offers Suppress
         "list_kept": rspamd_sync_on(),
         "suppression_whitelist_domains": settings.suppression_whitelist_domains,
         "suppression_hard_bounce_action": settings.suppression_hard_bounce_action,
@@ -893,7 +893,7 @@ def rspamd_sync_on() -> bool:
     user asks for in Settings (removing its blocks, starting fresh).
     Automatic blocks are made only with "Handle undeliverable mail
     automatically" on as well."""
-    return settings.is_feature_enabled('spam-filter') and bool(settings.suppression_rspamd_sync)
+    return settings.is_feature_enabled('suppressions') and bool(settings.suppression_rspamd_sync)
 
 
 def _run_on_worker_loop(work):
@@ -919,7 +919,7 @@ def sync_suppressions_worker(automatic: bool = False) -> dict:
     reads. Without automatic (Settings turning the sync on) it always writes.
     """
     with map_write_lock():
-        if not settings.is_feature_enabled('spam-filter'):
+        if not settings.is_feature_enabled('suppressions'):
             # Its list is deleted while it is off: writing it would wipe the
             # blocks that come back when it is turned on
             if automatic:
@@ -955,7 +955,7 @@ class MapUnavailable(Exception):
         "no_rw_key_and_password": "The Read-Write API key and Rspamd password are not set.",
         "read_failed": "The Rspamd map could not be read. Check the connection and try again.",
         "map_not_found": "Rspamd has no recipient denylist map.",
-        "feature_off": "Spam Filter is off.",
+        "feature_off": "Suppressions are off in Settings > Features.",
         "import_failed": "This app's Rspamd blocks could not be loaded into the list.",
         "section_missing": "The app's section is missing from the Rspamd map. Nothing was changed.",
         "section_unclear": ("The app's section markers in the Rspamd map are missing or repeated. "
@@ -1391,7 +1391,7 @@ async def _write_to_rspamd(db: Session, snapshot: dict, automatic: bool) -> dict
 
 def off_transition(db: Session) -> Optional[str]:
     """The token of the save that last stopped the list being kept (Sync with
-    Rspamd or Spam Filter turned off), which a Remove of the app's blocks
+    Rspamd or Suppressions turned off), which a Remove of the app's blocks
     asked with that save names."""
     from ..models import SystemSetting
     row = db.query(SystemSetting.value).filter(SystemSetting.key == OFF_TRANSITION_KEY).first()
@@ -1477,7 +1477,7 @@ async def sync_suppressions_to_rspamd(db: Session, automatic: bool = False) -> d
     return {"success": True, **written, **_pull_counts(pulled), "pending_count": pending_count(db)}
 
 
-# ---- Clear, start fresh, load back after Spam Filter was off ----
+# ---- Clear, start fresh, load back after Suppressions was off ----
 
 async def _clear_managed_section(db: Session, purpose: str = 'remove', transition: Optional[str] = None) -> int:
     """Empty the app's part of the map, leaving every other line exactly as it
@@ -1551,7 +1551,7 @@ def start_fresh_worker() -> dict:
 
 def import_pending(db: Session) -> bool:
     """Whether the blocks this app wrote to Rspamd still have to be loaded
-    into the list (Spam Filter was off and its list deleted)."""
+    into the list (Suppressions was off and its list deleted)."""
     from ..models import SystemSetting
     from ..services.feature_data import SPAM_IMPORT_PENDING_KEY
     return db.query(SystemSetting.key).filter(SystemSetting.key == SPAM_IMPORT_PENDING_KEY).first() is not None
@@ -1566,7 +1566,7 @@ def import_managed_worker() -> dict:
     from ..models import SystemSetting
     from ..services.feature_data import SPAM_IMPORT_PENDING_KEY, SPAM_IMPORT_RESTORE
     with map_write_lock():
-        if not settings.is_feature_enabled('spam-filter'):
+        if not settings.is_feature_enabled('suppressions'):
             return {"imported": 0, "pending": False, "loaded": False, "feature_off": True}
         if not rspamd_sync_on():
             # Nothing is read while the sync is off: the first read once it is on loads them

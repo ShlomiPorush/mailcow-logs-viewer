@@ -12,7 +12,7 @@ const GS_CATEGORIES = [
     { id: 'messages', label: 'Messages', feature: null },
     { id: 'domains', label: 'Domains', feature: 'domains' },
     { id: 'mailboxes', label: 'Mailboxes', feature: 'mailbox-stats' },
-    { id: 'suppressions', label: 'Suppressions', feature: 'spam-filter' },
+    { id: 'suppressions', label: 'Suppressions', feature: 'suppressions' },
     { id: 'addresses', label: 'IP addresses', feature: 'netfilter' }
 ];
 // Results a category's tab lists, and how many of them All shows
@@ -36,7 +36,7 @@ const GS_ICONS = {
 const GS_PAGE_TABS = {
     netfilter: 'security-tab-btn-',
     quarantine: 'quarantine-tab-btn-',
-    'spam-filter': 'spam-subtab-',
+    outbound: 'outbound-tab-btn-',
     status: 'status-tab-btn-',
     'mailbox-stats': 'mailbox-stats-view-'
 };
@@ -512,7 +512,7 @@ async function gsOpenMailbox(username, text) {
     gsReveal(content ? content.parentElement : null, 'start');
 }
 
-// Spam Filter > Suppressions, listing what the search found in every state
+// Outbound > Suppressions, listing what the search found in every state
 function gsOpenSuppressions(text) {
     const search = gsEl('suppression-search');
     if (search) search.value = text;
@@ -522,8 +522,8 @@ function gsOpenSuppressions(text) {
     if (active) active.value = '';
     // The list keeps the filters it was last asked with: it reads them again from the fields
     suppressionQuery = null;
-    const already = gsPageOpen('spam-filter') && spamFilterSubTab === 'suppressions';
-    navigateTo('spam-filter', { sub: 'suppressions' });
+    const already = gsPageOpen('outbound') && outboundTab === 'suppressions';
+    navigateTo('outbound', { sub: 'suppressions' });
     if (already) loadSuppressions(1);
 }
 

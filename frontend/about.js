@@ -111,10 +111,10 @@ function aboutHealthCards(info, mailcow, rw, health) {
     cards.push(card('MaxMind GeoIP', geoTone, geoValue, geoDetail, settingsBtn('maxmind')));
 
     const rspamdCheck = config.rspamd_configured && checked('rspamd_password', config.rspamd_password_status,
-        'Spam Filter maps are read and kept in sync.');
+        'The Rspamd maps are read, and the suppression list syncs with Rspamd.');
     cards.push(card('Rspamd', config.rspamd_configured ? rspamdCheck.tone : '', config.rspamd_configured ? rspamdCheck.value : 'Not set up',
         config.rspamd_configured ? rspamdCheck.detail
-            : 'Add the Rspamd password to see and sync the Spam Filter maps.', settingsBtn('mailcow')));
+            : 'Add the Rspamd password to see the Rspamd maps and sync the suppression list.', settingsBtn('mailcow')));
 
     // Basic Auth names its user, OAuth2 its provider
     const methods = [

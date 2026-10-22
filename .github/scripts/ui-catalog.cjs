@@ -22,12 +22,12 @@ const END = '<!-- generated:end -->';
 const PAGE_BY_FILE = {
     'devices.js': 'Devices', 'dmarc.js': 'DMARC', 'domains.js': 'Domains', 'logs-viewer.js': 'Logs', 'mailbox-stats.js': 'Mailbox stats',
     'message-details.js': 'Message details', 'notifications.js': 'Settings', 'rate-limits.js': 'Mailbox stats',
-    'settings.js': 'Settings', 'smtp-abuse.js': 'Security', 'spam_filter.js': 'Spam filter',
+    'settings.js': 'Settings', 'smtp-abuse.js': 'Security', 'spam_filter.js': 'Outbound',
     'utils.js': 'Shared', 'export.js': 'Shared', 'router.js': 'Shell',
 };
 const PAGE_BY_SECTION = {
-    dashboard: 'Dashboard', messages: 'Messages', netfilter: 'Security', queue: 'Queue', quarantine: 'Quarantine',
-    'spam-filter': 'Spam filter', status: 'Status', domains: 'Domains', dmarc: 'DMARC', 'mailbox-stats': 'Mailbox stats',
+    dashboard: 'Dashboard', messages: 'Messages', netfilter: 'Security', outbound: 'Outbound', quarantine: 'Quarantine', rspamd: 'Rspamd',
+    status: 'Status', domains: 'Domains', dmarc: 'DMARC', 'mailbox-stats': 'Mailbox stats',
     devices: 'Devices', logs: 'Logs', settings: 'Settings',
 };
 // app.js holds most pages; its functions are placed by name.
@@ -36,15 +36,15 @@ const PAGE_BY_FUNCTION = [
     [/messageDetail|modalTab|postfixDetail/i, 'Message details'],
     [/message/i, 'Messages'],
     [/netfilter|fail2ban|security|abuse|unban|banIP/i, 'Security'],
-    [/queue/i, 'Queue'],
+    [/queue|outbound/i, 'Outbound'],
     [/quarantine|qrule/i, 'Quarantine'],
     [/status|blacklist|container|storage|version|host|job/i, 'Status'],
     [/geoip|flag/i, 'Shared'],
     [/dark|theme|mobile|navigate|toast|help|changelog|autoRefresh|switchTab/i, 'Shell'],
 ];
 const UNREACHABLE = 'Not rendered (possible dead code)';
-const PAGE_ORDER = ['Shell', 'Dashboard', 'Messages', 'Message details', 'Security', 'Queue', 'Quarantine',
-    'Spam filter', 'Status', 'Domains', 'DMARC', 'Mailbox stats', 'Logs', 'Settings', 'Shared', 'app.js (mixed)', UNREACHABLE];
+const PAGE_ORDER = ['Shell', 'Dashboard', 'Messages', 'Message details', 'Security', 'Outbound', 'Quarantine', 'Rspamd',
+    'Status', 'Domains', 'DMARC', 'Mailbox stats', 'Logs', 'Settings', 'Shared', 'app.js (mixed)', UNREACHABLE];
 
 function loadFiles() {
     return fs.readdirSync(FRONTEND)
@@ -172,7 +172,12 @@ function idPages(files) {
 // touches (majority vote), then from its name, then from the file.
 function pageOf(file, idx, files) {
     if (file.name === 'index.html') return htmlPageAt(file.text, idx);
-    if (PAGE_BY_FILE[file.name] && file.name !== 'app.js') return PAGE_BY_FILE[file.name];
+    if (PAGE_BY_FILE[file.name] && file.name !== 'app.js') {
+        // spam_filter.js holds the Rspamd maps editor too, the Rspamd page
+        const fnName = (containingFunction(file.text, idx) || {}).name || '';
+        if (file.name === 'spam_filter.js' && /rspamdmap|map(editor|content|crumb|meta)|regex/i.test(fnName)) return 'Rspamd';
+        return PAGE_BY_FILE[file.name];
+    }
     // Inside a function: its whole body. Top-level code: the statement around idx.
     const fn = containingFunction(file.text, idx) || { name: '', start: idx, end: Math.min(file.text.length, idx + 800) };
     {

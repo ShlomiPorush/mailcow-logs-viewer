@@ -204,9 +204,10 @@ window.disabledFeatures = [];
 // All toggleable feature definitions (for settings UI)
 const TOGGLEABLE_FEATURES = [
     { id: 'netfilter', label: 'Security', description: 'Fail2Ban management and security events' },
-    { id: 'queue', label: 'Queue', description: 'Mail queue monitoring' },
+    { id: 'queue', label: 'Queue', description: 'Outbound > Queue: mail waiting in the Postfix queue' },
+    { id: 'suppressions', label: 'Suppressions', description: 'Outbound > Suppressions: recipients blocked after failed delivery' },
     { id: 'quarantine', label: 'Quarantine', description: 'Quarantined emails and auto-rules' },
-    { id: 'spam-filter', label: 'Spam Filter', description: 'Bounce suppression and Rspamd maps' },
+    { id: 'rspamd', label: 'Rspamd', description: 'The Rspamd maps that allow or block mail, incoming and outgoing' },
     { id: 'domains', label: 'Domains', description: 'Domain DNS analysis and transports' },
     { id: 'dmarc', label: 'DMARC & TLS', description: 'DMARC/TLS reports and IMAP sync' },
     { id: 'mailbox-stats', label: 'Mailbox Stats', description: 'Mailbox and alias statistics' },
@@ -218,6 +219,49 @@ const TOGGLEABLE_FEATURES = [
 
 function isFeatureDisabled(featureId) {
     return window.disabledFeatures.includes(featureId);
+}
+
+// Pages whose tabs belong to different features: tab -> feature. A tab whose
+// feature is off is hidden, and the page goes only when all of them are off.
+const TAB_FEATURES = {
+    outbound: { queue: 'queue', suppressions: 'suppressions' }
+};
+
+function tabFeatureOn(page, tab) {
+    const feature = TAB_FEATURES[page] && TAB_FEATURES[page][tab];
+    return !feature || !isFeatureDisabled(feature);
+}
+
+// The tab asked for while its feature is on, otherwise the first one that is on
+function pageTabOn(page, tab) {
+    const tabs = Object.keys(TAB_FEATURES[page]);
+    return tabs.includes(tab) && tabFeatureOn(page, tab) ? tab : (tabs.find(t => tabFeatureOn(page, t)) || tabs[0]);
+}
+
+function pageAllOff(page) {
+    return !Object.keys(TAB_FEATURES[page]).some(tab => tabFeatureOn(page, tab));
+}
+
+// A page shows "is disabled" while its features are off. The Mailbox Stats
+// page also hosts Rate Limits, so it stays open while that feature is on.
+function pageIsOff(page) {
+    if (TAB_FEATURES[page]) return pageAllOff(page);
+    if (page === 'mailbox-stats' && !isFeatureDisabled('rate-limits')) return false;
+    return isFeatureDisabled(page);
+}
+
+// Hide the tabs of features that are off; a page with one tab left shows no tab bar
+function applyTabFeatures(page) {
+    const prefix = `${page}-tab-btn-`;
+    let shown = 0;
+    for (const tab of Object.keys(TAB_FEATURES[page])) {
+        const btn = document.getElementById(prefix + tab);
+        const on = tabFeatureOn(page, tab);
+        if (btn) btn.classList.toggle('hidden', !on);
+        if (on) shown++;
+    }
+    const bar = document.getElementById(`${page}-tabs`);
+    if (bar) bar.classList.toggle('hidden', shown < 2);
 }
 
 function applyFeatureToggles() {
@@ -238,6 +282,24 @@ function applyFeatureToggles() {
             }
         }
     }
+    // Suppressions can open the map they are written to while the Rspamd page is on
+    const openMap = document.getElementById('suppression-open-map');
+    if (openMap) openMap.style.display = isFeatureDisabled('rspamd') ? 'none' : '';
+
+    // Outbound stays while one of its features is on
+    for (const page of Object.keys(TAB_FEATURES)) {
+        for (const id of [`tab-${page}`, `mobile-tab-${page}`, `tabbar-${page}`]) {
+            const el = document.getElementById(id);
+            if (el) el.style.display = pageAllOff(page) ? 'none' : '';
+        }
+        applyTabFeatures(page);
+    }
+    // A tab that just went is not left open: the page shows its first tab that is on
+    if (typeof outboundTab !== 'undefined' && outboundTab !== pageTabOn('outbound', outboundTab)) {
+        if (currentTab === 'outbound' && !pageAllOff('outbound')) outboundShowTab(outboundTab);
+        else outboundTab = pageTabOn('outbound', outboundTab);
+    }
+
     // A navigation group whose pages are all off loses its heading too
     document.querySelectorAll('[data-nav-group]').forEach(group => {
         const visible = [...group.querySelectorAll('button')].some(btn => btn.style.display !== 'none');
@@ -373,7 +435,7 @@ async function fetchRwStatus() {
         renderSecuritySettings();
     }
     // Same for the Queue and Quarantine rows and their actions
-    if (currentTab === 'queue' && allQueueData.length) applyQueueFilters();
+    if (currentTab === 'outbound' && allQueueData.length) applyQueueFilters();
     if (currentTab === 'quarantine' && quarantineLastData) renderQuarantineData(quarantineLastData);
 }
 
@@ -412,7 +474,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         'content-dashboard',
         'content-messages',
         'content-netfilter',
-        'content-queue',
+        'content-outbound',
         'content-quarantine',
         'content-status',
         'content-settings',
@@ -764,7 +826,7 @@ async function loadNavCounters() {
     const failedLogins = dashboard ? dashboard.failed_logins || 0 : 0;
     setNavCount('netfilter', failedLogins, false, `${failedLogins} failed logins in the last 24 hours`);
     const queued = queue && Array.isArray(queue.data) ? queue.data.length : 0;
-    setNavCount('queue', queued, false, `${queued} messages in the queue`);
+    setNavCount('outbound', queued, false, `${queued} messages in the queue`);
     const held = quarantine ? (quarantine.total || (quarantine.data || []).length) : 0;
     setNavCount('quarantine', held, false, `${held} quarantined messages`);
     const dmarcActions = insights ? (insights.insights || []).filter(i =>
@@ -1033,6 +1095,8 @@ function stopAutoRefresh() {
 
 // Smart refresh - fetches data silently and only updates if changed
 async function smartRefreshCurrentTab() {
+    // A page that says it is disabled asks for nothing
+    if (pageIsOff(currentTab)) return;
     // Don't refresh if modal is open
     const modal = document.getElementById('message-modal');
     if (modal && !modal.classList.contains('hidden') && !modal.classList.contains('ui-docked')) {
@@ -1054,8 +1118,13 @@ async function smartRefreshCurrentTab() {
                 loadFail2BanSettings();
                 if (typeof refreshProtectionHits === 'function') refreshProtectionHits();
                 break;
-            case 'queue':
-                await smartRefreshQueue();
+            case 'outbound':
+                // The queue feeds the page's summary and the sidebar counter on both tabs
+                if (!isFeatureDisabled('queue')) await smartRefreshQueue();
+                if (!isFeatureDisabled('suppressions')) {
+                    if (outboundTab === 'suppressions') await smartRefreshSuppressions();
+                    else await loadSuppressionStats();
+                }
                 break;
             case 'quarantine':
                 await smartRefreshQuarantine();
@@ -1065,9 +1134,6 @@ async function smartRefreshCurrentTab() {
                 break;
             case 'settings':
                 await smartRefreshSettings();
-                break;
-            case 'spam-filter':
-                await smartRefreshSpamFilter();
                 break;
         }
     } catch (error) {
@@ -1645,11 +1711,9 @@ function switchTab(tab, params = {}) {
     // Block disabled features - show a "Feature Disabled" page.
     // Exception: the Mailbox Stats page also hosts Rate Limits, so it stays
     // open while that feature is on, even with Mailbox Stats itself off.
-    const hostsEnabledRateLimits = tab === 'mailbox-stats'
-        && !window.disabledFeatures.includes('rate-limits');
-    if (window.disabledFeatures.includes(tab) && !hostsEnabledRateLimits) {
+    if (pageIsOff(tab)) {
         const feature = TOGGLEABLE_FEATURES.find(f => f.id === tab);
-        const featureLabel = feature ? feature.label : tab;
+        const featureLabel = feature ? feature.label : (TAB_LABELS[tab] || tab);
         console.warn(`Feature '${tab}' is disabled`);
 
         currentTab = tab;
@@ -1749,12 +1813,16 @@ function switchTab(tab, params = {}) {
             loadSmtpAbusePanel();
             loadSecurityAppSettings();
             break;
-        case 'queue':
-            loadQueue();
+        case 'outbound':
+            loadOutbound();
             break;
         case 'quarantine':
             loadQuarantine();
             initQuarantineRules();
+            break;
+        case 'rspamd':
+            // Not refreshed on the timer: the map editor would drop unsaved changes
+            loadRspamdMaps();
             break;
         case 'status':
             loadStatus();
@@ -1780,9 +1848,6 @@ function switchTab(tab, params = {}) {
             break;
         case 'about':
             loadAbout();
-            break;
-        case 'spam-filter':
-            loadSpamFilter();
             break;
         default:
             console.warn('Unknown tab:', tab);
@@ -2394,7 +2459,7 @@ async function loadFail2BanSettings() {
 
 let allQueueData = [];
 // Suppress shows only while the app keeps a suppression list (Sync with Rspamd
-// on), read again with each load; unknown (an error, Spam Filter off) shows none
+// on), read again with each load; unknown (an error, Suppressions off) shows none
 let queueSuppressOn = false;
 // Loads and auto refreshes share one order: an answer older than the one
 // drawn is dropped, so neither undoes a newer one
@@ -3152,6 +3217,16 @@ async function initQuarantineRules() {
     }
 }
 
+// Show one tab of a page with tabs: its button, its panel
+function showPageTab(page, tab) {
+    Object.keys(TAB_FEATURES[page]).forEach(name => {
+        const btn = document.getElementById(`${page}-tab-btn-${name}`);
+        if (btn) { btn.classList.toggle('active', name === tab); btn.setAttribute('aria-selected', name === tab); }
+        const panel = document.getElementById(`${page}-tab-${name}`);
+        if (panel) panel.classList.toggle('hidden', name !== tab);
+    });
+}
+
 // Quarantine tabs: the held messages, and the Auto-Rules that handle them
 let quarantineTab = 'messages';
 function quarantineShowTab(tab) {
@@ -3163,6 +3238,36 @@ function quarantineShowTab(tab) {
         const panel = document.getElementById(`quarantine-tab-${name}`);
         if (panel) panel.classList.toggle('hidden', name !== tab);
     });
+}
+
+// Outbound tabs: the mail waiting to leave, and the recipients it is no
+// longer sent to (spam_filter.js). Each has its own feature.
+let outboundTab = 'queue';
+function outboundShowTab(tab, load = true) {
+    const asked = tab;
+    tab = pageTabOn('outbound', tab);
+    outboundTab = tab;
+    routerSyncSubpage('outbound', tab, tab !== asked);
+    showPageTab('outbound', tab);
+    if (!load || currentTab !== 'outbound') return;
+    // An opened tab shows what is there now, as the page did on its own
+    if (tab === 'suppressions') loadSuppressionsTab();
+    else if (!isFeatureDisabled('queue')) loadQueue();
+}
+
+// The page opened: the queue (also for the summary and the sidebar counter),
+// and the suppressions: their list on their tab, otherwise their count
+function loadOutbound() {
+    applyTabFeatures('outbound');
+    const queueOn = !isFeatureDisabled('queue'), suppressionsOn = !isFeatureDisabled('suppressions');
+    const queueSummary = document.getElementById('queue-summary');
+    const suppressionSummary = document.getElementById('suppression-summary');
+    if (queueSummary && !queueOn) queueSummary.textContent = '';
+    if (suppressionSummary && !suppressionsOn) suppressionSummary.textContent = '';
+    if (queueOn) loadQueue();
+    outboundShowTab(outboundTab, false);
+    if (outboundTab === 'suppressions') loadSuppressionsTab();
+    else if (suppressionsOn) loadSuppressionStats();
 }
 
 async function loadQuarantineRules() {
@@ -4707,7 +4812,7 @@ function statusJobCategories(jobs) {
             ]
         },
         {
-            title: 'Spam Filter',
+            title: 'Outbound',
             icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"></path>',
             jobs: [
                 ['Detect Suppressions', 'detect_suppressions', jobs.detect_suppressions],
@@ -5067,7 +5172,7 @@ const DOCS_REPO_URL = 'https://github.com/ShlomiPorush/mailcow-logs-viewer/blob/
 // In the app its screenshots are left out, since the page itself is on screen,
 // and its relative links, which work on the site, point to the site instead.
 // A link to a section of the same page goes there too: the window's headings
-// have no anchors. docName is the file's name, such as Spam_Filter.
+// have no anchors. docName is the file's name, such as Mailbox_Stats.
 function helpDocMarkdown(markdown, docName) {
     return markdown
         .replace(/^[ \t]*!\[[^\]]*\]\([^)\s]*\)[ \t]*$/gm, '')
@@ -5102,7 +5207,7 @@ async function showHelpModal(docName, title) {
         }
 
         const markdown = helpDocMarkdown(await response.text(), docName);
-        // Else the document's file name, read as words: Spam_Filter is Spam Filter
+        // Else the document's file name, read as words: Mailbox_Stats is Mailbox Stats
         showMarkdownModal(`Help - ${title || docName.replace(/_/g, ' ')}`, markdown);
 
     } catch (error) {
@@ -5225,8 +5330,8 @@ function closeContainerLogsModal() {
 
 const NAV_SUBPAGE_TABS = {
     quarantine: '#quarantine-tabs:not(.hidden)',
+    outbound: '#outbound-tabs:not(.hidden)',
     netfilter: '.ui-se-tabs',
-    'spam-filter': '#content-spam-filter .ui-page-tabs',
     status: '.ui-st-tabs',
     'mailbox-stats': '#mailbox-stats-views'
 };

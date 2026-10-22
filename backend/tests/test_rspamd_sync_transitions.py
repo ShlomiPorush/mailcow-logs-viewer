@@ -206,7 +206,7 @@ def purge_client(monkeypatch, rows):
         monkeypatch.setattr(settings._inner, key, False)
     monkeypatch.setattr(settings._inner, 'edit_settings_via_ui_enabled', True)
     real = type(settings._inner).is_feature_enabled
-    monkeypatch.setattr(type(settings._inner), "is_feature_enabled", lambda self, name: False if name == 'spam-filter' else real(self, name))
+    monkeypatch.setattr(type(settings._inner), "is_feature_enabled", lambda self, name: False if name == 'suppressions' else real(self, name))
     import starlette.staticfiles as sf
     orig = sf.StaticFiles.__init__
     monkeypatch.setattr(sf.StaticFiles, '__init__', lambda s, *a, **k: orig(s, *a, **{**k, 'check_dir': False}))
@@ -216,13 +216,13 @@ def purge_client(monkeypatch, rows):
 
 
 def test_the_list_is_not_deleted_without_a_choice_for_its_rspamd_blocks(purge_client):
-    resp = purge_client.post('/api/settings/purge-feature-data', json={'feature': 'spam-filter'})
+    resp = purge_client.post('/api/settings/purge-feature-data', json={'feature': 'suppressions'})
     assert resp.status_code == 400 and len(_mine()) == 2
 
 
 def test_remove_that_fails_keeps_the_list(purge_client, creds, monkeypatch):
     monkeypatch.setattr(suppressions.mailcow_api, "edit_rspamd_map", AsyncMock(side_effect=MailcowAPIError('not saved')))
-    resp = purge_client.post('/api/settings/purge-feature-data', json={'feature': 'spam-filter', 'rspamd': 'remove'})
+    resp = purge_client.post('/api/settings/purge-feature-data', json={'feature': 'suppressions', 'rspamd': 'remove'})
     assert resp.status_code == 502 and resp.json()['detail']['code'] == 'not_confirmed'
     assert len(_mine()) == 2
 
@@ -236,12 +236,39 @@ def test_remove_then_delete(purge_client, creds, monkeypatch):
         held.append(lock._LOCK.locked())
         return await real(db, *args)
     monkeypatch.setattr(suppressions, "_clear_managed_section", clear)
-    resp = purge_client.post('/api/settings/purge-feature-data', json={'feature': 'spam-filter', 'rspamd': 'remove'})
+    resp = purge_client.post('/api/settings/purge-feature-data', json={'feature': 'suppressions', 'rspamd': 'remove'})
     assert held == [True] and not lock._LOCK.locked(), 'the map lock is held from the removal until the list is gone'
     assert resp.status_code == 200 and _mine() == []
     assert split_managed_section(creds[0])[1] == [] and split_managed_section(creds[0])[0] == BEFORE
 
 
 def test_keep_deletes_the_list_and_leaves_rspamd_alone(purge_client, creds):
-    resp = purge_client.post('/api/settings/purge-feature-data', json={'feature': 'spam-filter', 'rspamd': 'keep'})
+    resp = purge_client.post('/api/settings/purge-feature-data', json={'feature': 'suppressions', 'rspamd': 'keep'})
     assert resp.status_code == 200 and _mine() == [] and creds == []
+
+
+def test_the_old_name_of_the_switch_still_deletes_the_list(purge_client, creds):
+    """spam-filter was the switch's name before the list moved to Outbound."""
+    resp = purge_client.post('/api/settings/purge-feature-data', json={'feature': 'spam-filter', 'rspamd': 'keep'})
+    assert resp.status_code == 200 and resp.json()['feature'] == 'suppressions'
+    assert _mine() == [] and creds == []
+
+
+def test_the_old_name_refuses_a_remove_whose_save_was_switched_again(purge_client, creds):
+    """A Remove carries the token of the save that turned the list off; once
+    another save turned it off again, that token is stale, also under the old name."""
+    from app.database import get_db_context
+    from app.services.feature_data import _set_key
+    from app.models import SystemSetting
+    with get_db_context() as db:
+        _set_key(db, 'spam_filter.off_transition', 'the-newer-save')
+        db.commit()
+    try:
+        resp = purge_client.post('/api/settings/purge-feature-data',
+                                 json={'feature': 'spam-filter', 'rspamd': 'remove', 'transition': 'an-older-save'})
+        assert resp.status_code == 409 and resp.json()['detail']['code'] == 'transition_changed'
+        assert len(_mine()) == 2 and creds == [], 'nothing removed from Rspamd, nothing deleted'
+    finally:
+        with get_db_context() as db:
+            db.query(SystemSetting).filter(SystemSetting.key == 'spam_filter.off_transition').delete()
+            db.commit()

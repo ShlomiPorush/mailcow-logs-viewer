@@ -1724,7 +1724,7 @@ button.ui-st-card:hover { outline: 1px solid var(--ui-line); }
     .ui-rl-tools { width: 100%; margin-inline-start: 0; }
 }
 
-/* ---------- Spam Filter (v3 language) ---------- */
+/* ---------- Outbound > Suppressions and the Rspamd maps (v3 language) ---------- */
 /* The four row buttons fit one line */
 .ui-supp-table { --ui-cols: minmax(184px, 2fr) minmax(150px, 1.2fr) 86px minmax(120px, 1fr) 80px 80px 288px; --ui-table-min: 1076px; }
 @media (min-width: 761px) { .ui-supp-table .ui-row-actions { flex-wrap: nowrap; } }
@@ -1874,7 +1874,7 @@ button.ui-st-card:hover { outline: 1px solid var(--ui-line); }
 /* A group's opening line, under its title: what the group is about */
 .ui-set-group-intro { padding: 0 var(--ui-pad-x) 4px; }
 
-/* Queue Management choices (settingsBounceChoice): one card per option, marked like the DMARC policy cards (.ui-dm-pol) */
+/* Outbound choices (settingsBounceChoice): one card per option, marked like the DMARC policy cards (.ui-dm-pol) */
 .ui-set-choice { gap: 10px; }
 .ui-set-choice-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
 .ui-set-choice-head > .ui-label { margin: 0; color: var(--ui-ink); font-size: 14px; }
@@ -1917,7 +1917,7 @@ html body .ui-main .ui-set-choice-opt > input[type="radio"] { accent-color: var(
 .ui-form-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .ui-dialog.ui-dialog-md { width: min(680px, 100%); }
 
-/* Block details (Spam Filter > Suppressions): one card per event, newest first */
+/* Block details (Outbound > Suppressions): one card per event, newest first */
 .ui-block-who { margin: 0 0 10px; font-weight: 650; overflow-wrap: anywhere; }
 .ui-block-event { display: grid; gap: 6px; padding: 12px 0; border-top: 1px solid var(--ui-line); }
 .ui-block-event > header { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }

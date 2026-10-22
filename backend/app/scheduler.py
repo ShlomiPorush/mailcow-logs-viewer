@@ -259,7 +259,7 @@ def _reschedule_suppression_jobs():
     if not scheduler.running:
         return
 
-    spam_enabled = settings.is_feature_enabled('spam-filter') and settings.suppression_enabled
+    spam_enabled = settings.is_feature_enabled('suppressions') and settings.suppression_enabled
 
     # detect_suppressions
     if spam_enabled and settings.suppression_auto_detect:
@@ -280,7 +280,7 @@ def _reschedule_suppression_jobs():
 
     # sync_suppressions: keeps the list and the app's Rspamd blocks in step
     # while "Sync with Rspamd" is on
-    if settings.is_feature_enabled('spam-filter') and settings.suppression_rspamd_sync and settings.is_rspamd_configured:
+    if settings.is_feature_enabled('suppressions') and settings.suppression_rspamd_sync and settings.is_rspamd_configured:
         scheduler.add_job(
             sync_suppressions_to_rspamd_job,
             trigger=every(minutes=10),
@@ -3415,7 +3415,7 @@ def _blocks_now(suppression) -> bool:
 
 
 def _list_writable(db) -> bool:
-    """Whether a job may add to the list now: it is kept (Spam Filter and Sync
+    """Whether a job may add to the list now: it is kept (Suppressions and Sync
     with Rspamd on) and no load of this app's blocks from Rspamd is owed.
     Asked under the row lock, so a purge or a load does not run in between."""
     from .routers.suppressions import import_pending
@@ -3658,7 +3658,7 @@ async def _spam_blocks_loaded(job: str) -> bool:
 
     if not rspamd_sync_on():
         # Nothing is read from Rspamd while the sync is off: nothing to wait for
-        return settings.is_feature_enabled('spam-filter')
+        return settings.is_feature_enabled('suppressions')
 
     def pending():
         with get_db_context() as db:
@@ -3667,7 +3667,7 @@ async def _spam_blocks_loaded(job: str) -> bool:
     loop = asyncio.get_running_loop()
     try:
         if not await loop.run_in_executor(get_thread_pool_executor(), pending):
-            return settings.is_feature_enabled('spam-filter')
+            return settings.is_feature_enabled('suppressions')
         result = await loop.run_in_executor(get_thread_pool_executor(), import_managed_worker)
         if result.get('reason') == 'no_password':
             update_job_status(job, 'failed', "Waiting to load this app's Rspamd blocks into the list: "
@@ -3675,9 +3675,9 @@ async def _spam_blocks_loaded(job: str) -> bool:
             return False
         if result.get('sync_off'):
             # The sync went off while this waited: nothing to wait for, as above
-            return settings.is_feature_enabled('spam-filter')
-        # Spam Filter turned off while this waited: the job stops
-        return not result.get('pending') and not result.get('feature_off') and settings.is_feature_enabled('spam-filter')
+            return settings.is_feature_enabled('suppressions')
+        # Suppressions turned off while this waited: the job stops
+        return not result.get('pending') and not result.get('feature_off') and settings.is_feature_enabled('suppressions')
     except Exception as e:
         logger.warning(f"[SUPPRESSION] This app's Rspamd blocks could not be loaded into the list yet: {e}")
         update_job_status(job, 'failed', f"Waiting to load this app's Rspamd blocks into the list: {e}")
@@ -3908,14 +3908,14 @@ FEATURE_DATA_SWEEP_MINUTES = 10
 
 
 async def feature_data_sweep_job(load_spam_blocks: bool = True):
-    """Keep features that are off without data, and load Spam Filter's blocks
+    """Keep features that are off without data, and load the Suppressions feature's blocks
     back once it is on again.
 
     Security off: this app's temporary bans leave Fail2ban first (only then
     can its ban history go). Then the data of every feature that is off is
     deleted again, which also takes what a job or an API call wrote after the
-    feature went off; Spam Filter's list also while Sync with Rspamd is off.
-    Spam Filter and the sync on, with the list deleted while one was off: the
+    feature went off; the Suppressions feature's list also while Sync with Rspamd is off.
+    Suppressions and the sync on, with the list deleted while one was off: the
     blocks this app wrote to Rspamd are loaded back into the list.
     """
     update_job_status('feature_data_sweep', 'running')
@@ -3930,8 +3930,8 @@ async def feature_data_sweep_job(load_spam_blocks: bool = True):
                 errors.append(f"Security's temporary bans could not be taken out of Fail2ban: {e}")
         failed = await loop.run_in_executor(get_thread_pool_executor(), cleanup_disabled_feature_data)
         errors.extend(f"The data of {part} could not be deleted: {error}" for part, error in failed.items())
-        if load_spam_blocks and settings.is_feature_enabled('spam-filter') \
-                and not await _spam_blocks_loaded('feature_data_sweep') and settings.is_feature_enabled('spam-filter'):
+        if load_spam_blocks and settings.is_feature_enabled('suppressions') \
+                and not await _spam_blocks_loaded('feature_data_sweep') and settings.is_feature_enabled('suppressions'):
             return JOB_STATUS_SET  # _spam_blocks_loaded reported why
         if errors:
             update_job_status('feature_data_sweep', 'failed', '; '.join(errors))
@@ -3945,7 +3945,7 @@ async def feature_data_sweep_job(load_spam_blocks: bool = True):
 
 def run_feature_data_sweep_soon() -> None:
     """After a settings save: sweep now instead of in up to
-    FEATURE_DATA_SWEEP_MINUTES. Spam Filter's blocks are not loaded by this
+    FEATURE_DATA_SWEEP_MINUTES. the Suppressions feature's blocks are not loaded by this
     run: the Settings page loads them itself and says how many came back
     (the next regular sweep loads them if it could not)."""
     try:
@@ -3979,7 +3979,7 @@ def start_scheduler():
             max_instances=1
         )
         
-        # Features that are off keep no data; Spam Filter on again loads its
+        # Features that are off keep no data; Suppressions on again loads its
         # Rspamd blocks back. First run right after startup.
         scheduler.add_job(
             feature_data_sweep_job,
@@ -4326,7 +4326,7 @@ def start_scheduler():
 
         # Keeps the list and the app's Rspamd blocks in step every 10 minutes
         # while "Sync with Rspamd" is on
-        if settings.is_feature_enabled('spam-filter') and settings.suppression_rspamd_sync and settings.is_rspamd_configured:
+        if settings.is_feature_enabled('suppressions') and settings.suppression_rspamd_sync and settings.is_rspamd_configured:
             scheduler.add_job(
                 sync_suppressions_to_rspamd_job,
                 trigger=every(minutes=10),
@@ -4337,7 +4337,7 @@ def start_scheduler():
             )
 
         # Job 16: Spam Suppression (if enabled)
-        if settings.is_feature_enabled('spam-filter') and settings.suppression_enabled:
+        if settings.is_feature_enabled('suppressions') and settings.suppression_enabled:
             # Detect bounces from postfix logs every 5 minutes, while a choice needs the logs
             if settings.suppression_auto_detect:
                 scheduler.add_job(
@@ -4628,7 +4628,7 @@ def _detect_suppressions_worker():
 async def detect_suppressions_job():
     """
     Scan recent postfix logs for delivery failures: block the addresses the
-    Queue Management choices block, and delete the queued mail of addresses
+    Outbound choices block, and delete the queued mail of addresses
     that failed permanently when the choices say so.
     """
     if not handling_on() or not settings.suppression_auto_detect:
@@ -4669,7 +4669,7 @@ async def detect_suppressions_job():
                     addresses = _queue_item_addresses(item)
                     if queue_id and addresses and any(a in targets for a in addresses):
                         items[queue_id] = addresses
-                if items and settings.is_feature_enabled('spam-filter'):
+                if items and settings.is_feature_enabled('suppressions'):
                     async with map_write_lock_async():
                         deletable = await asyncio.get_running_loop().run_in_executor(
                             get_thread_pool_executor(), _hard_deletable, items, to_block, to_delete)
@@ -4699,7 +4699,7 @@ async def sync_suppressions_to_rspamd_job():
     step while "Sync with Rspamd" is on: changes made in mailcow come into the
     list, the list's changes are written (see sync_suppressions_worker).
     """
-    if not settings.is_feature_enabled('spam-filter'):
+    if not settings.is_feature_enabled('suppressions'):
         return
     if not settings.suppression_rspamd_sync or not settings.is_rspamd_configured:
         return
@@ -4735,7 +4735,7 @@ def _expire_suppressions_sync():
     """
     Deactivate suppressions that have passed their expiry date.
     """
-    if not settings.is_feature_enabled('spam-filter'):
+    if not settings.is_feature_enabled('suppressions'):
         return
     if not settings.suppression_enabled:
         return

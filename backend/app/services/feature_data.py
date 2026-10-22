@@ -2,11 +2,11 @@
 
 A feature that is off keeps nothing in the app, whichever way it was turned
 off (the Settings switch or DISABLED_FEATURES). Turned on again, it reads
-back what the server still has: Spam Filter loads the blocks this app wrote
+back what the server still has: Suppressions loads the blocks this app wrote
 to Rspamd (see routers/suppressions.import_managed_worker), the other
-features fetch or check again on their own. Spam Filter's list is kept only
+features fetch or check again on their own. the Suppressions feature's list is kept only
 while "Sync with Rspamd" is on as well: with the sync off it goes like the
-list of a Spam Filter that is off, and comes back the same way.
+list of a Suppressions that is off, and comes back the same way.
 
 The deletion runs at startup, after every settings save and on a sweep every
 few minutes, so a row written by a job or an API call that was already under
@@ -32,7 +32,7 @@ FEATURE_TABLES: Dict[str, List[str]] = {
     'logs': ['raw_service_logs'],
     'blacklist': ['blacklist_checks', 'monitored_hosts'],
     # The block details go with their blocks (the foreign key cascades too); listed first to count them
-    'spam-filter': ['suppression_events', 'spam_suppressions'],
+    'suppressions': ['suppression_events', 'spam_suppressions'],
     'quarantine': ['quarantine_rule_logs', 'quarantine_rules'],
     'devices': ['eas_devices'],
 }
@@ -44,10 +44,10 @@ FEATURE_KEYS: Dict[str, List[str]] = {
     'blacklist': ['ignore.blocklists'],
     'domains': ['dns_last_full_check'],
     # What the two-way sync with Rspamd keeps about the rows
-    'spam-filter': ['spam_filter.rspamd_%'],
+    'suppressions': ['spam_filter.rspamd_%'],
 }
 
-# Spam Filter turned on again loads the blocks this app wrote to Rspamd while
+# Suppressions turned on again loads the blocks this app wrote to Rspamd while
 # this key is set (routers/suppressions.import_managed_worker). RESTORE: the
 # app may have blocks there, so nothing adds to the list before they are
 # loaded, even while the Rspamd password is missing. BOOTSTRAP: nothing says
@@ -81,7 +81,7 @@ def security_bans_to_release(db: Session) -> int:
 
 
 def spam_list_kept() -> bool:
-    """Whether Spam Filter keeps its suppression list: the feature on, and
+    """Whether Suppressions keeps its suppression list: the feature on, and
     "Sync with Rspamd" on (services/bounce_policy.rspamd_sync_on)."""
     from .bounce_policy import rspamd_sync_on
     return rspamd_sync_on()
@@ -107,7 +107,7 @@ def _spam_may_be_in_rspamd(db: Session) -> bool:
 def purge_feature(db: Session, feature: str, still_off=None) -> dict:
     """Delete everything a feature that is off keeps, in one transaction.
 
-    still_off, for Spam Filter, is asked again once the row lock is held: a
+    still_off, for Suppressions, is asked again once the row lock is held: a
     feature (or sync) turned on while this waited keeps its list, and nothing
     is deleted. Raises on failure after rolling back; the caller decides
     whether that stops it. Returns the rows deleted per table.
@@ -116,7 +116,7 @@ def purge_feature(db: Session, feature: str, still_off=None) -> dict:
     deleted: Dict[str, int] = {}
     restore = False
     try:
-        if feature == 'spam-filter':
+        if feature == 'suppressions':
             # Before the tables: a detection run or the Rspamd sync holds it while it changes the rows
             from .suppression_rows_lock import lock_suppression_rows
             lock_suppression_rows(db)
@@ -153,7 +153,7 @@ def purge_feature(db: Session, feature: str, still_off=None) -> dict:
             removed = db.query(ProtectionHit).delete(synchronize_session=False)
             if removed:
                 deleted['protection_hits'] = removed
-        if feature == 'spam-filter':
+        if feature == 'suppressions':
             _set_key(db, SPAM_IMPORT_PENDING_KEY, SPAM_IMPORT_RESTORE if restore else SPAM_IMPORT_BOOTSTRAP)
         db.commit()
     except Exception:
@@ -172,14 +172,14 @@ SPAM_IMPORT_BOOTSTRAP_KEY = 'spam_filter.import_bootstrapped'
 
 
 def bootstrap_spam_import(db: Session) -> None:
-    """Once, on the first start of a version that loads Spam Filter's blocks
-    back: an empty list with Spam Filter on loads them too. An earlier
+    """Once, on the first start of a version that loads the Suppressions feature's blocks
+    back: an empty list with Suppressions on loads them too. An earlier
     version could leave the blocks in Rspamd with the list deleted (turned off
     with "Keep blocks"), and nothing marked them to come back."""
     from ..models import SpamSuppression, SystemSetting
     if db.query(SystemSetting.key).filter(SystemSetting.key == SPAM_IMPORT_BOOTSTRAP_KEY).first() is not None:
         return
-    if settings.is_feature_enabled('spam-filter') and db.query(SpamSuppression.id).first() is None \
+    if settings.is_feature_enabled('suppressions') and db.query(SpamSuppression.id).first() is None \
             and db.query(SystemSetting.key).filter(SystemSetting.key == SPAM_IMPORT_PENDING_KEY).first() is None:
         _set_key(db, SPAM_IMPORT_PENDING_KEY, SPAM_IMPORT_BOOTSTRAP)
     _set_key(db, SPAM_IMPORT_BOOTSTRAP_KEY, '1')
@@ -188,7 +188,7 @@ def bootstrap_spam_import(db: Session) -> None:
 
 def purge_disabled_features() -> Dict[str, Optional[str]]:
     """Purge every feature that is off, each in its own session, so one that
-    fails does not keep the others; Spam Filter's list also while "Sync with
+    fails does not keep the others; the Suppressions feature's list also while "Sync with
     Rspamd" is off. Returns {feature: error or None}."""
     from ..database import get_db_context
     from .rspamd_map_lock import map_write_lock
@@ -197,16 +197,16 @@ def purge_disabled_features() -> Dict[str, Optional[str]]:
         with get_db_context() as db:
             bootstrap_spam_import(db)
     except Exception as e:
-        logger.warning(f"[FEATURES] Could not check whether Spam Filter's blocks need loading: {e}")
+        logger.warning(f"[FEATURES] Could not check whether the Suppressions feature's blocks need loading: {e}")
     def spam_off():
         return not spam_list_kept()
 
     for feature in FEATURE_TABLES:
-        if not spam_off() if feature == 'spam-filter' else settings.is_feature_enabled(feature):
+        if not spam_off() if feature == 'suppressions' else settings.is_feature_enabled(feature):
             continue
         try:
             with get_db_context() as db:
-                if feature == 'spam-filter':
+                if feature == 'suppressions':
                     # A sync or an import of the list waits, or is waited for
                     with map_write_lock():
                         # Turned on again while this waited for a lock: its list stays

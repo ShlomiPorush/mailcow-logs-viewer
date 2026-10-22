@@ -8,7 +8,7 @@
 
 ## Refresh
 
-**Refresh** reloads the open page and the sidebar counters; on DMARC & TLS it also clears cached report figures. The Dashboard, Messages, Security, Queue, Quarantine, Status, Settings and Spam Filter pages also update every 30 seconds while they are open, except while message details are open in a window over the page. Other pages update when reopened or refreshed manually.
+**Refresh** reloads the open page and the sidebar counters; on DMARC & TLS it also clears cached report figures. The Dashboard, Messages, Security, Outbound, Quarantine, Status and Settings pages also update every 30 seconds while they are open, except while message details are open in a window over the page. Other pages update when reopened or refreshed manually.
 
 ## Feature switches
 

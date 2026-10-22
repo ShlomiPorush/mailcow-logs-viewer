@@ -32,7 +32,7 @@
             color: #3b82f6;
         }
 
-        /* Sub-tabs inside a page (Spam Filter, DMARC, Mailbox Stats), in the v3 tokens */
+        /* Sub-tabs inside a page (DMARC, Mailbox Stats), in the v3 tokens */
         .modal-tab-sm {
             padding: 0.5rem 1rem;
             border-bottom: 2px solid transparent;
@@ -456,13 +456,13 @@
             <div class="ui-nav-group" data-nav-group>
                 <div class="ui-nav-group-label">Mail</div>
                 <button onclick="navigateTo('messages')" id="tab-messages" class="ui-nav-item" title="Messages"><svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"> <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"> </path> </svg><span class="ui-nav-label">Messages</span></button>
-                <button onclick="navigateTo('queue')" id="tab-queue" class="ui-nav-item" title="Queue"><svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"> <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"> </path> </svg><span class="ui-nav-label">Queue</span><span id="nav-count-queue" class="ui-nav-count hidden"></span></button>
+                <button onclick="navigateTo('outbound')" id="tab-outbound" class="ui-nav-item" title="Outbound"><svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"> <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"> </path> </svg><span class="ui-nav-label">Outbound</span><span id="nav-count-outbound" class="ui-nav-count hidden"></span></button>
                 <button onclick="navigateTo('quarantine')" id="tab-quarantine" class="ui-nav-item" title="Quarantine"><svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"> <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"> </path> </svg><span class="ui-nav-label">Quarantine</span><span id="nav-count-quarantine" class="ui-nav-count hidden"></span></button>
             </div>
             <div class="ui-nav-group" data-nav-group>
                 <div class="ui-nav-group-label">Protection</div>
                 <button onclick="navigateTo('netfilter')" id="tab-netfilter" class="ui-nav-item" title="Security"><svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"> <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"> </path> </svg><span class="ui-nav-label">Security</span><span id="nav-count-netfilter" class="ui-nav-count hidden"></span></button>
-                <button onclick="navigateTo('spam-filter')" id="tab-spam-filter" class="ui-nav-item" title="Spam Filter"><svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"> <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"> </path> </svg><span class="ui-nav-label">Spam Filter</span></button>
+                <button onclick="navigateTo('rspamd')" id="tab-rspamd" class="ui-nav-item" title="Rspamd"><svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"> <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"> </path> </svg><span class="ui-nav-label">Rspamd</span></button>
                 <button onclick="navigateTo('dmarc')" id="tab-dmarc" class="ui-nav-item" title="DMARC &amp; TLS"><svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"> <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path> </svg><span class="ui-nav-label">DMARC &amp; TLS</span><span id="nav-count-dmarc" class="ui-nav-count hidden"></span></button>
             </div>
             <div class="ui-nav-group" data-nav-group>
@@ -544,13 +544,13 @@
             <div class="ui-nav-group" data-nav-group>
                 <div class="ui-nav-group-label">Mail</div>
                 <button onclick="navigateToMobile('messages')" id="mobile-tab-messages" class="mobile-menu-item"><svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"> <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"> </path> </svg><span class="ui-nav-label">Messages</span></button>
-                <button onclick="navigateToMobile('queue')" id="mobile-tab-queue" class="mobile-menu-item"><svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"> <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"> </path> </svg><span class="ui-nav-label">Queue</span><span id="mobile-nav-count-queue" class="ui-nav-count hidden"></span></button>
+                <button onclick="navigateToMobile('outbound')" id="mobile-tab-outbound" class="mobile-menu-item"><svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"> <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"> </path> </svg><span class="ui-nav-label">Outbound</span><span id="mobile-nav-count-outbound" class="ui-nav-count hidden"></span></button>
                 <button onclick="navigateToMobile('quarantine')" id="mobile-tab-quarantine" class="mobile-menu-item"><svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"> <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"> </path> </svg><span class="ui-nav-label">Quarantine</span><span id="mobile-nav-count-quarantine" class="ui-nav-count hidden"></span></button>
             </div>
             <div class="ui-nav-group" data-nav-group>
                 <div class="ui-nav-group-label">Protection</div>
                 <button onclick="navigateToMobile('netfilter')" id="mobile-tab-netfilter" class="mobile-menu-item"><svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"> <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"> </path> </svg><span class="ui-nav-label">Security</span><span id="mobile-nav-count-netfilter" class="ui-nav-count hidden"></span></button>
-                <button onclick="navigateToMobile('spam-filter')" id="mobile-tab-spam-filter" class="mobile-menu-item"><svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"> <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"> </path> </svg><span class="ui-nav-label">Spam Filter</span></button>
+                <button onclick="navigateToMobile('rspamd')" id="mobile-tab-rspamd" class="mobile-menu-item"><svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"> <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"> </path> </svg><span class="ui-nav-label">Rspamd</span></button>
                 <button onclick="navigateToMobile('dmarc')" id="mobile-tab-dmarc" class="mobile-menu-item"><svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"> <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path> </svg><span class="ui-nav-label">DMARC &amp; TLS</span><span id="mobile-nav-count-dmarc" class="ui-nav-count hidden"></span></button>
             </div>
             <div class="ui-nav-group" data-nav-group>
@@ -862,18 +862,25 @@
             </div>
 
             <!-- Queue Tab -->
-            <div id="content-queue" class="tab-content hidden ui-page">
+            <!-- Outbound: the mail waiting to leave (Queue, feature queue) and the
+                 recipients it is no longer sent to (Suppressions, feature suppressions).
+                 A tab whose feature is off is hidden; the page goes when both are off. -->
+            <div id="content-outbound" class="tab-content hidden ui-page">
                 <div class="ui-page-head">
                     <div>
-                        <h1 class="ui-h1">Queue <button onclick="showHelpModal('Queue')" class="ui-icon-btn ui-help-btn" title="Help - Queue">
+                        <h1 class="ui-h1">Outbound <button onclick="showHelpModal('Outbound')" class="ui-icon-btn ui-help-btn" title="Help - Outbound">
                                 <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
                                 </svg>
                             </button></h1>
-                        <p class="ui-muted" id="queue-summary">Messages waiting in the Postfix queue</p>
+                        <p class="ui-muted" id="outbound-summary"><span id="queue-summary">Messages waiting in the Postfix queue</span> <span id="suppression-summary"></span></p>
                     </div>
                 </div>
-                <section class="ui-sec-block ui-scroll">
+                <div id="outbound-tabs" class="ui-tabs ui-page-tabs" role="tablist" aria-label="Outbound sections">
+                    <button type="button" class="modal-tab active" role="tab" aria-selected="true" id="outbound-tab-btn-queue" onclick="outboundShowTab('queue')">Queue</button>
+                    <button type="button" class="modal-tab" role="tab" aria-selected="false" id="outbound-tab-btn-suppressions" onclick="outboundShowTab('suppressions')">Suppressions</button>
+                </div>
+                <section class="ui-sec-block ui-scroll" id="outbound-tab-queue" role="tabpanel">
                     <div class="ui-list-head"><h2 class="ui-h2">Mail Queue</h2></div>
                     <div class="ui-panel ui-table-card">
                     <section class="ui-panel ui-filters ui-fbar">
@@ -894,6 +901,62 @@
                         <div id="queue-logs"><div class="ui-loading"><div class="loading"></div><p>Loading...</p></div></div>
                     </div>
                 </section>
+
+                <div id="outbound-tab-suppressions" class="ui-sec-block ui-scroll hidden" role="tabpanel">
+                    <!-- Sync with Rspamd off: the app keeps no list, and only this note shows -->
+                    <div id="suppression-off-note" class="hidden"></div>
+                    <div id="suppression-stats" class="ui-kpis"></div>
+
+                    <div id="suppression-list-card" class="ui-panel ui-table-card">
+                    <section class="ui-panel ui-filters ui-fbar">
+                        <div class="ui-fbar-row">
+                            <label class="ui-search ui-ms-search"><svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+                                <input type="text" id="suppression-search" placeholder="Search email, notes..." aria-label="Search suppressions"
+                                    onkeypress="if(event.key==='Enter') loadSuppressions(1)">
+                            </label>
+                            <span class="ui-toolbar-gap"></span>
+                            <button onclick="showAddSuppressionModal()" class="ui-btn ui-btn-primary">Add Suppression</button>
+                            <div class="ui-more-wrap">
+                                <button onclick="toggleSuppressionMoreMenu()" class="ui-btn" title="More" aria-label="More">⋯</button>
+                                <div id="suppression-more-menu" class="ui-menu-panel hidden">
+                                    <button onclick="exportSuppressions()">Export CSV</button>
+                                    <!-- The map the list is written to; gone while the Rspamd page is off -->
+                                    <button id="suppression-open-map" onclick="openRspamdMap('global_rcpt_blacklist.map')">Open in Rspamd</button>
+                                    <label>
+                                        Import CSV
+                                        <input type="file" accept=".csv" class="hidden" onchange="importSuppressions(event)">
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="ui-fbar-pickers">
+                            <select id="suppression-filter-reason" class="ui-select" aria-label="Reason" data-picker-label="Reason"
+                                onchange="loadSuppressions(1)">
+                                <option value="" data-short="All">All Reasons</option>
+                                <option value="hard_bounce">Hard Bounce</option>
+                                <option value="soft_bounce">Soft Bounce</option>
+                                <option value="deferred_stuck">Deferred Stuck</option>
+                                <option value="rejected">Rejected</option>
+                                <option value="manual">Manual</option>
+                            </select>
+                            <select id="suppression-filter-active" class="ui-select" aria-label="State" data-picker-label="State"
+                                onchange="loadSuppressions(1)">
+                                <option value="true" data-short="Active">Active Only</option>
+                                <option value="">All</option>
+                                <option value="false">Inactive</option>
+                                <option value="expired">Expired</option>
+                            </select>
+                        </div>
+                    </section>
+                    <p class="ui-list-summary"><span id="suppression-count" class="ui-count"></span><button type="button" class="ui-clear-filters hidden" onclick="clearSuppressionFilters()">Clear filters</button></p>
+
+                    <div id="suppression-rw-note"></div>
+                    <div id="suppression-sync-note"></div>
+                    <div id="suppression-list">
+                        <div class="ui-loading"><div class="loading"></div><p>Loading...</p></div>
+                    </div>
+                    </div>
+                </div>
             </div>
 
             <!-- Quarantine Tab -->
@@ -975,87 +1038,21 @@
                 </div>
             </div>
 
-            <!-- Spam Filter Tab -->
-            <div id="content-spam-filter" class="tab-content hidden ui-page">
+            <!-- Rspamd: the maps that allow or block mail, incoming and outgoing (spam_filter.js) -->
+            <div id="content-rspamd" class="tab-content hidden ui-page">
                 <div class="ui-page-head">
                     <div>
-                        <h1 class="ui-h1">Spam Filter <button onclick="showHelpModal('Spam_Filter')" class="ui-icon-btn ui-help-btn"
-                                    title="Help - Spam Filter">
-                                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                            d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                                    </svg>
-                                </button></h1>
-                        <p class="ui-muted">Addresses mailcow stops sending to, and the Rspamd maps that allow or block mail</p>
+                        <h1 class="ui-h1">Rspamd <button onclick="showHelpModal('Rspamd')" class="ui-icon-btn ui-help-btn" title="Help - Rspamd">
+                                <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                                </svg>
+                            </button></h1>
+                        <p class="ui-muted">The Rspamd maps that allow or block mail, incoming and outgoing</p>
                     </div>
-                    <div id="spam-filter-actions" class="ui-head-tools"></div>
                 </div>
-
-                <!-- Sub-tabs: Suppressions | Rspamd Maps -->
-                <div class="ui-tabs ui-page-tabs" role="tablist">
-                    <button onclick="spamFilterSwitchSubTab('suppressions')" id="spam-subtab-suppressions" class="modal-tab active" role="tab">Suppressions</button>
-                    <button onclick="spamFilterSwitchSubTab('maps')" id="spam-subtab-maps" class="modal-tab" role="tab">Rspamd Maps</button>
-                </div>
-
-                <!-- Maps sub-tab content (hidden by default) -->
-                <div id="spam-filter-maps-content" class="hidden ui-scroll">
+                <div class="ui-scroll">
                     <div id="rspamd-maps-list" class="ui-sec-block">
                         <div class="ui-loading"><div class="loading"></div><p>Loading Rspamd maps...</p></div>
-                    </div>
-                </div>
-
-                <!-- Suppressions sub-tab content (visible by default) -->
-                <div id="spam-filter-suppressions-content" class="ui-sec-block ui-scroll">
-                    <!-- Sync with Rspamd off: the app keeps no list, and only this note shows -->
-                    <div id="suppression-off-note" class="hidden"></div>
-                    <div id="suppression-stats" class="ui-kpis"></div>
-
-                    <div id="suppression-list-card" class="ui-panel ui-table-card">
-                    <section class="ui-panel ui-filters ui-fbar">
-                        <div class="ui-fbar-row">
-                            <label class="ui-search ui-ms-search"><svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
-                                <input type="text" id="suppression-search" placeholder="Search email, notes..." aria-label="Search suppressions"
-                                    onkeypress="if(event.key==='Enter') loadSuppressions(1)">
-                            </label>
-                            <span class="ui-toolbar-gap"></span>
-                            <button onclick="showAddSuppressionModal()" class="ui-btn ui-btn-primary">Add Suppression</button>
-                            <div class="ui-more-wrap">
-                                <button onclick="toggleSuppressionMoreMenu()" class="ui-btn" title="More" aria-label="More">⋯</button>
-                                <div id="suppression-more-menu" class="ui-menu-panel hidden">
-                                    <button onclick="exportSuppressions()">Export CSV</button>
-                                    <label>
-                                        Import CSV
-                                        <input type="file" accept=".csv" class="hidden" onchange="importSuppressions(event)">
-                                    </label>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="ui-fbar-pickers">
-                            <select id="suppression-filter-reason" class="ui-select" aria-label="Reason" data-picker-label="Reason"
-                                onchange="loadSuppressions(1)">
-                                <option value="" data-short="All">All Reasons</option>
-                                <option value="hard_bounce">Hard Bounce</option>
-                                <option value="soft_bounce">Soft Bounce</option>
-                                <option value="deferred_stuck">Deferred Stuck</option>
-                                <option value="rejected">Rejected</option>
-                                <option value="manual">Manual</option>
-                            </select>
-                            <select id="suppression-filter-active" class="ui-select" aria-label="State" data-picker-label="State"
-                                onchange="loadSuppressions(1)">
-                                <option value="true" data-short="Active">Active Only</option>
-                                <option value="">All</option>
-                                <option value="false">Inactive</option>
-                                <option value="expired">Expired</option>
-                            </select>
-                        </div>
-                    </section>
-                    <p class="ui-list-summary"><span id="suppression-count" class="ui-count"></span><button type="button" class="ui-clear-filters hidden" onclick="clearSuppressionFilters()">Clear filters</button></p>
-
-                    <div id="suppression-rw-note"></div>
-                    <div id="suppression-sync-note"></div>
-                    <div id="suppression-list">
-                        <div class="ui-loading"><div class="loading"></div><p>Loading...</p></div>
-                    </div>
                     </div>
                 </div>
             </div>
@@ -1579,15 +1576,15 @@
 
     <!-- JavaScript -->
     <script src="/static/utils.js?v=20"></script>
-    <script src="/static/router.js?v=6"></script>
-    <script src="/static/app.js?v=70"></script>
+    <script src="/static/router.js?v=7"></script>
+    <script src="/static/app.js?v=71"></script>
     <script src="/static/alert-activity.js?v=2"></script>
     <script src="/static/export.js?v=1"></script>
     <script src="/static/message-details.js?v=8"></script>
     <script src="/static/dmarc.js?v=19"></script>
     <script src="/static/logs-viewer.js?v=6"></script>
-    <script src="/static/settings.js?v=41"></script>
-    <script src="/static/about.js?v=3"></script>
+    <script src="/static/settings.js?v=42"></script>
+    <script src="/static/about.js?v=4"></script>
     <script src="/static/domains.js?v=9"></script>
     <script src="/static/mailbox-stats.js?v=7"></script>
     <script src="/static/devices.js?v=7"></script>
@@ -1595,9 +1592,9 @@
     <script src="/static/smtp-abuse.js?v=4"></script>
     <script src="/static/protection.js?v=2"></script>
     <script src="/static/security.js?v=8"></script>
-    <script src="/static/search.js?v=9"></script>
+    <script src="/static/search.js?v=10"></script>
     <script src="/static/notifications.js?v=6"></script>
-    <script src="/static/spam_filter.js?v=16"></script>
+    <script src="/static/spam_filter.js?v=17"></script>
 
     <!-- DMARC fetch history -->
     <div id="dmarc-sync-history-modal" class="hidden ui-dialog-backdrop" role="dialog" aria-label="Fetch history">

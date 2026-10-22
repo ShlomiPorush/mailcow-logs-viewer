@@ -109,7 +109,7 @@ Open **Settings** and click **Migrate Settings from ENV**, then **Import**. Unti
 
 A variable set in `.env`, even an empty value such as `SMTP_HOST=`, always wins over the saved value, and its field shows **Set by ENV**. To manage a value in the app, delete its line from `.env` and run `docker compose up -d`. Keep `MAILCOW_URL`, `MAILCOW_API_KEY`, the `POSTGRES_` values and `SETTINGS_EDIT_VIA_UI_ENABLED=true` in `.env`: the app needs them before it can read the saved settings.
 
-From here, add what you need in [Settings](HelpDocs/Settings.md): the Rspamd password for the Spam Filter maps, SMTP and [notifications](Notifications.md) for alerts, a mailbox for DMARC and TLS reports, and MaxMind for IP locations.
+From here, add what you need in [Settings](HelpDocs/Settings.md): the Rspamd password for the Rspamd maps and the suppression list, SMTP and [notifications](Notifications.md) for alerts, a mailbox for DMARC and TLS reports, and MaxMind for IP locations.
 
 ## Data and backups
 

@@ -683,7 +683,7 @@ class SpamSuppression(Base):
 
 class SuppressionEvent(Base):
     """What happened to a blocked address, kept with it for as long as it is on
-    the list (Spam Filter > Suppressions > Block details).
+    the list (Outbound > Suppressions > Block details).
 
     Postfix logs and messages are deleted after RETENTION_DAYS, but a block can
     last up to months, so each event keeps its own copy of the evidence: the

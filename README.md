@@ -26,9 +26,9 @@ A self-hosted dashboard for mailcow mail servers. It collects mailcow's logs and
 ![Messages](images/docs/messages-light.webp#gh-light-mode-only)
 ![Messages](images/docs/messages-dark.webp#gh-dark-mode-only)
 
-**Queue**
-![Queue](images/docs/queue-light.webp#gh-light-mode-only)
-![Queue](images/docs/queue-dark.webp#gh-dark-mode-only)
+**Outbound**
+![Outbound](images/docs/outbound-queue-light.webp#gh-light-mode-only)
+![Outbound](images/docs/outbound-queue-dark.webp#gh-dark-mode-only)
 
 **Quarantine**
 ![Quarantine](images/docs/quarantine-messages-light.webp#gh-light-mode-only)
@@ -50,9 +50,9 @@ A self-hosted dashboard for mailcow mail servers. It collects mailcow's logs and
 ![Status](images/docs/status-server-light.webp#gh-light-mode-only)
 ![Status](images/docs/status-server-dark.webp#gh-dark-mode-only)
 
-**Spam Filter**
-![Spam Filter](images/docs/spam-filter-maps-light.webp#gh-light-mode-only)
-![Spam Filter](images/docs/spam-filter-maps-dark.webp#gh-dark-mode-only)
+**Rspamd**
+![Rspamd](images/docs/rspamd-maps-light.webp#gh-light-mode-only)
+![Rspamd](images/docs/rspamd-maps-dark.webp#gh-dark-mode-only)
 
 **Mailbox Stats**
 ![Mailbox Stats](images/docs/mailbox-stats-statistics-light.webp#gh-light-mode-only)

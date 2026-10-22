@@ -199,7 +199,7 @@ class Settings(BaseSettings):
     app_logo_url: str = Field(default="", description="Application logo URL (optional)")
     disabled_features: str = Field(
         default="",
-        description="Comma-separated list of features to disable (hides page and stops related jobs). Valid: netfilter, queue, quarantine, spam-filter, domains, dmarc, mailbox-stats, rate-limits, logs, blacklist, devices"
+        description="Comma-separated list of features to disable (hides page and stops related jobs). Valid: netfilter, queue, quarantine, suppressions, rspamd, domains, dmarc, mailbox-stats, rate-limits, logs, blacklist, devices (spam-filter: both suppressions and rspamd)"
     )
     
     # Settings UI: allow editing config from web UI (overrides stored in DB). ENV only; default False.
@@ -1028,13 +1028,15 @@ class Settings(BaseSettings):
 
     @property
     def disabled_features_set(self) -> set:
-        """Parse disabled_features into a set of feature IDs."""
-        if not self.disabled_features:
-            return set()
-        return {f.strip().lower() for f in self.disabled_features.split(',') if f.strip()}
+        """Parse disabled_features into a set of feature IDs, the old
+        spam-filter read as the two features it became."""
+        return set(normalize_disabled_features(self.disabled_features))
 
     def is_feature_enabled(self, feature: str) -> bool:
         """Check if a feature is enabled (not in disabled_features)."""
+        # A name no switch has would read "on" for good
+        if feature not in FEATURE_IDS:
+            raise ValueError(f"Unknown feature: {feature}")
         return feature not in self.disabled_features_set
     
     class Config:
@@ -1065,9 +1067,31 @@ EDITABLE_SETTING_KEYS = _get_editable_setting_keys()
 
 # Every feature DISABLED_FEATURES can switch off (TOGGLEABLE_FEATURES in app.js)
 FEATURE_IDS = frozenset({
-    "netfilter", "queue", "quarantine", "spam-filter", "domains", "dmarc",
+    "netfilter", "queue", "quarantine", "suppressions", "rspamd", "domains", "dmarc",
     "mailbox-stats", "rate-limits", "logs", "blacklist", "devices",
 })
+
+# Old names still accepted in DISABLED_FEATURES and in a stored or saved value.
+# spam-filter was one switch for the suppression list and the Rspamd maps, so
+# it stays off as both.
+FEATURE_ALIASES = {
+    "spam-filter": ("suppressions", "rspamd"),
+}
+
+
+def normalize_disabled_features(value) -> list:
+    """A disabled_features value (comma-separated, or a list) as feature ids:
+    lower case, old names expanded, each once, in the order given."""
+    if not value:
+        return []
+    names = value.split(',') if isinstance(value, str) else list(value)
+    result = []
+    for name in names:
+        name = str(name).strip().lower()
+        for feature in FEATURE_ALIASES.get(name, (name,)):
+            if feature and feature not in result:
+                result.append(feature)
+    return result
 
 
 def _is_env_key_set(key: str) -> bool:

@@ -22,7 +22,7 @@ let mailboxStatsCache = {
 // VIEW SWITCHER - Statistics | Rate Limits
 // =============================================================================
 // Rate Limits is a view of this page rather than a page of its own. The
-// switcher follows the Spam Filter recipe in index.html; the code for the
+// switcher follows the page-tabs recipe in index.html; the code for the
 // view itself stays in rate-limits.js.
 
 let mailboxStatsView = 'statistics';

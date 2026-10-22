@@ -170,6 +170,8 @@ if [ "${UI_SMOKE:-0}" = "1" ]; then
     # The same data with every feature turned off and settings read-only, so the
     # "is disabled" pages, hidden tabs and read-only Settings render at least once
     # (see "Gated and conditional states" in documentation/UI_Behavior_Catalog.md).
+    # spam-filter is the old name of suppressions and rspamd together: it
+    # must still turn both off.
     step "Browser pass over every page (every feature off, settings read-only)"
     docker rm -f "${APP}" >/dev/null
     start_app -e SETTINGS_EDIT_VIA_UI_ENABLED=false \

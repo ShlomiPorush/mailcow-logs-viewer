@@ -39,7 +39,7 @@ def _rw(monkeypatch, value):
     ("dns_check", "domains"),
     ("blacklist_check", "blacklist"),
     ("eas_devices", "devices"),
-    ("expire_suppressions", "spam-filter"),
+    ("expire_suppressions", "suppressions"),
     ("protection_rules", "netfilter"),
 ])
 def test_a_job_of_a_feature_that_is_off_is_refused(started, monkeypatch, job, disabled):
