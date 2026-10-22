@@ -28,7 +28,7 @@ from ..config import settings, get_cached_active_domains
 from ..scheduler import update_job_status
 from .domains import get_cached_dns_check, check_dmarc_record, check_tls_rpt_record, parse_dmarc_record_tags, _public_cached_dns_result
 from ..utils import internal_error, format_datetime_for_api
-from ..app_time import day_bounds, day_key, epoch, epoch_day_key, utc_naive
+from ..app_time import app_tz, day_bounds, day_key, epoch, epoch_day_key, local_now, utc_naive
 
 logger = logging.getLogger(__name__)
 
@@ -875,6 +875,54 @@ def _load_domain_overview(domain: str, days: int, dmarc_record: dict, tls_rpt_re
             'dmarc_record': dmarc_record,
             'tls_rpt_record': tls_rpt_record
         }
+
+
+# =============================================================================
+# DOMAIN CALENDAR (a square per day)
+# =============================================================================
+
+MAX_CALENDAR_DAYS = 400
+
+
+@router.get("/dmarc/domains/{domain}/calendar")
+def get_domain_calendar(
+    domain: str,
+    days: Optional[int] = Query(None, ge=1, le=MAX_CALENDAR_DAYS, description="Whole days back from today; the DMARC retention by default"),
+    db: Session = Depends(get_db),
+):
+    """A domain's messages and DMARC passes per day of the app's zone, for its
+    calendar: whole calendar days from the first one to today (the same bounds
+    as a day's own view), summed in one query whatever the number of reports.
+    Reports go by import date (DMARC retention), so a day before the retention
+    may miss some: maybe_incomplete_before says from which day back."""
+    try:
+        keep = max(1, int(settings.dmarc_retention_days or 60))
+        count = days or min(MAX_CALENDAR_DAYS, keep)
+        today = local_now().date()
+        first = today - timedelta(days=count - 1)
+        start, _ = day_bounds(first)
+        zone = getattr(app_tz(), 'key', 'UTC')
+        local_day = func.date(func.timezone(zone, func.to_timestamp(DMARCReport.begin_date)))
+        passed = case((or_(DMARCRecord.spf_result == 'pass', DMARCRecord.dkim_result == 'pass'), DMARCRecord.count), else_=0)
+        rows = db.query(local_day.label('day'), func.sum(DMARCRecord.count), func.sum(passed)).join(
+            DMARCRecord, DMARCRecord.dmarc_report_id == DMARCReport.id
+        ).filter(
+            DMARCReport.domain == domain, DMARCReport.begin_date >= epoch(start)
+        ).group_by(local_day).order_by(local_day).all()
+        out = []
+        for day, total, ok in rows:
+            total, ok = int(total or 0), int(ok or 0)
+            if day is None or day < first or day > today:
+                continue
+            out.append({'date': day.isoformat(), 'total': total, 'pass': ok, 'fail': total - ok})
+        return {
+            'domain': domain, 'from': first.isoformat(), 'to': today.isoformat(), 'retention_days': keep,
+            'maybe_incomplete_before': (today - timedelta(days=keep - 1)).isoformat(),
+            'days': out,
+        }
+    except Exception as e:
+        logger.error(f"Error building the DMARC calendar: {e}")
+        raise internal_error(e)
 
 
 # =============================================================================

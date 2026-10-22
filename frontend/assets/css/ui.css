@@ -1460,6 +1460,22 @@ body { font-family: var(--ui-font); background: var(--ui-bg); color: var(--ui-in
 .ui-dash-grid .ui-stat .ui-spark { order: 3; }
 .ui-spark-svg path, .ui-spark-svg line { fill: none; stroke: var(--ui-muted); stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
 .ui-spark-svg circle { fill: var(--ui-ink); }
+/* The DMARC calendar: weeks as columns, a square a day (dmarc.js dmarcCalendarCard) */
+.ui-dm-cal-scroll { overflow-x: auto; overscroll-behavior-x: contain; padding: 2px; }
+.ui-dm-cal { display: grid; grid-auto-flow: column; grid-template-rows: repeat(7, var(--cell, 13px)); grid-auto-columns: var(--cell, 13px); gap: 3px; width: max-content; }
+.ui-dm-cal-wrap { display: inline-block; }
+.ui-dm-x.ui-dm-cal-x { margin: 6px 0 0; gap: 24px; }
+.ui-dm-cal-day { width: var(--cell, 13px); height: var(--cell, 13px); padding: 0; border: 0; border-radius: 3px; cursor: pointer; opacity: var(--strength, 1); }
+.ui-dm-cal-day.is-ok, .ui-dm-cal-legend i.is-ok { background: var(--ui-ok); }
+.ui-dm-cal-day.is-warn, .ui-dm-cal-legend i.is-warn { background: var(--ui-warn); }
+.ui-dm-cal-day.is-fail, .ui-dm-cal-legend i.is-fail { background: var(--ui-fail); }
+.ui-dm-cal-day.is-empty, .ui-dm-cal-legend i.is-empty { background: transparent; box-shadow: inset 0 0 0 1px var(--ui-line); cursor: default; }
+.ui-dm-cal-day.is-old, .ui-dm-cal-legend i.is-old { background-image: repeating-linear-gradient(135deg, color-mix(in srgb, var(--ui-ink) 25%, transparent) 0 2px, transparent 2px 4px); }
+.ui-dm-cal-day:focus-visible { outline: 2px solid var(--ui-focus); outline-offset: 1px; opacity: 1; }
+.ui-dm-cal-legend { margin-top: 10px; }
+.ui-dm-cal-legend i { display: inline-block; width: 11px; height: 11px; border-radius: 3px; }
+/* The hatch alone on its own swatch (the chart legend's color would show under it) */
+.ui-dm-cal-legend i.is-old { background-color: transparent; box-shadow: inset 0 0 0 1px var(--ui-line); }
 .ui-st-card { display: grid; align-content: start; gap: 4px; padding: 14px var(--ui-pad-x); border: 0; border-radius: var(--ui-radius);
     background: var(--ui-panel); color: inherit; font: inherit; text-align: start; }
 button.ui-st-card { cursor: pointer; }

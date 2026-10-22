@@ -283,6 +283,71 @@ function renderDmarcHome() {
 // =============================================================================
 
 // Messages (or TLS sessions) per day, passed on failed; a day opens its reports
+// A square per day over the reports kept (DMARC retention): weeks as columns from
+// Monday, colored by the day's DMARC pass rate, stronger with more mail; a day
+// without reports is only a border, a day before the retention is hatched (its
+// reports may be gone). One Tab stop: arrows move by day and week, Enter opens it.
+function dmarcCalendarCard(x) {
+    const cal = x.calendar;
+    if (!cal || !cal.from) return '';
+    const byDate = Object.fromEntries((cal.days || []).map(d => [d.date, d]));
+    const ymd = s => s.split('-').map(Number);
+    const dayNum = s => { const [y, m, d] = ymd(s); return Date.UTC(y, m - 1, d) / 86400000; };
+    const dateOf = n => new Date(n * 86400000).toISOString().slice(0, 10);
+    const first = dayNum(cal.from), last = dayNum(cal.to);
+    // Monday-first weeks: the first column begins on the Monday on or before the first day
+    const lead = (new Date(first * 86400000).getUTCDay() + 6) % 7;
+    const max = Math.max(1, ...(cal.days || []).map(d => d.total));
+    const old = cal.maybe_incomplete_before ? dayNum(cal.maybe_incomplete_before) : -Infinity;
+    const domain = escapeJsArg(x.name);
+    // The day as the app writes dates (formatDay's numbers, in the browser's order), from the date alone
+    const fmt = new Intl.DateTimeFormat(undefined, { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC' });
+    const dayWords = date => { const [y, m, d] = ymd(date); return fmt.format(new Date(Date.UTC(y, m - 1, d))); };
+    const cells = [];
+    for (let i = 0; i < lead; i++) cells.push('<span class="ui-dm-cal-pad" aria-hidden="true"></span>');
+    for (let n = first; n <= last; n++) {
+        const date = dateOf(n), d = byDate[date];
+        const pct = d && d.total ? d.pass / d.total * 100 : null;
+        const tone = pct === null ? 'is-empty' : pct >= 98 ? 'is-ok' : pct >= 90 ? 'is-warn' : 'is-fail';
+        const strength = d && d.total ? (0.35 + 0.65 * Math.log(d.total + 1) / Math.log(max + 1)).toFixed(2) : '';
+        const words = d && d.total ? `${dayWords(date)}: ${dmarcNum(d.total)} messages, ${dmarcPct(pct)} passed DMARC` : `${dayWords(date)}: no reports`;
+        const maybe = n < old ? ', reports of this day may have been cleaned up' : '';
+        cells.push(`<button type="button" class="ui-dm-cal-day ${tone}${n < old ? ' is-old' : ''}" data-date="${date}" tabindex="${n === last ? 0 : -1}"${strength ? ` style="--strength:${strength}"` : ''}
+            aria-label="${escapeHtml(words + maybe)}" title="${escapeHtml(words + maybe)}"${d && d.total ? ` onclick="loadReportDetails('${domain}', '${date}')"` : ' aria-disabled="true"'}></button>`);
+    }
+    const span = last - first + 1;
+    // Bigger squares when there are few weeks; a year scrolls sideways on a narrow screen
+    const weeks = Math.ceil((lead + span) / 7);
+    const size = weeks <= 16 ? 20 : weeks <= 30 ? 16 : 13;
+    return `<div class="ui-dm-card"><header>Pass rate per day <span class="ui-muted">last ${span} days</span></header>
+        <div class="ui-dm-body"><div class="ui-dm-cal-scroll"><div class="ui-dm-cal-wrap"><div class="ui-dm-cal" style="--cell:${size}px" role="group" aria-label="DMARC pass rate per day, last ${span} days. Arrow keys move by day and week, Enter opens a day" onkeydown="dmarcCalendarKey(event)">${cells.join('')}</div>
+            <div class="ui-dm-x ui-dm-cal-x" aria-hidden="true"><span>${escapeHtml(dayWords(cal.from))}</span><span>${escapeHtml(dayWords(cal.to))}</span></div></div></div>
+        <div class="ui-dm-legend ui-dm-cal-legend"><span><i class="is-ok"></i>98% or more</span><span><i class="is-warn"></i>90% to 98%</span><span><i class="is-fail"></i>Under 90%</span><span><i class="is-empty"></i>No reports</span>${old > first ? '<span><i class="is-old"></i>Before the retention</span>' : ''}</div></div></div>`;
+}
+
+// The calendar's keys: one Tab stop (roving), arrows by day (up and down) and week (left and right)
+function dmarcCalendarKey(event) {
+    const days = [...event.currentTarget.querySelectorAll('.ui-dm-cal-day')];
+    const at = days.indexOf(document.activeElement);
+    if (at < 0) return;
+    const step = { ArrowUp: -1, ArrowDown: 1, ArrowLeft: -7, ArrowRight: 7 }[event.key];
+    let next = null;
+    if (step) next = Math.max(0, Math.min(days.length - 1, at + step));
+    else if (event.key === 'Home') next = 0;
+    else if (event.key === 'End') next = days.length - 1;
+    else if ((event.key === 'Enter' || event.key === ' ') && days[at].getAttribute('aria-disabled') !== 'true') { event.preventDefault(); days[at].click(); return; }
+    if (next === null) return;
+    event.preventDefault();
+    days[at].tabIndex = -1;
+    days[next].tabIndex = 0;
+    days[next].focus();
+}
+
+// The calendar shows its newest weeks first on a narrow screen
+function dmarcCalendarToEnd() {
+    document.querySelectorAll('.ui-dm-cal-scroll').forEach(box => { box.scrollLeft = box.scrollWidth; });
+}
+
 function dmarcChart(daily, opts = {}) {
     if (!daily.length) return '<p class="ui-dm-empty">No reports in the last 30 days.</p>';
     const h = opts.h || 190;
@@ -435,17 +500,18 @@ function dmarcGroups(sources) {
 async function dmarcLoadDomain(domain) {
     if (dmarcState.domain && dmarcState.domain.name === domain) return dmarcState.domain;
     const enc = encodeURIComponent(domain);
-    const [overview, sources, tls, insight, days] = await Promise.all([
+    const [overview, sources, tls, insight, days, calendar] = await Promise.all([
         dmarcGet(`/api/dmarc/domains/${enc}/overview?days=30`),
         dmarcGet(`/api/dmarc/domains/${enc}/sources?days=30&limit=500`),
         dmarcGet(`/api/dmarc/domains/${enc}/tls-reports/daily?days=30&limit=31`).catch(() => ({ data: [] })),
         dmarcGet(`/api/dmarc/insights?domain=${enc}`).catch(() => null),
-        dmarcGet(`/api/dmarc/domains/${enc}/reports?days=30&limit=31`).catch(() => ({ data: [] }))
+        dmarcGet(`/api/dmarc/domains/${enc}/reports?days=30&limit=31`).catch(() => ({ data: [] })),
+        dmarcGet(`/api/dmarc/domains/${enc}/calendar`).catch(() => null)
     ]);
     const groups = dmarcGroups(sources.data || []);
     const sent = groups.reduce((s, g) => s + g.total, 0);
     dmarcState.domain = {
-        name: domain, overview, groups, tls: tls || { data: [] }, insight, days: (days || {}).data || [],
+        name: domain, overview, groups, tls: tls || { data: [] }, insight, days: (days || {}).data || [], calendar,
         totals: overview.totals || {}, record: overview.dmarc_record || {}, tlsRecord: overview.tls_rpt_record || {},
         spfPct: sent ? groups.reduce((s, g) => s + g.spf, 0) / sent * 100 : 0,
         dkimSeen: groups.some(g => g.dkim > 0)
@@ -548,6 +614,7 @@ async function loadDomainOverview(domain, updateUrl = true) {
         dmarcView().innerHTML = `
             <div class="ui-dm-ttl"><div><small>Last 30 days</small><h2>${escapeHtml(domain)}${dmarcNotOnServer(x.overview)}</h2></div></div>
             <div class="ui-dm-lay"><div>
+                ${dmarcCalendarCard(x)}
                 <div class="ui-dm-card"><header>Messages per day</header><div class="ui-dm-body">${dmarcChart(x.overview.daily_stats || [])}</div></div>
                 ${x.groups.length ? `<div class="ui-dm-card ui-dm-flow-card"><header>Mail flow</header><div class="ui-dm-body">${dmarcFlow(x)}</div></div>` : ''}
                 ${dmarcSendersCard(x)}
@@ -555,6 +622,7 @@ async function loadDomainOverview(domain, updateUrl = true) {
                 ${dmarcTlsCard(x)}
             </div><aside>${dmarcTodoCard(dmarcDomainTasks(x))}${dmarcRecordsCard(x)}</aside></div>`;
         drawDmarcFlow();
+        dmarcCalendarToEnd();
     } catch (error) {
         console.error('Error loading the DMARC domain:', error);
         dmarcFailed(error);
