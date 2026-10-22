@@ -1756,9 +1756,9 @@ async function smartRefreshDashboard() {
         refreshMailFlowChart();
         loadDashboardStatusSummary();
         loadDashboardSecurity();
-        // Needs attention: the alerts each time, the server checks every five minutes
+        // Needs attention: the alerts each time, the server checks (and the trends) every five minutes
         loadDashboardSecurityAlerts();
-        if (Date.now() - dashboardChecksAt >= 300000) loadDashboardAttention();
+        if (Date.now() - dashboardChecksAt >= 300000) { loadDashboardAttention(); loadDashboardTrends(); }
     } catch (error) {
         console.error('Dashboard refresh error:', error);
     }
@@ -1989,6 +1989,7 @@ async function loadDashboard() {
         loadDashboardSecurityAlerts();
         loadDashboardAttention();
         loadDashboardSecurity();
+        loadDashboardTrends();
         loadMailFlowChart();
     } catch (error) {
         console.error('Failed to load dashboard:', error);
@@ -2733,6 +2734,37 @@ async function undoAlertDismissal(receipt, undoName) {
     }
 }
 
+// The figures' trends (/api/stats/trends): loaded with the dashboard's checks, painted
+// into each figure's place, and again whenever a card is drawn anew
+const DASH_TRENDS = {
+    storage_used: { label: 'Mail storage used', format: v => `${Math.round(v)}%` },
+    linking_rate: { label: 'Messages linked', format: v => `${Math.round(v * 10) / 10}%` },
+    blocklists_listed: { label: 'Addresses listed', format: v => `${Math.round(v)}`, feature: 'blacklist' },
+    security_review: { label: 'Addresses to review', format: v => `${Math.round(v)}`, feature: 'netfilter' },
+    security_banned: { label: 'Addresses banned', format: v => `${Math.round(v)}`, feature: 'netfilter' },
+};
+let dashboardTrends = null;
+
+async function loadDashboardTrends() {
+    const names = Object.keys(DASH_TRENDS).filter(n => !DASH_TRENDS[n].feature || !isFeatureDisabled(DASH_TRENDS[n].feature));
+    try {
+        const res = await authenticatedFetch(`/api/stats/trends?names=${names.join(',')}&days=7`);
+        if (!res.ok) return;
+        dashboardTrends = (await res.json()).trends || {};
+        paintDashboardTrends();
+    } catch (e) {
+        console.warn('Failed to load trends:', e);
+    }
+}
+
+function paintDashboardTrends() {
+    document.querySelectorAll('.ui-spark[data-trend]').forEach(el => {
+        const name = el.dataset.trend, meta = DASH_TRENDS[name];
+        if (!meta || !dashboardTrends || !(name in dashboardTrends)) { el.innerHTML = ''; return; }
+        el.innerHTML = uiSparkline(dashboardTrends[name], { days: 7, label: meta.label, format: meta.format });
+    });
+}
+
 // One dashboard health card: the big value, its tone and the line under it
 function setDashKpi(id, value, tone, note) {
     const el = document.getElementById(id);
@@ -2784,16 +2816,18 @@ function renderDashboardSecurity(page = dashboardSecurityPage) {
     dashboardSecurityPage = page;
     const box = document.getElementById('dashboard-security');
     if (!box) return;
-    const counts = page ? page.all_counts : null;
-    const n = key => counts ? Number(counts[key]).toLocaleString() : '-';
+    // Without Fail2ban's answer neither list is known (its bans and lists are missing)
+    const known = !page || page.fail2ban_known !== false;
+    const counts = page && known ? page.all_counts : null;
+    const n = key => counts ? Number(counts[key]).toLocaleString() : page ? 'Unknown' : '-';
     const protections = securityProtectionItems();
     const on = protections.filter(securityProtectionOn);
     // The line's own mark: a tick when anything acts, an eye when everything on only watches
     const lineState = on.some(p => p.state === 'on') ? 'on' : on.length ? 'watch' : 'off';
     box.innerHTML = `
         <div class="ui-stats ui-dash-sec-stats">
-            <button type="button" class="ui-stat" onclick="openSecurityList('review')"><span>To review</span><b>${n('review')}</b><small>Not banned</small></button>
-            <button type="button" class="ui-stat" onclick="openSecurityList('banned')"><span>Banned now</span><b${counts && counts.banned ? ' class="ui-text-fail"' : ''}>${n('banned')}</b><small>By Fail2ban and the rules</small></button>
+            <button type="button" class="ui-stat" onclick="openSecurityList('review')"><span>To review</span><b>${n('review')}</b><small>${known ? 'Not banned' : 'Fail2ban did not answer'}</small><span class="ui-spark" data-trend="security_review"></span></button>
+            <button type="button" class="ui-stat" onclick="openSecurityList('banned')"><span>Banned now</span><b${counts && counts.banned ? ' class="ui-text-fail"' : ''}>${n('banned')}</b><small>${known ? 'By Fail2ban and the rules' : 'Fail2ban did not answer'}</small><span class="ui-spark" data-trend="security_banned"></span></button>
         </div>
         <button type="button" class="ui-dash-sec-prot is-${lineState}" aria-expanded="${dashboardProtectionsOpen}" aria-controls="dashboard-protections"
             onclick="dashboardProtectionsOpen = !dashboardProtectionsOpen; renderDashboardSecurity()">
@@ -2801,6 +2835,7 @@ function renderDashboardSecurity(page = dashboardSecurityPage) {
             ${on.length && !dashboardProtectionsOpen ? `<span class="ui-dash-sec-on">${on.map(p => escapeHtml(p.name)).join(' · ')}</span>` : ''}
         </button>
         ${dashboardProtectionsOpen ? `<div id="dashboard-protections" class="ui-dash-sec-list">${protections.map(p => securityProtectionButton(p, 'openSecurityProtection')).join('')}</div>` : ''}`;
+    paintDashboardTrends();
 }
 
 // Jobs, message linking and the app version for the dashboard health cards
@@ -2813,7 +2848,8 @@ async function loadDashboardHealth() {
             setDashKpi('dash-kpi-jobs', `${jobs.healthy} of ${jobs.running} healthy`, jobs.failed.length ? 'fail' : '',
                 jobs.failed.length ? `${jobs.failed.map(([name]) => name).join(', ')} failed` : (jobs.off ? `${jobs.off} off with their feature` : 'None failed'));
             const c = info.correlation_status || {};
-            setDashKpi('dash-kpi-linking', `${c.completion_rate || 0}%`, c.incomplete ? 'warn' : '',
+            if (c.known === false || !info.correlation_status) setDashKpi('dash-kpi-linking', 'Unknown', '', 'Could not count');
+            else setDashKpi('dash-kpi-linking', `${c.completion_rate || 0}%`, c.incomplete ? 'warn' : '',
                 `${(c.complete || 0).toLocaleString()} of ${(c.total || 0).toLocaleString()} complete`);
         }
         if (versionRes.ok) {
@@ -2847,7 +2883,8 @@ async function loadDashboardStatusSummary() {
         const storage = data.storage || {};
         const usedPercent = parseInt(storage.used_percent) || 0;
         const storageLevel = usedPercent > 90 ? 'fail' : usedPercent > 75 ? 'warn' : '';
-        setDashKpi('dash-kpi-storage', `${storage.used_percent || '0%'} used`, storageLevel, `${storage.used || '0'} of ${storage.total || '0'}`);
+        if (storage.known === false) setDashKpi('dash-kpi-storage', 'Unknown', '', 'mailcow did not answer');
+        else setDashKpi('dash-kpi-storage', `${storage.used_percent || '0%'} used`, storageLevel, `${storage.used || '0'} of ${storage.total || '0'}`);
 
         const systemDiv = document.getElementById('dashboard-system-summary');
         const system = data.system || {};
@@ -5258,7 +5295,8 @@ function statusJobCategories(jobs) {
                 ['Mailbox Statistics', 'mailbox_stats', jobs.mailbox_stats],
                 ['Alias Statistics', 'alias_stats', jobs.alias_stats],
                 ['Sync Transports & Relayhosts', 'sync_transports', jobs.sync_transports],
-                ['Turned-Off Features', 'feature_data_sweep', jobs.feature_data_sweep]
+                ['Turned-Off Features', 'feature_data_sweep', jobs.feature_data_sweep],
+                ['Trend Samples', 'trend_samples', jobs.trend_samples]
             ]
         },
         {

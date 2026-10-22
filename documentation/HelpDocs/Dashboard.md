@@ -61,7 +61,7 @@ To zoom in time, drag across bars, use Ctrl and the mouse wheel or a trackpad pi
 
 ## Security
 
-**To review** counts addresses that tried to log in during the last 24 hours and are not banned. **Banned now** counts those of them banned by Fail2ban or the protection rules.
+**To review** counts addresses that tried to log in during the last 24 hours and are not banned. **Banned now** counts those of them banned by Fail2ban or the protection rules. Both say **Unknown** when Fail2ban does not answer.
 
 **Protection N of M on** counts enabled protections. A tick means at least one bans; an eye means the enabled protections only watch. Expand the count for individual states and unmet requirements, such as MaxMind GeoIP or a read-write key for outgoing spam protection.
 
@@ -73,6 +73,8 @@ To zoom in time, drag across bars, use Ctrl and the mouse wheel or a trackpad pi
 - **Message linking** is the share of messages whose logs are fully linked. Amber means some are incomplete.
 - **Blocklists** uses the last check. **Unknown** or **No check yet** is not a clean result.
 - **Update check failed** means the app could not reach GitHub to check its version.
+
+Mail storage, Message linking, Blocklists, To review and Banned now show their last 7 days as a small line under the figure. The app samples them once an hour and keeps 90 days. A break in the line is an hour whose source did not answer; a dashed line means the first samples are still being collected. **Unknown** on Mail storage or Message linking means mailcow, or the count, did not answer.
 
 See [Status](Status.md) and [About](About.md) for details.
 

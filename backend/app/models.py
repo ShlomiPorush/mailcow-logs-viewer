@@ -778,6 +778,25 @@ class QuarantineRuleLog(Base):
         Index('idx_qrule_log_created', 'created_at'),
     )
 
+class MetricSnapshot(Base):
+    """An hourly sample of a dashboard figure that shows a trend (services/figures.py):
+    one per figure and hour, kept 90 days; a hour whose source did not answer has
+    none (a gap). Alembic 0021."""
+    __tablename__ = "metric_snapshots"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String(40), nullable=False)
+    slot = Column(DateTime, nullable=False)       # the hour (UTC) the sample stands for
+    value = Column(Float)
+    of = Column(Float)                            # the denominator, when the figure has one
+    as_of = Column(DateTime, nullable=False)      # when it was read
+
+    __table_args__ = (
+        UniqueConstraint('name', 'slot', name='uq_metric_snapshot_name_slot'),
+        Index('idx_metric_snapshot_slot', 'slot'),
+    )
+
+
 class SecurityAlert(Base):
     """
     Anomaly-detection alerts: outbound volume spikes (possible compromised

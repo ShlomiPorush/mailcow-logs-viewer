@@ -124,6 +124,11 @@ def purge_feature(db: Session, feature: str, still_off=None) -> dict:
                 db.rollback()
                 return {}
             restore = _spam_may_be_in_rspamd(db)
+        # The feature's trend samples (in a table shared with other figures, by name)
+        from .figures import purge_feature_metrics
+        removed_metrics = purge_feature_metrics(db, feature)
+        if removed_metrics:
+            deleted['metric_snapshots'] = removed_metrics
         for table_name in FEATURE_TABLES[feature]:
             if not _TABLE_NAME_RE.match(table_name):
                 raise ValueError(f"Invalid table name: {table_name}")

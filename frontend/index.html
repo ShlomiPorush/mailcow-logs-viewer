@@ -634,12 +634,12 @@
                             <div class="ui-panel-head">Server health
                                 <button type="button" class="ui-more" onclick="openStatusTab('server')">Status</button></div>
                             <div class="ui-dash-health">
-                                <button type="button" class="ui-st-card" onclick="openStatusTab('server')"><span class="ui-st-card-label">Containers</span><b id="dash-kpi-containers">-</b><small id="dash-kpi-containers-note"></small></button>
-                                <button type="button" class="ui-st-card" id="dashboard-blacklist-card" onclick="openStatusTab('blocklists')"><span class="ui-st-card-label">Blocklists</span><b id="dash-kpi-blocklists">-</b><small id="dash-kpi-blocklists-note"></small></button>
-                                <button type="button" class="ui-st-card" onclick="openStatusTab('jobs')"><span class="ui-st-card-label">Background jobs</span><b id="dash-kpi-jobs">-</b><small id="dash-kpi-jobs-note"></small></button>
-                                <button type="button" class="ui-st-card" onclick="openStatusTab('server')"><span class="ui-st-card-label">Mail storage</span><b id="dash-kpi-storage">-</b><small id="dash-kpi-storage-note"></small></button>
-                                <button type="button" class="ui-st-card" onclick="openStatusTab('server')"><span class="ui-st-card-label">Message linking</span><b id="dash-kpi-linking">-</b><small id="dash-kpi-linking-note"></small></button>
-                                <button type="button" class="ui-st-card" onclick="navigateTo('about')"><span class="ui-st-card-label">This app</span><b id="dash-kpi-version">-</b><small id="dash-kpi-version-note"></small></button>
+                                <button type="button" class="ui-st-card" onclick="openStatusTab('server')"><span class="ui-st-card-label">Containers</span><b id="dash-kpi-containers">-</b><small id="dash-kpi-containers-note"></small><span class="ui-spark is-none" aria-hidden="true"></span></button>
+                                <button type="button" class="ui-st-card" id="dashboard-blacklist-card" onclick="openStatusTab('blocklists')"><span class="ui-st-card-label">Blocklists</span><b id="dash-kpi-blocklists">-</b><small id="dash-kpi-blocklists-note"></small><span class="ui-spark" data-trend="blocklists_listed"></span></button>
+                                <button type="button" class="ui-st-card" onclick="openStatusTab('jobs')"><span class="ui-st-card-label">Background jobs</span><b id="dash-kpi-jobs">-</b><small id="dash-kpi-jobs-note"></small><span class="ui-spark is-none" aria-hidden="true"></span></button>
+                                <button type="button" class="ui-st-card" onclick="openStatusTab('server')"><span class="ui-st-card-label">Mail storage</span><b id="dash-kpi-storage">-</b><small id="dash-kpi-storage-note"></small><span class="ui-spark" data-trend="storage_used"></span></button>
+                                <button type="button" class="ui-st-card" onclick="openStatusTab('server')"><span class="ui-st-card-label">Message linking</span><b id="dash-kpi-linking">-</b><small id="dash-kpi-linking-note"></small><span class="ui-spark" data-trend="linking_rate"></span></button>
+                                <button type="button" class="ui-st-card" onclick="navigateTo('about')"><span class="ui-st-card-label">This app</span><b id="dash-kpi-version">-</b><small id="dash-kpi-version-note"></small><span class="ui-spark is-none" aria-hidden="true"></span></button>
                             </div>
                         </section>
                         <section class="ui-panel">

@@ -169,6 +169,16 @@ def get_blacklist_config() -> Dict[str, Any]:
 
 @router.get("/summary")
 def get_blacklist_summary() -> Dict[str, Any]:
+    """Compact blacklist status summary for the dashboard, with its figure (listed of
+    all monitored addresses; valid with a fresh check) that the trend samples too."""
+    from app.services.figures import blocklists_figure
+    summary = blacklist_summary_data()
+    figure = blocklists_figure(summary)
+    summary['figure'] = {'value': figure['value'], 'of': figure['of'], 'valid': figure['valid']}
+    return summary
+
+
+def blacklist_summary_data() -> Dict[str, Any]:
     """
     Get compact blacklist status summary for dashboard.
 

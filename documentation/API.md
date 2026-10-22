@@ -1010,6 +1010,19 @@ A read failure can return HTTP 200 with `error` and zero values, so check `error
 
 ---
 
+### GET /stats/trends
+
+The hourly samples behind the Dashboard's small trend lines.
+
+| Parameter | Type | Default | Constraints and purpose |
+| --- | --- | --- | --- |
+| `names` | string | required | Comma-separated, 1 to 10 of `storage_used`, `linking_rate`, `blocklists_listed`, `security_review`, `security_banned` |
+| `days` | integer | `7` | 1 to 90 |
+
+Returns `{ "days": 7, "trends": { "storage_used": [ {"slot": "2026-10-22T10:00:00Z", "value": 45.0, "of": 100.0, "as_of": "2026-10-22T10:00:31Z"} ] } }`, oldest first. An hour whose source did not answer has no sample. The trends of a feature that is off (`blocklists_listed` with the blocklist monitor, the `security_*` ones with Security) are left out of the answer. An unknown name returns 422.
+
+---
+
 ### GET /stats/flow
 
 The Dashboard's mail flow: counts per bar, in the app's time zone. Give either `period`, or `from`, `to` and `bucket`.
@@ -1141,7 +1154,7 @@ Total and active counts from mailcow: `{ "domains": {"total": 5, "active": 5}, "
 
 ### GET /status/summary
 
-Containers, storage and mailcow counts in one call, for the dashboard: `containers` (the summary of `GET /status/containers`), `storage` (`used_percent`, `used`, `total`) and `system` (`domains`, `mailboxes`, `aliases` totals). A part that cannot be read falls back to zeros.
+Containers, storage and mailcow counts in one call, for the dashboard: `containers` (the summary of `GET /status/containers`), `storage` (`used_percent`, `used`, `total`, and `known`: false when mailcow did not tell it, so the zeros are not a reading) and `system` (`domains`, `mailboxes`, `aliases` totals). A part that cannot be read falls back to zeros.
 
 ---
 
@@ -1175,7 +1188,7 @@ Configuration, import state, correlation state and background job state, for the
     "rspamd": { "...": "..." },
     "netfilter": { "...": "..." }
   },
-  "correlation_status": {"last_update": "2025-12-25T10:30:00Z", "total": 40000, "complete": 39500, "incomplete": 500, "expired": 100, "completion_rate": 98.75},
+  "correlation_status": {"last_update": "2025-12-25T10:30:00Z", "total": 40000, "complete": 39500, "incomplete": 500, "expired": 100, "completion_rate": 98.75, "known": true},
   "background_jobs": {
     "complete_correlations": {"interval": "120 seconds (2 minutes)", "description": "Links Postfix logs to messages", "status": "running", "last_run": "2026-01-08T12:13:56Z", "error": null, "pending_items": 93}
   },
@@ -1785,6 +1798,7 @@ The dashboard summary across every active monitored host (WAN IP, transports, re
     {"hostname": "198.51.100.20", "source": "relayhost:smtp.example.com", "status": "clean", "listed_count": 0, "checked_at": "2026-01-25T14:00:00Z"}
   ],
   "hosts_total": 2,
+  "figure": {"value": 1, "of": 2, "valid": true},
   "hosts_listed": 1
 }
 ```

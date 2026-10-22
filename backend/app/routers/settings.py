@@ -332,18 +332,13 @@ def get_settings_info(db: Session = Depends(get_db)):
         last_netfilter = db.query(func.max(NetfilterLog.created_at)).scalar()
         last_correlation = db.query(func.max(MessageCorrelation.updated_at)).scalar()
         
-        # Get completion statistics
-        total_correlations = db.query(func.count(MessageCorrelation.id)).scalar()
-        complete_correlations = db.query(func.count(MessageCorrelation.id)).filter(
-            MessageCorrelation.is_complete == True,
-            MessageCorrelation.final_status != 'expired'
-        ).scalar()
-        incomplete_correlations = db.query(func.count(MessageCorrelation.id)).filter(
-            MessageCorrelation.is_complete == False
-        ).scalar()
-        expired_correlations = db.query(func.count(MessageCorrelation.id)).filter(
-            MessageCorrelation.final_status == 'expired'
-        ).scalar()
+        # Completion statistics: the Message linking figure (its trend samples the same function)
+        from ..services.figures import linking_figure
+        linking = linking_figure(db)
+        total_correlations = linking['total']
+        complete_correlations = linking['complete']
+        incomplete_correlations = linking['incomplete']
+        expired_correlations = linking['expired']
         
         # Count correlations without definitive final_status (for update_final_status job)
         # Only count correlations within Max Correlation Age (older ones should be expired)
@@ -439,7 +434,8 @@ def get_settings_info(db: Session = Depends(get_db)):
                 "complete": complete_correlations or 0,
                 "incomplete": incomplete_correlations or 0,
                 "expired": expired_correlations or 0,
-                "completion_rate": round((complete_correlations / total_correlations * 100) if total_correlations > 0 else 0, 2)
+                "completion_rate": linking['value'] if linking['valid'] else 0,
+                "known": linking['valid']
             },
             "background_jobs": {
                 "fetch_logs": {
@@ -465,6 +461,13 @@ def get_settings_info(db: Session = Depends(get_db)):
                     "last_run": format_datetime_utc(jobs_status.get('update_final_status', {}).get('last_run')),
                     "error": jobs_status.get('update_final_status', {}).get('error'),
                     "pending_items": correlations_needing_status or 0
+                },
+                "trend_samples": {
+                    "interval": "1 hour",
+                    "description": "Samples the dashboard figures that show a trend (storage, linking, blocklists, Security), kept 90 days",
+                    "status": jobs_status.get('trend_samples', {}).get('status', 'unknown'),
+                    "last_run": format_datetime_utc(jobs_status.get('trend_samples', {}).get('last_run')),
+                    "error": jobs_status.get('trend_samples', {}).get('error')
                 },
                 "feature_data_sweep": {
                     "interval": "10 minutes",
@@ -1402,6 +1405,7 @@ def trigger_job(job_name: str, background_tasks: BackgroundTasks):
         update_final_status_for_correlations,
         expire_old_correlations,
         feature_data_sweep_job,
+        trend_samples_job,
         correlate_dovecot_logs,
         cleanup_old_logs,
         cleanup_old_dmarc_reports,
@@ -1438,6 +1442,7 @@ def trigger_job(job_name: str, background_tasks: BackgroundTasks):
         'update_final_status': ('update_final_status', update_final_status_for_correlations, False),
         'expire_correlations': ('expire_correlations', expire_old_correlations, False),
         'feature_data_sweep': ('feature_data_sweep', feature_data_sweep_job, False),
+        'trend_samples': ('trend_samples', trend_samples_job, False),
         'correlate_dovecot': ('correlate_dovecot', correlate_dovecot_logs, False),
         'cleanup_logs': ('cleanup_logs', cleanup_old_logs, False),
         'cleanup_dmarc_reports': ('cleanup_dmarc_reports', cleanup_old_dmarc_reports, False),

@@ -2118,6 +2118,52 @@ function uiRedrawKeepingFocus(container, draw) {
 }
 
 // =============================================================================
+// A small trend beside a figure: its hourly samples over the last days as a
+// line (a gap where an hour has no sample), the latest point marked. Fewer
+// than two samples: a dashed line, "Collecting since". The words (aria-label
+// and title) say the trend's start and end and when it was read.
+//   uiSparkline(points, { days, now, format }) -> SVG markup
+//     points: [{ slot, value, as_of }] oldest first (slot, as_of: ISO); format(value) -> words
+// =============================================================================
+function uiSparkline(points, { days = 7, now = Date.now(), format = v => String(v), label = 'Trend' } = {}) {
+    const W = 72, H = 18, pad = 2;
+    const from = now - days * 86400000;
+    const hourly = (points || []).filter(p => p.value !== null && p.value !== undefined && Date.parse(p.slot) >= from);
+    // Six hours to a point over a week (the hours' average): a line, not a comb; a six hours with no sample is a gap
+    const step = days > 2 ? 6 * 3600000 : 3600000;
+    const groups = new Map();
+    hourly.forEach(p => {
+        const key = Math.floor(Date.parse(p.slot) / step) * step;
+        const g = groups.get(key) || { slot: new Date(key).toISOString(), sum: 0, n: 0, as_of: p.as_of };
+        g.sum += Number(p.value); g.n += 1; g.as_of = p.as_of;
+        groups.set(key, g);
+    });
+    const pts = [...groups.values()].map(g => ({ slot: g.slot, value: g.sum / g.n, as_of: g.as_of }));
+    // The words use the samples as read: the first and the latest
+    const firstRead = hourly.length ? Number(hourly[0].value) : null, lastRead = hourly.length ? Number(hourly[hourly.length - 1].value) : null;
+    const when = t => `${formatDay(t)}, ${formatInZone(t, { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }, 'en-US')}`;
+    if (pts.length < 2) {
+        // Since the first sample as read (not the six hours it falls in)
+        const since = hourly.length ? `Collecting since ${when(Date.parse(hourly[0].slot))}` : 'Collecting: the first samples come within the hour';
+        return `<svg class="ui-spark-svg is-collecting" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="${escapeHtml(`${label}: ${since}`)}"><title>${escapeHtml(since)}</title><line x1="${pad}" y1="${H / 2}" x2="${W - pad}" y2="${H / 2}"/></svg>`;
+    }
+    const values = pts.map(p => Number(p.value));
+    const lo = Math.min(...values), hi = Math.max(...values);
+    const x = t => pad + (Math.max(from, Math.min(now, t)) - from) / (now - from) * (W - 2 * pad);
+    const y = v => (hi === lo ? H / 2 : H - pad - (v - lo) / (hi - lo) * (H - 2 * pad));
+    // A missing hour (more than an hour and a half between samples) breaks the line
+    let d = '';
+    pts.forEach((p, i) => {
+        const t = Date.parse(p.slot);
+        const gap = i === 0 || t - Date.parse(pts[i - 1].slot) > step * 1.5;
+        d += `${gap ? 'M' : 'L'}${x(t).toFixed(1)} ${y(Number(p.value)).toFixed(1)} `;
+    });
+    const last = pts[pts.length - 1];
+    const words = `${label}, last ${days} days: from ${format(firstRead)} to ${format(lastRead)}, as of ${when(Date.parse(last.as_of || last.slot))}`;
+    return `<svg class="ui-spark-svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="${escapeHtml(words)}"><title>${escapeHtml(words)}</title><path d="${d.trim()}"/><circle cx="${x(Date.parse(last.slot)).toFixed(1)}" cy="${y(Number(last.value)).toFixed(1)}" r="1.8"/></svg>`;
+}
+
+// =============================================================================
 // Overview strip under a zoomable chart: the whole period in small bars, with a
 // window over the span the chart shows. Drag the window to move it, drag an
 // edge to resize it, click beside it to center it there. Its two edges are

@@ -1450,6 +1450,15 @@ body { font-family: var(--ui-font); background: var(--ui-bg); color: var(--ui-in
 
 /* Overview cards */
 .ui-st-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+/* A trend under a figure (uiSparkline): one row of its own in every card, empty where
+   a figure has none, so the cards keep one height */
+.ui-spark { display: block; height: 18px; line-height: 0; margin-top: 2px; }
+.ui-spark-svg { overflow: visible; }
+/* In the Security figures (whose parts are ordered): the trend comes last */
+.ui-dash-grid .ui-stat .ui-spark { order: 3; }
+.ui-spark-svg path, .ui-spark-svg line { fill: none; stroke: var(--ui-muted); stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.ui-spark-svg circle { fill: var(--ui-ink); }
+.ui-spark-svg.is-collecting line { stroke-dasharray: 2 3; opacity: .7; }
 .ui-st-card { display: grid; align-content: start; gap: 4px; padding: 14px var(--ui-pad-x); border: 0; border-radius: var(--ui-radius);
     background: var(--ui-panel); color: inherit; font: inherit; text-align: start; }
 button.ui-st-card { cursor: pointer; }
