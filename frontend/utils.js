@@ -679,6 +679,8 @@ function showToast(message, type = 'info', options = {}) {
     `;
     // An action still running holds the toast like the pointer or the keyboard does
     let busy = false;
+    // Set below where the toast has a timer (not for one that stays until closed)
+    let holdNow = () => {};
     if (options.action) {
         const button = toast.querySelector('.ui-toast-action');
         button.addEventListener('click', () => {
@@ -688,7 +690,7 @@ function showToast(message, type = 'info', options = {}) {
             // Until it is done the toast stays, with the keyboard in it: what comes next
             // (a message, Retry) takes the keyboard over from here
             busy = true;
-            pause();
+            holdNow();
             button.setAttribute('aria-disabled', 'true');
             Promise.resolve(result).catch(() => {}).finally(() => { if (toast.isConnected) toast.remove(); });
         });
@@ -741,6 +743,7 @@ function showToast(message, type = 'info', options = {}) {
         toast.style.transition = '';
     };
     const resume = () => { if (timer === null && !hold()) run(); };
+    holdNow = pause;
     toast.addEventListener('mouseenter', pause);
     toast.addEventListener('focusin', pause);
     toast.addEventListener('mouseleave', () => setTimeout(resume, 0));

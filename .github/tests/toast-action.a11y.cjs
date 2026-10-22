@@ -146,3 +146,19 @@ test('an action clicked while its toast fades keeps the toast until it is done',
     await wait(50);
     assert.equal(toast.isConnected, false);
 });
+
+test('Retry that takes time, in a toast that stays until closed, runs without an error', async () => {
+    const w = page();
+    const errors = [];
+    w.addEventListener('error', e => errors.push(e.message));
+    let tries = 0;
+    w.showToast('Could not undo.', 'error', { duration: Infinity, action: { label: 'Retry', onAction: () => { tries++; return new w.Promise(r => setTimeout(r, 30)); } } });
+    const toast = w.document.getElementById('toast-notification');
+    let thrown = null;
+    try { toast.querySelector('.ui-toast-action').click(); } catch (e) { thrown = e; }
+    assert.equal(thrown, null);
+    assert.equal(tries, 1);
+    await wait(80);
+    assert.equal(toast.isConnected, false, 'gone once done');
+    assert.deepEqual(errors, []);
+});
