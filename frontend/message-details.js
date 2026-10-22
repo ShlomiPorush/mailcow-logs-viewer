@@ -334,15 +334,16 @@ function renderLogTimeline(postfixLogs, dovecotLogs) {
     const ownersOf = e => mdLineOwners(e.log, e.dovecot);
     const shown = entries.filter(e => (!mdView.source || timelineSource(e) === mdView.source)
         && (!picked || !ownersOf(e).length || ownersOf(e).includes(picked.key)));
-    const own = picked ? shown.filter(e => ownersOf(e).includes(picked.key)).length : 0;
-    const count = picked ? `${own} for this recipient, ${shown.length - own} shared`
-        : shown.length === entries.length ? `${entries.length} entries` : `${shown.length} of ${entries.length} entries`;
+    const count = shown.length === entries.length ? `${entries.length} entries` : `${shown.length} of ${entries.length} entries`;
     const picker = mdRecipients.length > 1 ? `
         ${uiPicker({
             id: 'md-rcpt-pick', label: 'Recipient', set: !!picked, search: 'Find a recipient', panelLabel: 'Show the logs of',
             value: picked ? `<bdi>${escapeHtml(picked.address)}</bdi>` : 'All recipients',
             options: [{ label: 'All recipients', value: -1, selected: !picked, onclick: 'pickMessageRecipient(-1)' }]
-                .concat(mdRecipients.map((r, i) => ({ label: r.address, hint: mdStatusInfo(r.status).word, value: i, selected: mdView.picked === i, onclick: `pickMessageRecipient(${i})` }))),
+                .concat(mdRecipients.map((r, i) => ({ r, i })).sort((a, b) => mdRecipientOrder(a.r, b.r)).map(({ r, i }) => {
+                    const status = mdStatusInfo(r.status);
+                    return { label: r.address, hint: status.word, dot: status.tone, value: i, selected: mdView.picked === i, onclick: `pickMessageRecipient(${i})` };
+                })),
         })}
         ${picked ? `<button type="button" class="ui-icon-btn ui-icon-btn-sm" onclick="pickMessageRecipient(-1)" title="Show every recipient" aria-label="Show every recipient"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg></button>` : ''}` : '';
 
@@ -668,6 +669,11 @@ function mdStatusCounts(recipients) {
 }
 
 // The statuses present, in list order, each with its count
+// Problems first, then by address: the Recipients list and the Recipient picker
+function mdRecipientOrder(a, b) {
+    return mdStatusInfo(a.status).rank - mdStatusInfo(b.status).rank || a.address.localeCompare(b.address);
+}
+
 function mdStatusList(recipients) {
     const counts = mdStatusCounts(recipients);
     return Object.keys(counts)
@@ -757,7 +763,7 @@ function renderRecipientRows() {
     const query = mdView.query.trim().toLowerCase();
     const rows = mdRecipients.map((r, index) => ({ r, index }))
         .filter(({ r }) => (!mdView.status || r.status === mdView.status) && (!query || r.address.toLowerCase().includes(query)))
-        .sort((a, b) => mdStatusInfo(a.r.status).rank - mdStatusInfo(b.r.status).rank || a.r.address.localeCompare(b.r.address));
+        .sort((a, b) => mdRecipientOrder(a.r, b.r));
     const shown = mdView.all ? rows : rows.slice(0, MD_RCPT_ROWS);
     const chip = (status, word, count) => `<button type="button" class="ui-chip" data-md-focus="status-${escapeHtml(status)}" aria-pressed="${mdView.status === status}" onclick="filterMessageRecipients('${escapeJsArg(status)}')">${escapeHtml(word)} <small>${count}</small></button>`;
     const row = ({ r, index }) => {

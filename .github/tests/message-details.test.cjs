@@ -50,6 +50,13 @@ function message() {
     };
 }
 
+
+// The timeline's rows, and those every recipient shares
+function timelineLines(html) {
+    const rows = html.split('id="log-timeline-entries"')[1] || '';
+    return { all: (rows.match(/data-log-source=/g) || []).length, shared: (rows.match(/>All recipients<\/span>/g) || []).length };
+}
+
 test('message entry point and all four tabs preserve content and actions', async () => {
     const h = harness(message());
     await h.context.viewMessageDetails('example-key');
@@ -200,7 +207,18 @@ test('the Logs tab lists the recipients, problems first, and shows one recipient
     const b = vm.runInContext("mdRecipients.findIndex(r => r.key === 'b@example.net')", h.context);
     h.context.pickMessageRecipient(b, true);
     const timeline = h.element('md-timeline-slot').innerHTML;
-    assert.match(timeline, /2 for this recipient, 1 shared/);
+    assert.deepEqual(timelineLines(timeline), { all: 3, shared: 1 });
+    assert.match(timeline, /3 of 5 entries/);
+    assert.doesNotMatch(timeline, /for this recipient/);
+    // The picker: a status dot for each recipient, problems first
+    const options = [...timeline.matchAll(/role="option"[^>]*>(?:<i class="ui-fct-dot ?([^"]*)" aria-hidden="true"><\/i>)?<span>([^<]*)<\/span>/g)]
+        .map(m => ({ tone: m[1] || '', label: m[2], dot: m[0].includes('ui-fct-dot') }));
+    assert.deepEqual(options[0], { tone: '', label: 'All recipients', dot: false });
+    const rank = { 'ui-fct-fail': 0, 'ui-fct-warn': 1, '': 2, 'ui-fct-ok': 3 };
+    const ranks = options.slice(1).map(o => rank[o.tone]);
+    assert.ok(options.slice(1).every(o => o.dot) && ranks.length === 4, JSON.stringify(options));
+    assert.deepEqual(ranks, [...ranks].sort((a, b) => a - b), JSON.stringify(options));
+    assert.ok(ranks[0] < ranks[ranks.length - 1], 'a problem leads, a delivery trails');
     assert.doesNotMatch(timeline.split('id="log-timeline-entries"')[1], /a@example\.net/, 'the lines, the picker lists everyone');
     assert.match(timeline, /is-shared[\s\S]*All recipients/);
     assert.match(h.element('md-rcpt-results').innerHTML, /aria-pressed="true" title="Show the logs of b@example\.net"/);
@@ -292,7 +310,7 @@ test('a delivery to an alias counts for the alias, not as another recipient', as
     // The alias's line is its own in the timeline
     const team = vm.runInContext("mdRecipients.findIndex(r => r.key === 'team@example.com')", h2.context);
     h2.context.pickMessageRecipient(team, true);
-    assert.match(h2.element('md-timeline-slot').innerHTML, /1 for this recipient, 0 shared/);
+    assert.deepEqual(timelineLines(h2.element('md-timeline-slot').innerHTML), { all: 1, shared: 0 });
 });
 
 test('a message that expired in the queue expires the recipients still waiting', async () => {
@@ -365,7 +383,7 @@ test('aliases and their mailboxes keep each delivery\'s own Dovecot verdict', as
     for (const alias of ['ops@example.com', 'sales@example.com']) {
         const i = vm.runInContext(`mdRecipients.findIndex(r => r.key === '${alias}')`, h.context);
         h.context.pickMessageRecipient(i);
-        assert.match(h.element('md-timeline-slot').innerHTML, /2 for this recipient, 0 shared/, alias);
+        assert.deepEqual(timelineLines(h.element('md-timeline-slot').innerHTML), { all: 2, shared: 0 }, alias);
     }
     // The address is copied with a click, as before
     assert.match(row('team@example.com'), /copyToClipboard\('team@example\.com', event\)/);

@@ -2527,13 +2527,14 @@ function uiPickerMatches(label, query) {
     return !query || plain(label).includes(plain(query.trim()));
 }
 
-// options: [{ label, hint, value, selected, onclick }] for a list (value: the option's
-// data-value); panel: HTML for a dialog; search: the search field's label, for a long list
+// options: [{ label, hint, dot, value, selected, onclick }] for a list (value: the option's
+// data-value; dot: a status tone, as the Outcome filter shows it, '' for a grey one);
+// panel: HTML for a dialog; search: the search field's label, for a long list
 function uiPicker({ id, label, value, set = false, options = null, panel = '', panelLabel = '', panelClass = '', hostClass = '', onOpen = '', search = '', field = false, labelledBy = '', disabled = false, icon = false }) {
     const open = uiPickerIsOpen(id);
     const list = Array.isArray(options);
     const query = search ? (uiPickers.query[id] || '') : '';
-    const items = list ? options.map(o => `<button type="button" role="option" class="ui-fct" tabindex="-1" aria-selected="${o.selected ? 'true' : 'false'}"${o.value !== undefined ? ` data-value="${escapeHtml(String(o.value))}"` : ''}${uiPickerMatches(o.label, query) ? '' : ' hidden'} onclick="${o.onclick}"><span>${escapeHtml(o.label)}</span>${o.hint !== undefined ? `<small>${escapeHtml(String(o.hint))}</small>` : ''}</button>`).join('') : '';
+    const items = list ? options.map(o => `<button type="button" role="option" class="ui-fct" tabindex="-1" aria-selected="${o.selected ? 'true' : 'false'}"${o.value !== undefined ? ` data-value="${escapeHtml(String(o.value))}"` : ''}${uiPickerMatches(o.label, query) ? '' : ' hidden'} onclick="${o.onclick}">${o.dot !== undefined ? `<i class="ui-fct-dot${o.dot ? ` ui-fct-${escapeHtml(o.dot)}` : ''}" aria-hidden="true"></i>` : ''}<span>${escapeHtml(o.label)}</span>${o.hint !== undefined ? `<small>${escapeHtml(String(o.hint))}</small>` : ''}</button>`).join('') : '';
     const anyShown = list && options.some(o => uiPickerMatches(o.label, query));
     let role = list ? 'listbox' : 'dialog';
     let body = list ? `<span class="ui-label" aria-hidden="true">${escapeHtml(label)}</span>${items}` : panel;
