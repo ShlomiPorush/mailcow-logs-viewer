@@ -343,7 +343,7 @@ function renderLogTimeline(postfixLogs, dovecotLogs) {
     const count = shown.length === entries.length ? `${entries.length} entries` : `${shown.length} of ${entries.length} entries`;
     const picker = mdRecipients.length > 1 ? `
         ${uiPicker({
-            id: 'md-rcpt-pick', label: 'Recipient', set: narrowed, search: 'Find a recipient', panelLabel: 'Show the logs of', panelClass: 'ui-md-rcpt-panel',
+            id: 'md-rcpt-pick', label: 'Recipient', set: narrowed, search: 'Find a recipient', panelLabel: 'Show the logs of', panelClass: 'ui-md-rcpt-panel', onOpen: 'mdRecipientPickerOpen',
             value: picked ? `<bdi>${escapeHtml(picked.address)}</bdi>` : listed ? `<bdi>${escapeHtml(listName)}</bdi>` : 'All recipients',
             options: [{ label: 'All recipients', value: -1, selected: !narrowed, onclick: 'pickMessageRecipient(-1)' }]
                 .concat(mdRecipients.map((r, i) => ({ r, i })).sort((a, b) => mdRecipientOrder(a.r, b.r)).map(({ r, i }) => {
@@ -755,6 +755,17 @@ function filterMessageRecipients(status) {
     mdView.all = false;
     mdRedrawRecipients();
     mdRedrawTimeline();
+}
+
+// The Recipient picker opens with the timeline's head pinned under the tabs, so
+// its list hangs down into the timeline instead of up behind the tabs
+function mdRecipientPickerOpen() {
+    const body = document.getElementById('message-modal-body');
+    const head = document.querySelector('#md-timeline .ui-md-timeline-head');
+    if (!body || !head) return;
+    const tabs = body.querySelector(':scope > .ui-tabs');
+    const gap = head.getBoundingClientRect().top - (tabs || body).getBoundingClientRect().bottom;
+    if (gap > 1) body.scrollTop += gap;
 }
 
 // The recipients the list shows, by its status and search

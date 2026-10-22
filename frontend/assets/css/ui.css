@@ -3037,7 +3037,9 @@ button.ui-aa-col:focus-visible { outline: 2px solid var(--ui-focus); outline-off
 .ui-picker-list, .ui-picker-panel[role="listbox"] { overflow-x: hidden; }
 .ui-picker-panel [role="option"].ui-fct > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ui-picker-panel [role="option"].ui-fct > small { flex: none; white-space: nowrap; }
-.ui-picker-panel.ui-md-rcpt-panel { width: min(400px, calc(100vw - 16px)); }
+.ui-picker-panel.ui-md-rcpt-panel { width: min(400px, calc(100vw - 16px)); inset-inline-start: auto; inset-inline-end: 0; }
+/* Over the pinned tabs while its picker is open, should the list open upward */
+#message-modal .ui-md-timeline-head:has(.ui-picker-panel:not(.hidden)) { z-index: 7; }
 .ui-picker-none { padding: 4px 8px; font-size: 12.5px; }
 .ui-picker-none.hidden { display: none; }
 .ui-ms-dropdown { width: min(320px, calc(100vw - 16px)); }
