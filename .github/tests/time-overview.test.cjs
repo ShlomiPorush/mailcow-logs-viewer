@@ -151,3 +151,11 @@ test('the hour\'s edge where the clocks move by half an hour (Lord Howe, 4 Octob
     // Kathmandu is UTC+5:45: its hours start at :15 UTC
     assert.equal(load('Asia/Kathmandu').uiNearestLocalHour(Date.parse('2026-10-21T10:20:00Z')), Date.parse('2026-10-21T10:15:00Z'));
 });
+
+test('on a grid of hours an edge at its limit reaches the hour before, however far', () => {
+    const c = load();
+    // The span ends at 10:59; the start goes as late as it may: 09:00, a whole hour back on the grid
+    const limits = { from: 0, to: 10 * H + 59 * 60000, min: H };
+    const hour = t => Math.round(t / H) * H;
+    assert.deepEqual(plain(c.uiOverviewEdge({ from: 4 * H, to: limits.to }, 'start', 99 * H, limits, hour)), { from: 9 * H, to: limits.to });
+});

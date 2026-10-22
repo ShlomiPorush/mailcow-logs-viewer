@@ -2364,8 +2364,14 @@ async function loadMailFlowPeriod() {
         }
         const l = dashFlow.limits, z = dashFlow.zoom;
         const from = Math.max(z.from, l.from), to = Math.min(z.to, l.to);
-        if (mailFlowBusy()) { dashFlow.stale = true; return; }
-        if (from !== z.from || to !== z.to) { dashFlowZoom(to - from >= l.min ? { from, to } : null); return; }
+        const moved = from !== z.from || to !== z.to;
+        if (mailFlowBusy()) {
+            // Under a gesture the zoom still moves inside the new limits; its end asks for it
+            if (moved) { dashFlow.zoom = to - from >= l.min ? { from, to } : null; dashFlow.view++; }
+            dashFlow.stale = true;
+            return;
+        }
+        if (moved) { dashFlowZoom(to - from >= l.min ? { from, to } : null); return; }
         // A zoom made before this period's answer came (a period switch, then Zoom in): its own answer now
         if (dashFlow.dataView !== dashFlow.view) { loadMailFlowZoom(); return; }
         renderMailFlowOverview(true);

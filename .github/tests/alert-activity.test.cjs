@@ -168,6 +168,12 @@ test('a zoom snaps to the quarters, the end of the data is an edge, and the rang
     assert.equal(z.to, end);
     assert.equal((z.from - first) % Q, 0, 'on a quarter');
     assert.ok(z.to - z.from >= 3600000, 'at least an hour');
+    // The 24 hours start off the quarters; the strip shows them from the next quarter: one step back is a zoom
+    h.run("alertActivityZoom = null; alertActivityRange = '24h'");
+    const shown = JSON.parse(JSON.stringify(h.run('alertActivityShown(alertActivity, alertActivityRangeSpan(alertActivity))')));
+    h.context.__span = { from: shown.from - Q, to: shown.to };
+    h.run('alertActivityShow(alertActivity, __span)');
+    assert.equal(h.run('alertActivityZoom && alertActivityZoom.from'), shown.from - Q, 'the first step back moves the start');
     // The pressed range's own span: no zoom
     h.run('__span = alertActivityRangeSpan(alertActivity); alertActivityShow(alertActivity, __span)');
     assert.equal(h.run('alertActivityZoom'), null);

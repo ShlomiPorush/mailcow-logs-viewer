@@ -214,6 +214,14 @@ function alertActivityShown(data, span) {
 // Show a span: snapped to the quarters (at least the shortest span); the pressed range's own span is no zoom
 function alertActivityShow(data, next) {
     const l = alertActivityLimits(data), snap = alertActivitySnap(data);
+    // The range itself, asked as it is: no zoom
+    const raw = alertActivityRangeSpan(data);
+    if (raw && Math.abs(next.from - raw.from) <= 1 && Math.abs(next.to - raw.to) <= 1) {
+        alertActivityZoom = null;
+        alertActivityPick = null;
+        renderAlertActivity();
+        return;
+    }
     let from = snap(next.from), to = snap(next.to);
     if (to - from < l.min) {
         to = Math.min(l.to, snap(from + l.min));
@@ -224,11 +232,8 @@ function alertActivityShow(data, next) {
         }
     }
     // The range is counted back from the data's end, off the quarters: compared as the chart shows it
-    // (asked as it is, its start snaps to the nearest quarter; as the strip shows it, to the next one)
-    const raw = alertActivityRangeSpan(data);
     const range = raw && alertActivityShown(data, raw);
-    const isRange = !!raw && Math.abs(range.to - to) <= 1 && (Math.abs(range.from - from) <= 1 || Math.abs(snap(raw.from) - from) <= 1);
-    alertActivityZoom = isRange ? null : { from, to };
+    alertActivityZoom = range && Math.abs(range.from - from) <= 1 && Math.abs(range.to - to) <= 1 ? null : { from, to };
     alertActivityPick = null;
     renderAlertActivity();
 }

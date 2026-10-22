@@ -2108,13 +2108,14 @@ function uiOverviewEdge(span, edge, t, limits, snap = t => t) {
         const most = span.to - limits.min;
         let x = Math.max(limits.from, Math.min(t, most));
         let from = at(x);
-        for (let i = 0; i < 8 && from > most && x > limits.from; i++) { x -= from - most + 60000; from = at(Math.max(limits.from, x)); }
+        // Steps that double reach the edge before it on any grid (quarters, hours, days)
+        for (let i = 0, d = from - most + 60000; i < 24 && from > most && x > limits.from; i++, d *= 2) { x -= d; from = at(Math.max(limits.from, x)); }
         return { from: Math.min(from, Math.max(limits.from, most)), to: span.to };
     }
     const least = span.from + limits.min;
     let x = Math.min(limits.to, Math.max(t, least));
     let to = at(x);
-    for (let i = 0; i < 8 && to < least && x < limits.to; i++) { x += least - to + 60000; to = at(Math.min(limits.to, x)); }
+    for (let i = 0, d = least - to + 60000; i < 24 && to < least && x < limits.to; i++, d *= 2) { x += d; to = at(Math.min(limits.to, x)); }
     return { from: span.from, to: Math.max(to, Math.min(limits.to, least)) };
 }
 
