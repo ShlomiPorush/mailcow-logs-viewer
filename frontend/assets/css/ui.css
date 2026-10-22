@@ -373,7 +373,6 @@
     /* Phones: search, Apply and Clear stay; the other filters open with "Filters" */
     .ui-filters:not(.is-open) .ui-filter-extra { display: none; }
     .ui-filters-toggle { display: inline-flex; }
-    .ui-filters.is-open .ui-filters-toggle { background: var(--ui-accent); border-color: var(--ui-accent); color: var(--ui-on-accent); }
     .ui-msg-l1 { flex-wrap: wrap; }
     .ui-alert > .ui-btn { margin-inline-start: 18px; }
 }
@@ -514,10 +513,12 @@
 .ui-fct-export { margin: 16px 8px 0; }
 
 .ui-msg-col { display: flex; flex-direction: column; min-height: 0; background: var(--ui-panel); border-inline-end: 1px solid var(--ui-line); }
-.ui-msg-searchbar { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0 8px; padding: 14px; border-bottom: 1px solid var(--ui-line); background: var(--ui-panel); }
-.ui-msg-searchbar > :not(.ui-search):not(.ui-msg-filter-btn) { grid-column: 1 / -1; }
-.ui-msg-filter-btn { position: relative; width: var(--ui-ctl-h); height: var(--ui-ctl-h); border: 1px solid var(--ui-line); border-radius: var(--ui-radius-sm); background: var(--ui-bg); }
-.ui-msg-filter-btn[aria-expanded="true"] { border-color: var(--ui-ink); color: var(--ui-ink); }
+.ui-msg-searchbar { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 0 8px; padding: 14px; border-bottom: 1px solid var(--ui-line); background: var(--ui-panel); }
+.ui-msg-searchbar > :not(.ui-search):not(.ui-msg-filter-btn):not(.ui-msg-sort) { grid-column: 1 / -1; }
+/* The tool icons beside a search (Filters, Sort) look alike: a light frame, the icon in the muted ink */
+:is(.ui-msg-filter-btn, .ui-sort-btn-icon) { position: relative; width: var(--ui-ctl-h); height: var(--ui-ctl-h); border: 1px solid var(--ui-line); border-radius: var(--ui-radius-sm); background: var(--ui-bg); }
+:is(.ui-msg-filter-btn, .ui-sort-btn-icon)[aria-expanded="true"] { border-color: var(--ui-ink); color: var(--ui-ink); }
+:is(.ui-msg-filter-btn, .ui-sort-btn-icon) svg { width: 16px; height: 16px; }
 .ui-msg-filter-n { position: absolute; top: -6px; inset-inline-end: -6px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px;
     background: var(--ui-accent); color: var(--ui-on-accent); font-size: 11px; font-weight: 700; line-height: 18px; text-align: center; }
 .ui-msg-filter-n.hidden { display: none; }
@@ -1640,6 +1641,10 @@ button.ui-st-card { cursor: pointer; }
 .ui-pager { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px; margin-top: 14px; }
 .ui-dialog.ui-dialog-fit { height: auto; max-height: 85vh; }
 .ui-dialog-head > .ui-muted { font-size: var(--ui-fs-sm); }
+@media (max-width: 760px) {
+    .ui-dialog-head:has(> .ui-muted) { flex-wrap: wrap; row-gap: 2px; }
+    .ui-dialog-head > .ui-muted { order: 3; flex-basis: 100%; }
+}
 
 @media (max-width: 760px) {
     .ui-dmarc-sync { align-items: flex-start; }
@@ -2331,10 +2336,37 @@ html .markdown-body .markdown-alert-caution .markdown-alert-title { color: var(-
 .ui-sort-btn { all: unset; cursor: pointer; }
 .ui-sort-btn:focus-visible { outline: 2px solid var(--ui-focus); outline-offset: 2px; border-radius: 3px; }
 .ui-sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
-/* Phones hide a list's header row: its Sort picker stands above the list instead */
-.ui-phone-sort { display: none; }
+/* A list's Sort button (utils.js uiSortControlSync): an icon the height of the search
+   beside it, or at the end of the list's header row; its menu holds two groups */
+.ui-sort-slot, .ui-msg-sort { display: inline-flex; flex: none; }
+.ui-list-summary > .ui-sort-slot, .ui-list-head > .ui-sort-slot, .ui-dm-card > header > .ui-sort-slot { margin-inline-start: auto; }
+/* A list in an order of its own choosing stands out, as a filter in use does */
+.ui-sort-btn-icon.is-set { color: var(--ui-ink); }
+.ui-sort-btn-icon.is-set::after { content: ""; position: absolute; top: -4px; inset-inline-end: -4px; width: 10px; height: 10px; border-radius: 50%;
+    background: var(--ui-accent); box-shadow: 0 0 0 2px var(--ui-panel); }
+:is(.ui-list-summary, .ui-dm-card > header) .ui-sort-btn-icon { width: 30px; height: 30px; }
+:is(.ui-sort-slot, .ui-msg-sort) .ui-popover { inset-inline-start: auto; inset-inline-end: 0; width: 240px; }
+.ui-sort-panel { display: grid; gap: 12px; padding: 12px; max-height: min(460px, 70vh); overflow-y: auto; font-weight: 400; }
+.ui-sort-group { display: grid; gap: 2px; margin: 0; padding: 0; border: 0; min-width: 0; }
+.ui-sort-group legend { padding: 0 0 4px; color: var(--ui-muted); font-size: 11.5px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+.ui-sort-opt { display: flex; align-items: center; gap: 10px; padding: 7px 8px; border-radius: var(--ui-radius-sm); color: var(--ui-ink); font-size: 13.5px; cursor: pointer; }
+.ui-sort-opt input { flex: none; margin: 0; accent-color: var(--ui-accent); }
+@media (hover: hover) { .ui-sort-opt:hover { background: color-mix(in srgb, var(--ui-ink) 6%, transparent); } }
+.ui-sort-opt:has(input:checked) { font-weight: 600; }
+.ui-sort-group:disabled .ui-sort-opt { color: var(--ui-muted); cursor: default; }
+/* In a dialog's head the Sort button sits just before Close */
+.ui-dialog-head > .ui-sort-host { margin-inline-start: auto; }
+.ui-dialog-head > .ui-sort-host + .ui-icon-btn, .ui-dialog-head .ui-sort-slot .ui-icon-btn { margin-inline-start: 0; }
+/* No card cuts the Sort menu open inside it */
+.ui-dm-card:has(.ui-picker-panel:not(.hidden)) { overflow: visible; }
+/* A menu open in a dialog's head opens over the dialog: the dialog does not cut it, the head stays above the body */
+.ui-dialog:has(> .ui-dialog-head .ui-picker-panel:not(.hidden)) { overflow: visible; }
+.ui-dialog-head:has(.ui-picker-panel:not(.hidden)) { position: relative; z-index: 2; }
 @media (max-width: 760px) {
-    .ui-phone-sort { display: flex; padding: 8px var(--ui-pad-x) 4px; }
+    /* The search keeps its line with the Sort button (and Filters, when there is one) */
+    .ui-fbar-row > .ui-search:has(+ .ui-sort-slot) { flex: 1 1 0; }
+    /* A checkbox after them takes the next line */
+    .ui-fbar-row > .ui-sort-slot ~ .ui-check-label { flex-basis: 100%; }
 }
 
 /* Filters and their table as one card: one panel, the filter row on top, the rows under it */
@@ -2817,8 +2849,7 @@ button.ui-dm-node { cursor: pointer; }
 .ui-fbar-row > .ui-toolbar-gap { flex: 1 1 0; }
 .ui-fbar-pickers { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .ui-fbar-pickers > .ui-picker-slot { display: contents; }
-.ui-fbar .ui-filters-toggle { display: inline-flex; align-items: center; gap: 6px; }
-.ui-fbar.is-open .ui-filters-toggle { background: var(--ui-accent); border-color: var(--ui-accent); color: var(--ui-on-accent); }
+.ui-fbar .ui-filters-toggle { display: inline-grid; }
 .ui-fbar-more { display: none; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px 14px; align-items: center; }
 .ui-fbar.is-open .ui-fbar-more { display: grid; }
 .ui-list-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin: 0; padding: 8px var(--ui-pad-x);
@@ -2836,6 +2867,8 @@ button.ui-dm-node { cursor: pointer; }
 }
 /* A picker panel stays within the screen and scrolls when its list is long */
 .ui-picker-panel { max-width: calc(100vw - 16px); }
+/* No room under the button: the panel opens above it */
+.ui-popover.is-up { top: auto; bottom: calc(100% + 6px); }
 .ui-picker-panel[role="listbox"] { max-height: min(420px, 60vh); overflow-y: auto; }
 .ui-picker-panel [role="option"][hidden] { display: none; }
 .ui-picker-panel.has-search { width: min(320px, calc(100vw - 16px)); }

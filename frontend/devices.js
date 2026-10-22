@@ -110,8 +110,8 @@ function renderDevicesList(container, data) {
     const newAfter = Date.now() - data.thresholds.new_days * 86400000;
     const staleBefore = Date.now() - data.thresholds.stale_days * 86400000;
     container.innerHTML = `${geoNote}
-        <div class="ui-table ui-stack" data-sort-handler="devicesSortBy" style="--ui-cols: minmax(200px, 1.6fr) minmax(170px, 1.4fr) minmax(120px, 1fr) minmax(120px, 1fr) 100px 100px; --ui-table-min: 880px">
-            <div class="ui-tr ui-tr-head"><span${devicesSortAttr('username')}>User</span><span${devicesSortAttr('device_type')}>Device</span><span${devicesSortAttr('last_ip')}>Last IP</span><span${devicesSortAttr('last_command')}>Last request</span><span${devicesSortAttr('first_seen')}>First seen</span><span${devicesSortAttr('last_seen')}>Last seen</span></div>
+        <div class="ui-table ui-stack" data-sort-handler="devicesSortBy" data-sort-at="devices-search" data-sort-name="devices" data-sort-default="Last seen:desc" style="--ui-cols: minmax(200px, 1.6fr) minmax(170px, 1.4fr) minmax(120px, 1fr) minmax(120px, 1fr) 100px 100px; --ui-table-min: 880px">
+            <div class="ui-tr ui-tr-head"><span data-sort-kind="text"${devicesSortAttr('username')}>User</span><span data-sort-kind="text"${devicesSortAttr('device_type')}>Device</span><span data-sort-kind="text"${devicesSortAttr('last_ip')}>Last IP</span><span data-sort-kind="text"${devicesSortAttr('last_command')}>Last request</span><span data-sort-kind="date"${devicesSortAttr('first_seen')}>First seen</span><span data-sort-kind="date"${devicesSortAttr('last_seen')}>Last seen</span></div>
             ${data.items.map(d => renderDeviceRow(d, newAfter, staleBefore)).join('')}
         </div>`;
 }

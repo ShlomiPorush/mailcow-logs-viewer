@@ -333,6 +333,7 @@ def get_unified_messages(
     ip: Optional[str] = Query(None, description="Filter by source IP"),
     start_date: Optional[RangeStart] = Query(None, description="Start date"),
     end_date: Optional[RangeEnd] = Query(None, description="End date"),
+    order: str = Query("desc", pattern="^(asc|desc)$", description="By time first seen: desc newest first, asc oldest first"),
     db: Session = Depends(get_db)
 ):
     """
@@ -372,7 +373,10 @@ def get_unified_messages(
             legs, MessageCorrelation.id == legs.c.leg_id
         ).filter(
             legs.c.leg_rank == 1
-        ).order_by(desc(legs.c.first_seen)).offset(offset).limit(limit * 2).all()
+        ).order_by(
+            # The leg's id settles messages first seen at the same moment, so pages never overlap or skip
+            *((legs.c.first_seen.asc(), legs.c.leg_id.asc()) if order == "asc" else (desc(legs.c.first_seen), desc(legs.c.leg_id)))
+        ).offset(offset).limit(limit * 2).all()
 
         # How many deliveries the message has in total, which is what the row
         # reports - not only the legs the current filters matched

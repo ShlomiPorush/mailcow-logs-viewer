@@ -106,7 +106,7 @@ function renderDomains(container, data) {
             </div>
         </section>
         <p class="ui-list-summary"><span id="domain-count-badge" class="ui-count">${uiCountLabel(domains.length, 'domain', 'domains')}</span><button type="button" class="ui-clear-filters hidden" onclick="clearDomainFilters()">Clear filters</button></p>
-        <div id="domains-list" class="ui-table ui-stack ui-domain-table">
+        <div id="domains-list" class="ui-table ui-stack ui-domain-table" data-sort-at="domain-search-input" data-sort-name="domains">
             ${renderDomainRows(domains)}
         </div>
         </div>
@@ -127,7 +127,7 @@ function clearDomainFilters() {
 
 function renderDomainRows(domains) {
     return `
-        <div class="ui-tr ui-tr-head"><span>Domain</span>${DNS_CHECKS.map(([label]) => `<span>${label}</span>`).join('')}<span class="ui-td-end">Storage</span></div>
+        <div class="ui-tr ui-tr-head"><span data-sort-kind="text">Domain</span>${DNS_CHECKS.map(([label]) => `<span data-sort-kind="text">${label}</span>`).join('')}<span class="ui-td-end" data-sort-kind="number">Storage</span></div>
         ${domains.map(domain => renderDomainAccordionRow(domain)).join('')}`;
 }
 
@@ -207,7 +207,7 @@ function renderDomainAccordionRow(domain, open = false) {
     const fact = (label, value, note) => `<div class="ui-md-fact${note ? ' ui-md-fact-inline' : ''}"><span>${label}</span><div>${escapeHtml(value)}</div>${note ? `<small class="ui-muted">${escapeHtml(note)}</small>` : ''}</div>`;
 
     return `
-        <div class="ui-tr ui-domain-row" data-domain-row="${escapeHtml(domain.domain_name)}" onclick="if (!uiRowHeld(event)) toggleDomainDetails('${escapeJsArg(domainId)}')">
+        <div class="ui-tr ui-domain-row" data-domain-row="${escapeHtml(domain.domain_name)}" data-sort-id="${escapeHtml(domain.domain_name)}" onclick="if (!uiRowHeld(event)) toggleDomainDetails('${escapeJsArg(domainId)}')">
             <div class="ui-td ui-q-who">
                 <div>
                     <button type="button" class="ui-row-chev" aria-expanded="${open}" aria-controls="${domainId}-details" aria-label="Details of ${escapeHtml(domain.domain_name)}" onclick="event.stopPropagation(); toggleDomainDetails('${escapeJsArg(domainId)}')"><svg id="${domainId}-icon-desktop" class="ui-domain-chevron" width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"${open ? ' style="transform: rotate(90deg)"' : ''}><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg></button>

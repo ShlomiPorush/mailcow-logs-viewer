@@ -264,8 +264,8 @@ function renderDmarcHome() {
             <div><small>Enforced (quarantine or reject)</small><b class="is-big">${enforced} of ${domains.length}</b></div></div></div>
         <div class="ui-dm-lay"><div>
             <div class="ui-dm-card"><header>Messages per day<small>every domain</small></header><div class="ui-dm-body">${dmarcChart(dmarcState.daily, { h: 150, open: null })}</div></div>
-            <div class="ui-dm-card"><header>Domains <span class="ui-count">${domains.length}</span></header>
-            <table class="ui-dm-tbl ui-dm-cards"><thead><tr><th>Domain</th><th>DMARC policy</th><th class="r">Messages</th><th class="r">Passed DMARC</th><th class="ui-dm-hm">TLS-RPT</th><th class="r ui-dm-hm">Encrypted</th><th class="r ui-dm-hm">Failing senders</th></tr></thead><tbody>
+            <div class="ui-dm-card"><header id="dmarc-domains-head">Domains <span class="ui-count">${domains.length}</span></header>
+            <table class="ui-dm-tbl ui-dm-cards" data-sort-at="dmarc-domains-head" data-sort-name="domains"><thead><tr><th data-sort-kind="text">Domain</th><th data-sort-kind="text">DMARC policy</th><th class="r" data-sort-kind="number">Messages</th><th class="r" data-sort-kind="number">Passed DMARC</th><th class="ui-dm-hm" data-sort-kind="text">TLS-RPT</th><th class="r ui-dm-hm" data-sort-kind="number">Encrypted</th><th class="r ui-dm-hm" data-sort-kind="number">Failing senders</th></tr></thead><tbody>
             ${domains.map(d => {
                 const s = d.stats_30d || {}, tls = d.tls_rpt_record || {};
                 return `<tr class="is-go" onclick="if (!uiRowHeld(event)) loadDomainOverview('${escapeJsArg(d.domain)}')"><td data-sort="${escapeHtml(d.domain)}"><button type="button" class="ui-dm-link">${escapeHtml(d.domain)}</button>${dmarcNotOnServer(d)}</td>
@@ -1067,8 +1067,8 @@ async function showDmarcSyncHistory() {
 
         const STATUS_TONE = { success: 'ok', error: 'fail', running: 'info' };
         content.innerHTML = `
-            <div class="ui-table ui-stack" style="--ui-cols: minmax(150px, 1.4fr) 80px 90px 70px 70px 80px 70px 80px; --ui-table-min: 760px">
-                <div class="ui-tr ui-tr-head"><span>Date</span><span>Type</span><span>Status</span><span class="ui-td-end">Emails</span><span class="ui-td-end">Created</span><span class="ui-td-end">Duplicate</span><span class="ui-td-end">Failed</span><span>Duration</span></div>
+            <div class="ui-table ui-stack" data-sort-at="dmarc-sync-history-sort" data-sort-name="fetches" style="--ui-cols: minmax(150px, 1.4fr) 80px 90px 70px 70px 80px 70px 80px; --ui-table-min: 760px">
+                <div class="ui-tr ui-tr-head"><span data-sort-kind="date">Date</span><span data-sort-kind="text">Type</span><span data-sort-kind="text">Status</span><span class="ui-td-end" data-sort-kind="number">Emails</span><span class="ui-td-end" data-sort-kind="number">Created</span><span class="ui-td-end" data-sort-kind="number">Duplicate</span><span class="ui-td-end" data-sort-kind="number">Failed</span><span data-sort-kind="number">Duration</span></div>
                 ${data.data.map(sync => `
                 <div class="ui-tr">
                     <span class="ui-td">${formatDate(sync.started_at)}</span>
@@ -1177,8 +1177,8 @@ function renderReportsDomains() {
         <h4 class="ui-md-h">Reports by domain</h4>
         ${allowDelete ? '' : `<div class="ui-list-note ui-flush">${uiLocked('Deleting reports is off', 'Turn on report deletion in Settings, DMARC.',
             `<button type="button" class="ui-btn ui-btn-sm" onclick="closeReportsManagementModal(); navigateTo('settings', { sub: 'dmarc' })">Open Settings</button>`)}</div>`}
-        <div id="dmarc-reports-domains-table" class="ui-table ui-stack" style="--ui-cols: minmax(180px, 2fr) 110px 110px minmax(110px, 1fr)${allowDelete ? ' 100px' : ''}; --ui-table-min: ${allowDelete ? 640 : 540}px">
-            <div class="ui-tr ui-tr-head"><span>Domain</span><span class="ui-td-end">DMARC reports</span><span class="ui-td-end">TLS reports</span><span>Last report</span>${allowDelete ? '<span class="ui-td-end">Actions</span>' : ''}</div>
+        <div id="dmarc-reports-domains-table" class="ui-table ui-stack" data-sort-icon="off" style="--ui-cols: minmax(180px, 2fr) 110px 110px minmax(110px, 1fr)${allowDelete ? ' 100px' : ''}; --ui-table-min: ${allowDelete ? 640 : 540}px">
+            <div class="ui-tr ui-tr-head"><span data-sort-kind="text">Domain</span><span class="ui-td-end" data-sort-kind="number">DMARC reports</span><span class="ui-td-end" data-sort-kind="number">TLS reports</span><span data-sort-kind="date">Last report</span>${allowDelete ? '<span class="ui-td-end">Actions</span>' : ''}</div>
             ${domains.map(d => `
             <div class="ui-tr">
                 <b class="ui-td">${escapeHtml(d.domain)}</b>
@@ -1314,8 +1314,8 @@ function renderReportsManagementTable(reports, allowDelete, { total, page, total
         : '--ui-cols: minmax(150px, 1.2fr) 70px minmax(140px, 1.2fr) minmax(120px, 1fr) 70px minmax(110px, .9fr)';
 
     content.innerHTML = `
-        <div class="ui-table ui-stack" data-sort-handler="sortReportsManagement" style="${cols}; --ui-table-min: 780px">
-            <div class="ui-tr ui-tr-head"><span${reportsSortAttr('created_at')}>Import Date</span><span${reportsSortAttr('type')}>Type</span><span${reportsSortAttr('domain')}>Domain</span><span${reportsSortAttr('reporter')}>Reporter</span><span class="ui-td-end"${reportsSortAttr('records')}>Records</span><span${reportsSortAttr('period')}>Period</span>${allowDelete ? '<span class="ui-td-end">Actions</span>' : ''}</div>
+        <div class="ui-table ui-stack" data-sort-handler="sortReportsManagement" data-sort-icon="off" style="${cols}; --ui-table-min: 780px">
+            <div class="ui-tr ui-tr-head"><span data-sort-kind="date"${reportsSortAttr('created_at')}>Import Date</span><span data-sort-kind="text"${reportsSortAttr('type')}>Type</span><span data-sort-kind="text"${reportsSortAttr('domain')}>Domain</span><span data-sort-kind="text"${reportsSortAttr('reporter')}>Reporter</span><span class="ui-td-end" data-sort-kind="number"${reportsSortAttr('records')}>Records</span><span data-sort-kind="date"${reportsSortAttr('period')}>Period</span>${allowDelete ? '<span class="ui-td-end">Actions</span>' : ''}</div>
             ${reports.map(report => `
             <div class="ui-tr">
                 <span class="ui-td">${dateTime(report.created_at)}</span>

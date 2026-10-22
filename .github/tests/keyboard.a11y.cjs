@@ -87,21 +87,142 @@ test('a table in help text does not sort', () => {
     assert.equal(th.hasAttribute('data-sort-state'), false);
 });
 
-test('a stacked list gets a Sort picker: a column sorts, the same column again turns it around', () => {
+const SORTED = (attrs = '') => `<section id="list"><div class="ui-fbar-row"><label class="ui-search"><input id="q" aria-label="Search things"></label></div>
+    <div class="ui-table ui-stack" data-sort-at="q" data-sort-name="things" ${attrs}>
+    <div class="ui-tr ui-tr-head"><span data-sort-kind="text">Name</span><span data-sort-kind="number">Count</span><span>Actions</span></div>
+    <div class="ui-tr"><span>beta</span><span>2</span><span><button type="button">Edit</button></span></div>
+    <div class="ui-tr"><span>gamma</span><span>5</span><span><button type="button">Edit</button></span></div>
+    <div class="ui-tr"><span>alpha</span><span>10</span><span><button type="button">Edit</button></span></div>
+</div></section>`;
+const sortParts = w => {
+    const slot = w.document.querySelector('.ui-sort-slot');
+    const radio = (group, value) => slot.querySelector(`input[name$="-${group}"][value="${value}"]`);
+    return { slot, button: slot.querySelector('.ui-picker-btn'), panel: slot.querySelector('.ui-picker-panel'), radio,
+        dirs: slot.querySelector('.ui-sort-dir'), checked: group => (slot.querySelector(`input[name$="-${group}"]:checked`) || {}).value };
+};
+
+test('a list gets a Sort button beside its search: its menu sorts by a column and an order, and Default order puts the list back', async () => {
+    const w = page(SORTED());
+    w.uiRefreshTableSorts();
+    const { slot, button, panel, radio, dirs, checked } = sortParts(w);
+    assert.equal(slot.previousElementSibling, w.document.querySelector('.ui-search'), 'right after the search box');
+    assert.equal(button.getAttribute('aria-haspopup'), 'dialog');
+    assert.equal(button.getAttribute('aria-label'), 'Sort: Default order');
+    assert.equal(panel.getAttribute('role'), 'dialog');
+    assert.equal(panel.getAttribute('aria-label'), 'Sort things');
+    assert.deepEqual([...panel.querySelectorAll('legend')].map(l => l.textContent), ['Sort by', 'Order']);
+    assert.deepEqual([...panel.querySelectorAll('fieldset')[0].querySelectorAll('label')].map(l => l.textContent.trim()), ['Default order', 'Name', 'Count'], 'Actions is not a column to sort by');
+    assert.equal(checked('by'), '', 'Default order is chosen');
+    assert.equal(dirs.disabled, true, 'no order for the list\'s own order');
+    radio('by', '0').click();
+    assert.deepEqual(names(w), ['alpha', 'beta', 'gamma'], 'Name starts A to Z');
+    w.uiRefreshTableSorts();
+    assert.equal(button.getAttribute('aria-label'), 'Sort: Name, A to Z');
+    assert.ok(button.classList.contains('is-set'), 'an order of its own stands out');
+    assert.equal(dirs.disabled, false);
+    assert.deepEqual([...dirs.querySelectorAll('label')].map(l => l.textContent.trim()), ['A to Z', 'Z to A']);
+    radio('dir', '-1').click();
+    assert.deepEqual(names(w), ['gamma', 'beta', 'alpha'], 'Z to A');
+    radio('by', '1').click();
+    assert.deepEqual(names(w), ['alpha', 'gamma', 'beta'], 'Count starts high to low');
+    w.uiRefreshTableSorts();
+    assert.equal(button.getAttribute('aria-label'), 'Sort: Count, High to low');
+    w.uiPickerOpen(w.document.querySelector('.ui-sort-slot .ui-picker').dataset.picker);
+    await noViolations(w, 'an open Sort menu');
+    radio('by', '').click();
+    assert.deepEqual(names(w), ['beta', 'gamma', 'alpha'], 'Default order: the order the list came in');
+    w.uiRefreshTableSorts();
+    assert.equal(button.getAttribute('aria-label'), 'Sort: Default order');
+    assert.equal(button.classList.contains('is-set'), false);
+    assert.ok([...w.document.querySelectorAll('#list .ui-tr-head > span')].every(h => h.dataset.sortState !== 'ascending' && h.dataset.sortState !== 'descending'), 'no header shows an order');
+});
+
+test('a header and the Sort button show the same order', () => {
+    const w = page(SORTED());
+    w.uiRefreshTableSorts();
+    w.document.querySelectorAll('#list .ui-tr-head .ui-sort-btn')[1].click();
+    w.uiRefreshTableSorts();
+    const { button, checked } = sortParts(w);
+    assert.equal(button.getAttribute('aria-label'), 'Sort: Count, High to low');
+    assert.equal(checked('by'), '1');
+    assert.equal(checked('dir'), '-1');
+});
+
+test('a list that arrives in a column\'s order shows it, offers no Default order, and stands out only when changed', () => {
+    const w = page(SORTED('data-sort-default="Count:desc"'));
+    w.uiRefreshTableSorts();
+    const { button, panel, radio, checked } = sortParts(w);
+    assert.equal(button.getAttribute('aria-label'), 'Sort: Count, High to low');
+    assert.equal(button.classList.contains('is-set'), false);
+    assert.equal(panel.querySelector('input[value=""]'), null, 'no Default order item');
+    assert.equal(checked('by'), '1');
+    radio('dir', '1').click();
+    w.uiRefreshTableSorts();
+    assert.equal(button.getAttribute('aria-label'), 'Sort: Count, Low to high');
+    assert.ok(button.classList.contains('is-set'));
+});
+
+test('a list sorted on the server asks for the column and the order, and a second choice builds on the first before the answer', () => {
+    const w = page(`<section id="srv"><label class="ui-search"><input id="sq" aria-label="Search"></label><div class="ui-table ui-stack" data-sort-handler="sortServer" data-sort-at="sq" data-sort-default="Seen:desc">
+        <div class="ui-tr ui-tr-head"><span data-sort-key="name" data-sort-kind="text" aria-sort="none">Name</span><span data-sort-key="seen" data-sort-kind="date" aria-sort="descending">Seen</span></div>
+        <div class="ui-tr"><span>a</span><span>1</span></div></div></section>`);
+    const asked = [];
+    w.sortServer = (key, dir) => asked.push(`${key}:${dir}`);   // the answer has not come yet
+    w.uiRefreshTableSorts();
+    const { radio } = sortParts(w);
+    radio('by', '0').click();
+    w.uiRefreshTableSorts();
+    radio('dir', '-1').click();
+    assert.deepEqual(asked, ['name:asc', 'name:desc']);
+});
+
+test('the Sort button stays one, keeps its id across redraws, and goes with its list', () => {
+    const w = page(SORTED());
+    w.uiRefreshTableSorts();
+    const id = w.document.querySelector('.ui-sort-slot .ui-picker').dataset.picker;
+    const table = w.document.querySelector('#list .ui-table');
+    table.outerHTML = table.outerHTML;   // the page draws the list again
+    w.uiRefreshTableSorts();
+    w.uiRefreshTableSorts();
+    assert.equal(w.document.querySelectorAll('.ui-sort-slot').length, 1);
+    assert.equal(w.document.querySelector('.ui-sort-slot .ui-picker').dataset.picker, id);
+    w.document.querySelector('#list .ui-table').remove();
+    w.uiRefreshTableSorts();
+    assert.equal(w.document.querySelector('.ui-sort-slot'), null);
+});
+
+test('a list without a place for it, or that says so, gets no Sort button; data-nosort does not sort at all', () => {
+    for (const attrs of ['data-sort-icon="off"', 'data-nosort']) {
+        const w = page(SORTED(attrs));
+        w.uiRefreshTableSorts();
+        assert.equal(w.document.querySelector('.ui-sort-slot'), null, attrs);
+        if (attrs === 'data-nosort') assert.equal(w.document.querySelector('#list .ui-sort-btn'), null, 'no header sorts');
+    }
     const w = page(LIST);
     w.uiRefreshTableSorts();
-    const select = w.document.querySelector('#list .ui-phone-sort select');
-    assert.ok(select, 'the list has a Sort picker');
-    assert.deepEqual([...select.options].map(o => o.textContent), ['Default order', 'Name', 'Count']);
-    assert.ok(w.document.querySelector('#list .ui-phone-sort .ui-picker'), 'shown as the shared picker');
-    select.value = '0';
-    w.uiPhoneSortPick(select);
-    assert.deepEqual(names(w), ['alpha', 'beta']);
+    assert.equal(w.document.querySelector('.ui-sort-slot'), null, 'no data-sort-at');
+});
+
+test('a helper element in a row (the phone line break) is not a cell', () => {
+    const w = page(`<section id="h"><div class="ui-table ui-stack">
+        <div class="ui-tr ui-tr-head"><span>Date</span><span>Status</span><span>Created</span></div>
+        <div class="ui-tr"><span>a</span><span>ok</span><span class="ui-tr-break"></span><span>3</span></div>
+        <div class="ui-tr"><span>b</span><span>ok</span><span class="ui-tr-break"></span><span>7</span></div>
+        <div class="ui-tr"><span>c</span><span>ok</span><span class="ui-tr-break"></span><span>1</span></div></div></section>`);
     w.uiRefreshTableSorts();
-    assert.equal(select.selectedOptions[0].dataset.short, 'Name ↑');
-    select.value = '0';
-    w.uiPhoneSortPick(select);
-    assert.deepEqual(names(w), ['beta', 'alpha'], 'picked again: turned around');
+    w.document.querySelectorAll('#h .ui-sort-btn')[2].click();
+    assert.deepEqual([...w.document.querySelectorAll('#h .ui-tr:not(.ui-tr-head) > span:first-child')].map(s => s.textContent), ['b', 'a', 'c']);
+});
+
+test('rows drawn anew in the same list get its remembered order', () => {
+    const w = page(SORTED());
+    w.uiRefreshTableSorts();
+    sortParts(w).radio('by', '0').click();
+    const table = w.document.querySelector('#list .ui-table');
+    // A filter draws the rows again inside the same element, in the list's own order
+    table.innerHTML = table.innerHTML.replace(/<div class="ui-tr"[\s\S]*$/, '') + '<div class="ui-tr"><span>zeta</span><span>1</span><span></span></div><div class="ui-tr"><span>delta</span><span>4</span><span></span></div>';
+    w.uiRefreshTableSorts();
+    assert.deepEqual(names(w), ['delta', 'zeta']);
 });
 
 test('a list sorted on the server gets the focus back on the same header once it is drawn again', async () => {
@@ -150,20 +271,106 @@ test('an answer with no list ends the wait for it', async () => {
     assert.equal(w.eval('uiSortFocus'), null);
 });
 
-test('the phone Sort picker keeps its id when its list is drawn again', () => {
-    const w = page(LIST);
+test('an age written as a time ago sorts newest first when it says so', () => {
+    const w = page(`<section id="a"><p id="ah"></p><div class="ui-table ui-stack" data-sort-at="ah">
+        <div class="ui-tr ui-tr-head"><span data-sort-kind="text">Message</span><span data-sort-kind="date">Age</span></div>
+        <div class="ui-tr"><span>m8</span><span>8m ago</span></div><div class="ui-tr"><span>m1</span><span>1m ago</span></div><div class="ui-tr"><span>m3</span><span>3m ago</span></div></div></section>`);
     w.uiRefreshTableSorts();
-    const id = w.document.querySelector('#list .ui-phone-sort select').id;
-    assert.equal(id, 'ui-phone-sort-list');
-    w.document.getElementById('list').innerHTML = w.document.getElementById('list').innerHTML.replace(/<div class="ui-phone-sort">[\s\S]*?<\/select><\/div>/, '');
+    w.document.querySelector('.ui-sort-slot input[name$="-by"][value="1"]').click();
     w.uiRefreshTableSorts();
-    assert.equal(w.document.querySelector('#list .ui-phone-sort select').id, 'ui-phone-sort-list');
+    assert.deepEqual([...w.document.querySelectorAll('#a .ui-tr:not(.ui-tr-head) > span:first-child')].map(x => x.textContent), ['m1', 'm3', 'm8']);
+    assert.equal(w.document.querySelector('.ui-sort-slot .ui-picker-btn').getAttribute('aria-label'), 'Sort: Age, Newest first');
 });
 
-test('a list with a sort control of its own gets no second one', () => {
-    const w = page(LIST.replace('class="ui-table ui-stack"', 'class="ui-table ui-stack" data-phone-sort="off"'));
+test('a list sorted on the server that does not come back shows the order still on screen again', async () => {
+    const w = page(`<section id="srv"><label class="ui-search"><input id="sq" aria-label="Search"></label><div class="ui-table ui-stack" data-sort-handler="sortServer" data-sort-at="sq" data-sort-default="Sent:desc">
+        <div class="ui-tr ui-tr-head"><span data-sort-key="name" data-sort-kind="text" aria-sort="none">Name</span><span data-sort-key="sent" data-sort-kind="number" aria-sort="descending">Sent</span></div>
+        <div class="ui-tr"><span>a</span><span>1</span></div></div></section>`);
+    w.eval('uiSortWait = 30');
+    w.sortServer = () => {};   // the request fails: no new list
     w.uiRefreshTableSorts();
-    assert.equal(w.document.querySelector('.ui-phone-sort'), null);
+    w.document.querySelector('.ui-sort-slot input[name$="-by"][value="0"]').click();
+    w.uiRefreshTableSorts();
+    assert.equal(w.document.querySelector('.ui-sort-slot .ui-picker-btn').getAttribute('aria-label'), 'Sort: Name, A to Z', 'shown at once');
+    await new Promise(resolve => setTimeout(resolve, 60));
+    assert.equal(w.document.querySelector('.ui-sort-slot .ui-picker-btn').getAttribute('aria-label'), 'Sort: Sent, High to low', 'back to what the list shows');
+    assert.equal(w.document.querySelectorAll('#srv .ui-tr-head > span')[1].dataset.sortState, 'descending');
+});
+
+test('the order a list arrives in comes back exactly, also where its column holds equal values', () => {
+    const w = page(`<section id="q"><p id="qh"></p><div class="ui-table ui-stack" data-sort-at="qh" data-sort-default="Held:desc">
+        <div class="ui-tr ui-tr-head"><span data-sort-kind="text">Message</span><span data-sort-kind="number">Score</span><span data-sort-kind="date">Held</span></div>
+        <div class="ui-tr"><span>a</span><span data-sort="3">3</span><span data-sort="100">x</span></div>
+        <div class="ui-tr"><span>b</span><span data-sort="9">9</span><span data-sort="100">x</span></div>
+        <div class="ui-tr"><span>c</span><span data-sort="5">5</span><span data-sort="50">x</span></div></div></section>`);
+    const order = () => [...w.document.querySelectorAll('#q .ui-tr:not(.ui-tr-head) > span:first-child')].map(x => x.textContent);
+    w.uiRefreshTableSorts();
+    const radio = v => w.document.querySelector(`.ui-sort-slot input[name$="-by"][value="${v}"]`);
+    radio('1').click();
+    assert.deepEqual(order(), ['b', 'c', 'a']);
+    radio('2').click();
+    assert.deepEqual(order(), ['a', 'b', 'c'], 'Held, newest first is the order it came in');
+    w.document.querySelectorAll('#q .ui-tr-head .ui-sort-btn')[2].click();
+    assert.deepEqual(order(), ['c', 'a', 'b'], 'its header turns it around');
+});
+
+test('a row drawn again on its own keeps its place in the list\'s own order', () => {
+    const w = page(SORTED().replace(/<div class="ui-tr"><span>(\w+)<\/span>/g, '<div class="ui-tr" data-sort-id="$1"><span>$1</span>'));
+    w.uiRefreshTableSorts();
+    sortParts(w).radio('by', '0').click();
+    const beta = w.document.querySelector('[data-sort-id="beta"]');
+    beta.outerHTML = '<div class="ui-tr" data-sort-id="beta"><span>beta</span><span>3</span><span></span></div>';   // checked again
+    w.uiRefreshTableSorts();
+    sortParts(w).radio('by', '').click();
+    assert.deepEqual(names(w), ['beta', 'gamma', 'alpha']);
+});
+
+test('two server sorts in a row that both fail go back to the order the rows show', async () => {
+    const w = page(`<section id="srv"><label class="ui-search"><input id="sq" aria-label="Search"></label><div class="ui-table ui-stack" data-sort-handler="sortServer" data-sort-at="sq" data-sort-default="Sent:desc">
+        <div class="ui-tr ui-tr-head"><span data-sort-key="name" data-sort-kind="text" aria-sort="none">Name</span><span data-sort-key="sent" data-sort-kind="number" aria-sort="descending">Sent</span></div>
+        <div class="ui-tr"><span>a</span><span>1</span></div></div></section>`);
+    w.eval('uiSortWait = 30');
+    w.sortServer = () => {};   // neither request comes back
+    w.uiRefreshTableSorts();
+    w.document.querySelector('.ui-sort-slot input[name$="-by"][value="0"]').click();
+    w.uiRefreshTableSorts();
+    w.document.querySelector('.ui-sort-slot input[name$="-dir"][value="-1"]').click();
+    w.uiRefreshTableSorts();
+    assert.equal(w.document.querySelector('.ui-sort-slot .ui-picker-btn').getAttribute('aria-label'), 'Sort: Name, Z to A');
+    await new Promise(resolve => setTimeout(resolve, 80));
+    assert.equal(w.document.querySelector('.ui-sort-slot .ui-picker-btn').getAttribute('aria-label'), 'Sort: Sent, High to low');
+    const heads = w.document.querySelectorAll('#srv .ui-tr-head > span');
+    assert.equal(heads[0].dataset.sortState, 'none');
+    assert.equal(heads[1].dataset.sortState, 'descending');
+});
+
+test('on a touch screen a long picker opens on its chosen option, not its search field (no keyboard)', () => {
+    for (const touch of [true, false]) {
+        const w = page('<div id="host"></div>');
+        w.matchMedia = query => ({ matches: touch && /pointer: coarse/.test(query), addEventListener() {}, removeEventListener() {} });
+        w.document.getElementById('host').innerHTML = w.uiPicker({ id: 'dom', label: 'Domain', value: 'b.example', search: 'Search domain',
+            options: Array.from({ length: 12 }, (_, i) => ({ label: `d${i}.example`, selected: i === 5, onclick: '' })) });
+        w.uiPickerOpen('dom');
+        const active = w.document.activeElement;
+        if (touch) assert.equal(active.textContent.trim(), 'd5.example', 'the chosen option takes the focus');
+        else assert.ok(active.matches('.ui-picker-search'), 'with a mouse the search field takes it');
+    }
+});
+
+test('every stacked list with a header row says where its Sort button goes, or that it has none', () => {
+    const dir = path.join(__dirname, '../../frontend');
+    const missing = [];
+    for (const f of fs.readdirSync(dir).filter(n => n.endsWith('.js') || n.endsWith('.html'))) {
+        const text = fs.readFileSync(path.join(dir, f), 'utf8');
+        for (const m of text.matchAll(/<(div|table)\b[^>]*class="[^"]*\b(ui-stack|ui-dm-cards)\b[^"]*"[^>]*>/g)) {
+            // A list with no header row (a rule list, a map) has no columns to sort by
+            const after = text.slice(m.index, m.index + 700);
+            if (!/ui-tr-head|<thead/.test(after)) continue;
+            if (/data-sort-at=|data-nosort|data-sort-icon="off"/.test(m[0])) continue;
+            missing.push(`${f}:${text.slice(0, m.index).split('\n').length}`);
+        }
+    }
+    assert.deepEqual(missing, []);
 });
 
 test('a row that opens on click opens on Enter and Space, and its own button keeps its keys', () => {

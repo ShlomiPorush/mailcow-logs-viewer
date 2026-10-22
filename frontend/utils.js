@@ -1101,6 +1101,13 @@ function uiSortValue(cell) {
     return { n: null, t };
 }
 
+// The cell a row holds for a column: a helper element in a row (the phone's
+// line break) is not a cell
+function uiSortCell(row, index) {
+    if (!row || index < 0) return null;
+    return [...row.children].filter(c => !c.classList.contains('ui-tr-break'))[index] || null;
+}
+
 // Rows travel with what follows them up to the next row (an opened detail)
 function uiSortUnits(table) {
     if (table.tagName === 'TABLE') {
@@ -1122,11 +1129,45 @@ function uiSortUnits(table) {
     return segments;
 }
 
+// Each row keeps the place it was drawn in, so the list's own order can come
+// back (Default order). Rows drawn anew come in that order; it tells whether
+// any row is new since the list was last sorted. A row drawn again on its own
+// (one domain checked again) finds its place by its data-sort-id, else by its
+// first cell's text.
+function uiSortRowId(row) {
+    if (row.dataset.sortId !== undefined) return row.dataset.sortId;
+    const first = uiSortCell(row, 0);
+    return first ? first.textContent.replace(/\s+/g, ' ').trim() : '';
+}
+function uiSortPositions(table) {
+    const units = uiSortUnits(table).flatMap(seg => seg.units);
+    const fresh = units.filter(u => u[0].dataset.sortPos === undefined);
+    if (!fresh.length) return false;
+    if (fresh.length === units.length || !table._sortPlaces) table._sortPlaces = new Map();
+    const places = table._sortPlaces;
+    if (fresh.length === units.length) {
+        units.forEach((u, i) => { u[0].dataset.sortPos = String(i); places.set(uiSortRowId(u[0]), i); });
+        return true;
+    }
+    let next = Math.max(...units.filter(u => u[0].dataset.sortPos !== undefined).map(u => Number(u[0].dataset.sortPos))) + 1;
+    for (const u of fresh) {
+        const known = places.get(uiSortRowId(u[0]));
+        const pos = known !== undefined ? known : next++;
+        u[0].dataset.sortPos = String(pos);
+        places.set(uiSortRowId(u[0]), pos);
+    }
+    return true;
+}
+
+// index -1 puts the list's own order back
 function uiApplyTableSort(table, index, dir) {
     const heads = uiSortHeads(table);
     heads.forEach((h, i) => { if (uiSortable(table, h)) uiSetSortState(h, i === index ? (dir > 0 ? 'ascending' : 'descending') : 'none'); });
+    uiSortPositions(table);
     for (const seg of uiSortUnits(table)) {
-        const keyed = seg.units.map((unit, pos) => ({ unit, pos, v: uiSortValue(unit[0].children[index]) }));
+        const keyed = seg.units.map((unit, pos) => ({ unit, pos,
+            v: index < 0 ? { n: Number(unit[0].dataset.sortPos), t: '' } : uiSortValue(uiSortCell(unit[0], index)) }));
+        if (index < 0) dir = 1;
         keyed.sort((a, b) => {
             // Empty values go last either way
             const ae = a.v.n === null && !a.v.t, be = b.v.n === null && !b.v.t;
@@ -1141,19 +1182,38 @@ function uiApplyTableSort(table, index, dir) {
         for (const { unit } of keyed) for (const el of unit) { seg.parent.insertBefore(el, anchor); anchor = el.nextSibling; }
         for (const el of seg.fixed) if (seg.parent.tagName === 'TBODY') seg.parent.appendChild(el);
     }
-    table.dataset.sortedBy = `${index}:${dir}`;
+    if (index < 0) delete table.dataset.sortedBy;
+    else table.dataset.sortedBy = `${index}:${dir}`;
+}
+
+// What a column holds, from its data-sort-kind: it names the two orders in the
+// Sort menu and says which one a column starts with. Without it the orders are
+// Ascending and Descending, and numbers start high to low.
+const UI_SORT_KINDS = {
+    text: { asc: 'A to Z', desc: 'Z to A', first: 1 },
+    number: { asc: 'Low to high', desc: 'High to low', first: -1 },
+    date: { asc: 'Oldest first', desc: 'Newest first', first: -1 },
+};
+function uiSortWords(cell) {
+    return UI_SORT_KINDS[cell && cell.dataset.sortKind] || { asc: 'Ascending', desc: 'Descending' };
+}
+function uiSortFirstDir(table, cell) {
+    const kind = UI_SORT_KINDS[cell.dataset.sortKind];
+    if (kind) return kind.first;
+    const index = uiSortHeads(table).indexOf(cell);
+    const numeric = uiSortUnits(table).some(seg => seg.units.some(u => uiSortValue(uiSortCell(u[0], index)).n !== null));
+    return numeric ? -1 : 1;
 }
 
 function uiClearTableSort(owner) {
     for (const key of [...uiTableSorts.keys()]) if (key.startsWith(`${owner}|`)) uiTableSorts.delete(key);
 }
 
-// One way to sort, for a header's click or keys and for the phone's Sort picker:
-// the sorted column turns around, another column starts high to low for numbers
-// and A to Z for text
+// A header's click or keys: the sorted column turns around, another column
+// starts in its own first order (uiSortFirstDir)
 // A list sorted on the server is drawn again: the focus goes back to the same
-// header, or to the phone's Sort picker, once the new list is there
-let uiSortFocus = null;   // { owner, nth, label, phone, server, from, until }
+// header once the new list is there
+let uiSortFocus = null;   // { owner, nth, label, server, from, until }
 function uiSortOwner(table) {
     const owner = table.id ? table : table.closest('[id]');
     return owner ? owner.id : '';
@@ -1164,23 +1224,64 @@ function uiSortNth(table) {
     return [...document.querySelectorAll('.ui-table, table')].filter(t => uiSortOwner(t) === owner).indexOf(table);
 }
 function uiSortBy(table, cell) {
+    const current = uiSortState(cell);
+    let dir = current === 'descending' ? 1 : current === 'ascending' ? -1 : uiSortFirstDir(table, cell);
+    // A list shown in the order it arrives in (data-sort-default): its column turns around too
+    if (current === 'none' && !table.hasAttribute('data-sort-handler') && table.dataset.sortDefault) {
+        const heads = uiSortHeads(table);
+        const fallback = uiSortDefault(table, heads);
+        if (fallback && fallback.cell === cell && heads.every(h => uiSortState(h) === 'none')) dir = -fallback.dir;
+    }
+    uiSortSet(table, cell, dir);
+}
+
+// Sort by a column in an order (1 low to high, -1 high to low), from a header or
+// the Sort menu. The headers show it at once, also while a list sorted on the
+// server is on its way, so a second choice builds on the first.
+function uiSortSet(table, cell, dir) {
     const active = document.activeElement;
-    const box = table.previousElementSibling;
-    if (active && (cell.contains(active) || (box && box.classList.contains('ui-phone-sort') && box.contains(active)))) {
-        uiSortFocus = { owner: uiSortOwner(table), nth: uiSortNth(table), label: uiSortLabel(cell), phone: !cell.contains(active),
+    if (active && cell.contains(active)) {
+        uiSortFocus = { owner: uiSortOwner(table), nth: uiSortNth(table), label: uiSortLabel(cell),
             server: table.hasAttribute('data-sort-handler'), from: active, until: Date.now() + 5000 };
     }
-    const index = uiSortHeads(table).indexOf(cell);
-    const current = uiSortState(cell);
-    const numeric = uiSortUnits(table).some(seg => seg.units.some(u => uiSortValue(u[0].children[index]).n !== null));
-    const dir = current === 'descending' ? 1 : current === 'ascending' ? -1 : (numeric ? -1 : 1);
+    const heads = uiSortHeads(table);
+    const index = heads.indexOf(cell);
     const handler = table.getAttribute('data-sort-handler');
+    // The order a list sorted in the page arrives in is its own order, exactly
+    // (rows equal in that column keep their places)
+    const fallback = !handler && table.dataset.sortDefault ? uiSortDefault(table, heads) : null;
+    if (fallback && fallback.cell === cell && fallback.dir === dir) { uiSortReset(table); return; }
+    const before = heads.map(uiSortState);
+    heads.forEach(h => { if (uiSortable(table, h)) uiSetSortState(h, h === cell ? (dir > 0 ? 'ascending' : 'descending') : 'none'); });
+    // The Sort button shows it too, before a list sorted on the server comes back
+    if (typeof requestAnimationFrame === 'function' && !uiTableSortQueued) { uiTableSortQueued = true; requestAnimationFrame(uiRefreshTableSorts); }
     if (handler) {
+        // A list sorted on the server comes back drawn anew; when it does not
+        // (the request failed), its headers go back to the order still shown
+        // Choices in a row before any answer keep the order the rows still show
+        if (table._sortUndo) before.splice(0, before.length, ...table._sortUndo);
+        table._sortUndo = before;
+        const token = table._sortToken = {};
+        if (typeof setTimeout === 'function') setTimeout(() => {
+            if (!table.isConnected || table._sortToken !== token) return;
+            delete table._sortUndo;
+            delete table._sortToken;
+            heads.forEach((h, i) => { if (uiSortable(table, h)) uiSetSortState(h, before[i]); });
+            if (typeof uiRefreshTableSorts === 'function') uiRefreshTableSorts();
+        }, uiSortWait);
         if (typeof window[handler] === 'function') window[handler](cell.getAttribute('data-sort-key'), dir > 0 ? 'asc' : 'desc');
         return;
     }
     uiTableSorts.set(uiTableKey(table), { index, dir });
     uiApplyTableSort(table, index, dir);
+}
+// How long a list sorted on the server has to come back before its headers go back
+let uiSortWait = 8000;
+
+// Default order: the list's own order again, and no remembered order
+function uiSortReset(table) {
+    uiTableSorts.delete(uiTableKey(table));
+    uiApplyTableSort(table, -1, 1);
 }
 
 document.addEventListener('click', event => {
@@ -1239,44 +1340,114 @@ function uiBackdropClick(event, backdrop = event.currentTarget) {
     return !event.detail || !uiPress || uiPress.target === backdrop;
 }
 
-// Phones hide a list's header row, so a list without a sort control of its own
-// gets a Sort picker above it (data-phone-sort="off": the page has its own)
-let uiPhoneSortSeq = 0;
-function uiPhoneSortSync(table, heads) {
-    if (table.matches('[data-phone-sort="off"]') || !table.matches('.ui-stack, .ui-dm-cards')) return false;
+// The Sort button of a list: an icon next to the list's search, or at the end
+// of its header row, that opens a menu with two groups, the column ("Sort by")
+// and its order. A list names where it goes with data-sort-at (the id of its
+// search field, or of the element it ends), says the order it arrives in with
+// data-sort-default="<column>:asc|desc" (else the menu offers "Default order"),
+// and data-sort-icon="off" leaves it out. Its headers keep sorting; the two
+// always show the same order.
+function uiSortControlKey(table) {
+    const nth = uiSortNth(table);
+    return `${uiSortOwner(table)}${nth > 0 ? `-${nth}` : ''}`;
+}
+function uiSortTableFor(key) {
+    return [...document.querySelectorAll('.ui-table, table')].find(t => uiSortControlKey(t) === key) || null;
+}
+function uiSortDefault(table, heads) {
+    const [label, order] = (table.dataset.sortDefault || '').split(':');
+    const cell = label ? heads.find(h => uiSortLabel(h) === label) : null;
+    return cell ? { cell, dir: order === 'asc' ? 1 : -1 } : null;
+}
+// The order the list shows: a sorted header, else the order it arrived in
+function uiSortCurrent(table, heads) {
+    const cell = heads.find(h => uiSortable(table, h) && uiSortState(h) !== 'none');
+    if (cell) return { cell, dir: uiSortState(cell) === 'ascending' ? 1 : -1 };
+    return uiSortDefault(table, heads);
+}
+function uiSortSaid(current) {
+    if (!current) return 'Sort: Default order';
+    const words = uiSortWords(current.cell);
+    return `Sort: ${uiSortLabel(current.cell)}, ${current.dir > 0 ? words.asc : words.desc}`;
+}
+const UI_SORT_ICON = '<svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 4v16m0 0l-3-3m3 3l3-3M17 20V4m0 0l-3 3m3-3l3 3"></path></svg>';
+
+function uiSortControlSync(table, heads) {
+    const key = uiSortControlKey(table);
+    let slot = [...document.querySelectorAll('.ui-sort-slot')].find(el => el.dataset.sortFor === key);
+    const at = table.dataset.sortAt ? document.getElementById(table.dataset.sortAt) : null;
     const sortable = heads.filter(h => uiSortable(table, h));
-    let box = table.previousElementSibling;
-    if (!sortable.length) {
-        if (box && box.classList.contains('ui-phone-sort')) { box.remove(); return true; }
+    if (!at || !sortable.length || table.matches('[data-sort-icon="off"]')) {
+        if (slot) { slot.remove(); return true; }
         return false;
     }
-    if (!box || !box.classList.contains('ui-phone-sort')) {
-        box = document.createElement('div');
-        box.className = 'ui-phone-sort';
-        // Named after the list's owner, so the picker keeps its id when the list is drawn again
-        const owner = uiSortOwner(table);
-        const nth = uiSortNth(table);
-        const name = owner ? `ui-phone-sort-${owner}${nth > 0 ? `-${nth}` : ''}` : '';
-        const id = name && !document.getElementById(name) ? name : `ui-phone-sort-${++uiPhoneSortSeq}`;
-        box.innerHTML = `<select id="${id}" class="hidden" data-picker-label="Sort" data-no-filter onchange="uiPhoneSortPick(this)"></select>`;
-        table.before(box);
+    let changed = false;
+    if (!slot) {
+        slot = document.createElement('span');
+        slot.className = 'ui-sort-slot';
+        slot.dataset.sortFor = key;
     }
-    const select = box.querySelector('select');
-    const on = sortable.find(h => uiSortState(h) !== 'none');
-    const arrow = h => (uiSortState(h) === 'descending' ? ' ↓' : ' ↑');
-    const sig = `${sortable.map(uiSortLabel).join('|')}#${on ? uiSortLabel(on) + uiSortState(on) : ''}`;
-    if (select.dataset.sig === sig) return false;
-    select.dataset.sig = sig;
-    select.innerHTML = (on ? '' : '<option value="" data-short="Default">Default order</option>')
-        + sortable.map(h => `<option value="${heads.indexOf(h)}"${h === on ? ` selected data-short="${escapeHtml(uiSortLabel(h) + arrow(h))}"` : ''}>${escapeHtml(uiSortLabel(h))}</option>`).join('');
+    // Next to the search field, else at the end of the element named
+    const search = at.closest('.ui-search');
+    if (search ? search.nextElementSibling !== slot : slot.parentElement !== at || at.lastElementChild !== slot) {
+        if (search) search.after(slot); else at.appendChild(slot);
+        changed = true;
+    }
+    const id = `ui-sort-${key.replace(/[^\w-]/g, '_')}`;
+    const fallback = uiSortDefault(table, heads);
+    const current = uiSortCurrent(table, heads);
+    const set = !!current && !(fallback && current.cell === fallback.cell && current.dir === fallback.dir);
+    const columns = sortable.map(h => uiSortLabel(h)).join('|');
+    // The menu is built once per set of columns, then kept up to date in place,
+    // so a choice in an open menu keeps the focus on it
+    if (slot.dataset.columns !== columns || !slot.querySelector('.ui-picker')) {
+        slot.dataset.columns = columns;
+        const listName = (table.dataset.sortName || '').trim();
+        const panel = `<fieldset class="ui-sort-group"><legend>Sort by</legend>
+            ${fallback ? '' : `<label class="ui-sort-opt"><input type="radio" name="${id}-by" value="" onchange="uiSortPick('${escapeJsArg(key)}', 'by', this.value)"><span>Default order</span></label>`}
+            ${sortable.map(h => `<label class="ui-sort-opt"><input type="radio" name="${id}-by" value="${heads.indexOf(h)}" onchange="uiSortPick('${escapeJsArg(key)}', 'by', this.value)"><span>${escapeHtml(uiSortLabel(h))}</span></label>`).join('')}
+            </fieldset>
+            <fieldset class="ui-sort-group ui-sort-dir"><legend>Order</legend>
+            <label class="ui-sort-opt"><input type="radio" name="${id}-dir" value="1" onchange="uiSortPick('${escapeJsArg(key)}', 'dir', this.value)"><span data-dir="asc"></span></label>
+            <label class="ui-sort-opt"><input type="radio" name="${id}-dir" value="-1" onchange="uiSortPick('${escapeJsArg(key)}', 'dir', this.value)"><span data-dir="desc"></span></label>
+            </fieldset>`;
+        slot.innerHTML = uiPicker({ id, label: 'Sort', icon: true, panel, panelLabel: listName ? `Sort ${listName}` : 'Sort', panelClass: 'ui-sort-panel' });
+        slot.dataset.sig = '';
+        changed = true;
+    }
+    const sig = `${current ? heads.indexOf(current.cell) + ':' + current.dir : ''}|${set}`;
+    if (slot.dataset.sig === sig) return changed;
+    slot.dataset.sig = sig;
+    const button = slot.querySelector('.ui-picker-btn');
+    const said = uiSortSaid(current);
+    button.setAttribute('aria-label', said);
+    button.title = said;
+    button.classList.toggle('is-set', set);
+    const by = current ? String(heads.indexOf(current.cell)) : '';
+    slot.querySelectorAll(`input[name="${id}-by"]`).forEach(r => { r.checked = r.value === by; });
+    const dirs = slot.querySelector('.ui-sort-dir');
+    dirs.disabled = !current;
+    const words = uiSortWords(current && current.cell);
+    dirs.querySelector('[data-dir="asc"]').textContent = words.asc;
+    dirs.querySelector('[data-dir="desc"]').textContent = words.desc;
+    dirs.querySelectorAll('input').forEach(r => { r.checked = !!current && Number(r.value) === current.dir; });
     return true;
 }
-function uiPhoneSortPick(select) {
-    const box = select.closest('.ui-phone-sort');
-    const table = box && box.nextElementSibling;
-    if (!table || select.value === '') return;
-    const cell = uiSortHeads(table)[Number(select.value)];
-    if (cell && uiSortable(table, cell)) uiSortBy(table, cell);
+
+// A choice in the Sort menu: a column starts in its own first order, an order
+// applies to the column shown, and "Default order" brings the list's own order back
+function uiSortPick(key, group, value) {
+    const table = uiSortTableFor(key);
+    if (!table) return;
+    const heads = uiSortHeads(table);
+    if (group === 'by') {
+        if (value === '') { uiSortReset(table); return; }
+        const cell = heads[Number(value)];
+        if (cell && uiSortable(table, cell)) uiSortSet(table, cell, uiSortFirstDir(table, cell));
+        return;
+    }
+    const current = uiSortCurrent(table, heads);
+    if (current) uiSortSet(table, current.cell, Number(value) > 0 ? 1 : -1);
 }
 
 // Mark the sortable headers, and put a remembered order back after a refresh
@@ -1284,6 +1455,7 @@ let uiTableSortQueued = false;
 function uiRefreshTableSorts() {
     uiTableSortQueued = false;
     let pickers = false;
+    const seen = new Set();
     document.querySelectorAll('.ui-table, table').forEach(table => {
         const heads = uiSortHeads(table);
         heads.forEach(h => {
@@ -1292,12 +1464,17 @@ function uiRefreshTableSorts() {
             uiSetSortState(h, uiSortState(h));
         });
         if (!table.hasAttribute('data-sort-handler')) {
+            // Rows drawn anew in the same list (a filter, a refresh) are not sorted yet
+            if (uiSortPositions(table)) delete table.dataset.sortedBy;
             const state = uiTableSorts.get(uiTableKey(table));
             if (state && table.dataset.sortedBy !== `${state.index}:${state.dir}`) uiApplyTableSort(table, state.index, state.dir);
         }
-        if (uiPhoneSortSync(table, heads)) pickers = true;
+        seen.add(uiSortControlKey(table));
+        if (uiSortControlSync(table, heads)) pickers = true;
     });
-    if (pickers && typeof uiFilterBarSync === 'function') uiFilterBarSync();
+    // A Sort button whose list is gone goes too
+    document.querySelectorAll('.ui-sort-slot').forEach(slot => { if (!seen.has(slot.dataset.sortFor)) slot.remove(); });
+    if (pickers) uiPickerRefocus();
     uiSortFocusBack();
 }
 function uiSortFocusBack() {
@@ -1312,15 +1489,13 @@ function uiSortFocusBack() {
     if (active && active !== document.body) return;
     const table = [...document.querySelectorAll('.ui-table, table')].filter(t => uiSortOwner(t) === want.owner)[want.nth];
     if (!table) return;   // the answer is no list (nothing found, an error): the layers place the focus
-    const target = want.phone
-        ? table.previousElementSibling?.querySelector?.('.ui-picker-btn')
-        : uiSortHeads(table).find(h => uiSortLabel(h) === want.label)?.querySelector('.ui-sort-btn');
+    const target = uiSortHeads(table).find(h => uiSortLabel(h) === want.label)?.querySelector('.ui-sort-btn');
     if (target && target.getClientRects().length) target.focus({ preventScroll: true });
 }
 // Moving on to anything else ends the wait for the list
 document.addEventListener('focusin', event => {
     if (uiSortFocus && event.target !== uiSortFocus.from && event.target instanceof Element
-        && !event.target.closest('.ui-tr-head, thead, .ui-phone-sort')) uiSortFocus = null;
+        && !event.target.closest('.ui-tr-head, thead')) uiSortFocus = null;
 }, true);
 document.addEventListener('DOMContentLoaded', () => {
     new MutationObserver(() => {
@@ -1631,11 +1806,15 @@ function uiFilterBarSync() {
         });
         const fields = [...bar.querySelectorAll('input, select')].filter(el => !el.closest('.ui-picker-panel') || el.matches('[data-filter-default]'));
         const more = bar.querySelector('.ui-fbar-more');
-        const badge = bar.querySelector('.ui-filters-toggle .ui-tab-n');
+        const badge = bar.querySelector('.ui-filters-toggle .ui-msg-filter-n');
         if (more && badge) {
             const changed = [...more.querySelectorAll('input, select')].filter(uiFilterChanged).length;
             badge.textContent = changed ? String(changed) : '';
             badge.classList.toggle('hidden', !changed);
+            // The count is in the button's name too, not only on the screen
+            const name = changed ? `Filters, ${changed} in use` : 'Filters';
+            const toggle = badge.closest('.ui-filters-toggle');
+            if (toggle.getAttribute('aria-label') !== name) { toggle.setAttribute('aria-label', name); toggle.title = name; }
         }
         const summary = bar.nextElementSibling;
         const clear = summary && summary.classList.contains('ui-list-summary') && summary.querySelector('.ui-clear-filters');
@@ -1779,7 +1958,7 @@ function uiPickerMatches(label, query) {
 
 // options: [{ label, hint, value, selected, onclick }] for a list (value: the option's
 // data-value); panel: HTML for a dialog; search: the search field's label, for a long list
-function uiPicker({ id, label, value, set = false, options = null, panel = '', panelLabel = '', panelClass = '', hostClass = '', onOpen = '', search = '', field = false, labelledBy = '', disabled = false }) {
+function uiPicker({ id, label, value, set = false, options = null, panel = '', panelLabel = '', panelClass = '', hostClass = '', onOpen = '', search = '', field = false, labelledBy = '', disabled = false, icon = false }) {
     const open = uiPickerIsOpen(id);
     const list = Array.isArray(options);
     const query = search ? (uiPickers.query[id] || '') : '';
@@ -1793,7 +1972,9 @@ function uiPicker({ id, label, value, set = false, options = null, panel = '', p
             <span id="${escapeHtml(id)}-list" class="ui-fct-list ui-picker-list" role="listbox" aria-label="${escapeHtml(label)}">${items}</span>
             <span class="ui-picker-none ui-muted${anyShown ? ' hidden' : ''}" role="status">No matches</span>`;
     }
-    const button = field
+    const button = icon
+        ? `<button type="button" class="ui-icon-btn ui-sort-btn-icon ui-picker-btn${set ? ' is-set' : ''}" aria-haspopup="${role}" aria-expanded="${open}" aria-controls="${escapeHtml(id)}-panel" aria-label="${escapeHtml(label)}" title="${escapeHtml(label)}">${UI_SORT_ICON}</button>`
+        : field
         ? `<button type="button" class="ui-select ui-select-btn ui-picker-btn" aria-haspopup="${role}" aria-expanded="${open}" aria-controls="${escapeHtml(id)}-panel"${labelledBy ? ` aria-labelledby="${escapeHtml(labelledBy)}"` : ''}${disabled ? ' disabled' : ''}><span>${value}</span><svg class="ui-select-arrow" width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg></button>`
         : `<button type="button" class="ui-msg-range ui-picker-btn${set ? ' is-set' : ''}" aria-haspopup="${role}" aria-expanded="${open}" aria-controls="${escapeHtml(id)}-panel"><span class="ui-picker-name">${escapeHtml(label)}:</span> ${value}</button>`;
     return `<span class="ui-popover-host ui-picker${field ? ' is-field' : ''}${hostClass ? ` ${hostClass}` : ''}" data-picker="${escapeHtml(id)}"${onOpen ? ` data-on-open="${escapeHtml(onOpen)}"` : ''}>
@@ -1824,9 +2005,55 @@ function uiPickerFocusables(panel) {
         .filter(el => !el.disabled && !el.hidden && !el.closest('.hidden'));
 }
 
-// An open panel stays on the screen: it moves back from an edge it would run past
+// An open panel stays on the screen: it moves back from an edge it would run
+// past, opens upward when there is more room above, and scrolls when it is
+// taller than the room it has. The room is the screen under a fixed top bar and
+// above a fixed tab bar (phones), within every box around the panel that cuts
+// what overflows it (the page's scrolling area).
+function uiPickerBounds(panel) {
+    const fixed = el => el && el.getClientRects().length && ['fixed', 'sticky'].includes(getComputedStyle(el).position);
+    const top = document.querySelector('.ui-mtop');
+    const bar = document.querySelector('.ui-tabbar');
+    let lo = fixed(top) ? top.getBoundingClientRect().bottom : 0;
+    let hi = fixed(bar) ? bar.getBoundingClientRect().top : window.innerHeight;
+    for (let box = panel && panel.parentElement; box && box !== document.body; box = box.parentElement) {
+        const style = getComputedStyle(box);
+        if (style.overflowY === 'visible' && style.overflowX === 'visible') continue;
+        const r = box.getBoundingClientRect();
+        if (!r.height) continue;
+        lo = Math.max(lo, r.top);
+        hi = Math.min(hi, r.bottom);
+    }
+    return { top: lo + 8, bottom: hi - 8 };
+}
 function uiPickerPlace(panel) {
     panel.style.transform = '';
+    panel.style.maxHeight = '';
+    panel.style.overflowY = '';
+    panel.classList.remove('is-up');
+    const button = panel.parentElement && panel.parentElement.querySelector('.ui-picker-btn');
+    let bounds = uiPickerBounds(panel);
+    // A button under a bar (reached with the keyboard) comes into view first
+    if (button) {
+        const at = button.getBoundingClientRect();
+        if (at.height && (at.bottom > bounds.bottom || at.top < bounds.top) && button.scrollIntoView) {
+            button.scrollIntoView({ block: 'center', behavior: 'instant' });
+            bounds = uiPickerBounds(panel);
+        }
+    }
+    const down = panel.getBoundingClientRect();
+    if (down.height && down.bottom > bounds.bottom) {
+        // Measured where the panel really hangs from, which is not always its button
+        panel.classList.add('is-up');
+        const up = panel.getBoundingClientRect();
+        if (up.bottom - bounds.top <= bounds.bottom - down.top) panel.classList.remove('is-up');
+    }
+    // Taller than the room on its side: it scrolls within that room
+    const placed = panel.getBoundingClientRect();
+    if (placed.height && (placed.top < bounds.top || placed.bottom > bounds.bottom)) {
+        const room = panel.classList.contains('is-up') ? placed.bottom - bounds.top : bounds.bottom - placed.top;
+        if (room > 0) { panel.style.maxHeight = `${Math.floor(room)}px`; panel.style.overflowY = 'auto'; }
+    }
     const rect = panel.getBoundingClientRect();
     const width = document.documentElement.clientWidth;
     let shift = 0;
@@ -1849,18 +2076,36 @@ function uiPickerOpen(id) {
 }
 
 // The search field, else the chosen option or the first one; in a dialog its first control
+// The panel is already placed on the screen, so the focus does not scroll the
+// page; a choice further down a long list is scrolled into view inside the panel
+function uiPickerReveal(el, panel) {
+    for (let box = el.parentElement; box; box = box.parentElement) {
+        if (box.scrollHeight > box.clientHeight + 1) {
+            const b = box.getBoundingClientRect(), r = el.getBoundingClientRect();
+            if (r.top < b.top) box.scrollTop -= b.top - r.top;
+            else if (r.bottom > b.bottom) box.scrollTop += r.bottom - b.bottom;
+        }
+        if (box === panel) break;
+    }
+}
+// A screen used by touch only (a phone): a field that takes the focus brings up the keyboard
+function uiTouchOnly() {
+    return typeof window.matchMedia === 'function' && window.matchMedia('(hover: none) and (pointer: coarse)').matches;
+}
 function uiPickerFocusInside(panel) {
+    const still = { preventScroll: true };
+    const show = el => { el.focus(still); uiPickerReveal(el, panel); };
     const search = panel.querySelector('.ui-picker-search');
-    if (search) { search.focus(); return; }
-    if (panel.getAttribute('role') === 'listbox') {
+    if (search && !uiTouchOnly()) { show(search); return; }
+    if (search || panel.getAttribute('role') === 'listbox') {
         const items = uiPickerItems(panel);
         const target = items.find(o => o.getAttribute('aria-selected') === 'true') || items[0];
-        if (target) target.focus();
+        if (target) show(target);
         return;
     }
-    const first = uiPickerFocusables(panel)[0];
-    if (first) first.focus();
-    else { panel.setAttribute('tabindex', '-1'); panel.focus(); }
+    const first = panel.querySelector('input[type="radio"]:checked:not(:disabled)') || uiPickerFocusables(panel)[0];
+    if (first) show(first);
+    else { panel.setAttribute('tabindex', '-1'); panel.focus(still); }
 }
 
 // Narrow a long list to the options that hold the typed text
@@ -1883,6 +2128,8 @@ function uiPickerClose(id, { returnFocus = false } = {}) {
     if (panel) {
         panel.classList.add('hidden');
         panel.style.transform = '';
+        panel.style.maxHeight = '';
+        panel.style.overflowY = '';
         // The next opening shows every choice again
         const search = panel.querySelector('.ui-picker-search');
         if (search && search.value) { search.value = ''; uiPickerFilter(panel, ''); }
@@ -2002,7 +2249,9 @@ if (typeof document !== 'undefined' && document.addEventListener) {
         const { host } = uiPickerParts(id);
         if (!host || !host.contains(event.target)) return;
         const next = event.relatedTarget;
-        if (next && !host.contains(next)) uiPickerClose(id);
+        // A click on a label in the panel can hand the focus to the dialog around
+        // it (a layer takes the focus itself): that is not leaving the picker
+        if (next && !host.contains(next) && !next.contains(host)) uiPickerClose(id);
     });
 
     // A panel open while the window changes size stays on the screen

@@ -1,0 +1,101 @@
+"""The Messages list comes newest first, and oldest first when asked (order=asc),
+on every page; any other order is refused."""
+import uuid
+from datetime import datetime, timedelta
+
+import pytest
+
+import starlette.staticfiles as sf
+_orig_init = sf.StaticFiles.__init__
+sf.StaticFiles.__init__ = lambda s, *a, **k: _orig_init(s, *a, **{**k, 'check_dir': False})
+
+from app.config import settings
+
+MARK = uuid.uuid4().hex[:8]
+SENDER = f'order-{MARK}@example.com'
+
+
+def _postgres_available() -> bool:
+    try:
+        from app.database import engine
+        with engine.connect():
+            return True
+    except Exception:
+        return False
+
+
+@pytest.fixture()
+def client(monkeypatch):
+    if not _postgres_available():
+        pytest.skip('PostgreSQL not available')
+    for key in ('auth_enabled', 'basic_auth_enabled', 'oauth2_enabled'):
+        monkeypatch.setattr(settings._inner, key, False)
+    from app.database import init_db, get_db_context
+    from app.models import MessageCorrelation
+    init_db()
+
+    def cleanup():
+        with get_db_context() as db:
+            db.query(MessageCorrelation).filter(MessageCorrelation.sender == SENDER).delete(synchronize_session=False)
+            db.commit()
+    cleanup()
+    now = datetime.utcnow().replace(microsecond=0)
+    with get_db_context() as db:
+        for minutes in (30, 10, 50, 20, 40):
+            db.add(MessageCorrelation(correlation_key=uuid.uuid4().hex, sender=SENDER, recipient='rcpt@example.net',
+                                      direction='outbound', subject=f'm{minutes} {MARK}', final_status='delivered',
+                                      first_seen=now - timedelta(minutes=minutes), last_seen=now, created_at=now))
+        db.commit()
+    from fastapi.testclient import TestClient
+    from app.main import app
+    yield TestClient(app)
+    cleanup()
+
+
+def _subjects(client, query):
+    response = client.get(f'/api/messages?search={SENDER}&{query}')
+    assert response.status_code == 200, response.text
+    return [m['subject'].split()[0] for m in response.json()['data']]
+
+
+def test_newest_first_by_default(client):
+    assert _subjects(client, 'limit=50') == ['m10', 'm20', 'm30', 'm40', 'm50']
+
+
+def test_oldest_first_on_every_page(client):
+    assert _subjects(client, 'order=asc&limit=50') == ['m50', 'm40', 'm30', 'm20', 'm10']
+    assert _subjects(client, 'order=asc&limit=2&page=1') == ['m50', 'm40']
+    assert _subjects(client, 'order=asc&limit=2&page=2') == ['m30', 'm20']
+
+
+def test_another_order_is_refused(client):
+    assert client.get('/api/messages?order=sideways').status_code == 422
+
+
+def test_messages_seen_at_one_moment_keep_their_place_across_pages(client):
+    from app.database import get_db_context
+    from app.models import MessageCorrelation
+    same = datetime.utcnow().replace(microsecond=0) - timedelta(minutes=5)
+    with get_db_context() as db:
+        for n in range(5):
+            db.add(MessageCorrelation(correlation_key=uuid.uuid4().hex, sender=SENDER, recipient='rcpt@example.net',
+                                      direction='outbound', subject=f'same{n} {MARK}', final_status='delivered',
+                                      first_seen=same, last_seen=same, created_at=same))
+        db.commit()
+    # Added in this order, so their ids rise: the id settles them, the last added first when newest first
+    same = ['same4', 'same3', 'same2', 'same1', 'same0']
+    want = {'desc': same + ['m10', 'm20', 'm30', 'm40', 'm50'], 'asc': ['m50', 'm40', 'm30', 'm20', 'm10'] + same[::-1]}
+    for order in ('desc', 'asc'):
+        pages = [_subjects(client, f'order={order}&limit=3&page={page}') for page in (1, 2, 3, 4)]
+        assert [s for page in pages for s in page] == want[order], (order, pages)
+
+
+def test_the_csv_export_follows_the_order(client):
+    import csv
+    import io
+    for order, first in (('desc', 'm10'), ('asc', 'm50')):
+        response = client.get(f'/api/export/messages/csv?search={SENDER}&order={order}')
+        assert response.status_code == 200, response.text
+        rows = list(csv.DictReader(io.StringIO(response.content.decode('utf-8-sig'))))
+        assert rows[0]['Subject'].split()[0] == first, (order, [r['Subject'] for r in rows])
+    assert client.get('/api/export/messages/csv?order=sideways').status_code == 422

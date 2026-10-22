@@ -705,6 +705,7 @@
                             <label class="ui-search"><svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-4.35-4.35M17 11a6 6 0 11-12 0 6 6 0 0112 0z"></path></svg>
                                 <input type="text" id="messages-filter-search" placeholder="Search (sender, recipient, subject, IP, user)..." aria-label="Search" onkeypress="if(event.key==='Enter') applyMessagesFilters()">
                             </label>
+                            <span id="messages-sort" class="ui-msg-sort"></span>
                             <button type="button" id="messages-filters-btn" class="ui-icon-btn ui-msg-filter-btn" aria-expanded="false" aria-controls="messages-more-filters" title="Filter by sender, recipient, user or IP" onclick="toggleMessagesFilters()"><svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"></path></svg><span id="messages-filters-n" class="ui-msg-filter-n hidden"></span></button>
                             <div id="messages-more-filters" class="ui-msg-filters hidden">
                                 <input type="text" id="messages-filter-sender" class="ui-input" placeholder="Sender" aria-label="Sender" onkeypress="if(event.key==='Enter') applyMessagesFilters()">
@@ -827,7 +828,7 @@
                         <select id="netfilter-filter-country" class="ui-select" aria-label="Country" data-picker-label="Country" data-picker-search="Search countries" onchange="applyNetfilterFilters()">
                             <option value="" data-short="All">All Countries</option>
                         </select>
-                        <button type="button" class="ui-btn ui-filters-toggle" aria-expanded="false" aria-controls="netfilter-more" onclick="uiToggleFilters(this)">Filters<span class="ui-tab-n hidden"></span></button>
+                        <button type="button" class="ui-icon-btn ui-msg-filter-btn ui-filters-toggle" aria-expanded="false" aria-controls="netfilter-more" aria-label="Filters" title="Filters" onclick="uiToggleFilters(this)"><svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"></path></svg><span class="ui-msg-filter-n hidden"></span></button>
                     </div>
                     <div id="netfilter-more" class="ui-fbar-more">
                         <input type="text" id="netfilter-filter-ip" class="ui-input" placeholder="IP Address" aria-label="IP Address" onkeypress="if(event.key==='Enter') applyNetfilterFilters()">
@@ -891,7 +892,7 @@
                                 <input type="text" id="queue-filter-search" placeholder="Search sender/recipient..." aria-label="Search sender or recipient"
                                     onkeypress="if(event.key==='Enter') applyQueueFilters()">
                             </label>
-                            <button type="button" class="ui-btn ui-filters-toggle" aria-expanded="false" aria-controls="queue-more" onclick="uiToggleFilters(this)">Filters<span class="ui-tab-n hidden"></span></button>
+                            <button type="button" class="ui-icon-btn ui-msg-filter-btn ui-filters-toggle" aria-expanded="false" aria-controls="queue-more" aria-label="Filters" title="Filters" onclick="uiToggleFilters(this)"><svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"></path></svg><span class="ui-msg-filter-n hidden"></span></button>
                         </div>
                         <div id="queue-more" class="ui-fbar-more">
                             <input type="text" id="queue-filter-queue-id" class="ui-input" placeholder="Queue ID" aria-label="Queue ID"
@@ -982,16 +983,7 @@
                 <section class="ui-sec-block">
                     <div class="ui-list-head"><h2 class="ui-h2">Quarantined Messages</h2></div>
                     <div class="ui-panel ui-table-card">
-                    <section class="ui-panel ui-filters ui-fbar">
-                        <div class="ui-fbar-pickers">
-                            <select id="quarantine-sort" onchange="applyQuarantineSort()" class="ui-select" aria-label="Sort" data-picker-label="Sort" data-no-filter>
-                                <option value="newest" data-short="Newest">Newest first</option>
-                                <option value="score_desc" data-short="Highest score">Score: high to low</option>
-                                <option value="score_asc" data-short="Lowest score">Score: low to high</option>
-                            </select>
-                        </div>
-                    </section>
-                    <p class="ui-list-summary"><span id="quarantine-count" class="ui-count"></span></p>
+                    <p class="ui-list-summary" id="quarantine-list-summary"><span id="quarantine-count" class="ui-count"></span></p>
                     <div id="quarantine-logs"><div class="ui-loading" role="status"><div class="loading"></div><p>Loading...</p></div></div>
                     </div>
                 </section>
@@ -1233,7 +1225,7 @@
                             <label class="ui-search ui-ms-search"><svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
                                 <input type="text" id="mailbox-stats-search" oninput="applyMailboxStatsFilters()" placeholder="Search mailboxes..." aria-label="Search mailboxes">
                             </label>
-                            <button type="button" class="ui-btn ui-filters-toggle" aria-expanded="false" aria-controls="mailbox-stats-more" onclick="uiToggleFilters(this)">Filters<span class="ui-tab-n hidden"></span></button>
+                            <button type="button" class="ui-icon-btn ui-msg-filter-btn ui-filters-toggle" aria-expanded="false" aria-controls="mailbox-stats-more" aria-label="Filters" title="Filters" onclick="uiToggleFilters(this)"><svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"></path></svg><span class="ui-msg-filter-n hidden"></span></button>
                         </div>
                         <div class="ui-fbar-pickers">
                             <span class="ui-popover-host ui-picker" id="date-range-picker-container" data-picker="mailbox-stats-period" data-state="mailbox-stats-date-range" data-on-open="mailboxStatsPeriodOpened">
@@ -1261,13 +1253,8 @@
                             <select id="mailbox-stats-domain-filter" onchange="applyMailboxStatsFilters()" class="ui-select" aria-label="Domain" data-picker-label="Domain">
                                 <option value="" data-short="All">All Domains</option>
                             </select>
-                            <select id="mailbox-stats-sort" onchange="applyMailboxStatsFilters()" class="ui-select" aria-label="Sort" data-picker-label="Sort" data-no-filter>
-                                <option value="sent_total-desc" data-short="Sent">Sent (High to Low)</option>
-                                <option value="received_total-desc" data-short="Received">Received (High to Low)</option>
-                                <option value="failure_rate-desc" data-short="Failure rate">Failure Rate (High to Low)</option>
-                                <option value="quota_used-desc" data-short="Quota used">Quota Used (High to Low)</option>
-                                <option value="username-asc" data-short="Username">Username (A-Z)</option>
-                            </select>
+                            <!-- The list's order (field-direction), set by its headers and its Sort button -->
+                            <input type="hidden" id="mailbox-stats-sort" value="sent_total-desc">
                         </div>
                         <div id="mailbox-stats-more" class="ui-fbar-more">
                             <label class="ui-check-label"><input type="checkbox" id="mailbox-stats-active-only" class="ui-check" checked onchange="applyMailboxStatsFilters()"> Active Only</label>
@@ -1610,6 +1597,7 @@
         <div class="ui-dialog ui-dialog-fit">
             <div class="ui-dialog-head">
                 <h3>Fetch history</h3>
+                <span id="dmarc-sync-history-sort" class="ui-sort-host"></span>
                 <button onclick="closeDmarcSyncHistoryModal()" class="ui-icon-btn" title="Close" aria-label="Close"><svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg></button>
             </div>
             <div class="ui-dialog-body">

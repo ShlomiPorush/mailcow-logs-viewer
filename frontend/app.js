@@ -1183,22 +1183,28 @@ async function smartRefreshMessages() {
     const hasActiveFilters = filters.search || filters.sender || filters.recipient ||
         filters.direction || filters.status || filters.user || filters.ip;
 
-    // Don't refresh if user is not on first page
-    if (hasActiveFilters || currentPage.messages > 1) {
+    // Don't refresh if user is not on first page, or while the next page is on its way
+    if (hasActiveFilters || currentPage.messages > 1 || messagesPaging.loading) {
         return; // Skip refresh to avoid disrupting user's view
     }
 
     // The same query as the list, so a time range stays applied
     const params = messagesQueryParams(currentPage.messages);
+    const gen = messagesGen;
 
     const response = await authenticatedFetch(`/api/messages?${params}`);
     if (!response.ok) return;
 
     const data = await response.json();
+    if (gen !== messagesGen) return;
+    // Meanwhile the user may have loaded more of the list: a first page would take it away
+    if (currentPage.messages > 1 || messagesPaging.page > 1 || messagesPaging.loading) return;
 
     if (hasDataChanged(data, 'messages')) {
         console.log('[REFRESH] Messages data changed, updating UI');
         lastDataCache.messages = data;
+        // A list drawn again is a new one: a page still on its way for the old one is dropped
+        messagesGen++;
         renderMessagesData(data);
     }
 }
@@ -1249,6 +1255,9 @@ function renderMessagesData(data) {
 
 // ---------- Messages list: the next page loads as the end scrolls into view ----------
 const messagesPaging = { page: 1, pages: 1, total: 0, loading: false, observer: null };
+// Each new load of the Messages list (new filters, a new order) starts a new
+// generation; an answer that comes back for an older one is dropped
+let messagesGen = 0;
 
 function messagesQueryParams(page) {
     const filters = currentFilters.messages || {};
@@ -1256,7 +1265,35 @@ function messagesQueryParams(page) {
     for (const key of ['search', 'sender', 'recipient', 'direction', 'user', 'status', 'ip', 'start_date', 'end_date']) {
         if (filters[key]) params.append(key, filters[key]);
     }
+    if (messagesOrder === 'asc') params.append('order', 'asc');
     return params;
+}
+
+// The Messages list's order, by the time each message was first seen: its Sort
+// button beside the search offers newest first (as it arrives) or oldest first.
+// An order is not a filter: clearing the filters keeps it.
+let messagesOrder = 'desc';
+function renderMessagesSort() {
+    const slot = document.getElementById('messages-sort');
+    if (!slot) return;
+    if (!slot.querySelector('.ui-picker')) {
+        const choice = (value, text) => `<label class="ui-sort-opt"><input type="radio" name="messages-order" value="${value}" onchange="setMessagesOrder(this.value)"><span>${text}</span></label>`;
+        slot.innerHTML = uiPicker({ id: 'messages-sort-menu', label: 'Sort', icon: true, panelLabel: 'Sort messages', panelClass: 'ui-sort-panel',
+            panel: `<fieldset class="ui-sort-group"><legend>Time</legend>${choice('desc', 'Newest first')}${choice('asc', 'Oldest first')}</fieldset>` });
+    }
+    const said = `Sort: ${messagesOrder === 'asc' ? 'Oldest first' : 'Newest first'}`;
+    const button = slot.querySelector('.ui-picker-btn');
+    button.setAttribute('aria-label', said);
+    button.title = said;
+    button.classList.toggle('is-set', messagesOrder === 'asc');
+    slot.querySelectorAll('input[name="messages-order"]').forEach(r => { r.checked = r.value === messagesOrder; });
+}
+// Shown with the page, before its list arrives
+document.addEventListener('DOMContentLoaded', renderMessagesSort);
+function setMessagesOrder(order) {
+    messagesOrder = order === 'asc' ? 'asc' : 'desc';
+    renderMessagesSort();
+    loadMessages();
 }
 
 function messagesMoreText() {
@@ -1294,20 +1331,26 @@ async function loadMoreMessages() {
     if (!list) return;
     messagesPaging.loading = true;
     const next = messagesPaging.page + 1;
+    const gen = messagesGen;
     try {
         const response = await authenticatedFetch(`/api/messages?${messagesQueryParams(next)}`);
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const data = await response.json();
-        // New mail can shift a page; never show the same message twice
-        const seen = new Set([...list.querySelectorAll('.ui-msg-item[data-key]')].map(row => row.dataset.key));
-        list.insertAdjacentHTML('beforeend', (data.data || []).filter(msg => !seen.has(msg.correlation_key || '')).map(renderMessageRow).join(''));
-        messagesPaging.page = next;
-        messagesPaging.pages = data.pages || messagesPaging.pages;
-        currentPage.messages = next;
-        if (more) more.textContent = messagesMoreText();
-        if (typeof markSelectedMessageRow === 'function' && window.openMessageKey) markSelectedMessageRow(window.openMessageKey);
+        // The list was loaded again meanwhile (other filters or order): this page
+        // is not part of it. The new list's own end is checked below as usual
+        if (gen === messagesGen) {
+            // New mail can shift a page; never show the same message twice
+            const seen = new Set([...list.querySelectorAll('.ui-msg-item[data-key]')].map(row => row.dataset.key));
+            list.insertAdjacentHTML('beforeend', (data.data || []).filter(msg => !seen.has(msg.correlation_key || '')).map(renderMessageRow).join(''));
+            messagesPaging.page = next;
+            messagesPaging.pages = data.pages || messagesPaging.pages;
+            currentPage.messages = next;
+            if (more) more.textContent = messagesMoreText();
+            if (typeof markSelectedMessageRow === 'function' && window.openMessageKey) markSelectedMessageRow(window.openMessageKey);
+        }
     } catch (error) {
-        if (more) more.innerHTML = `Could not load more messages. <button type="button" class="ui-link-row ui-link" onclick="loadMoreMessages()">Try again</button>`;
+        // An error for an older list says nothing about the one shown
+        if (gen === messagesGen && more) more.innerHTML = `Could not load more messages. <button type="button" class="ui-link-row ui-link" onclick="loadMoreMessages()">Try again</button>`;
     } finally {
         messagesPaging.loading = false;
     }
@@ -2602,7 +2645,7 @@ function applyQueueFilters() {
 
     container.innerHTML = `
         ${lockedNote}
-        <div class="ui-table ui-stack" style="${cols}">
+        <div class="ui-table ui-stack" data-sort-at="queue-filter-search" data-sort-name="mail queue" style="${cols}">
         ${canAct ? `
             <div class="ui-toolbar ui-table-tools">
                 <button onclick="queueSelectAll()" id="queue-select-all-btn" class="ui-btn ui-btn-sm">Select All</button>
@@ -2617,7 +2660,7 @@ function applyQueueFilters() {
                 <button onclick="queueDeleteAll()" id="queue-delete-all-btn" class="ui-btn ui-btn-sm ui-btn-danger-solid">Delete All</button>
             </div>
         ` : ''}
-            <div class="ui-tr ui-tr-head">${canAct ? '<span></span>' : ''}<span>Recipient</span><span>State</span><span>Last response</span><span class="ui-td-end">Size</span><span class="ui-td-end">Actions</span></div>
+            <div class="ui-tr ui-tr-head">${canAct ? '<span></span>' : ''}<span data-sort-kind="text">Recipient</span><span data-sort-kind="text">State</span><span data-sort-kind="text">Last response</span><span class="ui-td-end" data-sort-kind="number">Size</span><span class="ui-td-end">Actions</span></div>
             ${filteredData.map(item => {
                 const qid = item.queue_id || '';
                 const queueName = (item.queue_name || '').toLowerCase();
@@ -2806,46 +2849,14 @@ async function queueDeleteRequest(itemIds) {
 // =============================================================================
 
 // Client-side sort state for the quarantine list ('newest' matches the backend default order)
-let quarantineSortOrder = 'newest';
 // Last quarantine payload rendered (used to re-sort without re-fetching)
 let quarantineLastData = null;
 
-// Return a sorted copy of quarantine items based on quarantineSortOrder.
-// Items without a numeric score are placed last in both score directions.
 // Reject is the strong verdict; add header and the softer ones read as a warning
 function quarantineActionTone(action) {
     return ['reject', 'discard'].includes(String(action || '').toLowerCase()) ? 'fail' : 'warn';
 }
 
-function sortQuarantineItems(items) {
-    const sorted = [...items];
-    if (quarantineSortOrder !== 'score_desc' && quarantineSortOrder !== 'score_asc') {
-        return sorted; // 'newest' - keep backend order (newest first)
-    }
-    const scoreOf = (item) => (typeof item.score === 'number' && isFinite(item.score)) ? item.score : null;
-    sorted.sort((a, b) => {
-        const sa = scoreOf(a);
-        const sb = scoreOf(b);
-        if (sa === null && sb === null) return 0;
-        if (sa === null) return 1;
-        if (sb === null) return -1;
-        return quarantineSortOrder === 'score_asc' ? sa - sb : sb - sa;
-    });
-    return sorted;
-}
-
-// Handler for the #quarantine-sort dropdown - re-sorts the already-fetched list
-function applyQuarantineSort() {
-    if (typeof uiClearTableSort === 'function') uiClearTableSort('quarantine-logs');
-    const select = document.getElementById('quarantine-sort');
-    if (select) quarantineSortOrder = select.value;
-    uiFilterBarSync();
-    if (quarantineLastData) {
-        renderQuarantineData(quarantineLastData);
-    } else {
-        loadQuarantine();
-    }
-}
 
 async function loadQuarantine() {
     const container = document.getElementById('quarantine-logs');
@@ -2895,7 +2906,7 @@ function renderQuarantineData(data) {
     }
 
     const canAct = mailcowRwConfigured;
-    const items = sortQuarantineItems(data.data);
+    const items = data.data;
 
     const lockedNote = canAct ? '' : `<div class="ui-list-note">${uiLocked('Quarantine actions are locked', `Release, delete, spam learning and the auto-rules ${UI_RW_KEY_TEXT}`)}</div>`;
     const cols = canAct
@@ -2904,7 +2915,7 @@ function renderQuarantineData(data) {
 
     container.innerHTML = `
         ${lockedNote}
-        <div class="ui-table ui-stack" data-phone-sort="off" style="${cols}">
+        <div class="ui-table ui-stack" data-sort-at="quarantine-list-summary" data-sort-name="quarantined messages" data-sort-default="Held:desc" style="${cols}">
         ${!canAct ? '' : `
             <div class="ui-toolbar ui-table-tools">
                 <button onclick="quarantineSelectAll()" id="quarantine-select-all-btn" class="ui-btn ui-btn-sm">Select All</button>
@@ -2918,7 +2929,7 @@ function renderQuarantineData(data) {
                 <button onclick="quarantineDeleteAll()" id="quarantine-delete-all-btn" class="ui-btn ui-btn-sm ui-btn-danger-solid">Delete All</button>
             </div>
         `}
-            <div class="ui-tr ui-tr-head">${canAct ? '<span></span>' : ''}<span>Message</span><span>For</span><span>Why</span><span class="ui-td-end">Score</span><span>Held</span><span class="ui-td-end">Actions</span></div>
+            <div class="ui-tr ui-tr-head">${canAct ? '<span></span>' : ''}<span data-sort-kind="text">Message</span><span data-sort-kind="text">For</span><span data-sort-kind="text">Why</span><span class="ui-td-end" data-sort-kind="number">Score</span><span data-sort-kind="date">Held</span><span class="ui-td-end">Actions</span></div>
             ${items.map(item => {
                 const itemId = item.id !== undefined ? item.id : '';
                 const idArg = escapeJsArg(String(itemId));
@@ -2932,8 +2943,8 @@ function renderQuarantineData(data) {
                     </div>
                     <span class="ui-td">${escapeHtml(item.rcpt || 'Unknown')}</span>
                     <span class="ui-td ui-td-wrap">${uiTag(item.action || 'Quarantined', quarantineActionTone(item.action))}${item.virus_flag ? ` ${uiTag('Virus', 'spam')}` : ''}</span>
-                    <span class="ui-td ui-td-end${hasScore && item.score >= 15 ? ' ui-text-fail' : ''}"><small class="ui-sec-unit">Score </small>${hasScore ? item.score.toFixed(1) : '-'}</span>
-                    <time class="ui-td" title="${escapeHtml(formatTime(item.created))}"><small class="ui-sec-unit">Held </small>${formatAgo(item.created).replace(' ago', '')}</time>
+                    <span class="ui-td ui-td-end${hasScore && item.score >= 15 ? ' ui-text-fail' : ''}"${hasScore && isFinite(Number(item.score)) ? ` data-sort="${Number(item.score)}"` : ''}><small class="ui-sec-unit">Score </small>${hasScore ? item.score.toFixed(1) : '-'}</span>
+                    <time class="ui-td" title="${escapeHtml(formatTime(item.created))}"${isFinite(Date.parse(item.created)) ? ` data-sort="${Date.parse(item.created)}"` : ''}><small class="ui-sec-unit">Held </small>${formatAgo(item.created).replace(' ago', '')}</time>
                     <span class="ui-td ui-td-end ui-row-actions">
                         ${canAct ? `
                             <button onclick="quarantineRelease('${idArg}')" title="Release message" class="quarantine-action-btn ui-btn ui-btn-sm">Release</button>
@@ -3759,6 +3770,8 @@ function updateMessagesFilterState() {
     const any = advanced || f.search || f.status || f.direction || f.start_date || f.end_date || f.date_range;
     const badge = document.getElementById('messages-filters-n');
     if (badge) { badge.textContent = advanced || ''; badge.classList.toggle('hidden', !advanced); }
+    const button = document.getElementById('messages-filters-btn');
+    if (button) button.setAttribute('aria-label', advanced ? `Filters, ${advanced} in use` : 'Filters');
     const clear = document.getElementById('messages-clear-filters');
     if (clear) clear.classList.toggle('hidden', !any);
 }
@@ -4001,6 +4014,8 @@ function afterMessagesRendered(data) {
 
 async function loadMessages(page = 1) {
     const container = document.getElementById('messages-logs');
+    renderMessagesSort();
+    const gen = ++messagesGen;
 
     try {
         container.innerHTML = '<div class="ui-loading" role="status"><div class="loading"></div><p>Loading...</p></div>';
@@ -4021,6 +4036,7 @@ async function loadMessages(page = 1) {
         }
 
         const data = await response.json();
+        if (gen !== messagesGen) return;
         console.log('Messages data:', data);
 
         // Update count display
@@ -4040,6 +4056,8 @@ async function loadMessages(page = 1) {
         currentPage.messages = page;
     } catch (error) {
         console.error('Failed to load messages:', error);
+        // A newer load is on its way or shown: this old one's error does not replace it
+        if (gen !== messagesGen) return;
         document.getElementById('messages-logs').innerHTML = `<p class="ui-empty ui-text-fail">Failed to load messages: ${escapeHtml(error.message)}</p>`;
         const countEl = document.getElementById('messages-count');
         if (countEl) countEl.textContent = '';
@@ -4729,7 +4747,7 @@ function renderStatusImport(imports) {
             ` : '<span class="ui-td ui-muted">No data</span><span></span><span></span><span></span>'}
         </div>`;
     container.innerHTML = `
-        <div class="ui-table ui-stack" style="--ui-cols: minmax(130px, 1fr) minmax(110px, 1fr) minmax(110px, 1fr) 110px minmax(150px, 1.2fr); --ui-table-min: 660px">
+        <div class="ui-table ui-stack" data-nosort style="--ui-cols: minmax(130px, 1fr) minmax(110px, 1fr) minmax(110px, 1fr) 110px minmax(150px, 1.2fr); --ui-table-min: 660px">
             <div class="ui-tr ui-tr-head"><span>Source</span><span>Last Fetch Run</span><span>Last Import</span><span class="ui-td-end">Total Entries</span><span>Oldest Entry</span></div>
             ${row('Postfix Logs', imports.postfix)}
             ${row('Rspamd Logs', imports.rspamd)}
@@ -4751,9 +4769,9 @@ function renderStatusCorrelation(correlation, incompleteList, maxAgeMinutes) {
     const pending = document.getElementById('status-correlation-pending');
     if (pending) pending.innerHTML = incompleteList.length > 0 ? `
         <section class="ui-sec-block">
-            <div class="ui-list-head"><h2 class="ui-h2">Waiting to be linked</h2> <span class="ui-count">${incompleteList.length}</span></div>
-            <div class="ui-table ui-stack" style="--ui-cols: minmax(180px, 1.4fr) minmax(220px, 2fr) 90px; --ui-table-min: 560px">
-                <div class="ui-tr ui-tr-head"><span>Message ID</span><span>From and to</span><span class="ui-td-end">Age</span></div>
+            <div class="ui-list-head" id="status-pending-head"><h2 class="ui-h2">Waiting to be linked</h2> <span class="ui-count">${incompleteList.length}</span></div>
+            <div class="ui-table ui-stack" data-sort-at="status-pending-head" data-sort-name="messages waiting to be linked" style="--ui-cols: minmax(180px, 1.4fr) minmax(220px, 2fr) 90px; --ui-table-min: 560px">
+                <div class="ui-tr ui-tr-head"><span data-sort-kind="text">Message ID</span><span data-sort-kind="text">From and to</span><span class="ui-td-end" data-sort-kind="date">Age</span></div>
                 ${incompleteList.map(item => `
                     <div class="ui-tr">
                         <span class="ui-td ui-mono">${copyableText(item.message_id || 'N/A')}</span>
