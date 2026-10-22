@@ -1974,6 +1974,8 @@ async function refreshAllData() {
     }
     switchTab(currentTab);
     loadNavCounters();
+    // Needs attention now, not when its next refresh is due
+    attentionRefresh({ force: true });
 }
 
 // =============================================================================
@@ -2283,20 +2285,25 @@ function attentionCheckItems(key, data) {
 }
 
 // The server checks; a check whose read fails keeps the items it had and is
-// tried again in a minute. The container counts say when mailcow did not answer
+// tried again in a minute. A read that does not answer in 20 seconds has failed;
+// so has a blocklist check that ended in an error, and container counts read
+// without an answer from mailcow
 function loadDashboardAttention({ force = true } = {}) {
     const s = attention.checks;
     return attentionLoad(s, force, async () => {
         const off = feature => (window.disabledFeatures || []).includes(feature);
-        const get = async url => {
-            try {
-                const res = await authenticatedFetch(url);
-                return res.ok ? await res.json() : ATTENTION_FAILED;
-            } catch (e) {
-                return ATTENTION_FAILED;
-            }
-        };
-        const [blocklist, summary, dmarc, appVersion, mailcowVersion, connection, fail2ban] = await Promise.all([
+        const get = url => Promise.race([
+            (async () => {
+                try {
+                    const res = await authenticatedFetch(url);
+                    return res.ok ? await res.json() : ATTENTION_FAILED;
+                } catch (e) {
+                    return ATTENTION_FAILED;
+                }
+            })(),
+            new Promise(resolve => setTimeout(() => resolve(ATTENTION_FAILED), 20000)),
+        ]);
+        const [blocklistRead, summary, dmarc, appVersion, mailcowVersion, connection, fail2ban] = await Promise.all([
             off('blacklist') ? null : get('/api/blacklist/summary'),
             get('/api/status/summary'),
             off('dmarc') ? null : get('/api/dmarc/insights'),
@@ -2305,7 +2312,9 @@ function loadDashboardAttention({ force = true } = {}) {
             get('/api/status/mailcow-connection'),
             off('netfilter') ? null : get('/api/fail2ban'),
         ]);
-        const containers = summary && summary !== ATTENTION_FAILED && summary.containers_known === false ? ATTENTION_FAILED : summary;
+        const answered = data => data && data !== ATTENTION_FAILED;
+        const blocklist = answered(blocklistRead) && blocklistRead.status === 'error' ? ATTENTION_FAILED : blocklistRead;
+        const containers = answered(summary) && summary.containers_known === false ? ATTENTION_FAILED : summary;
         const read = { connection, blocklist, containers, fail2ban, dmarc, appVersion, mailcowVersion };
         return () => {
             for (const key of ATTENTION_CHECKS) {
@@ -2396,7 +2405,8 @@ function attnWindowOpen(bell) {
         el.innerHTML = `<section class="ui-attn-win" role="dialog" aria-labelledby="attn-win-title">
             <div class="ui-attn-win-head">${head}<button type="button" class="ui-icon-btn ui-attn-win-x" onclick="attnWindowClose()" aria-label="Close" title="Close">&times;</button></div>
             <div id="attn-win-scroll" class="ui-attn-scroll ui-attn-win-list" data-keep-scroll tabindex="0">${list}</div>${foot}</section>`;
-        el.addEventListener('click', event => { if (event.target === el) attnWindowClose(); });
+        // A click beside it; not a press that began inside (a text selection) and ended there
+        el.addEventListener('click', event => { if (uiBackdropClick(event)) attnWindowClose(); });
         document.body.appendChild(el);
         const at = bell.getBoundingClientRect();
         const panel = el.firstElementChild;

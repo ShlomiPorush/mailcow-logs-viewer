@@ -98,3 +98,7 @@ def test_container_counts_say_whether_mailcow_answered(monkeypatch):
     # An answer with no containers at all is not a reading either
     empty = _summary(monkeypatch, AsyncMock(return_value={'summary': {'running': 0, 'stopped': 0, 'total': 0}}))
     assert empty['containers_known'] is False
+    # Nor are counts with nothing running: mailcow's API runs in a container, so these
+    # are the containers known before, all counted as stopped, not mailcow's answer
+    cached = _summary(monkeypatch, AsyncMock(return_value={'summary': {'running': 0, 'stopped': 18, 'total': 18}}))
+    assert cached['containers_known'] is False

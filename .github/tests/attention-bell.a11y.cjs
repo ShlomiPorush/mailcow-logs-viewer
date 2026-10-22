@@ -20,7 +20,7 @@ const read = name => fs.readFileSync(path.join(frontend, name), 'utf8');
 
 const BODY = `
     <main class="ui-shell">
-        <header id="ui-topbar" class="ui-topbar">
+        <header id="ui-topbar" class="ui-topbar"><div id="ui-topbar-title"></div>
             <button type="button" id="ui-bell" class="ui-icon-btn ui-bell" aria-haspopup="dialog" aria-expanded="false" aria-label="Needs attention" title="Needs attention" onclick="attnWindowOpen(this)"><span class="ui-bell-n is-none" aria-hidden="true"></span></button>
         </header>
         <span id="theme-toggle-light-icon" class="hidden"></span><span id="theme-toggle-dark-icon" class="hidden"></span>
@@ -74,9 +74,15 @@ function page(over) {
         w.document.head.appendChild(script);
     };
     [read('utils.js'), read('router.js'), read('app.js'), 'watchOverlays();'].forEach(run);
-    // The page switch, reduced to what these tests watch
+    // The page switch, reduced to what these tests watch: the page's title goes up
+    // into the top bar, as placeTopbar does on a wide screen
     run(`var switched = []; function switchTab(tab) { switched.push(tab);
-        document.querySelectorAll('.ui-page').forEach(p => p.classList.toggle('hidden', p.id !== 'content-' + tab)); }`);
+        document.querySelectorAll('.ui-page').forEach(p => p.classList.toggle('hidden', p.id !== 'content-' + tab));
+        const bar = document.getElementById('ui-topbar-title');
+        const up = bar.firstElementChild;
+        if (up) document.getElementById('content-' + up.dataset.page).prepend(up);
+        const h1 = document.querySelector('#content-' + tab + ' h1');
+        if (h1) { h1.dataset.page = tab; bar.appendChild(h1); } }`);
     w.asked = [];
     w.answers = answers(over);
     w.authenticatedFetch = async url => {
@@ -232,7 +238,9 @@ test('a page opened from the window takes the focus; a move cancelled over unsav
     await settle(w);
     assert.equal(w.document.getElementById('attn-window'), null);
     assert.equal(w.eval('switched').at(-1), 'dashboard');
+    // Its title is in the top bar there, not in the page
     assert.equal(w.document.activeElement.textContent, 'Dashboard');
+    assert.equal(w.document.activeElement.parentElement.id, 'ui-topbar-title');
 });
 
 test('Show activity from the window closes it, and the activity window gives the focus back to the bell', async () => {
@@ -273,4 +281,43 @@ test('Undo with the window open puts the keyboard on the alert back in the windo
     const focused = w.document.activeElement;
     assert.equal(focused.textContent, 'Dismiss');
     assert.ok(focused.closest('#attn-win-alerts [data-key="alert-1"]'));
+});
+
+test('a blocklist check that ended in an error is no all clear: the listing stays and the note offers Retry', async () => {
+    const w = page({ '/api/blacklist/summary': { status: 'listed', hosts: [{ hostname: '203.0.113.10', status: 'listed', listed_count: 1, total_blacklists: 30 }] } });
+    await loadAll(w);
+    assert.match(w.document.getElementById('dashboard-attention').innerHTML, /203\.0\.113\.10 is on a blocklist/);
+    w.answers['/api/blacklist/summary'] = { status: 'error', hosts: [] };
+    await w.loadDashboardAttention();
+    assert.match(w.document.getElementById('dashboard-attention').innerHTML, /203\.0\.113\.10 is on a blocklist/);
+    assert.match(w.document.getElementById('dashboard-attention-clear').textContent, /Some checks could not run/);
+});
+
+test('a press that begins in the window and ends beside it (a text selection) leaves it open; a click beside it closes it', async () => {
+    const w = page();
+    await loadAll(w);
+    w.document.getElementById('ui-bell').click();
+    await settle(w);
+    const win = w.document.getElementById('attn-window');
+    win.querySelector('.ui-alert p').dispatchEvent(new w.MouseEvent('mousedown', { bubbles: true }));
+    win.dispatchEvent(new w.MouseEvent('click', { bubbles: true, detail: 1 }));
+    await settle(w);
+    assert.ok(w.document.getElementById('attn-window'));
+    win.dispatchEvent(new w.MouseEvent('mousedown', { bubbles: true }));
+    win.dispatchEvent(new w.MouseEvent('click', { bubbles: true, detail: 1 }));
+    await settle(w);
+    assert.equal(w.document.getElementById('attn-window'), null);
+});
+
+test('Refresh reads Needs attention again at once, even when it was just read', async () => {
+    const w = page();
+    state(w).ready = true;
+    await loadAll(w);
+    w.uiConfirmLeave = async () => true;
+    w.loadNavCounters = () => {};
+    w.asked.length = 0;
+    await w.refreshAllData();
+    await Promise.all([state(w).alerts.busy, state(w).checks.busy]);
+    assert.ok(w.asked.includes('/api/security-alerts'));
+    assert.ok(w.asked.includes('/api/status/summary'));
 });

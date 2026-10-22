@@ -432,12 +432,13 @@ function layerFocusIn(layer) {
 }
 
 // Back to what opened the layer; when that is gone, into the layer below, else
-// to the page's heading
+// to the page's heading (in the top bar while the page has one, placeTopbar)
 function layerFocusBack(opener, below) {
     if (layerUsable(opener)) { opener.focus({ preventScroll: true }); return; }
     if (below) { layerFocusIn(below); return; }
     const page = [...document.querySelectorAll('.ui-page:not(.hidden)')].find(layerShown);
-    const heading = page && page.querySelector('h1, h2');
+    const barTitle = document.querySelector('#ui-topbar-title h1');
+    const heading = (barTitle && layerShown(barTitle) ? barTitle : null) || (page && page.querySelector('h1, h2'));
     if (heading) {
         if (!heading.hasAttribute('tabindex')) heading.setAttribute('tabindex', '-1');
         heading.focus({ preventScroll: true });
