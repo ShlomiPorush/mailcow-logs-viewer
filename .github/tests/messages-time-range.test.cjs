@@ -160,7 +160,7 @@ test('the Dashboard hour opens Messages on that hour, with its day in the app zo
         assert.equal(h.element('messages-date-range-start').value, day, zone);
         assert.equal(h.element('messages-date-range-end').value, day, zone);
         assert.equal(h.element('messages-date-range-label').textContent,
-            zone === 'UTC' ? 'Sat, Oct 24, 23:00 to 00:00' : 'Sun, Oct 25, 01:00 to 02:00', zone);
+            zone === 'UTC' ? '10/24/2026, 23:00 to 00:00' : '10/25/2026, 01:00 to 02:00', zone);
         assert.equal(h.element('messages-start-date').value, '2026-10-24T23:00:00.000000Z');
         assert.equal(h.element('messages-end-date').value, '2026-10-24T23:59:59.999999Z');
         // Apply on the filled day covers the hour
@@ -176,7 +176,7 @@ test('the Dashboard chart with no bar picked opens Messages on the span shown', 
         dashFlow.zoom = { from: 1, to: 2 }; dashFlow.pick = null; openMailFlowHourMessages()`);
     assert.equal(h.element('messages-start-date').value, '2026-10-21T04:00:00.000000Z');
     assert.equal(h.element('messages-end-date').value, '2026-10-21T09:59:59.999999Z');
-    assert.equal(h.element('messages-date-range-label').textContent, 'Wed, Oct 21, 06:00 to 12:00');
+    assert.equal(h.element('messages-date-range-label').textContent, '10/21/2026, 06:00 to 12:00');
     assert.deepEqual(h.calls.navigated, [['messages']]);
     // Not zoomed and nothing picked: the whole period shown
     const plain = harness({}, 'UTC');

@@ -2209,14 +2209,13 @@ function mailFlowHour(t) {
     return formatInZone(t, { hour: '2-digit', minute: '2-digit', hour12: false });
 }
 
-// A span as people read it: "Tue 21 Oct, 06:00 to 12:00", "Oct 14 to Oct 16"
+// A span with the dates as the rest of the app writes them: "21/10/2026, 06:00 to 12:00",
+// "14/10/2026 to 16/10/2026" (the order of day and month follows the browser, as formatTime)
 function mailFlowSpan(from, to) {
-    const day = t => formatInZone(t, { weekday: 'short', day: 'numeric', month: 'short' }, 'en-US');
     const end = to - 1;
-    if (zonedDateString(from) === zonedDateString(end)) return `${day(from)}, ${mailFlowHour(from)} to ${mailFlowHour(to)}`;
+    if (zonedDateString(from) === zonedDateString(end)) return `${formatDay(from)}, ${mailFlowHour(from)} to ${mailFlowHour(to)}`;
     const whole = mailFlowHour(from) === '00:00' && mailFlowHour(to) === '00:00';
-    const date = t => formatInZone(t, { day: 'numeric', month: 'short' }, 'en-US');
-    return whole ? `${day(from)} to ${day(end)}` : `${date(from)}, ${mailFlowHour(from)} to ${date(end)}, ${mailFlowHour(to)}`;
+    return whole ? `${formatDay(from)} to ${formatDay(end)}` : `${formatDay(from)}, ${mailFlowHour(from)} to ${formatDay(end)}, ${mailFlowHour(to)}`;
 }
 
 // The bar length for a span: an hour up to two days, six hours up to ten, else a day
@@ -2371,9 +2370,9 @@ function renderMailFlowChart() {
         const p = zonedParts(b.s);
         if (i === n - 1 && b.partial) return '<span class="is-major">Now</span>';
         if (d.bucket === 'hour') return p.hour % 6 === 0 ? `<span class="is-major">${mailFlowHour(b.s)}</span>` : p.hour % 3 === 0 ? `<span class="is-minor">${mailFlowHour(b.s)}</span>` : '<span></span>';
-        if (d.bucket === '6h') return p.hour < 6 ? `<span class="is-major">${escapeHtml(formatInZone(b.s, { weekday: 'short' }, 'en-US'))}</span>` : '<span></span>';
+        if (d.bucket === '6h') return p.hour < 6 ? `<span class="is-major">${escapeHtml(formatDayMonth(b.s))}</span>` : '<span></span>';
         // Every fifth day, not near Now
-        return (n <= 10 || (i % 5 === 0 && i < n - 5)) ? `<span class="is-major">${escapeHtml(formatInZone(b.s, { day: 'numeric', month: 'short' }, 'en-US'))}</span>` : '<span></span>';
+        return (n <= 10 || (i % 5 === 0 && i < n - 5)) ? `<span class="is-major">${escapeHtml(formatDayMonth(b.s))}</span>` : '<span></span>';
     };
     const zoomed = !!dashFlow.zoom;
     const shown = { from: Date.parse(d.from), to: Date.parse(d.to) };

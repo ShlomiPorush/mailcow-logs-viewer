@@ -1603,10 +1603,14 @@
         <div class="ui-dialog ui-dialog-fit ui-aa-dialog">
             <div class="ui-dialog-head">
                 <h3 id="alert-activity-title">Activity</h3>
-                <button type="button" id="alert-activity-dismiss" class="hidden ui-btn ui-btn-sm ui-aa-dismiss" title="Dismiss the alert">Dismiss</button>
                 <button onclick="closeAlertActivity()" class="ui-icon-btn" title="Close" aria-label="Close"><svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg></button>
             </div>
             <div id="alert-activity-content" class="ui-dialog-body"></div>
+            <!-- The actions stay at the bottom of the window while its content scrolls -->
+            <div class="ui-dialog-foot" id="alert-activity-foot">
+                <button type="button" id="alert-activity-dismiss" class="hidden ui-btn" title="Dismiss the alert">Dismiss</button>
+                <span id="alert-activity-open" class="ui-aa-open"></span>
+            </div>
         </div>
     </div>
 

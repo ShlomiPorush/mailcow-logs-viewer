@@ -30,6 +30,8 @@ async function openAlertActivity(alertId) {
     content.innerHTML = '<div class="ui-loading" role="status"><div class="loading"></div><p>Loading...</p></div>';
     document.getElementById('alert-activity-title').textContent = 'Activity';
     document.getElementById('alert-activity-dismiss')?.classList.add('hidden');
+    const openSlot = document.getElementById('alert-activity-open');
+    if (openSlot) openSlot.innerHTML = '';
     modal.classList.remove('hidden');
     try {
         const response = await authenticatedFetch(`/api/security-alerts/${encodeURIComponent(alertId)}/activity`, control ? { signal: control.signal } : {});
@@ -143,8 +145,8 @@ function alertActivityChart(data, span) {
     // no usual rate, only a threshold. It stays the alert's own rate, whatever is zoomed.
     const usualIn = c => (a.baseline_value || 0) * (c.end - c.start) / 3600000;
     const usual = spike ? (a.baseline_value || 0) * minutes / 60 : null;
-    // Written like the other chart labels, in English on a 24-hour clock
-    const fmt = d => formatInZone(d, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }, 'en-US');
+    // The date as the rest of the app writes it, on a 24-hour clock
+    const fmt = d => `${formatDay(d)}, ${formatInZone(d, { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }, 'en-US')}`;
     const what = sent ? 'sent' : 'failed logins';
     const markAt = cols.findIndex(c => at >= c.start && at < c.end);
     const ranges = [['24h', '24 hours'], ['48h', '2 days'], ['7d', `${escapeHtml(String(data.baseline_days))} days`]];
@@ -218,7 +220,7 @@ function renderAlertActivity() {
     const before = data.buckets.filter(b => new Date(b.start) < from).reduce((s, b) => s + b.count, 0);
     const critical = a.severity === 'critical';
     document.getElementById('alert-activity-title').innerHTML = `<span class="ui-tag ${critical ? 'ui-tag-fail' : 'ui-tag-warn'}">${escapeHtml((a.severity || 'warning').toUpperCase())}</span> ${escapeHtml(a.subject || '')}`;
-    // Dismiss is in the window's head, in reach without scrolling
+    // Dismiss and the way on are in the footer, at the bottom of the window however far it scrolls
     const dismiss = document.getElementById('alert-activity-dismiss');
     if (dismiss) {
         dismiss.classList.toggle('hidden', !!a.acknowledged);
@@ -270,10 +272,13 @@ function renderAlertActivity() {
         <p class="ui-muted ui-aa-note">${sent
             ? 'Spam from a hijacked mailbox usually goes to many unrelated domains with the same few subjects, and much of it bounces or is rejected. Mail the user really sent goes to people they write to.'
             : 'Many addresses or networks trying one username point to an attack spread out to stay under the ban; one address is a single machine, possibly a device with an old password.'}</p>
-        <div class="ui-aa-acts">
-            ${sent ? `<button type="button" class="ui-btn" onclick="openAlertActivityMessages()">${picked ? 'Open this time in Messages' : 'Open in Messages'}</button>`
-                : `<button type="button" class="ui-btn" onclick="closeAlertActivity(); openAlertSecurityEvents('${escapeJsArg(a.subject)}')">Open in Security</button>`}
-        </div>`; });
+`; });
+    // The way on, in the footer
+    const open = document.getElementById('alert-activity-open');
+    if (open) uiRedrawKeepingFocus(open, () => {
+        open.innerHTML = sent ? `<button type="button" class="ui-btn ui-btn-primary" onclick="openAlertActivityMessages()">${picked ? 'Open this time in Messages' : 'Open in Messages'}</button>`
+            : `<button type="button" class="ui-btn ui-btn-primary" onclick="closeAlertActivity(); openAlertSecurityEvents('${escapeJsArg(a.subject)}')">Open in Security</button>`;
+    });
     // Zoom by gesture over the columns (a preview stretches them; the end draws the span)
     const box = content.querySelector('.ui-aa-cols');
     const chart = content.querySelector('.ui-aa-chart');

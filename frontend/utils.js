@@ -553,6 +553,15 @@ function formatTime(isoString) {
     });
 }
 
+// A day as formatTime writes it (its date part), and its day and month alone (a chart's axis)
+function formatDay(value) {
+    return formatInZone(value, { day: '2-digit', month: '2-digit', year: 'numeric' });
+}
+
+function formatDayMonth(value) {
+    return formatInZone(value, { day: '2-digit', month: '2-digit' });
+}
+
 function formatDate(isoString) {
     if (!isoString) return '-';
     // Use formatTime for consistent date/time formatting

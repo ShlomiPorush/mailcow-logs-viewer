@@ -63,7 +63,8 @@ function harness(appTimezone = 'UTC', { browserLocale } = {}) {
         render(data, range = '24h') {
             context.__data = data;
             run(`alertActivity = __data; alertActivityRange = '${range}'; alertActivityZoom = null; alertActivityPick = null; renderAlertActivity();`);
-            return element('alert-activity-content').innerHTML;
+            // The content, and the footer's button to go on (Open in Messages or Security)
+            return `${element('alert-activity-content').innerHTML}<foot>${element('alert-activity-open').innerHTML}</foot>`;
         },
         // The columns the range buttons show
         columns(data, range) {
@@ -84,7 +85,7 @@ test('an SMTP block shows the mailbox sent mail, its limit and Open in Messages'
     assert.equal(figure(html, "Sent in the alert's 60 minutes"), '40');
     assert.equal(figure(html, 'The limit, in 60 minutes'), '30');
     assert.doesNotMatch(html, /Failed logins|Open in Security|ui-aa-usual/);
-    assert.match(html, /onclick="openAlertActivityMessages\(\)">Open in Messages</);
+    assert.match(html, /<foot><button [^>]*onclick="openAlertActivityMessages\(\)">Open in Messages<\/button><\/foot>/);
 });
 
 test('an SMTP block whose window is not known says so instead of using today\'s window', () => {
@@ -135,7 +136,7 @@ test('Open in Messages asks for the mailbox around the alert, or in the picked c
     const html = h.render(activity({ alert_type: 'volume_spike', subject: 'user@example.com', metric_value: 40, baseline_value: 0.5 }, { around }));
     assert.match(html, /aria-pressed="false"[^>]*onclick="pickAlertActivityColumn\(\d+\)"/);
     h.run(`pickAlertActivityColumn(${at})`);
-    assert.match(h.run("document.getElementById('alert-activity-content').innerHTML"), /Open this time in Messages/);
+    assert.match(h.run("document.getElementById('alert-activity-open').innerHTML"), />Open this time in Messages</);
     h.run('openAlertActivityMessages()');
     assert.deepEqual(JSON.parse(JSON.stringify(h.opened.pop())),
         { start: new Date(at).toISOString(), endInclusive: new Date(at + 15 * 60000 - 1).toISOString().replace('Z', '999Z'), user: 'user@example.com' });
@@ -179,7 +180,7 @@ test('From addresses counts every address, not only the six listed', () => {
     const html = harness().render(activity({ alert_type: 'auth_failure_burst', subject: 'user@example.com', metric_value: 18, baseline_value: 10 },
         { around: { total: 18, addresses, address_count: 9, countries: [], networks: [] } }));
     assert.equal(figure(html, 'From addresses'), '9');
-    assert.match(html, /Open in Security/);
+    assert.match(html, /<foot><button [^>]*>Open in Security<\/button><\/foot>/);
 });
 
 test('the long period covers the whole baseline, not always 7 days', () => {
@@ -212,12 +213,15 @@ test('Messages can be opened filtered by the authenticated user', () => {
 
 // ---------- times in the app's zone ----------
 
-test('the alert mark and the time axis are in the app zone, written like every other label in any browser language', () => {
+test('the alert mark and the time axis are in the app zone, the dates written as the rest of the app writes them', () => {
     // 12:00 UTC is 14:00 in Berlin (08:00 in New York); the last quarter starts at 13:45 UTC
     for (const browserLocale of [undefined, 'de-DE', 'he-IL']) {
         const html = harness('Europe/Berlin', { browserLocale }).render(activity({ alert_type: 'volume_spike', subject: 'user@example.com', metric_value: 40, baseline_value: 0.5 }));
         assert.match(html, /<span>Alert 14:00<\/span>/, browserLocale);
-        assert.match(html, /<div class="ui-aa-x"><span>[^<]*<\/span><span>Tue, Oct 13, 15:45<\/span><\/div>/, browserLocale);
+        // The date of formatTime in that browser language (13.10.2026, 10/13/2026), then the time
+        const h = harness('Europe/Berlin', { browserLocale });
+        const date = h.run("formatTime('2026-10-13T13:45:00Z').split(', ')[0]");
+        assert.ok(html.includes(`<span>${date}, 15:45</span></div>`), `${browserLocale}: ${date}`);
     }
 });
 
@@ -245,7 +249,7 @@ test('on the night the clocks go back, columns are spans of time that do not ove
     const left = Number(html.match(/<div class="ui-aa-mark" style="left:([\d.]+)%"/)[1]);
     const marked = Math.floor(left / 100 * tips.length);
     // [01:00Z, 03:00Z) is 02:00 to 04:00 CET: seven quarters of 1 and the alert's 50
-    assert.match(tips[marked], /^Sun, Oct 25, 02:00: 57 sent/);
+    assert.match(tips[marked], /^10\/25\/2026, 02:00: 57 sent/);
     assert.match(html, /<span>Alert 02:30<\/span>/);
 });
 
@@ -317,8 +321,8 @@ test('normal traffic sits on the usual level of every column, also one a clock c
         const { data, h } = steadyChart(...steadyCases[0]);
         const html = h.render(data, '7d');
         const line = html.match(/<div class="ui-aa-usual" style="bottom:([\d.]+)%"/);
-        const [tip, bar, own] = drawnColumns(html).find(c => c[1].startsWith('Sun, Mar 29, 00:00')).slice(1);
-        assert.match(tip, /^Sun, Mar 29, 00:00: 12 sent in 3 hours$/);
+        const [tip, bar, own] = drawnColumns(html).find(c => c[1].startsWith('03/29/2026, 00:00')).slice(1);
+        assert.match(tip, /^03\/29\/2026, 00:00: 12 sent in 3 hours$/);
         assert.equal(Number(own ?? line?.[1]), Number(bar));
     }
     for (const [zone, at, days] of steadyCases) {
