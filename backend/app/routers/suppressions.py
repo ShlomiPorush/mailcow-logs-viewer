@@ -348,12 +348,18 @@ def list_suppressions(
     
     # Filters
     if search:
-        search_term = f"%{search.lower()}%"
+        # Literally: a backslash, % or _ in the search is itself, not a LIKE
+        # wildcard. A domain or pattern block is also found by its value
+        # without the backslashes it is stored with (example.org finds
+        # /^.+@example\.org$/i)
+        literal = search.lower().replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')
+        search_term = f"%{literal}%"
         query = query.filter(
             or_(
-                SpamSuppression.email.ilike(search_term),
-                SpamSuppression.notes.ilike(search_term),
-                SpamSuppression.last_bounce_message.ilike(search_term),
+                SpamSuppression.email.ilike(search_term, escape='\\'),
+                func.replace(SpamSuppression.email, '\\', '').ilike(search_term, escape='\\'),
+                SpamSuppression.notes.ilike(search_term, escape='\\'),
+                SpamSuppression.last_bounce_message.ilike(search_term, escape='\\'),
             )
         )
     
