@@ -78,13 +78,31 @@ function isSubpage(route, name) {
 
 // A tab was opened on the page on screen: give it its address. While a page
 // loads (replace), the address is corrected instead of adding a Back step.
+// Every history entry the app writes carries its place in the history (idx), so
+// Back and Forward know how far they went and can be undone exactly
+let historyIdx = 0;
+let routerHere = { route: 'dashboard', params: {} };   // the page the app shows
+function routerPush(state, url) {
+    routerSaveScroll();
+    historyIdx += 1;
+    routerNoteHere(state);
+    history.pushState({ ...(state || {}), idx: historyIdx }, '', url);
+}
+function routerReplace(state, url) {
+    routerNoteHere(state);
+    history.replaceState({ ...(state || {}), idx: historyIdx }, '', url);
+}
+function routerNoteHere(state) {
+    if (state && state.route && !state.overlay) routerHere = { route: state.route, params: state.params || {} };
+}
+
 function routerSyncSubpage(route, name, replace = false) {
     if (typeof currentTab === 'undefined' || currentTab !== route || !SUBPAGES[route]) return;
     const path = buildPath(route, { sub: name });
     if (window.location.pathname === path) return;
     const state = { route, params: { sub: name } };
-    if (replace) history.replaceState(state, '', path);
-    else history.pushState(state, '', path);
+    if (replace) routerReplace(state, path);
+    else routerPush(state, path);
 }
 
 /**
@@ -221,8 +239,11 @@ function buildPath(baseRoute, params = {}) {
  * @param {string} route - The base route to navigate to
  * @param {Object} params - Optional route parameters (for nested routes)
  * @param {boolean} updateHistory - Whether to push to browser history (default: true)
+ * @param {boolean} confirmed - The user already agreed to drop unsaved changes
+ * @returns {Promise<boolean>} false when the user chose to stay with unsaved changes;
+ *   a caller that does more after the move (opens a card, applies a filter) waits for it
  */
-function navigateTo(route, params = {}, updateHistory = true) {
+function navigateTo(route, params = {}, updateHistory = true, confirmed = false) {
     // Handle legacy calls with just route string
     if (typeof params === 'boolean') {
         updateHistory = params;
@@ -246,6 +267,11 @@ function navigateTo(route, params = {}, updateHistory = true) {
         params = { ...params, sub: SUBPAGES[route].current() };
     }
 
+    // Changes not saved yet that this move would drop: ask first
+    if (!confirmed && typeof uiUnsavedCount === 'function' && uiUnsavedCount({ route, params })) {
+        return uiConfirmLeave({ route, params }).then(ok => (ok ? navigateTo(route, params, updateHistory, true) : false));
+    }
+
     // Build the new path
     const newPath = buildPath(route, params);
 
@@ -254,18 +280,20 @@ function navigateTo(route, params = {}, updateHistory = true) {
     if (updateHistory && window.location.pathname !== newPath) {
         if (overlayHistoryEntry) {
             overlayHistoryEntry = false;
-            history.replaceState({ route, params }, '', newPath);
+            routerReplace({ route, params }, newPath);
         } else {
-            history.pushState({ route, params }, '', newPath);
+            routerPush({ route, params }, newPath);
         }
     }
 
     // Always switch to the tab (even if URL is same, to handle returning to main view)
+    routerHere = { route, params };
     if (typeof switchTab === 'function') {
         switchTab(route, params);
     } else {
         console.error('switchTab function not found');
     }
+    return Promise.resolve(true);
 }
 
 // =============================================================================
@@ -487,9 +515,9 @@ function syncOverlayHistory() {
     overlaySyncQueued = false;
     const layers = openOverlays();
     syncLayerFocus(layers);
-    const open = layers.length > 0;
+    const open = layers.some(el => !el.matches('[data-no-history]'));
     if (open && !overlayHistoryEntry) {
-        history.pushState({ ...(history.state || {}), overlay: true }, '', window.location.href);
+        routerPush({ ...(history.state || {}), overlay: true }, window.location.href);
         overlayHistoryEntry = true;
     } else if (!open && overlayHistoryEntry) {
         overlayHistoryEntry = false;
@@ -510,6 +538,65 @@ function watchOverlays() {
     new MutationObserver(queue).observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ['class'] });
 }
 document.addEventListener('DOMContentLoaded', watchOverlays);
+
+// Back and Forward: a page comes back where it was scrolled to. The app scrolls
+// inside its pages, not the window: each scrolling area of the open page keeps its
+// position per history entry. A list that grows as it scrolls is scrolled down
+// until the old place is there again (up to 5 seconds); the user scrolling stops it
+let routerPopUndo = false;
+let routerPopConfirmed = false;
+const routerScrolls = new Map();   // idx -> { area key: scrollTop }
+function routerScrollAreas() {
+    const page = [...document.querySelectorAll('.ui-page:not(.hidden)')].find(el => el.getClientRects().length);
+    if (!page) return [];
+    return [page, ...page.querySelectorAll('.ui-scroll, .ui-msg-items, #settings-content .settings-edit-content, .ui-logs-side')]
+        .filter(el => el.scrollHeight > el.clientHeight);
+}
+function routerScrollKey(el) {
+    if (el.id) return el.id;
+    const owner = el.parentElement && el.parentElement.closest('[id]');
+    return `${owner ? owner.id : ''}|${el.className}`;
+}
+function routerSaveScroll() {
+    const areas = routerScrollAreas();
+    if (!areas.length) return;
+    const saved = {};
+    areas.forEach(el => { if (el.scrollTop > 0) saved[routerScrollKey(el)] = el.scrollTop; });
+    routerScrolls.set(historyIdx, saved);
+}
+let routerScrollRestore = null;
+function routerRestoreScroll(idx) {
+    if (routerScrollRestore) routerScrollRestore();
+    const saved = routerScrolls.get(idx);
+    if (!saved || !Object.keys(saved).length) return;
+    const until = Date.now() + 5000;
+    let stopped = false;
+    const stop = () => {
+        stopped = true;
+        routerScrollRestore = null;
+        ['wheel', 'touchstart', 'pointerdown', 'keydown'].forEach(type => window.removeEventListener(type, stop, true));
+    };
+    ['wheel', 'touchstart', 'pointerdown', 'keydown'].forEach(type => window.addEventListener(type, stop, true));
+    routerScrollRestore = stop;
+    const step = () => {
+        if (stopped) return;
+        let left = 0;
+        for (const [key, top] of Object.entries(saved)) {
+            const el = document.getElementById(key) || [...document.querySelectorAll('.ui-page:not(.hidden) *')].find(e => routerScrollKey(e) === key);
+            if (!el) { left++; continue; }
+            const max = el.scrollHeight - el.clientHeight;
+            // Further down than the list reaches yet: to its end, where it loads more
+            const want = Math.min(top, max);
+            if (Math.abs(el.scrollTop - want) > 1) el.scrollTop = want;
+            if (max < top) left++;
+        }
+        // The page may draw its list again once fresh data comes: the place is held
+        // until the time is up, or until the user scrolls
+        if (Date.now() < until) setTimeout(step, left ? 150 : 250);
+        else stop();
+    };
+    requestAnimationFrame(step);
+}
 
 /**
  * Navigate specifically within DMARC section
@@ -552,13 +639,29 @@ function initRouter() {
 
     // Handle browser back/forward buttons
     window.addEventListener('popstate', (event) => {
+        const idx = event.state && Number.isInteger(event.state.idx) ? event.state.idx : null;
+        const delta = idx === null ? null : idx - historyIdx;
+        // The step that undid a Back or Forward while unsaved changes are asked about
+        if (routerPopUndo) {
+            routerPopUndo = false;
+            if (idx !== null) historyIdx = idx;
+            return;
+        }
         // Back with a dialog or sheet open closes it and stays on the page
         if (overlayIgnorePop) {
             overlayIgnorePop = false;
+            if (idx !== null) historyIdx = idx;
             return;
         }
-        if (overlayHistoryEntry) {
+        // While the unsaved changes question is open, Back and Forward wait for its answer
+        if (typeof uiUnsavedAsking !== 'undefined' && uiUnsavedAsking && delta) {
+            routerPopUndo = true;
+            history.go(-delta);
+            return;
+        }
+        if (overlayHistoryEntry && (delta === -1 || delta === null)) {
             overlayHistoryEntry = false;
+            if (idx !== null) historyIdx = idx;
             closeTopOverlay();
             // Another dialog may still be open under it
             setTimeout(syncOverlayHistory, 0);
@@ -570,25 +673,71 @@ function initRouter() {
         let params = routeInfo.params || {};
         // A history entry an older version wrote, for a page that moved since
         const moved = canonicalRoute(route, params);
+
+        // An entry an older version of the app wrote has no place in the history,
+        // so the step cannot be undone exactly: the page the user was on is written
+        // back as a new entry, then the question is asked
+        const target = { route: (moved || { route }).route, params: (moved || { params }).params };
+        if (!routerPopConfirmed && delta === null && typeof uiUnsavedCount === 'function' && uiUnsavedCount(target)) {
+            const here = routerHere;
+            routerPush({ route: here.route, params: here.params }, buildPath(here.route, here.params));
+            uiConfirmLeave(target).then(ok => { if (ok) navigateTo(target.route, target.params, true, true); });
+            return;
+        }
+        // Unsaved changes this step would drop: step back to where the user was,
+        // ask, and take the same step again on Leave (the history stays as it was)
+        if (!routerPopConfirmed && delta && typeof uiUnsavedCount === 'function'
+            && uiUnsavedCount({ route: (moved || { route }).route, params: (moved || { params }).params })) {
+            routerPopUndo = true;
+            history.go(-delta);
+            uiConfirmLeave({ route: (moved || { route }).route, params: (moved || { params }).params }).then(ok => {
+                if (!ok) return;
+                routerPopConfirmed = true;
+                history.go(delta);
+            });
+            return;
+        }
+        routerPopConfirmed = false;
+        routerSaveScroll();
+        if (idx !== null) historyIdx = idx;
+
+        // A jump of several steps back from an open dialog: whatever is open closes
+        if (overlayHistoryEntry) {
+            overlayHistoryEntry = false;
+            for (let i = 0; i < 10 && openOverlays().length; i++) closeTopOverlay();
+        }
         if (moved) {
             ({ route, params } = moved);
-            history.replaceState({ route, params }, '', buildPath(route, params));
+            routerReplace({ route, params }, buildPath(route, params));
         }
 
         console.log('Popstate event, navigating to:', route, params);
 
         // Use switchTab directly to avoid pushing duplicate history entries
+        routerHere = { route, params };
         if (typeof switchTab === 'function') {
             switchTab(route, params);
         }
+        routerRestoreScroll(historyIdx);
     });
 
-    // Get initial route from URL
+    // Get initial route from URL. A reload keeps the entry's place in the history
     const routeInfo = parseRoute();
+    routerHere = { route: routeInfo.baseRoute, params: routeInfo.params };
+    if (history.state && Number.isInteger(history.state.idx)) historyIdx = history.state.idx;
 
     // Replace current history state with route info; a moved page gets its new address
-    history.replaceState({ route: routeInfo.baseRoute, params: routeInfo.params }, '',
+    routerReplace({ route: routeInfo.baseRoute, params: routeInfo.params },
         routeInfo.moved ? buildPath(routeInfo.baseRoute, routeInfo.params) : window.location.pathname);
+
+    // Closing or reloading the browser tab with changes not saved yet: the browser asks
+    window.addEventListener('beforeunload', event => {
+        if (typeof uiUnsavedCount === 'function' && uiUnsavedCount()) {
+            event.preventDefault();
+            event.returnValue = '';
+        }
+    });
+    if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
 
     console.log('Router initialized, initial route:', routeInfo);
     return routeInfo;
@@ -646,14 +795,13 @@ function navigateToMobile(route) {
     // Close the mobile menu first
     closeMobileMenu();
 
-    // Update mobile menu active state
-    updateMobileMenuActiveState(route);
-
-    // Update the current tab label
-    updateCurrentTabLabel(route);
-
-    // Navigate to the route
-    navigateTo(route);
+    // Navigate to the route; the menu and the label follow only when it went
+    // (the user may stay with unsaved changes)
+    navigateTo(route).then(moved => {
+        if (!moved) return;
+        updateMobileMenuActiveState(route);
+        updateCurrentTabLabel(route);
+    });
 }
 
 /**

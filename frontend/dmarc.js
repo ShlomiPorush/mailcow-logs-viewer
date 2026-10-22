@@ -81,12 +81,12 @@ function dmarcFailed(error) {
 function dmarcPush(params) {
     if (typeof buildPath !== 'function') return;
     const path = buildPath('dmarc', params);
-    if (window.location.pathname !== path) history.pushState({ route: 'dmarc', params }, '', path);
+    if (window.location.pathname !== path) routerPush({ route: 'dmarc', params }, path);
 }
 
 function dmarcReplace(params) {
     if (typeof buildPath !== 'function') return;
-    history.replaceState({ route: 'dmarc', params }, '', buildPath('dmarc', params));
+    routerReplace({ route: 'dmarc', params }, buildPath('dmarc', params));
 }
 
 // =============================================================================

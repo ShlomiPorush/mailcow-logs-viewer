@@ -1186,6 +1186,21 @@ body { font-family: var(--ui-font); background: var(--ui-bg); color: var(--ui-in
     .mobile-menu-content .ui-nav-group-label { display: block; }
 }
 
+/* A Settings field that does not hold a valid value says why under it */
+.ui-set-invalid { display: block; margin-top: 4px; font-size: 12.5px; }
+.ui-input[aria-invalid="true"], .ui-select[aria-invalid="true"] { border-color: var(--ui-fail); }
+
+/* Login: the password shows on demand, and a note says when Caps Lock is on */
+.ui-pass { position: relative; }
+.ui-pass .ui-input { padding-inline-end: 44px; }
+.ui-pass-toggle { position: absolute; inset-block: 0; inset-inline-end: 2px; display: inline-flex; align-items: center; justify-content: center; width: 40px;
+    padding: 0; border: 0; background: none; color: var(--ui-muted); cursor: pointer; }
+@media (hover: hover) { .ui-pass-toggle:hover { color: var(--ui-ink); } }
+.ui-pass-toggle:focus-visible { outline: 2px solid var(--ui-focus); outline-offset: -4px; border-radius: 8px; }
+.ui-pass-toggle .ui-pass-hide, .ui-pass-toggle[aria-pressed="true"] .ui-pass-show { display: none; }
+.ui-pass-toggle[aria-pressed="true"] .ui-pass-hide { display: block; }
+.ui-caps { margin: 6px 0 0; color: var(--ui-warn); font-size: 12.5px; font-weight: 600; }
+
 /* ---------- Empty state ---------- */
 
 .ui-empty { padding: 36px var(--ui-pad-x); color: var(--ui-muted); text-align: center; }

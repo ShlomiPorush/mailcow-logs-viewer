@@ -63,14 +63,10 @@ function navigateToMessagesWithFilter(options) {
     }
 
     // Navigate to Messages tab
-    navigateTo('messages');
-
-    // Apply filters after navigation
-    setTimeout(() => {
-        if (typeof applyMessagesFilters === 'function') {
-            applyMessagesFilters();
-        }
-    }, 100);
+    navigateTo('messages').then(moved => {
+        // Apply filters after navigation
+        if (moved) setTimeout(() => { if (typeof applyMessagesFilters === 'function') applyMessagesFilters(); }, 100);
+    });
 }
 
 // =============================================================================
@@ -84,6 +80,7 @@ let dmarcConfiguration = null;
 // Send the browser to the login page, dropping any client-side state; signing
 // in again returns to the page that was open
 function redirectToLogin() {
+    if (typeof uiUnsavedClear === 'function') uiUnsavedClear();
     const here = window.location.pathname + window.location.search;
     window.location.replace(here === '/' ? '/login' : `/login?next=${encodeURIComponent(here)}`);
 }
@@ -127,13 +124,21 @@ async function responseError(response) {
 // the same server-side session. POST only: a GET that logs out could be
 // triggered by any other site.
 async function handleLogout() {
+    // Changes not saved yet: ask now, while Stay still leaves a working session
+    if (typeof uiConfirmLeave === 'function' && !(await uiConfirmLeave(undefined, { keep: true }))) return;
     try {
-        await authenticatedFetch('/api/auth/logout', { method: 'POST' });
+        const response = await authenticatedFetch('/api/auth/logout', { method: 'POST' });
+        if (!response.ok) {
+            showToast('Could not sign out. Try again in a moment.', 'error');
+            return;
+        }
     } catch (e) {
         // A 401 means the session is already gone; authenticatedFetch has
-        // sent the browser to the login page.
+        // sent the browser to the login page. Otherwise nothing changed, and
+        // the changes are still guarded.
         return;
     }
+    if (typeof uiUnsavedClear === 'function') uiUnsavedClear();
     window.location.href = '/login';
 }
 
@@ -542,6 +547,21 @@ function setAppTimezone(info) {
     };
 }
 
+// The browser tab names the page and its open tab: "Mailbox Stats · Rate Limits · mailcow Logs Viewer"
+let appTitleText = document.title;
+let documentTitleQueued = false;
+function queueDocumentTitle() {
+    if (documentTitleQueued) return;
+    documentTitleQueued = true;
+    requestAnimationFrame(() => {
+        documentTitleQueued = false;
+        if (typeof currentTab === 'undefined' || !currentTab) return;
+        const name = TAB_LABELS[currentTab] || currentTab;
+        const sub = topbarSubLabel(currentTab);
+        document.title = [name, sub && sub !== name ? sub : '', appTitleText].filter(Boolean).join(' · ');
+    });
+}
+
 async function loadAppInfo() {
     try {
         // Use regular fetch since this is called after authentication check
@@ -550,7 +570,8 @@ async function loadAppInfo() {
 
         if (data.app_title) {
             document.getElementById('app-title').textContent = data.app_title;
-            document.title = data.app_title;
+            appTitleText = data.app_title;
+            queueDocumentTitle();
             // The phone top bar names the app above the page
             const phoneTitle = document.getElementById('mtop-app-title');
             if (phoneTitle) phoneTitle.textContent = data.app_title;
@@ -736,6 +757,7 @@ function setPageCrumbs(route, sub, back, labels) {
 }
 
 function updateTopbarCrumbs() {
+    queueDocumentTitle();
     const nav = document.querySelector('.ui-page-crumbs');
     if (!nav || !topbarRoute) return;
     const route = topbarRoute;
@@ -1735,8 +1757,9 @@ function switchTab(tab, params = {}) {
         // Update URL to reflect the disabled page (don't silently change to dashboard)
         const newPath = typeof buildPath === 'function' ? buildPath(tab) : `/${tab}`;
         if (window.location.pathname !== newPath) {
-            history.replaceState({ route: tab, params: {} }, '', newPath);
+            routerReplace({ route: tab, params: {} }, newPath);
         }
+        queueDocumentTitle();
         return;
     }
 
@@ -1852,9 +1875,11 @@ function switchTab(tab, params = {}) {
         default:
             console.warn('Unknown tab:', tab);
     }
+    queueDocumentTitle();
 }
 
 async function refreshAllData() {
+    if (!(await uiConfirmLeave({ route: currentTab, reload: true }))) return;
     if (currentTab === 'dmarc') {
         try {
             await authenticatedFetch('/api/dmarc/cache/clear', { method: 'POST' });
@@ -4173,7 +4198,7 @@ async function loadStatusAppVersion() {
         setStatusKpi('status-kpi-version', data.current_version || '-');
         if (note) {
             note.innerHTML = data.update_available
-                ? `<button type="button" class="ui-link-row ui-text-info" onclick="switchTab('settings')">Update ${escapeHtml(data.latest_version)} available</button>`
+                ? `<button type="button" class="ui-link-row ui-text-info" onclick="navigateTo('settings')">Update ${escapeHtml(data.latest_version)} available</button>`
                 : 'Up to date';
         }
     } catch (error) {

@@ -954,8 +954,7 @@ function openSecuritySettings() {
 
 // From the dashboard, straight to one protection's settings card
 function openSecurityProtection(key) {
-    navigateTo('netfilter', { sub: 'settings' });
-    securityOpenCard(key);
+    navigateTo('netfilter', { sub: 'settings' }).then(moved => { if (moved) securityOpenCard(key); });
 }
 
 // A protection in the Overview's row opens its own card
@@ -1022,6 +1021,9 @@ function securityChangeCount() {
     return protectionChangeCount() + securityF2bChanges().length + securityAbuseChanges().length
         + (smtpAbuseWhitelistDraft !== null ? 1 : 0);
 }
+
+// Security's changes stay while other pages are open; only leaving the app loses them
+uiUnsavedRegister('security', { count: () => securityChangeCount(), keeps: () => true });
 
 function securityUpdateSaveBar() {
     uiSaveBarUpdate('security-savebar', securityChangeCount());

@@ -658,9 +658,7 @@ const SETTINGS_RSPAMD_CONNECTION_KEYS = ['mailcow_url', 'mailcow_api_key_rw', 'r
 function settingsPlural(n, one, many) { return n === 1 ? one : many; }
 
 function settingsErrorText(body, fallback) {
-    const detail = body && body.detail;
-    if (detail && typeof detail === 'object') return detail.message || fallback;
-    return detail || fallback;
+    return uiApiErrorText(body, fallback);
 }
 
 async function settingsRspamdState() {
@@ -1329,6 +1327,61 @@ function renderSettingsEditField(key, value, sensitiveKeys, description, envLock
         envLockedHtml + '</div>';
 }
 
+// Before a save: every changed field must hold a value it accepts (a number in a
+// number field, at least its minimum). The first one that does not is opened in
+// its section, marked, and says what is wrong under it; nothing is sent
+function settingsCheckFields(form, initialValues, fieldValue) {
+    form.querySelectorAll('[aria-invalid="true"]').forEach(el => el.removeAttribute('aria-invalid'));
+    form.querySelectorAll('.ui-set-invalid').forEach(el => el.remove());
+    const bad = [...form.querySelectorAll('input, select, textarea')].filter(el => {
+        if (el.disabled || el.type === 'hidden') return false;
+        const name = el.name || el.dataset.mirror;
+        if (name && initialValues.has(name) && initialValues.get(name) === fieldValue(el)) return false;
+        return !el.checkValidity();
+    });
+    // A value shown twice (a mirror of one setting) is named once, where it can be edited
+    const usable = el => !el.closest('[inert]') && el.getClientRects().length > 0;
+    const keyOf = el => el.name || el.dataset.mirror;
+    const named = bad.filter((el, i) => {
+        const key = keyOf(el);
+        if (!key) return true;
+        const same = bad.filter(other => keyOf(other) === key);
+        return el === (same.find(usable) || same[0]);
+    });
+    bad.length = 0;
+    bad.push(...named);
+    if (!bad.length) return true;
+    bad.forEach(el => {
+        el.setAttribute('aria-invalid', 'true');
+        const note = document.createElement('small');
+        note.className = 'ui-set-invalid ui-text-fail';
+        note.id = `${el.id || el.name}-invalid`;
+        note.textContent = el.validationMessage || 'This value is not valid.';
+        el.setAttribute('aria-describedby', [el.getAttribute('aria-describedby'), note.id].filter(Boolean).join(' '));
+        // Under the field's line, not inside a sentence the field is part of
+        const line = el.closest('.ui-set-choice-opt, .ui-set-field, .ui-set-bool, .ui-set-wide');
+        if (line) line.appendChild(note);
+        else el.insertAdjacentElement('afterend', note);
+        el.addEventListener('input', () => {
+            el.removeAttribute('aria-invalid');
+            note.remove();
+        }, { once: true });
+    });
+    const first = bad[0];
+    // Its section opens first, so the field can take the focus
+    const panel = first.closest('[id^="settings-tab-panel-"]');
+    if (panel && panel.classList.contains('hidden')) {
+        const tab = form.closest('#settings-content')?.querySelector(`.settings-edit-tab[data-tab="${panel.id.replace('settings-tab-panel-', '')}"]`);
+        if (tab) tab.click();
+    }
+    first.focus({ preventScroll: true });   // Settings' own area scrolls, not the app frame (scrollIntoView can pan a phone's window)
+    { let area = first.parentElement; while (area && !(area.scrollHeight > area.clientHeight && /auto|scroll/.test(getComputedStyle(area).overflowY))) area = area.parentElement; if (area) area.scrollTop += first.getBoundingClientRect().top - area.getBoundingClientRect().top - area.clientHeight / 2; }
+    const label = first.closest('.ui-set-field, .ui-set-bool, .ui-set-wide')?.querySelector('.ui-label');
+    const name = label ? label.textContent.replace(/\s+/g, ' ').trim() : 'A field';
+    showToast(bad.length === 1 ? `${name}: ${first.validationMessage}` : `${bad.length} fields need a valid value, starting with ${name}`, 'error');
+    return false;
+}
+
 async function loadSettings() {
     const loading = document.getElementById('settings-loading');
     const content = document.getElementById('settings-content');
@@ -1402,7 +1455,7 @@ async function loadSettings() {
                 }
 
                 // Update UI with fresh data
-                if (appInfo || versionInfo) {
+                if ((appInfo || versionInfo) && !uiUnsavedCount({ route: 'settings', reload: true })) {
                     const currentData = { ...data };
                     if (appInfo) {
                         currentData.app_version = appInfo.version;
@@ -1871,6 +1924,18 @@ function renderSettings(content, data) {
                 tabBtn.classList.toggle('has-changes', has);
             });
         };
+        // Leaving Settings drops what is not saved; moving between its sections keeps it
+        uiUnsavedRegister('settings', {
+            count: () => {
+                if (!form || !form.isConnected || !form.getClientRects().length) return 0;
+                let n = 0;
+                form.querySelectorAll('[name]:not([data-choice])').forEach(el => {
+                    if (initialValues.has(el.name) && initialValues.get(el.name) !== fieldValue(el)) n++;
+                });
+                return n;
+            },
+            keeps: target => target.route === 'settings' && !target.reload,
+        });
         if (form) {
             form.addEventListener('input', updateDirty);
             form.addEventListener('change', updateDirty);
@@ -1890,8 +1955,11 @@ function renderSettings(content, data) {
         }
 
         if (form) {
+            // The fields are checked here, so a problem is named under its field (not in a browser bubble)
+            form.noValidate = true;
             form.onsubmit = async (e) => {
                 e.preventDefault();
+                if (!settingsCheckFields(form, initialValues, fieldValue)) return;
                 const payload = {};
                 const sensitiveKeys = SETTINGS_SENSITIVE_KEYS;
                 for (const key of Object.keys(data.editable_config)) {
@@ -1984,9 +2052,11 @@ function renderSettings(content, data) {
                     const res = await authenticatedFetch('/api/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
                     if (!res.ok) {
                         const err = await res.json().catch(() => ({}));
-                        throw new Error(err.detail || res.statusText);
+                        throw new Error(uiApiErrorText(err, res.statusText));
                     }
                     const saved = await res.json().catch(() => ({}));
+                    // Saved: these values are the new start, so a reload asks nothing about them
+                    form.querySelectorAll('[name]:not([data-choice])').forEach(el => initialValues.set(el.name, fieldValue(el)));
                     uiSaveBarBusy('settings-savebar', false);
                     // A new or changed Read-Write key or Rspamd password is checked right away;
                     // a failure is the answer to show, so it wins over a success
@@ -2102,14 +2172,14 @@ function renderSettings(content, data) {
                 try {
                     importBtn.disabled = true;
                     const res = await authenticatedFetch('/api/settings/import-from-env', { method: 'POST' });
-                    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || res.statusText);
+                    if (!res.ok) throw new Error(uiApiErrorText(await res.json().catch(() => ({})), res.statusText));
                     const result = await res.json();
                     if (result.env_locked_keys) {
                         data.env_locked_keys = result.env_locked_keys;
                     }
                     await loadSettings();
                 } catch (err) {
-                    alert('Import failed: ' + (err.message || err));
+                    showToast('Import failed: ' + (err.message || err), 'error');
                 } finally {
                     importBtn.disabled = false;
                 }

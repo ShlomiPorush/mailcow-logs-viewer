@@ -203,6 +203,7 @@ function openAlertSecurityEvents(username) {
     if (field) field.value = username;
     currentFilters.netfilter = { ip: '', username, action: '', country_code: '' };
     currentPage.netfilter = 1;
-    navigateTo('netfilter', { sub: 'events' });
-    setTimeout(() => { if (typeof applyNetfilterFilters === 'function') applyNetfilterFilters(); }, 100);
+    navigateTo('netfilter', { sub: 'events' }).then(moved => {
+        if (moved) setTimeout(() => { if (typeof applyNetfilterFilters === 'function') applyNetfilterFilters(); }, 100);
+    });
 }

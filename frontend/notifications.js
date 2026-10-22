@@ -240,7 +240,7 @@ async function saveNotificationChannel(event) {
             });
         if (!response.ok) {
             const detail = await response.json().catch(() => ({}));
-            showToast(detail.detail || 'Could not save destination', 'error');
+            showToast(uiApiErrorText(detail, 'Could not save destination'), 'error');
             return;
         }
         showToast(isNew ? 'Destination added' : 'Destination updated', 'success');

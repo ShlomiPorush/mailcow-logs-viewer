@@ -48,6 +48,12 @@ function initMailboxStatsPage() {
 
 
 function mailboxStatsSwitchView(view) {
+    // Leaving Rate Limits drops a limit being edited: ask first
+    if (mailboxStatsView === 'rate-limits' && view !== 'rate-limits'
+        && uiUnsavedCount({ route: 'mailbox-stats', params: { sub: view }, reload: true })) {
+        uiConfirmLeave({ route: 'mailbox-stats', params: { sub: view }, reload: true }).then(ok => { if (ok) mailboxStatsSwitchView(view); });
+        return;
+    }
     const requested = view;
     const disabled = window.disabledFeatures || [];
     // The feature can be turned off while the Rate Limits view is open

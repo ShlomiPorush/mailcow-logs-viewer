@@ -665,14 +665,39 @@ function showToast(message, type = 'info') {
 
     document.body.appendChild(toast);
 
-    // Auto-remove after 4 seconds
-    setTimeout(() => {
-        if (toast.parentElement) {
-            toast.style.opacity = '0';
-            toast.style.transition = 'opacity 0.3s';
-            setTimeout(() => toast.remove(), 300);
-        }
-    }, 4000);
+    // It goes after 4 seconds, but waits while the pointer or the focus is on it,
+    // and then gives the rest of its time (at least 1.5 seconds) to read it
+    let left = 4000;
+    let started = Date.now();
+    let timer = null;
+    const hold = () => toast.matches(':hover') || toast.contains(document.activeElement);
+    let fading = false;
+    const fade = () => {
+        if (!toast.parentElement) return;
+        fading = true;
+        toast.style.opacity = '0';
+        toast.style.transition = 'opacity 0.3s';
+        setTimeout(() => toast.remove(), 300);
+    };
+    const run = () => {
+        clearTimeout(timer);
+        started = Date.now();
+        timer = setTimeout(fade, left);
+    };
+    const pause = () => {
+        if (timer === null || fading) return;
+        clearTimeout(timer);
+        timer = null;
+        left = Math.max(1500, left - (Date.now() - started));
+        toast.style.opacity = '';
+        toast.style.transition = '';
+    };
+    const resume = () => { if (timer === null && !hold()) run(); };
+    toast.addEventListener('mouseenter', pause);
+    toast.addEventListener('focusin', pause);
+    toast.addEventListener('mouseleave', () => setTimeout(resume, 0));
+    toast.addEventListener('focusout', () => setTimeout(resume, 0));
+    run();
 }
 
 // =============================================================================
@@ -683,7 +708,7 @@ function showToast(message, type = 'info') {
  * Show a styled confirmation modal (replaces native confirm()).
  * Returns a Promise<boolean>: true if confirmed, false if cancelled.
  */
-function showConfirmModal({ title = 'Confirm', message = 'Are you sure?', confirmText = 'Confirm', cancelText = 'Cancel', confirmColor, isDangerous = false, focusCancel = false } = {}) {
+function showConfirmModal({ title = 'Confirm', message = 'Are you sure?', confirmText = 'Confirm', cancelText = 'Cancel', confirmColor, isDangerous = false, focusCancel = false, noHistory = false } = {}) {
     return new Promise((resolve) => {
         const existing = document.getElementById('app-confirm-modal');
         if (existing) existing.remove();
@@ -693,6 +718,8 @@ function showConfirmModal({ title = 'Confirm', message = 'Are you sure?', confir
         overlay.className = 'ui-dialog-backdrop ui-confirm';
         overlay.setAttribute('role', 'alertdialog');
         overlay.setAttribute('aria-label', title);
+        // A question asked during Back or Forward writes no history entry of its own
+        if (noHistory) overlay.dataset.noHistory = '';
 
         // Callers pass plain text (channel names, emails, domains, ...) - escape
         // it before it goes into innerHTML, then turn newlines into breaks.
@@ -814,6 +841,75 @@ function uiCloseSavedDialog(id) {
     const modal = document.getElementById(id);
     uiDialogSaved(modal);
     modal?.remove();
+}
+
+// What the server said went wrong, in words: its detail text, a detail object's
+// message, or a validation list (FastAPI 422) as "field: problem" for each field
+function uiApiErrorText(body, fallback) {
+    const detail = body && body.detail;
+    if (Array.isArray(detail)) {
+        const lines = detail.map(item => {
+            if (!item || typeof item !== 'object') return String(item);
+            const loc = Array.isArray(item.loc) ? item.loc.filter(p => p !== 'body' && typeof p === 'string') : [];
+            const field = loc.length ? loc[loc.length - 1].replace(/_/g, ' ') : '';
+            return field ? `${field}: ${item.msg || 'not valid'}` : (item.msg || '');
+        }).filter(Boolean);
+        return lines.length ? lines.join('; ') : fallback;
+    }
+    if (detail && typeof detail === 'object') return detail.message || fallback;
+    return detail || fallback;
+}
+
+// =============================================================================
+// Changes not saved yet. A page or an editor that would lose them registers how
+// many it holds: uiUnsavedRegister(key, { count, keeps }). Moving away (another
+// page, Back and Forward, Refresh, the editor's own way back) asks first, and
+// closing or reloading the browser tab asks through the browser. keeps(target)
+// says which moves keep the changes: Settings keeps them across its sections,
+// Security keeps them across pages. A planned reload clears the list first.
+// target: { route, params } a move, { route, params, reload: true } the same page
+// loaded again, nothing: the browser leaving the app.
+// =============================================================================
+const uiUnsavedEntries = new Map();
+function uiUnsavedRegister(key, entry) {
+    uiUnsavedEntries.set(key, { keeps: () => false, ...entry });
+}
+function uiUnsavedUnregister(key) {
+    uiUnsavedEntries.delete(key);
+}
+function uiUnsavedClear() {
+    uiUnsavedEntries.clear();
+}
+function uiUnsavedDrop(target) {
+    for (const entry of uiUnsavedEntries.values()) {
+        if (!(target && entry.keeps({ params: {}, ...target })) && typeof entry.drop === 'function') entry.drop();
+    }
+}
+function uiUnsavedCount(target) {
+    let n = 0;
+    for (const entry of uiUnsavedEntries.values()) {
+        let count = 0;
+        try { count = Number(entry.count()) || 0; } catch (e) { count = 0; }
+        if (count && !(target && entry.keeps({ params: {}, ...target }))) n += count;
+    }
+    return n;
+}
+let uiUnsavedAsking = null;   // the open question, so one move asks once
+// keep: Leave does not drop the changes yet (signing out drops them only once it worked)
+function uiConfirmLeave(target, { keep = false } = {}) {
+    const n = uiUnsavedCount(target);
+    if (!n) return Promise.resolve(true);
+    if (uiUnsavedAsking) return uiUnsavedAsking;
+    const changes = n === 1 ? '1 unsaved change' : `${n} unsaved changes`;
+    uiUnsavedAsking = showConfirmModal({
+        title: 'Leave without saving?',
+        message: `You have ${changes}. Leaving drops ${n === 1 ? 'it' : 'them'}.`,
+        confirmText: 'Leave', cancelText: 'Stay', isDangerous: true, focusCancel: true, noHistory: true,
+    }).then(leave => {
+        if (leave && !keep) uiUnsavedDrop(target);
+        return leave;
+    }).finally(() => { uiUnsavedAsking = null; });
+    return uiUnsavedAsking;
 }
 
 function renderJobCard(name, jobKey, job) {

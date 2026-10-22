@@ -114,9 +114,18 @@ async function loadRateLimits() {
 }
 
 
-function changeRateLimitWindow(value) {
+async function changeRateLimitWindow(value) {
     const hours = parseInt(value, 10);
     if (!Number.isFinite(hours)) return;
+    if (!(await rateLimitsConfirmDrop())) {
+        // Stay: the picker goes back to the window that is shown
+        const select = document.getElementById('rate-limit-window');
+        if (select) {
+            select.value = String(rateLimitWindowHours);
+            if (typeof uiFilterBarSync === 'function') uiFilterBarSync();
+        }
+        return;
+    }
     rateLimitWindowHours = hours;
     loadRateLimits();
 }
@@ -829,6 +838,31 @@ function refreshRateLimitBulkPanel() {
 }
 
 
+// A limit being edited (or a bulk value typed) is lost by opening another, by the
+// page loading again, or by leaving it
+uiUnsavedRegister('rate-limits', {
+    count: () => {
+        let n = 0;
+        const value = document.getElementById('rate-limit-value');
+        const frame = document.getElementById('rate-limit-frame');
+        // The open form counts even while a search or a filter hides its row
+        if (rateLimitEditing && value && value.isConnected
+            && (value.value !== value.defaultValue || (frame && frame.selectedIndex >= 0 && !frame.options[frame.selectedIndex].defaultSelected))) n++;
+        const bulk = document.getElementById('rate-limit-bulk-value');
+        if (rateLimitBulkOpen && bulk && bulk.isConnected && bulk.value.trim() !== '') n++;
+        return n;
+    },
+    drop: () => {
+        rateLimitEditing = null;
+        rateLimitBulkOpen = false;
+        rateLimitBulkValue = '';
+        if (document.getElementById('rate-limit-value') || document.getElementById('rate-limit-bulk-value')) renderRateLimitConfigCard();
+    },
+});
+function rateLimitsConfirmDrop() {
+    return uiConfirmLeave({ route: 'mailbox-stats', params: { sub: 'rate-limits' }, reload: true });
+}
+
 function setRateLimitBulkValue(value) {
     rateLimitBulkValue = value || '';
 }
@@ -839,7 +873,9 @@ function setRateLimitBulkFrame(frame) {
 }
 
 
-function toggleRateLimitBulkPanel() {
+async function toggleRateLimitBulkPanel() {
+    // Opening the bulk form closes a limit being edited
+    if (!rateLimitBulkOpen && rateLimitEditing && !(await rateLimitsConfirmDrop())) return;
     rateLimitBulkOpen = !rateLimitBulkOpen;
     // One open form at a time: a row being edited and a bulk apply above it
     // are two answers to the same question
@@ -1011,7 +1047,8 @@ function renderRateLimitEditForm(kind, name, value, frame) {
 }
 
 
-function openRateLimitEdit(kind, name) {
+async function openRateLimitEdit(kind, name) {
+    if (!(await rateLimitsConfirmDrop())) return;
     rateLimitEditing = { kind: kind, name: name };
     // One open form at a time, in both directions
     rateLimitBulkOpen = false;
