@@ -37,7 +37,7 @@ function harness(appTimezone = 'UTC', { browserLocale } = {}) {
         classList: { add() {}, remove() {}, toggle() {}, contains: () => false }, querySelector: () => null });
     const opened = [];
     const context = vm.createContext({
-        document: { getElementById: element, addEventListener() {} },
+        document: { getElementById: element, addEventListener() {}, querySelector: () => null },
         escapeHtml: value => String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;'),
         escapeJsArg: value => value,
         uiCountLabel: (n, one, many) => `${n} ${n === 1 ? one : many}`,
@@ -48,6 +48,7 @@ function harness(appTimezone = 'UTC', { browserLocale } = {}) {
         openMessagesRange: options => opened.push(options),
         uiTimeZoom: () => ({ destroy() {}, busy: () => false }),
         uiRedrawKeepingFocus: (container, draw) => draw(),
+        uiTimeOverview: () => ({ destroy() {}, busy: () => false }),
         appTimezone,
     });
     if (browserLocale) {
@@ -73,6 +74,7 @@ function harness(appTimezone = 'UTC', { browserLocale } = {}) {
         },
         run,
         opened,
+        context,
     };
 }
 
@@ -140,6 +142,27 @@ test('Open in Messages asks for the mailbox around the alert, or in the picked c
     h.run('openAlertActivityMessages()');
     assert.deepEqual(JSON.parse(JSON.stringify(h.opened.pop())),
         { start: new Date(at).toISOString(), endInclusive: new Date(at + 15 * 60000 - 1).toISOString().replace('Z', '999Z'), user: 'user@example.com' });
+});
+
+test('a zoom snaps to the quarters, the end of the data is an edge, and the range\'s own span is no zoom', () => {
+    const h = harness();
+    const data = activity({ alert_type: 'volume_spike', baseline_value: 0.5 });
+    const first = Date.parse(data.buckets[0].start);
+    const last = Date.parse(data.buckets[data.buckets.length - 1].start);
+    // The data ends seven minutes into its last quarter
+    data.data_end = new Date(last + 7 * 60000).toISOString();
+    h.render(data, '24h');
+    const Q = 15 * 60000;
+    h.context.__span = { from: first + 10 * Q + 4 * 60000, to: first + 18 * Q + 9 * 60000 };
+    h.run('alertActivityShow(alertActivity, __span)');
+    assert.deepEqual(JSON.parse(JSON.stringify(h.run('alertActivityZoom'))), { from: first + 10 * Q, to: first + 19 * Q });
+    // Up to just short of the end of the data: the end itself, not the next quarter
+    h.context.__span = { from: last - 8 * Q, to: last + 6 * 60000 };
+    h.run('alertActivityShow(alertActivity, __span)');
+    assert.equal(h.run('alertActivityZoom.to'), last + 7 * 60000);
+    // The pressed range's own span: no zoom
+    h.run('__span = alertActivityRangeSpan(alertActivity); alertActivityShow(alertActivity, __span)');
+    assert.equal(h.run('alertActivityZoom'), null);
 });
 
 test('the columns stop where the data ends, and a zoom shows a span inside it', () => {

@@ -16,6 +16,7 @@ let alertActivityPick = null;      // a column's start (ms)
 let alertActivityGen = 0;          // the window opened last: an older answer is dropped
 let alertActivityControl = null;
 let alertActivityZoomer = null;
+let alertActivityOverviewer = null;  // the strip under the chart (uiTimeOverview)
 
 async function openAlertActivity(alertId) {
     const modal = document.getElementById('alert-activity-modal');
@@ -54,6 +55,7 @@ function closeAlertActivity() {
     alertActivityGen++;
     if (alertActivityControl) alertActivityControl.abort();
     if (alertActivityZoomer) { alertActivityZoomer.destroy(); alertActivityZoomer = null; }
+    if (alertActivityOverviewer) { alertActivityOverviewer.destroy(); alertActivityOverviewer = null; }
     document.getElementById('alert-activity-modal').classList.add('hidden');
 }
 
@@ -173,6 +175,7 @@ function alertActivityChart(data, span) {
             <div class="ui-flow-band hidden" aria-hidden="true"></div>
         </div>
         <div class="ui-aa-x"><span>${escapeHtml(fmt(cols[0].start))}</span><span>${escapeHtml(fmt(cols[cols.length - 1].start))}</span></div>
+        <div class="ui-ov" data-zoom role="group" aria-label="All the data, with the span shown"></div>
         <div class="ui-flow-foot">
             <p class="ui-aa-legend"><span><i></i>${sent ? 'Sent' : 'Failed logins'}, per ${escapeHtml(per)}</span>${from ? `<span><i class="is-alert"></i>The alert's ${escapeHtml(String(data.window_minutes))} minutes</span>` : ''}${usual !== null ? `<span><i class="is-usual"></i>Its usual rate over ${escapeHtml(String(data.baseline_days))} days</span>` : ''}</p>
             <div class="ui-flow-zoom" role="group" aria-label="Zoom the chart">
@@ -191,14 +194,61 @@ function alertActivityLimits(data) {
     return q.length ? { from: q[0].start, to: q[q.length - 1].end, min: 3600000 } : { from: 0, to: 1, min: 1 };
 }
 
+// An instant on the data's quarters (the data's end, even inside a quarter, is one too)
+function alertActivitySnap(data) {
+    const l = alertActivityLimits(data);
+    const quarter = data.bucket_minutes * 60000;
+    return t => {
+        const q = Math.max(l.from, Math.min(l.to, l.from + Math.round((t - l.from) / quarter) * quarter));
+        // The nearer of the quarter's edge and the data's end
+        return Math.abs(l.to - t) < Math.abs(q - t) ? l.to : q;
+    };
+}
+
+// Show a span: snapped to the quarters (at least the shortest span); the pressed range's own span is no zoom
+function alertActivityShow(data, next) {
+    const l = alertActivityLimits(data), snap = alertActivitySnap(data);
+    let from = snap(next.from), to = snap(next.to);
+    if (to - from < l.min) {
+        to = Math.min(l.to, snap(from + l.min));
+        if (to - from < l.min) from = Math.max(l.from, to - l.min);
+    }
+    // The range is counted back from the data's end, off the quarters: compared as it snaps
+    const range = alertActivityRangeSpan(data);
+    alertActivityZoom = range && Math.abs(snap(range.from) - from) <= 1 && Math.abs(snap(range.to) - to) <= 1 ? null : { from, to };
+    alertActivityPick = null;
+    renderAlertActivity();
+}
+
 function alertActivityStep(step) {
     const data = alertActivity;
     if (!data) return;
     if (step === 'reset') { alertActivityZoom = null; alertActivityPick = null; renderAlertActivity(); return; }
     const span = alertActivityZoom || alertActivityRangeSpan(data);
-    alertActivityZoom = uiTimeZoomStep(span, alertActivityLimits(data), step);
-    alertActivityPick = null;
-    renderAlertActivity();
+    alertActivityShow(data, uiTimeZoomStep(span, alertActivityLimits(data), step));
+}
+
+// The strip under the chart: all the data in small bars, a window over the span shown
+function alertActivityOverview(data, span) {
+    if (alertActivityOverviewer) { alertActivityOverviewer.destroy(); alertActivityOverviewer = null; }
+    const strip = document.querySelector('#alert-activity-content .ui-ov');
+    const l = alertActivityLimits(data);
+    if (!strip || l.to - l.from < l.min) return;
+    const cols = alertActivityColumns(data, l).cols;
+    const max = Math.max(1, ...cols.map(c => c.count));
+    strip.innerHTML = `<div class="ui-ov-bars" aria-hidden="true">${cols.map(c => `<i style="height:${Math.max(6, c.count / max * 100)}%"></i>`).join('')}</div>`;
+    const edges = cols.map(c => c.start.getTime()).concat(l.to);
+    const fmt = t => `${formatDay(t)}, ${formatInZone(t, { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }, 'en-US')}`;
+    alertActivityOverviewer = uiTimeOverview(strip, {
+        limits: () => l,
+        span: () => span,
+        snap: alertActivitySnap(data),
+        // One step is one bar of the strip, a big step a day
+        step: (t, dir, big) => (big ? t + dir * 86400000
+            : dir > 0 ? (edges.find(e => e > t + 1) ?? l.to) : ([...edges].reverse().find(e => e < t - 1) ?? l.from)),
+        label: fmt,
+        change: next => alertActivityShow(data, next),
+    });
 }
 
 function alertActivityList(title, rows, total, tone) {
@@ -274,7 +324,8 @@ function renderAlertActivity() {
         <p class="ui-muted ui-aa-note">${sent
             ? 'Spam from a hijacked mailbox usually goes to many unrelated domains with the same few subjects, and much of it bounces or is rejected. Mail the user really sent goes to people they write to.'
             : 'Many addresses or networks trying one username point to an attack spread out to stay under the ban; one address is a single machine, possibly a device with an old password.'}</p>
-`; });
+`;
+        alertActivityOverview(data, span); });
     // The way on, in the footer
     document.getElementById('alert-activity-foot')?.classList.remove('hidden');
     const open = document.getElementById('alert-activity-open');
@@ -307,10 +358,7 @@ function renderAlertActivity() {
             },
             change: next => {
                 previewing = false;
-                const l = alertActivityLimits(data);
-                alertActivityZoom = next.from <= l.from + 1 && next.to >= l.to - 1 ? null : { from: next.from, to: next.to };
-                alertActivityPick = null;
-                renderAlertActivity();
+                alertActivityShow(data, next);
             },
             cancel: () => { previewing = false; box.style.transform = ''; band.classList.add('hidden'); },
         });

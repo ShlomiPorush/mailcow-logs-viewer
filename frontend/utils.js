@@ -2044,6 +2044,7 @@ function uiRedrawKeepingFocus(container, draw) {
     const inside = !!active && active !== container && container.contains(active);
     const name = el => el.getAttribute('aria-label') || el.textContent.trim();
     const was = inside ? {
+        thumb: active.dataset ? active.dataset.thumb : undefined,
         start: active.dataset ? active.dataset.start : undefined,
         name: name(active),
         group: active.closest('[role="group"]')?.getAttribute('aria-label') || null,
@@ -2062,14 +2063,197 @@ function uiRedrawKeepingFocus(container, draw) {
         return bars.find(b => Number(b.dataset.start) <= t && t < Number(b.dataset.end))
             || bars.reduce((best, b) => (!best || Math.abs(b.dataset.start - t) < Math.abs(best.dataset.start - t) ? b : best), null);
     };
-    // A bar goes by its time (bars have no names of their own); a button by its name
-    const target = was.start !== undefined
+    // A strip's thumb by which edge it holds; a bar by its time (bars have no names of their own); a button by its name
+    const target = was.thumb !== undefined ? container.querySelector(`[data-thumb="${CSS.escape(was.thumb)}"]`)
+        : was.start !== undefined
         ? container.querySelector(`[data-start="${CSS.escape(was.start)}"]`) || nearestBar(Number(was.start))
         : enabled(inGroup ? '[role="group"] button' : 'button').find(b => name(b) === was.name && (!inGroup || inGroup.contains(b)))
             || (was.picked !== undefined && container.querySelector(`[data-start="${CSS.escape(was.picked)}"]`))
             || (inGroup && enabled('button').find(b => inGroup.contains(b)))
             || null;
     if (target) target.focus({ preventScroll: true });
+}
+
+// =============================================================================
+// Overview strip under a zoomable chart: the whole period in small bars, with a
+// window over the span the chart shows. Drag the window to move it, drag an
+// edge to resize it, click beside it to center it there. Its two edges are
+// sliders for the keyboard ("Start of the span shown", "End of the span
+// shown"): arrows by one step, Page Up / Page Down by a big step, Home / End
+// to the limits. Every change snaps to the chart's own resolution (snap) and
+// keeps at least the shortest span (limits.min); the end of the data is a
+// legal edge even inside a step.
+//   uiTimeOverview(box, { limits, span, snap, step, label, change }) -> { busy, destroy }
+//     limits(): { from, to, min }; span(): { from, to } shown; snap(t): t on an edge
+//     step(t, dir, big): the next edge from t (dir -1 or 1); label(t): the words for t
+//     change(span): after a drag ends, or a moment after the last key
+// The caller draws the bars inside box; this adds the window and its edges.
+// =============================================================================
+
+// The span a drag of the window by dt makes: same length, inside the limits, snapped
+function uiOverviewMove(start, dt, limits, snap = t => t) {
+    const len = start.to - start.from;
+    const sn = x => Math.max(limits.from, Math.min(limits.to, snap(x)));
+    let from = Math.max(limits.from, Math.min(start.from + dt, limits.to - len));
+    from = sn(from);
+    const to = from + len >= limits.to - 1 ? limits.to : sn(from + len);
+    return to - from >= limits.min ? { from, to } : { from: Math.max(limits.from, to - len), to };
+}
+
+// The span when one edge moves to t: snapped, kept at least the shortest span from the other edge
+function uiOverviewEdge(span, edge, t, limits, snap = t => t) {
+    const at = x => (x >= limits.to - 1 ? limits.to : x <= limits.from + 1 ? limits.from : Math.max(limits.from, Math.min(limits.to, snap(x))));
+    if (edge === 'start') {
+        const most = span.to - limits.min;
+        let from = at(Math.max(limits.from, Math.min(t, most)));
+        if (from > most) from = Math.max(limits.from, most);
+        return { from, to: span.to };
+    }
+    const least = span.from + limits.min;
+    let to = at(Math.min(limits.to, Math.max(t, least)));
+    if (to < least) to = Math.min(limits.to, least);
+    return { from: span.from, to };
+}
+
+// The span centered at t, same length, inside the limits
+function uiOverviewCenter(span, t, limits, snap = t => t) {
+    const len = span.to - span.from;
+    return uiOverviewMove(span, t - len / 2 - span.from, limits, snap);
+}
+
+// A whole hour of the app's zone nearest to t (a zone off by half an hour has its hours there too)
+function uiNearestLocalHour(t) {
+    const p = zonedParts(t);
+    const floor = t - (p.minute * 60000 + p.second * 1000 + (t % 1000 + 1000) % 1000);
+    return t - floor < 1800000 ? floor : floor + 3600000;
+}
+
+function uiTimeOverview(box, opts) {
+    box.querySelectorAll('.ui-ov-win, .ui-ov-thumb').forEach(el => el.remove());
+    const win = document.createElement('div');
+    win.className = 'ui-ov-win';
+    win.setAttribute('aria-hidden', 'true');
+    const thumb = edge => {
+        const el = document.createElement('div');
+        el.className = 'ui-ov-thumb';
+        el.dataset.thumb = edge;
+        el.tabIndex = 0;
+        el.setAttribute('role', 'slider');
+        el.setAttribute('aria-label', edge === 'start' ? 'Start of the span shown' : 'End of the span shown');
+        return el;
+    };
+    const startThumb = thumb('start'), endThumb = thumb('end');
+    box.append(win, startThumb, endThumb);
+    let shown = null;         // the span drawn while a drag or keys are on
+    let drag = null;          // { kind: 'move' | 'start' | 'end' | 'press', x, span, id }
+    let keyTimer = null;
+    const snap = opts.snap || (t => t);
+    const width = () => box.getBoundingClientRect().width || 1;
+    const timeAt = x => {
+        const l = opts.limits(), r = box.getBoundingClientRect();
+        return l.from + Math.max(0, Math.min(1, (x - r.left) / (r.width || 1))) * (l.to - l.from);
+    };
+    const draw = span => {
+        const l = opts.limits();
+        const pos = t => ((t - l.from) / ((l.to - l.from) || 1)) * 100;
+        const a = pos(span.from), b = pos(span.to);
+        win.style.left = `${a}%`;
+        win.style.width = `${Math.max(0, b - a)}%`;
+        startThumb.style.left = `${a}%`;
+        endThumb.style.left = `${b}%`;
+        // Each edge's own bounds depend on the other edge and the shortest span
+        const set = (el, now, min, max) => {
+            el.setAttribute('aria-valuemin', String(Math.round(min)));
+            el.setAttribute('aria-valuemax', String(Math.round(max)));
+            el.setAttribute('aria-valuenow', String(Math.round(now)));
+            el.setAttribute('aria-valuetext', opts.label(now));
+        };
+        set(startThumb, span.from, l.from, Math.max(l.from, span.to - l.min));
+        set(endThumb, span.to, Math.min(l.to, span.from + l.min), l.to);
+    };
+    const current = () => shown || opts.span();
+    const commit = span => {
+        const before = opts.span();
+        shown = null;
+        if (span && (span.from !== before.from || span.to !== before.to)) opts.change(span);
+        else draw(opts.span());
+    };
+    draw(opts.span());
+
+    const onDown = event => {
+        if (event.pointerType === 'mouse' && event.button !== 0) return;
+        if (drag) return;
+        const edge = event.target.closest && event.target.closest('.ui-ov-thumb');
+        const kind = edge ? edge.dataset.thumb : event.target === win ? 'move' : 'press';
+        drag = { kind, x: event.clientX, y: event.clientY, span: current(), id: event.pointerId, moved: false };
+    };
+    const onMove = event => {
+        if (!drag || event.pointerId !== drag.id) return;
+        const dx = event.clientX - drag.x, dy = event.clientY - drag.y;
+        if (!drag.moved) {
+            if (Math.hypot(dx, dy) < 6) return;
+            // Mostly up or down: the page scrolls, the strip lets it
+            if (Math.abs(dy) > Math.abs(dx)) { drag = null; return; }
+            drag.moved = true;
+            try { box.setPointerCapture(event.pointerId); } catch (e) { /* the pointer may be gone */ }
+        }
+        const l = opts.limits();
+        if (drag.kind === 'move') shown = uiOverviewMove(drag.span, dx / width() * (l.to - l.from), l, snap);
+        else if (drag.kind === 'start' || drag.kind === 'end') shown = uiOverviewEdge(drag.span, drag.kind, timeAt(event.clientX), l, snap);
+        else return;
+        draw(shown);
+    };
+    const onUp = event => {
+        if (!drag || event.pointerId !== drag.id) return;
+        const d = drag;
+        drag = null;
+        if (d.moved) { commit(shown); return; }
+        // A press without a move beside the window: center the window there
+        if (d.kind === 'press') commit(uiOverviewCenter(d.span, timeAt(event.clientX), opts.limits(), snap));
+    };
+    const onCancel = event => {
+        if (!drag || event.pointerId !== drag.id) return;
+        drag = null;
+        shown = null;
+        draw(opts.span());
+    };
+    const onKey = event => {
+        const el = event.target.closest && event.target.closest('.ui-ov-thumb');
+        if (!el) return;
+        const edge = el.dataset.thumb, span = current(), l = opts.limits();
+        const t = edge === 'start' ? span.from : span.to;
+        let next;
+        if (event.key === 'ArrowLeft' || event.key === 'ArrowDown') next = opts.step(t, -1, false);
+        else if (event.key === 'ArrowRight' || event.key === 'ArrowUp') next = opts.step(t, 1, false);
+        else if (event.key === 'PageDown') next = opts.step(t, -1, true);
+        else if (event.key === 'PageUp') next = opts.step(t, 1, true);
+        else if (event.key === 'Home') next = l.from;
+        else if (event.key === 'End') next = l.to;
+        else return;
+        event.preventDefault();
+        shown = uiOverviewEdge(span, edge, next, l, snap);
+        draw(shown);
+        // Keys held or pressed in a row ask the server once, a moment after the last
+        clearTimeout(keyTimer);
+        keyTimer = setTimeout(() => { keyTimer = null; commit(shown); }, 350);
+    };
+    box.addEventListener('pointerdown', onDown);
+    box.addEventListener('pointermove', onMove);
+    box.addEventListener('pointerup', onUp);
+    box.addEventListener('pointercancel', onCancel);
+    box.addEventListener('keydown', onKey);
+    return {
+        // A drag or keys are on: a redraw waits, an answer on its way is set aside
+        busy: () => !!(drag && drag.moved) || !!keyTimer,
+        destroy() {
+            clearTimeout(keyTimer);
+            box.removeEventListener('pointerdown', onDown);
+            box.removeEventListener('pointermove', onMove);
+            box.removeEventListener('pointerup', onUp);
+            box.removeEventListener('pointercancel', onCancel);
+            box.removeEventListener('keydown', onKey);
+        },
+    };
 }
 
 // Phones: every dialog opens like the help sheet, at four fifths of the
