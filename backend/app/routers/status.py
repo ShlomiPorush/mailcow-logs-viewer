@@ -449,9 +449,14 @@ async def get_status_summary():
             return_exceptions=True
         )
         
-        # Handle exceptions
-        if isinstance(containers_data, Exception):
+        # Handle exceptions. Without an answer from mailcow the counts are zeros, which
+        # are not "nothing stopped": containers_known says whether they were read. Its
+        # API runs in a container, so an answer has one running; none running means the
+        # counts came from the containers known before, not from mailcow
+        containers_known = not isinstance(containers_data, Exception)
+        if not containers_known:
             containers_data = {"summary": {"running": 0, "stopped": 0, "total": 0}}
+        containers_known = containers_known and containers_data.get("summary", {}).get("running", 0) > 0
         if isinstance(storage_data, Exception):
             storage_data = {"used_percent": "0%", "valid": False}
         if isinstance(mailcow_info, Exception):
@@ -459,6 +464,7 @@ async def get_status_summary():
         
         return {
             "containers": containers_data.get("summary", {}),
+            "containers_known": containers_known,
             "storage": {
                 "used_percent": storage_data.get("used_percent", "0%"),
                 "used": storage_data.get("used", "0"),

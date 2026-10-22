@@ -1214,11 +1214,10 @@ body { font-family: var(--ui-font); background: var(--ui-bg); color: var(--ui-in
         background: color-mix(in srgb, var(--ui-bg) 94%, transparent); backdrop-filter: blur(10px); border-bottom: 1px solid var(--ui-line); }
     .ui-mtop-logo { width: 28px; height: 28px; border-radius: var(--ui-radius-sm); }
     .ui-page-label { display: block; font-weight: 700; font-size: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .ui-problems { display: flex; align-items: center; gap: 7px; height: 32px; padding: 0 12px; margin-inline-start: auto; border: 0; border-radius: 999px;
-        background: color-mix(in srgb, var(--ui-fail) 12%, transparent); color: var(--ui-fail); font: inherit; font-weight: 600; font-size: 13px; cursor: pointer; }
-    .ui-problems::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+    /* The Needs attention bell (app.js attnWindowOpen), then the bar's buttons */
+    .ui-mtop .ui-bell { width: 36px; height: 36px; margin-inline-start: auto; }
+    .ui-mtop .ui-bell-n { top: -2px; inset-inline-end: -3px; box-shadow: 0 0 0 2px var(--ui-bg); }
     .ui-mtop-actions { display: flex; }
-    .ui-problems.hidden + .ui-mtop-actions { margin-inline-start: auto; }
     .ui-mtop-actions .ui-utilities { flex-direction: row; margin: 0; flex-wrap: nowrap; }
     .ui-mtop-actions .ui-utilities > :not(#theme-toggle):not([onclick="refreshAllData()"]):not(#logout-btn) { display: none; }
     .ui-mtop-actions .ui-utilities > #logout-btn.hidden { display: none; }
@@ -1333,6 +1332,40 @@ body { font-family: var(--ui-font); background: var(--ui-bg); color: var(--ui-in
 .ui-attn-more { margin: 0; padding: 8px var(--ui-pad-x); border-top: 1px solid var(--ui-line); color: var(--ui-muted); font-size: 12.5px; }
 .ui-attn-more.is-off { display: none; }
 @media (max-width: 760px) { .ui-attn-scroll { max-height: 340px; } }
+/* The header bell: Needs attention from any page. Its count is red for a failing
+   item, amber for a warning, plain for news only; a grey dot when a check could not run */
+.ui-bell { position: relative; color: var(--ui-ink); }
+.ui-bell svg { width: 19px; height: 19px; }
+.ui-topbar .ui-bell { width: 40px; height: 40px; margin-inline-start: 10px; border: 1px solid var(--ui-line); border-radius: 10px; background: var(--ui-panel); }
+.ui-topbar .ui-bell[aria-expanded="true"] { border-color: var(--ui-ink); background: var(--ui-bg); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ui-ink) 10%, transparent); }
+.ui-bell-n { position: absolute; top: -6px; inset-inline-end: -6px; min-width: 19px; height: 19px; padding: 0 5px; border-radius: 999px; box-shadow: 0 0 0 2px var(--ui-side);
+    color: var(--ui-bg); font-size: 11.5px; font-weight: 700; line-height: 19px; text-align: center; font-variant-numeric: tabular-nums; pointer-events: none; }
+.ui-bell-n.is-none { display: none; }
+.ui-bell-n.is-fail { background: var(--ui-fail); }
+.ui-bell-n.is-warn { background: var(--ui-warn); }
+.ui-bell-n.is-info { background: var(--ui-ink); }
+.ui-bell-n.is-unknown { top: -2px; inset-inline-end: -2px; min-width: 10px; height: 10px; padding: 0; background: var(--ui-muted); }
+/* Its window: under the bell on a wide screen (a layer, router.js; a click beside it
+   closes it), a sheet on a phone. The same rows as the Dashboard, text above actions */
+.ui-attn-backdrop { display: block; padding: 0; background: transparent; }
+.ui-attn-win { position: fixed; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; width: min(460px, calc(100vw - 32px)); max-height: min(560px, calc(100vh - 90px));
+    overflow: hidden; border: 1px solid var(--ui-line); border-radius: 14px; background: var(--ui-raise); color: var(--ui-ink); font-size: var(--ui-fs);
+    box-shadow: 0 22px 50px rgb(0 0 0 / .16); }
+.ui-attn-win-head { display: flex; align-items: center; gap: 8px; padding-block: 10px; padding-inline: var(--ui-pad-x) 10px; }
+.ui-attn-win-title { margin: 0; margin-inline-end: auto; font-size: 15px; font-weight: 700; }
+.ui-attn-win-title .ui-count { font-weight: 500; }
+#attn-win-dismiss-all { flex: none; gap: 0; }
+.ui-attn-scroll.ui-attn-win-list { max-height: none; }
+.ui-attn-win-foot { padding: 10px var(--ui-pad-x); border-top: 1px solid var(--ui-line); }
+.ui-attn-win-foot .ui-attn-win-go { font-weight: 600; font-size: 13px; }
+@media (hover: hover) { .ui-attn-win-foot .ui-attn-win-go:hover { text-decoration: underline; } }
+:is(.ui-attn-win, #attn-sheet) .ui-alert { display: grid; grid-template-columns: 4px minmax(0, 1fr); column-gap: 14px; row-gap: 8px; }
+:is(.ui-attn-win, #attn-sheet) .ui-alert-bar { grid-row: 1 / span 2; }
+:is(.ui-attn-win, #attn-sheet) :is(.ui-alert > .ui-btn, .ui-alert-acts) { grid-column: 2; justify-self: start; align-self: start; margin-inline-start: 0; }
+#attn-sheet .ui-sheet-head { justify-content: flex-start; }
+#attn-sheet .ui-sheet-head .ui-sheet-x { margin-inline-start: 4px; }
+#attn-sheet .ui-sheet-body { display: block; padding: 0 0 env(safe-area-inset-bottom); }
+#attn-sheet .ui-alert:first-child { border-top: 0; }
 /* The mail flow: a period picker, bars that zoom in time (utils.js uiTimeZoom) */
 #dashboard-flow-period { margin-inline-start: auto; }
 .ui-flow-view { position: relative; overflow: hidden; }

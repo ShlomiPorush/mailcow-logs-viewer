@@ -637,6 +637,8 @@ async function loadAppInfo() {
         watchTopbarCrumbs();
         loadNavCounters();
         setInterval(loadNavCounters, 5 * 60 * 1000);
+        // Needs attention, for the Dashboard and the bell on every page
+        startAttention();
     } catch (error) {
         console.error('Failed to load app info:', error);
     }
@@ -871,12 +873,7 @@ async function loadNavCounters() {
         small.title = problems.join(', ');
         small.classList.toggle('has-problems', problems.length > 0);
     }
-    const pill = document.getElementById('ui-problems-pill');
-    if (pill) {
-        pill.textContent = label;
-        pill.title = problems.join(', ');
-        pill.classList.toggle('hidden', problems.length === 0);
-    }
+    // On a phone the header bell has these too, with the rest of Needs attention
     const pip = document.getElementById('tabbar-pip-status');
     if (pip) pip.classList.toggle('hidden', problems.length === 0);
 
@@ -1760,9 +1757,8 @@ async function smartRefreshDashboard() {
         refreshMailFlowChart();
         loadDashboardStatusSummary();
         loadDashboardSecurity();
-        // Needs attention: the alerts each time, the server checks (and the trends) every five minutes
-        loadDashboardSecurityAlerts();
-        if (Date.now() - dashboardChecksAt >= 300000) { loadDashboardAttention(); loadDashboardTrends(); }
+        // Needs attention has its own refresh on every page (attentionRefresh); the trends every five minutes
+        if (Date.now() - dashboardTrendsAt >= 300000) loadDashboardTrends();
     } catch (error) {
         console.error('Dashboard refresh error:', error);
     }
@@ -1978,6 +1974,8 @@ async function refreshAllData() {
     }
     switchTab(currentTab);
     loadNavCounters();
+    // Needs attention now, not when its next refresh is due
+    attentionRefresh({ force: true });
 }
 
 // =============================================================================
@@ -1990,8 +1988,9 @@ async function loadDashboard() {
         loadDashboardStatusSummary();
         loadDashboardBlacklistSummary();
         loadDashboardHealth();
-        loadDashboardSecurityAlerts();
-        loadDashboardAttention();
+        // Needs attention as last read, and read again what is due
+        renderAttention();
+        attentionRefresh();
         loadDashboardSecurity();
         loadDashboardTrends();
         loadMailFlowChart();
@@ -2000,67 +1999,125 @@ async function loadDashboard() {
     }
 }
 
+// =============================================================================
+// Needs attention: the Dashboard panel and the header bell show one state, read
+// by one refresh on every page (alerts every 30 seconds, server checks every
+// five minutes). A load that a newer one replaced is dropped when it answers, so
+// a list read before a Dismiss never brings the dismissed alert back
+// =============================================================================
+
+const ATTENTION_ALERTS_EVERY = 30000;
+const ATTENTION_CHECKS_EVERY = 5 * 60 * 1000;
+// The server checks, each read on its own: one that fails keeps what it showed
+const ATTENTION_CHECKS = ['connection', 'blocklist', 'containers', 'fail2ban', 'dmarc', 'appVersion', 'mailcowVersion'];
+const ATTENTION_FAILED = { failed: true };
+const attention = {
+    ready: false, // the refresh starts once the app's features are known
+    timeout: 20000, // a read without an answer by then has failed
+    // ok: null before the first answer, then whether the last one came
+    alerts: { seq: 0, busy: null, latest: null, at: 0, ok: null, list: [], total: 0, critical: 0 },
+    // ok and items per check
+    checks: { seq: 0, busy: null, latest: null, at: 0, ok: {}, items: {} },
+};
+
 // The alerts Needs attention shows (by id, for the words of an Undo), and every
 // open alert the last list had: Dismiss all changes those and no alert that came after
 const dashboardAlerts = new Map();
 let dashboardOpenAlertIds = [];
 
-async function loadDashboardSecurityAlerts() {
-    const container = document.getElementById('dashboard-security-alerts');
-    if (!container) return;
-    const dismissAll = document.getElementById('dashboard-dismiss-all');
-    try {
-        const response = await authenticatedFetch('/api/security-alerts?acknowledged=false&limit=20');
-        if (!response.ok) { container.classList.add('hidden'); updateAttentionState(); return false; }
-        const data = await response.json();
-        const alerts = data.alerts || [];
-        dashboardAlerts.clear();
-        alerts.forEach(a => dashboardAlerts.set(Number(a.id), a));
-        dashboardOpenAlertIds = data.unacknowledged_ids || alerts.map(a => Number(a.id));
-        if (dismissAll) {
-            const count = dashboardOpenAlertIds.length, n = count.toLocaleString();
-            // "Dismiss all 25 alerts"; one alone is "Dismiss 1 alert" (a narrow panel drops the last word)
-            const words = count === 1 ? ['Dismiss 1', 'alert'] : [`Dismiss all ${n}`, 'alerts'];
-            dismissAll.innerHTML = `${words[0]}<span class="ui-attn-wide">&nbsp;${words[1]}</span>`;
-            dismissAll.setAttribute('aria-label', words.join(' '));
-        }
-        if (alerts.length === 0) {
-            container.classList.add('hidden');
-            uiReplaceKeepingFocus(container, '');
-            if (dismissAll) dismissAll.classList.add('is-off');
-            updateAttentionState();
-            return true;
-        }
+// One load of a source at a time. With force (after a Dismiss or an Undo, or a
+// Retry) a load on its way is replaced and its answer dropped; without, it is joined
+function attentionLoad(state, force, read) {
+    if (state.busy && !force) return state.busy;
+    const seq = ++state.seq;
+    const run = (async () => {
+        const answer = await read();
+        if (seq !== state.seq) return state.latest;
+        return answer();
+    })();
+    state.busy = run;
+    state.latest = run;
+    run.finally(() => { if (state.busy === run) state.busy = null; });
+    return run;
+}
 
-        uiReplaceKeepingFocus(container, alerts.map(a => {
-            const critical = a.severity === 'critical';
-            return `
-                <div class="ui-alert ui-alert-go ${critical ? 'ui-alert-fail' : 'ui-alert-warn'}" data-key="alert-${Number(a.id)}" onclick="if (uiAlertRowClick(event)) openAlertActivity(${Number(a.id)})">
-                    <span class="ui-alert-bar"></span>
-                    <div class="ui-alert-text">
-                        <div class="ui-alert-title">
-                            <span class="ui-tag ${critical ? 'ui-tag-fail' : 'ui-tag-warn'}">${escapeHtml((a.severity || 'warning').toUpperCase())}</span>
-                            <b>${escapeHtml(a.title)}</b>
-                        </div>
-                        <p>${escapeHtml(a.detail || '')}</p>
-                        <p class="ui-muted">${escapeHtml(formatTime(a.created_at))}</p>
+// One read of a source's answer. A read that has not answered in 20 seconds has
+// failed, so a request that hangs never holds the refresh that comes after it
+function attentionRead(url) {
+    return Promise.race([
+        (async () => {
+            try {
+                const res = await authenticatedFetch(url);
+                return res.ok ? await res.json() : ATTENTION_FAILED;
+            } catch (e) {
+                console.warn(`Needs attention could not read ${url}:`, e);
+                return ATTENTION_FAILED;
+            }
+        })(),
+        new Promise(resolve => setTimeout(() => resolve(ATTENTION_FAILED), attention.timeout)),
+    ]);
+}
+
+// The open security alerts (anomaly detection); true when the list was read
+function loadDashboardSecurityAlerts({ force = true } = {}) {
+    const s = attention.alerts;
+    return attentionLoad(s, force, async () => {
+        const read = await attentionRead('/api/security-alerts?acknowledged=false&limit=20');
+        const data = read === ATTENTION_FAILED ? null : read;
+        return () => {
+            s.at = Date.now();
+            // A failed read keeps the alerts the last one had
+            if (!data) { s.ok = false; renderAttention(); return false; }
+            const alerts = data.alerts || [];
+            s.ok = true;
+            s.list = alerts;
+            // All open alerts, also those past the 20 rows shown
+            s.total = Number.isFinite(data.unacknowledged_count) ? data.unacknowledged_count : alerts.length;
+            s.critical = Number.isFinite(data.unacknowledged_critical) ? data.unacknowledged_critical
+                : alerts.filter(a => a.severity === 'critical').length;
+            dashboardAlerts.clear();
+            alerts.forEach(a => dashboardAlerts.set(Number(a.id), a));
+            dashboardOpenAlertIds = data.unacknowledged_ids || alerts.map(a => Number(a.id));
+            renderAttention();
+            return true;
+        };
+    });
+}
+
+// "Dismiss all 25 alerts"; one alone is "Dismiss 1 alert" (a narrow panel drops the last word)
+function renderDismissAll(button) {
+    if (!button) return;
+    const count = dashboardOpenAlertIds.length, n = count.toLocaleString();
+    const words = count === 1 ? ['Dismiss 1', 'alert'] : [`Dismiss all ${n}`, 'alerts'];
+    button.innerHTML = `${words[0]}<span class="ui-attn-wide">&nbsp;${words[1]}</span>`;
+    button.setAttribute('aria-label', words.join(' '));
+    button.classList.toggle('is-off', !attention.alerts.list.length);
+}
+
+// The rows of the alerts. In the bell's window an action that opens another
+// window closes this one first, so the next gives the focus back to the bell
+function attentionAlertRows(where) {
+    return attention.alerts.list.map(a => {
+        const id = Number(a.id);
+        const critical = a.severity === 'critical';
+        const first = where === 'bell' ? 'attnBellOpen();' : '';
+        return `
+            <div class="ui-alert ui-alert-go ${critical ? 'ui-alert-fail' : 'ui-alert-warn'}" data-key="alert-${id}" onclick="if (uiAlertRowClick(event)) { ${first} openAlertActivity(${id}) }">
+                <span class="ui-alert-bar"></span>
+                <div class="ui-alert-text">
+                    <div class="ui-alert-title">
+                        <span class="ui-tag ${critical ? 'ui-tag-fail' : 'ui-tag-warn'}">${escapeHtml((a.severity || 'warning').toUpperCase())}</span>
+                        <b>${escapeHtml(a.title)}</b>
                     </div>
-                    <div class="ui-alert-acts">
-                        <button type="button" onclick="openAlertActivity(${Number(a.id)})" class="ui-btn ui-btn-sm" title="What happened before and around this alert">Show activity</button>
-                        <button type="button" onclick="acknowledgeSecurityAlert(${Number(a.id)})" class="ui-btn ui-btn-sm" title="Dismiss">Dismiss</button>
-                    </div>
-                </div>`;
-        }).join(''));
-        container.classList.remove('hidden');
-        if (dismissAll) dismissAll.classList.remove('is-off');
-    } catch (e) {
-        console.warn('Failed to load security alerts:', e);
-        container.classList.add('hidden');
-        updateAttentionState();
-        return false;
-    }
-    updateAttentionState();
-    return true;
+                    <p>${escapeHtml(a.detail || '')}</p>
+                    <p class="ui-muted">${escapeHtml(formatTime(a.created_at))}</p>
+                </div>
+                <div class="ui-alert-acts">
+                    <button type="button" onclick="${first} openAlertActivity(${id})" class="ui-btn ui-btn-sm" title="What happened before and around this alert">Show activity</button>
+                    <button type="button" onclick="acknowledgeSecurityAlert(${id})" class="ui-btn ui-btn-sm" title="Dismiss">Dismiss</button>
+                </div>
+            </div>`;
+    }).join('');
 }
 
 // A Needs attention row whose action opens a popup opens it from anywhere on
@@ -2069,34 +2126,83 @@ function uiAlertRowClick(event) {
     return !event.target.closest('button, a') && !uiRowHeld(event);
 }
 
-// The count and the "all clear" line of Needs attention follow what is in it;
-// the line under it says how many items are shown when they do not all fit,
-// and the fade at the foot stays while more is below
+// How many items, of which tone, and whether every check could run
+function attentionStatus() {
+    const a = attention.alerts, c = attention.checks;
+    const items = ATTENTION_CHECKS.flatMap(k => c.items[k] || []);
+    const total = items.length + a.total;
+    const tone = items.some(i => i.tone === 'fail') || a.critical > 0 ? 'fail'
+        : items.some(i => i.tone === 'warn') || a.total > 0 ? 'warn' : 'info';
+    const failed = a.ok === false || ATTENTION_CHECKS.some(k => c.ok[k] === false);
+    const loading = a.ok === null || ATTENTION_CHECKS.some(k => c.ok[k] === undefined);
+    return { total, tone, failed, loading };
+}
+
+// Under the items: all clear only when every check ran and found nothing; a check
+// that could not run says so (what it showed before stays) and offers Retry
+function renderAttentionNote(el, status) {
+    if (!el) return;
+    const html = status.failed
+        ? 'Some checks could not run. <button type="button" class="ui-link-row ui-link" onclick="attentionRetry()">Retry</button>'
+        : !status.loading && status.total === 0 ? 'Nothing needs attention right now.' : '';
+    if (el.dataset.shown !== html) {
+        el.innerHTML = html;
+        el.dataset.shown = html;
+    }
+    el.classList.toggle('hidden', !html);
+}
+
+function attentionRetry() {
+    if (attention.alerts.ok === false) loadDashboardSecurityAlerts();
+    if (ATTENTION_CHECKS.some(k => attention.checks.ok[k] === false)) loadDashboardAttention();
+}
+
+// The count, the note and Dismiss all of the Dashboard panel and the bell's window;
+// a list that scrolls fades at its foot while more is below, and on the Dashboard
+// the line under it says how many items there are
 function updateAttentionState() {
-    const panel = document.getElementById('dashboard-attention-panel');
-    if (!panel) return;
-    const rows = panel.querySelectorAll('.ui-alert').length;
+    const status = attentionStatus();
     const count = document.getElementById('dashboard-attention-count');
-    if (count) count.textContent = rows ? String(rows) : '';
-    const clear = document.getElementById('dashboard-attention-clear');
-    if (clear) clear.classList.toggle('hidden', rows > 0);
-    const scroll = document.getElementById('dashboard-attention-scroll');
-    const more = document.getElementById('dashboard-attention-more');
-    if (!scroll) return;
-    const overflows = scroll.scrollHeight > scroll.clientHeight + 1;
-    scroll.classList.toggle('has-more', overflows && scroll.scrollTop + scroll.clientHeight < scroll.scrollHeight - 2);
-    scroll.tabIndex = overflows ? 0 : -1;
-    if (more) {
+    if (count) count.textContent = status.total ? status.total.toLocaleString() : '';
+    const winCount = document.getElementById('attn-win-count');
+    if (winCount) winCount.textContent = status.total ? status.total.toLocaleString() : '';
+    renderAttentionNote(document.getElementById('dashboard-attention-clear'), status);
+    renderAttentionNote(document.getElementById('attn-win-state'), status);
+    renderDismissAll(document.getElementById('dashboard-dismiss-all'));
+    renderDismissAll(document.getElementById('attn-win-dismiss-all'));
+    document.querySelectorAll('.ui-attn-scroll').forEach(scroll => {
+        const overflows = scroll.scrollHeight > scroll.clientHeight + 1;
+        scroll.classList.toggle('has-more', overflows && scroll.scrollTop + scroll.clientHeight < scroll.scrollHeight - 2);
+        scroll.tabIndex = overflows || scroll.id === 'attn-win-scroll' ? 0 : -1;
+        if (scroll.id !== 'dashboard-attention-scroll') return;
+        const more = document.getElementById('dashboard-attention-more');
+        if (!more) return;
         // Only while the items pass the cap; otherwise it takes no room
         more.classList.toggle('is-off', !overflows);
-        more.textContent = overflows ? `${uiCountLabel(rows, 'item', 'items')}. Scroll the list for the rest` : '\u00a0';
-    }
+        more.textContent = overflows ? `${uiCountLabel(status.total, 'item', 'items')}. Scroll the list for the rest` : ' ';
+    });
+    updateAttentionBell(status);
 }
 if (typeof document !== 'undefined' && document.addEventListener) {
     document.addEventListener('scroll', event => {
-        if (event.target instanceof Element && event.target.id === 'dashboard-attention-scroll') updateAttentionState();
+        if (event.target instanceof Element && event.target.classList.contains('ui-attn-scroll')) updateAttentionState();
     }, true);
     window.addEventListener('resize', () => updateAttentionState());
+}
+
+// The bell: the count of every open item, red for a failing one, amber for a
+// warning, plain for news only; a grey dot when a check could not run and
+// nothing is known to need a look
+function updateAttentionBell(status = attentionStatus()) {
+    const label = status.total ? `Needs attention, ${uiCountLabel(status.total, 'item', 'items')}`
+        : status.failed ? 'Needs attention, some checks could not run' : 'Needs attention';
+    document.querySelectorAll('.ui-bell').forEach(bell => {
+        bell.setAttribute('aria-label', label);
+        const badge = bell.querySelector('.ui-bell-n');
+        if (!badge) return;
+        badge.textContent = status.total ? (status.total > 99 ? '99+' : String(status.total)) : '';
+        badge.className = `ui-bell-n is-${status.total ? status.tone : status.failed ? 'unknown' : 'none'}`;
+    });
 }
 
 // Replace what a box shows, only when it changed, keeping the focus where it
@@ -2111,7 +2217,7 @@ function uiReplaceKeepingFocus(container, html) {
         const items = [...container.querySelectorAll('[data-key]')];
         keep = { key: item && item.dataset.key, action: active.textContent.trim(), at: Math.max(0, items.indexOf(item)) };
     }
-    const scroller = container.closest('.ui-attn-scroll');
+    const scroller = container.closest('.ui-attn-scroll, [data-keep-scroll]');
     const top = scroller ? scroller.scrollTop : 0;
     container.innerHTML = html;
     container.dataset.shown = html;
@@ -2127,84 +2233,225 @@ function uiReplaceKeepingFocus(container, html) {
     return true;
 }
 
-// Server checks that need a look, each with the place to handle it
-let dashboardChecksAt = 0;
-async function loadDashboardAttention() {
-    const container = document.getElementById('dashboard-attention');
-    if (!container) return;
-    dashboardChecksAt = Date.now();
-    const off = feature => (window.disabledFeatures || []).includes(feature);
-    const get = async url => {
-        try {
-            const res = await authenticatedFetch(url);
-            return res.ok ? await res.json() : null;
-        } catch (e) {
-            return null;
-        }
-    };
-    const [blacklist, summary, insights, appVersion, mailcowVersion, connection, fail2ban] = await Promise.all([
-        off('blacklist') ? null : get('/api/blacklist/summary'),
-        get('/api/status/summary'),
-        off('dmarc') ? null : get('/api/dmarc/insights'),
-        get('/api/status/app-version'),
-        get('/api/status/version'),
-        get('/api/status/mailcow-connection'),
-        off('netfilter') ? null : get('/api/fail2ban'),
-    ]);
-    const items = [];
-    if (connection && connection.connected === false) {
-        items.push({ tone: 'fail', title: 'mailcow is not reachable', detail: 'The mailcow API did not answer, so logs and server data may be out of date.', action: 'Open settings', onclick: "navigateTo('settings')" });
+// Server checks that need a look, each with the place to handle it: go is the
+// page it opens, popup an action that opens a window
+function attentionCheckItems(key, data) {
+    if (!data) return [];
+    if (key === 'connection') {
+        return data.connected === false ? [{ tone: 'fail', title: 'mailcow is not reachable', detail: 'The mailcow API did not answer, so logs and server data may be out of date.',
+            action: 'Open settings', onclick: "navigateTo('settings')", go: ['settings'] }] : [];
     }
-    if (blacklist && blacklist.status === 'listed') {
+    if (key === 'blocklist') {
+        if (data.status !== 'listed') return [];
         // Name the host that is actually listed, with its own list count
-        const listedHosts = (blacklist.hosts || []).filter(h => h.status === 'listed');
+        const listedHosts = (data.hosts || []).filter(h => h.status === 'listed');
         const first = listedHosts[0];
         const title = listedHosts.length > 1
             ? `${listedHosts.length} of your addresses are on a blocklist`
-            : `${first ? first.hostname : (blacklist.server_ip || 'Your server')} is on a blocklist`;
+            : `${first ? first.hostname : (data.server_ip || 'Your server')} is on a blocklist`;
         const detail = listedHosts.length > 1
             ? `${listedHosts.map(h => h.hostname).join(', ')}. Outbound mail to some providers may bounce.`
-            : `Listed on ${first ? first.listed_count : blacklist.listed_count} of ${first && first.total_blacklists ? first.total_blacklists : blacklist.total_blacklists} lists. Outbound mail to some providers may bounce.`;
-        items.push({ tone: 'fail', title, detail, action: 'Check listing', onclick: "navigateTo('status')" });
+            : `Listed on ${first ? first.listed_count : data.listed_count} of ${first && first.total_blacklists ? first.total_blacklists : data.total_blacklists} lists. Outbound mail to some providers may bounce.`;
+        return [{ tone: 'fail', title, detail, action: 'Check listing', onclick: "navigateTo('status')", go: ['status'] }];
     }
-    const containers = summary && summary.containers ? summary.containers : null;
-    if (containers && containers.stopped > 0) {
-        items.push({ tone: 'fail', title: containers.stopped === 1 ? 'A mailcow container is stopped' : `${containers.stopped} mailcow containers are stopped`,
-            detail: `${containers.running || 0} of ${containers.total || 0} containers are running.`, action: 'Open status', onclick: "navigateTo('status')" });
+    if (key === 'containers') {
+        const containers = data.containers;
+        if (!containers || !(containers.stopped > 0)) return [];
+        return [{ tone: 'fail', title: containers.stopped === 1 ? 'A mailcow container is stopped' : `${containers.stopped} mailcow containers are stopped`,
+            detail: `${containers.running || 0} of ${containers.total || 0} containers are running.`, action: 'Open status', onclick: "navigateTo('status')", go: ['status'] }];
     }
-    // Single IPv6 addresses an earlier version wrote as /32 networks
-    const legacy = (fail2ban && fail2ban.legacy_entries) || [];
-    if (legacy.length) {
+    if (key === 'fail2ban') {
+        // Single IPv6 addresses an earlier version wrote as /32 networks
+        const legacy = data.legacy_entries || [];
+        if (!legacy.length) return [];
         const first = legacy[0];
-        items.push({ tone: 'warn',
+        return [{ tone: 'warn',
             title: legacy.length === 1 ? `A Fail2ban entry ${first.list === 'whitelist' ? 'exempts' : 'blocks'} the whole ${first.network} network` : `${legacy.length} Fail2ban entries cover whole /32 networks`,
             detail: legacy.length === 1 ? `An earlier version wrote ${first.address} as ${first.entry}. Repair it on the Security page's Lists tab.`
                 : 'An earlier version wrote single IPv6 addresses as networks. Repair them on the Security page\'s Lists tab.',
-            action: 'Open lists', onclick: "navigateTo('netfilter', { sub: 'lists' })" });
+            action: 'Open lists', onclick: "navigateTo('netfilter', { sub: 'lists' })", go: ['netfilter', { sub: 'lists' }] }];
     }
-    const dmarc = insights ? (insights.insights || []).filter(i =>
-        i.recommendations.some(r => r.type === 'tighten_policy' || r.type === 'low_pass_rate') || (i.new_sources && i.new_sources.length > 0)) : [];
-    if (dmarc.length) {
+    if (key === 'dmarc') {
+        const dmarc = (data.insights || []).filter(i =>
+            i.recommendations.some(r => r.type === 'tighten_policy' || r.type === 'low_pass_rate') || (i.new_sources && i.new_sources.length > 0));
+        if (!dmarc.length) return [];
         const first = dmarc[0].recommendations[0];
-        items.push({ tone: 'warn', title: dmarc.length === 1 ? `DMARC needs attention for ${dmarc[0].domain}` : `DMARC needs attention for ${dmarc.length} domains`,
-            detail: first ? first.message : 'New sources are failing DMARC.', action: 'Open DMARC', onclick: "navigateTo('dmarc')" });
+        return [{ tone: 'warn', title: dmarc.length === 1 ? `DMARC needs attention for ${dmarc[0].domain}` : `DMARC needs attention for ${dmarc.length} domains`,
+            detail: first ? first.message : 'New sources are failing DMARC.', action: 'Open DMARC', onclick: "navigateTo('dmarc')", go: ['dmarc'] }];
     }
-    if (appVersion && appVersion.update_available) {
-        appUpdateInfo = appVersion;
-        items.push({ tone: 'info', title: `Version ${appVersion.latest_version} is available`,
-            detail: `You are running ${appVersion.current_version}. See what changed before updating.`, action: 'Read changes', onclick: 'showAppUpdateModal()', popup: true });
+    if (key === 'appVersion') {
+        if (!data.update_available) return [];
+        appUpdateInfo = data;
+        return [{ tone: 'info', title: `Version ${data.latest_version} is available`,
+            detail: `You are running ${data.current_version}. See what changed before updating.`, action: 'Read changes', onclick: 'showAppUpdateModal()', popup: true }];
     }
-    if (mailcowVersion && mailcowVersion.update_available) {
-        items.push({ tone: 'info', title: `mailcow ${mailcowVersion.latest_version} is available`,
-            detail: `You are running ${mailcowVersion.current_version}.`, action: 'Read changes', onclick: 'showMailcowUpdateModal()', popup: true });
+    if (key === 'mailcowVersion') {
+        if (!data.update_available) return [];
+        // What its Read changes shows (showMailcowUpdateModal), from this same answer
+        window.mailcowUpdateVersion = data.latest_version;
+        window.mailcowUpdateName = data.name || '';
+        window.mailcowUpdateChangelog = data.changelog || 'No changelog available';
+        return [{ tone: 'info', title: `mailcow ${data.latest_version} is available`,
+            detail: `You are running ${data.current_version}.`, action: 'Read changes', onclick: 'showMailcowUpdateModal()', popup: true }];
     }
-    uiReplaceKeepingFocus(container, items.map(item => `
-        <div class="ui-alert ui-alert-${item.tone}${item.popup ? ' ui-alert-go' : ''}" data-key="check-${escapeHtml(item.title)}"${item.popup ? ` onclick="if (uiAlertRowClick(event)) ${item.onclick}"` : ''}>
+    return [];
+}
+
+// The server checks; a check whose read fails keeps the items it had and is
+// tried again in a minute. A blocklist check that ended in an error has failed
+// too, and so have container counts read without an answer from mailcow
+function loadDashboardAttention({ force = true } = {}) {
+    const s = attention.checks;
+    return attentionLoad(s, force, async () => {
+        const off = feature => (window.disabledFeatures || []).includes(feature);
+        const get = attentionRead;
+        const [blocklistRead, summary, dmarc, appVersion, mailcowVersion, connection, fail2ban] = await Promise.all([
+            off('blacklist') ? null : get('/api/blacklist/summary'),
+            get('/api/status/summary'),
+            off('dmarc') ? null : get('/api/dmarc/insights'),
+            get('/api/status/app-version'),
+            get('/api/status/version'),
+            get('/api/status/mailcow-connection'),
+            off('netfilter') ? null : get('/api/fail2ban'),
+        ]);
+        const answered = data => data && data !== ATTENTION_FAILED;
+        const blocklist = answered(blocklistRead) && blocklistRead.status === 'error' ? ATTENTION_FAILED : blocklistRead;
+        const containers = answered(summary) && summary.containers_known === false ? ATTENTION_FAILED : summary;
+        const read = { connection, blocklist, containers, fail2ban, dmarc, appVersion, mailcowVersion };
+        return () => {
+            for (const key of ATTENTION_CHECKS) {
+                if (read[key] === ATTENTION_FAILED) { s.ok[key] = false; continue; }
+                s.ok[key] = true;
+                s.items[key] = attentionCheckItems(key, read[key]);
+            }
+            const failed = ATTENTION_CHECKS.some(k => s.ok[k] === false);
+            s.at = failed ? Date.now() - ATTENTION_CHECKS_EVERY + 60000 : Date.now();
+            renderAttention();
+        };
+    });
+}
+
+function attentionCheckRows(where) {
+    return ATTENTION_CHECKS.flatMap(k => attention.checks.items[k] || []).map(item => {
+        const act = where !== 'bell' ? item.onclick
+            : item.go ? `attnBellGo(${escapeHtml(JSON.stringify(item.go))})` : `attnBellOpen(); ${item.onclick}`;
+        return `
+        <div class="ui-alert ui-alert-${item.tone}${item.popup ? ' ui-alert-go' : ''}" data-key="check-${escapeHtml(item.title)}"${item.popup ? ` onclick="if (uiAlertRowClick(event)) { ${act} }"` : ''}>
             <span class="ui-alert-bar"></span>
             <div class="ui-alert-text"><div class="ui-alert-title"><b>${escapeHtml(item.title)}</b></div><p>${escapeHtml(item.detail)}</p></div>
-            <button type="button" class="ui-btn ui-btn-sm" onclick="${item.onclick}">${escapeHtml(item.action)}</button>
-        </div>`).join(''));
+            <button type="button" class="ui-btn ui-btn-sm" onclick="${act}">${escapeHtml(item.action)}</button>
+        </div>`;
+    }).join('');
+}
+
+// Both places from the one state
+function renderAttention() {
+    for (const [where, checksId, alertsId] of [['dashboard', 'dashboard-attention', 'dashboard-security-alerts'], ['bell', 'attn-win-checks', 'attn-win-alerts']]) {
+        const checks = document.getElementById(checksId);
+        if (checks) uiReplaceKeepingFocus(checks, attentionCheckRows(where));
+        const alerts = document.getElementById(alertsId);
+        if (alerts) {
+            uiReplaceKeepingFocus(alerts, attentionAlertRows(where));
+            alerts.classList.toggle('hidden', !attention.alerts.list.length);
+        }
+    }
     updateAttentionState();
+}
+
+// One refresh for every page: what is older than its cadence is read again.
+// A hidden browser tab reads nothing; it catches up when it is shown
+function attentionRefresh({ force = false } = {}) {
+    if (!attention.ready) return;
+    if (!force && document.hidden) return;
+    const now = Date.now();
+    if (force || now - attention.alerts.at >= ATTENTION_ALERTS_EVERY - 2000) loadDashboardSecurityAlerts({ force });
+    if (force || now - attention.checks.at >= ATTENTION_CHECKS_EVERY - 2000) loadDashboardAttention({ force });
+}
+
+// Once the app's features are known (a feature turned off is not checked)
+function startAttention() {
+    if (attention.ready) return;
+    attention.ready = true;
+    attentionRefresh();
+    setInterval(attentionRefresh, ATTENTION_ALERTS_EVERY);
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) attentionRefresh(); });
+    // The window belongs to the bell it opened from: past 760px that one is gone
+    window.matchMedia('(max-width: 760px)').addEventListener('change', event => {
+        if (attnWindow && attnWindow.phone !== event.matches) attnWindowClose();
+    });
+}
+
+// The bell's window: under the bell on a wide screen, a sheet on a phone. It is
+// a layer like any dialog (router.js): Escape, Back and a click beside it close
+// it, and the focus goes back to the bell
+let attnWindow = null;
+function attnWindowOpen(bell) {
+    if (attnWindow && attnWindow.el.isConnected) { attnWindowClose(); return; }
+    attnWindow = null;
+    const phone = window.matchMedia('(max-width: 760px)').matches;
+    const head = `<h2 id="attn-win-title" class="ui-attn-win-title">Needs attention <span id="attn-win-count" class="ui-count"></span></h2>
+        <button type="button" id="attn-win-dismiss-all" class="ui-btn ui-btn-sm is-off" onclick="acknowledgeAllSecurityAlerts()"></button>`;
+    const list = `<div id="attn-win-checks"></div><div id="attn-win-alerts" class="hidden"></div><p id="attn-win-state" class="ui-dash-clear hidden"></p>`;
+    const foot = `<div class="ui-attn-win-foot"><button type="button" class="ui-link-row ui-attn-win-go" onclick="attnBellGo(['dashboard'])">Open the Dashboard</button></div>`;
+    uiLayerOpener(bell);
+    let el;
+    if (phone) {
+        el = uiSheetShow('attn-sheet', { label: 'Needs attention', head, body: list + foot, onClose: () => attnWindowClose() });
+        const body = el.querySelector('.ui-sheet-body');
+        body.dataset.keepScroll = '';
+        body.tabIndex = -1;
+    } else {
+        el = document.createElement('div');
+        el.id = 'attn-window';
+        el.className = 'ui-dialog-backdrop ui-attn-backdrop';
+        el.innerHTML = `<section class="ui-attn-win" role="dialog" aria-labelledby="attn-win-title">
+            <div class="ui-attn-win-head">${head}<button type="button" class="ui-icon-btn ui-attn-win-x" onclick="attnWindowClose()" aria-label="Close" title="Close">&times;</button></div>
+            <div id="attn-win-scroll" class="ui-attn-scroll ui-attn-win-list" data-keep-scroll tabindex="0">${list}</div>${foot}</section>`;
+        // A click beside it; not a press that began inside (a text selection) and ended there
+        el.addEventListener('click', event => { if (uiBackdropClick(event)) attnWindowClose(); });
+        document.body.appendChild(el);
+        const at = bell.getBoundingClientRect();
+        const panel = el.firstElementChild;
+        panel.style.top = `${Math.round(at.bottom + 8)}px`;
+        panel.style.right = `${Math.max(16, Math.round(document.documentElement.clientWidth - at.right))}px`;
+    }
+    attnWindow = { bell, el, phone };
+    document.querySelectorAll('.ui-bell').forEach(b => {
+        b.setAttribute('aria-expanded', String(b === bell));
+        if (b === bell) b.setAttribute('aria-controls', el.id);
+    });
+    renderAttention();
+    attentionRefresh();
+}
+
+// toPage: a move to another page, which takes the focus instead of the bell
+function attnWindowClose({ toPage = false } = {}) {
+    const w = attnWindow;
+    if (!w) return;
+    attnWindow = null;
+    if (toPage) uiLayerReturn(w.el, null);
+    if (w.phone) uiSheetClose('attn-sheet');
+    else w.el.remove();
+    document.querySelectorAll('.ui-bell').forEach(b => {
+        b.setAttribute('aria-expanded', 'false');
+        b.removeAttribute('aria-controls');
+    });
+}
+
+// An action that opens a page: the window closes once the move is made (a move
+// cancelled over unsaved changes leaves it open)
+async function attnBellGo(go) {
+    const moved = await navigateTo(go[0], go[1] || {});
+    if (moved && attnWindow) attnWindowClose({ toPage: true });
+}
+
+// An action that opens another window: this one closes, and the next gives the
+// focus back to the bell when it closes
+function attnBellOpen() {
+    const w = attnWindow;
+    if (!w) return;
+    attnWindowClose();
+    uiLayerOpener(w.bell);
 }
 
 // The dashboard's mail flow (/api/stats/flow): a period of 24 hours, 7 days or
@@ -2725,11 +2972,14 @@ async function undoAlertDismissal(receipt, undoName) {
             offerAlertsRefresh(back ? `${back}, but Needs attention could not be refreshed.` : 'Needs attention could not be refreshed.');
             return;
         }
-        // On the Dashboard the keyboard goes to the first alert back (its Dismiss), else to
-        // Needs attention; on another page it stays with the message
-        if (typeof currentTab === 'undefined' || currentTab === 'dashboard') {
-            const row = done.ids && done.ids.map(id => document.querySelector(`#dashboard-security-alerts [data-key="alert-${Number(id)}"]`)).find(Boolean);
-            const target = row ? [...row.querySelectorAll('button')].find(b => b.textContent.trim() === 'Dismiss') : document.getElementById('dashboard-attention-scroll');
+        // With the bell's window open the keyboard goes to the first alert back there (its
+        // Dismiss), else to its list; on the Dashboard the same in Needs attention; on
+        // another page it stays with the message
+        const place = attnWindow ? ['#attn-win-alerts', attnWindow.phone ? '#attn-sheet .ui-sheet-body' : '#attn-win-scroll']
+            : typeof currentTab === 'undefined' || currentTab === 'dashboard' ? ['#dashboard-security-alerts', '#dashboard-attention-scroll'] : null;
+        if (place) {
+            const row = done.ids && done.ids.map(id => document.querySelector(`${place[0]} [data-key="alert-${Number(id)}"]`)).find(Boolean);
+            const target = row ? [...row.querySelectorAll('button')].find(b => b.textContent.trim() === 'Dismiss') : document.querySelector(place[1]);
             if (target) target.focus({ preventScroll: false });
         }
         showToast(back ? `${back} in Needs attention` : 'Nothing to undo: dismissed again since', back ? 'success' : 'info');
@@ -2738,7 +2988,7 @@ async function undoAlertDismissal(receipt, undoName) {
     }
 }
 
-// The figures' trends (/api/stats/trends): loaded with the dashboard's checks, painted
+// The figures' trends (/api/stats/trends): loaded with the Dashboard and every five minutes, painted
 // into each figure's place, and again whenever a card is drawn anew
 const DASH_TRENDS = {
     storage_used: { label: 'Mail storage used', format: v => `${Math.round(v)}%` },
@@ -2746,8 +2996,10 @@ const DASH_TRENDS = {
     security_banned: { label: 'Addresses banned', format: v => `${Math.round(v)}`, feature: 'netfilter' },
 };
 let dashboardTrends = null;
+let dashboardTrendsAt = 0;
 
 async function loadDashboardTrends() {
+    dashboardTrendsAt = Date.now();
     const names = Object.keys(DASH_TRENDS).filter(n => !DASH_TRENDS[n].feature || !isFeatureDisabled(DASH_TRENDS[n].feature));
     try {
         const res = await authenticatedFetch(`/api/stats/trends?names=${names.join(',')}&days=7`);
