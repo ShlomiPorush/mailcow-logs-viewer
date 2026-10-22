@@ -497,21 +497,26 @@ function mdRelayTipFit(el) {
 
 // A touch screen has no hover: a tap shows the tooltip for a moment.
 // On the wrapper, as a click on the host copies it and stops there.
-let mdRelayTapAt = 0;
 function mdRelayTipTap(event, el) {
     if (event.pointerType === 'mouse') return;
     mdRelayTipFit(el);
     if (!el.dataset.tip) return;
-    mdRelayTapAt = Date.now();
     el.classList.add('is-tip');
     clearTimeout(el.tipTimer);
     el.tipTimer = setTimeout(() => el.classList.remove('is-tip'), 2500);
+    // The click this tap makes next belongs to the tooltip, once
+    el.tapClick = true;
+    clearTimeout(el.tapTimer);
+    el.tapTimer = setTimeout(() => { el.tapClick = false; }, 600);
 }
 
-// A tap that just showed a row's relay tooltip does not also open the row
+// A tap that just showed a row's relay tooltip does not also open the row;
+// a mouse click, or any later click, does
 function mdRelayTapped(event) {
     const host = event.target && event.target.closest ? event.target.closest('.ui-md-relay-host') : null;
-    return !!host && host.classList.contains('is-tip') && Date.now() - mdRelayTapAt < 800;
+    if (!host || !host.tapClick || event.pointerType === 'mouse') return false;
+    host.tapClick = false;
+    return true;
 }
 
 function mdRelayTip(root) {
@@ -822,7 +827,7 @@ function renderRecipientRows() {
         const sub = !r.last ? `<span>${r.status === 'none' ? 'No delivery logged yet' : 'No delivery attempt logged'}</span>`
             : `${host ? `<span class="ui-md-rrow-via">via ${renderRelay(r.relay, false)}</span>` : `<span>${escapeHtml(info.word)}</span>`}${r.delivered.length ? `<span>· to <bdi>${escapeHtml(r.delivered.join(', '))}</bdi></span>` : ''}${r.attempts > 1 ? `<span>· ${r.attempts} attempts</span>` : ''}${r.last.time ? `<span>· ${escapeHtml(formatTime(r.last.time))}</span>` : ''}`;
         return `
-            <div class="ui-md-rrow" role="button" tabindex="0" data-row-open data-md-focus="row-${index}" aria-pressed="${mdView.picked === index}" title="Show the logs of ${escapeHtml(r.address)}" onclick="if (!uiRowHeld(event) && !mdRelayTapped(event)) pickMessageRecipient(${index}, true)">
+            <div class="ui-md-rrow" role="button" tabindex="0" data-row-open data-md-focus="row-${index}" aria-pressed="${mdView.picked === index}" title="Show the logs of ${escapeHtml(r.address)}" onfocus="mdRelayTip(this)" onclick="if (!uiRowHeld(event) && !mdRelayTapped(event)) pickMessageRecipient(${index}, true)">
                 <span class="ui-md-rrow-addr">${copyableText(r.address)}</span>${uiTag(info.word, info.tone)}
                 <span class="ui-md-rrow-sub">${sub}</span>
                 ${r.reason ? `<span class="ui-md-rrow-why ${info.tone && info.tone !== 'ok' ? `ui-text-${info.tone}` : 'ui-muted'}">${escapeHtml(r.reason)}</span>` : ''}

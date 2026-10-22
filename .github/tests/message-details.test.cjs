@@ -500,15 +500,23 @@ test('a relay tooltip fits the width it has, shows on a tap or the focus, and a 
         assert.doesNotMatch(h.context.renderRelay(relay, false), /tabindex/);
     }
 
-    // A tap shows the tooltip; the click that follows it does not open the row
+    // A tap shows the tooltip; the one click that follows it does not open the row
     const tapped = host({ host: 'mx.example.net', ip: '192.0.2.9', tip: 'IP 192.0.2.9' }, 100, 100);
+    const clickOn = (el, pointerType) => h.context.mdRelayTapped({ pointerType, target: { closest: () => el } });
     h.context.mdRelayTipTap({ pointerType: 'touch' }, tapped);
     assert.ok(tapped.classList.contains('is-tip'));
-    assert.equal(h.context.mdRelayTapped({ target: { closest: () => tapped } }), true);
+    assert.equal(clickOn(tapped, 'touch'), true);
+    assert.equal(clickOn(tapped, 'touch'), false, 'once: the next click opens the row, the tooltip still showing');
     assert.equal(h.context.mdRelayTapped({ target: { closest: () => null } }), false, 'a tap elsewhere in the row opens it');
+    // A mouse click right after a tap opens the row: the tap's hold is not global
+    h.context.mdRelayTipTap({ pointerType: 'touch' }, tapped);
+    assert.equal(clickOn(tapped, 'mouse'), false);
+    const other = host({ host: 'mx2.example.net', ip: '192.0.2.10', tip: 'IP 192.0.2.10' }, 100, 100);
+    assert.equal(clickOn(other, 'touch'), false, 'a tap on one host holds no click on another');
     const hovered = host({ host: 'mx.example.net', ip: '192.0.2.9' }, 100, 100);
     h.context.mdRelayTipTap({ pointerType: 'mouse' }, hovered);
-    assert.equal(h.context.mdRelayTapped({ target: { closest: () => hovered } }), false, 'a mouse click opens the row');
+    assert.equal(clickOn(hovered, 'mouse'), false, 'a mouse click opens the row');
+    // A row fits its relay's tooltip when it takes the focus (after a resize too)
     await h.context.viewMessageDetails('example-key');
-    assert.match(h.context.renderRecipientRows(), /onclick="if \(!uiRowHeld\(event\) && !mdRelayTapped\(event\)\) pickMessageRecipient/);
+    assert.match(h.context.renderRecipientRows(), /onfocus="mdRelayTip\(this\)" onclick="if \(!uiRowHeld\(event\) && !mdRelayTapped\(event\)\) pickMessageRecipient/);
 });
