@@ -18,7 +18,7 @@ function harness(data, ok = true) {
                 setAttribute: (name, value) => { attrs[name] = String(value); }, getAttribute: name => attrs[name] ?? null,
                 classList: { add: value => classes.add(value), remove: value => classes.delete(value), contains: value => classes.has(value) },
                 addEventListener: (name, handler) => { listeners[id + ':' + name] = handler; },
-                querySelector: () => null,
+                querySelector: () => null, querySelectorAll: () => [],
             });
         }
         return elements.get(id);
@@ -228,6 +228,26 @@ test('one recipient keeps its strip and error box, with no recipient list', asyn
     // The sender shows; the queue ID stays in Overview only
     assert.match(logs, /sender@example\.com/);
     assert.doesNotMatch(logs, /Queue ID/);
+    // The relay in its parts: the host, its IP in a tooltip, the port beside it
+    assert.match(logs, /data-host="mx\.example\.net" data-ip="192\.0\.2\.9" data-tip="IP 192\.0\.2\.9"/);
+    assert.match(logs, /<bdi>mx\.example\.net<\/bdi>/);
+    assert.match(logs, /class="ui-md-relay-port">:25</);
+    assert.doesNotMatch(logs.split('md-timeline-slot')[0], /mx\.example\.net\[192\.0\.2\.9\]:25/);
+});
+
+test('a relay splits into host, IP and port, and keeps any other form whole', () => {
+    const h = harness(message());
+    const parts = relay => JSON.parse(JSON.stringify(h.context.relayParts(relay)));
+    assert.deepEqual(parts('dovecot[172.22.1.250]:24'), { host: 'dovecot', ip: '172.22.1.250', port: '24' });
+    assert.deepEqual(parts('mx.example.net[2001:db8::25]:25'), { host: 'mx.example.net', ip: '2001:db8::25', port: '25' });
+    assert.deepEqual(parts('none'), { host: 'none', ip: '', port: '' });
+    assert.deepEqual(parts('private/dovecot-lmtp'), { host: 'private/dovecot-lmtp', ip: '', port: '' });
+    // A server with no name: its IP is the name, with no tooltip repeating it
+    const bare = h.context.renderRelay('192.0.2.9[192.0.2.9]:25');
+    assert.doesNotMatch(bare, /data-tip/);
+    assert.match(bare, /ui-md-relay-host ui-mono/);
+    // Text from the logs stays text
+    assert.doesNotMatch(h.context.renderRelay('x"><img src=x>[192.0.2.1]:25'), /<img/);
 });
 
 test('a recipient address from the logs is text, and its row opens it by position', async () => {

@@ -456,6 +456,34 @@ function relayHost(relay) {
     return host === 'none' ? '' : host;
 }
 
+// A relay in its parts; "none" or a socket path stays whole
+function relayParts(relay) {
+    const m = /^([^[\]]+)\[([^\]]+)\](?::(\d+))?$/.exec(String(relay || ''));
+    return m ? { host: m[1], ip: m[2], port: m[3] || '' } : { host: String(relay || ''), ip: '', port: '' };
+}
+
+// The strip's relay: the host to copy, its IP in a tooltip, the port beside it.
+// The tooltip names the host too when the host is cut (mdRelayTip).
+function renderRelay(relay) {
+    const { host, ip, port } = relayParts(relay);
+    const named = ip && ip !== host;
+    // No browser title on top of the IP's tooltip
+    const name = host === 'none' ? escapeHtml(host) : copyableText(host).replace(' title="Click to copy"', '');
+    const tip = named ? ` data-ip="${escapeHtml(ip)}" data-tip="IP ${escapeHtml(ip)}"` : '';
+    return `<div class="ui-md-relay">
+        <span class="ui-md-relay-host${ip && !named ? ' ui-mono' : ''}" data-host="${escapeHtml(host)}"${tip}>${name}${named ? `<span class="ui-sr-only">, IP ${escapeHtml(ip)}</span>` : ''}</span>
+        ${port ? `<span class="ui-md-relay-port">:${escapeHtml(port)}</span>` : ''}
+    </div>`;
+}
+
+function mdRelayTip(root) {
+    root.querySelectorAll('.ui-md-relay-host').forEach(el => {
+        const name = el.querySelector('bdi');
+        if (!name || name.scrollWidth <= name.clientWidth) return;
+        el.dataset.tip = el.dataset.ip ? `${el.dataset.host} · IP ${el.dataset.ip}` : el.dataset.host;
+    });
+}
+
 // =============================================================================
 // RECIPIENTS OF A MESSAGE TO MANY (issue #476)
 // =============================================================================
@@ -1083,7 +1111,7 @@ function renderPostfixTab(content, data) {
         toFact,
         finalStatus && !many ? mdFact('Final Status', uiStatusTag(finalStatus)) : '',
         clientIp ? mdFact('Client IP', `<span class="ui-mono">${copyableText(clientIp)}</span>`) : '',
-        relay && !many ? mdFact('Relay', `<span class="ui-mono ui-md-relay" title="${escapeHtml(relay)}">${escapeHtml(relay)}</span>`) : '',
+        relay && !many ? mdFact('Relay', renderRelay(relay)) : '',
     ].join('');
 
     content.innerHTML = `
@@ -1099,6 +1127,7 @@ function renderPostfixTab(content, data) {
             <div id="md-timeline-slot">${renderLogTimeline(data.postfix, dovecotLogs)}</div>
         </div>
     `;
+    mdRelayTip(content);
 }
 
 // Accordion toggle function

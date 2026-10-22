@@ -421,8 +421,16 @@
 .ui-md-fact > span { display: block; margin-bottom: 2px; color: var(--ui-muted); font-size: 12px; font-weight: 600; }
 .ui-md-fact > div { overflow-wrap: anywhere; font-weight: 600; }
 .ui-md-fact-wide { grid-column: 1 / -1; }
-/* A relay is one address: cut, never broken inside it; the title holds all of it */
-.ui-md-fact > div > .ui-md-relay { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The relay: the host, cut and never broken, its IP in a tooltip, the port beside it */
+.ui-md-relay { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+.ui-md-relay-host { position: relative; display: flex; min-width: 0; }
+.ui-md-relay-host .copyable { min-width: 0; max-width: 100%; }
+.ui-md-relay-host bdi { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ui-md-relay-host[data-tip] bdi { text-decoration: underline dotted var(--ui-muted); text-underline-offset: 3px; }
+/* Under the host, above the pinned timeline head; a tap shows it on a touch screen */
+.ui-md-relay-host[data-tip]:hover::after { content: attr(data-tip); position: absolute; top: calc(100% + 6px); left: 0; z-index: 6;
+    white-space: nowrap; padding: 6px 8px; border-radius: 6px; background: var(--ui-ink); color: var(--ui-bg); font: 600 12px/1.3 var(--ui-font, inherit); pointer-events: none; }
+.ui-md-relay-port { flex: none; padding: 0 6px; border-radius: 5px; background: var(--ui-bg); color: var(--ui-muted); font-size: 12px; font-weight: 600; line-height: 1.6; }
 .ui-md-recipients { display: grid; gap: 2px; max-height: 8rem; overflow-y: auto; }
 .ui-md-strip { padding: 12px var(--ui-pad-x); border-radius: var(--ui-radius); background: var(--ui-panel); flex: none; }
 .ui-md-figures { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; text-align: center; }
