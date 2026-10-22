@@ -234,7 +234,7 @@ test('a Fail2ban network ban is a row named by the network, and its attackers ar
     const ban = { network: '198.51.96.0/20', ip: '198.51.96.0', banned_until: '24m 10s', queued_for_unban: 0 };
     const net = context.securityDescribe(address({ ip: '198.51.96.0/20', state: 'banned', tries: 0, attempts: 0, f2b: ban,
         networkSize: 4096, networkRange: ['198.51.96.0', '198.51.111.255'] }));
-    assert.match(net.tag, /Whole network, 4,096 addresses/);
+    assert.match(net.tag, /Whole network, 4096 addresses/, 'the size is a plain figure in every locale');
     assert.match(net.why, /Every address from 198\.51\.96\.0 to 198\.51\.111\.255 is blocked/);
     assert.match(net.acts, /unbanIP\('198\.51\.96\.0\/20'/);
     assert.doesNotMatch(net.acts, /Ban permanently/, 'a whole network is not banned for good in one click');
