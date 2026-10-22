@@ -1315,8 +1315,9 @@ body { font-family: var(--ui-font); background: var(--ui-bg); color: var(--ui-in
 .ui-dash-clear { margin: 0; padding: var(--ui-pad-y) var(--ui-pad-x); border-top: 1px solid var(--ui-line); color: var(--ui-muted); }
 
 .ui-flow { padding: 0 var(--ui-pad-x) 14px; }
-/* Needs attention: as tall as its items, up to a cap; past it they scroll inside, with a fade while more is below (not over a focused item) */
-.ui-attn-scroll { max-height: 380px; overflow-y: auto; overscroll-behavior: contain; }
+/* Needs attention: as tall as its items, up to a cap; past it they scroll inside, with a fade while more is below (not over a focused item).
+   At its end the page scrolls on, so Mail flow stays in reach */
+.ui-attn-scroll { max-height: 380px; overflow-y: auto; }
 .ui-attn-scroll .ui-dash-clear { border-top: 0; }
 /* The head stays one line: in a narrow panel the button says Dismiss all (its name keeps alerts) */
 #dashboard-attention-panel { container-type: inline-size; }
