@@ -27,6 +27,7 @@ class PendingRequest:
     code_challenge: str
     resource: str
     requested: FrozenSet[str]
+    sign_in: str                      # the sign-in fingerprint when the request was opened
     created: float
 
 

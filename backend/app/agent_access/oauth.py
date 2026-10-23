@@ -223,6 +223,7 @@ async def authorize(request: Request):
         session_key=session_key, client_id=client_id, client_kind=kind, declared_name=declared,
         publisher=publisher, redirect_uri=redirect_uri, state=state, code_challenge=challenge,
         resource=live.resource(), requested=parse_scopes(q.get("scope")),
+        sign_in=await db_call(store.sign_in_stamp),
     )
     return RedirectResponse(f"{CONSENT_PAGE}?request={entry.id}", status_code=302, headers=_NO_STORE)
 

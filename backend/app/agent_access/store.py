@@ -215,11 +215,12 @@ class GrantInfo:
     scopes: FrozenSet[str]
     expires_at: datetime
     publisher: Optional[str]
+    token_hash: Optional[str] = None   # the access token the request came with
 
 
-def _info(grant: AgentGrant) -> GrantInfo:
+def _info(grant: AgentGrant, access_hash: Optional[str] = None) -> GrantInfo:
     return GrantInfo(grant.id, grant.display_name, grant.client_id, parse_scopes(grant.scopes),
-                     grant.expires_at, grant.publisher)
+                     grant.expires_at, grant.publisher, access_hash)
 
 
 def _grant_active(grant: Optional[AgentGrant]) -> bool:
@@ -238,8 +239,12 @@ def _revoke(db: Session, grant: AgentGrant, reason: str) -> bool:
     return True
 
 
+# Lock order everywhere: the sign-in fingerprint, then a code, then grants (by
+# id), then their tokens. A token is only ever locked after its grant.
+
 def _revoke_all(db: Session, reason: str) -> int:
-    grants = db.query(AgentGrant).filter(AgentGrant.revoked_at.is_(None)).all()
+    grants = db.query(AgentGrant).filter(AgentGrant.revoked_at.is_(None)) \
+        .order_by(AgentGrant.id).with_for_update().all()
     return sum(1 for g in grants if _revoke(db, g, reason))
 
 
@@ -363,12 +368,19 @@ def refresh_tokens(db: Session, *, refresh_token: str, client_id: str, scope: Op
     different scope than asked when the answer says so), so a client that
     repeats the scope it first asked for is never refused and never gets more.
     """
-    row = db.query(AgentToken).filter(AgentToken.token_hash == token_hash(refresh_token or ""),
-                                      AgentToken.kind == "refresh").with_for_update().first()
+    wanted = token_hash(refresh_token or "")
+    found = db.query(AgentToken.grant_id).filter(AgentToken.token_hash == wanted,
+                                                 AgentToken.kind == "refresh").first()
+    if found is None:
+        db.rollback()
+        raise TokenError("invalid_grant", "The refresh token is not valid.")
+    # The grant first, then its token (the lock order above)
+    grant = db.query(AgentGrant).filter(AgentGrant.id == found.grant_id).with_for_update().first()
+    row = db.query(AgentToken).filter(AgentToken.token_hash == wanted, AgentToken.kind == "refresh") \
+        .with_for_update().first()
     if row is None or row.client_id != client_id:
         db.rollback()
         raise TokenError("invalid_grant", "The refresh token is not valid.")
-    grant = db.query(AgentGrant).filter(AgentGrant.id == row.grant_id).with_for_update().first()
     if row.rotated_at is not None:
         if grant is not None:
             _revoke(db, grant, "refresh_reused")
@@ -416,14 +428,21 @@ def validate_access_token(db: Session, token: str) -> Optional[GrantInfo]:
     if grant.last_used_at is None or now() - grant.last_used_at > LAST_USED_RESOLUTION:
         grant.last_used_at = now()
         db.commit()
-    return _info(grant)
+    return _info(grant, row.token_hash)
 
 
-def grant_still_active(db: Session, grant_id: int) -> bool:
-    """Checked again right before a route runs: a request may wait for its body or a slot."""
+def grant_still_active(db: Session, info: GrantInfo) -> bool:
+    """Checked again right before a route runs: a request may wait for its body or a slot.
+
+    The access token it came with must still be valid too, so a slow request
+    cannot outlive its token's hour or a refresh that replaced it.
+    """
     check_sign_in_unchanged(db)
-    grant = db.query(AgentGrant).filter(AgentGrant.id == grant_id).first()
-    active = _grant_active(grant) and live.is_live() and live.same_resource(grant.resource, live.resource())
+    grant = db.query(AgentGrant).filter(AgentGrant.id == info.id).first()
+    token = db.query(AgentToken).filter(AgentToken.token_hash == (info.token_hash or ""),
+                                        AgentToken.kind == "access", AgentToken.grant_id == info.id).first()
+    active = (_grant_active(grant) and token is not None and token.expires_at > now()
+              and live.is_live() and live.same_resource(grant.resource, live.resource()))
     db.rollback()
     return active
 

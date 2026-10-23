@@ -105,12 +105,12 @@ def decide(app, call: AgentCall, endpoint, method: str, path_params: Dict[str, A
     return _guard_problem(rule.guard, path_params)
 
 
-def _still_active(grant_id: int) -> bool:
+def _still_active(grant) -> bool:
     from ..database import SessionLocal
     from .store import grant_still_active
     db = SessionLocal()
     try:
-        return grant_still_active(db, grant_id)
+        return grant_still_active(db, grant)
     finally:
         db.close()
 
@@ -125,7 +125,7 @@ async def enforce_agent_policy(connection: HTTPConnection) -> None:
         return
     reason = decide(connection.app, call, connection.scope.get("endpoint"), connection.scope["method"],
                     connection.path_params)
-    if reason is None and not await run_in_threadpool(_still_active, call.grant.id):
+    if reason is None and not await run_in_threadpool(_still_active, call.grant):
         # The call may have waited for its body or a slot since the token was checked
         reason = "This connection has ended. The person who connected you can connect you again."
     call.checked = True

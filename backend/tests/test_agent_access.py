@@ -417,6 +417,82 @@ def test_a_sign_in_change_after_consent_voids_the_code(live_agents, monkeypatch)
     assert r.json()["error"] == "invalid_grant"
 
 
+def test_a_consent_opened_before_a_sign_in_change_cannot_finish(live_agents, monkeypatch):
+    client = _signed_in()
+    client_id = _register(client)
+    verifier, challenge = _pkce()
+    request_id = _request_id(_authorize(client, client_id, challenge))
+    monkeypatch.setattr(settings._inner, "auth_username", "someone-else")
+    answer = client.post(f"/api/agents/consent/{request_id}", json={"allow": True, "views": ["security"]})
+    if answer.status_code == 200:
+        code = parse_qs(urlsplit(answer.json()["redirect"]).query)["code"][0]
+        r = client.post("/oauth/token", data={"grant_type": "authorization_code", "code": code,
+                                              "client_id": client_id, "redirect_uri": REDIRECT,
+                                              "code_verifier": verifier})
+        assert r.json()["error"] == "invalid_grant"
+    from app.database import get_db_context
+    from app.models import AgentGrant
+    with get_db_context() as db:
+        assert db.query(AgentGrant).filter(AgentGrant.revoked_at.is_(None)).count() == 0
+
+
+def test_a_call_waiting_past_its_token_does_not_run(live_agents):
+    client, client_id, tokens = _connect(acts=("security",))
+    from app.database import SessionLocal
+    db = SessionLocal()
+    try:
+        grant = store.validate_access_token(db, tokens["access_token"])
+    finally:
+        db.close()
+    # The agent refreshes meanwhile: the token the waiting call came with is gone
+    assert client.post("/oauth/token", data={"grant_type": "refresh_token", "client_id": client_id,
+                                             "refresh_token": tokens["refresh_token"]}).status_code == 200
+
+    async def run():
+        dispatch._slots = None
+        return await dispatch.call_api(app, grant, "write", "POST", "/api/security-alerts/acknowledge-all",
+                                       None, None, None)
+    result = asyncio.run(run())
+    assert result.outcome == "denied" and "ended" in result.text
+
+
+def test_refresh_and_disconnect_at_once_never_deadlock(live_agents):
+    from app.database import SessionLocal
+    for _ in range(8):
+        pending.clear()
+        client, client_id, tokens = _connect()
+        grant_id = client.get("/api/agents").json()["agents"][0]["id"]
+        errors, barrier = [], threading.Barrier(2)
+
+        def refresh():
+            db = SessionLocal()
+            try:
+                barrier.wait()
+                store.refresh_tokens(db, refresh_token=tokens["refresh_token"], client_id=client_id,
+                                     scope=None, resource=None)
+            except store.TokenError:
+                pass
+            except Exception as e:
+                errors.append(e)
+            finally:
+                db.close()
+
+        def disconnect():
+            db = SessionLocal()
+            try:
+                barrier.wait()
+                store.revoke_grant(db, grant_id)
+            except Exception as e:
+                errors.append(e)
+            finally:
+                db.close()
+        threads = [threading.Thread(target=refresh), threading.Thread(target=disconnect)]
+        [t.start() for t in threads]
+        [t.join() for t in threads]
+        assert not errors, errors
+        assert client.get("/api/agents").json()["agents"][0]["state"] == "disconnected"
+
+
 def test_a_change_while_access_is_off_still_disconnects(live_agents, monkeypatch):
     client, _, tokens = _connect()
     monkeypatch.setattr(settings._inner, "agent_access_enabled", False)
