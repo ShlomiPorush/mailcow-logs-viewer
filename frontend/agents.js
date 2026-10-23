@@ -10,12 +10,20 @@
 let agentsData = null;
 const agentsOpenActivity = new Set();
 
-const AGENTS_PROBLEM_TEXT = {
-    off: 'Agent access is off. Turn on <strong>Agent access</strong> below (or set <code>AGENT_ACCESS_ENABLED=true</code>).',
-    no_sign_in: 'Agent access needs sign-in, so a person can approve each agent. Turn on Basic or OAuth2 sign-in in Settings → Authentication.',
-    no_url: 'Agent access needs the address agents reach this app at, such as <code>https://logs.example.com</code>. Set <strong>App address for agents</strong> below (or <code>AGENT_ACCESS_URL</code>).',
-    bad_url: 'The app address for agents must be an <code>https://</code> address without a path, such as <code>https://logs.example.com</code>.',
-};
+// What is missing. With the edit form there is a field above the list; without it, only the variable
+function agentsProblemText(problem) {
+    const form = !!document.querySelector('[data-tab-extra="agents"]');
+    const set = (field, variable, value) => form
+        ? `Set <strong>${field}</strong> above, or <code>${variable}</code>.`
+        : `Set <code>${variable}${value}</code> in <code>.env</code>.`;
+    switch (problem) {
+        case 'off': return `Agent access is off. ${set('Agent access', 'AGENT_ACCESS_ENABLED', '=true')}`;
+        case 'no_sign_in': return 'Agent access needs sign-in, so a person can approve each agent. Turn on Basic or OAuth2 sign-in in Settings → Authentication.';
+        case 'no_url': return `Agent access needs the address agents reach this app at, such as <code>https://logs.example.com</code>. ${set('App address for agents', 'AGENT_ACCESS_URL', '')}`;
+        case 'bad_url': return 'The app address for agents must be an <code>https://</code> address without a path, such as <code>https://logs.example.com</code>.';
+        default: return 'Agent access is not available.';
+    }
+}
 
 const AGENTS_END_REASONS = {
     disconnected: 'Disconnected',
@@ -45,8 +53,16 @@ function agentsAreaChips(areas) {
     (agentsData.areas || []).forEach(a => { labels[a.id] = a.label; });
     const entries = Object.entries(areas || {});
     if (!entries.length) return '<span class="ui-muted">Nothing</span>';
-    return entries.map(([id, mode]) => uiTag(`${labels[id] || id}: ${mode === 'act' ? 'View + Act' : 'View'}`,
-        mode === 'act' ? 'warn' : '')).join(' ');
+    // Actions first, each by name; views by name too, unless they cover every other area
+    const acts = entries.filter(([, mode]) => mode === 'act');
+    const views = entries.filter(([, mode]) => mode !== 'act');
+    const chips = acts.map(([id]) => uiTag(`${labels[id] || id}: View + Act`, 'warn'));
+    if (views.length && entries.length === (agentsData.areas || []).length) {
+        chips.push(uiTag(acts.length ? 'All other areas: View' : 'All areas: View', ''));
+    } else {
+        views.forEach(([id]) => chips.push(uiTag(`${labels[id] || id}: View`, '')));
+    }
+    return chips.join(' ');
 }
 
 function agentsWhen(iso) {
@@ -98,7 +114,7 @@ function agentsConnectHelp() {
         ${line('Claude Code', claude)}
         ${line('Codex', codex)}
     </div>
-    <p class="ui-set-desc">The agent opens a page in the browser. Sign in there, choose what it may see and do and for how long, and allow it. Codex: run <code>codex mcp login mailcow</code> after adding it.</p>`;
+    <p class="ui-set-desc">The agent opens a page in the browser. Sign in there, choose what it may see and do and for how long, and allow it. If the page does not open, run <code>claude mcp login mailcow</code> or <code>codex mcp login mailcow</code>.</p>`;
 }
 
 function renderAgentsPanel() {
@@ -108,7 +124,7 @@ function renderAgentsPanel() {
     const connected = agents.filter(a => a.state === 'connected');
     const intro = agentsData.live
         ? agentsConnectHelp()
-        : uiLocked('Agents cannot connect', AGENTS_PROBLEM_TEXT[agentsData.problem] || 'Agent access is not available.', '');
+        : uiLocked('Agents cannot connect', agentsProblemText(agentsData.problem), '');
     panel.innerHTML = `
         <div class="ui-list-head">
             <div>
@@ -155,7 +171,7 @@ async function loadAgentActivity(grantId) {
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const rows = (await response.json()).activity || [];
         box.innerHTML = rows.length
-            ? `<ul class="ui-agent-log">${rows.map(agentsActivityRow).join('')}</ul><p class="ui-set-desc">The last ${rows.length} entries.</p>`
+            ? `<ul class="ui-agent-log">${rows.map(agentsActivityRow).join('')}</ul>${rows.length >= 50 ? '<p class="ui-set-desc">The last 50 entries.</p>' : ''}`
             : '<p class="ui-muted">Nothing yet.</p>';
     } catch (e) {
         box.innerHTML = '<p class="ui-text-fail">Could not load the activity.</p>';

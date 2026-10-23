@@ -75,6 +75,7 @@ nav:
   - Setup:
       - Getting Started: GETTING_STARTED.md
       - Sign-in: OAuth2_Configuration.md
+      - AI Agents: AI_Agents.md
       - Reverse Proxy: Reverse_Proxy.md
       - Settings: HelpDocs/Settings.md
       - Notifications: Notifications.md

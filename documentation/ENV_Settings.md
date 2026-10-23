@@ -127,8 +127,11 @@ The names are `netfilter` (Security), `queue`, `quarantine`, `suppressions`, `rs
 | `SESSION_SECRET_KEY` | Empty | Signs the session cookie. Empty uses a temporary key for each run. Set a long random value, for example from `openssl rand -hex 32`. Sessions live in memory, so a restart signs everyone out either way. |
 | `SESSION_EXPIRY_HOURS` | `24` | |
 | `SESSION_MAX_ENTRIES` | `50` | Most signed-in sessions at once, at least 1. When full, new sign-ins wait; existing sessions stay. |
+| `AGENT_ACCESS_ENABLED` | `false` | Lets AI agents connect over MCP after a signed-in person approves them. Needs sign-in and `AGENT_ACCESS_URL`. |
+| `AGENT_ACCESS_URL` | Empty | The address agents reach the app at, such as `https://logs.example.com`. `https` without a path; `http` only on `localhost` or `127.0.0.1`. |
+| `AGENT_ACCESS_MAX_DAYS` | `90` | The longest period a person can give an agent, from 1 to 365 days. |
 
-See [Sign-in configuration](OAuth2_Configuration.md) for provider recipes.
+See [Sign-in configuration](OAuth2_Configuration.md) for provider recipes and [AI agents](AI_Agents.md) for agent access.
 
 ## SMTP configuration
 
