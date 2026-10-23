@@ -2498,12 +2498,13 @@ function mailFlowHour(t) {
 // A span with the dates as the rest of the app writes them: "21/10/2026, 06:00 to 12:00",
 // "14/10/2026 to 16/10/2026", or one whole day: "14/10/2026". `to` is where the span ends
 // (not in it), so a span of whole days ends at the midnight after its last day.
-function mailFlowSpan(from, to) {
+// day: formatDayMonth leaves the year out
+function mailFlowSpan(from, to, day = formatDay) {
     const end = to - 1;
     const sameDay = zonedDateString(from) === zonedDateString(end);
-    if (isZonedMidnight(from) && isZonedMidnight(to)) return sameDay ? formatDay(from) : `${formatDay(from)} to ${formatDay(end)}`;
-    if (sameDay) return `${formatDay(from)}, ${mailFlowHour(from)} to ${mailFlowHour(to)}`;
-    return `${formatDay(from)}, ${mailFlowHour(from)} to ${formatDay(end)}, ${mailFlowHour(to)}`;
+    if (isZonedMidnight(from) && isZonedMidnight(to)) return sameDay ? day(from) : `${day(from)} to ${day(end)}`;
+    if (sameDay) return `${day(from)}, ${mailFlowHour(from)} to ${mailFlowHour(to)}`;
+    return `${day(from)}, ${mailFlowHour(from)} to ${day(end)}, ${mailFlowHour(to)}`;
 }
 
 // The bar length for a span: an hour up to two days, six hours up to ten, else a day
@@ -2737,6 +2738,9 @@ function renderMailFlowOverview(alone = false) {
 // always there (what is not in use keeps its place), so the panel keeps its size
 function mailFlowFoot(can) {
     const off = on => (on ? '' : ' disabled');
+    // The Messages figure opens the same messages: it is on when View these messages is
+    const figure = document.getElementById('dashboard-flow-messages');
+    if (figure) figure.disabled = !can.view;
     return `<div class="ui-flow-foot">
             <div class="ui-flow-legend"><span><i class="ui-flow-clean"></i>Clean</span><span><i class="ui-flow-spam"></i>Spam</span></div>
             <div class="ui-flow-zoom" role="group" aria-label="Zoom the chart">
@@ -2871,11 +2875,18 @@ function renderMailFlowStats() {
     set('stat-blocked-note', before('blocked'));
     set('stat-deferred-note', before('deferred'));
     set('stat-auth-failures-note', before('auth_failures'));
-    const span = bar ? mailFlowSpan(Date.parse(bar.start), Date.parse(bar.end))
-        : dashFlow.zoom ? mailFlowSpan(Date.parse(d.from), Date.parse(d.to)) : period.last;
-    set('dashboard-flow-title', `Mail flow, ${span}${(bar ? bar.partial : false) ? ', so far' : ''}`);
-    // Clear keeps its place when nothing is picked, so the row does not move
+    // The title in two lengths: in a narrow panel (a phone) the picker names the period,
+    // so the short one says only a picked bar's or a zoom's span, its days without the year
+    const shown = bar ? [Date.parse(bar.start), Date.parse(bar.end)] : dashFlow.zoom ? [Date.parse(d.from), Date.parse(d.to)] : null;
+    const soFar = bar && bar.partial ? ', so far' : '';
+    const long = document.querySelector('#dashboard-flow-title .ui-flow-long');
+    const short = document.querySelector('#dashboard-flow-title .ui-flow-short');
+    if (long) long.textContent = `Mail flow, ${shown ? mailFlowSpan(...shown) : period.last}${soFar}`;
+    if (short) short.textContent = shown ? `${mailFlowSpan(...shown, formatDayMonth)}${soFar}` : 'Mail flow';
+    // Clear keeps its place when nothing is picked, so the row does not move; the narrow
+    // panel's Clear beside the title shows only with a bar picked
     document.getElementById('dashboard-flow-reset')?.classList.toggle('is-off', !bar);
+    document.getElementById('dashboard-flow-clear')?.classList.toggle('hidden', !bar);
     const bars = document.querySelector('#dashboard-flow-chart .ui-flow-bars');
     if (bars) {
         bars.classList.toggle('has-pick', !!bar);
