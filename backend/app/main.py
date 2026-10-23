@@ -119,14 +119,18 @@ def log_authentication_state() -> None:
 
 
 def log_agent_access_state() -> None:
-    """Say whether agents can connect, and disconnect them all if sign-in changed while the app was down."""
+    """Say whether agents can connect, and disconnect them all if sign-in changed while the app was down.
+
+    The sign-in check runs with agent access off too: a change made while it
+    was off must not be undone by changing the setting back later.
+    """
     problem = agent_live.problem()
     if problem == agent_live.OFF:
-        return
-    if problem:
+        pass
+    elif problem:
         logger.warning(f"Agent access is switched on but not available ({problem}): see Settings > Agents")
-        return
-    logger.info(f"Agent access is ON: agents connect to {agent_live.resource()}")
+    else:
+        logger.info(f"Agent access is ON: agents connect to {agent_live.resource()}")
     try:
         from .agent_access import store as agent_store
         from .database import get_db_context

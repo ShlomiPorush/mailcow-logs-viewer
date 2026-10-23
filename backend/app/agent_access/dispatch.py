@@ -18,6 +18,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import quote, urlencode
 
 from fastapi import HTTPException
+from starlette.concurrency import run_in_threadpool
 from starlette.requests import HTTPConnection
 
 from ..config import get_cached_active_domains, settings
@@ -104,6 +105,16 @@ def decide(app, call: AgentCall, endpoint, method: str, path_params: Dict[str, A
     return _guard_problem(rule.guard, path_params)
 
 
+def _still_active(grant_id: int) -> bool:
+    from ..database import SessionLocal
+    from .store import grant_still_active
+    db = SessionLocal()
+    try:
+        return grant_still_active(db, grant_id)
+    finally:
+        db.close()
+
+
 async def enforce_agent_policy(connection: HTTPConnection) -> None:
     """App-wide dependency: let an agent's call run only when its grant covers the route.
 
@@ -114,6 +125,9 @@ async def enforce_agent_policy(connection: HTTPConnection) -> None:
         return
     reason = decide(connection.app, call, connection.scope.get("endpoint"), connection.scope["method"],
                     connection.path_params)
+    if reason is None and not await run_in_threadpool(_still_active, call.grant.id):
+        # The call may have waited for its body or a slot since the token was checked
+        reason = "This connection has ended. The person who connected you can connect you again."
     call.checked = True
     if reason:
         call.denied = reason

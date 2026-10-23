@@ -135,6 +135,26 @@ def check_sign_in_unchanged(db: Session) -> bool:
     return False
 
 
+def sign_in_stamp(db: Session) -> str:
+    """The stored sign-in fingerprint, after checking it is current; a code carries it from the consent."""
+    check_sign_in_unchanged(db)
+    row = db.query(SystemSetting).filter(SystemSetting.key == _FINGERPRINT_KEY).first()
+    value = row.value if row else ""
+    db.commit()
+    return value
+
+
+def _hold_sign_in(db: Session) -> str:
+    """Share-lock the stored fingerprint for this transaction and return it.
+
+    A sign-in change takes the same row for update before it disconnects
+    everyone, so a grant made while this lock is held is either finished
+    before the change (and then disconnected by it) or refused after it.
+    """
+    row = db.query(SystemSetting).filter(SystemSetting.key == _FINGERPRINT_KEY).with_for_update(read=True).first()
+    return row.value if row else ""
+
+
 # ── Activity log ───────────────────────────────────────────────────────────
 
 def audit(db: Session, event: str, grant: Optional["GrantInfo"] = None, *, grant_id: Optional[int] = None,
@@ -284,7 +304,12 @@ def exchange_code(db: Session, *, code: str, client_id: str, redirect_uri: str, 
     and PKCE verifier) means it leaked: the grant it made is disconnected. A
     code presented with a wrong binding is refused and stays usable, so a
     leaked code without its verifier cannot be used to disconnect anyone.
+
+    The grant is made under a share lock on the sign-in fingerprint, and only
+    when sign-in has not changed since the person approved it.
     """
+    check_sign_in_unchanged(db)
+    sign_in = _hold_sign_in(db)
     row = db.query(AgentCode).filter(AgentCode.code_hash == token_hash(code or "")).with_for_update().first()
     if row is None or row.client_id != client_id or row.redirect_uri != redirect_uri \
             or not pkce_matches(verifier, row.code_challenge):
@@ -304,11 +329,14 @@ def exchange_code(db: Session, *, code: str, client_id: str, redirect_uri: str, 
         db.rollback()
         raise TokenError("invalid_target", "The resource is not this server.")
     d = row.details
+    if d.get("sign_in") != sign_in:
+        db.rollback()
+        raise TokenError("invalid_grant", "The sign-in settings changed. Connect the agent again.")
     grant = AgentGrant(
         client_id=client_id, client_kind=d["client_kind"], display_name=d["display_name"],
         declared_name=d["declared_name"], publisher=d.get("publisher"), redirect_uri=redirect_uri,
         scopes=d["scopes"], resource=row.resource, approved_by=d.get("approved_by"),
-        created_at=now(), expires_at=now() + timedelta(days=int(d["days"])),
+        created_at=now(), expires_at=now() + timedelta(days=float(d["days"])),
     )
     db.add(grant)
     db.flush()
@@ -329,8 +357,11 @@ def refresh_tokens(db: Session, *, refresh_token: str, client_id: str, scope: Op
     """Exchange a refresh token for a new pair; the old one is spent.
 
     A spent refresh token presented again by its own client means it leaked:
-    the grant is disconnected. A scope parameter may only narrow; the grant
-    itself never changes.
+    the grant is disconnected. Spent tokens are kept until the grant ends, so
+    this works for the whole period. A scope parameter is ignored: the new
+    tokens always carry exactly what the person granted (RFC 6749 allows a
+    different scope than asked when the answer says so), so a client that
+    repeats the scope it first asked for is never refused and never gets more.
     """
     row = db.query(AgentToken).filter(AgentToken.token_hash == token_hash(refresh_token or ""),
                                       AgentToken.kind == "refresh").with_for_update().first()
@@ -349,11 +380,6 @@ def refresh_tokens(db: Session, *, refresh_token: str, client_id: str, scope: Op
     if resource is not None and not live.same_resource(resource, grant.resource):
         db.rollback()
         raise TokenError("invalid_target", "The resource is not this server.")
-    if scope:
-        asked = parse_scopes(scope)
-        if not asked or not asked <= parse_scopes(grant.scopes):
-            db.rollback()
-            raise TokenError("invalid_scope", "A refresh cannot add permissions.")
     row.rotated_at = now()
     # Spent access tokens of this grant end with the refresh
     db.query(AgentToken).filter(AgentToken.grant_id == grant.id, AgentToken.kind == "access") \
@@ -393,6 +419,15 @@ def validate_access_token(db: Session, token: str) -> Optional[GrantInfo]:
     return _info(grant)
 
 
+def grant_still_active(db: Session, grant_id: int) -> bool:
+    """Checked again right before a route runs: a request may wait for its body or a slot."""
+    check_sign_in_unchanged(db)
+    grant = db.query(AgentGrant).filter(AgentGrant.id == grant_id).first()
+    active = _grant_active(grant) and live.is_live() and live.same_resource(grant.resource, live.resource())
+    db.rollback()
+    return active
+
+
 # ── Management ─────────────────────────────────────────────────────────────
 
 def list_grants(db: Session) -> List[AgentGrant]:
@@ -420,7 +455,6 @@ def cleanup(db: Session) -> None:
     db.query(AgentCode).filter(AgentCode.created_at < t - timedelta(minutes=CODES_KEPT_MINUTES)) \
         .delete(synchronize_session=False)
     db.query(AgentToken).filter(AgentToken.expires_at < t - timedelta(days=1)).delete(synchronize_session=False)
-    db.query(AgentToken).filter(AgentToken.rotated_at < t - timedelta(days=1)).delete(synchronize_session=False)
     ended = t - timedelta(days=ENDED_GRANTS_KEPT_DAYS)
     db.query(AgentGrant).filter(or_(AgentGrant.revoked_at < ended,
                                     and_(AgentGrant.revoked_at.is_(None), AgentGrant.expires_at < ended))) \

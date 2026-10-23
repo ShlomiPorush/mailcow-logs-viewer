@@ -386,11 +386,66 @@ def test_refresh_rotates_and_a_reused_refresh_disconnects(live_agents):
     assert _mcp(client, fresh.json()["access_token"], "ping").status_code == 401
 
 
-def test_refresh_cannot_add_permissions(live_agents):
+def test_refresh_never_changes_the_granted_scopes(live_agents):
+    # Clients repeat the scope they first asked for; the answer is what the person granted
     client, client_id, tokens = _connect(views=("security",))
     r = client.post("/oauth/token", data={"grant_type": "refresh_token", "client_id": client_id,
-                                          "refresh_token": tokens["refresh_token"], "scope": "security:write"})
-    assert r.json()["error"] == "invalid_scope"
+                                          "refresh_token": tokens["refresh_token"],
+                                          "scope": "security:write messages:read"})
+    assert r.status_code == 200 and r.json()["scope"] == "security:read"
+
+
+def test_one_hour_lasts_an_hour(live_agents):
+    _connect(days=1 / 24)
+    from app.database import get_db_context
+    from app.models import AgentGrant
+    with get_db_context() as db:
+        grant = db.query(AgentGrant).one()
+        assert timedelta(minutes=59) < grant.expires_at - grant.created_at <= timedelta(hours=1, minutes=1)
+
+
+def test_a_sign_in_change_after_consent_voids_the_code(live_agents, monkeypatch):
+    client = _signed_in()
+    client_id = _register(client)
+    verifier, challenge = _pkce()
+    request_id = _request_id(_authorize(client, client_id, challenge))
+    code = parse_qs(urlsplit(client.post(f"/api/agents/consent/{request_id}", json={
+        "allow": True, "views": ["security"]}).json()["redirect"]).query)["code"][0]
+    monkeypatch.setattr(settings._inner, "auth_username", "someone-else")
+    r = client.post("/oauth/token", data={"grant_type": "authorization_code", "code": code, "client_id": client_id,
+                                          "redirect_uri": REDIRECT, "code_verifier": verifier})
+    assert r.json()["error"] == "invalid_grant"
+
+
+def test_a_change_while_access_is_off_still_disconnects(live_agents, monkeypatch):
+    client, _, tokens = _connect()
+    monkeypatch.setattr(settings._inner, "agent_access_enabled", False)
+    monkeypatch.setattr(settings._inner, "auth_password", "changed while off")
+    monkeypatch.setattr(store, "_known_fingerprint", None)
+    from app.main import log_agent_access_state
+    log_agent_access_state()  # what startup runs
+    monkeypatch.setattr(settings._inner, "auth_password", PASSWORD)
+    monkeypatch.setattr(settings._inner, "agent_access_enabled", True)
+    assert _mcp(_client(), tokens["access_token"], "ping").status_code == 401
+
+
+def test_a_call_waiting_while_the_agent_is_disconnected_does_not_run(live_agents):
+    client, _, tokens = _connect(acts=("security",))
+    from app.database import SessionLocal
+    db = SessionLocal()
+    try:
+        grant = store.validate_access_token(db, tokens["access_token"])
+    finally:
+        db.close()
+    agent_id = client.get("/api/agents").json()["agents"][0]["id"]
+    assert client.delete(f"/api/agents/{agent_id}").status_code == 200
+
+    async def run():
+        dispatch._slots = None
+        return await dispatch.call_api(app, grant, "write", "POST", "/api/security-alerts/acknowledge-all",
+                                       None, None, None)
+    result = asyncio.run(run())
+    assert result.outcome == "denied" and "ended" in result.text
 
 
 def test_revocation_disconnects_the_agent(live_agents):
@@ -685,6 +740,29 @@ def test_cimd_refuses_bad_answers(fake_web, response_kwargs):
 def test_cimd_refuses_unsafe_addresses(url):
     with pytest.raises(cimd.ClientDocumentError):
         cimd._check_url(url)
+
+
+@pytest.mark.parametrize("address", ["10.0.0.5", "127.0.0.1", "169.254.169.254", "100.64.0.1", "fec0::1",
+                                     "fd00::1", "::1", "fe80::1", "::ffff:10.0.0.1", "2002:a00:1::1",
+                                     "64:ff9b::a00:1", "ff02::1", "0.0.0.0"])
+def test_cimd_treats_inside_addresses_as_inside(address):
+    assert not cimd._public(address)
+
+
+def test_cimd_gives_up_on_a_slow_server(fake_web, monkeypatch):
+    import httpx
+    answers, _ = fake_web
+
+    class Drip(httpx.AsyncByteStream):
+        async def __aiter__(self):
+            for _ in range(50):
+                await asyncio.sleep(0.1)
+                yield b" "
+
+    answers["response"] = httpx.Response(200, stream=Drip())
+    monkeypatch.setattr(cimd, "TIMEOUT_SECONDS", 0.5)
+    with pytest.raises(cimd.ClientDocumentError, match="too long"):
+        asyncio.run(cimd.fetch(DOC_URL))
 
 
 def test_cimd_refuses_hosts_that_resolve_inside(monkeypatch):

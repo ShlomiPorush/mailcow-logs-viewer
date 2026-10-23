@@ -133,6 +133,8 @@ def answer_consent(request_id: str, answer: ConsentAnswer, request: Request, db:
                                  "scopes": scopes,
                                  "days": days,
                                  "approved_by": _who(request),
+                                 # A sign-in change before the token request voids the code
+                                 "sign_in": store.sign_in_stamp(db),
                              })
     return {"redirect": client_redirect(entry.redirect_uri, entry.state, code=code).headers["location"]}
 

@@ -78,11 +78,29 @@ def _check_url(url: str) -> Tuple[str, str]:
     return host, target
 
 
+_NAT64 = ipaddress.ip_network("64:ff9b::/96")
+
+
+def _public_one(ip) -> bool:
+    return (ip.is_global and not ip.is_multicast and not ip.is_private and not ip.is_loopback
+            and not ip.is_link_local and not ip.is_reserved and not ip.is_unspecified
+            and not getattr(ip, "is_site_local", False))
+
+
 def _public(address: str) -> bool:
-    ip = ipaddress.ip_address(address)
-    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped:
-        ip = ip.ipv4_mapped
-    return ip.is_global and not ip.is_multicast
+    """Whether an address is a public unicast one, IPv4 carried inside IPv6 included."""
+    try:
+        ip = ipaddress.ip_address(address.split("%", 1)[0])
+    except ValueError:
+        return False
+    if not _public_one(ip) and not (isinstance(ip, ipaddress.IPv6Address) and ip in _NAT64):
+        return False
+    if isinstance(ip, ipaddress.IPv6Address):
+        embedded = [ip.ipv4_mapped, ip.sixtofour, ip.teredo[1] if ip.teredo else None,
+                    ipaddress.IPv4Address(int(ip) & 0xFFFFFFFF) if ip in _NAT64 else None]
+        if any(v4 is not None and not _public_one(v4) for v4 in embedded):
+            return False
+    return True
 
 
 async def _resolve(host: str) -> str:
@@ -136,12 +154,26 @@ def parse_document(url: str, body: bytes, publisher: str) -> ClientDocument:
 
 
 async def fetch(url: str) -> ClientDocument:
-    """The client's document, from the cache or the web."""
-    global _semaphore
+    """The client's document, from the cache or the web, within TIMEOUT_SECONDS in all.
+
+    The deadline covers waiting for a free fetch, the DNS lookup and the whole
+    download: httpx's own timeout only limits each read, so a server sending a
+    byte every few seconds would otherwise hold a fetch for as long as it likes.
+    """
     cached = _cache.get(url)
     if cached and cached[0] > time.monotonic():
         return cached[1]
     host, target = _check_url(url)
+    try:
+        async with asyncio.timeout(TIMEOUT_SECONDS):
+            return await _fetch(url, host, target)
+    except TimeoutError:
+        logger.info(f"Agent access: the client document of {host} took too long")
+        raise ClientDocumentError("The client's document took too long to fetch.")
+
+
+async def _fetch(url: str, host: str, target: str) -> ClientDocument:
+    global _semaphore
     if _semaphore is None:
         _semaphore = asyncio.Semaphore(MAX_CONCURRENT_FETCHES)
     async with _semaphore:
