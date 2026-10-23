@@ -87,12 +87,15 @@ class OAuth2Client:
             logger.error(f"OIDC discovery error: {e}")
             raise OAuth2ClientError(f"OIDC discovery error: {e}")
     
-    def get_authorization_url(self, state: str) -> str:
+    def get_authorization_url(self, state: str, code_challenge: Optional[str] = None) -> str:
         """
         Get authorization URL for OAuth2 flow
         
         Args:
             state: CSRF state token
+            code_challenge: PKCE S256 code_challenge (RFC 7636). Providers
+                without PKCE support ignore it, as RFC 6749 requires for
+                unknown parameters.
             
         Returns:
             Authorization URL
@@ -116,16 +119,21 @@ class OAuth2Client:
             'scope': ' '.join(self.scopes),
             'state': state,
         }
+        if code_challenge:
+            params['code_challenge'] = code_challenge
+            params['code_challenge_method'] = 'S256'
         
         query_string = urlencode(params)
         return f"{self.authorization_url}?{query_string}"
     
-    async def exchange_code_for_token(self, code: str) -> Dict[str, Any]:
+    async def exchange_code_for_token(self, code: str, code_verifier: Optional[str] = None) -> Dict[str, Any]:
         """
         Exchange authorization code for access token
         
         Args:
             code: Authorization code from callback
+            code_verifier: PKCE code_verifier matching the code_challenge
+                sent with the authorization request
             
         Returns:
             Token response with access_token, etc.
@@ -147,6 +155,8 @@ class OAuth2Client:
             'client_id': self.client_id,
             'client_secret': self.client_secret,
         }
+        if code_verifier:
+            data['code_verifier'] = code_verifier
         
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:

@@ -65,9 +65,11 @@ def test_quarantine_job_remains_responsive(monkeypatch, state, stage):
 
     async def released(ids):
         actions.append(("release", ids, threading.get_ident()))
+        return [{"type": "success", "log": [], "msg": ["item_released", i]} for i in ids]
 
     async def deleted(ids):
         actions.append(("delete", ids, threading.get_ident()))
+        return [{"type": "success", "log": [], "msg": ["item_deleted", i]} for i in ids]
 
     state.commit.side_effect = commit
     scheduler.mailcow_api.release_quarantine.side_effect = released

@@ -15,6 +15,7 @@ from typing import Optional, List, Dict, Any
 
 from ..config import settings
 from ..mailcow_api import mailcow_api, MailcowAPIError
+from ..services.rspamd_map_lock import MapBusyError, map_write_lock_async
 from ..utils import internal_error
 
 logger = logging.getLogger(__name__)
@@ -345,7 +346,9 @@ async def update_map_content(filename: str, body: MapContentRequest):
         )
 
     try:
-        result = await mailcow_api.edit_rspamd_map(filename, content_to_save)
+        # The suppression sync writes the recipient denylist too; one writer at a time
+        async with map_write_lock_async():
+            result = await mailcow_api.edit_rspamd_map(filename, content_to_save)
 
         # Count entries for response
         lines = [l.strip() for l in content_to_save.split('\n') if l.strip() and not l.strip().startswith('#')]
@@ -360,6 +363,8 @@ async def update_map_content(filename: str, body: MapContentRequest):
             "api_response": result,
         }
         
+    except MapBusyError as e:
+        raise HTTPException(status_code=409, detail=str(e))
     except MailcowAPIError as e:
         logger.error(f"Failed to update map {filename}: {e}")
         raise internal_error(e, status_code=502)

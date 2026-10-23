@@ -118,6 +118,8 @@ def env(monkeypatch):
 
     def cycle(services):
         monkeypatch.setattr(settings._inner, 'raw_logs_services', ','.join(services))
+        # Only the services under test; what other pages need is tested in test_raw_log_collection
+        monkeypatch.setattr(type(settings._inner), 'raw_logs_required', property(lambda self: {}))
         asyncio.run(worker.fetch_raw_service_logs())
     fake.cycle = cycle
 

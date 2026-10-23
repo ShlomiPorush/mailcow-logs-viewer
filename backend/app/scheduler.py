@@ -14,18 +14,25 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 from apscheduler.triggers.cron import CronTrigger
 from sqlalchemy.orm import Session
-from sqlalchemy import desc, or_
+from sqlalchemy import desc, or_, text
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 
+from .app_time import UTC, app_tz, format_clock
 from .config import settings, set_cached_active_domains
 from .database import get_db_context, SessionLocal
-from .mailcow_api import mailcow_api
-from .models import PostfixLog, RspamdLog, NetfilterLog, MessageCorrelation, DMARCSync, DomainDNSCheck, MailboxStatistics, AliasStatistics, MonitoredHost, BlacklistCheck, DMARCReport, DMARCRecord, TLSReport, TLSReportPolicy, SpamSuppression, RawServiceLog, SystemSetting
+from .mailcow_api import mailcow_api, mailcow_handled_items
+from .services.suppression_events import record_bounces, record_stuck
+from .services.suppression_rows_lock import lock_suppression_rows
+from .services.bounce_policy import cleanup_blocks, handling_on, hard_action, soft_action, rspamd_sync_on
+from .services.rspamd_map_lock import map_write_lock_async
+from .models import EasDevice, PostfixLog, RspamdLog, NetfilterLog, MessageCorrelation, DMARCSync, DomainDNSCheck, MailboxStatistics, AliasStatistics, MonitoredHost, BlacklistCheck, DMARCReport, DMARCRecord, TLSReport, TLSReportPolicy, SpamSuppression, SuppressionEvent, RawServiceLog, SystemSetting
 from .correlation import (
     detect_direction,
     ensure_leg,
     find_legs,
     parse_postfix_message,
+    POSTFIX_DELIVERY_AGENTS,
 )
 from .services.dovecot_parser import (
     NON_DELIVERY_VERDICTS,
@@ -34,6 +41,7 @@ from .services.dovecot_parser import (
     resolve_session_verdicts,
 )
 from .routers.domains import check_domain_dns, store_dns_check_worker
+from .routers.suppressions import auto_suppression_address, RSPAMD_SOURCE
 from .services.dmarc_imap_service import sync_dmarc_reports_from_imap
 from .services.dmarc_notifications import send_dmarc_error_notification
 from .services import geoip_service, correlation_jobs
@@ -70,7 +78,7 @@ def reschedule_interval_jobs():
         # Reschedule fetch_logs
         scheduler.add_job(
             fetch_all_logs,
-            trigger=IntervalTrigger(seconds=settings.fetch_interval),
+            trigger=every(seconds=settings.fetch_interval),
             id='fetch_logs',
             name='Fetch mailcow Logs',
             replace_existing=True,
@@ -79,7 +87,7 @@ def reschedule_interval_jobs():
         # Reschedule complete_correlations
         scheduler.add_job(
             complete_incomplete_correlations,
-            trigger=IntervalTrigger(seconds=settings.correlation_check_interval),
+            trigger=every(seconds=settings.correlation_check_interval),
             id='complete_correlations',
             name='Complete Correlations',
             replace_existing=True,
@@ -88,7 +96,7 @@ def reschedule_interval_jobs():
         # Reschedule update_final_status
         scheduler.add_job(
             update_final_status_for_correlations,
-            trigger=IntervalTrigger(seconds=settings.correlation_check_interval),
+            trigger=every(seconds=settings.correlation_check_interval),
             id='update_final_status',
             name='Update Final Status',
             replace_existing=True,
@@ -98,7 +106,7 @@ def reschedule_interval_jobs():
         if settings.dmarc_imap_enabled:
             scheduler.add_job(
                 dmarc_imap_sync_job,
-                IntervalTrigger(seconds=settings.dmarc_imap_interval),
+                every(seconds=settings.dmarc_imap_interval),
                 id='dmarc_imap_sync',
                 name='DMARC IMAP Sync',
                 replace_existing=True
@@ -126,6 +134,11 @@ def reschedule_interval_jobs():
         _reschedule_smtp_abuse_job()
         _reschedule_anomaly_job()
         _reschedule_dovecot_correlation_job()
+        _reschedule_geoip_job()
+        _reschedule_quarantine_rules_job()
+
+        # A new time zone moves every clock-time job now, not at the next restart
+        apply_app_time_zone()
 
     except Exception as e:
         logger.warning("Failed to reschedule interval jobs: %s", e)
@@ -138,7 +151,7 @@ def _reschedule_smtp_abuse_job():
     if settings.smtp_abuse_enabled and mailcow_api.has_rw_key:
         scheduler.add_job(
             smtp_abuse_job,
-            trigger=IntervalTrigger(minutes=1),
+            trigger=every(minutes=1),
             id='smtp_abuse',
             name='SMTP Abuse Protection',
             replace_existing=True,
@@ -161,7 +174,7 @@ def _reschedule_anomaly_job():
     if settings.anomaly_detection_enabled:
         scheduler.add_job(
             anomaly_detection_job,
-            trigger=IntervalTrigger(minutes=settings.anomaly_check_interval),
+            trigger=every(minutes=settings.anomaly_check_interval),
             id='anomaly_detection',
             name='Anomaly Detection',
             replace_existing=True,
@@ -176,6 +189,46 @@ def _reschedule_anomaly_job():
             pass
 
 
+def _reschedule_geoip_job():
+    """Add or remove the weekly GeoIP update when the MaxMind license is saved or removed."""
+    if not scheduler.running:
+        return
+    if is_license_configured():
+        scheduler.add_job(
+            update_geoip_database,
+            trigger=clock_trigger('update_geoip'),
+            id='update_geoip',
+            name='Update GeoIP',
+            replace_existing=True
+        )
+    else:
+        try:
+            scheduler.remove_job('update_geoip')
+        except Exception:
+            pass
+
+
+def _reschedule_quarantine_rules_job():
+    """Add, move or remove the quarantine rules job when settings are reloaded
+    (interval, the Read-Write key and the Quarantine feature can all change)."""
+    if not scheduler.running:
+        return
+    if settings.is_feature_enabled('quarantine') and mailcow_api.has_rw_key:
+        scheduler.add_job(
+            process_quarantine_rules_job,
+            trigger=every(minutes=settings.quarantine_rules_interval),
+            id='process_quarantine_rules',
+            name='Process Quarantine Rules',
+            replace_existing=True,
+            max_instances=1
+        )
+    else:
+        try:
+            scheduler.remove_job('process_quarantine_rules')
+        except Exception:
+            pass
+
+
 def _reschedule_dovecot_correlation_job():
     """
     Add or remove the Dovecot correlation job when settings are reloaded - it
@@ -186,7 +239,7 @@ def _reschedule_dovecot_correlation_job():
     if dovecot_correlation_available():
         scheduler.add_job(
             correlate_dovecot_logs,
-            trigger=IntervalTrigger(seconds=60),
+            trigger=every(seconds=60),
             id='correlate_dovecot',
             name='Correlate Dovecot Deliveries',
             replace_existing=True,
@@ -206,13 +259,13 @@ def _reschedule_suppression_jobs():
     if not scheduler.running:
         return
 
-    spam_enabled = settings.is_feature_enabled('spam-filter') and settings.suppression_enabled
+    spam_enabled = settings.is_feature_enabled('suppressions') and settings.suppression_enabled
 
     # detect_suppressions
     if spam_enabled and settings.suppression_auto_detect:
         scheduler.add_job(
             detect_suppressions_job,
-            trigger=IntervalTrigger(minutes=5),
+            trigger=every(minutes=5),
             id='detect_suppressions',
             name='Detect Suppressions',
             replace_existing=True,
@@ -225,11 +278,12 @@ def _reschedule_suppression_jobs():
         except Exception:
             pass
 
-    # sync_suppressions
-    if spam_enabled and settings.suppression_rspamd_sync and settings.is_rspamd_configured:
+    # sync_suppressions: keeps the list and the app's Rspamd blocks in step
+    # while "Sync with Rspamd" is on
+    if settings.is_feature_enabled('suppressions') and settings.suppression_rspamd_sync and settings.is_rspamd_configured:
         scheduler.add_job(
             sync_suppressions_to_rspamd_job,
-            trigger=IntervalTrigger(minutes=10),
+            trigger=every(minutes=10),
             id='sync_suppressions',
             name='Sync Suppressions to Rspamd',
             replace_existing=True,
@@ -246,7 +300,7 @@ def _reschedule_suppression_jobs():
     if spam_enabled:
         scheduler.add_job(
             expire_suppressions_job,
-            trigger=IntervalTrigger(hours=1),
+            trigger=every(hours=1),
             id='expire_suppressions',
             name='Expire Suppressions',
             replace_existing=True,
@@ -263,7 +317,7 @@ def _reschedule_suppression_jobs():
     if spam_enabled and settings.queue_cleanup_enabled and mailcow_api.has_rw_key:
         scheduler.add_job(
             cleanup_deferred_queue_job,
-            trigger=IntervalTrigger(minutes=5),
+            trigger=every(minutes=5),
             id='cleanup_deferred_queue',
             name='Cleanup Deferred Queue',
             replace_existing=True,
@@ -282,12 +336,15 @@ job_status = {
     'complete_correlations': {'last_run': None, 'status': 'idle', 'error': None},
     'update_final_status': {'last_run': None, 'status': 'idle', 'error': None},
     'expire_correlations': {'last_run': None, 'status': 'idle', 'error': None},
+    'feature_data_sweep': {'last_run': None, 'status': 'idle', 'error': None},
+    'trend_samples': {'last_run': None, 'status': 'idle', 'error': None},
     'correlate_dovecot': {'last_run': None, 'status': 'idle', 'error': None},
     'cleanup_logs': {'last_run': None, 'status': 'idle', 'error': None},
     'cleanup_dmarc_reports': {'last_run': None, 'status': 'idle', 'error': None},
     'check_app_version': {'last_run': None, 'status': 'idle', 'error': None},
     'dns_check': {'last_run': None, 'status': 'idle', 'error': None},
     'update_geoip': {'last_run': None, 'status': 'idle', 'error': None},
+    'check_credentials': {'last_run': None, 'status': 'idle', 'error': None},
     'dmarc_imap_sync': {'last_run': None, 'status': 'idle', 'error': None},
     'mailbox_stats': {'last_run': None, 'status': 'idle', 'error': None},
     'alias_stats': {'last_run': None, 'status': 'idle', 'error': None},
@@ -303,11 +360,21 @@ job_status = {
     'cleanup_deferred_queue': {'last_run': None, 'status': 'idle', 'error': None},
     'anomaly_detection': {'last_run': None, 'status': 'idle', 'error': None},
     'smtp_abuse': {'last_run': None, 'status': 'idle', 'error': None},
+    'protection_rules': {'last_run': None, 'status': 'idle', 'error': None},
+    'eas_devices': {'last_run': None, 'status': 'idle', 'error': None},
+    'cleanup_eas_devices': {'last_run': None, 'status': 'idle', 'error': None},
 }
 
 # Number of hosts that were listed on actionable blacklists in the previous blacklist check run (for "cleared" notification)
 _blacklist_last_listed_actionable_count = 0
 _blacklist_check_lock = asyncio.Lock()
+
+# Returned by a job that skipped because another run of it holds its lock; that
+# run sets the job status when it ends, so a manual run must not mark it done
+JOB_SKIPPED = "skipped"
+# Returned by a job that sets its own final status, failures included: a
+# manual run must not overwrite it
+JOB_STATUS_SET = "status_set"
 
 def update_job_status(job_name: str, status: str, error: str = None):
     """Update job execution status"""
@@ -431,12 +498,73 @@ def get_app_version_cache():
     """Get app version cache (for API endpoint)"""
     return app_version_cache
 
+# Constructed in UTC: without an explicit zone APScheduler asks the container
+# for its own (tzlocal), which raises on an unknown TZ and stopped the app at
+# import. start_scheduler() switches to the app's zone (app_time).
 scheduler = AsyncIOScheduler(
+    timezone=UTC,
     job_defaults={
         'misfire_grace_time': 30,
         'coalesce': True,
     }
 )
+
+# Jobs that run at a clock time, in the app's time zone, never the container's
+CLOCK_JOBS = {
+    'cleanup_logs': {'hour': 2, 'minute': 0},
+    'cleanup_dmarc_reports': {'hour': 2, 'minute': 15},
+    'update_geoip': {'day_of_week': 'sun', 'hour': 3, 'minute': 0},
+    'cleanup_eas_devices': {'hour': 3, 'minute': 30},
+    'blacklist_check': {'hour': 5, 'minute': 0},
+    'send_weekly_summary': {'day_of_week': 'mon', 'hour': 9, 'minute': 0},
+    'cleanup_raw_logs': {'hour': 3, 'minute': 0},  # raw_logs_worker.py
+}
+_WEEKDAY_NAMES = {'mon': 'Monday', 'sun': 'Sunday'}
+
+
+def every(**interval) -> IntervalTrigger:
+    """An interval trigger. Its zone does not change when it fires, but it has
+    to be given: otherwise APScheduler asks tzlocal, which raises on an unknown TZ."""
+    return IntervalTrigger(timezone=UTC, **interval)
+
+
+def clock_trigger(job_id: str) -> CronTrigger:
+    """The trigger of a clock-time job, in the app's time zone."""
+    return CronTrigger(timezone=app_tz(), **CLOCK_JOBS[job_id])
+
+
+def clock_schedule(job_id: str) -> str:
+    """When a clock-time job runs, as the server writes it: 'Daily at 02:00 (Europe/Berlin)'."""
+    spec = CLOCK_JOBS[job_id]
+    at = format_clock(spec['hour'], spec['minute'])
+    day = spec.get('day_of_week')
+    when = f"Weekly, {_WEEKDAY_NAMES[day]} at {at}" if day else f"Daily at {at}"
+    return f"{when} ({app_tz().key})"
+
+
+def clock_parts(job_id: str) -> dict:
+    """When a clock-time job runs, as parts: the jobs list writes the time
+    itself, so it follows the browser's clock when the setting says so."""
+    spec = CLOCK_JOBS[job_id]
+    day = spec.get('day_of_week')
+    return {'hour': spec['hour'], 'minute': spec['minute'],
+            'weekday': _WEEKDAY_NAMES[day] if day else None, 'zone': app_tz().key}
+
+
+def apply_app_time_zone() -> None:
+    """Move both schedulers, and every clock-time job they hold, to the app's
+    current time zone. Runs at start and after every settings save, so a new
+    zone takes effect at once."""
+    from .raw_logs_worker import raw_logs_scheduler
+    zone = app_tz()
+    for sched in (scheduler, raw_logs_scheduler):
+        sched.timezone = zone
+        if not sched.running:
+            continue
+        for job in sched.get_jobs():
+            if job.id in CLOCK_JOBS and str(job.trigger.timezone) != zone.key:
+                sched.reschedule_job(job.id, trigger=clock_trigger(job.id))
+                logger.info(f"[SCHEDULER] {job.id}: {clock_schedule(job.id)}")
 
 seen_postfix: Set[str] = set()
 _postfix_ingest_lock = threading.Lock()
@@ -481,6 +609,40 @@ def is_blacklisted(email: Optional[str]) -> bool:
         logger.debug(f"Blacklist: blocking {email_lower}")
     
     return is_blocked
+
+
+def _column_length(model, name: str) -> Optional[int]:
+    column = model.__table__.columns.get(name)
+    return getattr(column.type, 'length', None) if column is not None else None
+
+
+def _fit_columns(model, values: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Cut every string value to the length of its column.
+
+    Addresses, Message-IDs and user names in mail logs are chosen by whoever
+    sends the mail or tries to log in. PostgreSQL rejects a value longer than
+    its VARCHAR column, and one such row used to roll back the whole page.
+    """
+    for name, value in values.items():
+        if isinstance(value, str):
+            length = _column_length(model, name)
+            if length and len(value) > length:
+                values[name] = value[:length]
+    return values
+
+
+def _fit_addresses(addresses):
+    """
+    Cut each address of an Rspamd recipient list to the address column
+    length. The list itself is JSON, but correlation copies its first entry
+    into MessageCorrelation.recipient, and an over-long one failed that
+    message's correlation on every run.
+    """
+    if not isinstance(addresses, list):
+        return addresses
+    length = _column_length(MessageCorrelation, 'recipient')
+    return [a[:length] if isinstance(a, str) and length else a for a in addresses]
 
 
 # Cache for log discovery results to avoid expensive binary search on every cycle
@@ -629,6 +791,9 @@ def _store_postfix_page(logs):
         page_status_queue_ids = set()
         page_skipped = 0
         page_blacklisted = 0
+        # Entries join the duplicate cache only after the page is committed;
+        # a failed commit must leave the page to be retried next cycle.
+        page_seen: Set[str] = set()
 
         with get_db_context() as db:
             blacklisted_queue_ids: Set[str] = set()
@@ -686,7 +851,7 @@ def _store_postfix_page(logs):
                     message = log_entry.get('message', '')
                     unique_id = f"{time_str}:{message[:100]}"
 
-                    if unique_id in seen_postfix:
+                    if unique_id in seen_postfix or unique_id in page_seen:
                         page_skipped += 1
                         continue
 
@@ -695,7 +860,7 @@ def _store_postfix_page(logs):
 
                     if queue_id and queue_id in blacklisted_queue_ids:
                         page_blacklisted += 1
-                        seen_postfix.add(unique_id)
+                        page_seen.add(unique_id)
                         continue
 
                     # Parse timestamp with timezone
@@ -708,14 +873,14 @@ def _store_postfix_page(logs):
                     time_val = int(log_entry.get('time', 0))
                     db_key = f"{time_val}|{log_entry.get('program', '')}|{queue_id or ''}|{message}"
                     if db_key in existing_in_db:
-                        seen_postfix.add(unique_id)
+                        page_seen.add(unique_id)
                         page_skipped += 1
                         continue
 
                     sender = parsed.get('sender')
                     recipient = parsed.get('recipient')
 
-                    postfix_log = PostfixLog(
+                    postfix_log = PostfixLog(**_fit_columns(PostfixLog, dict(
                         time=timestamp,
                         program=log_entry.get('program'),
                         priority=log_entry.get('priority'),
@@ -729,10 +894,10 @@ def _store_postfix_page(logs):
                         delay=parsed.get('delay'),
                         dsn=parsed.get('dsn'),
                         raw_data=log_entry
-                    )
+                    )))
 
                     db.add(postfix_log)
-                    seen_postfix.add(unique_id)
+                    page_seen.add(unique_id)
                     page_new += 1
 
                     if queue_id and parsed.get('status') in PUSH_TRIGGER_STATUSES:
@@ -743,6 +908,7 @@ def _store_postfix_page(logs):
                     continue
 
             db.commit()
+            seen_postfix.update(page_seen)
 
             # The outcome of these queues just changed. Refresh only those
             # correlations, so a delivery that lands after the correlation age
@@ -864,6 +1030,9 @@ def _store_rspamd_page(logs):
         page_new = 0
         page_skipped = 0
         page_blacklisted = 0
+        # Entries join the duplicate cache only after the page is committed
+        page_seen: Set[str] = set()
+        message_id_max = _column_length(RspamdLog, 'message_id')
 
         with get_db_context() as db:
             blacklisted_message_ids: Set[str] = set()
@@ -892,26 +1061,30 @@ def _store_rspamd_page(logs):
                     message_id = log_entry.get('message-id', '')
                     if message_id == 'undef' or not message_id:
                         message_id = None
+                    elif isinstance(message_id, str):
+                        # Cut here, not only at the model: the duplicate key
+                        # and the blacklist cleanup must use the stored value
+                        message_id = message_id[:message_id_max]
                     sender = log_entry.get('sender_smtp')
                     recipients = log_entry.get('rcpt_smtp', [])
 
                     unique_id = f"{unix_time}:{message_id if message_id else 'no-id'}"
 
-                    if unique_id in seen_rspamd or unique_id in existing_in_db:
-                        seen_rspamd.add(unique_id)
+                    if unique_id in seen_rspamd or unique_id in existing_in_db or unique_id in page_seen:
+                        page_seen.add(unique_id)
                         page_skipped += 1
                         continue
 
                     if is_blacklisted(sender):
                         page_blacklisted += 1
-                        seen_rspamd.add(unique_id)
+                        page_seen.add(unique_id)
                         if message_id:
                             blacklisted_message_ids.add(message_id)
                         continue
 
                     if recipients and any(is_blacklisted(r) for r in recipients):
                         page_blacklisted += 1
-                        seen_rspamd.add(unique_id)
+                        page_seen.add(unique_id)
                         if message_id:
                             blacklisted_message_ids.add(message_id)
                         continue
@@ -919,13 +1092,13 @@ def _store_rspamd_page(logs):
                     timestamp = datetime.fromtimestamp(unix_time, tz=timezone.utc)
                     direction = detect_direction(log_entry)
 
-                    rspamd_log = RspamdLog(
+                    rspamd_log = RspamdLog(**_fit_columns(RspamdLog, dict(
                         time=timestamp,
                         message_id=message_id,
                         sender_smtp=sender,
                         sender_mime=log_entry.get('sender_mime', sender),
-                        recipients_smtp=recipients,
-                        recipients_mime=log_entry.get('rcpt_mime', recipients),
+                        recipients_smtp=_fit_addresses(recipients),
+                        recipients_mime=_fit_addresses(log_entry.get('rcpt_mime', recipients)),
                         subject=log_entry.get('subject'),
                         score=log_entry.get('score', 0.0),
                         required_score=log_entry.get('required_score', 15.0),
@@ -941,7 +1114,7 @@ def _store_rspamd_page(logs):
                         user=log_entry.get('user'),
                         size=log_entry.get('size'),
                         raw_data=log_entry
-                    )
+                    )))
 
                     if geoip_service.is_geoip_available() and rspamd_log.ip:
                         geo_info = geoip_service.lookup_ip(rspamd_log.ip)
@@ -952,7 +1125,7 @@ def _store_rspamd_page(logs):
                         rspamd_log.asn_org = geo_info.get('asn_org')
 
                     db.add(rspamd_log)
-                    seen_rspamd.add(unique_id)
+                    page_seen.add(unique_id)
                     page_new += 1
 
                 except Exception as e:
@@ -960,18 +1133,38 @@ def _store_rspamd_page(logs):
                     continue
 
             if blacklisted_message_ids:
-                correlations_to_delete = db.query(MessageCorrelation).filter(
+                # The Message-ID only finds candidates: senders choose it, so
+                # an unrelated message can share it. Remove a correlation (and
+                # its queue's Postfix lines) only when that message itself
+                # involves a listed address.
+                candidates = db.query(MessageCorrelation).filter(
                     MessageCorrelation.message_id.in_(blacklisted_message_ids)
                 ).all()
+                candidate_queues = {c.queue_id for c in candidates if c.queue_id}
+                listed_queues = set()
+                if candidate_queues:
+                    for queue_id, p_sender, p_recipient in db.query(
+                        PostfixLog.queue_id, PostfixLog.sender, PostfixLog.recipient
+                    ).filter(PostfixLog.queue_id.in_(candidate_queues)).all():
+                        if is_blacklisted(p_sender) or is_blacklisted(p_recipient):
+                            listed_queues.add(queue_id)
+
+                correlations_to_delete = [
+                    c for c in candidates
+                    if is_blacklisted(c.sender) or is_blacklisted(c.recipient)
+                    or (c.queue_id and c.queue_id in listed_queues)
+                ]
 
                 queue_ids_to_delete = set()
                 for corr in correlations_to_delete:
                     if corr.queue_id:
                         queue_ids_to_delete.add(corr.queue_id)
 
-                deleted_corr = db.query(MessageCorrelation).filter(
-                    MessageCorrelation.message_id.in_(blacklisted_message_ids)
-                ).delete(synchronize_session=False)
+                deleted_corr = 0
+                if correlations_to_delete:
+                    deleted_corr = db.query(MessageCorrelation).filter(
+                        MessageCorrelation.id.in_([c.id for c in correlations_to_delete])
+                    ).delete(synchronize_session=False)
 
                 if queue_ids_to_delete:
                     deleted_postfix = db.query(PostfixLog).filter(
@@ -985,6 +1178,7 @@ def _store_rspamd_page(logs):
                     logger.info(f"[BLACKLIST] Deleted {deleted_corr} correlations for blacklisted message IDs")
 
             db.commit()
+            seen_rspamd.update(page_seen)
         return page_new, page_skipped, page_blacklisted
 
 
@@ -1104,6 +1298,8 @@ def _store_netfilter_logs(logs):
         with get_db_context() as db:
             new_count = 0
             skipped_count = 0
+            # Entries join the duplicate cache only after the batch is committed
+            batch_seen: Set[str] = set()
             
             for log_entry in logs:
                 try:
@@ -1112,7 +1308,7 @@ def _store_netfilter_logs(logs):
                     priority = log_entry.get('priority', 'info')
                     unique_id = f"{time_val}:{priority}:{message}"
                     
-                    if unique_id in seen_netfilter:
+                    if unique_id in seen_netfilter or unique_id in batch_seen:
                         skipped_count += 1
                         continue
                     
@@ -1125,12 +1321,12 @@ def _store_netfilter_logs(logs):
                     
                     if existing:
                         skipped_count += 1
-                        seen_netfilter.add(unique_id)
+                        batch_seen.add(unique_id)
                         continue
                     
                     parsed = parse_netfilter_message(message, priority=priority)
                     
-                    netfilter_log = NetfilterLog(
+                    netfilter_log = NetfilterLog(**_fit_columns(NetfilterLog, dict(
                         time=timestamp,
                         priority=priority,
                         message=message,
@@ -1141,7 +1337,7 @@ def _store_netfilter_logs(logs):
                         rule_id=parsed.get('rule_id'),
                         attempts_left=parsed.get('attempts_left'),
                         raw_data=log_entry
-                    )
+                    )))
                     
                     # Enrich with GeoIP data at import time
                     if geoip_service.is_geoip_available() and netfilter_log.ip:
@@ -1153,7 +1349,7 @@ def _store_netfilter_logs(logs):
                         netfilter_log.asn_org = geo_info.get('asn_org')
                     
                     db.add(netfilter_log)
-                    seen_netfilter.add(unique_id)
+                    batch_seen.add(unique_id)
                     new_count += 1
                     
                 except Exception as e:
@@ -1161,6 +1357,7 @@ def _store_netfilter_logs(logs):
                     continue
             
             db.commit()
+            seen_netfilter.update(batch_seen)
             
             if new_count > 0:
                 logger.info(f"[OK] Imported {new_count} Netfilter logs (skipped {skipped_count} duplicates)")
@@ -1184,8 +1381,14 @@ async def fetch_all_logs():
         ]
         if settings.is_feature_enabled('netfilter'):
             tasks.append(fetch_and_store_netfilter())
-        
-        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # The protection rules must not read the netfilter lines while this
+        # fetch is still storing them, or they would skip ids not yet committed
+        async with _protection_lock:
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            protection_due = settings.is_feature_enabled('netfilter')
+            if protection_due:
+                await _run_protection_rules_locked()
         
         log_types = ["Postfix", "Rspamd"]
         if settings.is_feature_enabled('netfilter'):
@@ -1197,6 +1400,7 @@ async def fetch_all_logs():
         
         logger.debug("[FETCH] Completed fetch_all_logs")
         update_job_status('fetch_logs', 'success')
+
     
     except asyncio.CancelledError:
         logger.info("[FETCH] Log fetch cancelled (application shutting down)")
@@ -1205,6 +1409,151 @@ async def fetch_all_logs():
         update_job_status('fetch_logs', 'failed', str(e))
         logger.error(f"[ERROR] Fetch all logs error: {e}", exc_info=True)
 
+
+
+# ---------------------------------------------------------------------------
+# Protection rules (watch mode): what the rules would ban and why
+# ---------------------------------------------------------------------------
+
+_protection_context_cache = {'at': None, 'context': None}
+_PROTECTION_CONTEXT_TTL = timedelta(minutes=5)
+
+
+async def _protection_context():
+    """The Fail2ban allowlist and the server's own addresses, read at most every few minutes."""
+    from .services.protection_rules import ProtectionContext
+    cached = _protection_context_cache
+    if cached['context'] is not None and cached['at'] and datetime.utcnow() - cached['at'] < _PROTECTION_CONTEXT_TTL:
+        return cached['context']
+    allowlist, protected = [], set()
+    try:
+        f2b = await mailcow_api.get_fail2ban() or {}
+        allowlist = [e.strip() for e in re.split(r'[\s,]+', str(f2b.get('whitelist') or '')) if e.strip()]
+    except Exception as e:
+        logger.warning(f"Protection rules: could not read the Fail2ban allowlist: {e}")
+    try:
+        host_ip = await mailcow_api.get_status_host_ip()
+        if host_ip:
+            protected.add(host_ip)
+    except Exception as e:
+        logger.warning(f"Protection rules: could not read the mailcow host address: {e}")
+    try:
+        import ipaddress as _ipaddress
+        with get_db_context() as db:
+            for (hostname,) in db.query(MonitoredHost.hostname).filter(MonitoredHost.active.is_(True)).all():
+                try:
+                    protected.add(str(_ipaddress.ip_address(hostname)))
+                except ValueError:
+                    continue  # a host name, not an address
+    except Exception as e:
+        logger.warning(f"Protection rules: could not read the monitored hosts: {e}")
+    context = ProtectionContext(allowlist=allowlist, protected_ips=protected)
+    _protection_context_cache.update({'at': datetime.utcnow(), 'context': context})
+    return context
+
+
+def _run_protection_rules_sync(context):
+    """Evaluate the rules; returns the new breach alerts to notify about."""
+    from .services import protection_rules
+    with get_db_context() as db:
+        created = protection_rules.evaluate(db, context)
+        notify_on = protection_rules.load_rules(db)['breach'].get('notify', True)
+        return [(h.ip, h.rule, h.reason) for h in created if h.rule == 'breach' and notify_on]
+
+
+def _notify_protection(banned, failed, alerts):
+    """One message per run about what the protection rules did."""
+    from .services.notification_service import notify
+    from .services import email_layout as e
+
+    def addresses(n):
+        return f'{n} address{"es" if n != 1 else ""}'
+
+    lines = []
+    if alerts:
+        lines.append('Possible stolen password:')
+        lines += [f'  {reason} ({ip})' for ip, rule, reason in alerts]
+    if banned:
+        lines.append(f'Banned {addresses(len(banned))}:')
+        lines += [f'  {ip}: {reason}' for ip, rule, reason, _ in banned]
+    if failed:
+        lines.append(f'Could not ban {addresses(len(failed))}; the next run tries again:')
+        lines += [f'  {ip}: {reason}' for ip, rule, reason, _ in failed]
+    if not lines:
+        return
+    subject = 'Possible stolen password' if alerts else 'Protection rules banned addresses' if banned else 'Protection rules could not ban'
+    review = 'Review them on the Security page, Overview tab.'
+    lines.append('')
+    lines.append(review)
+
+    done = []
+    if banned:
+        done.append(f'banned {addresses(len(banned))}')
+    if failed:
+        done.append(f'could not ban {addresses(len(failed))}')
+    intro = ' '.join(filter(None, [
+        'A mailbox may be used by someone else.' if alerts else '',
+        f'The protection rules {" and ".join(done)}.' if done else '',
+    ]))
+    blocks = [e.banner('fail', reason, f'Address: {ip}') for ip, rule, reason in alerts]
+    if banned:
+        blocks.append(e.panel('Banned', e.table(
+            ['Address', 'Reason'], [[e.mono(ip), reason] for ip, rule, reason, _ in banned]), count=len(banned)))
+    if failed:
+        blocks.append(e.panel('Could not ban', e.table(
+            ['Address', 'Reason'], [[e.mono(ip), reason] for ip, rule, reason, _ in failed]),
+            count=len(failed), note='The next run tries again.'))
+    blocks.append(e.paragraph(review, muted=True))
+    html = e.render(title=subject, topic='Security', tone='fail' if alerts or failed else 'warn',
+                    intro=intro or None, blocks=blocks,
+                    footer='The protection rules are set on the Security page, Settings tab.')
+    notify(subject, '\n'.join(lines), html_content=html, alert_type='security')
+
+
+_protection_lock = asyncio.Lock()
+
+
+async def run_protection_rules():
+    """Evaluate the protection rules (the Status page Run button); waits for a fetch in progress."""
+    async with _protection_lock:
+        await _run_protection_rules_locked()
+
+
+async def _run_protection_rules_locked():
+    """Evaluate the protection rules on the netfilter lines read since the last run. Hold _protection_lock."""
+    from .services.protection_rules import ProtectionContext, RULE_NAMES, load_rules
+    update_job_status('protection_rules', 'running')
+    try:
+        with get_db_context() as db:
+            rules = load_rules(db)
+        # With every rule off only the reading moves on; no call to mailcow is needed
+        active = any(rules[name]['enabled'] for name in RULE_NAMES)
+        context = await _protection_context() if active else ProtectionContext()
+        # The breach alert reads its logins even with the rule off, so turning it on never reaches back
+        context = ProtectionContext(
+            allowlist=context.allowlist, protected_ips=context.protected_ips,
+            geoip=geoip_service.is_geoip_available(),
+            raw_logs='dovecot' in settings.raw_logs_collected_list,
+        )
+        alerts = await asyncio.to_thread(_run_protection_rules_sync, context)
+        banned, failed = [], []
+        if mailcow_api.has_rw_key:
+            from .services.protection_rules import enforce
+            # Bans reviewed by hand and bans that ended are written even with every rule off
+            result = await enforce(mailcow_api)
+            banned = [b for b in result['banned'] if b[3]]
+            failed = [f for f in result['failed'] if isinstance(f, tuple) and f[3]]
+        if alerts or banned or failed:
+            try:
+                await asyncio.to_thread(_notify_protection, banned, failed, alerts)
+            except Exception as e:
+                logger.warning(f"Protection rules: could not send the notification: {e}")
+        update_job_status('protection_rules', 'success')
+    except asyncio.CancelledError:
+        raise
+    except Exception as e:
+        update_job_status('protection_rules', 'failed', str(e))
+        logger.error(f"[ERROR] Protection rules failed: {e}", exc_info=True)
 
 
 async def cleanup_blacklisted_queues():
@@ -1366,14 +1715,11 @@ _dovecot_correlation_lock = threading.Lock()
 
 def dovecot_correlation_available() -> bool:
     """
-    Dovecot correlation reads the raw logs the Live Logs worker already ingests,
-    so it is only possible while that worker actually collects Dovecot.
+    Dovecot correlation reads the raw logs the raw logs worker ingests. Dovecot
+    is among the services collected for other pages (raw_logs_required), so
+    this holds with the Logs page off too.
     """
-    return (
-        settings.is_feature_enabled('logs')
-        and settings.raw_logs_enabled
-        and 'dovecot' in settings.raw_logs_services_list
-    )
+    return 'dovecot' in settings.raw_logs_collected_list
 
 
 def _apply_dovecot_verdict(correlation: MessageCorrelation) -> None:
@@ -1409,12 +1755,28 @@ def _leg_for_dovecot_event(
     """
     recipient = (event.get('recipient') or '').strip().lower()
     if recipient:
-        for leg in legs:
-            if (leg.recipient or '').strip().lower() == recipient:
-                return leg
+        matches = [leg for leg in legs if (leg.recipient or '').strip().lower() == recipient]
+        if len(matches) > 1:
+            return _latest_leg_before(matches, event.get('time'))
+        if matches:
+            return matches[0]
     if len(legs) == 1:
         return legs[0]
     return None
+
+
+def _latest_leg_before(legs: List[MessageCorrelation], when: Optional[datetime]) -> MessageCorrelation:
+    """
+    Several legs share the recipient, as a message rejected into quarantine and
+    its later release do. A leg that was rejected or bounced never reached
+    Dovecot, so the line belongs to one that was not; among those, to the
+    latest one that had started by the time Dovecot logged it.
+    """
+    reached = [leg for leg in legs if leg.final_status not in ('rejected', 'bounced')] or legs
+    started = [leg for leg in reached if leg.first_seen and (when is None or leg.first_seen <= when)]
+    if started:
+        return max(started, key=lambda leg: leg.first_seen)
+    return min(reached, key=lambda leg: leg.first_seen or datetime.max)
 
 
 async def correlate_dovecot_logs():
@@ -1603,6 +1965,53 @@ def _persist_geoip_license_status():
         })
 
 
+CREDENTIAL_CHECK_HOURS = 6
+_credential_check_runs = 0  # the latest run reports the status, not an older one finishing late
+# What a failed check says on Status, by credential
+_CREDENTIAL_LABELS = {'mailcow_rw_key': 'Read-Write API key', 'rspamd_password': 'Rspamd password'}
+
+
+async def check_credentials_job():
+    """Check that mailcow accepts the Read-Write API key and Rspamd the
+    password, the same check as Validate in Settings > Mailcow, for each one
+    that is set (also from the environment). The result is kept for the
+    current key or password, so the page shows it without a click; a key
+    revoked in mailcow shows as a problem on Status within hours. Changes
+    nothing in mailcow."""
+    from .routers.settings import _CREDENTIAL_CHECKS, _validate_credential
+    global _credential_check_runs
+    names = [name for name, check in _CREDENTIAL_CHECKS.items() if check["configured"]()]
+    if not names:
+        return
+    _credential_check_runs += 1
+    run = _credential_check_runs
+    update_job_status('check_credentials', 'running')
+    failed = []
+    for name in names:
+        try:
+            result = await _validate_credential(name)
+        except Exception as e:
+            logger.warning(f"[CREDENTIALS] Could not check the {_CREDENTIAL_LABELS[name]}: {e}")
+            failed.append(f"the {_CREDENTIAL_LABELS[name]} could not be checked")
+            continue
+        if result.get("stale"):
+            continue  # changed meanwhile: the check of the new value says it
+        if result.get("configured") and not result.get("valid"):
+            reason = {'connection': 'could not be reached', 'rejected': 'was rejected',
+                      'read_only': 'has no write access'}.get(result.get("error"), 'was not accepted')
+            failed.append(f"the {_CREDENTIAL_LABELS[name]} {reason}")
+    if run != _credential_check_runs:
+        # A newer run (a manual one, say) started meanwhile: its result is the one to show
+        return JOB_STATUS_SET
+    if failed:
+        message = '; '.join(failed)
+        update_job_status('check_credentials', 'failed', message[0].upper() + message[1:] + '. See Settings > Mailcow.')
+    else:
+        update_job_status('check_credentials', 'success')
+    # A manual run keeps this status (a rejected key stays failed)
+    return JOB_STATUS_SET
+
+
 async def update_geoip_database():
     """Background job: Update GeoIP databases"""
     from .services.geoip_downloader import (
@@ -1652,6 +2061,29 @@ async def update_geoip_database():
         update_job_status('update_geoip', 'failed', str(e))
 
 
+_BLACKLIST_TODO = ("Find out why the host was listed and fix the cause, then ask each blacklist to remove it. "
+                   "You get another email when fewer hosts are listed.")
+_BLACKLIST_FOOTER = "Blacklist alerts go to the address set in Settings, Notifications."
+
+
+def _blacklist_alert_host_html(display_name, extra_info, listed_count, listed_bls) -> str:
+    """
+    One host panel of the blacklist alert email. Host names come from the
+    mailcow transports and relayhosts and the blacklist entries from the
+    check results; email_layout escapes every value.
+    """
+    from .services import email_layout as e
+    return e.panel(
+        display_name,
+        e.kv([('Listed on', f"{listed_count} blacklist{'s' if listed_count != 1 else ''}", 'fail')]),
+        e.table(['Blacklist', 'Zone', ''], [
+            [bl.get('name', ''), e.mono(bl.get('zone', '')), e.link('Look up', bl.get('info_url'))]
+            for bl in listed_bls
+        ]),
+        note=str(extra_info).strip().strip('()') or None,
+    )
+
+
 async def check_monitored_hosts_job(force: bool = False, send_notification: bool = True):
     """
     Background job: Check all monitored hosts against DNS blacklists
@@ -1670,7 +2102,7 @@ async def check_monitored_hosts_job(force: bool = False, send_notification: bool
     # listed-count used for cleared/improved notifications - never overlap.
     if _blacklist_check_lock.locked():
         logger.info("[BLACKLIST] Check already in progress, skipping this trigger")
-        return
+        return JOB_SKIPPED
     async with _blacklist_check_lock:
         await _run_check_monitored_hosts(force, send_notification)
 
@@ -1786,7 +2218,7 @@ async def _run_check_monitored_hosts(force: bool, send_notification: bool):
             for host_data in listed_hosts:
                 results = host_data.get('results', {}).get('results', [])
                 for res in results:
-                    if res.get('listed') and res.get('name') not in IGNORED_NOTIFICATION_BLACKLISTS:
+                    if res.get('listed') and not res.get('ignored') and res.get('name') not in IGNORED_NOTIFICATION_BLACKLISTS:
                         actionable_listed_hosts.append(host_data)
                         break
             actionable_count = len(actionable_listed_hosts)
@@ -1806,14 +2238,18 @@ async def _run_check_monitored_hosts(force: bool, send_notification: bool):
 
                 # Notification destinations must fire even with no email configured
                 if notification_email or any_channel_configured():
-                    # Build aggregated email content
-                    subject = f"⚠️ ALERT: {len(listed_hosts)} Host(s) Listed on Blacklists"
-                    
-                    text_content = f"The following hosts have been detected on one or more blacklists:\n\n"
+                    # Build aggregated email content. A host listed only on
+                    # lists that never alert is neither counted nor shown.
+                    many = actionable_count != 1
+                    title = f"{actionable_count} host{'s are' if many else ' is'} on a blacklist"
+                    subject = f"Blacklist: {title}"
+                    intro = f"Servers that use these blacklists may reject or junk mail from {'these hosts' if many else 'this host'}."
+
+                    text_content = f"{title}. {intro}\n\n"
                     
                     html_rows = ""
                     
-                    for host_data in listed_hosts:
+                    for host_data in actionable_listed_hosts:
                         hostname = host_data['hostname']
                         ip = host_data['ip']
                         source = host_data.get('source', '')
@@ -1839,7 +2275,7 @@ async def _run_check_monitored_hosts(force: bool, send_notification: bool):
                                 extra_info = f" ({ip})"
 
                         # Get specific blacklists
-                        listed_bls = [r for r in results.get('results', []) if r.get('listed')]
+                        listed_bls = [r for r in results.get('results', []) if r.get('listed') and not r.get('ignored')]
                         bl_text_list = "\n".join([f"  - {bl['name']} ({bl['zone']})" for bl in listed_bls])
                         
                         text_content += f"Host: {display_name}{extra_info}\n"
@@ -1847,37 +2283,15 @@ async def _run_check_monitored_hosts(force: bool, send_notification: bool):
                         text_content += f"Blacklists:\n{bl_text_list}\n\n"
                         
                         # HTML Row
-                        bl_html_list = "".join([f'<li><strong>{bl["name"]}</strong> - {bl["zone"]} (<a href="{bl.get("info_url", "#")}">lookup</a>)</li>' for bl in listed_bls])
-                        
-                        html_rows += f"""
-                        <div style="margin-bottom: 30px; border-bottom: 1px solid #eee; padding-bottom: 20px;">
-                            <h3 style="margin: 0 0 10px 0;">{display_name} <span style="font-weight: normal; font-size: 14px; color: #666;">{extra_info}</span></h3>
-                            <div style="background-color: #fef2f2; border: 1px solid #fee2e2; border-radius: 4px; padding: 10px; margin-bottom: 10px;">
-                                <strong style="color: #dc2626;">Listed on {listed_count} blacklist(s)</strong>
-                            </div>
-                            <ul style="margin-top: 5px;">
-                                {bl_html_list}
-                            </ul>
-                        </div>
-                        """
+                        html_rows += _blacklist_alert_host_html(display_name, extra_info, listed_count, listed_bls)
 
-                    text_content += "Action Required:\nPlease investigate and request removal from these blacklists to ensure email deliverability.\n\n"
-                    text_content += "This is an automated notification from mailcow Logs Viewer."
-                    
-                    html_content = f"""
-    <html>
-    <body style="font-family: Arial, sans-serif; padding: 20px; line-height: 1.5;">
-    <h2 style="color: #dc2626;">⚠️ Blacklist Alert</h2>
-    <p>The following hosts have been detected on blacklists:</p>
+                    text_content += f"What to do:\n{_BLACKLIST_TODO}\n\n{_BLACKLIST_FOOTER}"
 
-    {html_rows}
-
-    <p style="color: #666; margin-top: 20px;">Please investigate and request removal from these blacklists to ensure email deliverability.</p>
-    <hr style="margin-top: 30px;">
-    <p style="color: #999; font-size: 12px;">This is an automated notification from mailcow Logs Viewer.</p>
-    </body>
-    </html>
-    """
+                    from .services import email_layout as e
+                    html_content = e.render(
+                        title=title, topic='Blacklist', tone='fail', intro=intro,
+                        blocks=[e.Safe(html_rows), e.banner('warn', 'What to do', _BLACKLIST_TODO)],
+                        footer=_BLACKLIST_FOOTER)
                     
                     # Send notification (in executor - smtplib/requests block the event loop)
                     logger.info("Sending blacklist alert (email + webhook)...")
@@ -1907,48 +2321,33 @@ async def _run_check_monitored_hosts(force: bool, send_notification: bool):
                 notification_email = get_notification_email(blacklist_alert_email)
                 from .services.notification_service import any_channel_configured
                 if notification_email or any_channel_configured():
+                    from .services import email_layout as e
                     if actionable_count == 0:
-                        subject = "✅ Blacklist Cleared - All Monitored Hosts Are Off Blacklists"
+                        subject = "Blacklist: all hosts are clear"
                         host_list = ", ".join(h["hostname"] for h in monitored_hosts)
-                        text_content = (
-                            "All monitored hosts are no longer listed on any (actionable) blacklists.\n\n"
-                            f"Monitored hosts: {host_list}\n\n"
-                            "This is an automated notification from mailcow Logs Viewer."
-                        )
-                        html_content = f"""
-    <html>
-    <body style="font-family: Arial, sans-serif; padding: 20px; line-height: 1.5;">
-    <h2 style="color: #16a34a;">✅ Blacklist Cleared</h2>
-    <p>All monitored hosts are no longer listed on any (actionable) blacklists.</p>
-    <p><strong>Monitored hosts:</strong> {host_list}</p>
-    <hr style="margin-top: 30px;">
-    <p style="color: #999; font-size: 12px;">This is an automated notification from mailcow Logs Viewer.</p>
-    </body>
-    </html>
-    """
+                        intro = "No monitored host is on a blacklist any more."
+                        text_content = f"{intro}\n\nMonitored hosts: {host_list}\n\n{_BLACKLIST_FOOTER}"
+                        html_content = e.render(
+                            title="All hosts are off the blacklists", topic='Blacklist', tone='ok', intro=intro,
+                            blocks=[e.panel('Monitored hosts', e.table(
+                                ['Host', 'Status'], [[h["hostname"], e.tag('Clean', 'ok')] for h in monitored_hosts]),
+                                count=len(monitored_hosts))],
+                            footer=_BLACKLIST_FOOTER)
                     else:
-                        subject = f"📉 Blacklist Improved - {prev_listed} → {actionable_count} Host(s) Listed"
+                        many = actionable_count != 1
+                        subject = f"Blacklist: {actionable_count} host{'s' if many else ''} still listed (was {prev_listed})"
                         still_listed = ", ".join(h["hostname"] for h in actionable_listed_hosts)
-                        text_content = (
-                            f"Fewer hosts are now listed on (actionable) blacklists.\n\n"
-                            f"Previously: {prev_listed} host(s) listed.\n"
-                            f"Now: {actionable_count} host(s) listed.\n\n"
-                            f"Still listed: {still_listed}\n\n"
-                            "This is an automated notification from mailcow Logs Viewer."
-                        )
-                        html_content = f"""
-    <html>
-    <body style="font-family: Arial, sans-serif; padding: 20px; line-height: 1.5;">
-    <h2 style="color: #2563eb;">📉 Blacklist Improved</h2>
-    <p>Fewer hosts are now listed on (actionable) blacklists.</p>
-    <p><strong>Previously:</strong> {prev_listed} host(s) listed.</p>
-    <p><strong>Now:</strong> {actionable_count} host(s) listed.</p>
-    <p><strong>Still listed:</strong> {still_listed}</p>
-    <hr style="margin-top: 30px;">
-    <p style="color: #999; font-size: 12px;">This is an automated notification from mailcow Logs Viewer.</p>
-    </body>
-    </html>
-    """
+                        intro = f"{actionable_count} host{'s are' if many else ' is'} still listed, down from {prev_listed}."
+                        text_content = f"{intro}\n\nStill listed: {still_listed}\n\n{_BLACKLIST_FOOTER}"
+                        html_content = e.render(
+                            title="Fewer hosts are on a blacklist", topic='Blacklist', tone='info', intro=intro,
+                            blocks=[
+                                e.stats([('Before', prev_listed), ('Now', actionable_count, 'fail')], per_row=2),
+                                e.panel('Still listed', e.table(
+                                    ['Host', 'Status'], [[h["hostname"], e.tag('Listed', 'fail')] for h in actionable_listed_hosts]),
+                                    count=actionable_count),
+                            ],
+                            footer=_BLACKLIST_FOOTER)
                     from .services.notification_service import notify
                     results = await asyncio.get_running_loop().run_in_executor(
                         _thread_pool_executor,
@@ -1996,8 +2395,6 @@ async def dmarc_imap_sync_job():
     if not settings.dmarc_imap_enabled:
         logger.debug("DMARC IMAP sync is disabled, skipping")
         return
-    
-    await asyncio.to_thread(_cleanup_stale_dmarc_syncs)
 
     # Start the current job
     update_job_status('dmarc_imap_sync', 'running')
@@ -2018,9 +2415,9 @@ async def dmarc_imap_sync_job():
             logger.error(f"DMARC IMAP sync failed: {error_msg}")
             update_job_status('dmarc_imap_sync', 'failed', error_msg)
             
-            # Send notification if needed
+            # Report the failures; the notification goes to the channels even without SMTP
             failed_emails = result.get('failed_emails')
-            if failed_emails and settings.notification_smtp_configured:
+            if failed_emails:
                 try:
                     await asyncio.get_running_loop().run_in_executor(
                         _thread_pool_executor,
@@ -2031,6 +2428,10 @@ async def dmarc_imap_sync_job():
         elif result.get('status') == 'disabled':
             logger.debug("DMARC IMAP sync is disabled")
             update_job_status('dmarc_imap_sync', 'disabled')
+        elif result.get('status') == 'already_running':
+            # Another import runs (Fetch reports, or an earlier run); it sets the status when it ends
+            logger.info("DMARC IMAP sync already running, skipped this run")
+            return JOB_SKIPPED
         else:
             # Sync finished successfully
             logger.info(f"DMARC IMAP sync completed: {result.get('reports_created', 0)} created")
@@ -2048,19 +2449,6 @@ async def dmarc_imap_sync_job():
 # =============================================================================
 # CLEANUP
 # =============================================================================
-
-def _cleanup_stale_dmarc_syncs():
-    """Keep best-effort stale-sync cleanup within a worker-owned session."""
-    try:
-        with SessionLocal() as db:
-            db.query(DMARCSync).filter(DMARCSync.status == 'running').update({
-                "status": "failed",
-                "error_message": "Stale job cleaned by scheduler"
-            })
-            db.commit()
-    except Exception as cleanup_err:
-        logger.warning(f"Background cleanup failed: {cleanup_err}")
-
 
 async def cleanup_old_logs():
     """Run retention database work in the configured scheduler worker pool."""
@@ -2576,6 +2964,91 @@ async def update_mailbox_statistics():
 
 
 # =============================================================================
+# ACTIVESYNC DEVICES
+# =============================================================================
+
+# ActiveSync lines read per batch; a backlog is worked off batch by batch
+EAS_DEVICES_BATCH_SIZE = 5000
+EAS_DEVICES_WATERMARK_KEY = 'eas_devices:last_raw_id'
+
+
+def _store_eas_devices() -> int:
+    """Record the devices in the SOGo rows the raw logs worker stored since
+    the last run. SOGo is among the services collected for other pages, so
+    this works with the Logs page off. Returns the device rows written."""
+    from .services.eas_devices import collect_devices, store_devices
+    written = 0
+    with get_db_context() as db:
+        mark_row = db.query(SystemSetting).filter(SystemSetting.key == EAS_DEVICES_WATERMARK_KEY).first()
+        try:
+            mark = int(mark_row.value) if mark_row and mark_row.value else 0
+        except (TypeError, ValueError):
+            mark = 0
+        while True:
+            rows = db.query(RawServiceLog.id, RawServiceLog.raw_data).filter(
+                RawServiceLog.service == 'sogo',
+                RawServiceLog.id > mark,
+                RawServiceLog.raw_data['message'].astext.like('%Microsoft-Server-ActiveSync%'),
+            ).order_by(RawServiceLog.id).limit(EAS_DEVICES_BATCH_SIZE).all()
+            if not rows:
+                break
+            written += store_devices(db, collect_devices(raw for _, raw in rows))
+            mark = rows[-1][0]
+            if mark_row is None:
+                mark_row = SystemSetting(key=EAS_DEVICES_WATERMARK_KEY, value=str(mark))
+                db.add(mark_row)
+            else:
+                mark_row.value = str(mark)
+            db.commit()
+            if len(rows) < EAS_DEVICES_BATCH_SIZE:
+                break
+    return written
+
+
+async def update_eas_devices():
+    """Record the ActiveSync devices in the newly stored SOGo lines. Runs every
+    minute; registered whatever the feature state, so turning Devices on in
+    Settings starts it without a restart."""
+    if not settings.is_feature_enabled('devices'):
+        return
+    update_job_status('eas_devices', 'running')
+    try:
+        stored = await asyncio.get_running_loop().run_in_executor(
+            get_thread_pool_executor(), _store_eas_devices
+        )
+        if stored:
+            logger.debug(f"[DEVICES] Recorded {stored} ActiveSync device(s)")
+        update_job_status('eas_devices', 'success')
+    except Exception as e:
+        logger.error(f"[DEVICES] Failed to update ActiveSync devices: {e}")
+        update_job_status('eas_devices', 'failed', str(e))
+
+
+def _cleanup_eas_devices_worker():
+    from .services.eas_devices import delete_stale_devices
+    with get_db_context() as db:
+        return delete_stale_devices(db, settings.eas_devices_retention_days)
+
+
+async def cleanup_eas_devices():
+    """Forget devices not seen for EAS_DEVICES_RETENTION_DAYS (daily)."""
+    if not settings.is_feature_enabled('devices'):
+        return
+    update_job_status('cleanup_eas_devices', 'running')
+    try:
+        deleted = await asyncio.get_running_loop().run_in_executor(
+            get_thread_pool_executor(), _cleanup_eas_devices_worker
+        )
+        if deleted:
+            logger.info(f"[DEVICES] Removed {deleted} device(s) not seen for "
+                        f"{settings.eas_devices_retention_days} days")
+        update_job_status('cleanup_eas_devices', 'success')
+    except Exception as e:
+        logger.error(f"[DEVICES] Cleanup failed: {e}")
+        update_job_status('cleanup_eas_devices', 'failed', str(e))
+
+
+# =============================================================================
 # ALIAS STATISTICS
 # =============================================================================
 
@@ -2944,25 +3417,92 @@ async def send_weekly_summary_email_job():
         logger.error(f"Weekly summary job failed: {e}")
         update_job_status('send_weekly_summary', 'failed', str(e))
 
-def _store_deferred_suppressions_worker(recipients_to_suppress):
-    """Persist deferred recipients within a worker-owned database session."""
-    unique_recipients = set(recipients_to_suppress)
+
+
+def _blocks_now(suppression) -> bool:
+    """Whether a block is in force now: active and not past its expiry."""
+    return bool(suppression.active) and (suppression.expires_at is None or suppression.expires_at > datetime.utcnow())
+
+
+def _list_writable(db) -> bool:
+    """Whether a job may add to the list now: it is kept (Suppressions and Sync
+    with Rspamd on) and no load of this app's blocks from Rspamd is owed.
+    Asked under the row lock, so a purge or a load does not run in between."""
+    from .routers.suppressions import import_pending
+    return rspamd_sync_on() and not import_pending(db)
+
+
+def _store_deferred_suppressions_worker(recipients_to_suppress, uncovered: Optional[set] = None):
+    """Persist deferred recipients within a worker-owned database session.
+
+    Each item is a recipient address, or a dict with the address ("email")
+    and the queue item it came from (queue_id, sender, arrived, reason), which
+    is kept as the block's details. An address counts once per run, however
+    many of its messages were stuck; each message is kept as its own event.
+
+    Runs before the messages are deleted, and again for the same messages when
+    that deletion failed: a message already kept for the address (same queue
+    id and arrival time) is not counted again. Returns the addresses counted.
+
+    A block loaded from Rspamd is not changed. When it does not block the
+    address now (disabled by hand), the address is added to uncovered: its
+    messages stay in the queue, since no block was stored for them.
+    """
+    items = [r if isinstance(r, dict) else {'email': r} for r in recipients_to_suppress]
+    by_email = {}
+    seen = set()
+    for item in items:
+        key = (item['email'], item.get('queue_id'), item.get('arrived'))
+        if item.get('queue_id') and key in seen:
+            continue  # the same recipient listed twice in one message
+        seen.add(key)
+        by_email.setdefault(item['email'], []).append(item)
     suppress_count = 0
+    captured = []
+    note = f'Deferred in queue > {settings.queue_cleanup_threshold_minutes}m'
 
     with get_db_context() as db:
-        for email in unique_recipients:
-            existing = db.query(SpamSuppression).filter(
-                SpamSuppression.email == email
-            ).first()
+        # One writer of the rows at a time: two runs cannot both find a message
+        # not yet kept, and the Rspamd sync never decides from rows changing here
+        lock_suppression_rows(db)
+        if not _list_writable(db):
+            # The sync went off (the list is deleted) or a load from Rspamd is
+            # still owed since this run started: no block is stored, so its
+            # messages stay in the queue for the next run to decide
+            return 0
+        existing_by_email = {s.email: s for s in db.query(SpamSuppression).filter(
+            SpamSuppression.email.in_(list(by_email))).all()}
+        kept = set()
+        queue_ids = {item['queue_id'] for group in by_email.values() for item in group if item.get('queue_id')}
+        if existing_by_email and queue_ids:
+            kept = {(e.suppression_id, e.queue_id, e.message_time) for e in db.query(
+                SuppressionEvent.suppression_id, SuppressionEvent.queue_id, SuppressionEvent.message_time).filter(
+                SuppressionEvent.suppression_id.in_([s.id for s in existing_by_email.values()]),
+                SuppressionEvent.kind == 'deferred_stuck',
+                SuppressionEvent.queue_id.in_(queue_ids)).all()}
 
+        for email, group in by_email.items():
+            existing = existing_by_email.get(email)
+            if existing and kept:
+                group = [item for item in group
+                         if not item.get('queue_id') or (existing.id, item['queue_id'], item.get('arrived')) not in kept]
+                if not group:
+                    continue  # every message of it was kept by an earlier run
+            if existing is not None and existing.source == RSPAMD_SOURCE:
+                # Loaded from Rspamd: permanent, no automatic path changes it
+                if uncovered is not None and not _blocks_now(existing):
+                    uncovered.add(email)
+                continue
             if existing:
                 existing.bounce_count = (existing.bounce_count or 0) + 1
                 existing.soft_bounce_count = (existing.soft_bounce_count or 0) + 1
                 existing.reason = 'deferred_stuck'
-                existing.last_bounce_message = f'Deferred in queue > {settings.queue_cleanup_threshold_minutes}m - auto-cleaned'
+                existing.last_bounce_message = note
                 existing.updated_at = datetime.utcnow()
 
+                outcome = 'extended'
                 if not existing.active or (existing.expires_at and existing.expires_at < datetime.utcnow()):
+                    outcome = 'activated'
                     existing.active = True
                     existing.synced_to_rspamd = False
 
@@ -2972,6 +3512,7 @@ def _store_deferred_suppressions_worker(recipients_to_suppress):
                     settings.suppression_max_expiry_days
                 )
                 existing.expires_at = datetime.utcnow() + timedelta(days=expiry_days)
+                entry = existing
             else:
                 new_entry = SpamSuppression(
                     email=email,
@@ -2982,33 +3523,195 @@ def _store_deferred_suppressions_worker(recipients_to_suppress):
                     hard_bounce_count=0,
                     soft_bounce_count=1,
                     last_bounce_dsn='4.x.x',
-                    last_bounce_message=f'Deferred in queue > {settings.queue_cleanup_threshold_minutes}m - auto-cleaned',
+                    last_bounce_message=note,
                     active=True,
                     synced_to_rspamd=False,
                     expires_at=datetime.utcnow() + timedelta(days=settings.suppression_base_expiry_days),
                     correlation_key=None
                 )
                 db.add(new_entry)
+                entry, outcome = new_entry, 'created'
             suppress_count += 1
+            captured.extend((entry, {**item, 'note': note}, outcome, entry.expires_at) for item in group if item.get('queue_id'))
 
+        record_stuck(db, captured)
         db.commit()
 
     return suppress_count
 
 
+def _blocked_now(emails) -> set:
+    """The addresses among emails that a block covers now."""
+    if not emails:
+        return set()
+    with get_db_context() as db:
+        rows = db.query(SpamSuppression).filter(SpamSuppression.email.in_(list(emails))).all()
+        return {r.email for r in rows if _blocks_now(r)}
+
+
+_PROTECT_MATCH_SECONDS = 0.1
+_protect_warned = set()
+
+
+def _protected_now(emails) -> set:
+    """The addresses among emails whose mail no automatic path deletes: a block
+    From Rspamd that does not block now (disabled by hand), for the address
+    itself or a pattern or domain that matches it, read the way Rspamd reads
+    the line."""
+    if not emails:
+        return set()
+    from .routers.suppressions import suppression_map_line
+    with get_db_context() as db:
+        # (value, line) read while the session is open
+        rows = [(r.email, suppression_map_line(r))
+                for r in db.query(SpamSuppression).filter(SpamSuppression.source == RSPAMD_SOURCE).all()
+                if not _blocks_now(r)]
+    import regex
+    protected = set()
+    for value, map_line in rows:
+        line = re.match(r'^/(.*)/([A-Za-z]*)$', map_line, re.S)
+        for email in emails:
+            if email == value:
+                protected.add(email)
+                continue
+            if not line:
+                continue
+            try:
+                # Rspamd reads the line with PCRE: the regex module reads the same
+                # syntax, and a time limit keeps a runaway pattern from stalling the app
+                if regex.search(line.group(1), email, regex.IGNORECASE if 'i' in line.group(2) else 0,
+                                timeout=_PROTECT_MATCH_SECONDS):
+                    protected.add(email)
+            except (TimeoutError, regex.error) as e:
+                # Cannot tell whether the disabled block covers it: its mail stays
+                protected.add(email)
+                if (value, type(e).__name__) not in _protect_warned:
+                    _protect_warned.add((value, type(e).__name__))
+                    logger.warning(f"[QUEUE] Could not match the block {value!r} ({type(e).__name__}): "
+                                   f"queued mail it may cover is kept")
+    return protected
+
+
+def _queue_item_addresses(item) -> Optional[List[str]]:
+    """Every recipient of a queued message, or None when one cannot be read: a
+    message is never deleted for recipients the app cannot tell apart."""
+    raws = item.get('recipients') if isinstance(item, dict) else None
+    if not isinstance(raws, list) or not raws:
+        return None
+    addresses = []
+    for raw in raws:
+        address = auto_suppression_address(raw.split(' ')[0].strip('<>')) if isinstance(raw, str) else None
+        if not address:
+            return None
+        addresses.append(address)
+    return addresses
+
+
+def _queue_delete_confirmed(reply) -> None:
+    """mailcow answers 200 even when it did not delete: only a reply of success
+    entries counts. Raises otherwise."""
+    entries = reply if isinstance(reply, list) else [reply]
+    if not entries or any(not isinstance(e, dict) or e.get('type') != 'success' for e in entries):
+        refused = next((e.get('msg') for e in entries if isinstance(e, dict) and e.get('type') != 'success'), None)
+        raise RuntimeError(f"mailcow did not confirm the deletion: {refused or reply}")
+
+
+def _whitelisted(addresses) -> bool:
+    whitelist = settings.suppression_whitelist_domains_list
+    return any(a.split('@')[-1] in whitelist for a in addresses)
+
+
+def _cleanup_deletable(items: Dict[str, List[str]], blocking: bool) -> List[str]:
+    """Of the stuck messages the cleanup picked, the ones it may delete now,
+    under the map lock (no Rspamd sync between this and the deletion): the
+    settings still ask for it, no recipient is excluded or protected, and when
+    it blocks, every recipient is blocked now."""
+    if not handling_on() or not settings.queue_cleanup_enabled or not mailcow_api.has_rw_key:
+        return []
+    every = set().union(*items.values()) if items else set()
+    protected = _protected_now(every)
+    blocked = _blocked_now(every) if blocking else set()
+    return [queue_id for queue_id, addresses in items.items()
+            if not _whitelisted(addresses) and not (set(addresses) & protected)
+            and (not blocking or all(a in blocked for a in addresses))]
+
+
+def _hard_deletable(items: Dict[str, List[str]], block: set, delete: set) -> List[str]:
+    """Of the queued messages to addresses that failed permanently, the ones the
+    detection may delete now, under the map lock: the settings still ask for
+    it, every recipient of the message is such an address (mail that also
+    goes elsewhere stays), none is excluded or protected, and an address the
+    detection blocked is blocked now."""
+    # The logs are read only while a choice needs them: off, the choice changed
+    if not handling_on() or not settings.suppression_auto_detect or not mailcow_api.has_rw_key \
+            or hard_action() == 'ignore':
+        return []
+    every = set().union(*items.values()) if items else set()
+    protected = _protected_now(every)
+    blocked = _blocked_now(every & block)
+    return [queue_id for queue_id, addresses in items.items()
+            if all(a in block or a in delete for a in addresses)
+            and not _whitelisted(addresses) and not (set(addresses) & protected)
+            and all(a in blocked for a in addresses if a in block)]
+
+
+async def _spam_blocks_loaded(job: str) -> bool:
+    """Whether the list holds the blocks this app wrote to Rspamd before Spam
+    Filter was off, loading them first when it was just turned on again.
+
+    A job that adds to the list or counts toward its blocks waits for that:
+    a row it made for an address still waiting in Rspamd would take the
+    place of the permanent one. While loading fails the job does not run,
+    and Status says why.
+    """
+    from .routers.suppressions import import_pending, import_managed_worker, rspamd_sync_on
+
+    if not rspamd_sync_on():
+        # Nothing is read from Rspamd while the sync is off: nothing to wait for
+        return settings.is_feature_enabled('suppressions')
+
+    def pending():
+        with get_db_context() as db:
+            return import_pending(db)
+
+    loop = asyncio.get_running_loop()
+    try:
+        if not await loop.run_in_executor(get_thread_pool_executor(), pending):
+            return settings.is_feature_enabled('suppressions')
+        result = await loop.run_in_executor(get_thread_pool_executor(), import_managed_worker)
+        if result.get('reason') == 'no_password':
+            update_job_status(job, 'failed', "Waiting to load this app's Rspamd blocks into the list: "
+                                             "the Rspamd password is not set.")
+            return False
+        if result.get('sync_off'):
+            # The sync went off while this waited: nothing to wait for, as above
+            return settings.is_feature_enabled('suppressions')
+        # Suppressions turned off while this waited: the job stops
+        return not result.get('pending') and not result.get('feature_off') and settings.is_feature_enabled('suppressions')
+    except Exception as e:
+        logger.warning(f"[SUPPRESSION] This app's Rspamd blocks could not be loaded into the list yet: {e}")
+        update_job_status(job, 'failed', f"Waiting to load this app's Rspamd blocks into the list: {e}")
+        return False
+
+
 async def cleanup_deferred_queue_job():
     """
     Periodically scan the mail queue for deferred items stuck longer than
-    QUEUE_CLEANUP_THRESHOLD_MINUTES.  For each stuck item:
-      1. Delete from queue via mailcow API
-      2. Suppress the recipient(s) using suppression_base_expiry_days
+    QUEUE_CLEANUP_THRESHOLD_MINUTES and delete them. With "block the
+    recipients" (and Sync with Rspamd on), the recipients are blocked first:
+    a message is never deleted without its block. When the deletion fails,
+    the next run finds the message again and deletes it without counting it
+    twice. A message with a recipient that cannot be read, that also goes to
+    an excluded domain, or to a block From Rspamd disabled by hand, stays.
     Completely stateless - only looks at arrival_time vs now.
     """
-    if not settings.is_feature_enabled('spam-filter'):
-        return
-    if not settings.suppression_enabled or not settings.queue_cleanup_enabled:
+    if not handling_on() or not settings.queue_cleanup_enabled:
         return
     if not mailcow_api.has_rw_key:
+        return
+    # Decided once per run: a message picked to be blocked is deleted only with its block
+    blocking = cleanup_blocks()
+    if blocking and not await _spam_blocks_loaded('cleanup_deferred_queue'):
         return
 
     update_job_status('cleanup_deferred_queue', 'running')
@@ -3021,10 +3724,9 @@ async def cleanup_deferred_queue_job():
 
         now_ts = datetime.now(timezone.utc).timestamp()
         threshold_seconds = settings.queue_cleanup_threshold_minutes * 60
-        whitelist = settings.suppression_whitelist_domains_list
 
-        items_to_delete = []
-        recipients_to_suppress = []  # (email, dsn_hint)
+        items = {}
+        recipients_to_suppress = []
 
         for item in queue:
             queue_name = (item.get('queue_name') or '').lower()
@@ -3043,60 +3745,73 @@ async def cleanup_deferred_queue_job():
             if not queue_id:
                 continue
 
-            # This item has been deferred longer than threshold - collect for deletion
-            items_to_delete.append(queue_id)
+            addresses = _queue_item_addresses(item)
+            if addresses is None:
+                logger.info(f"[QUEUE CLEANUP] Deferred item {queue_id} has a recipient that cannot be read - left in the queue")
+                continue
+            # Mail to an excluded domain stays in the queue for Postfix to retry
+            if _whitelisted(addresses):
+                continue
+            items[queue_id] = addresses
 
-            # Collect recipients for suppression
-            for rcpt in (item.get('recipients') or []):
-                rcpt_email = rcpt.split(' ')[0].strip('<>').lower()
-                if not rcpt_email or '@' not in rcpt_email:
-                    continue
-                domain = rcpt_email.split('@')[-1]
-                if domain in whitelist:
-                    continue
-                recipients_to_suppress.append(rcpt_email)
+            if blocking:
+                arrived = datetime.fromtimestamp(arrival_time, tz=timezone.utc).replace(tzinfo=None)
+                for raw, email in zip(item.get('recipients'), addresses):
+                    # mailcow writes the deferral reason after the address: "a@b (connect to ...: timed out)"
+                    reason = raw.split(' ', 1)[1].strip().strip('()') if ' ' in raw else None
+                    recipients_to_suppress.append({'email': email, 'queue_id': queue_id, 'sender': item.get('sender'),
+                                                   'arrived': arrived, 'reason': reason or None})
 
             age_min = int(age_seconds / 60)
             logger.info(
                 f"[QUEUE CLEANUP] Deferred item {queue_id} stuck for {age_min}m "
                 f"(threshold: {settings.queue_cleanup_threshold_minutes}m) - "
-                f"recipients: {', '.join(r.split(' ')[0].strip('<>') for r in (item.get('recipients') or []))}"
+                f"recipients: {', '.join(addresses)}"
             )
 
-        if not items_to_delete:
+        if not items:
             update_job_status('cleanup_deferred_queue', 'success')
             return
 
-        # Delete stuck items from queue
-        try:
-            await mailcow_api.delete_queue(items_to_delete)
-            logger.info(f"[QUEUE CLEANUP] Deleted {len(items_to_delete)} stuck deferred item(s) from queue")
-        except Exception as e:
-            logger.error(f"[QUEUE CLEANUP] Failed to delete queue items: {e}")
-            update_job_status('cleanup_deferred_queue', 'failed', f"Queue delete failed: {e}")
-            return
-
-        # Suppress recipients
-        if recipients_to_suppress:
+        if blocking:
+            # Block the recipients first: if this fails, nothing is deleted
             suppress_count = await asyncio.get_running_loop().run_in_executor(
                 get_thread_pool_executor(),
                 _store_deferred_suppressions_worker,
                 recipients_to_suppress,
+                set(),
             )
-
             logger.info(
                 f"[QUEUE CLEANUP] Suppressed {suppress_count} recipient(s) for "
                 f"{settings.suppression_base_expiry_days} day(s)"
             )
 
-            # Trigger immediate Rspamd sync so the block takes effect now
-            if settings.suppression_rspamd_sync and settings.is_rspamd_configured:
-                try:
-                    await sync_suppressions_to_rspamd_job()
-                    logger.info("[QUEUE CLEANUP] Triggered immediate Rspamd sync")
-                except Exception as e:
-                    logger.warning(f"[QUEUE CLEANUP] Rspamd sync failed (will retry on schedule): {e}")
+        # Then delete the stuck items, checked again right before (settings
+        # changed meanwhile, blocks deleted in mailcow or on the page). mailcow
+        # can answer 200 with a failure in the body.
+        delete_error = None
+        try:
+            async with map_write_lock_async():
+                deletable = await asyncio.get_running_loop().run_in_executor(
+                    get_thread_pool_executor(), _cleanup_deletable, items, blocking)
+                if deletable:
+                    _queue_delete_confirmed(await mailcow_api.delete_queue(deletable))
+                    logger.info(f"[QUEUE CLEANUP] Deleted {len(deletable)} stuck deferred item(s) from queue")
+        except Exception as e:
+            delete_error = e
+            logger.error(f"[QUEUE CLEANUP] Failed to delete queue items (any blocks are kept; retried next run): {e}")
 
+        # Trigger immediate Rspamd sync so the block takes effect now
+        if blocking and settings.suppression_rspamd_sync and settings.is_rspamd_configured:
+            try:
+                await sync_suppressions_to_rspamd_job()
+                logger.info("[QUEUE CLEANUP] Triggered immediate Rspamd sync")
+            except Exception as e:
+                logger.warning(f"[QUEUE CLEANUP] Rspamd sync failed (will retry on schedule): {e}")
+
+        if delete_error is not None:
+            update_job_status('cleanup_deferred_queue', 'failed', f"Queue delete failed: {delete_error}")
+            return
         update_job_status('cleanup_deferred_queue', 'success')
 
     except asyncio.CancelledError:
@@ -3130,6 +3845,20 @@ def _run_disabled_feature_cleanup(db: Session) -> None:
         if removed:
             deleted['mailbox_statistics'] = removed
 
+    if not settings.is_feature_enabled('devices'):
+        removed = db.query(EasDevice).delete(synchronize_session=False)
+        if removed:
+            deleted['eas_devices'] = removed
+        # Turned on again, it reads the SOGo lines still stored from the start
+        db.query(SystemSetting).filter(SystemSetting.key == EAS_DEVICES_WATERMARK_KEY).delete(synchronize_session=False)
+
+    # Raw log rows of services nothing collects any more (the Logs page was
+    # turned off); what other pages read stays
+    from .raw_logs_worker import delete_uncollected_raw_logs
+    removed = delete_uncollected_raw_logs(db)
+    if removed:
+        deleted['raw_service_logs'] = removed
+
     if rate_limits_off:
         # The audit of "who reset which counter", kept in system_settings
         removed = db.query(SystemSetting).filter(
@@ -3143,7 +3872,7 @@ def _run_disabled_feature_cleanup(db: Session) -> None:
                     + ", ".join(f"{table}={rows}" for table, rows in deleted.items()))
 
 
-def cleanup_disabled_feature_data(db: Optional[Session] = None) -> None:
+def cleanup_disabled_feature_data(db: Optional[Session] = None) -> Dict[str, str]:
     """Drop the data of features that are currently switched off.
 
     Turning a feature off should take its data with it instead of leaving rows
@@ -3151,9 +3880,17 @@ def cleanup_disabled_feature_data(db: Optional[Session] = None) -> None:
     than from a transition, so this is idempotent and safe to run on every
     startup and after every settings save.
 
+    A feature that is off keeps no data at all (services/feature_data.py):
+    the rebuildable data goes here, then every table and key of each feature
+    that is off, each feature in its own transaction. The sweep job runs this
+    again every few minutes, so what a job or an API call wrote after the
+    feature went off goes too.
+
     Never raises: a failure here must not stop the app from starting or a
-    settings save from succeeding.
+    settings save from succeeding. Returns what failed, {part: error}, for
+    the sweep to report.
     """
+    failed: Dict[str, str] = {}
     try:
         if db is not None:
             _run_disabled_feature_cleanup(db)
@@ -3162,11 +3899,86 @@ def cleanup_disabled_feature_data(db: Optional[Session] = None) -> None:
                 _run_disabled_feature_cleanup(own_db)
     except Exception as e:
         logger.warning(f"[FEATURES] Could not clean up disabled feature data: {e}")
+        failed['rebuildable data'] = str(e) or type(e).__name__
         if db is not None:
             try:
                 db.rollback()
             except Exception:
                 pass
+    try:
+        from .services.feature_data import purge_disabled_features
+        failed.update({feature: error for feature, error in purge_disabled_features().items() if error})
+    except Exception as e:
+        logger.warning(f"[FEATURES] Could not delete the data of disabled features: {e}")
+        failed['features'] = str(e) or type(e).__name__
+    return failed
+
+
+FEATURE_DATA_SWEEP_MINUTES = 10
+
+
+async def trend_samples_job():
+    """Hourly: sample the figures with a trend (services/figures.py). A source that does
+    not answer leaves a gap in its trend; the job fails only on its own error."""
+    update_job_status('trend_samples', 'running')
+    try:
+        from .services.figures import run_trend_samples
+        written = await run_trend_samples()
+        logger.info(f"[TRENDS] {written} figure(s) sampled")
+        update_job_status('trend_samples', 'success')
+    except Exception as e:
+        logger.error(f"[TRENDS] Sampling failed: {e}")
+        update_job_status('trend_samples', 'failed', str(e))
+
+
+async def feature_data_sweep_job(load_spam_blocks: bool = True):
+    """Keep features that are off without data, and load the Suppressions feature's blocks
+    back once it is on again.
+
+    Security off: this app's temporary bans leave Fail2ban first (only then
+    can its ban history go). Then the data of every feature that is off is
+    deleted again, which also takes what a job or an API call wrote after the
+    feature went off; the Suppressions feature's list also while Sync with Rspamd is off.
+    Suppressions and the sync on, with the list deleted while one was off: the
+    blocks this app wrote to Rspamd are loaded back into the list.
+    """
+    update_job_status('feature_data_sweep', 'running')
+    loop = asyncio.get_running_loop()
+    errors = []
+    try:
+        if not settings.is_feature_enabled('netfilter'):
+            from .services import protection_rules
+            try:
+                await protection_rules.release_temporary_bans(mailcow_api)
+            except Exception as e:
+                errors.append(f"Security's temporary bans could not be taken out of Fail2ban: {e}")
+        failed = await loop.run_in_executor(get_thread_pool_executor(), cleanup_disabled_feature_data)
+        errors.extend(f"The data of {part} could not be deleted: {error}" for part, error in failed.items())
+        if load_spam_blocks and settings.is_feature_enabled('suppressions') \
+                and not await _spam_blocks_loaded('feature_data_sweep') and settings.is_feature_enabled('suppressions'):
+            return JOB_STATUS_SET  # _spam_blocks_loaded reported why
+        if errors:
+            update_job_status('feature_data_sweep', 'failed', '; '.join(errors))
+        else:
+            update_job_status('feature_data_sweep', 'success')
+    except Exception as e:
+        logger.error(f"[FEATURES] Sweep failed: {e}", exc_info=True)
+        update_job_status('feature_data_sweep', 'failed', str(e))
+    return JOB_STATUS_SET
+
+
+def run_feature_data_sweep_soon() -> None:
+    """After a settings save: sweep now instead of in up to
+    FEATURE_DATA_SWEEP_MINUTES. the Suppressions feature's blocks are not loaded by this
+    run: the Settings page loads them itself and says how many came back
+    (the next regular sweep loads them if it could not)."""
+    try:
+        if scheduler.running:
+            scheduler.add_job(feature_data_sweep_job, kwargs={'load_spam_blocks': False},
+                              id='feature_data_sweep_now', name='Turned-Off Features (after a save)',
+                              replace_existing=True, max_instances=1)
+    except Exception as e:
+        logger.warning(f"[FEATURES] Could not start the sweep now: {e}")
 
 
 def start_scheduler():
@@ -3177,21 +3989,36 @@ def start_scheduler():
 
         # Features switched off in the meantime should not leave data behind
         cleanup_disabled_feature_data()
+
+        # Clock-time jobs run in the app's time zone (an unknown one is UTC)
+        scheduler.timezone = app_tz()
         
         # Job 1: Fetch logs from API (every fetch_interval seconds)
         scheduler.add_job(
             fetch_all_logs,
-            trigger=IntervalTrigger(seconds=settings.fetch_interval),
+            trigger=every(seconds=settings.fetch_interval),
             id='fetch_logs',
             name='Fetch mailcow Logs',
             replace_existing=True,
             max_instances=1
         )
         
+        # Features that are off keep no data; Suppressions on again loads its
+        # Rspamd blocks back. First run right after startup.
+        scheduler.add_job(
+            feature_data_sweep_job,
+            trigger=every(minutes=FEATURE_DATA_SWEEP_MINUTES),
+            id='feature_data_sweep',
+            name='Turned-Off Features',
+            replace_existing=True,
+            max_instances=1,
+            next_run_time=datetime.now(timezone.utc)
+        )
+
         # Job 2: Run correlation (every 30 seconds, after logs are imported)
         scheduler.add_job(
             run_correlation,
-            trigger=IntervalTrigger(seconds=30),
+            trigger=every(seconds=30),
             id='run_correlation',
             name='Correlate Logs',
             replace_existing=True,
@@ -3201,7 +4028,7 @@ def start_scheduler():
         # Job 3: Complete incomplete correlations (every 2 minutes)
         scheduler.add_job(
             complete_incomplete_correlations,
-            trigger=IntervalTrigger(seconds=settings.correlation_check_interval),
+            trigger=every(seconds=settings.correlation_check_interval),
             id='complete_correlations',
             name='Complete Correlations',
             replace_existing=True,
@@ -3212,7 +4039,7 @@ def start_scheduler():
         # This is separate to ensure old correlations get expired reliably
         scheduler.add_job(
             expire_old_correlations,
-            trigger=IntervalTrigger(seconds=60),
+            trigger=every(seconds=60),
             id='expire_correlations',
             name='Expire Old Correlations',
             replace_existing=True,
@@ -3224,7 +4051,7 @@ def start_scheduler():
         # after the initial correlation was created
         scheduler.add_job(
             update_final_status_for_correlations,
-            trigger=IntervalTrigger(seconds=settings.correlation_check_interval),
+            trigger=every(seconds=settings.correlation_check_interval),
             id='update_final_status',
             name='Update Final Status',
             replace_existing=True,
@@ -3236,7 +4063,7 @@ def start_scheduler():
         if dovecot_correlation_available():
             scheduler.add_job(
                 correlate_dovecot_logs,
-                trigger=IntervalTrigger(seconds=60),
+                trigger=every(seconds=60),
                 id='correlate_dovecot',
                 name='Correlate Dovecot Deliveries',
                 replace_existing=True,
@@ -3247,10 +4074,21 @@ def start_scheduler():
             logger.info("   [DOVECOT] Delivery correlation inactive - needs raw log "
                         "collection with the 'dovecot' service enabled")
 
+        # Hourly samples of the dashboard figures that show a trend, the first a minute after start
+        scheduler.add_job(
+            trend_samples_job,
+            trigger=every(hours=1),
+            id='trend_samples',
+            name='Trend Samples',
+            replace_existing=True,
+            max_instances=1,
+            next_run_time=datetime.now(timezone.utc) + timedelta(minutes=1)
+        )
+
         # Job 6: Cleanup old logs (daily at 2 AM)
         scheduler.add_job(
             cleanup_old_logs,
-            trigger=CronTrigger(hour=2, minute=0),
+            trigger=clock_trigger('cleanup_logs'),
             id='cleanup_logs',
             name='Cleanup Old Logs',
             replace_existing=True
@@ -3260,7 +4098,7 @@ def start_scheduler():
         if settings.is_feature_enabled('dmarc'):
             scheduler.add_job(
                 cleanup_old_dmarc_reports,
-                trigger=CronTrigger(hour=2, minute=15),
+                trigger=clock_trigger('cleanup_dmarc_reports'),
                 id='cleanup_dmarc_reports',
                 name='Cleanup Old DMARC Reports',
                 replace_existing=True
@@ -3271,19 +4109,31 @@ def start_scheduler():
         # Job 7: Check app version updates (every 6 hours, starting immediately)
         scheduler.add_job(
             check_app_version_update,
-            trigger=IntervalTrigger(hours=6),
+            trigger=every(hours=6),
             id='check_app_version',
             name='Check App Version Updates',
             replace_existing=True,
             max_instances=1,
             next_run_time=datetime.now(timezone.utc)
         )
+
+        # The Read-Write key and the Rspamd password are checked soon after a
+        # start, without waiting for a click on Validate
+        scheduler.add_job(
+            check_credentials_job,
+            trigger=every(hours=CREDENTIAL_CHECK_HOURS),
+            id='check_credentials',
+            name='Credential Checks',
+            replace_existing=True,
+            max_instances=1,
+            next_run_time=datetime.now(timezone.utc) + timedelta(seconds=30)
+        )
         
         # Job 7c: SMTP abuse protection (enforcement - needs a RW API key)
         if settings.smtp_abuse_enabled and mailcow_api.has_rw_key:
             scheduler.add_job(
                 smtp_abuse_job,
-                trigger=IntervalTrigger(minutes=1),
+                trigger=every(minutes=1),
                 id='smtp_abuse',
                 name='SMTP Abuse Protection',
                 replace_existing=True,
@@ -3301,7 +4151,7 @@ def start_scheduler():
         if settings.anomaly_detection_enabled:
             scheduler.add_job(
                 anomaly_detection_job,
-                trigger=IntervalTrigger(minutes=settings.anomaly_check_interval),
+                trigger=every(minutes=settings.anomaly_check_interval),
                 id='anomaly_detection',
                 name='Anomaly Detection',
                 replace_existing=True,
@@ -3315,7 +4165,7 @@ def start_scheduler():
         if settings.is_feature_enabled('domains'):
             scheduler.add_job(
                 check_all_domains_dns_background,
-                trigger=IntervalTrigger(hours=6),
+                trigger=every(hours=6),
                 id='dns_check_background',
                 name='DNS Check (All Domains)',
                 replace_existing=True,
@@ -3336,7 +4186,7 @@ def start_scheduler():
         # Job 9: Sync local domains (every 6 hours)
         scheduler.add_job(
             sync_local_domains,
-            IntervalTrigger(hours=6),
+            every(hours=6),
             id='sync_local_domains',
             name='Sync Local Domains',
             replace_existing=True,
@@ -3349,7 +4199,7 @@ def start_scheduler():
         if is_license_configured():
             scheduler.add_job(
                 update_geoip_database,
-                trigger=CronTrigger(day_of_week='sun', hour=3, minute=0),
+                trigger=clock_trigger('update_geoip'),
                 id='update_geoip',
                 name='Update GeoIP',
                 replace_existing=True
@@ -3371,7 +4221,7 @@ def start_scheduler():
         if settings.is_feature_enabled('dmarc') and settings.dmarc_imap_enabled:
             scheduler.add_job(
                 dmarc_imap_sync_job,
-                IntervalTrigger(seconds=settings.dmarc_imap_interval),
+                every(seconds=settings.dmarc_imap_interval),
                 id='dmarc_imap_sync',
                 name='DMARC IMAP Sync',
                 replace_existing=True
@@ -3383,7 +4233,7 @@ def start_scheduler():
             scheduler.add_job(
                 dmarc_imap_sync_job,
                 'date',
-                run_date=datetime.now() + timedelta(seconds=30),
+                run_date=datetime.now(timezone.utc) + timedelta(seconds=30),
                 id='dmarc_imap_sync_startup',
                 name='DMARC IMAP Sync (Startup)'
             )
@@ -3395,7 +4245,7 @@ def start_scheduler():
         if _mailbox_sync_needed():
             scheduler.add_job(
                 update_mailbox_statistics,
-                IntervalTrigger(minutes=5),
+                every(minutes=5),
                 id='mailbox_stats',
                 name='Update Mailbox Statistics',
                 replace_existing=True,
@@ -3420,7 +4270,7 @@ def start_scheduler():
         if settings.is_feature_enabled('mailbox-stats'):
             scheduler.add_job(
                 update_alias_statistics,
-                IntervalTrigger(minutes=5),
+                every(minutes=5),
                 id='alias_stats',
                 name='Update Alias Statistics',
                 replace_existing=True,
@@ -3439,11 +4289,30 @@ def start_scheduler():
         else:
             logger.info("   [FEATURE] Mailbox Stats feature disabled - skipping alias stats job")
 
+        # ActiveSync devices: every minute, plus a daily cleanup. Both check
+        # the feature themselves, so they are always registered.
+        scheduler.add_job(
+            update_eas_devices,
+            every(minutes=1),
+            id='eas_devices',
+            name='Update ActiveSync Devices',
+            replace_existing=True,
+            max_instances=1
+        )
+        scheduler.add_job(
+            cleanup_eas_devices,
+            trigger=clock_trigger('cleanup_eas_devices'),
+            id='cleanup_eas_devices',
+            name='Cleanup ActiveSync Devices',
+            replace_existing=True,
+            max_instances=1
+        )
+
         # Job 15: Blacklist Check (daily at 5 AM)
         if settings.is_feature_enabled('blacklist'):
             scheduler.add_job(
                 check_monitored_hosts_job,
-                trigger=CronTrigger(hour=5, minute=0),
+                trigger=clock_trigger('blacklist_check'),
                 id='blacklist_check',
                 name='IP Blacklist Check (Daily)',
                 replace_existing=True,
@@ -3466,7 +4335,7 @@ def start_scheduler():
         if settings.is_feature_enabled('blacklist'):
             scheduler.add_job(
                 sync_transports_job,
-                trigger=IntervalTrigger(hours=6),
+                trigger=every(hours=6),
                 id='sync_transports',
                 name='Sync Transports & Relayhosts',
                 replace_existing=True
@@ -3484,31 +4353,33 @@ def start_scheduler():
         # Job 15: Weekly Summary Email (Every Monday at 9:00 AM)
         scheduler.add_job(
             send_weekly_summary_email_job,
-            trigger=CronTrigger(day_of_week='mon', hour=9, minute=0),
+            trigger=clock_trigger('send_weekly_summary'),
             id='send_weekly_summary',
             name='Send Weekly Summary',
             replace_existing=True
         )
 
-        # Job 16: Spam Suppression (if enabled)
-        if settings.is_feature_enabled('spam-filter') and settings.suppression_enabled:
-            # Detect bounces from postfix logs every 5 minutes
+        # Keeps the list and the app's Rspamd blocks in step every 10 minutes
+        # while "Sync with Rspamd" is on
+        if settings.is_feature_enabled('suppressions') and settings.suppression_rspamd_sync and settings.is_rspamd_configured:
             scheduler.add_job(
-                detect_suppressions_job,
-                trigger=IntervalTrigger(minutes=5),
-                id='detect_suppressions',
-                name='Detect Suppressions',
+                sync_suppressions_to_rspamd_job,
+                trigger=every(minutes=10),
+                id='sync_suppressions',
+                name='Sync Suppressions to Rspamd',
                 replace_existing=True,
                 max_instances=1
             )
-            
-            # Sync suppressions to Rspamd every 10 minutes
-            if settings.suppression_rspamd_sync and settings.is_rspamd_configured:
+
+        # Job 16: Spam Suppression (if enabled)
+        if settings.is_feature_enabled('suppressions') and settings.suppression_enabled:
+            # Detect bounces from postfix logs every 5 minutes, while a choice needs the logs
+            if settings.suppression_auto_detect:
                 scheduler.add_job(
-                    sync_suppressions_to_rspamd_job,
-                    trigger=IntervalTrigger(minutes=10),
-                    id='sync_suppressions',
-                    name='Sync Suppressions to Rspamd',
+                    detect_suppressions_job,
+                    trigger=every(minutes=5),
+                    id='detect_suppressions',
+                    name='Detect Suppressions',
                     replace_existing=True,
                     max_instances=1
                 )
@@ -3516,7 +4387,7 @@ def start_scheduler():
             # Expire old suppressions every hour
             scheduler.add_job(
                 expire_suppressions_job,
-                trigger=IntervalTrigger(hours=1),
+                trigger=every(hours=1),
                 id='expire_suppressions',
                 name='Expire Suppressions',
                 replace_existing=True,
@@ -3532,7 +4403,7 @@ def start_scheduler():
             if settings.queue_cleanup_enabled and mailcow_api.has_rw_key:
                 scheduler.add_job(
                     cleanup_deferred_queue_job,
-                    trigger=IntervalTrigger(minutes=5),
+                    trigger=every(minutes=5),
                     id='cleanup_deferred_queue',
                     name='Cleanup Deferred Queue',
                     replace_existing=True,
@@ -3544,7 +4415,7 @@ def start_scheduler():
         if settings.is_feature_enabled('quarantine') and mailcow_api.has_rw_key:
             scheduler.add_job(
                 process_quarantine_rules_job,
-                trigger=IntervalTrigger(minutes=settings.quarantine_rules_interval),
+                trigger=every(minutes=settings.quarantine_rules_interval),
                 id='process_quarantine_rules',
                 name='Process Quarantine Rules',
                 replace_existing=True,
@@ -3562,9 +4433,9 @@ def start_scheduler():
         logger.info(f"   [EXPIRE] Old correlations: every 60s (expire after {settings.max_correlation_age_minutes}min)")
         logger.info(f"   [VERSION] Check app version updates: every 6 hours")
         logger.info(f"   [DNS] Check all domains DNS: every 6 hours")
-        logger.info("   [GEOIP] Update GeoIP database: weekly (Sunday 3 AM)")
-        logger.info("   [BLACKLIST] Check IP blacklists: daily at 5:00 AM")
-        logger.info("   [REPORT] Weekly Summary: Monday at 9:00 AM")
+        logger.info(f"   [GEOIP] Update GeoIP database: {clock_schedule('update_geoip')}")
+        logger.info(f"   [BLACKLIST] Check IP blacklists: {clock_schedule('blacklist_check')}")
+        logger.info(f"   [REPORT] Weekly Summary: {clock_schedule('send_weekly_summary')}")
 
         
         if settings.dmarc_imap_enabled:
@@ -3592,9 +4463,35 @@ def start_scheduler():
 # SPAM SUPPRESSION SCHEDULER JOBS
 # =============================================================================
 
+# The highest PostfixLog id bounce detection has counted. The 10-minute window
+# below is wider than the 5-minute run interval, so every line is in two runs;
+# only lines above this mark are counted. It is stored, and locked, in the
+# same transaction as the suppressions, so a restart or two runs at once
+# cannot count a line twice. Postfix lines are inserted under
+# _postfix_ingest_lock by the single app process, so a line never becomes
+# visible after a line with a higher id.
+BOUNCE_WATERMARK_KEY = 'suppression_bounce_log_watermark'
+
+
 def _detect_suppressions_worker():
     """Scan and persist suppressions with a worker-owned database session."""
     with get_db_context() as db:
+        # Before the first read of the rows: the Rspamd sync never decides from rows changing here
+        lock_suppression_rows(db)
+        # Read under the lock, so a purge or a load does not come between this and the rows
+        sync_on = rspamd_sync_on()
+        if sync_on and not _list_writable(db):
+            # The list is kept but this app's blocks are still to be loaded from
+            # Rspamd: nothing is read now (the watermark stays), the logs are
+            # read once they are loaded
+            return 0, 0, [], []
+        db.execute(pg_insert(SystemSetting).values(
+            key=BOUNCE_WATERMARK_KEY, value='0', updated_at=datetime.utcnow(),
+        ).on_conflict_do_nothing(index_elements=['key']))
+        mark = db.query(SystemSetting).filter(
+            SystemSetting.key == BOUNCE_WATERMARK_KEY).with_for_update().one()
+        counted_up_to = int(mark.value or 0)
+
         # Look for recently imported bounced emails (last 10 minutes by import time)
         # Uses created_at (DB insert time) instead of time (original mailcow timestamp)
         # so that historical bounces imported via paginated fetch are still detected
@@ -3607,25 +4504,40 @@ def _detect_suppressions_worker():
         if not settings.queue_cleanup_enabled:
             statuses_to_check.append('deferred')
 
+        # Only a delivery agent's result for a queued message is a bounce.
+        # smtpd lines (NOQUEUE rejects included) carry client-chosen from=<>
+        # and helo=<> values and must never suppress anyone - this also
+        # covers rows stored before the parser stopped reading status= and
+        # dsn= out of those fields.
         bounce_logs = db.query(PostfixLog).filter(
+            PostfixLog.id > counted_up_to,
             PostfixLog.created_at >= cutoff,
             PostfixLog.status.in_(statuses_to_check),
             PostfixLog.recipient.isnot(None),
             PostfixLog.dsn.isnot(None),
+            PostfixLog.queue_id.isnot(None),
+            or_(*[PostfixLog.program.like(f'%/{agent}') for agent in POSTFIX_DELIVERY_AGENTS]),
         ).all()
 
         if not bounce_logs:
-            return 0, 0, []
+            return 0, 0, [], []
+        mark.value = str(max(log.id for log in bounce_logs))
+        # What the choices do now (a choice that blocks acts as its twin while
+        # Sync with Rspamd is off)
+        hard, soft = hard_action(sync_on), soft_action(sync_on)
 
         whitelist = settings.suppression_whitelist_domains_list
         new_count = 0
         updated_count = 0
         emails_for_queue_cleanup = []  # Only hard bounces - deferred/soft should be retried by Postfix
+        emails_to_delete = set()  # Hard bounces whose queued mail goes without a block
         # Entries created in THIS run, by email: the session has
         # autoflush=False, so a DB query cannot see them - a recipient
         # bouncing several times in one batch must update the pending
         # entry, not insert a duplicate (unique index on email)
         pending_entries = {}
+        # (block, bounce line, what it did): kept with the block as Block details
+        captured = []
 
         for log in bounce_logs:
             # Skip DSN bounce notifications:
@@ -3636,7 +4548,9 @@ def _detect_suppressions_worker():
                 if not sender_val or sender_val.startswith('mailer-daemon'):
                     continue
 
-            recipient = log.recipient.lower().strip()
+            recipient = auto_suppression_address(log.recipient)
+            if not recipient:
+                continue
 
             # Skip whitelisted domains
             domain = recipient.split('@')[-1] if '@' in recipient else ''
@@ -3644,12 +4558,21 @@ def _detect_suppressions_worker():
                 continue
 
             dsn = log.dsn or ''
+            # Only a failure Postfix calls permanent (5.x.x) or temporary
+            # (4.x.x) counts; any other status line is left alone
             is_hard = dsn.startswith('5.')
             is_soft = dsn.startswith('4.')
-
-            if is_hard and settings.suppression_hard_bounce_action == 'ignore':
-                continue
-            if is_soft and settings.suppression_soft_bounce_action == 'ignore':
+            if is_hard:
+                if hard == 'ignore':
+                    continue
+                if hard == 'delete':
+                    # Its queued mail goes (checked before the deletion); the list is not touched
+                    emails_to_delete.add(recipient)
+                    continue
+            elif is_soft:
+                if soft == 'ignore':
+                    continue
+            else:
                 continue
 
             # Only clean queue for hard bounces (permanent failures)
@@ -3663,6 +4586,10 @@ def _detect_suppressions_worker():
             ).first()
             if existing is None:
                 existing = pending_entries.get(recipient)
+            if existing is not None and existing.source == RSPAMD_SOURCE:
+                # Loaded from Rspamd: permanent, no automatic path changes it. Its
+                # queued mail goes only while it blocks the address (checked before the deletion)
+                continue
 
             if existing:
                 # Update bounce counts
@@ -3677,8 +4604,13 @@ def _detect_suppressions_worker():
                 existing.last_bounce_message = log.message[:500] if log.message else None
                 existing.updated_at = datetime.utcnow()
 
-                # Re-activate if expired
-                if not existing.active or (existing.expires_at and existing.expires_at < datetime.utcnow()):
+                # Re-activate if expired; Count then suppress waits for the threshold
+                below_threshold = (is_soft and soft == 'count'
+                                   and existing.soft_bounce_count < settings.suppression_soft_bounce_threshold)
+                outcome = 'extended' if existing.active else 'counted'
+                if (not existing.active or (existing.expires_at and existing.expires_at < datetime.utcnow())) \
+                        and not below_threshold:
+                    outcome = 'activated'
                     existing.active = True
                     existing.synced_to_rspamd = False
 
@@ -3690,19 +4622,14 @@ def _detect_suppressions_worker():
                 existing.expires_at = datetime.utcnow() + timedelta(days=expiry_days)
 
                 updated_count += 1
+                captured.append((existing, log, outcome, existing.expires_at))
             else:
-                # Determine if we should suppress
-                if is_soft and settings.suppression_soft_bounce_action == 'count':
-                    # For soft bounces with count action, we still create the entry
-                    # but only activate it when threshold is reached
-                    pass
-
-                reason = 'hard_bounce' if is_hard else ('soft_bounce' if is_soft else 'rejected')
+                reason = 'hard_bounce' if is_hard else 'soft_bounce'
 
                 is_active = True
                 # For soft bounces with count action, only activate if threshold reached
-                if is_soft and settings.suppression_soft_bounce_action == 'count':
-                    is_active = False
+                if is_soft and soft == 'count':
+                    is_active = settings.suppression_soft_bounce_threshold <= 1
 
                 new_entry = SpamSuppression(
                     email=recipient,
@@ -3723,26 +4650,31 @@ def _detect_suppressions_worker():
                 db.add(new_entry)
                 pending_entries[recipient] = new_entry
                 new_count += 1
+                captured.append((new_entry, log, 'created' if is_active else 'counted', new_entry.expires_at))
 
+        # In the same transaction as the counts and the watermark: if keeping
+        # the details fails, nothing of this run is counted
+        record_bounces(db, captured)
         db.commit()
 
-    return new_count, updated_count, emails_for_queue_cleanup
+    return new_count, updated_count, emails_for_queue_cleanup, sorted(emails_to_delete)
 
 
 async def detect_suppressions_job():
     """
-    Scan recent postfix logs for bounced/rejected outbound emails
-    and add them to the suppression list.
+    Scan recent postfix logs for delivery failures: block the addresses the
+    Outbound choices block, and delete the queued mail of addresses
+    that failed permanently when the choices say so.
     """
-    if not settings.is_feature_enabled('spam-filter'):
+    if not handling_on() or not settings.suppression_auto_detect:
         return
-    if not settings.suppression_enabled or not settings.suppression_auto_detect:
+    if not await _spam_blocks_loaded('detect_suppressions'):
         return
 
     update_job_status('detect_suppressions', 'running')
 
     try:
-        new_count, updated_count, emails_for_queue_cleanup = await asyncio.get_running_loop().run_in_executor(
+        new_count, updated_count, to_block, to_delete = await asyncio.get_running_loop().run_in_executor(
             get_thread_pool_executor(), _detect_suppressions_worker
         )
 
@@ -3757,34 +4689,38 @@ async def detect_suppressions_job():
                 except Exception as e:
                     logger.warning(f"[SUPPRESSION] Rspamd sync failed (will retry on schedule): {e}")
 
-        # Clean up queue items for ALL detected bounce recipients
-        # If a message is bouncing/deferred, there's no point keeping it stuck in the queue
-        if emails_for_queue_cleanup and mailcow_api.has_rw_key:
+        # Delete the queued mail of addresses that failed permanently: only
+        # messages that go to such addresses alone, checked again right before
+        delete_error = None
+        # A deletion that fails is reported on Status and not tried again:
+        # the mail stays in the queue
+        to_block, to_delete = set(to_block), set(to_delete)
+        targets = to_block | to_delete
+        if targets and mailcow_api.has_rw_key:
             try:
-                queue = await mailcow_api.get_queue()
-                if queue:
-                    cleanup_set = set(emails_for_queue_cleanup)
-                    items_to_delete = []
-                    for item in queue:
-                        recipients = item.get('recipients', [])
-                        queue_id = item.get('queue_id')
-                        if not queue_id or not recipients:
-                            continue
-                        for rcpt in recipients:
-                            rcpt_email = rcpt.split(' ')[0].strip('<>').lower()
-                            if rcpt_email in cleanup_set:
-                                items_to_delete.append(queue_id)
-                                break
-
-                    if items_to_delete:
-                        await mailcow_api.delete_queue(items_to_delete)
-                        logger.info(
-                            f"[SUPPRESSION] Cleaned up {len(items_to_delete)} queue item(s) "
-                            f"for {len(cleanup_set)} bounced address(es)"
-                        )
+                items = {}
+                for item in await mailcow_api.get_queue() or []:
+                    queue_id = item.get('queue_id') if isinstance(item, dict) else None
+                    addresses = _queue_item_addresses(item)
+                    if queue_id and addresses and any(a in targets for a in addresses):
+                        items[queue_id] = addresses
+                if items and settings.is_feature_enabled('suppressions'):
+                    async with map_write_lock_async():
+                        deletable = await asyncio.get_running_loop().run_in_executor(
+                            get_thread_pool_executor(), _hard_deletable, items, to_block, to_delete)
+                        if deletable:
+                            _queue_delete_confirmed(await mailcow_api.delete_queue(deletable))
+                            logger.info(
+                                f"[SUPPRESSION] Cleaned up {len(deletable)} queue item(s) "
+                                f"for {len(targets)} bounced address(es)"
+                            )
             except Exception as e:
+                delete_error = e
                 logger.warning(f"[SUPPRESSION] Queue cleanup failed: {e}")
 
+        if delete_error is not None:
+            update_job_status('detect_suppressions', 'failed', f"Queue delete failed: {delete_error}")
+            return
         update_job_status('detect_suppressions', 'success')
 
     except Exception as e:
@@ -3794,25 +4730,29 @@ async def detect_suppressions_job():
 
 async def sync_suppressions_to_rspamd_job():
     """
-    Sync active suppressions to Rspamd's global_rcpt_blacklist.map
-    using the shared sync function from the suppressions router.
+    Bring the list and the app's section of global_rcpt_blacklist.map in
+    step while "Sync with Rspamd" is on: changes made in mailcow come into the
+    list, the list's changes are written (see sync_suppressions_worker).
     """
-    if not settings.is_feature_enabled('spam-filter'):
+    if not settings.is_feature_enabled('suppressions'):
         return
-    if not settings.suppression_enabled or not settings.suppression_rspamd_sync:
-        return
-    if not settings.is_rspamd_configured or not settings.mailcow_api_key_rw:
+    if not settings.suppression_rspamd_sync or not settings.is_rspamd_configured:
         return
     
     update_job_status('sync_suppressions', 'running')
     
     try:
         from app.routers.suppressions import sync_suppressions_worker
+        # automatic: the worker checks the switches again right before it
+        # writes, so a sync that was waiting does not write after they went off
         result = await asyncio.get_running_loop().run_in_executor(
-            get_thread_pool_executor(), sync_suppressions_worker
+            get_thread_pool_executor(), sync_suppressions_worker, True
         )
-
-        logger.info(f"[SUPPRESSION] Rspamd sync complete: {result.get('synced', 0)} active entries")
+        if result.get('list_added') or result.get('list_removed'):
+            logger.info(f"[SUPPRESSION] List updated from Rspamd: {result.get('list_added', 0)} added, "
+                        f"{result.get('list_removed', 0)} deleted")
+        if result.get('written'):
+            logger.info(f"[SUPPRESSION] Rspamd sync complete: {result.get('synced', 0)} active entries")
         update_job_status('sync_suppressions', 'success')
     except Exception as e:
         logger.error(f"[SUPPRESSION] Sync error: {e}", exc_info=True)
@@ -3830,7 +4770,7 @@ def _expire_suppressions_sync():
     """
     Deactivate suppressions that have passed their expiry date.
     """
-    if not settings.is_feature_enabled('spam-filter'):
+    if not settings.is_feature_enabled('suppressions'):
         return
     if not settings.suppression_enabled:
         return
@@ -3839,8 +4779,9 @@ def _expire_suppressions_sync():
     
     try:
         with get_db_context() as db:
+            lock_suppression_rows(db)
             now = datetime.utcnow()
-            
+
             expired_count = db.query(SpamSuppression).filter(
                 SpamSuppression.active == True,
                 SpamSuppression.expires_at.isnot(None),
@@ -3946,30 +4887,46 @@ async def _process_quarantine_rules_in_worker():
             release_items = [(item, rule) for item, rule in actions_to_take if rule.action == 'release']
             delete_items = [(item, rule) for item, rule in actions_to_take if rule.action == 'delete']
             
-            released_count = 0
-            deleted_count = 0
-            
+            # The item ids mailcow confirmed, per action
+            done = {'release': set(), 'delete': set()}
+
+            # Quarantine turned off while the queue was read: its rules are deleted, nothing is done
+            if not settings.is_feature_enabled('quarantine'):
+                update_job_status('process_quarantine_rules', 'success')
+                return
+
             # Execute releases
             if release_items:
                 release_ids = [str(item.get('id', '')) for item, _ in release_items]
                 try:
-                    await mailcow_api.release_quarantine(release_ids)
-                    released_count = len(release_ids)
+                    reply = await mailcow_api.release_quarantine(release_ids)
+                    done['release'] = mailcow_handled_items(reply, release_ids)
+                    if len(done['release']) < len(release_ids):
+                        logger.warning(f"[QUARANTINE RULES] mailcow did not release "
+                                       f"{len(release_ids) - len(done['release'])} item(s): {reply}")
                 except Exception as e:
                     logger.error(f"[QUARANTINE RULES] Release failed: {e}")
-            
-            # Execute deletes
-            if delete_items:
+
+            # Execute deletes (not after Quarantine was turned off during the releases)
+            if delete_items and settings.is_feature_enabled('quarantine'):
                 delete_ids = [str(item.get('id', '')) for item, _ in delete_items]
                 try:
-                    await mailcow_api.delete_quarantine(delete_ids)
-                    deleted_count = len(delete_ids)
+                    reply = await mailcow_api.delete_quarantine(delete_ids)
+                    done['delete'] = mailcow_handled_items(reply, delete_ids)
+                    if len(done['delete']) < len(delete_ids):
+                        logger.warning(f"[QUARANTINE RULES] mailcow did not delete "
+                                       f"{len(delete_ids) - len(done['delete'])} item(s): {reply}")
                 except Exception as e:
                     logger.error(f"[QUARANTINE RULES] Delete failed: {e}")
-            
-            # Log actions and update hit counts
+            released_count = len(done['release'])
+            deleted_count = len(done['delete'])
+
+            # Log actions and update hit counts (an item mailcow did not
+            # confirm is retried next run)
             rule_hit_counts = {}  # rule_id -> count
             for item, rule in actions_to_take:
+                if str(item.get('id', '')) not in done.get(rule.action, ()):
+                    continue
                 log_entry = QuarantineRuleLog(
                     rule_id=rule.id,
                     rule_name=rule.name,

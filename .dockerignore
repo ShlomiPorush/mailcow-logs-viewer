@@ -5,3 +5,5 @@
 backend/tests
 documentation
 *.md
+# The demo image serves the help documents locally (see backend/demo)
+!documentation/HelpDocs

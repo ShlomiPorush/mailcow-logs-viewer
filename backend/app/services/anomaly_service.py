@@ -18,6 +18,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import func
 
 from ..config import settings
+from ..correlation import authenticated_submissions, submitting_mailbox
 from ..database import get_db_context
 from ..models import (
     MessageCorrelation,
@@ -73,7 +74,7 @@ def _record_and_notify(db, pending, alert_type, severity, subject, title, detail
     # Notification delivery is slow (HTTP + SMTP with timeouts); queue it and
     # dispatch after the DB session is closed so a pooled connection is never
     # pinned while we wait on external services.
-    pending.append((title, detail))
+    pending.append((title, detail, severity, alert_type, subject))
 
 
 def _is_recurring_daily_pattern(db, sender: str, recent_count: int,
@@ -93,11 +94,11 @@ def _is_recurring_daily_pattern(db, sender: str, recent_count: int,
     for day_back in range(1, settings.anomaly_baseline_days + 1):
         slot_end = now - timedelta(days=day_back) + tolerance
         slot_start = now - timedelta(days=day_back) - window - tolerance
-        slot_count = db.query(func.count(MessageCorrelation.id)).filter(
+        slot_count = authenticated_submissions(db.query(func.count(MessageCorrelation.id))).filter(
             MessageCorrelation.direction == "outbound",
             MessageCorrelation.first_seen >= slot_start,
             MessageCorrelation.first_seen <= slot_end,
-            func.lower(MessageCorrelation.sender) == sender,
+            submitting_mailbox() == sender,
         ).scalar() or 0
         if slot_count >= recent_count * 0.5:
             recurring_days += 1
@@ -117,16 +118,18 @@ def detect_volume_spikes(db, pending) -> int:
     if not locals_:
         return 0
 
-    # Messages sent per local sender in the recent window
-    recent = db.query(
-        func.lower(MessageCorrelation.sender).label("sender"),
+    # Messages sent per local mailbox in the recent window, counted for the
+    # mailbox that logged in rather than the alias it sent from
+    mailbox = submitting_mailbox()
+    recent = authenticated_submissions(db.query(
+        mailbox.label("sender"),
         func.count(MessageCorrelation.id).label("cnt"),
-    ).filter(
+    )).filter(
         MessageCorrelation.direction == "outbound",
         MessageCorrelation.first_seen >= window_start,
         MessageCorrelation.first_seen <= now,
-        func.lower(MessageCorrelation.sender).in_(locals_),
-    ).group_by(func.lower(MessageCorrelation.sender)).all()
+        mailbox.in_(locals_),
+    ).group_by(mailbox).all()
 
     alerts = 0
     window_hours = max(window_minutes / 60.0, 1e-6)
@@ -135,11 +138,11 @@ def detect_volume_spikes(db, pending) -> int:
             continue
 
         # Baseline: this sender's average per-window rate over the history period
-        baseline_total = db.query(func.count(MessageCorrelation.id)).filter(
+        baseline_total = authenticated_submissions(db.query(func.count(MessageCorrelation.id))).filter(
             MessageCorrelation.direction == "outbound",
             MessageCorrelation.first_seen >= baseline_start,
             MessageCorrelation.first_seen < window_start,
-            func.lower(MessageCorrelation.sender) == sender,
+            submitting_mailbox() == sender,
         ).scalar() or 0
 
         baseline_hours = max((window_start - baseline_start).total_seconds() / 3600.0, 1e-6)
@@ -226,6 +229,32 @@ def detect_auth_failure_bursts(db, pending) -> int:
     return alerts
 
 
+_ALERT_HEADINGS = {
+    "volume_spike": ("Unusual sending from {}", "Mailbox"),
+    "auth_failure_burst": ("Many failed sign-ins for {}", "Username"),
+}
+
+
+def _alert_email_html(title, detail, severity, alert_type, subject) -> str:
+    """The alert email: the first paragraph of the detail says what happened,
+    the rest what to do."""
+    from . import email_layout as e
+    heading, label = _ALERT_HEADINGS.get(alert_type, ("{}", "Subject"))
+    what, _, advice = detail.partition("\n\n")
+    blocks = [e.panel('Details', e.kv([
+        (label, subject),
+        ('Severity', e.tag(severity.capitalize(), 'fail' if severity == 'critical' else 'warn')),
+    ]))]
+    if advice:
+        blocks.append(e.banner('warn', 'What to do', advice))
+    blocks.append(e.paragraph('The alert is also on the Dashboard.', muted=True))
+    return e.render(
+        title=heading.format(subject) if alert_type in _ALERT_HEADINGS else title,
+        topic='Security', tone='fail' if severity == 'critical' else 'warn',
+        intro=what, blocks=blocks,
+        footer='Anomaly detection is on in Settings, Anomaly Detection.')
+
+
 def run_anomaly_detection() -> dict:
     """Run all detectors. Returns a summary dict."""
     if not settings.anomaly_detection_enabled:
@@ -243,10 +272,12 @@ def run_anomaly_detection() -> dict:
         # committed one by one, so a detector crash must not swallow the
         # notifications of alerts recorded before it - the cooldown would then
         # suppress any retry.
-        for title, detail in pending:
+        for title, detail, severity, alert_type, subject in pending:
             try:
                 from .notification_service import notify
-                notify(subject=f"[Security] {title}", text_content=detail, alert_type="security")
+                notify(subject=f"[Security] {title}", text_content=detail,
+                       html_content=_alert_email_html(title, detail, severity, alert_type, subject),
+                       alert_type="security")
             except Exception as e:
                 logger.error(f"Failed to dispatch security alert notification: {e}")
 

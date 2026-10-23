@@ -4,18 +4,26 @@ API endpoints for exporting logs to CSV
 import logging
 from fastapi import APIRouter, Depends, Query, HTTPException, Request
 from sqlalchemy.orm import Session, load_only
-from sqlalchemy import or_, and_, desc
+from sqlalchemy import or_, and_, desc, func
 from datetime import datetime
 from typing import Optional
 
 from ..models import PostfixLog, RspamdLog, NetfilterLog, MessageCorrelation
+from ..app_time import local_now, to_local
 from ..config import settings
-from ..utils import internal_error
+from ..utils import internal_error, RangeStart, RangeEnd
+from .messages import BLANKS, message_sort_time
 from ..services.csv_export import csv_download, csv_query_rows, get_csv_db
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+def _csv_time(value: Optional[datetime]) -> str:
+    """A stored (naive UTC) time in the app's time zone with its offset, for
+    example 2026-01-15 13:00:00+01:00, so a spreadsheet cannot misread it."""
+    return to_local(value).isoformat(sep=' ', timespec='seconds') if value else ""
 
 
 @router.head("/export/postfix/csv", include_in_schema=False)
@@ -26,8 +34,8 @@ def export_postfix_csv(
     sender: Optional[str] = Query(None),
     recipient: Optional[str] = Query(None),
     status: Optional[str] = Query(None),
-    start_date: Optional[datetime] = Query(None),
-    end_date: Optional[datetime] = Query(None),
+    start_date: Optional[RangeStart] = Query(None),
+    end_date: Optional[RangeEnd] = Query(None),
     db: Session = Depends(get_csv_db)
 ):
     """
@@ -73,7 +81,7 @@ def export_postfix_csv(
         # Format one row at a time while the response is consumed.
         data = (
             {
-                "Time": log.time.isoformat(),
+                "Time": _csv_time(log.time),
                 "Program": log.program,
                 "Priority": log.priority,
                 "Queue ID": log.queue_id,
@@ -90,7 +98,7 @@ def export_postfix_csv(
         )
         
         return csv_download(
-            data, f"postfix_logs_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+            data, f"postfix_logs_{local_now().strftime('%Y%m%d_%H%M%S')}.csv",
             head_only=request.method == "HEAD",
         )
     except HTTPException:
@@ -110,8 +118,8 @@ def export_rspamd_csv(
     min_score: Optional[float] = Query(None),
     max_score: Optional[float] = Query(None),
     is_spam: Optional[bool] = Query(None),
-    start_date: Optional[datetime] = Query(None),
-    end_date: Optional[datetime] = Query(None),
+    start_date: Optional[RangeStart] = Query(None),
+    end_date: Optional[RangeEnd] = Query(None),
     db: Session = Depends(get_csv_db)
 ):
     """
@@ -162,7 +170,7 @@ def export_rspamd_csv(
         # Format one row at a time while the response is consumed.
         data = (
             {
-                "Time": log.time.isoformat(),
+                "Time": _csv_time(log.time),
                 "Message ID": log.message_id,
                 "Subject": log.subject,
                 "Sender": log.sender_smtp,
@@ -182,7 +190,7 @@ def export_rspamd_csv(
         )
         
         return csv_download(
-            data, f"rspamd_logs_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+            data, f"rspamd_logs_{local_now().strftime('%Y%m%d_%H%M%S')}.csv",
             head_only=request.method == "HEAD",
         )
     except HTTPException:
@@ -199,12 +207,14 @@ def export_netfilter_csv(
     search: Optional[str] = Query(None),
     ip: Optional[str] = Query(None),
     username: Optional[str] = Query(None),
-    start_date: Optional[datetime] = Query(None),
-    end_date: Optional[datetime] = Query(None),
+    action: Optional[str] = Query(None),
+    country_code: Optional[str] = Query(None),
+    start_date: Optional[RangeStart] = Query(None),
+    end_date: Optional[RangeEnd] = Query(None),
     db: Session = Depends(get_csv_db)
 ):
     """
-    Export Netfilter logs to CSV
+    Export Netfilter logs to CSV, with the filters of the Events list
     """
     try:
         query = db.query(NetfilterLog).options(load_only(
@@ -230,6 +240,16 @@ def export_netfilter_csv(
         if username:
             query = query.filter(NetfilterLog.username.ilike(f"%{username}%"))
         
+        if action:
+            # As in the list: 'ban' also matches the older 'banned' lines
+            if action == 'ban':
+                query = query.filter(or_(NetfilterLog.action == 'ban', NetfilterLog.action == 'banned'))
+            else:
+                query = query.filter(NetfilterLog.action == action)
+
+        if country_code:
+            query = query.filter(NetfilterLog.country_code == country_code.upper())
+
         if start_date:
             query = query.filter(NetfilterLog.time >= start_date)
         
@@ -241,7 +261,7 @@ def export_netfilter_csv(
         # Format one row at a time while the response is consumed.
         data = (
             {
-                "Time": log.time.isoformat(),
+                "Time": _csv_time(log.time),
                 "IP": log.ip,
                 "Username": log.username,
                 "Auth Method": log.auth_method,
@@ -255,7 +275,7 @@ def export_netfilter_csv(
         )
         
         return csv_download(
-            data, f"netfilter_logs_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+            data, f"netfilter_logs_{local_now().strftime('%Y%m%d_%H%M%S')}.csv",
             head_only=request.method == "HEAD",
         )
     except HTTPException:
@@ -276,8 +296,9 @@ def export_messages_csv(
     status: Optional[str] = Query(None),
     user: Optional[str] = Query(None),
     ip: Optional[str] = Query(None),
-    start_date: Optional[datetime] = Query(None),
-    end_date: Optional[datetime] = Query(None),
+    start_date: Optional[RangeStart] = Query(None),
+    end_date: Optional[RangeEnd] = Query(None),
+    order: str = Query("desc", pattern="^(asc|desc)$"),
     db: Session = Depends(get_csv_db)
 ):
     """
@@ -292,7 +313,10 @@ def export_messages_csv(
             MessageCorrelation.queue_id, MessageCorrelation.message_id,
             MessageCorrelation.rspamd_log_id, MessageCorrelation.is_complete,
         ), load_only(RspamdLog.id, RspamdLog.score, RspamdLog.is_spam, RspamdLog.user, RspamdLog.ip))
-        
+
+        # The filters mean what they mean in the Messages list (messages.py)
+        query = query.filter(MessageCorrelation.correlation_key != "BLACKLISTED")
+
         # Apply filters
         if search:
             search_term = f"%{search}%"
@@ -302,7 +326,9 @@ def export_messages_csv(
                     MessageCorrelation.recipient.ilike(search_term),
                     MessageCorrelation.subject.ilike(search_term),
                     MessageCorrelation.message_id.ilike(search_term),
-                    MessageCorrelation.queue_id.ilike(search_term)
+                    MessageCorrelation.queue_id.ilike(search_term),
+                    RspamdLog.ip.ilike(search_term),
+                    RspamdLog.user.ilike(search_term)
                 )
             )
         
@@ -315,29 +341,42 @@ def export_messages_csv(
         if direction:
             query = query.filter(MessageCorrelation.direction == direction)
         
-        if status:
+        if status == 'spam':
+            # Spam is the final status or Rspamd's verdict
+            query = query.filter(or_(MessageCorrelation.final_status == 'spam', RspamdLog.is_spam == True))  # noqa: E712
+        elif status:
             query = query.filter(MessageCorrelation.final_status == status)
-        
+
         if start_date:
             query = query.filter(MessageCorrelation.first_seen >= start_date)
-        
+
         if end_date:
             query = query.filter(MessageCorrelation.first_seen <= end_date)
-        
+
         # Filtering the joined columns excludes messages without a matching log.
         if user:
             query = query.filter(RspamdLog.user.ilike(f"%{user}%"))
         if ip:
             query = query.filter(RspamdLog.ip.ilike(f"%{ip}%"))
-        
-        # Limit and order
-        messages = csv_query_rows(query.order_by(desc(MessageCorrelation.last_seen)).limit(settings.csv_export_limit))
+
+        # Addresses hidden with Blacklist Emails stay hidden here, as in the list.
+        # Rows stored before an address was added are left out too
+        hidden = settings.blacklist_emails_list
+        if hidden:
+            for column in (MessageCorrelation.sender, MessageCorrelation.recipient):
+                query = query.filter(or_(column.is_(None), func.lower(func.btrim(column, BLANKS)).notin_(hidden)))
+
+        # In the list's order (newest first, or oldest first), so the row limit keeps the same messages
+        # By the same time the list sorts by (a delivery with no first-seen time by when it was stored)
+        by = (message_sort_time().asc(), MessageCorrelation.id.asc()) if order == "asc" \
+            else (desc(message_sort_time()), desc(MessageCorrelation.id))
+        messages = csv_query_rows(query.order_by(*by).limit(settings.csv_export_limit))
         
         # Format one row at a time while the response is consumed.
         def rows():
             for msg, rspamd in messages:
                 yield {
-                    "Time": msg.first_seen.isoformat() if msg.first_seen else "",
+                    "Time": _csv_time(msg.first_seen),
                     "Sender": msg.sender,
                     "Recipient": msg.recipient,
                     "Subject": msg.subject,
@@ -353,7 +392,7 @@ def export_messages_csv(
                 }
 
         return csv_download(
-            rows(), f"messages_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+            rows(), f"messages_{local_now().strftime('%Y%m%d_%H%M%S')}.csv",
             head_only=request.method == "HEAD",
         )
     except HTTPException:

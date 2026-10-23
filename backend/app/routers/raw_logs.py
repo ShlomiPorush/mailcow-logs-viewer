@@ -14,15 +14,16 @@ import json
 import secrets
 import time
 from datetime import datetime, timezone
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
-from fastapi import APIRouter, Query, Path, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi import APIRouter, Query, Path, Request, WebSocket, WebSocketDisconnect, HTTPException
 from sqlalchemy import func, desc, asc, or_, cast, String
 from sqlalchemy.dialects.postgresql import JSONB
 
 from ..database import get_db_context
 from ..config import settings
 from ..models import RawServiceLog
+from ..session import auth_generation, is_session_active, session_key_from_request
 from ..raw_logs_worker import (
     SERVICE_METADATA,
     ALL_SERVICES,
@@ -30,7 +31,8 @@ from ..raw_logs_worker import (
     set_ws_broadcast_fn,
     set_ws_broadcast_all_fn,
 )
-from ..utils import internal_error
+from ..app_time import range_bound
+from ..utils import internal_error, format_datetime_for_api
 
 logger = logging.getLogger(__name__)
 
@@ -43,14 +45,33 @@ router = APIRouter()
 ws_router = APIRouter()
 
 # ── WebSocket Auth Tokens (in-memory, short-lived) ─────────────────────────
-_ws_tokens: Dict[str, float] = {}  # token -> expiry timestamp
+# A stream lasts longer than the request that allowed it, so it carries the
+# authority it came from: the session that asked for its token (None without
+# one) and the session generation at that time. It ends when that session is
+# deleted or expires (sign-out) or when every session is revoked (sign-in
+# settings changed), the same moments the HTTP API stops accepting the session.
+Authority = Tuple[Optional[str], int]
+
+_ws_tokens: Dict[str, Tuple[float, Authority]] = {}  # token -> (expiry timestamp, authority)
 _WS_TOKEN_TTL = 30  # seconds
+# Close code for a stream whose session ended. The page reconnects on it: with
+# a valid session it gets a new token, otherwise the token request is refused
+# and the page goes to the login screen.
+WS_SESSION_ENDED = 4001
+
+
+def _authority_is_current(authority: Authority) -> bool:
+    session_key, generation = authority
+    if generation != auth_generation():
+        return False
+    return session_key is None or is_session_active(session_key)
+
 
 def _cleanup_expired_tokens():
     """Remove expired tokens. Iterate over a snapshot so a concurrent
     mutation of _ws_tokens can never raise 'dictionary changed size'."""
     now = time.time()
-    expired = [t for t, exp in list(_ws_tokens.items()) if exp < now]
+    expired = [t for t, (exp, _authority) in list(_ws_tokens.items()) if exp < now]
     for t in expired:
         _ws_tokens.pop(t, None)
 
@@ -69,10 +90,12 @@ class LogStreamManager:
     def __init__(self):
         self.connections: Dict[str, List[WebSocket]] = {}
         self._send_locks: Dict[WebSocket, asyncio.Lock] = {}
+        self._authority: Dict[WebSocket, Authority] = {}
 
-    async def connect(self, websocket: WebSocket, service: str):
+    async def connect(self, websocket: WebSocket, service: str, authority: Optional[Authority] = None):
         await websocket.accept()
         self._send_locks[websocket] = asyncio.Lock()
+        self._authority[websocket] = authority or (None, auth_generation())
         self.connections.setdefault(service, []).append(websocket)
 
     async def disconnect(self, websocket: WebSocket, service: str):
@@ -80,6 +103,11 @@ class LogStreamManager:
         if websocket in clients:
             clients.remove(websocket)
         self._send_locks.pop(websocket, None)
+        self._authority.pop(websocket, None)
+
+    def is_current(self, websocket: WebSocket) -> bool:
+        authority = self._authority.get(websocket)
+        return authority is not None and _authority_is_current(authority)
 
     async def switch_service(self, websocket: WebSocket, old_service: str, new_service: str):
         if websocket not in self._send_locks:
@@ -90,21 +118,32 @@ class LogStreamManager:
         self.connections.setdefault(new_service, []).append(websocket)
         return True
 
-    async def _drop(self, websocket: WebSocket):
+    async def _drop(self, websocket: WebSocket, code: int = 1013, reason: str = ""):
         # A client may have switched service while its write was pending.
         if self._send_locks.pop(websocket, None) is None:
             return
+        self._authority.pop(websocket, None)
         for clients in self.connections.values():
             if websocket in clients:
                 clients.remove(websocket)
         try:
-            await asyncio.wait_for(websocket.close(code=1013), WS_CLOSE_TIMEOUT_SECONDS)
+            await asyncio.wait_for(websocket.close(code=code, reason=reason), WS_CLOSE_TIMEOUT_SECONDS)
         except Exception:
             pass  # The peer may already be gone or unable to receive a close frame.
+
+    async def end_if_revoked(self, websocket: WebSocket) -> bool:
+        """Close the stream if its session ended. True when it was closed."""
+        if self.is_current(websocket):
+            return False
+        logger.info("[WS] Closing a live log stream: its session ended")
+        await self._drop(websocket, code=WS_SESSION_ENDED, reason="Session ended")
+        return True
 
     async def _send_text(self, websocket: WebSocket, text: str):
         lock = self._send_locks.get(websocket)
         if lock is None:
+            return False
+        if await self.end_if_revoked(websocket):
             return False
         try:
             # Include waiting for an earlier write in this client's time budget.
@@ -132,7 +171,7 @@ class LogStreamManager:
             "type": "new_logs",
             "service": service,
             "entries": entries,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": format_datetime_for_api(datetime.now(timezone.utc)),
         })
         await self._broadcast_text(clients, text)
 
@@ -153,7 +192,7 @@ set_ws_broadcast_all_fn(log_stream_manager.broadcast_to_all)
 
 
 @router.get("/raw-logs/ws-token")
-async def get_ws_token():
+async def get_ws_token(request: Request):
     """
     Issue a one-time short-lived token for WebSocket authentication.
     This endpoint is protected by the existing HTTP auth middleware,
@@ -166,7 +205,8 @@ async def get_ws_token():
     """
     _cleanup_expired_tokens()
     token = secrets.token_urlsafe(32)
-    _ws_tokens[token] = time.time() + _WS_TOKEN_TTL
+    authority = (session_key_from_request(request), auth_generation())
+    _ws_tokens[token] = (time.time() + _WS_TOKEN_TTL, authority)
     return {"token": token, "ttl": _WS_TOKEN_TTL}
 
 
@@ -190,16 +230,19 @@ async def websocket_raw_logs(
       {"action": "subscribe", "service": "dovecot"}
     """
     # ── WebSocket Authentication ────────────────────────────────────────
+    # Without authentication the stream is still tied to the session
+    # generation, so turning authentication on ends it
+    authority: Authority = (None, auth_generation())
     if settings.is_authentication_enabled:
         authenticated = False
-        
-        # Validate one-time token
-        if token and token in _ws_tokens:
-            if _ws_tokens[token] >= time.time():
+
+        # Validate one-time token; always consume it (one-time use)
+        entry = _ws_tokens.pop(token, None) if token else None
+        if entry:
+            expiry, authority = entry
+            if expiry >= time.time() and _authority_is_current(authority):
                 authenticated = True
                 logger.debug("[WS Auth] One-time token verified")
-            # Always consume the token (one-time use)
-            _ws_tokens.pop(token, None)
         
         if not authenticated:
             logger.warning("[WS Auth] Unauthenticated WebSocket connection attempt")
@@ -218,7 +261,7 @@ async def websocket_raw_logs(
         service = enabled[0] if enabled else "postfix"
     
     current_service = service
-    await log_stream_manager.connect(websocket, current_service)
+    await log_stream_manager.connect(websocket, current_service, authority)
     
     try:
         # Send initial connection confirmation
@@ -232,6 +275,8 @@ async def websocket_raw_logs(
         while True:
             try:
                 data = await websocket.receive_text()
+                if await log_stream_manager.end_if_revoked(websocket):
+                    break
                 msg = json.loads(data)
 
                 if msg.get("action") == "subscribe":
@@ -310,7 +355,11 @@ def get_services():
 @router.get("/raw-logs/worker-status")
 def get_worker_status():
     """Worker health check - last fetch time, stats, errors"""
-    status = get_raw_logs_job_status()
+    # A copy with the run times as UTC with Z; the worker's own record stays as it is
+    status = {
+        name: {**job, "last_run": format_datetime_for_api(job.get("last_run"))}
+        for name, job in get_raw_logs_job_status().items()
+    }
     return {
         "enabled": settings.raw_logs_enabled,
         "fetch_interval": settings.raw_logs_fetch_interval,
@@ -320,6 +369,17 @@ def get_worker_status():
         "jobs": status,
         "ws_connections": log_stream_manager.get_connection_count(),
     }
+
+
+def _range_bound(value: Optional[str], end: bool) -> Optional[datetime]:
+    """A range bound as stored times are kept (naive UTC): see app_time.range_bound.
+    None when empty or unreadable."""
+    if not value:
+        return None
+    try:
+        return range_bound(value, end)
+    except ValueError:
+        return None
 
 
 @router.get("/raw-logs/{service}")
@@ -346,20 +406,15 @@ def get_raw_logs(
         with get_db_context() as db:
             query = db.query(RawServiceLog).filter(RawServiceLog.service == service)
 
-            # Date range filter
-            if start_date:
-                try:
-                    start_dt = datetime.fromisoformat(start_date.replace('Z', '+00:00'))
-                    query = query.filter(RawServiceLog.time >= start_dt)
-                except ValueError:
-                    pass
-            
-            if end_date:
-                try:
-                    end_dt = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
-                    query = query.filter(RawServiceLog.time <= end_dt)
-                except ValueError:
-                    pass
+            # Date range filter: instants (UTC unless they say otherwise), or
+            # whole days (YYYY-MM-DD) in the app's time zone
+            start_bound = _range_bound(start_date, end=False)
+            if start_bound is not None:
+                query = query.filter(RawServiceLog.time >= start_bound)
+
+            end_bound = _range_bound(end_date, end=True)
+            if end_bound is not None:
+                query = query.filter(RawServiceLog.time <= end_bound)
             
             # Text search in raw_data JSONB
             if search:
@@ -412,7 +467,7 @@ def get_raw_logs(
                 entry = log.raw_data.copy() if log.raw_data else {}
                 entry['_id'] = log.id
                 entry['_service'] = log.service
-                entry['_stored_at'] = log.created_at.isoformat() if log.created_at else None
+                entry['_stored_at'] = format_datetime_for_api(log.created_at)
                 data.append(entry)
             
             return {

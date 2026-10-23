@@ -1,484 +1,170 @@
-# OAuth2/OIDC Authentication Configuration Guide
+# Sign-in configuration
 
-This guide provides step-by-step instructions and examples for configuring OAuth2/OIDC authentication with various identity providers.
+The app can ask for a username and password (Basic authentication), send users to an identity provider (OAuth2/OIDC), or offer both. You set this up in **Settings** > **Authentication** or with environment variables.
 
----
+> [!WARNING]
+> Everyone who signs in can see everything and use every action the app's mailcow API keys allow. The app has no user roles and no list of allowed OAuth2 users, so limit who can use the app at your identity provider.
 
-## Table of Contents
+## Basic authentication
 
-1. [Overview](#overview)
-2. [Configuration Methods](#configuration-methods)
-3. [Provider-Specific Examples](#provider-specific-examples)
-   - [Authentik](#authentik)
-   - [Mailcow](#mailcow)
-   - [Keycloak](#keycloak)
-   - [Google](#google)
-   - [Microsoft Azure AD](#microsoft-azure-ad)
-4. [Troubleshooting](#troubleshooting)
+Add these lines to `.env` and run `docker compose up -d`:
 
----
+```dotenv
+BASIC_AUTH_ENABLED=true
+AUTH_USERNAME=admin
+AUTH_PASSWORD=replace-with-a-long-random-password
+```
 
-## Overview
+To set it up in the app instead, fill in **Auth Username** and **Auth Password** in **Settings** > **Authentication**, turn on **Basic Auth Enabled** and save. The app asks you to type the username and password again, so you cannot lock yourself out with a typo, and it does not let you clear the password while Basic authentication is on.
 
-mailcow-logs-viewer supports OAuth2/OIDC authentication with any standard OAuth2/OIDC provider. You can use:
+Scripts and API clients can send an `Authorization: Basic` header with every request instead of signing in.
 
-- **OIDC Discovery** (recommended) - Automatically discovers endpoints from the provider
-- **Manual Configuration** - Manually specify all endpoints (for providers without discovery support)
+![Login page](../images/docs/authentication-login-light.webp#gh-light-mode-only)
+![Login page](../images/docs/authentication-login-dark.webp#gh-dark-mode-only)
 
-### Basic Configuration
+After 10 failed attempts within 15 minutes, the app refuses further Basic sign-in attempts from that address ("Too many login attempts") until the oldest failures are more than 15 minutes old. IPv6 addresses are counted per `/64` network. Users who are already signed in are not affected.
 
-Enable OAuth2 authentication in your `.env` file:
+Behind a reverse proxy, the app must know the real visitor address, or all visitors share one counter. See [Reverse proxy](Reverse_Proxy.md). **Auth Max Failure Clients** (`AUTH_MAX_FAILURE_CLIENTS`, default 10,000) caps how many addresses the app tracks.
 
-```env
-# Enable OAuth2 authentication
+## OAuth2/OIDC
+
+1. At your identity provider, register a confidential web client (one with a client secret) that uses the authorization code flow. Set its redirect or callback URL to your app address followed by `/api/auth/callback`, for example `https://logs.example.com/api/auth/callback`.
+2. Copy the client ID and the client secret.
+3. Generate a session secret with `openssl rand -hex 32`.
+4. Add the lines below to `.env`, plus the provider lines from one of the [recipes](#provider-recipes).
+5. Run `docker compose up -d`. The login page now shows a **Login with** button with your provider name.
+
+```dotenv
 OAUTH2_ENABLED=true
-
-# Provider display name (shown on login button)
-OAUTH2_PROVIDER_NAME=Your Provider Name
-
-# OAuth2 Client ID and Secret (from your provider)
-OAUTH2_CLIENT_ID=your-client-id
-OAUTH2_CLIENT_SECRET=your-client-secret
-
-# Redirect URI (must match provider configuration)
-OAUTH2_REDIRECT_URI=https://your-logs-viewer.example.com/api/auth/callback
-
-# Session secret key (generate with: openssl rand -hex 32)
-SESSION_SECRET_KEY=your-random-secret-key
-
-# Session expiration (hours)
+OAUTH2_PROVIDER_NAME=Company sign-in
+OAUTH2_CLIENT_ID=replace-with-client-id
+OAUTH2_CLIENT_SECRET=replace-with-client-secret
+OAUTH2_REDIRECT_URI=https://logs.example.com/api/auth/callback
+OAUTH2_SCOPES=openid profile email
+SESSION_SECRET_KEY=replace-with-the-generated-secret
 SESSION_EXPIRY_HOURS=24
 ```
 
----
+The app uses PKCE (`S256`) on every login and sends the client secret when it exchanges the code. After sign-in it reads the user's details from the provider's UserInfo endpoint, so the access token must be allowed to call it.
 
-## Configuration Methods
+### Discovery or manual endpoints
 
-### Method 1: OIDC Discovery (Recommended)
+With discovery on (the default), set `OAUTH2_ISSUER_URL` to the base address of the provider. The app adds `/.well-known/openid-configuration` and reads the three endpoints from there, so do not include that part yourself:
 
-If your provider supports OIDC Discovery (most modern providers do), you only need to set the issuer URL:
-
-```env
-# OIDC Discovery Configuration
-OAUTH2_ISSUER_URL=https://your-provider.example.com
+```dotenv
 OAUTH2_USE_OIDC_DISCOVERY=true
-OAUTH2_SCOPES=openid profile email
+OAUTH2_ISSUER_URL=https://identity.example.com
 ```
 
-The application will automatically discover:
-- Authorization endpoint
-- Token endpoint
-- UserInfo endpoint
+If the provider has no discovery document, turn discovery off and set the three endpoints:
 
-### Method 2: Manual Configuration
-
-For providers that don't support OIDC Discovery, manually configure all endpoints:
-
-```env
-# Manual Endpoint Configuration
+```dotenv
 OAUTH2_USE_OIDC_DISCOVERY=false
-OAUTH2_AUTHORIZATION_URL=https://provider.example.com/oauth/authorize
-OAUTH2_TOKEN_URL=https://provider.example.com/oauth/token
-OAUTH2_USERINFO_URL=https://provider.example.com/oauth/userinfo
-OAUTH2_SCOPES=profile email
+OAUTH2_AUTHORIZATION_URL=https://identity.example.com/oauth/authorize
+OAUTH2_TOKEN_URL=https://identity.example.com/oauth/token
+OAUTH2_USERINFO_URL=https://identity.example.com/oauth/userinfo
 ```
 
-**Note:** When using manual configuration, do NOT set `OAUTH2_ISSUER_URL`.
+If discovery fails and all three endpoints are set, the app uses them.
 
----
-
-## Provider-Specific Examples
+## Provider recipes
 
 ### Authentik
 
-Authentik supports OIDC Discovery and works out of the box.
+Create an OAuth2/OIDC provider (confidential client, your callback URL, the `openid`, `profile` and `email` scope mappings) and an application that uses it. Bind a policy or group to the application so only mail administrators can use it. See [Authentik's provider setup](https://docs.goauthentik.io/add-secure-apps/providers/oauth2/create-oauth2-provider).
 
-#### Step 1: Create OAuth2 Provider in Authentik
-
-1. Log in to Authentik admin panel
-2. Navigate to **Applications** → **Providers**
-3. Click **Create** → **OAuth2/OpenID Provider**
-4. Configure:
-   - **Name**: mailcow-logs-viewer
-   - **Client type**: Confidential
-   - **Redirect URIs**: `https://your-logs-viewer.example.com/api/auth/callback`
-   - **Scopes**: `openid`, `profile`, `email`
-5. Save and note the **Client ID** and **Client Secret**
-
-#### Step 2: Create Application in Authentik
-
-1. Navigate to **Applications** → **Applications**
-2. Click **Create**
-3. Configure:
-   - **Name**: mailcow-logs-viewer
-   - **Slug**: mailcow-logs-viewer
-   - **Provider**: Select the provider created in Step 1
-4. Save
-
-#### Step 3: Configure mailcow-logs-viewer
-
-Add to your `.env` file:
-
-```env
-# Enable OAuth2
-OAUTH2_ENABLED=true
+```dotenv
 OAUTH2_PROVIDER_NAME=Authentik
-
-# OIDC Discovery (Authentik supports this)
-OAUTH2_ISSUER_URL=https://authentik.yourdomain.com/application/o/mailcow-logs-viewer/
 OAUTH2_USE_OIDC_DISCOVERY=true
+OAUTH2_ISSUER_URL=https://identity.example.com/application/o/mailcow-logs-viewer/
 OAUTH2_SCOPES=openid profile email
-
-# Client credentials from Authentik
-OAUTH2_CLIENT_ID=your-client-id-from-authentik
-OAUTH2_CLIENT_SECRET=your-client-secret-from-authentik
-
-# Redirect URI (must match Authentik configuration)
-OAUTH2_REDIRECT_URI=https://your-logs-viewer.example.com/api/auth/callback
-
-# Session configuration
-SESSION_SECRET_KEY=your-random-secret-key
-SESSION_EXPIRY_HOURS=24
 ```
 
-**Important Notes:**
-- The issuer URL should point to your Authentik application endpoint
-- Authentik automatically provides all required endpoints via discovery
-- No need to manually configure authorization/token/userinfo URLs
+Replace `mailcow-logs-viewer` with your application's slug. See [Authentik's OAuth2 endpoints](https://docs.goauthentik.io/add-secure-apps/providers/oauth2/).
 
----
+### mailcow
 
-### Mailcow
+<!-- VERIFY: Test this manual-endpoint recipe against the supported mailcow release, including which mailbox or administrator accounts can authorize the client. Provider implementation is outside this checkout. -->
+Add an OAuth2 client in mailcow with your callback URL, then use these lines:
 
-Mailcow's OAuth2 implementation does not support OIDC Discovery, so manual endpoint configuration is required.
-
-#### Step 1: Create OAuth2 App in Mailcow
-
-1. Log in to Mailcow admin panel
-2. Navigate to **System** → **Configuration** → **Access** → **OAuth2 Apps**
-3. Click **Add OAuth2 App**
-4. Configure:
-   - **Name**: mailcow-logs-viewer
-   - **Redirect URI**: `https://your-logs-viewer.example.com/api/auth/callback`
-5. Save and note the **Client ID** and **Client Secret**
-
-#### Step 2: Configure mailcow-logs-viewer
-
-Add to your `.env` file:
-
-```env
-# Enable OAuth2
-OAUTH2_ENABLED=true
-OAUTH2_PROVIDER_NAME=Mailcow
-
-# Manual Configuration (Mailcow doesn't support OIDC Discovery)
+```dotenv
+OAUTH2_PROVIDER_NAME=mailcow
 OAUTH2_USE_OIDC_DISCOVERY=false
-OAUTH2_AUTHORIZATION_URL=https://mail.yourdomain.com/oauth/authorize
-OAUTH2_TOKEN_URL=https://mail.yourdomain.com/oauth/token
-OAUTH2_USERINFO_URL=https://mail.yourdomain.com/oauth/profile
-
-# Scopes (Mailcow typically only supports 'profile')
+OAUTH2_AUTHORIZATION_URL=https://mail.example.com/oauth/authorize
+OAUTH2_TOKEN_URL=https://mail.example.com/oauth/token
+OAUTH2_USERINFO_URL=https://mail.example.com/oauth/profile
 OAUTH2_SCOPES=profile
-
-# Client credentials from Mailcow
-OAUTH2_CLIENT_ID=your-client-id-from-mailcow
-OAUTH2_CLIENT_SECRET=your-client-secret-from-mailcow
-
-# Redirect URI (must match Mailcow configuration)
-OAUTH2_REDIRECT_URI=https://your-logs-viewer.example.com/api/auth/callback
-
-# Session configuration
-SESSION_SECRET_KEY=your-random-secret-key
-SESSION_EXPIRY_HOURS=24
 ```
 
-**Important Notes:**
-- **Do NOT** set `OAUTH2_ISSUER_URL` when using manual configuration
-- Mailcow typically only supports the `profile` scope (not `openid` or `email`)
-- Replace `https://mail.yourdomain.com` with your actual Mailcow URL
-
----
+Do not assume that only mailcow administrators can sign in this way. If you cannot limit who uses this client, choose a provider with access control or use Basic authentication.
 
 ### Keycloak
 
-Keycloak supports OIDC Discovery and works well with discovery mode.
+Create an OpenID Connect client in the realm, turn on client authentication and the standard (authorization code) flow, add your callback URL and copy the client secret. To keep other users out, use an authentication flow or policy that denies them; a role on its own does nothing here, because the app does not check roles.
 
-#### Step 1: Create OAuth2 Client in Keycloak
-
-1. Log in to Keycloak admin console
-2. Select your realm
-3. Navigate to **Clients** → **Create**
-4. Configure:
-   - **Client ID**: mailcow-logs-viewer
-   - **Client Protocol**: openid-connect
-   - **Access Type**: confidential
-   - **Valid Redirect URIs**: `https://your-logs-viewer.example.com/api/auth/callback`
-   - **Web Origins**: `https://your-logs-viewer.example.com`
-5. Go to **Credentials** tab and note the **Secret**
-
-#### Step 2: Configure mailcow-logs-viewer
-
-Add to your `.env` file:
-
-```env
-# Enable OAuth2
-OAUTH2_ENABLED=true
+```dotenv
 OAUTH2_PROVIDER_NAME=Keycloak
-
-# OIDC Discovery (Keycloak supports this)
-OAUTH2_ISSUER_URL=https://keycloak.yourdomain.com/realms/your-realm
 OAUTH2_USE_OIDC_DISCOVERY=true
+OAUTH2_ISSUER_URL=https://identity.example.com/realms/mail-admin
 OAUTH2_SCOPES=openid profile email
-
-# Client credentials from Keycloak
-OAUTH2_CLIENT_ID=mailcow-logs-viewer
-OAUTH2_CLIENT_SECRET=your-client-secret-from-keycloak
-
-# Redirect URI (must match Keycloak configuration)
-OAUTH2_REDIRECT_URI=https://your-logs-viewer.example.com/api/auth/callback
-
-# Session configuration
-SESSION_SECRET_KEY=your-random-secret-key
-SESSION_EXPIRY_HOURS=24
 ```
 
-**Important Notes:**
-- The issuer URL format is: `https://keycloak.domain.com/realms/realm-name`
-- Keycloak supports full OIDC Discovery
-- All standard scopes are supported
-
----
+Replace `mail-admin` with your realm. See [Keycloak's OIDC endpoints](https://www.keycloak.org/securing-apps/oidc-layers).
 
 ### Google
 
-Google supports OIDC Discovery and can be used as an identity provider.
+Create an OAuth client of type web application, add your callback URL and copy the client ID and secret. See [Google's OpenID Connect setup](https://developers.google.com/identity/openid-connect/openid-connect).
 
-#### Step 1: Create OAuth2 Credentials in Google Cloud
-
-1. Go to [Google Cloud Console](https://console.cloud.google.com/)
-2. Select your project
-3. Navigate to **APIs & Services** → **Credentials**
-4. Click **Create Credentials** → **OAuth client ID**
-5. Configure:
-   - **Application type**: Web application
-   - **Name**: mailcow-logs-viewer
-   - **Authorized redirect URIs**: `https://your-logs-viewer.example.com/api/auth/callback`
-6. Save and note the **Client ID** and **Client Secret**
-
-#### Step 2: Configure mailcow-logs-viewer
-
-Add to your `.env` file:
-
-```env
-# Enable OAuth2
-OAUTH2_ENABLED=true
+```dotenv
 OAUTH2_PROVIDER_NAME=Google
-
-# OIDC Discovery (Google supports this)
+OAUTH2_USE_OIDC_DISCOVERY=true
 OAUTH2_ISSUER_URL=https://accounts.google.com
-OAUTH2_USE_OIDC_DISCOVERY=true
 OAUTH2_SCOPES=openid profile email
-
-# Client credentials from Google Cloud
-OAUTH2_CLIENT_ID=your-google-client-id
-OAUTH2_CLIENT_SECRET=your-google-client-secret
-
-# Redirect URI (must match Google configuration)
-OAUTH2_REDIRECT_URI=https://your-logs-viewer.example.com/api/auth/callback
-
-# Session configuration
-SESSION_SECRET_KEY=your-random-secret-key
-SESSION_EXPIRY_HOURS=24
 ```
 
-**Important Notes:**
-- Google's issuer URL is always `https://accounts.google.com`
-- Full OIDC Discovery is supported
-- All standard scopes work with Google
+Limit access at Google. Even an internal audience usually includes more people than your mail administrators, and the app does not check groups or email domains.
 
----
+### Microsoft Entra ID
 
-### Microsoft Azure AD
+Register a single-tenant web application with your callback URL and create a client secret. In the enterprise application, turn on assignment required and assign the users who may sign in. See [Microsoft's OIDC documentation](https://learn.microsoft.com/en-us/entra/identity-platform/v2-protocols-oidc).
 
-Azure AD supports OIDC Discovery.
-
-#### Step 1: Register Application in Azure AD
-
-1. Go to [Azure Portal](https://portal.azure.com/)
-2. Navigate to **Azure Active Directory** → **App registrations**
-3. Click **New registration**
-4. Configure:
-   - **Name**: mailcow-logs-viewer
-   - **Supported account types**: Your choice
-   - **Redirect URI**: Web → `https://your-logs-viewer.example.com/api/auth/callback`
-5. Go to **Certificates & secrets** → **New client secret**
-6. Note the **Application (client) ID** and **Client secret value**
-
-#### Step 2: Configure mailcow-logs-viewer
-
-Add to your `.env` file:
-
-```env
-# Enable OAuth2
-OAUTH2_ENABLED=true
+```dotenv
 OAUTH2_PROVIDER_NAME=Microsoft
-
-# OIDC Discovery (Azure AD supports this)
-OAUTH2_ISSUER_URL=https://login.microsoftonline.com/your-tenant-id/v2.0
 OAUTH2_USE_OIDC_DISCOVERY=true
+OAUTH2_ISSUER_URL=https://login.microsoftonline.com/replace-with-tenant-id/v2.0
 OAUTH2_SCOPES=openid profile email
-
-# Client credentials from Azure AD
-OAUTH2_CLIENT_ID=your-azure-client-id
-OAUTH2_CLIENT_SECRET=your-azure-client-secret
-
-# Redirect URI (must match Azure configuration)
-OAUTH2_REDIRECT_URI=https://your-logs-viewer.example.com/api/auth/callback
-
-# Session configuration
-SESSION_SECRET_KEY=your-random-secret-key
-SESSION_EXPIRY_HOURS=24
 ```
 
-**Important Notes:**
-- Replace `your-tenant-id` with your Azure AD tenant ID
-- Azure AD supports full OIDC Discovery
-- Standard scopes work with Azure AD
+Use your own tenant ID. Do not use the shared multi-tenant address unless you limit who can use the client some other way.
 
----
+## Sessions and signing out
 
-## Troubleshooting
+Both sign-in methods give the browser a cookie named `session_id` (`HttpOnly`, `SameSite=Lax`). The cookie is marked `Secure` when the request came over HTTPS, directly or through a proxy that sends `X-Forwarded-Proto: https`. Use HTTPS for anything outside a private network.
 
-### Common Issues
+- A session lasts **Session Expiry Hours** (`SESSION_EXPIRY_HOURS`, default 24).
+- Sessions are kept in memory, so every restart of the app signs everyone out.
+- **Session Max Entries** (`SESSION_MAX_ENTRIES`, default 50) caps open sessions. When it is reached, existing sessions keep working and new sign-ins fail with "Login capacity reached" until a session expires or someone signs out.
+- **Logout** ends the session in this app only. It does not sign you out of your identity provider.
+- Saving a change to the sign-in settings signs everyone out. The person who saved gets a new session and stays signed in.
 
-#### 1. "OIDC discovery failed"
+## Apply changes and recover access
 
-**Symptoms:** Error message about discovery failure
+A variable set in `.env` always wins over the value saved in the app. After you change `.env`, run `docker compose up -d`. Changes saved in **Settings** apply right away.
 
-**Solutions:**
-- Verify `OAUTH2_ISSUER_URL` is correct and accessible
-- Check if provider supports OIDC Discovery
-- If not supported, use manual configuration instead
-- Ensure network connectivity to the provider
+If you lock yourself out:
 
-#### 2. "Invalid redirect URI"
+1. Add `BASIC_AUTH_ENABLED=true`, `AUTH_USERNAME` and `AUTH_PASSWORD` to `.env`.
+2. Run `docker compose up -d` and sign in with those values.
+3. Fix the sign-in settings in **Settings** > **Authentication**.
+4. Remove the lines from `.env` again and run `docker compose up -d`.
 
-**Symptoms:** Provider rejects the redirect URI
+## When sign-in fails
 
-**Solutions:**
-- Ensure `OAUTH2_REDIRECT_URI` matches exactly what's configured in the provider
-- Check for trailing slashes (should match exactly)
-- Verify the URL uses HTTPS (required by most providers)
-- Check provider logs for specific error messages
-
-#### 3. "Invalid client credentials"
-
-**Symptoms:** Authentication fails with credential errors
-
-**Solutions:**
-- Verify `OAUTH2_CLIENT_ID` and `OAUTH2_CLIENT_SECRET` are correct
-- Check if client secret has expired (some providers rotate secrets)
-- Ensure the client is enabled in the provider
-- Verify the client has correct permissions/scopes
-
-#### 4. "Scope not supported"
-
-**Symptoms:** Provider rejects requested scopes
-
-**Solutions:**
-- Check provider documentation for supported scopes
-- Try minimal scopes first (e.g., just `profile`)
-- Some providers (like Mailcow) only support specific scopes
-- Remove unsupported scopes from `OAUTH2_SCOPES`
-
-#### 5. Session expires immediately
-
-**Symptoms:** User gets logged out right after login
-
-**Solutions:**
-- Verify `SESSION_SECRET_KEY` is set and not empty
-- Ensure `SESSION_SECRET_KEY` is a strong random value
-- Check `SESSION_EXPIRY_HOURS` is set to a reasonable value
-- Verify cookies are being set (check browser dev tools)
-
-### Debugging Tips
-
-1. **Check Application Logs:**
-   ```bash
-   docker compose logs app | grep -i oauth
-   ```
-
-2. **Verify Provider Configuration:**
-   - Test OIDC Discovery endpoint: `https://your-provider/.well-known/openid-configuration`
-   - Verify all endpoints are accessible
-   - Check provider admin panel for client status
-
-3. **Browser Developer Tools:**
-   - Check Network tab for OAuth2 redirects
-   - Verify cookies are being set
-   - Check for CORS errors
-
-4. **Test OIDC Discovery:**
-   ```bash
-   curl https://your-provider/.well-known/openid-configuration
-   ```
-   Should return JSON with `authorization_endpoint`, `token_endpoint`, and `userinfo_endpoint`.
-
----
-
-## Quick Reference
-
-### OIDC Discovery Providers
-
-These providers support automatic endpoint discovery:
-
-- ✅ Authentik
-- ✅ Keycloak
-- ✅ Google
-- ✅ Microsoft Azure AD
-- ✅ Auth0
-- ✅ Okta
-- ✅ Most modern OIDC providers
-
-### Manual Configuration Required
-
-These providers require manual endpoint configuration:
-
-- ❌ Mailcow
-- ❌ Some custom/legacy OAuth2 implementations
-
-### Scope Recommendations
-
-| Provider | Recommended Scopes |
-|----------|-------------------|
-| Authentik | `openid profile email` |
-| Mailcow | `profile` |
-| Keycloak | `openid profile email` |
-| Google | `openid profile email` |
-| Microsoft | `openid profile email` |
-
----
-
-## Security Best Practices
-
-1. **Use HTTPS:** Always use HTTPS for production deployments
-2. **Strong Secrets:** Generate strong random values for `SESSION_SECRET_KEY`
-   ```bash
-   openssl rand -hex 32
-   ```
-3. **Secure Cookies:** The application automatically uses secure cookies when HTTPS is detected
-4. **Regular Rotation:** Rotate client secrets and session keys periodically
-5. **Minimal Scopes:** Request only the scopes you actually need
-6. **Provider Security:** Follow your provider's security recommendations
-
----
-
-## Additional Resources
-
-- [OAuth 2.0 Specification](https://oauth.net/2/)
-- [OpenID Connect Specification](https://openid.net/connect/)
-- [OIDC Discovery Specification](https://openid.net/specs/openid-connect-discovery-1_0.html)
-
----
-
-**Need Help?** Check the main [Getting Started Guide](/documentation/GETTING_STARTED.md) or open an issue on GitHub.
+| Problem | What to check |
+| --- | --- |
+| No **Login with** button | `OAUTH2_ENABLED` and the values in **Settings** > **Authentication**. **About** shows whether sign-in is required. |
+| The provider button fails at once | The issuer URL (the app adds `/.well-known/openid-configuration`), network access from the app to the provider, and the provider's certificate. The reason is in the app's log. |
+| The provider rejects the callback | The callback URL must be identical at the provider and in `OAUTH2_REDIRECT_URI`: scheme, host, port and path. |
+| "Invalid authentication state" | Start the login again in the same browser and finish it within 10 minutes. |
+| "Login capacity reached" | Sign out unused sessions or wait for them to expire, or raise **Session Max Entries**. |
+| Everyone gets "Too many login attempts" at once | The app sees the proxy's address instead of the visitor's. Check `FORWARDED_ALLOW_IPS` in [Reverse proxy](Reverse_Proxy.md). |

@@ -5,13 +5,13 @@ from datetime import datetime, timedelta
 from app import auth, session
 
 
-def test_cleanup_removes_idle_clients_and_keeps_recent_failures(monkeypatch):
+def test_cleanup_removes_idle_clients_and_keeps_recent_failures(monkeypatch, module_clock):
     monkeypatch.setattr(auth, "_auth_failures", {
         "192.0.2.1": deque([1.0]),
         "192.0.2.2": deque([1.0, 999.0]),
         "192.0.2.3": deque([999.0] * auth._AUTH_MAX_FAILURES),
     })
-    monkeypatch.setattr(auth.time, "time", lambda: 1000.0)
+    module_clock(auth, time=lambda: 1000.0)
     auth.cleanup_expired_auth_failures()
     assert "192.0.2.1" not in auth._auth_failures
     assert list(auth._auth_failures["192.0.2.2"]) == [999.0]

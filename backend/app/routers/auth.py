@@ -4,14 +4,18 @@ Handles OAuth2 login flow, callbacks, logout, and status
 """
 import base64
 import binascii
+import hashlib
+import hmac
 import logging
 import secrets
 import re
 import time
+from collections import OrderedDict
 from fastapi import APIRouter, Request, Response, HTTPException, status
 from fastapi.responses import JSONResponse, RedirectResponse
-from typing import Dict, Any
+from typing import Optional
 
+from ..auth import safe_return_path
 from ..config import settings
 from ..session import (
     create_session,
@@ -22,6 +26,7 @@ from ..session import (
     clear_session_cookie,
     SESSION_COOKIE_NAME,
     is_secure_request,
+    get_session_secret_key,
 )
 from ..services.oauth2_client import oauth2_client, OAuth2ClientError
 
@@ -29,18 +34,108 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-# The application runs one worker; pending authorizations expire after ten minutes.
+# A login must be completed within ten minutes.
 OAUTH_STATE_TTL = 600
-MAX_PENDING_OAUTH_STATES = 1024
 OAUTH_COOKIE_PREFIX = "oauth_state_"
-_state_store: Dict[str, tuple[str, float]] = {}
+# Starting a login keeps nothing on the server, so unauthenticated clients
+# cannot fill a shared store and block everyone's login. The state is
+# "<expiry>.<HMAC>", signed over a random nonce that only the starting
+# browser holds (in an HttpOnly cookie), the expiry and the return page.
+# Callbacks are single-use: a consumed state is remembered until it expires.
+# The application runs one worker, so this in-process record is complete.
+# At the size limit the oldest entry is dropped; replaying it would still need
+# the browser's cookie, and the provider accepts each authorization code once.
+MAX_CONSUMED_OAUTH_STATES = 65536
+_consumed_states: "OrderedDict[str, int]" = OrderedDict()
+_STATE_RE = re.compile(r"(\d{1,12})\.([A-Za-z0-9_-]{43})")
+_NONCE_RE = re.compile(r"[A-Za-z0-9_-]{43}")
+
+
+def _b64(data: bytes) -> str:
+    return base64.urlsafe_b64encode(data).rstrip(b"=").decode("ascii")
+
+
+def _state_signature(nonce: str, expires: str, return_to: str) -> str:
+    message = "\n".join(("oauth-state", nonce, expires, return_to)).encode("utf-8")
+    return _b64(hmac.new(get_session_secret_key().encode("utf-8"), message, hashlib.sha256).digest())
+
+
+def _pkce_verifier(nonce: str) -> str:
+    """The PKCE code_verifier (RFC 7636) for the login started with this cookie nonce.
+
+    Derived from the session secret, so the callback can recompute it without
+    server-side storage, and it never appears in the state, the cookie or the
+    authorization URL. 43 base64url characters, the minimum RFC 7636 allows.
+    """
+    message = "\n".join(("oauth-pkce", nonce)).encode("utf-8")
+    return _b64(hmac.new(get_session_secret_key().encode("utf-8"), message, hashlib.sha256).digest())
+
+
+def _pkce_challenge(verifier: str) -> str:
+    """The S256 code_challenge for a code_verifier."""
+    return _b64(hashlib.sha256(verifier.encode("ascii")).digest())
+
+
+def _new_browser_value(return_to: str) -> str:
+    """The browser cookie value: a fresh random nonce plus the page to return to.
+
+    It carries no secret; only the state sent to the provider is signed.
+    """
+    return f"{secrets.token_urlsafe(32)}.{_b64(return_to.encode('utf-8'))}"
+
+
+def _signed_state(browser_value: str) -> str:
+    """The state sent to the provider, signed over the cookie's nonce and return page."""
+    nonce, _, encoded = browser_value.partition(".")
+    return_to = base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4)).decode("utf-8")
+    expires = str(int(time.time()) + OAUTH_STATE_TTL)
+    return f"{expires}.{_state_signature(nonce, expires, return_to)}"
+
+
+def _new_oauth_flow(return_to: str) -> tuple[str, str]:
+    """A signed state for the provider and the matching value for the browser cookie."""
+    browser_value = _new_browser_value(return_to)
+    return _signed_state(browser_value), browser_value
+
+
+def _verify_oauth_flow(state: Optional[str], cookie_value: str) -> Optional[str]:
+    """The page to return to when state and cookie belong together and are current, else None."""
+    match = _STATE_RE.fullmatch(state or "")
+    nonce, _, encoded = (cookie_value or "").partition(".")
+    if not match or not _NONCE_RE.fullmatch(nonce) or len(encoded) > 4096:
+        return None
+    try:
+        return_to = base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4)).decode("utf-8")
+    except (binascii.Error, ValueError):
+        return None
+    expires, signature = match.groups()
+    if int(expires) <= time.time():
+        return None
+    if not hmac.compare_digest(signature, _state_signature(nonce, expires, return_to)):
+        return None
+    return safe_return_path(return_to)
 
 
 def _cleanup_oauth_states() -> None:
-    now = time.monotonic()
-    for token, (_, expires_at) in list(_state_store.items()):
-        if expires_at <= now:
-            del _state_store[token]
+    """Forget used states that have expired (they can no longer pass verification)."""
+    now = time.time()
+    for state, expires in list(_consumed_states.items()):
+        if expires <= now:
+            del _consumed_states[state]
+
+
+def _consume_oauth_state(state: str) -> bool:
+    """Record a state as used; False when it was used before."""
+    now = time.time()
+    while _consumed_states:
+        oldest, expires = next(iter(_consumed_states.items()))
+        if expires > now and len(_consumed_states) < MAX_CONSUMED_OAUTH_STATES:
+            break
+        _consumed_states.pop(oldest)
+    if state in _consumed_states:
+        return False
+    _consumed_states[state] = int(state.split(".", 1)[0])
+    return True
 
 
 def _oauth_redirect(url: str, state: str, request: Request) -> RedirectResponse:
@@ -112,10 +207,10 @@ def get_provider_info():
 
 
 @router.get("/auth/login")
-async def oauth2_login(request: Request):
+async def oauth2_login(request: Request, next: Optional[str] = None):
     """
     Initiate OAuth2 login flow
-    Redirects user to OAuth2 provider
+    Redirects user to OAuth2 provider; `next` is the local page to return to
     """
     if not settings.is_oauth2_enabled:
         raise HTTPException(
@@ -132,25 +227,22 @@ async def oauth2_login(request: Request):
     try:
         # Initialize client (perform discovery if needed)
         await oauth2_client.initialize()
-        
-        _cleanup_oauth_states()
-        if len(_state_store) >= MAX_PENDING_OAUTH_STATES:
-            raise HTTPException(status_code=503, detail="Too many pending logins. Try again later.")
 
-        state = secrets.token_urlsafe(32)
-        # Independent random nonce, never an OAuth client secret or user password.
-        browser_nonce = secrets.token_urlsafe(32)
-        auth_url = oauth2_client.get_authorization_url(state)
+        browser_value = _new_browser_value(safe_return_path(next))
+        state = _signed_state(browser_value)
+        nonce = browser_value.partition(".")[0]
+        auth_url = oauth2_client.get_authorization_url(
+            state, code_challenge=_pkce_challenge(_pkce_verifier(nonce)),
+        )
         response = RedirectResponse(url=auth_url)
         # A separate cookie per flow permits concurrent logins in different tabs.
         # Lax allows the provider's top-level GET callback; no Domain scopes it
         # to this host. Follow the existing session cookie's HTTPS policy.
         response.set_cookie(
-            key=OAUTH_COOKIE_PREFIX + state, value=browser_nonce,
+            key=OAUTH_COOKIE_PREFIX + state, value=browser_value,
             max_age=OAUTH_STATE_TTL, httponly=True,
             secure=is_secure_request(request), samesite="lax", path="/",
         )
-        _state_store[state] = (browser_nonce, time.monotonic() + OAUTH_STATE_TTL)
         logger.info(f"Redirecting to OAuth2 provider: {settings.oauth2_provider_name}")
         return response
         
@@ -186,17 +278,14 @@ async def oauth2_callback(
             detail="OAuth2 authentication is not enabled"
         )
     
-    _cleanup_oauth_states()
-    pending = _state_store.get(state) if state else None
-    browser_nonce = request.cookies.get(OAUTH_COOKIE_PREFIX + state, "") if pending else ""
-    if (not pending or not re.fullmatch(r"[A-Za-z0-9_-]{43}", browser_nonce)
-            or not secrets.compare_digest(pending[0], browser_nonce)):
-        logger.warning("Invalid, expired or unbound state in OAuth2 callback")
-        return RedirectResponse(url="/login?error=invalid_state", status_code=302)
-
+    browser_value = request.cookies.get(OAUTH_COOKIE_PREFIX + state, "") if state else ""
+    return_to = _verify_oauth_flow(state, browser_value)
     # Consume before any await, including on provider errors or missing codes.
     # A callback from another browser must not consume the owner's state.
-    del _state_store[state]
+    if return_to is None or not _consume_oauth_state(state):
+        logger.warning("Invalid, expired, reused or unbound state in OAuth2 callback")
+        return RedirectResponse(url="/login?error=invalid_state", status_code=302)
+
     if error:
         logger.warning("OAuth2 provider declined authorization")
         return _oauth_redirect("/login?error=oauth2_error", state, request)
@@ -207,7 +296,9 @@ async def oauth2_callback(
     
     try:
         # Exchange code for token
-        token_data = await oauth2_client.exchange_code_for_token(code)
+        # The cookie's nonce was verified with the state above
+        code_verifier = _pkce_verifier(browser_value.partition(".")[0])
+        token_data = await oauth2_client.exchange_code_for_token(code, code_verifier=code_verifier)
         access_token = token_data.get('access_token')
         
         if not access_token:
@@ -221,7 +312,7 @@ async def oauth2_callback(
         session_id = create_session(user_info)
         
         # Create response with redirect
-        response = _oauth_redirect("/", state, request)
+        response = _oauth_redirect(return_to, state, request)
         
         # Set session cookie
         set_session_cookie(response, session_id, request)
@@ -239,10 +330,13 @@ async def oauth2_callback(
         return _oauth_redirect("/login?error=server_error", state, request)
 
 
-@router.get("/auth/logout")
+@router.post("/auth/logout")
 def oauth2_logout(request: Request):
     """
-    Logout and clear session
+    Logout and clear session.
+    POST only: a GET that ends the session lets any other site log the
+    operator out with a link or an image. The same-origin guard rejects
+    cross-site POSTs. GET answers 405.
     """
     session_id = request.cookies.get(SESSION_COOKIE_NAME)
     
@@ -258,6 +352,16 @@ def oauth2_logout(request: Request):
     
     logger.info("User logged out")
     return response
+
+
+@router.get("/auth/logout", include_in_schema=False)
+def oauth2_logout_get():
+    """Explicit 405: without this route the SPA catch-all would answer GET with the page."""
+    raise HTTPException(
+        status_code=status.HTTP_405_METHOD_NOT_ALLOWED,
+        detail="Log out with POST",
+        headers={"Allow": "POST"},
+    )
 
 
 @router.get("/auth/status")

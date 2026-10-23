@@ -1,87 +1,39 @@
-# Mailbox Statistics - User Guide
+# Mailbox Stats
 
-## Overview
+Counts cover only messages this app has recorded, not the mailbox's whole history. For sending limits, see [Rate Limits](Rate_Limits.md).
 
-This page provides a comprehensive dashboard for monitoring mailbox usage, traffic patterns etc.
+![Mailbox Stats, Statistics](../../images/docs/mailbox-stats-statistics-light.webp#gh-light-mode-only)
+![Mailbox Stats, Statistics](../../images/docs/mailbox-stats-statistics-dark.webp#gh-dark-mode-only)
 
-### Summary Cards
-The top section displays aggregated metrics for **all mailboxes** matching your current filters:
-*   **MESSAGES SENT**: Total emails sent outbound.
-*   **MESSAGES RECEIVED**: Total emails received inbound.
-*   **FAILED**: Total messages that failed delivery (Bounced or Rejected).
-*   **FAILURE RATE**: The percentage of sent messages that failed.
+## Statistics
 
-> **Note**: These numbers represent traffic processed by the system during the selected date range.
+The summary counts every mailbox and alias for the chosen period (30 days by default); the search and filters do not change it. **Failed** is sent mail that bounced or was rejected; **Failure Rate** divides that count by sent mail. Each message counts once per address, using its best delivery outcome, so a later successful delivery is not a failure.
 
-### Search & Filtering Toolbar
-Use the toolbar to drill down into specific data:
-1.  **Search**: Filter by email address, username, or alias.
-2.  **Date Range**: Select a preset (Today, 7 Days, 30 Days) or define a custom range.
-3.  **Domain**: Filter to show mailboxes from a specific domain only. mailcow alias domains are listed too and resolve to their target domain's mailboxes.
-4.  **Sort**: Order the list by Sent count, Quota usage, Failure rate, etc.
-5.  **Toggles**:
-    *   **Active Only**: Hides deleted mailboxes that still have historical data.
-    *   **Hide Zero Activity**: Hides mailboxes with no sent/received traffic in the selected period.
+Days, for **Today** and for custom dates, are days in the [app's time zone](../Using_the_App.md#time-zone), as in the activity window.
 
-## 📧 Mailbox List
+The search finds mailbox addresses, display names and alias addresses. In **Domain**, an alias domain shows as "alias of" its target and lists the target's mailboxes.
 
-The list displays mailboxes in an expandable "accordion" view.
+**Active Only** hides mailboxes that are inactive or deleted in mailcow. **Hide Zero Activity** hides mailboxes, and aliases inside a mailbox, with no messages in the period. Both start checked.
 
-### Quick View (Collapsed)
-Each row provides an immediate snapshot:
-*   **Identity**: Mailbox address and status (Active/Inactive).
-*   **Traffic Badges**:
-    *   **Sent**: Total sent.
-    *   **Received**: Total received.
-    *   **Delivered**: Successfully delivered.
-    *   **Failed**: Failed deliveries.
-*   **Usage**: Detailed on the right side:
-    *   **Aliases**: Count of linked alias addresses.
-    *   **Storage**: Current storage usage (e.g., 10.4 KB).
+## Mailbox details
 
-### Detailed View (Expanded)
-Clicking a row reveals comprehensive details split into three sections:
+A service tag under the address (**IMAP**, **POP3**, **SMTP**, **Sieve**) is lit when the service is on; **TLS** is lit when TLS is enforced. Hover **IMAP**, **POP3** or **SMTP** for the last login. The counts in the row include the mailbox's aliases. **Failed** is the share of sent mail that bounced or was rejected, amber from 5% and red from 10%.
 
-#### 1. Mailbox Status & Configuration
-Synced directly from mailcow (every 5 minutes):
-*   **Quota**: Usage vs. Limit (e.g., 10.4 KB / 1.0 GB).
-*   **Messages**: Current count of messages stored in the mailbox.
-*   **Timestamps**: Created date, Modified date, and Last Login times for IMAP/SMTP/POP3.
-*   **Permissions**: Color-coded status for protocols (IMAP, POP3, SMTP, Sieve, TLS Enforce).
-    *   🟢 Green: Enabled/Active (may show last access time).
-    *   🔴 Red: Disabled/Inactive.
-    *   ⚪ Grey: Never accessed.
+In an open row, **First seen** and **Last synced** are when this app first recorded the mailbox and last read it from mailcow. **Message Statistics** counts the mailbox and its aliases together; click a count to open [Messages](Messages.md) searched for the mailbox address, with that direction or status. The **Aliases** table gives the same counts per alias; **domain alias** marks an address on a mailcow alias domain.
 
-#### 2. Message Statistics (Traffic)
-Colored cards showing the breakdown of message flow.
-**✨ Interactive:** Click any card to jump to the **Messages** page filtered for those specific emails.
+## Activity window
 
-*   **Sent** (Blue): Total messages sent by this mailbox.
-*   **Received** (Purple): Total messages received.
-*   **Internal** (Teal): Messages sent internally between local domains.
-*   **Delivered** (Green): Messages successfully handed off to the next hop.
-*   **Deferred** (Yellow): Temporary failures (server will retry).
-*   **Bounced** (Orange): Permanent failures (e.g., invalid recipient).
-*   **Rejected** (Red): Blocked messages (e.g., policy violation, spam).
+Click the small chart in **Activity** to see the mailbox's sent and received messages, aliases included, per hour for periods up to two days and per day for longer ones.
 
-#### 3. Aliases Breakdown
-A table listing all aliases associated with the mailbox, breaking down traffic per alias.
-*   Columns: Sent, Received, Internal, Delivered, Deferred, Bounced, Rejected.
-*   **Interactive**: Click the numbers to view the specific logs for that alias.
-*   **Domain aliases**: If a mailcow alias domain points at the mailbox's domain, traffic for `user@alias.tld` is attributed to the mailbox `user@target.tld`. Such addresses appear here as rows with a "domain alias" badge (only when they had traffic in the selected period) and count into the mailbox's combined totals exactly once.
+![Activity window](../../images/docs/mailbox-stats-activity-light.webp#gh-light-mode-only)
+![Activity window](../../images/docs/mailbox-stats-activity-dark.webp#gh-dark-mode-only)
 
----
+## Settings that change this page
 
-## ℹ️ Technical Notes
+The counts come from the message history, which **Retention Days** under **Settings** > **Fetch** keeps for 7 days by default. A longer period cannot show more than that. Mailbox and alias details sync from mailcow every 5 minutes, and the list can be up to 5 minutes old.
 
-### How is data counted?
-*   **Traffic Data** (Sent, Received, Failed, etc.): Aggregated locally from the **MessageCorrelation** table. This means it reflects logs processed by this viewer, offering historical data even if logs are rotated on the mail server. It is strictly tied to the selected **Date Range**.
-*   **Mailbox Status** (Quota, Permissions, Login Times): Fetched directly from the **mailcow API** via a background job running every 5 minutes. This data reflects the *current state* on the server.
+**Mailbox Stats** and **Rate Limits** are separate switches under **Settings** > **Features**. Turning off **Mailbox Stats** deletes the stored mailbox and alias details, not the messages. While **Rate Limits** is on, the mailbox details stay, because Rate Limits reads each mailbox's limit from them. If **Rate Limits** stays on, the sidebar entry is called **Rate Limits** and opens only that tab.
 
-### "Internal" vs "Sent"
-*   **Sent**: Includes all outbound traffic.
-*   **Internal**: A subset of "Sent". Refers to emails where both sender and recipient are hosted on this local system.
+## When something is missing
 
-### Data Accuracy
-*   Since traffic stats are based on logs, if the log retention period (e.g., 7 days) is shorter than your selected date range (e.g., 30 days), the older stats might be partial.
-*   Quota and "Messages in Mailbox" are real-time values from the server and are not affected by the date range filter.
+**No mailboxes found** means the filters hide every mailbox, or the first sync from mailcow has not finished. Clear the filters, then check **Mailbox Statistics** and **Alias Statistics** under [Status](Status.md#jobs) > **Jobs**.

@@ -9,7 +9,7 @@ import pytest
 
 from app import raw_logs_worker as raw, scheduler
 from app.config import settings
-from app.services import geoip_downloader
+from app.services import dmarc_imap_service, geoip_downloader
 
 
 async def assert_responsive(operation, started, release, finished):
@@ -58,6 +58,8 @@ def test_raw_database_lifetime_is_owned_by_worker(monkeypatch, job, stage):
     monkeypatch.setattr(type(settings._inner), "is_feature_enabled", lambda self, name: True)
     monkeypatch.setattr(settings._inner, "raw_logs_enabled", True)
     monkeypatch.setattr(settings._inner, "raw_logs_services", "dovecot")
+    # Only the selected service; what other pages need is tested in test_raw_log_collection
+    monkeypatch.setattr(type(settings._inner), "raw_logs_required", property(lambda self: {}))
     monkeypatch.setattr(raw, "_catchup_state", {})
     monkeypatch.setattr(raw, "_unavailable_services", set())
     api = SimpleNamespace(get_raw_logs=AsyncMock(return_value=[{
@@ -108,11 +110,13 @@ def test_dmarc_stale_cleanup_is_off_loop_and_best_effort(monkeypatch, fail):
     @contextmanager
     def session():
         yield db
-    monkeypatch.setattr(scheduler, "SessionLocal", session)
+    # The cleanup runs inside the import, under its one-at-a-time lock
+    monkeypatch.setattr(dmarc_imap_service, "SessionLocal", session)
     monkeypatch.setattr(type(settings._inner), "is_feature_enabled", lambda self, name: True)
     monkeypatch.setattr(settings._inner, "dmarc_imap_enabled", True)
     sync = Mock(return_value={"status": "success", "reports_created": 0})
-    monkeypatch.setattr(scheduler, "sync_dmarc_reports_from_imap", sync)
+    monkeypatch.setattr(dmarc_imap_service.DMARCImapService, "__init__", lambda self: None)
+    monkeypatch.setattr(dmarc_imap_service.DMARCImapService, "sync_reports", lambda self, sync_type: sync(sync_type))
     monkeypatch.setattr(scheduler, "update_job_status", Mock())
     async def run():
         loop_thread = threading.get_ident()

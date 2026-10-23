@@ -6,7 +6,7 @@ SIMPLIFIED VERSION:
 - Removed old generate_correlation_key function
 - Correlation key is now SHA256 of Message-ID
 """
-from sqlalchemy import Column, Integer, BigInteger, String, Float, DateTime, Boolean, Text, Index, JSON, UniqueConstraint, func
+from sqlalchemy import Column, Integer, BigInteger, String, Float, DateTime, Boolean, Text, Index, JSON, UniqueConstraint, ForeignKey, func, Uuid
 from sqlalchemy.dialects.postgresql import JSONB
 from datetime import datetime
 
@@ -245,6 +245,7 @@ class DMARCReport(Base):
     
     domain_id = Column(String(255), index=True)
     
+    # No longer written (always NULL); kept so an older version can still run
     raw_xml = Column(Text)
     
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
@@ -433,7 +434,7 @@ class TLSReport(Base):
     start_datetime = Column(DateTime, nullable=False)
     end_datetime = Column(DateTime, nullable=False)
     
-    # Raw JSON for reference
+    # No longer written (always NULL); kept so an older version can still run
     raw_json = Column(Text)
     
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
@@ -604,6 +605,33 @@ class RawServiceLog(Base):
         return f"<RawServiceLog(service={self.service}, time={self.time})>"
 
 
+class EasDevice(Base):
+    """
+    One ActiveSync device of one user, built from SOGo's access log lines for
+    /Microsoft-Server-ActiveSync. Each row keeps the newest request seen for
+    the pair (user, device id) and when the pair was first and last seen.
+    """
+    __tablename__ = "eas_devices"
+
+    id = Column(Integer, primary_key=True, index=True)
+    username = Column(String(255), nullable=False)
+    device_id = Column(String(255), nullable=False)
+    device_type = Column(String(100))
+    last_ip = Column(String(255))
+    last_command = Column(String(64))
+    last_status = Column(Integer)
+    first_seen = Column(DateTime, nullable=False)
+    last_seen = Column(DateTime, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint('username', 'device_id', name='uq_eas_device'),
+        Index('idx_eas_device_last_seen', 'last_seen'),
+    )
+
+    def __repr__(self):
+        return f"<EasDevice(username={self.username}, device_id={self.device_id})>"
+
+
 class SpamSuppression(Base):
     """
     Spam suppression list for blocking outgoing emails to recipients
@@ -651,6 +679,45 @@ class SpamSuppression(Base):
     
     def __repr__(self):
         return f"<SpamSuppression(email={self.email}, reason={self.reason}, active={self.active}, bounces={self.bounce_count})>"
+
+
+class SuppressionEvent(Base):
+    """What happened to a blocked address, kept with it for as long as it is on
+    the list (Outbound > Suppressions > Block details).
+
+    Postfix logs and messages are deleted after RETENTION_DAYS, but a block can
+    last up to months, so each event keeps its own copy of the evidence: the
+    server's answer, the message's sender, subject and ids, and the Postfix
+    lines of that message. Deleting the address deletes its events.
+    """
+    __tablename__ = "suppression_events"
+
+    id = Column(Integer, primary_key=True)
+    suppression_id = Column(Integer, ForeignKey('spam_suppressions.id', ondelete='CASCADE'), nullable=False)
+    # hard_bounce, soft_bounce, rejected, deferred_stuck, added, imported,
+    # enabled, disabled, expiry_changed, notes_changed, before_upgrade
+    kind = Column(String(30), nullable=False)
+    # What the event did to the block: created, activated, extended, counted, changed
+    outcome = Column(String(20))
+    recorded_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    message_time = Column(DateTime)
+    reason = Column(Text)
+    server_reply = Column(Text)
+    dsn = Column(String(20))
+    sender = Column(String(255))
+    recipient = Column(String(255))
+    subject = Column(Text)
+    queue_id = Column(String(50))
+    message_id = Column(String(255))
+    correlation_key = Column(String(64))
+    notes = Column(Text)
+    expires_at = Column(DateTime)
+    log_lines = Column(JSONB)
+    logs_shortened = Column(Boolean, default=False)
+
+    __table_args__ = (
+        Index('idx_suppression_event_owner', 'suppression_id', 'recorded_at'),
+    )
 
 
 class QuarantineRule(Base):
@@ -711,6 +778,25 @@ class QuarantineRuleLog(Base):
         Index('idx_qrule_log_created', 'created_at'),
     )
 
+class MetricSnapshot(Base):
+    """An hourly sample of a dashboard figure that shows a trend (services/figures.py):
+    one per figure and hour, kept 90 days; a hour whose source did not answer has
+    none (a gap). Alembic 0021."""
+    __tablename__ = "metric_snapshots"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String(40), nullable=False)
+    slot = Column(DateTime, nullable=False)       # the hour (UTC) the sample stands for
+    value = Column(Float)
+    of = Column(Float)                            # the denominator, when the figure has one
+    as_of = Column(DateTime, nullable=False)      # when it was read
+
+    __table_args__ = (
+        UniqueConstraint('name', 'slot', name='uq_metric_snapshot_name_slot'),
+        Index('idx_metric_snapshot_slot', 'slot'),
+    )
+
+
 class SecurityAlert(Base):
     """
     Anomaly-detection alerts: outbound volume spikes (possible compromised
@@ -728,6 +814,8 @@ class SecurityAlert(Base):
     metric_value = Column(Float)                 # observed value (messages, failures, ...)
     baseline_value = Column(Float)               # expected/baseline value for context
     acknowledged = Column(Boolean, default=False, index=True)
+    # The receipt of the dismissal that acknowledged it (Undo re-opens by it); Alembic 0020
+    ack_batch = Column(Uuid, nullable=True, index=True)
 
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
 
@@ -787,6 +875,53 @@ class SMTPAbuseAction(Base):
 
     def __repr__(self):
         return f"<SMTPAbuseAction(email={self.email}, action={self.action}, count={self.message_count})>"
+
+
+class ProtectionHit(Base):
+    """
+    An address a protection rule caught, and what happened to it.
+
+    One open hit per address and rule: later tries by the same address are
+    added to it rather than opening a new one. In watch mode a hit only records
+    what the rule would have banned (status 'watching'); the usernames tried and
+    the netfilter log ids are the evidence shown to the admin.
+    """
+    __tablename__ = "protection_hits"
+
+    id = Column(Integer, primary_key=True, index=True)
+    ip = Column(String(50), nullable=False, index=True)
+    rule = Column(String(40), nullable=False, index=True)
+    mode = Column(String(20), nullable=False, default="watch")        # 'watch' | 'enforce' | 'manual' (Ban now)
+    # Open: 'watching' (watch mode), 'pending' (to be banned), 'banned', 'alert' (breach alert, never banned)
+    # Closed: 'dismissed', 'expired', 'undone'
+    status = Column(String(20), nullable=False, default="watching", index=True)
+    reason = Column(Text)
+    usernames = Column(JSONB, default=list)
+    log_ids = Column(JSONB, default=list)
+    attempts = Column(Integer, nullable=False, default=0)
+    country_code = Column(String(2))
+    country_name = Column(String(100))
+
+    first_seen = Column(DateTime, nullable=False)
+    last_seen = Column(DateTime, nullable=False, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    ended_at = Column(DateTime)
+
+    # Enforcement: the ban length (0 = permanent), when it was written and when
+    # it ends, and whether this app added the entry to the Fail2ban blacklist.
+    # Only entries the app added are ever removed by it.
+    ban_hours = Column(Integer)
+    banned_at = Column(DateTime)
+    expires_at = Column(DateTime, index=True)
+    owned = Column(Boolean)
+    error = Column(Text)
+
+    __table_args__ = (
+        Index('idx_protection_hits_ip_rule_status', 'ip', 'rule', 'status'),
+    )
+
+    def __repr__(self):
+        return f"<ProtectionHit(ip={self.ip}, rule={self.rule}, status={self.status})>"
 
 
 class NotificationChannel(Base):

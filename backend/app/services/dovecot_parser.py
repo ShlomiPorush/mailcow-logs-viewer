@@ -34,7 +34,7 @@ Verdicts returned in ``verdict``:
 ``resolve_session_verdicts``.
 """
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 # lmtp(user@example.com)<pid><session>: rest   /   lda(user@example.com): rest
 # Older Dovecot writes lmtp(12345, user@example.com); the user is then the part
@@ -44,8 +44,21 @@ _PREFIX_RE = re.compile(
     re.IGNORECASE
 )
 _SESSION_RE = re.compile(r'<([^>]*)>')
-_MSGID_RE = re.compile(r'msgid=<([^>]+)>', re.IGNORECASE)
 
+# Dovecot writes "msgid=<ID>: ACTION". ID is the sender's Message-ID after
+# Dovecot's normalisation, and a quoted id-left keeps '>' and spaces, so the
+# first '>' does not end it. The field ends at the last '>: ' that is
+# followed by one of these fixed action phrases (optionally prefixed with
+# the Sieve action name, e.g. "fileinto action: ").
+_ACTION_START_RE = re.compile(
+    r"(?:[a-z]+ action:\s*)?"
+    r"(?:stored mail into mailbox|saved mail to|discarded message|marked message to be discarded"
+    r"|rejected message|forwarded to|save failed to|failed to store into mailbox)",
+    re.IGNORECASE
+)
+_ACTION_PREFIX_RE = re.compile(r'[a-z]+ action:\s*', re.IGNORECASE)
+
+# Applied to the action text only, anchored at its start.
 _STORED_MAILBOX_RE = re.compile(r"stored mail into mailbox '([^']*)'", re.IGNORECASE)
 _SAVED_TO_RE = re.compile(r'saved mail to (\S+)', re.IGNORECASE)
 _REJECT_REASON_RE = re.compile(r'rejected message.*?\((.+)\)\s*$', re.IGNORECASE)
@@ -95,15 +108,13 @@ def parse_dovecot_message(message: Optional[str]) -> Optional[Dict[str, Any]]:
     if not prefix_match:
         return None
 
-    msgid_match = _MSGID_RE.search(prefix_match.group('rest'))
-    if not msgid_match:
+    split = _split_msgid_and_action(prefix_match.group('rest'))
+    if not split:
         return None
-
-    message_id = msgid_match.group(1).strip()
+    message_id, action = split
     if not message_id:
         return None
 
-    rest = prefix_match.group('rest')
     sessions = _SESSION_RE.findall(prefix_match.group('ids') or '')
 
     result: Dict[str, Any] = {
@@ -116,59 +127,86 @@ def parse_dovecot_message(message: Optional[str]) -> Optional[Dict[str, Any]]:
         'detail': None,
     }
 
-    lowered = rest.lower()
+    # Only the action text is inspected, never the Message-ID before it,
+    # which the sender chose.
+    prefix = _ACTION_PREFIX_RE.match(action)
+    if prefix:
+        action = action[prefix.end():]
+    lowered = action.lower()
 
-    # Order matters: the specific failure shapes have to be tested before the
-    # generic "stored"/"discarded" wording they can contain.
-    store_failed = _STORE_FAILED_RE.search(rest)
+    store_failed = _STORE_FAILED_RE.match(action)
     if store_failed:
         result['verdict'] = 'failed'
         result['mailbox'] = store_failed.group(1)
         result['detail'] = store_failed.group(2).strip()
         return result
 
-    save_failed = _SAVE_FAILED_RE.search(rest)
+    save_failed = _SAVE_FAILED_RE.match(action)
     if save_failed:
         result['verdict'] = 'failed'
         result['mailbox'] = save_failed.group(1)
         result['detail'] = save_failed.group(2).strip()
         return result
 
-    if 'rejected message' in lowered:
+    if lowered.startswith('rejected message'):
         result['verdict'] = 'rejected'
-        reason = _REJECT_REASON_RE.search(rest)
+        reason = _REJECT_REASON_RE.match(action)
         if reason:
             result['detail'] = reason.group(1).strip()
         return result
 
-    if 'forwarded to' in lowered:
+    if lowered.startswith('forwarded to'):
         result['verdict'] = 'forwarded'
-        target = _FORWARD_TARGET_RE.search(rest)
+        target = _FORWARD_TARGET_RE.match(action)
         if target:
             result['detail'] = target.group(1).strip()
         return result
 
-    if 'marked message to be discarded' in lowered:
+    if lowered.startswith('marked message to be discarded'):
         result['verdict'] = 'discard_pending'
         return result
 
-    if 'discarded message' in lowered:
+    if lowered.startswith('discarded message'):
         result['verdict'] = 'discarded'
         return result
 
-    stored = _STORED_MAILBOX_RE.search(rest)
+    stored = _STORED_MAILBOX_RE.match(action)
     if stored:
         result['verdict'] = 'stored'
         result['mailbox'] = stored.group(1)
         return result
 
-    saved = _SAVED_TO_RE.search(rest)
+    saved = _SAVED_TO_RE.match(action)
     if saved:
         result['verdict'] = 'stored'
         result['mailbox'] = saved.group(1).rstrip(':')
         return result
 
     return None
+
+
+def _split_msgid_and_action(rest: str) -> Optional[Tuple[str, str]]:
+    """
+    Split "... msgid=<ID>: ACTION" into (ID, ACTION).
+
+    ID runs up to the LAST '>: ' that is followed by a recognised action
+    phrase. Text a sender puts inside a quoted Message-ID can contain
+    '>: discarded message', but the real action Dovecot appends always comes
+    after it, so it is never mistaken for the verdict.
+    """
+    start = rest.lower().find('msgid=<')
+    if start < 0:
+        return None
+    body = rest[start + len('msgid=<'):]
+    boundary = None
+    pos = body.find('>: ')
+    while pos != -1:
+        if _ACTION_START_RE.match(body, pos + 3):
+            boundary = pos
+        pos = body.find('>: ', pos + 1)
+    if boundary is None:
+        return None
+    return body[:boundary].strip(), body[boundary + 3:]
 
 
 def resolve_session_verdicts(events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:

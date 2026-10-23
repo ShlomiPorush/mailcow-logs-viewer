@@ -4,6 +4,8 @@ Configuration management using Pydantic Settings
 import os
 import re
 import ipaddress
+from functools import lru_cache
+from urllib.parse import urlsplit
 from pydantic_settings import BaseSettings
 from pydantic import TypeAdapter, Field, validator, field_validator, model_validator
 from typing import List, Optional, Any, Dict
@@ -12,6 +14,50 @@ import logging
 logger = logging.getLogger(__name__)
 
 _cached_active_domains: Optional[List[str]] = None
+
+_DEFAULT_PORTS = {"http": 80, "https": 443}
+
+
+def normalize_origin(value: str) -> Optional[str]:
+    """A browser origin as scheme://host[:port] in canonical form, or None.
+
+    Lower-cases scheme and host and drops the default port, the way browsers
+    send the Origin header. Anything with a path, credentials or a scheme
+    other than http/https is not an origin.
+    """
+    value = (value or "").strip()
+    if value.endswith("/"):
+        value = value[:-1]
+    try:
+        parts = urlsplit(value)
+        port = parts.port
+    except ValueError:
+        return None
+    scheme = parts.scheme.lower()
+    if (scheme not in _DEFAULT_PORTS or not parts.hostname or parts.username or parts.password
+            or parts.path or parts.query or parts.fragment):
+        return None
+    host = parts.hostname.lower()
+    if ":" in host:
+        host = f"[{host}]"
+    if port and port != _DEFAULT_PORTS[scheme]:
+        host = f"{host}:{port}"
+    return f"{scheme}://{host}"
+
+
+@lru_cache(maxsize=8)
+def _parse_cors_origins(raw: str) -> tuple:
+    origins = []
+    for entry in (raw or "").split(","):
+        if not entry.strip():
+            continue
+        origin = normalize_origin(entry)
+        if origin is None:
+            logger.warning("Ignoring CORS_ALLOWED_ORIGINS entry %r: list exact origins such as "
+                           "https://dashboard.example.com", entry.strip()[:200])
+        elif origin not in origins:
+            origins.append(origin)
+    return tuple(origins)
 
 # Database-only keys: not editable from UI (must stay in ENV).
 _DB_ONLY_KEYS = frozenset({"postgres_host", "postgres_port", "postgres_user", "postgres_password", "postgres_db"})
@@ -146,14 +192,22 @@ class Settings(BaseSettings):
         description="Logging level: DEBUG, INFO, WARNING, ERROR, CRITICAL"
     )
     tz: str = Field(
-        default="UTC",
-        description="Timezone"
+        default="",
+        description="The app time zone, an IANA name such as Europe/Berlin (UTC when empty or unknown, see app_time.py)"
+    )
+    date_format: str = Field(
+        default="browser",
+        description="How dates are written: browser, DD/MM/YYYY, MM/DD/YYYY, DD.MM.YYYY or YYYY-MM-DD (see app_time.py)"
+    )
+    time_format: str = Field(
+        default="24h",
+        description="How times are written: 24h, 12h or browser (see app_time.py)"
     )
     app_title: str = Field(default="mailcow Logs Viewer", description="Application title")
     app_logo_url: str = Field(default="", description="Application logo URL (optional)")
     disabled_features: str = Field(
         default="",
-        description="Comma-separated list of features to disable (hides page and stops related jobs). Valid: netfilter, queue, quarantine, spam-filter, domains, dmarc, mailbox-stats, rate-limits, logs, blacklist"
+        description="Comma-separated list of features to disable (hides page and stops related jobs). Valid: netfilter, queue, quarantine, suppressions, rspamd, domains, dmarc, mailbox-stats, rate-limits, logs, blacklist, devices (spam-filter: both suppressions and rspamd)"
     )
     
     # Settings UI: allow editing config from web UI (overrides stored in DB). ENV only; default False.
@@ -256,6 +310,11 @@ class Settings(BaseSettings):
         default=True,
         description="Enable OIDC discovery (uses .well-known/openid-configuration)"
     )
+    cors_allowed_origins: str = Field(
+        default="",
+        description="Comma-separated exact origins (scheme://host[:port]) that may call the API "
+                    "from another site with the user's session. Empty: same-origin only."
+    )
     session_secret_key: str = Field(
         default="",
         description="Secret key for signing session cookies (required if oauth2_enabled=True)"
@@ -279,20 +338,20 @@ class Settings(BaseSettings):
     dmarc_manual_upload_enabled: bool = Field(
         default=True,
         env='DMARC_MANUAL_UPLOAD_ENABLED',
-        description='Allow manual upload of DMARC reports via UI'
+        description='Allow uploading DMARC and TLS reports by hand in the UI'
     )
 
     dmarc_allow_report_delete: bool = Field(
         default=False,
         env='DMARC_ALLOW_REPORT_DELETE',
-        description='Allow deleting DMARC/TLS reports from the UI'
+        description='Allow deleting DMARC and TLS reports from the UI'
     )
 
-    # DMARC IMAP Configuration
+    # DMARC & TLS report import over IMAP (the env names keep DMARC_IMAP_)
     dmarc_imap_enabled: bool = Field(
         default=False,
         env='DMARC_IMAP_ENABLED',
-        description='Enable automatic DMARC report import from IMAP'
+        description='Import DMARC and TLS reports automatically from IMAP'
     )
 
     dmarc_imap_host: Optional[str] = Field(
@@ -313,6 +372,14 @@ class Settings(BaseSettings):
         description='Use SSL/TLS for IMAP connection'
     )
 
+    dmarc_imap_verify_ssl: str = Field(
+        default='false',
+        env='DMARC_IMAP_VERIFY_SSL',
+        description='Verify the IMAP server TLS certificate before the password is sent: false (default, '
+                    'no check), auto (check host names like imap.example.com, not localhost, IP addresses '
+                    'or container names) or true (always check)'
+    )
+
     dmarc_imap_user: Optional[str] = Field(
         default=None,
         env='DMARC_IMAP_USER',
@@ -328,7 +395,7 @@ class Settings(BaseSettings):
     dmarc_imap_folder: str = Field(
         default='INBOX',
         env='DMARC_IMAP_FOLDER',
-        description='IMAP folder to scan for DMARC reports'
+        description='IMAP folder to scan for DMARC and TLS reports'
     )
 
     dmarc_imap_delete_after: bool = Field(
@@ -364,7 +431,7 @@ class Settings(BaseSettings):
     dmarc_error_email: Optional[str] = Field(
         default=None,
         env='DMARC_ERROR_EMAIL',
-        description='Email address for DMARC error notifications (defaults to ADMIN_EMAIL if not set)'
+        description='Email address(es) for DMARC error notifications, separated by commas (defaults to ADMIN_EMAIL if not set)'
     )
 
     # MaxMind Configuration
@@ -409,6 +476,14 @@ class Settings(BaseSettings):
         default=False,
         env='SMTP_USE_SSL',
         description='Use Implicit SSL/TLS for SMTP connection (usually port 465)'
+    )
+
+    smtp_verify_ssl: str = Field(
+        default='false',
+        env='SMTP_VERIFY_SSL',
+        description='Verify the SMTP server TLS certificate before the password is sent: false (default, '
+                    'no check), auto (check host names like smtp.example.com, not localhost, IP addresses '
+                    'or container names) or true (always check)'
     )
 
     smtp_user: Optional[str] = Field(
@@ -617,14 +692,14 @@ class Settings(BaseSettings):
     admin_email: Optional[str] = Field(
         default=None,
         env='ADMIN_EMAIL',
-        description='Administrator email for system notifications'
+        description='Administrator email(s) for system notifications, separated by commas'
     )
 
     # Blacklist Alert Email
     blacklist_alert_email: Optional[str] = Field(
         default=None,
         env='BLACKLIST_ALERT_EMAIL',
-        description='Email address for blacklist alerts (defaults to ADMIN_EMAIL if not set)'
+        description='Email address(es) for blacklist alerts, separated by commas (defaults to ADMIN_EMAIL if not set)'
     )
 
     # Weekly Summary Report
@@ -654,6 +729,11 @@ class Settings(BaseSettings):
         default=2,
         env='RAW_LOGS_RETENTION_DAYS',
         description='Days to keep raw logs before cleanup'
+    )
+    rate_limits_retention_days: int = Field(
+        default=90, ge=1, le=3650,
+        env='RATE_LIMITS_RETENTION_DAYS',
+        description='Days to keep the rate limit log for the Rate Limits page (never less than raw log retention)'
     )
     raw_logs_services: str = Field(
         default='acme,api,autodiscover,dovecot,netfilter,postfix,ratelimited,rspamd-history,sogo,watchdog',
@@ -687,7 +767,7 @@ class Settings(BaseSettings):
     suppression_rspamd_sync: bool = Field(
         default=True,
         env='SUPPRESSION_RSPAMD_SYNC',
-        description='Auto-sync suppression list to Rspamd global_rcpt_blacklist.map'
+        description='Keep the suppression list and the app\'s section of Rspamd global_rcpt_blacklist.map in step, both ways'
     )
     suppression_whitelist_domains: str = Field(
         default='',
@@ -697,7 +777,7 @@ class Settings(BaseSettings):
     suppression_hard_bounce_action: str = Field(
         default='suppress',
         env='SUPPRESSION_HARD_BOUNCE_ACTION',
-        description='Action for hard bounces (DSN 5.x.x): suppress or ignore'
+        description='Action for hard bounces (DSN 5.x.x): suppress (block and delete queued mail), delete (only the queued mail) or ignore'
     )
     suppression_soft_bounce_action: str = Field(
         default='count',
@@ -724,7 +804,12 @@ class Settings(BaseSettings):
     queue_cleanup_enabled: bool = Field(
         default=True,
         env='QUEUE_CLEANUP_ENABLED',
-        description='Automatically delete deferred emails stuck longer than threshold and suppress their recipients'
+        description='Automatically delete deferred emails stuck longer than threshold'
+    )
+    queue_cleanup_block: bool = Field(
+        default=True,
+        env='QUEUE_CLEANUP_BLOCK',
+        description='Also block the recipients of the stuck emails the queue cleanup deletes (needs Sync with Rspamd)'
     )
     queue_cleanup_threshold_minutes: int = Field(
         default=60,
@@ -749,6 +834,13 @@ class Settings(BaseSettings):
         description='Days to keep quarantine auto-rule action history (older logs are automatically cleaned up)'
     )
 
+    # ActiveSync devices (Devices page)
+    eas_devices_retention_days: int = Field(
+        default=90, ge=0,
+        env='EAS_DEVICES_RETENTION_DAYS',
+        description='Days to keep an ActiveSync device that stopped connecting (0 = keep forever)'
+    )
+
     @field_validator('smtp_port', 'dmarc_imap_port', 'dmarc_imap_interval', mode='before')
     @classmethod
     def empty_str_to_none(cls, v):
@@ -756,6 +848,16 @@ class Settings(BaseSettings):
         if v == '':
             return None
         return v
+
+    @field_validator('smtp_verify_ssl', 'dmarc_imap_verify_ssl', mode='before')
+    @classmethod
+    def normalize_verify_mode(cls, v):
+        """false (also empty or unset), auto or true, whatever the case"""
+        from .services.mail_tls import verify_mode
+        mode = verify_mode(v)
+        if mode is None:
+            raise ValueError("must be false, auto or true")
+        return mode
 
     @validator('mailcow_url')
     def validate_mailcow_url(cls, v):
@@ -771,7 +873,19 @@ class Settings(BaseSettings):
             logger.warning(f"Invalid log level '{v}', using WARNING")
             return 'WARNING'
         return v
-    
+
+    # An unknown format never stops the app: it falls back to the default.
+    # Settings refuses a new unknown value when it is saved (routers/settings.py).
+    @validator('date_format')
+    def validate_date_format(cls, v):
+        from .app_time import normalize_date_format
+        return normalize_date_format(v)
+
+    @validator('time_format')
+    def validate_time_format(cls, v):
+        from .app_time import normalize_time_format
+        return normalize_time_format(v)
+
     @property
     def is_basic_auth_enabled(self) -> bool:
         """Check if Basic Auth is enabled (with backward compatibility)"""
@@ -800,6 +914,12 @@ class Settings(BaseSettings):
         return _cached_active_domains
     
     @property
+    def rate_limits_retention_effective(self) -> int:
+        """Days the rate limit log is kept: its own setting, but never less than
+        the other raw logs, so an install that kept them longer loses nothing"""
+        return max(self.rate_limits_retention_days, self.raw_logs_retention_days)
+
+    @property
     def blacklist_emails_list(self) -> List[str]:
         """Parse blacklisted emails into a list"""
         if not self.blacklist_emails:
@@ -817,6 +937,11 @@ class Settings(BaseSettings):
         return _lenient_manual_hosts_list(self.domain_spf_source_manual_hosts, 'domain_spf_source_manual_hosts')
 
     @property
+    def cors_allowed_origins_list(self) -> List[str]:
+        """Exact origins allowed cross-origin access; never a wildcard."""
+        return list(_parse_cors_origins(self.cors_allowed_origins))
+
+    @property
     def raw_logs_services_list(self) -> List[str]:
         """Parse raw_logs_services into a list of enabled service names.
         Supports 'all' as a shortcut for all services. Names that are not a
@@ -829,6 +954,36 @@ class Settings(BaseSettings):
             return list(ALL_RAW_LOG_SERVICES)
         names = [s.strip().lower() for s in val.split(',') if s.strip()]
         return [s for s in dict.fromkeys(names) if s in ALL_RAW_LOG_SERVICES]
+
+    @property
+    def raw_logs_page_on(self) -> bool:
+        """The Logs page is on: its service selection is collected too."""
+        return self.is_feature_enabled('logs') and self.raw_logs_enabled
+
+    @property
+    def raw_logs_required(self) -> Dict[str, List[str]]:
+        """Services other pages read from the raw logs, with those pages.
+
+        These are collected whatever the Logs page settings are, so turning
+        the Logs page off or unticking a service does not quietly empty them.
+        """
+        # Dovecot: Sieve and delivery results in message details, and the
+        # Security alert on a login after failed attempts
+        required = {'dovecot': ['Message details']}
+        if self.is_feature_enabled('netfilter'):
+            required['dovecot'].append('Security')
+        if self.is_feature_enabled('rate-limits'):
+            required['ratelimited'] = ['Rate Limits']
+        if self.is_feature_enabled('devices'):
+            required['sogo'] = ['Devices']
+        return required
+
+    @property
+    def raw_logs_collected_list(self) -> List[str]:
+        """Every service the raw logs worker fetches: the Logs page selection
+        while that page is on, plus what other pages need."""
+        page = self.raw_logs_services_list if self.raw_logs_page_on else []
+        return list(dict.fromkeys(page + list(self.raw_logs_required)))
     
     @property
     def suppression_whitelist_domains_list(self) -> List[str]:
@@ -893,13 +1048,15 @@ class Settings(BaseSettings):
 
     @property
     def disabled_features_set(self) -> set:
-        """Parse disabled_features into a set of feature IDs."""
-        if not self.disabled_features:
-            return set()
-        return {f.strip().lower() for f in self.disabled_features.split(',') if f.strip()}
+        """Parse disabled_features into a set of feature IDs, the old
+        spam-filter read as the two features it became."""
+        return set(normalize_disabled_features(self.disabled_features))
 
     def is_feature_enabled(self, feature: str) -> bool:
         """Check if a feature is enabled (not in disabled_features)."""
+        # A name no switch has would read "on" for good
+        if feature not in FEATURE_IDS:
+            raise ValueError(f"Unknown feature: {feature}")
         return feature not in self.disabled_features_set
     
     class Config:
@@ -909,11 +1066,12 @@ class Settings(BaseSettings):
 
 def _get_editable_setting_keys() -> frozenset:
     """All Settings field names that are editable from UI (excludes DB keys, UI-edit flag, and deprecated/legacy fields)."""
-    # auth_enabled deprecated, tz legacy, app_port is Docker-level.
+    # auth_enabled deprecated, app_port is Docker-level.
+    # cors_allowed_origins is applied once at startup, so it lives in ENV only.
     # webhook_* are legacy single-webhook settings, superseded by the
     # notification channels UI (they are migrated into a channel on upgrade).
     excluded = _DB_ONLY_KEYS | {
-        _EDIT_VIA_UI_FLAG_KEY, "auth_enabled", "tz", "app_port",
+        _EDIT_VIA_UI_FLAG_KEY, "auth_enabled", "app_port", "cors_allowed_origins",
         "webhook_enabled", "webhook_type", "webhook_url", "webhook_telegram_chat_id",
     }
     keys = set(Settings.model_fields.keys()) - excluded
@@ -929,9 +1087,31 @@ EDITABLE_SETTING_KEYS = _get_editable_setting_keys()
 
 # Every feature DISABLED_FEATURES can switch off (TOGGLEABLE_FEATURES in app.js)
 FEATURE_IDS = frozenset({
-    "netfilter", "queue", "quarantine", "spam-filter", "domains", "dmarc",
-    "mailbox-stats", "rate-limits", "logs", "blacklist",
+    "netfilter", "queue", "quarantine", "suppressions", "rspamd", "domains", "dmarc",
+    "mailbox-stats", "rate-limits", "logs", "blacklist", "devices",
 })
+
+# Old names still accepted in DISABLED_FEATURES and in a stored or saved value.
+# spam-filter was one switch for the suppression list and the Rspamd maps, so
+# it stays off as both.
+FEATURE_ALIASES = {
+    "spam-filter": ("suppressions", "rspamd"),
+}
+
+
+def normalize_disabled_features(value) -> list:
+    """A disabled_features value (comma-separated, or a list) as feature ids:
+    lower case, old names expanded, each once, in the order given."""
+    if not value:
+        return []
+    names = value.split(',') if isinstance(value, str) else list(value)
+    result = []
+    for name in names:
+        name = str(name).strip().lower()
+        for feature in FEATURE_ALIASES.get(name, (name,)):
+            if feature and feature not in result:
+                result.append(feature)
+    return result
 
 
 def _is_env_key_set(key: str) -> bool:
@@ -967,6 +1147,10 @@ def get_env_locked_keys() -> frozenset:
     return frozenset(k for k in EDITABLE_SETTING_KEYS if _is_env_key_set(k))
 
 
+class SettingsLoadError(RuntimeError):
+    """The settings stored in the database could not be read."""
+
+
 def build_settings(db: Optional[Any] = None) -> Settings:
     """
     Build effective Settings: defaults -> DB -> ENV overrides.
@@ -979,52 +1163,59 @@ def build_settings(db: Optional[Any] = None) -> Settings:
     This prevents lockout: if a user makes a mistake in the UI (e.g. wrong
     OIDC URL or bad auth password), they can fix it by setting the correct
     value in ENV / docker-compose.yml and restarting.
+
+    A failed read of the stored overrides raises SettingsLoadError. It must
+    never fall back to ENV-only settings: authentication enabled from the UI
+    lives only in the database, so that fallback would turn it off.
     """
     base = Settings()  # loads defaults + ENV
     if not base.edit_settings_via_ui_enabled or db is None:
         return base
+    from .services.settings_store import get_config_overrides_from_db
     try:
-        from .services.settings_store import get_config_overrides_from_db
         overrides = get_config_overrides_from_db(db, _get_field_annotations())
-        if not overrides:
-            return base
-        # Only apply DB overrides for editable keys where ENV is NOT explicitly set.
-        # When an ENV variable is set, it takes precedence over the DB value.
-        env_locked = get_env_locked_keys()
-        allowed = {k: v for k, v in overrides.items()
-                   if k in EDITABLE_SETTING_KEYS and k not in env_locked}
-        if not allowed:
-            return base
-        # model_copy bypasses validators: validate security capacity bounds first.
-        for key in ("session_max_entries", "auth_max_failure_clients"):
-            if key in allowed:
-                try:
-                    value = TypeAdapter(int).validate_python(allowed[key])
-                    if value < 1:
-                        raise ValueError("Capacity must be positive")
-                    allowed[key] = value
-                except (ValueError, TypeError):
-                    logger.warning("Ignoring invalid authentication capacity override for %s", key)
-                    allowed.pop(key)
-        merged = base.model_copy(update=allowed)
-        # model_copy skips validators. Apply them manually on affected fields.
-        # (We can't use Settings.model_validate() because BaseSettings re-reads ENV on init)
-        try:
-            if 'mailcow_url' in allowed:
-                object.__setattr__(merged, 'mailcow_url', merged.mailcow_url.rstrip('/'))
-            if 'log_level' in allowed:
-                v = merged.log_level.upper()
-                if v not in ('DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'):
-                    v = 'WARNING'
-                object.__setattr__(merged, 'log_level', v)
-            if 'scheduler_workers' in allowed:
-                object.__setattr__(merged, 'scheduler_workers', max(1, min(64, merged.scheduler_workers)))
-        except Exception as e:
-            logger.warning("Post-validation of DB overrides failed: %s", e)
-        return merged
     except Exception as e:
-        logger.warning("Could not load config overrides from DB: %s", e)
+        raise SettingsLoadError(f"Could not read the settings stored in the database: {e}") from e
+    if not overrides:
         return base
+    # Only apply DB overrides for editable keys where ENV is NOT explicitly set.
+    # When an ENV variable is set, it takes precedence over the DB value.
+    env_locked = get_env_locked_keys()
+    allowed = {k: v for k, v in overrides.items()
+               if k in EDITABLE_SETTING_KEYS and k not in env_locked}
+    if not allowed:
+        return base
+    # model_copy bypasses validators: validate security capacity bounds first.
+    for key in ("session_max_entries", "auth_max_failure_clients"):
+        if key in allowed:
+            try:
+                value = TypeAdapter(int).validate_python(allowed[key])
+                if value < 1:
+                    raise ValueError("Capacity must be positive")
+                allowed[key] = value
+            except (ValueError, TypeError):
+                logger.warning("Ignoring invalid authentication capacity override for %s", key)
+                allowed.pop(key)
+    merged = base.model_copy(update=allowed)
+    # model_copy skips validators. Apply them manually on affected fields.
+    # (We can't use Settings.model_validate() because BaseSettings re-reads ENV on init)
+    try:
+        if 'mailcow_url' in allowed:
+            object.__setattr__(merged, 'mailcow_url', merged.mailcow_url.rstrip('/'))
+        if 'log_level' in allowed:
+            v = merged.log_level.upper()
+            if v not in ('DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'):
+                v = 'WARNING'
+            object.__setattr__(merged, 'log_level', v)
+        if 'scheduler_workers' in allowed:
+            object.__setattr__(merged, 'scheduler_workers', max(1, min(64, merged.scheduler_workers)))
+        if 'date_format' in allowed or 'time_format' in allowed:
+            from .app_time import normalize_date_format, normalize_time_format
+            object.__setattr__(merged, 'date_format', normalize_date_format(merged.date_format))
+            object.__setattr__(merged, 'time_format', normalize_time_format(merged.time_format))
+    except Exception as e:
+        logger.warning("Post-validation of DB overrides failed: %s", e)
+    return merged
 
 
 class SettingsWrapper:
@@ -1041,28 +1232,53 @@ settings = _settings_wrapper
 
 
 def reload_settings(db: Optional[Any] = None) -> None:
-    """Reload effective settings (e.g. after saving from UI). Updates the global settings wrapper."""
+    """Reload effective settings (e.g. after saving from UI). Updates the global settings wrapper.
+
+    On failure the current settings stay in force and the error is raised, so
+    the caller (an API request, or startup) fails instead of serving with
+    defaults that may have authentication off.
+    """
     global _settings_wrapper
-    _settings_wrapper._inner = build_settings(db)
+    try:
+        new_inner = build_settings(db)
+    except Exception as e:
+        logger.error("Settings reload failed, keeping the current settings: %s", e)
+        raise
+    _settings_wrapper._inner = new_inner
     # Re-apply log level to root logger (setup_logging ran at import time with the old level)
     root = logging.getLogger()
     root.setLevel(getattr(logging, _settings_wrapper.log_level, logging.WARNING))
 
 
+class AppZoneFormatter(logging.Formatter):
+    """Log lines with their time in the app's time zone and its offset, for
+    example 2026-01-15 13:30:05+01:00, whatever the container clock says. The
+    zone is read for every line, so a new zone in Settings applies at once."""
+
+    def formatTime(self, record, datefmt=None):
+        from datetime import datetime
+        from .app_time import UTC, configured_zone_name, zone_for
+        try:
+            # Not app_tz(): it may log a warning, and this runs inside a handler
+            zone = zone_for(configured_zone_name()) or UTC
+        except Exception:
+            zone = UTC
+        return datetime.fromtimestamp(record.created, zone).isoformat(sep=' ', timespec='seconds')
+
+
 def setup_logging():
     """Configure application logging"""
     root = logging.getLogger()
-    
+
     # Remove ALL existing handlers
     for handler in root.handlers[:]:
         root.removeHandler(handler)
-    
+
     log_format = '%(asctime)s - %(levelname)s - %(message)s'
-    date_format = '%Y-%m-%d %H:%M:%S'
-    
+
     # Console Handler
     console_handler = logging.StreamHandler()
-    console_handler.setFormatter(logging.Formatter(log_format, datefmt=date_format))
+    console_handler.setFormatter(AppZoneFormatter(log_format))
     root.addHandler(console_handler)
     
     # File Handler (logs to /app/data/container.log)
@@ -1084,7 +1300,7 @@ def setup_logging():
             backupCount=3,
             encoding='utf-8'
         )
-        file_handler.setFormatter(logging.Formatter(log_format, datefmt=date_format))
+        file_handler.setFormatter(AppZoneFormatter(log_format))
         root.addHandler(file_handler)
         
     except Exception as e:

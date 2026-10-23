@@ -6,15 +6,17 @@ FIXED: All timestamps now sent with proper UTC timezone ('Z' suffix)
 import logging
 from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy.orm import Session
-from sqlalchemy import or_, and_, desc, func, select
+from sqlalchemy import or_, and_, desc, func, select, tuple_, literal
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+import re
+from typing import List, Optional
 
 from ..database import get_db
 from ..models import MessageCorrelation, PostfixLog, RspamdLog, NetfilterLog, RawServiceLog
 from ..config import settings
+from ..app_time import range_bound
 from ..services.dovecot_parser import parse_dovecot_message
-from ..utils import internal_error, format_datetime_for_api as format_datetime_utc
+from ..utils import internal_error, format_datetime_for_api as format_datetime_utc, RangeStart, RangeEnd
 
 logger = logging.getLogger(__name__)
 
@@ -152,6 +154,197 @@ def _group_postfix_by_recipient(postfix_logs) -> dict:
     return grouped
 
 
+# Every character Python's str.strip() removes around an address (str.isspace),
+# so the SQL match hides exactly what is_blacklisted hid
+BLANKS = "".join(chr(c) for c in range(0x110000) if chr(c).isspace())
+
+
+def message_group_key():
+    """What makes deliveries one message: the Message-ID, else (none, or empty)
+    the delivery's own key, so it is never merged with another"""
+    return func.coalesce(func.nullif(MessageCorrelation.message_id, ""), MessageCorrelation.correlation_key)
+
+
+def message_sort_time():
+    """The time the Messages list sorts by: first seen, else when stored (a
+    delivery may lack it), else the epoch. The list, its cursor, the leg that
+    stands for a message and the CSV export all use it."""
+    return func.coalesce(MessageCorrelation.first_seen, MessageCorrelation.created_at, literal(datetime(1970, 1, 1)))
+
+
+def _filtered_messages_query(db, search=None, sender=None, recipient=None, direction=None, status=None,
+                             user=None, ip=None, start_date=None, end_date=None):
+    """The message legs matching the Messages filters. Shared by the list and
+    its facet counts, so a count always equals what the list shows for it."""
+    query = db.query(MessageCorrelation)
+
+    # Exclude blacklisted correlations
+    query = query.filter(MessageCorrelation.correlation_key != "BLACKLISTED")
+    # Addresses hidden with Blacklist Emails, here in the query, so pages,
+    # totals and facet counts leave them out alike (no page comes out empty)
+    hidden = settings.blacklist_emails_list
+    if hidden:
+        for column in (MessageCorrelation.sender, MessageCorrelation.recipient):
+            query = query.filter(or_(column.is_(None), func.lower(func.btrim(column, BLANKS)).notin_(hidden)))
+    
+    # Apply filters
+    if search:
+        search_term = f"%{search}%"
+        # Search in correlation fields
+        correlation_filters = or_(
+            MessageCorrelation.sender.ilike(search_term),
+            MessageCorrelation.recipient.ilike(search_term),
+            MessageCorrelation.subject.ilike(search_term),
+            MessageCorrelation.message_id.ilike(search_term),
+            MessageCorrelation.queue_id.ilike(search_term)
+        )
+        
+        # Also search in Rspamd fields (IP and user) via subquery
+        rspamd_subquery = select(RspamdLog.id).where(
+            or_(
+                RspamdLog.ip.ilike(search_term),
+                RspamdLog.user.ilike(search_term)
+            )
+        )
+        
+        query = query.filter(
+            or_(
+                correlation_filters,
+                MessageCorrelation.rspamd_log_id.in_(rspamd_subquery)
+            )
+        )
+    
+    if sender:
+        query = query.filter(MessageCorrelation.sender.ilike(f"%{sender}%"))
+    
+    if recipient:
+        query = query.filter(MessageCorrelation.recipient.ilike(f"%{recipient}%"))
+    
+    if direction:
+        query = query.filter(MessageCorrelation.direction == direction)
+    
+    if status:
+        # For spam status, check both final_status and is_spam from Rspamd
+        if status == 'spam':
+            # Use outerjoin to include correlations without Rspamd logs
+            # Check if final_status is 'spam' OR if Rspamd marked it as spam
+            query = query.outerjoin(
+                RspamdLog,
+                MessageCorrelation.rspamd_log_id == RspamdLog.id
+            ).filter(
+                or_(
+                    MessageCorrelation.final_status == 'spam',
+                    RspamdLog.is_spam == True
+                )
+            )
+        else:
+            query = query.filter(MessageCorrelation.final_status == status)
+    
+    if start_date:
+        query = query.filter(MessageCorrelation.first_seen >= start_date)
+    
+    if end_date:
+        query = query.filter(MessageCorrelation.first_seen <= end_date)
+    
+    # Filter by user (need to join with Rspamd)
+    # Check if we already have a join from spam filter (outerjoin)
+    has_rspamd_join = status == 'spam'
+    if user:
+        if not has_rspamd_join:
+            query = query.join(
+                RspamdLog,
+                MessageCorrelation.rspamd_log_id == RspamdLog.id
+            )
+            has_rspamd_join = True
+        # outerjoin works fine for filtering, no need to change it
+        query = query.filter(RspamdLog.user.ilike(f"%{user}%"))
+    
+    # Filter by IP (need to join with Rspamd if not already joined)
+    if ip:
+        if not has_rspamd_join:
+            query = query.join(
+                RspamdLog,
+                MessageCorrelation.rspamd_log_id == RspamdLog.id
+            )
+        query = query.filter(RspamdLog.ip.ilike(f"%{ip}%"))
+    return query
+
+
+def _count_messages(query):
+    """Messages, not legs, in a filtered leg query (the rule of the list)."""
+    # As the list groups them: an empty Message-ID is none
+    group_key = func.coalesce(func.nullif(MessageCorrelation.message_id, ""), MessageCorrelation.correlation_key)
+    legs = query.with_entities(
+        func.row_number().over(
+            partition_by=group_key,
+            order_by=(MessageCorrelation.first_seen.asc(), MessageCorrelation.id.asc())
+        ).label("leg_rank")
+    ).subquery()
+    return query.session.query(func.count()).select_from(legs).filter(legs.c.leg_rank == 1).scalar() or 0
+
+
+FACET_STATUSES = ("delivered", "deferred", "bounced", "rejected", "spam", "discarded")
+FACET_DIRECTIONS = ("inbound", "outbound", "internal")
+
+
+@router.get("/messages/facets")
+def get_message_facets(
+    search: Optional[str] = Query(None),
+    sender: Optional[str] = Query(None),
+    recipient: Optional[str] = Query(None),
+    direction: Optional[str] = Query(None),
+    status: Optional[str] = Query(None),
+    user: Optional[str] = Query(None),
+    ip: Optional[str] = Query(None),
+    start_date: Optional[RangeStart] = Query(None),
+    end_date: Optional[RangeEnd] = Query(None),
+    since: List[str] = Query([], description="Time ranges to count, as name:start, an ISO instant or a YYYY-MM-DD day (e.g. today:2026-09-27T00:00:00Z)"),
+    db: Session = Depends(get_db)
+):
+    """
+    Message counts per outcome and per direction for the Messages facets.
+    With since=name:start pairs it also counts each time range (every other
+    filter applies, the chosen date range does not).
+
+    Each outcome count applies every filter except the outcome itself, and each
+    direction count every filter except the direction, so the numbers say what
+    choosing that facet would show.
+    """
+    try:
+        common = dict(search=search, sender=sender, recipient=recipient, user=user, ip=ip,
+                      start_date=start_date, end_date=end_date)
+        by_status = {
+            value: _count_messages(_filtered_messages_query(db, direction=direction, status=value, **common))
+            for value in FACET_STATUSES
+        }
+        by_direction = {
+            value: _count_messages(_filtered_messages_query(db, direction=value, status=status, **common))
+            for value in FACET_DIRECTIONS
+        }
+        result = {
+            "status": {"all": _count_messages(_filtered_messages_query(db, direction=direction, **common)), **by_status},
+            "direction": {"all": _count_messages(_filtered_messages_query(db, status=status, **common)), **by_direction},
+        }
+        if since:
+            undated = dict(search=search, sender=sender, recipient=recipient, user=user, ip=ip)
+            by_time = {"all": _count_messages(_filtered_messages_query(db, direction=direction, status=status, **undated))}
+            for item in since[:8]:
+                name, _, iso = item.partition(':')
+                if not re.fullmatch(r'[a-z0-9]{1,16}', name):
+                    continue
+                try:
+                    # An instant, or a date: the start of that day in the app's time zone
+                    start = range_bound(iso, end=False)
+                except ValueError:
+                    continue
+                by_time[name] = _count_messages(_filtered_messages_query(db, direction=direction, status=status, start_date=start, **undated))
+            result["time"] = by_time
+        return result
+    except Exception as e:
+        logger.error(f"Error counting message facets: {e}")
+        raise internal_error(e)
+
+
 @router.get("/messages")
 def get_unified_messages(
     page: int = Query(1, ge=1, description="Page number"),
@@ -163,115 +356,43 @@ def get_unified_messages(
     status: Optional[str] = Query(None, description="Filter by status"),
     user: Optional[str] = Query(None, description="Filter by authenticated user"),
     ip: Optional[str] = Query(None, description="Filter by source IP"),
-    start_date: Optional[datetime] = Query(None, description="Start date"),
-    end_date: Optional[datetime] = Query(None, description="End date"),
+    start_date: Optional[RangeStart] = Query(None, description="Start date"),
+    end_date: Optional[RangeEnd] = Query(None, description="End date"),
+    order: str = Query("desc", pattern="^(asc|desc)$", description="By time first seen: desc newest first, asc oldest first"),
+    cursor: Optional[str] = Query(None, max_length=80, description="The next_cursor of the page before: the messages after it, instead of a page number"),
     db: Session = Depends(get_db)
 ):
     """
     Get unified messages view (combines Postfix + Rspamd)
     """
+    # A cursor is the last message shown (its time first seen and its leg's id):
+    # the next page starts right after it, so a message removed or added in
+    # between (retention, new mail) neither skips nor repeats one
+    after = None
+    if isinstance(cursor, str) and cursor:   # a direct call (tests) leaves the Query default
+        try:
+            at, leg = cursor.rsplit("|", 1)
+            after = (datetime.fromisoformat(at), int(leg))
+        except ValueError:
+            raise HTTPException(status_code=422, detail="Invalid cursor")
     try:
-        query = db.query(MessageCorrelation)
-        
-        # Exclude blacklisted correlations
-        query = query.filter(MessageCorrelation.correlation_key != "BLACKLISTED")
-        
-        # Apply filters
-        if search:
-            search_term = f"%{search}%"
-            # Search in correlation fields
-            correlation_filters = or_(
-                MessageCorrelation.sender.ilike(search_term),
-                MessageCorrelation.recipient.ilike(search_term),
-                MessageCorrelation.subject.ilike(search_term),
-                MessageCorrelation.message_id.ilike(search_term),
-                MessageCorrelation.queue_id.ilike(search_term)
-            )
-            
-            # Also search in Rspamd fields (IP and user) via subquery
-            rspamd_subquery = select(RspamdLog.id).where(
-                or_(
-                    RspamdLog.ip.ilike(search_term),
-                    RspamdLog.user.ilike(search_term)
-                )
-            )
-            
-            query = query.filter(
-                or_(
-                    correlation_filters,
-                    MessageCorrelation.rspamd_log_id.in_(rspamd_subquery)
-                )
-            )
-        
-        if sender:
-            query = query.filter(MessageCorrelation.sender.ilike(f"%{sender}%"))
-        
-        if recipient:
-            query = query.filter(MessageCorrelation.recipient.ilike(f"%{recipient}%"))
-        
-        if direction:
-            query = query.filter(MessageCorrelation.direction == direction)
-        
-        if status:
-            # For spam status, check both final_status and is_spam from Rspamd
-            if status == 'spam':
-                # Use outerjoin to include correlations without Rspamd logs
-                # Check if final_status is 'spam' OR if Rspamd marked it as spam
-                query = query.outerjoin(
-                    RspamdLog,
-                    MessageCorrelation.rspamd_log_id == RspamdLog.id
-                ).filter(
-                    or_(
-                        MessageCorrelation.final_status == 'spam',
-                        RspamdLog.is_spam == True
-                    )
-                )
-            else:
-                query = query.filter(MessageCorrelation.final_status == status)
-        
-        if start_date:
-            query = query.filter(MessageCorrelation.first_seen >= start_date)
-        
-        if end_date:
-            query = query.filter(MessageCorrelation.first_seen <= end_date)
-        
-        # Filter by user (need to join with Rspamd)
-        # Check if we already have a join from spam filter (outerjoin)
-        has_rspamd_join = status == 'spam'
-        if user:
-            if not has_rspamd_join:
-                query = query.join(
-                    RspamdLog,
-                    MessageCorrelation.rspamd_log_id == RspamdLog.id
-                )
-                has_rspamd_join = True
-            # outerjoin works fine for filtering, no need to change it
-            query = query.filter(RspamdLog.user.ilike(f"%{user}%"))
-        
-        # Filter by IP (need to join with Rspamd if not already joined)
-        if ip:
-            if not has_rspamd_join:
-                query = query.join(
-                    RspamdLog,
-                    MessageCorrelation.rspamd_log_id == RspamdLog.id
-                )
-            query = query.filter(RspamdLog.ip.ilike(f"%{ip}%"))
-        
+        query = _filtered_messages_query(db, search, sender, recipient, direction, status, user, ip, start_date, end_date)
+
         # One row per message, not one per delivery leg (issue #36). The filters
         # above select legs; the legs are then grouped by Message-ID and the
         # earliest matching leg represents its message in the list, so a search
         # always shows the leg that matched it. A correlation without a
         # Message-ID falls back to its own key and is never merged with another.
-        group_key = func.coalesce(
-            MessageCorrelation.message_id, MessageCorrelation.correlation_key
-        )
+        group_key = message_group_key()
         legs = query.with_entities(
             MessageCorrelation.id.label("leg_id"),
             MessageCorrelation.first_seen.label("first_seen"),
+            # The time the list sorts by: first seen, else stored (a leg may lack it)
+            message_sort_time().label("sort_time"),
             func.row_number().over(
                 partition_by=group_key,
                 order_by=(
-                    MessageCorrelation.first_seen.asc(),
+                    message_sort_time().asc(),
                     MessageCorrelation.id.asc()
                 )
             ).label("leg_rank")
@@ -282,13 +403,23 @@ def get_unified_messages(
             legs.c.leg_rank == 1
         ).scalar() or 0
 
-        # Apply pagination
-        offset = (page - 1) * limit
-        messages = db.query(MessageCorrelation).join(
+        # A page: after the cursor when there is one, else by its number. One
+        # row more than the page says whether another page follows
+        rows = db.query(MessageCorrelation, legs.c.sort_time).join(
             legs, MessageCorrelation.id == legs.c.leg_id
         ).filter(
             legs.c.leg_rank == 1
-        ).order_by(desc(legs.c.first_seen)).offset(offset).limit(limit * 2).all()
+        )
+        if after:
+            mark = tuple_(legs.c.sort_time, legs.c.leg_id)
+            rows = rows.filter(mark > tuple_(*after) if order == "asc" else mark < tuple_(*after))
+        found = rows.order_by(
+            # The leg's id settles messages first seen at the same moment, so pages never overlap or skip
+            *((legs.c.sort_time.asc(), legs.c.leg_id.asc()) if order == "asc" else (desc(legs.c.sort_time), desc(legs.c.leg_id)))
+        ).offset(0 if after else (page - 1) * limit).limit(limit + 1).all()
+        more = len(found) > limit
+        found = found[:limit]
+        messages = [msg for msg, _ in found]
 
         # How many deliveries the message has in total, which is what the row
         # reports - not only the legs the current filters matched
@@ -304,13 +435,9 @@ def get_unified_messages(
                 ).group_by(MessageCorrelation.message_id).all()
             )
 
-        # Filter out blacklisted emails and build response
+        # Build the response (hidden addresses are already left out by the query)
         result_messages = []
         for msg in messages:
-            # Check blacklist
-            if is_blacklisted(msg.sender) or is_blacklisted(msg.recipient):
-                continue
-            
             # Get Rspamd log for additional info
             rspamd_log = None
             if msg.rspamd_log_id:
@@ -338,17 +465,15 @@ def get_unified_messages(
                 "user": rspamd_log.user if rspamd_log else None,
                 "ip": rspamd_log.ip if rspamd_log else None
             })
-            
-            # Stop when we have enough messages
-            if len(result_messages) >= limit:
-                break
-        
+
         return {
             "total": total_before_filter,
             "page": page,
             "limit": limit,
             "pages": (total_before_filter + limit - 1) // limit if total_before_filter > 0 else 0,
-            "data": result_messages
+            "data": result_messages,
+            # Where the next page starts, or null at the end
+            "next_cursor": f"{found[-1][1].isoformat()}|{found[-1][0].id}" if more and found else None,
         }
     except Exception as e:
         logger.error(f"Error fetching unified messages: {e}")
@@ -425,6 +550,7 @@ def get_message_full_details(
         # sender, recipient and verdict, so neither leg tells the whole story
         # on its own and the detail view links them.
         related_deliveries = []
+        other_legs = []
         if correlation.message_id:
             other_legs = db.query(MessageCorrelation).filter(
                 MessageCorrelation.message_id == correlation.message_id,
@@ -444,6 +570,13 @@ def get_message_full_details(
                 }
                 for leg in other_legs
             ]
+
+        # A delivery Rspamd did not scan, such as a release from quarantine,
+        # has no subject of its own; it is the same message, so it takes the
+        # subject another delivery of the same Message-ID recorded
+        subject = correlation.subject
+        if not subject and correlation.message_id:
+            subject = next((leg.subject for leg in other_legs if leg.subject), None)
 
         # Get the Dovecot delivery lines for the last hop (issue #65)
         dovecot_logs = _get_dovecot_logs(
@@ -472,7 +605,7 @@ def get_message_full_details(
             "recipient": correlation.recipient,  # Primary recipient (for backwards compatibility)
             "recipients": recipients,  # ALL recipients
             "recipient_count": len(recipients),
-            "subject": correlation.subject,
+            "subject": subject,
             "direction": correlation.direction,
             "final_status": correlation.final_status,
             "is_complete": correlation.is_complete,

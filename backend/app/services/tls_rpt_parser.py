@@ -174,7 +174,6 @@ def parse_tls_rpt_json(json_content: str) -> Optional[Dict[str, Any]]:
             'start_datetime': start_datetime,
             'end_datetime': end_datetime,
             'policies': policies,
-            'raw_json': json_content
         }
         
     except json.JSONDecodeError as e:

@@ -1,447 +1,310 @@
-# Environment Variables Reference
+# Environment variables
 
-Complete reference guide for all environment variables available in mailcow Logs Viewer.
+Set these variables in the `.env` file next to `docker-compose.yml`; with the supplied `docker-compose.yml`, the app container reads only that file. After a change, recreate the app with `docker compose up -d`. A plain restart keeps the container's old environment.
 
-> **Note:** When `SETTINGS_EDIT_VIA_UI_ENABLED=true`, most settings can be managed from the web UI. Only database connection settings (`POSTGRES_*`) and the UI editing flag itself must remain in the `.env` file.
+## Configuration priority
+
+A variable that is set, even to an empty value (`SMTP_HOST=`), wins over the value saved on the Settings page and locks its field there. Saved values are used only while `SETTINGS_EDIT_VIA_UI_ENABLED=true`. To move variables into the Settings page, see [Settings](HelpDocs/Settings.md#enable-editing-and-migrate-from-env).
 
----
+The required settings, `SETTINGS_EDIT_VIA_UI_ENABLED`, `APP_PORT` and every variable from [Environment-only and legacy settings](#environment-only-and-legacy-settings) down can be set only here. Notification destinations, ignored containers and blocklists, protection rules, quarantine rules and the outgoing spam whitelist have no variables; you manage them on their pages.
 
-## Required Settings
+Switches take `true` or `false`. **Required** means the app does not start without it, **Unset** means no value, and **Empty** means an empty string.
 
-These settings **must** be configured in your `.env` file:
-
-| Variable | Type | Description | Example |
-|----------|------|-------------|---------|
-| `MAILCOW_URL` | string | Your mailcow instance URL (without trailing slash) | `https://mail.example.com` |
-| `MAILCOW_API_KEY` | string | mailcow API key — **Read-Only** (generate from System → API in mailcow admin). Required permissions: Read access to logs | `abc123-def456-ghi789` |
-| `POSTGRES_USER` | string | PostgreSQL username | `mailcowlogs` |
-| `POSTGRES_PASSWORD` | string | PostgreSQL password. ⚠️ Avoid special chars (`@:/?#`) - breaks connection strings. 💡 Use UUID: `uuidgen` or https://it-tools.tech/uuid-generator | `a7f3c8e2-4b1d-4f9a-8c3e-7d2f1a9b5e4c` |
-| `POSTGRES_DB` | string | PostgreSQL database name | `mailcowlogs` |
-| `POSTGRES_HOST` | string | PostgreSQL host (use `db` for docker-compose setup) | `db` |
-| `POSTGRES_PORT` | integer | PostgreSQL port | `5432` |
-
----
-
-## Settings UI Configuration
-
-| Variable | Type | Default | Description |
-|----------|------|---------|-------------|
-| `SETTINGS_EDIT_VIA_UI_ENABLED` | boolean | `false` | Allow editing app settings from the web UI (Settings tab). When enabled, values are stored in the database (priority: Default → DB → ENV; ENV always wins). **Must be in .env** and app must be restarted after change. |
-
----
-
-## mailcow API Configuration
-
-| Variable | Type | Default | Description |
-|----------|------|---------|-------------|
-| `MAILCOW_API_KEY_RW` | string | (empty) | mailcow API key — **Read-Write** (optional). Generate a separate key from System → API with write permissions. Used only for edit operations (e.g. Fail2Ban settings). When not set, edit features are disabled |
-| `MAILCOW_API_VERIFY_SSL` | boolean | `true` | Verify SSL certificates when connecting to mailcow API. Set to `false` for development environments with self-signed certificates |
-| `MAILCOW_API_TIMEOUT` | integer | `30` | API request timeout in seconds |
-
----
-
-## Fetch Configuration
-
-| Variable | Type | Default | Description |
-|----------|------|---------|-------------|
-| `FETCH_INTERVAL` | integer | `60` | Seconds between log fetches from mailcow. Lower = more frequent updates, higher load on mailcow |
-| `FETCH_COUNT_POSTFIX` | integer | `2000` | Number of Postfix records to fetch per request. Recommended: 500-2000 for most servers, increase if you have high email volume |
-| `FETCH_COUNT_RSPAMD` | integer | `500` | Number of Rspamd records to fetch per request |
-| `FETCH_COUNT_NETFILTER` | integer | `500` | Number of Netfilter records to fetch per request |
-| `FETCH_MAX_PAGES` | integer | `50` | Maximum number of pages to fetch per cycle for Postfix/Rspamd (safety limit to prevent infinite loops) |
-| `RETENTION_DAYS` | integer | `7` | Number of days to keep logs in database. Logs older than this will be automatically deleted. Recommended: 7 for most cases, 30 for compliance/audit requirements |
-
----
-
-## Correlation Configuration
-
-| Variable | Type | Default | Description |
-|----------|------|---------|-------------|
-| `MAX_CORRELATION_AGE_MINUTES` | integer | `10` | Stop searching for correlations older than this (minutes) |
-| `CORRELATION_CHECK_INTERVAL` | integer | `120` | Seconds between correlation completion checks |
-
----
-
-## Application Configuration
-
-| Variable | Type | Default | Description |
-|----------|------|---------|-------------|
-| `APP_TITLE` | string | `mailcow Logs Viewer` | Application title (shown in browser tab) |
-| `APP_LOGO_URL` | string | (empty) | Logo URL (optional, leave empty to use the default project icon) |
-| `LOG_LEVEL` | string | `WARNING` | Logging level: `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL` |
-| `DEBUG` | boolean | `false` | Enable debug mode (shows detailed errors, use only for development). ⚠️ **WARNING: Never enable in production!** |
-| `MAX_SEARCH_RESULTS` | integer | `1000` | Maximum records to return in search results |
-| `CSV_EXPORT_LIMIT` | integer | `10000` | CSV export row limit |
-| `SCHEDULER_WORKERS` | integer | `4` | Thread pool size for blocking scheduler jobs (e.g. DMARC IMAP sync). Valid range: 1-64. Higher values allow more blocking jobs to run in parallel |
-| `DISABLED_FEATURES` | string | (empty) | Comma-separated list of features to disable (hides navigation, stops background jobs). Valid values: `netfilter`, `queue`, `quarantine`, `spam-filter`, `domains`, `dmarc`, `mailbox-stats`, `rate-limits`, `logs`, `blacklist`. Can also be managed from the Settings UI when `SETTINGS_EDIT_VIA_UI_ENABLED=true` |
-
----
-
-## SMTP Configuration
-
-| Variable | Type | Default | Description |
-|----------|------|---------|-------------|
-| `SMTP_ENABLED` | boolean | `false` | Enable SMTP for sending notifications |
-| `SMTP_HOST` | string | (empty) | SMTP server hostname |
-| `SMTP_PORT` | integer | `587` | SMTP server port (587 for TLS, 465 for SSL, 25 for plain) |
-| `SMTP_USE_TLS` | boolean | `false` | Use STARTTLS for SMTP connection (recommended) |
-| `SMTP_USE_SSL` | boolean | `false` | Use Implicit SSL/TLS for SMTP connection (usually port 465) |
-| `SMTP_USER` | string | (empty) | SMTP username (usually email address) |
-| `SMTP_PASSWORD` | string | (empty) | SMTP password |
-| `SMTP_FROM` | string | (empty) | From address for emails (defaults to SMTP user if not set) |
-| `SMTP_RELAY_MODE` | boolean | `false` | Relay mode - send emails without authentication (for local relay servers). When enabled, username and password are not required |
-
----
-
-## Admin & Notification Configuration
-
-| Variable | Type | Default | Description |
-|----------|------|---------|-------------|
-| `ADMIN_EMAIL` | string | (empty) | Administrator email for system notifications |
-| `BLACKLIST_ALERT_EMAIL` | string | (empty) | Email address for blacklist alerts (defaults to `ADMIN_EMAIL` if not set) |
-| `ENABLE_WEEKLY_SUMMARY` | boolean | `true` | Enable weekly summary email report (sent to `ADMIN_EMAIL`) |
-
----
-
-## Notification Destinations
-
-Alerts (blacklist listings, DMARC processing errors, security alerts) are delivered by email and to any number of **notification destinations** - Slack, Discord, Telegram, ntfy, Gotify, or a custom JSON endpoint.
-
-Destinations are **configured in the web UI**, not through environment variables: go to **Settings -> Notifications -> Add destination**, pick the service, and fill in only the fields that service needs (Telegram asks for a bot token and chat ID, ntfy for a server and topic, Slack for its incoming-webhook URL). The endpoint URL is assembled for you. Each destination has a **Send test** button, can be enabled/disabled individually, and shows whether the last delivery succeeded.
-
-You can add as many destinations as you like, and choose **which alerts each one receives**:
-
-| Alert type | Sent when |
-|------------|-----------|
-| **Security** | A mailbox looks compromised (outbound spike), an authentication attack is detected, or SMTP is disabled by abuse protection |
-| **IP blacklist** | Your server IP appears on a spam blacklist, or is no longer listed |
-| **DNS record changes** | A domain's SPF, DKIM, DMARC, TLSA, MTA-STS or TLS-RPT record changed, DNSSEC stopped validating, or a TLSA record no longer matches the mail server certificate |
-| **DMARC processing errors** | A DMARC report could not be imported or parsed |
-
-A destination with all types ticked receives everything. Destinations created before this existed keep receiving all alerts.
-
-| Setting | Where | Description |
-|---------|-------|-------------|
-| Destinations | Settings -> Notifications | Add/edit/remove Slack, Discord, Telegram, ntfy, Gotify or custom webhook targets |
-| `ADMIN_EMAIL` | ENV or Settings | Email address for general alerts (see Admin & Notification Configuration above) |
-
-> **Upgrading from the old single-webhook settings?** Nothing to do. `WEBHOOK_ENABLED`, `WEBHOOK_TYPE`, `WEBHOOK_URL` and `WEBHOOK_TELEGRAM_CHAT_ID` are migrated automatically into a destination on first start, and are not used afterwards.
-
----
-
-## Security Monitoring & Abuse Protection
-
-Two complementary layers for detecting and stopping a compromised mailbox:
-
-- **Anomaly detection** - *alerts only*. Compares each mailbox against **its own** recent sending baseline, so it catches an account takeover even at low volumes. Never takes action on its own.
-- **SMTP abuse protection** - *acts*. Applies a **hard** outbound limit and disables SMTP for a mailbox that crosses it.
-
-Both write to the same security alert feed (dashboard banner) and notify through email + webhook.
-
-### Anomaly Detection
-
-| Variable | Type | Default | Description |
-|----------|------|---------|-------------|
-| `ANOMALY_DETECTION_ENABLED` | boolean | `false` | Enable anomaly detection (outbound volume spikes and authentication-failure bursts) |
-| `ANOMALY_CHECK_INTERVAL` | integer | `15` | Minutes between detection runs. Also the length of the window each run examines |
-| `ANOMALY_VOLUME_MULTIPLIER` | float | `5.0` | Alert when a mailbox's current sending rate exceeds this multiple of its own baseline (e.g. `5.0` = five times its normal rate) |
-| `ANOMALY_VOLUME_MIN_MESSAGES` | integer | `30` | Noise floor: a mailbox must send at least this many messages in the window before a spike can alert |
-| `ANOMALY_BASELINE_DAYS` | integer | `7` | Days of history used to compute each mailbox's normal sending rate |
-| `ANOMALY_AUTH_FAILURE_THRESHOLD` | integer | `20` | Alert when a username accumulates this many authentication failures within the window (brute-force / credential stuffing) |
-| `ANOMALY_ALERT_COOLDOWN_HOURS` | integer | `6` | Suppress repeat alerts for the same mailbox and alert type within this many hours |
-
-> Alerts appear as a banner on the Dashboard and can be dismissed there. No mailbox is ever blocked by this feature.
-
-### SMTP Abuse Protection
-
-Automatically disables **sending** for a mailbox that exceeds a hard outbound limit - the usual signature of a compromised account. **Receiving (IMAP) is never affected**, so the user keeps access to their mail. Manage blocked mailboxes and the whitelist under **Security → Abuse Protection**.
-
-| Variable | Type | Default | Description |
-|----------|------|---------|-------------|
-| `SMTP_ABUSE_ENABLED` | boolean | `false` | Enable automatic SMTP blocking |
-| `SMTP_ABUSE_THRESHOLD` | integer | `100` | Outbound messages a mailbox may send within the rolling window before SMTP is disabled |
-| `SMTP_ABUSE_WINDOW_MINUTES` | integer | `60` | Length of the rolling window in minutes |
-| `SMTP_ABUSE_REVOKE_APP_PASSWORDS` | boolean | `true` | Also revoke the mailbox's app passwords when blocking (a compromised mailbox usually sends via an app password) |
-| `SMTP_ABUSE_UNBLOCK_GRACE_MINUTES` | integer | `60` | After an operator re-enables SMTP, do not auto-block that mailbox again for this many minutes. Prevents the mailbox from being re-blocked immediately while old messages are still inside the rolling window |
-| `SMTP_ABUSE_HELP_ADDRESS` | string | (empty) | Support address included in the notification sent to the blocked mailbox (falls back to `ADMIN_EMAIL`) |
-
-> **Prerequisites:**
-> - `MAILCOW_API_KEY_RW` - **required**; blocking uses the mailcow edit API. Without it the feature stays inactive
-> - Whitelist mailboxes that legitimately send in bursts (newsletters, ticketing, monitoring) under Security → Abuse Protection
-> - Set `SMTP_ENABLED` / `ADMIN_EMAIL` (or a webhook) to be notified when a mailbox is blocked
->
-> **Tip:** start with a threshold well above your busiest legitimate mailbox's hourly volume, watch the Security page for a few days, then tighten it.
-
----
-
-## Blacklist Configuration
-
-| Variable | Type | Default | Description |
-|----------|------|---------|-------------|
-| `DNS_CHANGE_ALERTS_ENABLED` | boolean | `true` | Alert when a domain's SPF, DKIM, DMARC, TLSA, MTA-STS or TLS-RPT record changes, when DNSSEC stops validating, or when a TLSA record no longer matches the mail server certificate. The alert names the domain and shows the old and new value, so you can update the records at your registrar. A failed DNS lookup is never treated as a change, so a temporary resolver problem cannot cause a false alarm |
-| `BLACKLIST_DNS_SERVERS` | string | (empty) | DNS resolvers used for IP blacklist (RBL) lookups, comma-separated. **Spamhaus rejects queries that arrive through public resolvers** (Google, Cloudflare, Quad9 and all DoH endpoints) and answers with a `127.255.255.x` rejection code instead of a real result. Point this at your own recursive resolver - in a mailcow deployment: `172.22.1.254` (unbound-mailcow). Leave empty to use the container's own resolver, which is correct in most setups |
-| `BLACKLIST_SOURCE_SERVER_IP` | boolean | `true` | Monitor the auto-detected WAN IP (reported by the mailcow status API) on spam blacklists (RBLs). Set to `false` when outbound mail goes through a relay host: the auto-detected WAN entry is deactivated (not deleted) and only the other enabled sources are monitored |
-| `BLACKLIST_SOURCE_TRANSPORTS` | boolean | `true` | Monitor the public IPs of active mailcow transports on spam blacklists. Each transport nexthop is resolved to **all** of its public IPs, so relay pools with several addresses are fully covered |
-| `BLACKLIST_SOURCE_RELAYHOSTS` | boolean | `true` | Monitor the public IPs of active mailcow relayhosts (sender-dependent transports) on spam blacklists |
-| `BLACKLIST_SOURCE_MANUAL_HOSTS` | string | (empty) | Additional hosts to monitor on spam blacklists, comma-separated, e.g. `203.0.113.10,2001:db8::10,relay.example.com`. Accepts IPv4/IPv6 addresses and hostnames (a hostname is resolved to all of its public IPs, source `config`). Monitored **in addition** to the sources above - these may also be hosts unrelated to this mailcow server. Invalid entries are rejected on save |
-| `BLACKLIST_EMAILS` | string | (empty) | Comma-separated list of email addresses to hide from logs (no spaces). These emails will NOT be stored in the database. Use cases: BCC addresses that receive all outbound mail, monitoring/health check addresses, internal system addresses. Example: `bcc-archive@example.com,monitor@example.com` |
-
----
-
-## Domain SPF Check Configuration
-
-Which sending IPs must pass each domain's SPF record on the Domains page. With a relay setup the relay IPs matter, not the auto-detected WAN IP.
-
-| Variable | Type | Default | Description |
-|----------|------|---------|-------------|
-| `DOMAIN_SPF_SOURCE_SERVER_IP` | boolean | `true` | Validate the auto-detected WAN IP against each domain's SPF record. Set to `false` when outbound mail leaves through a relay host and the WAN IP is not supposed to be in your SPF records |
-| `DOMAIN_SPF_SOURCE_TRANSPORTS` | boolean | `false` | Also validate the public IPs resolved from active mailcow transport nexthops against each domain's SPF record |
-| `DOMAIN_SPF_SOURCE_RELAYHOSTS` | boolean | `false` | Also validate the public IPs resolved from active mailcow relayhosts against each domain's SPF record |
-| `DOMAIN_SPF_SOURCE_MANUAL_HOSTS` | string | (empty) | Additional hosts that must pass each domain's SPF check, comma-separated. Accepts IPv4/IPv6 addresses and hostnames. **Outbound sending addresses only** - every entry must pass the SPF check, so do not add addresses that never send mail (such as an inbound-only MX). Invalid entries are rejected on save |
-| `DOMAIN_SPF_SOURCE_DMARC_HISTORY` | boolean | `false` | Also validate source IPs observed with a passing SPF result in the last 30 days of imported DMARC aggregate reports for each domain (up to 20 IPs per domain). Caution: with relaxed SPF alignment, an IP sending from an ESP subdomain can appear as an aligned pass without being listed in the domain's own SPF record, which then shows up as a false warning |
-
----
-
-## DMARC Configuration
-
-| Variable | Type | Default | Description |
-|----------|------|---------|-------------|
-| `DMARC_RETENTION_DAYS` | integer | `60` | DMARC reports retention in days |
-| `DMARC_MANUAL_UPLOAD_ENABLED` | boolean | `true` | Allow manual upload of DMARC reports via UI |
-| `DMARC_ALLOW_REPORT_DELETE` | boolean | `false` | Allow deleting DMARC/TLS reports from the UI |
-| `DMARC_ERROR_EMAIL` | string | (empty) | Email address for DMARC error notifications (defaults to `ADMIN_EMAIL` if not set) |
-
-### DMARC Insights (Policy Recommendations)
-
-Turns collected DMARC report data into advice: when a domain's pass rate and volume are healthy under a lax policy, the DMARC & TLS page suggests tightening it (`p=none` → `p=quarantine` → `p=reject`), and it flags source IPs that only recently started sending for a domain **and** are failing DMARC (possible spoofing).
-
-| Variable | Type | Default | Description |
-|----------|------|---------|-------------|
-| `DMARC_INSIGHTS_WINDOW_DAYS` | integer | `28` | Days of DMARC report data used for recommendations |
-| `DMARC_INSIGHTS_PASS_THRESHOLD` | float | `99.5` | Minimum DMARC pass rate (%) before a stricter policy is recommended |
-| `DMARC_INSIGHTS_MIN_VOLUME` | integer | `100` | Minimum reported messages in the window before any recommendation is made (avoids advice based on a handful of messages) |
-
-> Read-only: this feature never changes DNS records - it only shows recommendations on the DMARC & TLS page.
-
-### DMARC IMAP Auto-Import Configuration
-
-| Variable | Type | Default | Description |
-|----------|------|---------|-------------|
-| `DMARC_IMAP_ENABLED` | boolean | `false` | Enable automatic DMARC report import from IMAP |
-| `DMARC_IMAP_HOST` | string | (empty) | IMAP server hostname (e.g., `imap.gmail.com`) |
-| `DMARC_IMAP_PORT` | integer | `993` | IMAP server port (993 for SSL, 143 for non-SSL) |
-| `DMARC_IMAP_USE_SSL` | boolean | `true` | Use SSL/TLS for IMAP connection |
-| `DMARC_IMAP_USER` | string | (empty) | IMAP username (email address) |
-| `DMARC_IMAP_PASSWORD` | string | (empty) | IMAP password |
-| `DMARC_IMAP_FOLDER` | string | `INBOX` | IMAP folder to scan for DMARC reports |
-| `DMARC_IMAP_DELETE_AFTER` | boolean | `true` | Delete emails after successful processing |
-| `DMARC_IMAP_INTERVAL` | integer | `3600` | Interval between IMAP syncs in seconds (default: 3600 = 1 hour) |
-| `DMARC_IMAP_RUN_ON_STARTUP` | boolean | `true` | Run IMAP sync once on application startup |
-| `DMARC_IMAP_BATCH_SIZE` | integer | `10` | Number of emails to process per batch (prevents memory issues with large mailboxes) |
-| `DMARC_IMAP_SCAN_ALL_UNSEEN` | boolean | `false` | Scan all unread emails for DMARC/TLS-RPT attachments, not just those matching known subject patterns. Enable if you receive reports from providers that use non-English subjects. Only recommended for dedicated DMARC mailboxes |
-
----
-
-## MaxMind GeoIP Configuration
-
-| Variable | Type | Default | Description |
-|----------|------|---------|-------------|
-| `MAXMIND_ACCOUNT_ID` | string | (empty) | MaxMind Account ID for GeoIP database downloads |
-| `MAXMIND_LICENSE_KEY` | string | (empty) | MaxMind License Key for GeoIP database downloads |
-
-> **Note:** To use MaxMind GeoIP features, you need to add a data volume in `docker-compose.yml`:
-> ```yaml
-> services:
->   app:
->     volumes:
->       - ./data:/app/data
-> ```
-
----
-
-## Raw Logs Configuration (Live Log Viewer)
-
-Settings for the background raw log collector that powers the Logs page. Logs are fetched from mailcow services and stored in a dedicated database table, then streamed to the UI via WebSocket.
-
-| Variable | Type | Default | Description |
-|----------|------|---------|-------------|
-| `RAW_LOGS_ENABLED` | boolean | `true` | Enable background raw log collection for the Logs page. When disabled, no logs are fetched and the Logs page shows historical data only |
-| `RAW_LOGS_FETCH_INTERVAL` | integer | `20` | Seconds between raw log fetch cycles. Lower = more real-time, higher = less API load |
-| `RAW_LOGS_FETCH_COUNT` | integer | `1000` | Number of log entries to fetch per service per cycle. Higher values catch more logs but increase API load |
-| `RAW_LOGS_RETENTION_DAYS` | integer | `2` | Days to keep raw logs in the database. Older logs are automatically deleted daily at 3:00 AM |
-| `RAW_LOGS_SERVICES` | string | `all` | Which mailcow services to collect logs from. Use `all` for all 10 services, or comma-separated list: `postfix,dovecot,sogo,api`. Available: `acme`, `api`, `autodiscover`, `dovecot`, `netfilter`, `postfix`, `ratelimited`, `rspamd-history`, `sogo`, `watchdog` |
-
----
-
-## Rspamd Integration
-
-| Variable | Type | Default | Description |
-|----------|------|---------|-------------|
-| `RSPAMD_URL` | string | (empty) | Address of the Rspamd controller. **Leave empty** to reach Rspamd through mailcow itself (`MAILCOW_URL/rspamd`) - this is correct for most setups, including when this app runs on a different server, because mailcow's own web server proxies the request. Only set it when this app has **direct network access** to the Rspamd controller *and* the path through mailcow fails - for example a reverse proxy in front of mailcow that redirects (302) `/rspamd` before the `Password` header is evaluated. Value depends on where the app runs: on the same Docker network as mailcow use `http://rspamd-mailcow:11334`; from another host you would first have to expose that port, which mailcow does not do by default |
-| `RSPAMD_PASSWORD` | string | (empty) | Rspamd UI/API password for reading and writing Rspamd map data. Found in mailcow's `mailcow.conf` as `RSPAMD_PASSWORD` or via the mailcow admin UI. Required for the Spam Filter maps editor |
-
----
-
-## Spam Suppression Configuration
-
-Settings for the automatic email suppression feature. When enabled, the system monitors Postfix logs for hard bounces and the live mail queue for stuck deferred emails, automatically blocking future delivery attempts via Rspamd.
-
-| Variable | Type | Default | Description |
-|----------|------|---------|-------------|
-| `SUPPRESSION_ENABLED` | boolean | `false` | Master switch for the suppression system. When enabled, bounced/rejected recipients are automatically blocked from receiving future emails |
-| `SUPPRESSION_AUTO_DETECT` | boolean | `true` | Automatically scan Postfix logs to detect hard bounce (5.x.x) errors and add recipients to the suppression list |
-| `SUPPRESSION_RSPAMD_SYNC` | boolean | `true` | Sync the suppression list to Rspamd's `global_rcpt_blacklist.map` so blocked emails are rejected at SMTP level. Requires `RSPAMD_PASSWORD` and `MAILCOW_API_KEY_RW` |
-| `SUPPRESSION_WHITELIST_DOMAINS` | string | (empty) | Domains that should never be suppressed, even if they bounce. Comma-separated (e.g., `gmail.com,outlook.com`) |
-| `SUPPRESSION_HARD_BOUNCE_ACTION` | string | `suppress` | What to do when a permanent delivery failure (5.x.x) is detected: `suppress` (block the recipient immediately) or `ignore` (do nothing) |
-| `SUPPRESSION_SOFT_BOUNCE_ACTION` | string | `count` | What to do when a temporary delivery failure (4.x.x) is detected in Postfix logs: `suppress` (block immediately), `count` (block after reaching threshold), or `ignore` (do nothing). Note: deferred emails stuck in the queue are handled separately by Queue Cleanup below |
-| `SUPPRESSION_SOFT_BOUNCE_THRESHOLD` | integer | `3` | How many soft bounces from Postfix logs before the recipient is suppressed (only used when `SUPPRESSION_SOFT_BOUNCE_ACTION=count`) |
-| `SUPPRESSION_BASE_EXPIRY_DAYS` | integer | `7` | How long to block a recipient in days. Multiplied by bounce count for repeat offenders (e.g., 7 × 3 bounces = 21 days). Used by all suppression types (hard bounces, soft bounces, and queue cleanup) |
-| `SUPPRESSION_MAX_EXPIRY_DAYS` | integer | `90` | Maximum block duration cap in days, regardless of bounce count |
-
-### Deferred Queue Cleanup
-
-Automatically monitors the live mail queue for deferred emails that have been stuck longer than a configurable threshold. When a stuck email is found, it is deleted from the queue and the recipient is suppressed. This catches soft bounces that may be missed by log-based detection on busy servers.
-
-| Variable | Type | Default | Description |
-|----------|------|---------|-------------|
-| `QUEUE_CLEANUP_ENABLED` | boolean | `true` | Automatically monitor the mail queue for stuck deferred emails. If an email has been deferred longer than the threshold, it is deleted and the recipient is suppressed |
-| `QUEUE_CLEANUP_THRESHOLD_MINUTES` | integer | `60` | How long (in minutes) a deferred email must be stuck in the queue before it is automatically deleted and the recipient suppressed |
-
-> **Prerequisites:**
-> - `SUPPRESSION_ENABLED=true` — Queue cleanup is part of the suppression system
-> - `MAILCOW_API_KEY_RW` — Required for deleting queue items and syncing to Rspamd maps
-> - `RSPAMD_PASSWORD` — Required for reading/writing Rspamd map files
-> - Block duration uses `SUPPRESSION_BASE_EXPIRY_DAYS` with progressive expiry
-
----
-
-## Quarantine Auto-Rules Configuration
-
-Settings for the automatic quarantine rule processing feature. When rules are defined and a Read-Write API key is configured, the system periodically checks quarantine items against user-defined rules and automatically releases or deletes matching emails.
-
-| Variable | Type | Default | Description |
-|----------|------|---------|-------------|
-| `QUARANTINE_RULES_MAX_ACTIONS` | integer | `50` | Safety limit: maximum emails to release/delete per scheduler run. Prevents accidental mass-processing from overly broad rules. Set lower for cautious environments |
-| `QUARANTINE_RULES_INTERVAL` | integer | `5` | Minutes between quarantine rule processing runs. Lower = faster response to new quarantine items, higher = less API load on mailcow |
-| `QUARANTINE_RULES_LOG_RETENTION_DAYS` | integer | `30` | Days to keep quarantine auto-rule action history. Older logs are automatically cleaned up |
-
-> **Prerequisites:**
-> - `MAILCOW_API_KEY_RW` — Required for releasing and deleting quarantine items
-> - Rules are managed from the Quarantine page in the web UI (not via environment variables)
-> - If no rules are defined or no RW key is configured, the background job simply does nothing
-
----
-
-## Authentication Configuration
-
-### Basic HTTP Authentication
-
-| Variable | Type | Default | Description |
-|----------|------|---------|-------------|
-| `AUTH_MAX_FAILURE_CLIENTS` | integer | `10000` | Maximum client addresses tracked for failed Basic Auth attempts per process. Must be positive. At capacity, Basic Auth from untracked addresses receives 429 before credential verification; existing sessions remain usable. Expired counters are reclaimed automatically. |
-| `SESSION_MAX_ENTRIES` | integer | `50` | Maximum live Basic Auth and OAuth2 sessions per process. Must be positive. New sessions are refused at capacity until a session expires or is logged out. Existing sessions are never evicted. |
-| `BASIC_AUTH_ENABLED` | boolean | `false` | Enable Basic HTTP authentication. When enabled, ALL pages and API endpoints require Basic Auth. If both `BASIC_AUTH_ENABLED` and `OAUTH2_ENABLED` are true, both methods are available |
-| `AUTH_USERNAME` | string | `admin` | Basic auth username |
-| `AUTH_PASSWORD` | string | (empty) | Basic auth password (required if `BASIC_AUTH_ENABLED=true` or `AUTH_ENABLED=true`). ⚠️ **WARNING: Use a strong password in production!** |
+## Required settings
+
+The app reads these before it can reach the database, so they stay in `.env`.
+
+| Variable | Default | Effect |
+| --- | --- | --- |
+| `MAILCOW_URL` | Required | mailcow address, such as `https://mail.example.com`. |
+| `MAILCOW_API_KEY` | Required | Read-only mailcow API key. It must be active, and its allowed IPs (mailcow **System** > **Configuration** > **Access** > **Administrators** > **API**) must hold the address mailcow sees for this app, which can change when the app moves to another Docker network. See [Getting started](GETTING_STARTED.md). |
+| `POSTGRES_HOST` | `db` | `db` is the database container of the supplied Compose file. |
+| `POSTGRES_PORT` | `5432` | |
+| `POSTGRES_USER` | Required | `env.example` uses `mailcowlogs`. |
+| `POSTGRES_PASSWORD` | Required | Replace the `changeme` from `env.example` with a long random value; hexadecimal avoids characters that break the database URL. |
+| `POSTGRES_DB` | Required | `env.example` uses `mailcowlogs`. |
+
+The `db` service in `docker-compose.yml` falls back to `mailcowlogs` and `changeme`, but the app does not: it does not start without these values in `.env`.
+
+## Settings UI configuration
+
+| Variable | Default | Effect |
+| --- | --- | --- |
+| `SETTINGS_EDIT_VIA_UI_ENABLED` | `false` | `true`, `1` or `yes` lets you edit settings on the Settings page and store them in the database. |
+
+## mailcow API configuration
+
+| Variable | Default | Effect |
+| --- | --- | --- |
+| `MAILCOW_API_KEY_RW` | Unset | Separate read-write mailcow API key, needed for every action that changes mailcow. Without it the app only monitors. It has its own allowed IPs, with the same rule as `MAILCOW_API_KEY`; check it with **Validate** under **Settings** > **Mailcow**. |
+| `RSPAMD_PASSWORD` | Unset | Rspamd UI password, needed to view Rspamd maps. Editing them also needs the read-write key. |
+| `RSPAMD_URL` | Empty | Empty reaches Rspamd through the mailcow URL plus `/rspamd`. Set a direct address, such as `http://rspamd-mailcow:11334`, only when that path fails. |
+| `MAILCOW_API_TIMEOUT` | `30` | Seconds before a mailcow API request gives up. |
+| `MAILCOW_API_VERIFY_SSL` | `true` | Check mailcow's certificate. Turn off only for a test server with a self-signed certificate. |
+
+## Fetch configuration
+
+| Variable | Default | Effect |
+| --- | --- | --- |
+| `FETCH_INTERVAL` | `60` | Seconds between reads of the message logs. |
+| `FETCH_COUNT_POSTFIX` | `2000` | Postfix entries per page. |
+| `FETCH_COUNT_RSPAMD` | `500` | Rspamd entries per page. |
+| `FETCH_COUNT_NETFILTER` | `500` | Netfilter entries per read. |
+| `FETCH_MAX_PAGES` | `50` | Most Postfix and Rspamd pages per read. |
+| `RETENTION_DAYS` | `7` | Days to keep message logs. |
+| `BLACKLIST_EMAILS` | Empty | Comma-separated addresses the viewer never stores, such as a BCC archive. Mail to them is still delivered. |
+
+## Correlation configuration
+
+| Variable | Default | Effect |
+| --- | --- | --- |
+| `MAX_CORRELATION_AGE_MINUTES` | `10` | Minutes after which the viewer stops trying to link the log lines of a message. |
+| `CORRELATION_CHECK_INTERVAL` | `120` | Seconds between linking runs. |
+
+## Application configuration
+
+| Variable | Default | Effect |
+| --- | --- | --- |
+| `APP_PORT` | `8080` | Environment only, and used only when the app is started directly with Python. The container always listens on 8080; change the host port in `docker-compose.yml`. |
+| `APP_TITLE` | `mailcow Logs Viewer` | Name in the sidebar and the browser tab. |
+| `APP_LOGO_URL` | Empty | Logo image address. Empty shows the project icon. |
+| `TZ` | Unset (UTC) | The app's time zone, an IANA name such as `Europe/Berlin`. Times on screen, days, times you type, emails, CSV exports and scheduled jobs follow it; the browser's and the containers' zones do not. An unknown name means UTC, and Settings and About say so. Use the time zone of your mailcow server. |
+| `DATE_FORMAT` | `browser` | How dates are written on every page and in emails: `browser` (in the order of the browser's language), `DD/MM/YYYY`, `MM/DD/YYYY`, `DD.MM.YYYY` or `YYYY-MM-DD`. With `browser`, emails use `DD/MM/YYYY`. An unknown value means `browser`. |
+| `TIME_FORMAT` | `24h` | How times are written on every page and in emails: `24h`, `12h` or `browser` (the clock of the browser's language). With `browser`, emails use the 24-hour clock. An unknown value means `24h`. |
+| `LOG_LEVEL` | `WARNING` | `DEBUG`, `INFO`, `WARNING`, `ERROR` or `CRITICAL`. Anything else means `WARNING`. |
+| `DEBUG` | `false` | Logs every SQL statement, puts exception text in API error responses and turns off database connection pooling. Keep off in production. |
+| `MAX_SEARCH_RESULTS` | `1000` | Not used by this version. |
+| `CSV_EXPORT_LIMIT` | `10000` | Most rows in one CSV export. |
+| `SCHEDULER_WORKERS` | `4` | Threads for background jobs such as the IMAP import, 1 to 64. |
+
+## Feature switches
+
+| Variable | Default | Effect |
+| --- | --- | --- |
+| `DISABLED_FEATURES` | Empty | Comma-separated features to turn off, for example `queue,quarantine`. Their pages disappear and jobs used only by those features stop; shared jobs continue while another enabled page needs them. API routes remain available. |
+
+The names are `netfilter` (Security), `queue`, `quarantine`, `suppressions`, `rspamd` (the Rspamd page), `domains`, `dmarc`, `mailbox-stats`, `rate-limits`, `logs`, `blacklist` (IP Blacklist Monitor) and `devices`. The old name `spam-filter` turns off both `suppressions` and `rspamd`. A feature listed here loses its stored data at startup, as when it is turned off in Settings, including DMARC history and quarantine rules; a feature removed from the list reloads only what the server still has. See [Settings](HelpDocs/Settings.md#features).
+
+## Blacklist configuration
+
+| Variable | Default | Effect |
+| --- | --- | --- |
+| `BLACKLIST_SOURCE_SERVER_IP` | `true` | Check the WAN address that mailcow reports. Turn off when mail leaves through a relay. |
+| `BLACKLIST_SOURCE_TRANSPORTS` | `true` | Check every public address of the active mailcow transports. |
+| `BLACKLIST_SOURCE_RELAYHOSTS` | `true` | Check every public address of the active mailcow relayhosts. |
+| `BLACKLIST_SOURCE_MANUAL_HOSTS` | Empty | More IPv4 or IPv6 addresses or host names to check, such as `192.0.2.10,relay.example.com`. |
+| `BLACKLIST_DNS_SERVERS` | Empty | Comma-separated DNS resolvers for the checks. Empty uses the container's resolver. Spamhaus refuses public resolvers, so use your own. |
+
+## Domain SPF check configuration
+
+| Variable | Default | Effect |
+| --- | --- | --- |
+| `DOMAIN_SPF_SOURCE_SERVER_IP` | `true` | The WAN address must pass each domain's SPF check. Turn off when mail leaves through a relay. |
+| `DOMAIN_SPF_SOURCE_TRANSPORTS` | `false` | The public addresses of the active mailcow transports must pass too. |
+| `DOMAIN_SPF_SOURCE_RELAYHOSTS` | `false` | The public addresses of the active mailcow relayhosts must pass too. |
+| `DOMAIN_SPF_SOURCE_MANUAL_HOSTS` | Empty | More sending addresses or host names that must pass. Do not add hosts that never send, such as an inbound-only MX. |
+| `DOMAIN_SPF_SOURCE_DMARC_HISTORY` | `false` | Addresses that passed SPF in the DMARC reports of the last 30 days must pass too. With relaxed alignment this can raise false warnings for an email service's subdomain. |
+
+## Authentication configuration
+
+| Variable | Default | Effect |
+| --- | --- | --- |
+| `BASIC_AUTH_ENABLED` | `false` | Sign-in with username and password. Needs a password. |
+| `AUTH_USERNAME` | `admin` | |
+| `AUTH_PASSWORD` | Empty | The Settings page will not clear it while Basic authentication is on. |
+| `AUTH_MAX_FAILURE_CLIENTS` | `10000` | How many client addresses the failed-login counter tracks, at least 1. When full, the oldest make room. |
+| `OAUTH2_ENABLED` | `false` | Sign-in through an OAuth2/OIDC provider. |
+| `OAUTH2_PROVIDER_NAME` | `OAuth2 Provider` | Text on the login button. |
+| `OAUTH2_ISSUER_URL` | Unset | Provider address for discovery. The app reads `/.well-known/openid-configuration` under it. |
+| `OAUTH2_USE_OIDC_DISCOVERY` | `true` | Read the endpoints from the discovery document. Turn off to set them by hand. |
+| `OAUTH2_AUTHORIZATION_URL` | Unset | Authorization endpoint, only without discovery. |
+| `OAUTH2_TOKEN_URL` | Unset | Token endpoint, only without discovery. |
+| `OAUTH2_USERINFO_URL` | Unset | UserInfo endpoint, only without discovery. |
+| `OAUTH2_CLIENT_ID` | Unset | |
+| `OAUTH2_CLIENT_SECRET` | Unset | |
+| `OAUTH2_REDIRECT_URI` | Unset | Callback address, exactly as registered with the provider, such as `https://logs.example.com/api/auth/callback`. |
+| `OAUTH2_SCOPES` | `openid profile email` | Scopes, separated by spaces. |
+| `SESSION_SECRET_KEY` | Empty | Signs the session cookie. Empty uses a temporary key for each run. Set a long random value, for example from `openssl rand -hex 32`. Sessions live in memory, so a restart signs everyone out either way. |
+| `SESSION_EXPIRY_HOURS` | `24` | |
+| `SESSION_MAX_ENTRIES` | `50` | Most signed-in sessions at once, at least 1. When full, new sign-ins wait; existing sessions stay. |
+
+See [Sign-in configuration](OAuth2_Configuration.md) for provider recipes.
+
+## SMTP configuration
+
+| Variable | Default | Effect |
+| --- | --- | --- |
+| `SMTP_ENABLED` | `false` | Turns on all email from the app. |
+| `SMTP_HOST` | Unset | |
+| `SMTP_PORT` | `587` | Port 465 always uses implicit TLS. |
+| `SMTP_USE_TLS` | `false` | STARTTLS. Set `true` for port 587. |
+| `SMTP_USE_SSL` | `false` | Implicit TLS. Wins over STARTTLS. |
+| `SMTP_VERIFY_SSL` | `false` | Certificate check: `false` (off), `auto` (checks host names such as `smtp.example.com`, skips `localhost`, IP addresses and container names) or `true` (always). Use `auto` unless the certificate is self-signed. |
+| `SMTP_USER` | Unset | |
+| `SMTP_PASSWORD` | Unset | |
+| `SMTP_RELAY_MODE` | `false` | Send without logging in, through a relay that trusts this app. Needs `SMTP_HOST` and `SMTP_FROM`. |
+| `SMTP_FROM` | Unset | From address, such as `alerts@example.com`. Empty uses `SMTP_USER`. |
+
+## Admin and notification configuration
+
+| Variable | Default | Effect |
+| --- | --- | --- |
+| `ADMIN_EMAIL` | Unset | Gets alerts, the weekly summary and the SMTP test. Several addresses separated by commas. |
+| `BLACKLIST_ALERT_EMAIL` | Unset | Blocklist alerts. Empty uses `ADMIN_EMAIL`. |
+| `DMARC_ERROR_EMAIL` | Unset | DMARC and TLS report import errors. Empty uses `ADMIN_EMAIL`. |
+| `ENABLE_WEEKLY_SUMMARY` | `true` | Summary email every Monday at 09:00. Needs SMTP and `ADMIN_EMAIL`. |
+| `DNS_CHANGE_ALERTS_ENABLED` | `true` | Alert when a domain's SPF, DKIM, DMARC, TLSA, MTA-STS or TLS-RPT record changes, DNSSEC stops validating or a TLSA record stops matching the certificate. A failed lookup is not a change. |
+
+Destinations such as Slack or Telegram are set on the Settings page only; see [Notifications](Notifications.md).
+
+## SMTP abuse protection
+
+| Variable | Default | Effect |
+| --- | --- | --- |
+| `SMTP_ABUSE_ENABLED` | `false` | Stop a mailbox from sending when it goes over the limit. Needs the read-write key. The mailbox still receives mail. |
+| `SMTP_ABUSE_THRESHOLD` | `100` | Messages one mailbox may send in the window. |
+| `SMTP_ABUSE_WINDOW_MINUTES` | `60` | Length of the rolling window in minutes. |
+| `SMTP_ABUSE_REVOKE_APP_PASSWORDS` | `true` | Also delete the mailbox's app passwords when it is stopped. Mail apps that sign in with one, including IMAP clients, then need a new one. |
+| `SMTP_ABUSE_UNBLOCK_GRACE_MINUTES` | `60` | After you let a mailbox send again, it is not stopped again for this many minutes. |
+| `SMTP_ABUSE_HELP_ADDRESS` | Empty | Contact named in the email to the stopped mailbox. Empty uses `ADMIN_EMAIL`, then the words `your administrator`. |
+
+## Anomaly detection
+
+| Variable | Default | Effect |
+| --- | --- | --- |
+| `ANOMALY_DETECTION_ENABLED` | `false` | Alert on sending spikes and bursts of failed logins. Never blocks anything. |
+| `ANOMALY_VOLUME_MULTIPLIER` | `5` | How many times its normal rate a mailbox must send to raise an alert. Decimals are allowed. |
+| `ANOMALY_VOLUME_MIN_MESSAGES` | `30` | Below this many sent messages in the window, no volume alert. |
+| `ANOMALY_BASELINE_DAYS` | `7` | Days of history used to learn each mailbox's normal rate, including batches it sends at the same hour every day. |
+| `ANOMALY_AUTH_FAILURE_THRESHOLD` | `20` | Failed logins for one username in the window that raise an alert. |
+| `ANOMALY_CHECK_INTERVAL` | `15` | Minutes between checks, and the window each check looks at. |
+| `ANOMALY_ALERT_COOLDOWN_HOURS` | `6` | No repeat alert for the same mailbox and problem within this many hours. |
+
+## DMARC configuration
+
+| Variable | Default | Effect |
+| --- | --- | --- |
+| `DMARC_RETENTION_DAYS` | `60` | Days to keep DMARC and TLS reports. |
+| `DMARC_MANUAL_UPLOAD_ENABLED` | `true` | Allow uploading DMARC and TLS reports by hand. |
+| `DMARC_ALLOW_REPORT_DELETE` | `false` | Allow deleting reports in the app and through the API. |
+| `DMARC_INSIGHTS_WINDOW_DAYS` | `28` | Days of DMARC reports used for policy recommendations. |
+| `DMARC_INSIGHTS_PASS_THRESHOLD` | `99.5` | DMARC pass rate (%) needed before a stricter policy is suggested. |
+| `DMARC_INSIGHTS_MIN_VOLUME` | `100` | Reported messages needed before any recommendation. |
+
+## DMARC and TLS IMAP auto-import configuration
+
+Use a mailbox that only receives reports: the import reads its unread emails and, with the default `DMARC_IMAP_DELETE_AFTER=true`, deletes each one it imports.
+
+| Variable | Default | Effect |
+| --- | --- | --- |
+| `DMARC_IMAP_ENABLED` | `false` | Import DMARC and TLS report emails over IMAP. |
+| `DMARC_IMAP_HOST` | Unset | |
+| `DMARC_IMAP_PORT` | `993` | |
+| `DMARC_IMAP_USE_SSL` | `true` | Implicit TLS. With `false` the connection is not encrypted at all (no STARTTLS). |
+| `DMARC_IMAP_VERIFY_SSL` | `false` | Certificate check, same values as `SMTP_VERIFY_SSL`. |
+| `DMARC_IMAP_USER` | Unset | Such as `reports@example.com`. |
+| `DMARC_IMAP_PASSWORD` | Unset | |
+| `DMARC_IMAP_FOLDER` | `INBOX` | |
+| `DMARC_IMAP_DELETE_AFTER` | `true` | Delete each report email after it is imported. Emails that fail stay, marked as read. |
+| `DMARC_IMAP_INTERVAL` | `3600` | Seconds between imports. |
+| `DMARC_IMAP_RUN_ON_STARTUP` | `true` | Import once when the app starts. |
+| `DMARC_IMAP_BATCH_SIZE` | `10` | Emails per batch. |
+| `DMARC_IMAP_SCAN_ALL_UNSEEN` | `false` | Also read unread emails whose subject does not look like a report, for providers with non-English subjects. |
+
+## MaxMind GeoIP configuration
+
+| Variable | Default | Effect |
+| --- | --- | --- |
+| `MAXMIND_ACCOUNT_ID` | Unset | Needed, with the license key, to download the GeoLite2 databases. |
+| `MAXMIND_LICENSE_KEY` | Unset | |
+
+## Raw logs configuration
+
+| Variable | Default | Effect |
+| --- | --- | --- |
+| `RAW_LOGS_ENABLED` | `true` | Collect logs for the Logs page. Off: the page says collection is off; services needed by other enabled pages are still collected. |
+| `RAW_LOGS_FETCH_INTERVAL` | `30` | Seconds between reads. |
+| `RAW_LOGS_FETCH_COUNT` | `1000` | Entries per service per read. |
+| `RAW_LOGS_RETENTION_DAYS` | `2` | Days to keep raw logs. |
+| `RATE_LIMITS_RETENTION_DAYS` | `90` | Days to keep the rate limit log for Rate Limits, 1 to 3650. Never less than `RAW_LOGS_RETENTION_DAYS`. |
+| `RAW_LOGS_SERVICES` | `acme,api,autodiscover,dovecot,netfilter,postfix,ratelimited,rspamd-history,sogo,watchdog` | Services the Logs page shows, comma-separated, or `all`. Unknown names are ignored. |
+
+Some services are collected whatever this list says, because other pages read them: `dovecot` for message details and Security, `ratelimited` for Rate Limits and `sogo` for Devices.
+
+## Devices (ActiveSync)
+
+| Variable | Default | Effect |
+| --- | --- | --- |
+| `EAS_DEVICES_RETENTION_DAYS` | `90` | Days to keep a device after its last ActiveSync request. `0` keeps every device. |
+
+## Spam suppression configuration
+
+| Variable | Default | Effect |
+| --- | --- | --- |
+| `SUPPRESSION_ENABLED` | `false` | Enables the suppression jobs: bounce detection, deferred queue cleanup, Rspamd sync and expiry. Manual API actions still work while it is off. |
+| `SUPPRESSION_AUTO_DETECT` | `true` | Read the Postfix logs for bounces. The Outbound choices set it; set it here only to force it. |
+| `SUPPRESSION_RSPAMD_SYNC` | `true` | Sync with Rspamd: keep the suppression list and the app's section of Rspamd's `global_rcpt_blacklist.map` in step, both ways, so mail to the listed addresses is rejected. `false` keeps no list: the app deletes it (Rspamd is not touched), and `true` again loads the app's blocks back from Rspamd. Needs `RSPAMD_PASSWORD` and the read-write key. |
+| `SUPPRESSION_HARD_BOUNCE_ACTION` | `suppress` | For permanent failures (5.x.x): `suppress` (block the address and delete its queued mail), `delete` (only delete its queued mail) or `ignore`. With `SUPPRESSION_RSPAMD_SYNC=false`, `suppress` acts as `delete`. |
+| `SUPPRESSION_SOFT_BOUNCE_ACTION` | `count` | For temporary failures (4.x.x): `suppress`, `count` (suppress at the threshold) or `ignore`. Used only while `QUEUE_CLEANUP_ENABLED=false`. With `SUPPRESSION_RSPAMD_SYNC=false`, both that block act as `ignore`. |
+| `SUPPRESSION_SOFT_BOUNCE_THRESHOLD` | `3` | Soft bounces before `count` suppresses. Used only while `QUEUE_CLEANUP_ENABLED=false`. |
+| `QUEUE_CLEANUP_ENABLED` | `true` | Delete messages stuck in the deferred queue longer than the threshold. Needs the read-write key and `SUPPRESSION_ENABLED=true`. |
+| `QUEUE_CLEANUP_BLOCK` | `true` | Also block the recipients of the messages `QUEUE_CLEANUP_ENABLED` deletes. Needs `SUPPRESSION_RSPAMD_SYNC=true`; without it the cleanup only deletes. |
+| `QUEUE_CLEANUP_THRESHOLD_MINUTES` | `60` | Minutes a deferred message waits before it is deleted. |
+| `SUPPRESSION_BASE_EXPIRY_DAYS` | `7` | Block time in days, multiplied by the number of bounces. |
+| `SUPPRESSION_MAX_EXPIRY_DAYS` | `90` | Longest block in days. |
+| `SUPPRESSION_WHITELIST_DOMAINS` | Empty | Domains never blocked automatically, and whose queued mail is never deleted automatically, such as `example.org`. |
+
+## Quarantine auto-rules configuration
+
+| Variable | Default | Effect |
+| --- | --- | --- |
+| `QUARANTINE_RULES_MAX_ACTIONS` | `50` | Most messages the rules release or delete in one run. |
+| `QUARANTINE_RULES_INTERVAL` | `5` | Minutes between runs. |
+| `QUARANTINE_RULES_LOG_RETENTION_DAYS` | `30` | Days to keep the history of what the rules did. |
+
+## Environment-only and legacy settings
+
+| Variable | Default | Effect |
+| --- | --- | --- |
+| `AUTH_ENABLED` | `false` | Old name for `BASIC_AUTH_ENABLED`. While it is `true`, Basic authentication stays on whatever the newer switch says. |
+| `CORS_ALLOWED_ORIGINS` | Empty | Other sites allowed to call the API with the user's session. See [Cross-site requests](#cross-site-requests). |
+| `WEBHOOK_ENABLED` | `false` | Old single-webhook switch. On upgrade, an old webhook becomes a destination under **Settings** > **Notifications**. |
+| `WEBHOOK_TYPE` | `generic` | Old webhook format: `generic`, `slack`, `discord`, `telegram`, `ntfy` or `gotify`. Read only by that upgrade. |
+| `WEBHOOK_URL` | Unset | Old webhook address, copied into the destination on upgrade. Changing it later does not change the destination. |
+| `WEBHOOK_TELEGRAM_CHAT_ID` | Unset | Old Telegram chat ID, read only by that upgrade. |
 
 ### Login attempt limits and reverse proxies
 
-Basic Auth allows 10 failed attempts per client address within 15 minutes. The
-same limit applies to password checks on `/api/info` and protected API endpoints.
-Further attempts return HTTP 429 with `Retry-After`. Public login information
-without credentials and already signed-in sessions remain available.
+The [limit on failed Basic sign-ins](OAuth2_Configuration.md#basic-authentication) counts by visitor address. Behind a reverse proxy, Uvicorn takes that address from the proxy only if the proxy is listed here:
 
-No new setting is required after upgrading. The application uses the client
-address supplied by Uvicorn, rather than trusting request headers itself:
+| Variable | Default | Effect |
+| --- | --- | --- |
+| `FORWARDED_ALLOW_IPS` | `127.0.0.1` | Comma-separated proxy addresses, such as `192.0.2.10`. Ranges (CIDR) are not accepted by the Uvicorn version in the image. Do not use `*` if anyone can reach the app without the proxy. See [Reverse proxy](Reverse_Proxy.md#trusted-proxy-addresses). |
 
-- **Direct access:** attempts are counted against the connecting client.
-- **An untrusted proxy:** attempts share a counter for the proxy address. Login
-  still works, but repeated failures by one user can temporarily block new Basic
-  Auth attempts by others behind that proxy. Existing sessions remain usable.
-- **A trusted proxy:** Uvicorn resolves `X-Forwarded-For` from right to left,
-  skipping trusted proxy addresses and using the first untrusted address. This
-  supports both one proxy and a chain of proxies without trusting a client-supplied
-  prefix. The proxy must overwrite the header or append its actual connecting peer.
-- **External authentication with app authentication disabled:** these Basic Auth
-  limits do not apply; the external authentication layer remains responsible.
+### Cross-site requests
 
-To count clients separately behind trusted proxies, pass Uvicorn's existing
-`FORWARDED_ALLOW_IPS` environment variable to the **app container**. It defaults
-to `127.0.0.1`. In the shipped Compose setup, it can be set in `.env`; recreate the
-app container to apply it. It is a server setting, not a UI setting.
+`CORS_ALLOWED_ORIGINS` takes exact origins (scheme, host and optional port, no path), such as `https://portal.example.org`; no wildcard. Empty allows only the app's own pages, which need no entry as long as a reverse proxy passes the original `Host` header. Add a site only if it should call the API with a signed-in user's session. Scripts that send no `Origin` or `Referer` header are not affected but still have to sign in.
 
-```dotenv
-# Example addresses only: replace with the actual trusted proxy addresses.
-FORWARDED_ALLOW_IPS=192.0.2.10,192.0.2.11
-```
+## Process and data-directory variables
 
-Use the exact IPv4 or IPv6 addresses of proxies in the chain; the bundled Uvicorn
-0.27 does not support CIDR ranges here. Do not use `*` on a service reachable by
-untrusted clients: it trusts every caller's forwarding headers and defeats this
-protection. If a proxy omits `X-Forwarded-For`, its connecting address is used.
-Users behind the same NAT address still share a counter.
+These are read by the container's start script or the GeoIP downloader, not by the Settings page.
 
-### OAuth2/OIDC Authentication
+| Variable | Default | Effect |
+| --- | --- | --- |
+| `GEOIP_DB_DIR` | `/app/data` | Where the GeoIP databases are downloaded. Leave it unchanged: the lookups read from `/app/data`. |
+| `APP_MODULE` | `app.main:app` | Application the container starts. Leave unchanged; the demo image sets `demo.main:app`. |
+| `UVICORN_LOOP` | `auto` | Event loop. The demo image uses `asyncio`. |
 
-Each OAuth login is bound to the browser that starts it by a temporary HttpOnly,
-SameSite=Lax cookie. Complete the login within ten minutes in the same browser and
-on the same application hostname as `OAUTH2_REDIRECT_URI`. Concurrent tabs are
-supported. If the flow expires, cookies are blocked, or the application restarts,
-start again from the login page. Callbacks are single-use, including provider
-errors. Pending flows are capped at 1,024 per process; expired entries are removed
-on the next login or callback. Existing signed-in sessions are unaffected.
+### Demo image variables
 
-No new environment settings are required. The temporary cookie uses the same
-HTTP/HTTPS policy as the session cookie, including deployments behind a reverse
-proxy. Proxies must preserve cookies and the original request scheme.
+These apply only to the `demo` image, which starts `demo.main:app` with made-up data and restarts once a day to reset it.
 
-| Variable | Type | Default | Description |
-|----------|------|---------|-------------|
-| `OAUTH2_ENABLED` | boolean | `false` | Enable OAuth2/OIDC authentication. Works with any standard OAuth2/OIDC provider (Mailcow, Keycloak, Auth0, Google, etc.) |
-| `OAUTH2_PROVIDER_NAME` | string | `OAuth2 Provider` | Display name for the OAuth2 provider (shown on login button). Examples: `Mailcow`, `Keycloak`, `Google`, `Microsoft` |
-| `OAUTH2_ISSUER_URL` | string | (empty) | OAuth2/OIDC issuer URL for discovery (recommended - auto-discovers endpoints). Examples: `https://mail.example.com` (Mailcow), `https://keycloak.example.com/realms/myrealm` (Keycloak) |
-| `OAUTH2_AUTHORIZATION_URL` | string | (empty) | OAuth2 authorization endpoint (auto-discovered if `OAUTH2_ISSUER_URL` provided). Only needed if OIDC discovery is not available |
-| `OAUTH2_TOKEN_URL` | string | (empty) | OAuth2 token endpoint (auto-discovered if `OAUTH2_ISSUER_URL` provided). Only needed if OIDC discovery is not available |
-| `OAUTH2_USERINFO_URL` | string | (empty) | OAuth2 UserInfo endpoint (auto-discovered if `OAUTH2_ISSUER_URL` provided). Only needed if OIDC discovery is not available |
-| `OAUTH2_CLIENT_ID` | string | (empty) | OAuth2 Client ID from your provider |
-| `OAUTH2_CLIENT_SECRET` | string | (empty) | OAuth2 Client Secret from your provider |
-| `OAUTH2_REDIRECT_URI` | string | (empty) | OAuth2 Redirect URI (callback URL). Must match the redirect URI configured in your OAuth2 provider. Example: `https://your-logs-viewer.example.com/api/auth/callback` |
-| `OAUTH2_SCOPES` | string | `openid profile email` | OAuth2 scopes to request |
-| `OAUTH2_USE_OIDC_DISCOVERY` | boolean | `true` | Enable OIDC discovery (uses `.well-known/openid-configuration`). Default: `true` (if `OAUTH2_ISSUER_URL` is set) |
-| `SESSION_SECRET_KEY` | string | (empty) | Secret key for signing session cookies. **REQUIRED if `OAUTH2_ENABLED=true`**. Also used for Basic Auth logins since 2.7.1: without it a new key is generated on every start, so restarting the container signs everyone out and they log in again. Generate a random secret: `openssl rand -hex 32`. ⚠️ **WARNING: Use a strong random secret in production!** |
-| `SESSION_EXPIRY_HOURS` | integer | `24` | Session expiration time in hours |
+> [!WARNING]
+> The demo clears its database at startup. Give it its own database; never point it at a real installation's database.
 
----
-
-## Configuration Priority
-
-When `SETTINGS_EDIT_VIA_UI_ENABLED=true`, configuration is resolved in this order (later overrides earlier):
-
-1. **Defaults** (from the application)
-2. **DB** (values stored via the web UI)
-3. **ENV** (environment variables — **always win** when set)
-
-So: ENV overrides DB, and DB overrides defaults. If an environment variable is explicitly set, it always takes precedence over the value stored in the database. This prevents lockout: if you make a configuration mistake in the UI (e.g., wrong OIDC URL or password typo), you can fix it by setting the correct value in your `.env` / `docker-compose.yml` and restarting.
-
----
-
-## Settings That Cannot Be Changed via UI
-
-The following settings **must** remain in the `.env` file and cannot be changed via the web UI:
-
-- `POSTGRES_HOST`
-- `POSTGRES_PORT`
-- `POSTGRES_USER`
-- `POSTGRES_PASSWORD`
-- `POSTGRES_DB`
-- `SETTINGS_EDIT_VIA_UI_ENABLED`
-
-All other settings can be managed from the Settings tab in the web interface when `SETTINGS_EDIT_VIA_UI_ENABLED=true`.
-
----
-
-## Related Documentation
-
-- [Getting Started Guide](./GETTING_STARTED.md) - Quick start installation
-- [Settings UI Guide](Settings_UI.md) - How to use the web UI for configuration
-- [OAuth2 Configuration](./OAuth2_Configuration.md) - Detailed OAuth2/OIDC setup guide
+| Variable | Default | Effect |
+| --- | --- | --- |
+| `DEMO_MODE` | `true` in the demo image | A label only. `APP_MODULE=demo.main:app` starts the demo. |
+| `DEMO_NOTICE` | Empty | Replaces the text of the demo banner. |
+| `DEMO_RESET_TIME` | `00:00` | Daily restart time as `HH:MM`, in the app's time zone (`TZ`). An invalid value means midnight. |
+| `DEMO_RESET_AFTER_SECONDS` | Unset | For testing: restart after this many seconds instead of at the daily time. |
