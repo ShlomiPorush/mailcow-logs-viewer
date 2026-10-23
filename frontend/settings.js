@@ -29,7 +29,10 @@ const SETTINGS_LABEL_OVERRIDES = {
     suppression_soft_bounce_threshold: 'Temporary failures before blocking',
     suppression_base_expiry_days: 'Base block length (days)',
     suppression_max_expiry_days: 'Maximum block length (days)',
-    suppression_whitelist_domains: 'Exclude these domains'
+    suppression_whitelist_domains: 'Exclude these domains',
+    agent_access_enabled: 'Agent access',
+    agent_access_url: 'App address for agents',
+    agent_access_max_days: 'Longest period (days)'
 };
 
 const SETTINGS_LOCK_ICON = '<svg width="12" height="12" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true"><path fill-rule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clip-rule="evenodd"></path></svg>';
@@ -277,6 +280,9 @@ var SETTINGS_FIELD_DESCRIPTIONS = {
     session_secret_key: 'Secret key for signing session cookies. REQUIRED if OAuth2 enabled. Generate: openssl rand -hex 32. Use a strong secret in production.',
     session_expiry_hours: 'Session expiration in hours. Default: 24.',
     session_max_entries: 'Maximum active login sessions per process. At capacity, new logins wait until a session expires or a user signs out. Existing sessions stay signed in. Default: 50.',
+    agent_access_enabled: 'Let AI agents such as Claude Code and Codex connect over MCP. Each agent opens a page in the browser where a signed-in person chooses what it may see and do. Needs sign-in and the address below. Default: off.',
+    agent_access_url: 'The address agents reach this app at, such as https://logs.example.com. It must be https and have no path. Changing it disconnects every agent.',
+    agent_access_max_days: 'The longest period a person can give an agent, from 1 to 365 days. Default: 90.',
     auth_max_failure_clients: 'Maximum client addresses tracked for failed Basic Auth attempts per process. At capacity, new addresses must wait before trying Basic Auth. Existing sessions remain usable. Default: 10000.',
     smtp_enabled: 'Enable SMTP for sending notifications (alerts, weekly summary).',
     smtp_host: 'SMTP server hostname.',
@@ -971,6 +977,11 @@ var SETTINGS_EDIT_TABS = [
         ]
     },
     {
+        id: 'agents', label: 'Agents', description: 'AI agents such as Claude Code and Codex can use this app over MCP. An agent never gets a password or a key: it opens a page in your browser, and a signed-in person chooses which areas it may view or act in and for how long. A change to the sign-in settings disconnects every agent.', groups: [
+            { label: 'Agent access', keys: ['agent_access_enabled', 'agent_access_url', 'agent_access_max_days'] }
+        ]
+    },
+    {
         id: 'smtp', label: 'SMTP', description: 'SMTP for sending notifications (alerts, weekly summary). Relay mode: for local relay servers that do not require authentication (only host and from address needed).', groups: [
             { label: 'Enable', keys: ['smtp_enabled'] },
             { label: 'Server', keys: ['smtp_host', 'smtp_port'] },
@@ -1066,7 +1077,7 @@ var SETTINGS_TAB_GROUPS = [
     { label: 'General', tabs: ['features', 'application'] },
     { label: 'mailcow', tabs: ['mailcow', 'fetch', 'correlation', 'logs'] },
     { label: 'Alerts', tabs: ['notifications', 'smtp'] },
-    { label: 'Security', tabs: ['auth', 'anomaly', 'smtp_abuse'] },
+    { label: 'Security', tabs: ['auth', 'agents', 'anomaly', 'smtp_abuse'] },
     { label: 'Data', tabs: ['domains', 'dmarc', 'dmarc_imap', 'maxmind', 'blacklist', 'outbound', 'quarantine', 'devices', 'other'] }
 ];
 
@@ -1785,6 +1796,10 @@ function renderSettings(content, data) {
                     });
                     tabsHtml += '</div></section>';
                 });
+                // Agents tab - connected agents (rendered by agents.js), under the switch that allows them
+                if (tab.id === 'agents') {
+                    tabsHtml += '<section id="agents-panel" class="ui-panel ui-set-channels"></section>';
+                }
                 tabsHtml += '</div>';
             });
             return mobileNavHtml + `
@@ -1831,8 +1846,15 @@ function renderSettings(content, data) {
                 ${data.dmarc_configuration?.imap_sync_enabled ? `<div class="ui-kv"><span>IMAP Server</span><b class="ui-mono ui-kv-small">${escapeHtml(data.dmarc_configuration.imap_host || 'N/A')}</b></div>` : ''}
             </section>
         </div>
+
+        <!-- Connected agents (agents.js): managed here even while editing settings is off -->
+        <section id="agents-panel" class="ui-panel ui-set-channels"></section>
         ` : ''}
     `;
+
+    if (typeof loadAgentsPanel === 'function') {
+        loadAgentsPanel();
+    }
 
     // Edit configuration: form submit, Import from ENV, and tab switching
     if (data.settings_edit_via_ui_enabled && data.editable_config) {

@@ -19,6 +19,25 @@ import base64
 
 from .config import settings
 from .session import get_session_from_request
+from .agent_access import live as agent_live
+from .agent_access.context import agent_call
+
+# Agent access (agent_access/): reachable without a session because they check
+# their own credentials or are public discovery documents. /oauth/authorize and
+# /oauth/consent are not here: a person must be signed in to approve an agent.
+AGENT_PUBLIC_PATHS = frozenset({
+    "/mcp",
+    "/oauth/token",
+    "/oauth/register",
+    "/oauth/revoke",
+    "/.well-known/oauth-protected-resource",
+    "/.well-known/oauth-protected-resource/mcp",
+    "/.well-known/oauth-authorization-server",
+})
+
+
+def _is_agent_path(path: str) -> bool:
+    return path == "/mcp" or path.startswith(("/oauth/", "/.well-known/oauth-"))
 
 logger = logging.getLogger(__name__)
 
@@ -240,12 +259,28 @@ class BasicAuthMiddleware(BaseHTTPMiddleware):
     """
     
     async def dispatch(self, request: Request, call_next):
+        path = request.url.path
+
+        # Agent access answers 404 while it is not live, before any sign-in
+        # redirect (agent_access/live.py)
+        if _is_agent_path(path) and not agent_live.is_live():
+            return Response(content="Not Found", status_code=status.HTTP_404_NOT_FOUND)
+
         # Skip authentication check if disabled
         if not settings.is_authentication_enabled:
             return await call_next(request)
-        
-        path = request.url.path
-        
+
+        # An agent's call made inside the app by agent_access/dispatch.py: its
+        # bearer token was checked at /mcp, and the policy guard checks the
+        # route. Only the app itself can put this marker into the ASGI scope.
+        if agent_call(request.scope) is not None:
+            return await call_next(request)
+
+        # Agent endpoints that check their own credentials (a bearer token at
+        # /mcp, PKCE at /oauth/token) or publish discovery documents
+        if path in AGENT_PUBLIC_PATHS:
+            return await call_next(request)
+
         # Allow access to login page, static files, health check, info endpoint, and auth endpoints without authentication
         # Health check endpoint must be accessible for Docker health monitoring
         # Info endpoint is used to check if authentication is enabled

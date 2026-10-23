@@ -329,6 +329,27 @@ class Settings(BaseSettings):
         description="Maximum live authentication sessions per process"
     )
 
+    # Agent access: AI agents connect over MCP after a person approves them in
+    # the browser (agent_access/). Off by default, and live only with sign-in on.
+    agent_access_enabled: bool = Field(
+        default=False,
+        description="Let AI agents connect over MCP once a signed-in person approves them"
+    )
+    agent_access_url: str = Field(
+        default="",
+        description="The app's address as agents reach it, such as https://logs.example.com"
+    )
+    agent_access_max_days: int = Field(
+        default=90,
+        description="The longest period a person can give an agent, in days (1 to 365)"
+    )
+
+    @field_validator('agent_access_max_days', mode='after')
+    @classmethod
+    def clamp_agent_access_max_days(cls, v: int) -> int:
+        """A value out of range is clamped, never a reason to stop the app."""
+        return max(1, min(365, v))
+
     # DMARC configuration
     dmarc_retention_days: int = Field(
         default=60,
@@ -1209,6 +1230,10 @@ def build_settings(db: Optional[Any] = None) -> Settings:
             object.__setattr__(merged, 'log_level', v)
         if 'scheduler_workers' in allowed:
             object.__setattr__(merged, 'scheduler_workers', max(1, min(64, merged.scheduler_workers)))
+        if 'agent_access_max_days' in allowed:
+            object.__setattr__(merged, 'agent_access_max_days', max(1, min(365, int(merged.agent_access_max_days))))
+        if 'agent_access_url' in allowed:
+            object.__setattr__(merged, 'agent_access_url', str(merged.agent_access_url or '').strip())
         if 'date_format' in allowed or 'time_format' in allowed:
             from .app_time import normalize_date_format, normalize_time_format
             object.__setattr__(merged, 'date_format', normalize_date_format(merged.date_format))

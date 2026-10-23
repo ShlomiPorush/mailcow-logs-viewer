@@ -962,6 +962,13 @@ def update_settings(body: Dict[str, Any], request: Request = None, response: Res
         guard.__exit__(None, None, None)
     if _session_bound_values() != prev_sign_in:
         revoke_all_sessions()
+        # Connected agents end with the sessions, for good (agent_access/store.py).
+        # Should this fail, every agent request repeats the check before it runs.
+        try:
+            from ..agent_access.store import check_sign_in_unchanged
+            check_sign_in_unchanged(db)
+        except Exception as e:
+            logger.error(f"Could not disconnect agents after the sign-in change: {e}")
         # Keep the operator who saved signed in, with a session issued under the new settings
         if operator_session and settings.is_authentication_enabled and response is not None:
             set_session_cookie(response, create_session(operator_session["user_info"]), request)

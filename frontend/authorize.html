@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Connect an agent - mailcow Logs Viewer</title>
+    <link rel="icon" href="/static/assets/icons/favicon.ico" sizes="any">
+    <link rel="icon" type="image/svg+xml" href="/static/assets/icons/app-icon.svg">
+    <meta name="theme-color" content="#0f172a">
+    <style>.hidden{display:none}</style>
+    <link rel="stylesheet" href="/static/assets/css/utilities.css?v=1">
+    <link rel="stylesheet" href="/static/assets/css/ui.css?v=1">
+    <script>
+        // The theme the app uses, before anything is drawn
+        (function () {
+            const theme = localStorage.getItem('theme');
+            if (theme === 'dark' || (!theme && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+                document.documentElement.classList.add('dark');
+            }
+        })();
+    </script>
+</head>
+<body class="ui-login">
+    <main class="ui-login-card ui-consent-card">
+        <div class="ui-login-head">
+            <img src="/static/assets/icons/app-icon.svg" alt="" class="ui-login-logo">
+            <h1 class="ui-h1">Connect an agent</h1>
+            <p class="ui-muted" id="consent-app">mailcow Logs Viewer</p>
+        </div>
+
+        <div id="consent-loading" class="ui-loading" role="status">Loading the request...</div>
+
+        <div id="consent-error" class="hidden ui-banner ui-banner-fail" role="alert">
+            <div><b id="consent-error-title">This request cannot be answered</b><p id="consent-error-text"></p></div>
+        </div>
+
+        <form id="consent-form" class="hidden ui-consent-form" novalidate>
+            <section class="ui-consent-sec" aria-labelledby="consent-who-h">
+                <h2 class="ui-consent-h" id="consent-who-h">Who is asking</h2>
+                <p class="ui-consent-agent" id="consent-declared"></p>
+                <p class="ui-consent-id" id="consent-identity"></p>
+                <p class="ui-set-desc">The answer goes to <span class="ui-mono ui-consent-uri" id="consent-redirect"></span></p>
+                <div>
+                    <label class="ui-label" for="consent-name">Name for this connection</label>
+                    <input type="text" id="consent-name" class="ui-input" maxlength="100" autocomplete="off">
+                </div>
+            </section>
+
+            <section class="ui-consent-sec" aria-labelledby="consent-what-h">
+                <div class="ui-consent-head">
+                    <h2 class="ui-consent-h" id="consent-what-h">What it may do</h2>
+                    <div class="ui-consent-quick">
+                        <button type="button" class="ui-btn ui-btn-sm" id="consent-view-all">View all</button>
+                        <button type="button" class="ui-btn ui-btn-sm" id="consent-clear">Clear</button>
+                    </div>
+                </div>
+                <p class="ui-set-desc"><b>View</b> reads. <b>Act</b> changes the mail server for real: bans, releases, deletions. Act includes View.</p>
+                <div class="ui-consent-areas" id="consent-areas" role="group" aria-labelledby="consent-what-h"></div>
+                <div id="consent-act-warning" class="hidden ui-banner ui-banner-warn" role="note">
+                    <div><b>This agent will be able to change your mail server.</b>
+                        <p>Agents can be misled by text in emails and logs. Give Act only where you need it, for the shortest time.</p></div>
+                </div>
+            </section>
+
+            <section class="ui-consent-sec" aria-labelledby="consent-period-h">
+                <h2 class="ui-consent-h" id="consent-period-h">For how long</h2>
+                <div class="ui-consent-periods" id="consent-periods" role="radiogroup" aria-labelledby="consent-period-h"></div>
+            </section>
+
+            <div id="consent-form-error" class="hidden ui-banner ui-banner-fail" role="alert"><span id="consent-form-error-text"></span></div>
+
+            <p class="ui-set-desc" id="consent-footnote">You can disconnect it at any time in Settings → Agents.</p>
+            <div class="ui-consent-actions">
+                <button type="button" class="ui-btn" id="consent-deny">Deny</button>
+                <button type="submit" class="ui-btn ui-btn-primary" id="consent-allow">Allow</button>
+            </div>
+        </form>
+
+        <div id="consent-done" class="hidden ui-banner ui-banner-ok" role="status">
+            <div><b id="consent-done-title">Done</b><p>You can close this window and go back to the agent.</p></div>
+        </div>
+    </main>
+    <script src="/static/authorize.js?v=1"></script>
+</body>
+</html>

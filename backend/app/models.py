@@ -951,3 +951,93 @@ class NotificationChannel(Base):
 
     def __repr__(self):
         return f"<NotificationChannel(name={self.name}, type={self.channel_type}, enabled={self.enabled})>"
+
+
+# Agent access (agent_access/): AI agents a person approved in the browser.
+# Tokens and codes are stored only as SHA-256 hashes.
+
+class AgentClient(Base):
+    """A program that registered itself through Dynamic Client Registration.
+
+    Clients that identify with a metadata document URL (CIMD) are not stored:
+    their document is fetched and cached in memory.
+    """
+    __tablename__ = "agent_clients"
+
+    id = Column(Integer, primary_key=True)
+    client_id = Column(String(64), nullable=False, unique=True)
+    client_name = Column(String(100), nullable=False)
+    redirect_uris = Column(JSONB, nullable=False, default=list)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    created_ip = Column(String(64))
+    last_used_at = Column(DateTime)
+
+
+class AgentGrant(Base):
+    """One connected agent: who approved it, what it may do and until when."""
+    __tablename__ = "agent_grants"
+
+    id = Column(Integer, primary_key=True)
+    client_id = Column(String(512), nullable=False, index=True)
+    client_kind = Column(String(10), nullable=False)          # 'dcr' | 'cimd'
+    display_name = Column(String(100), nullable=False)        # the name the person gave it
+    declared_name = Column(String(100), nullable=False)       # the name the program gave itself
+    publisher = Column(String(255))                           # host of a CIMD client_id URL
+    redirect_uri = Column(String(512), nullable=False)
+    scopes = Column(Text, nullable=False)                     # space separated
+    resource = Column(String(512), nullable=False)
+    approved_by = Column(String(255))
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    expires_at = Column(DateTime, nullable=False, index=True)
+    last_used_at = Column(DateTime)
+    revoked_at = Column(DateTime, index=True)
+    revoke_reason = Column(String(40))
+
+
+class AgentCode(Base):
+    """An authorization code between the consent page and the token request."""
+    __tablename__ = "agent_codes"
+
+    id = Column(Integer, primary_key=True)
+    code_hash = Column(String(64), nullable=False, unique=True)
+    client_id = Column(String(512), nullable=False)
+    redirect_uri = Column(String(512), nullable=False)
+    code_challenge = Column(String(128), nullable=False)
+    resource = Column(String(512), nullable=False)
+    # Everything the person chose, applied when the code is exchanged
+    details = Column(JSONB, nullable=False)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    expires_at = Column(DateTime, nullable=False, index=True)
+    used_at = Column(DateTime)
+    grant_id = Column(Integer, ForeignKey("agent_grants.id", ondelete="CASCADE"))
+
+
+class AgentToken(Base):
+    """An access or refresh token of a grant."""
+    __tablename__ = "agent_tokens"
+
+    id = Column(Integer, primary_key=True)
+    grant_id = Column(Integer, ForeignKey("agent_grants.id", ondelete="CASCADE"), nullable=False, index=True)
+    kind = Column(String(10), nullable=False)                 # 'access' | 'refresh'
+    token_hash = Column(String(64), nullable=False, unique=True)
+    client_id = Column(String(512), nullable=False)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    expires_at = Column(DateTime, nullable=False, index=True)
+    rotated_at = Column(DateTime)                             # refresh tokens: when it was exchanged
+
+
+class AgentAudit(Base):
+    """What a connected agent did, and when a grant was made or ended."""
+    __tablename__ = "agent_audit"
+
+    id = Column(Integer, primary_key=True)
+    grant_id = Column(Integer, ForeignKey("agent_grants.id", ondelete="SET NULL"), index=True)
+    agent_name = Column(String(100))
+    at = Column(DateTime, nullable=False, default=datetime.utcnow, index=True)
+    event = Column(String(20), nullable=False)                # grant_created | grant_revoked | call | denied
+    tool = Column(String(40))
+    method = Column(String(10))
+    path = Column(String(512))
+    http_status = Column(Integer)
+    outcome = Column(String(10))                              # ok | error | accepted | denied
+    detail = Column(String(300))
