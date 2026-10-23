@@ -242,7 +242,7 @@ Each job starts as `{"last_run": null, "status": "idle", "error": null}`. The ID
 
 ### Background Jobs List
 
-Times of day follow the container's clock.
+Times of day are in the app's time zone (`TZ`), never the container's clock.
 
 | Job Name | Interval | Description |
 |----------|----------|-------------|

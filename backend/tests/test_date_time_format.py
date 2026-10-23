@@ -169,6 +169,16 @@ def test_env_wins_and_locks_the_fields(store, monkeypatch):
     assert display_formats() == {"date_format": "MM/DD/YYYY", "time_format": "12h"}
 
 
+def test_an_empty_env_value_locks_the_fields_at_the_defaults(store, monkeypatch):
+    store.data.update(date_format="MM/DD/YYYY", time_format="12h")
+    monkeypatch.setenv("DATE_FORMAT", "")
+    monkeypatch.setenv("TIME_FORMAT", "")
+    cfg.reload_settings(object())
+
+    assert {"date_format", "time_format"} <= get_env_locked_keys()
+    assert display_formats() == {"date_format": "browser", "time_format": "24h"}
+
+
 def test_an_unknown_format_in_env_never_stops_the_app(monkeypatch):
     """Settings() is built at import and at every reload: an unknown value
     there must fall back, not raise, or the app would not start."""
@@ -185,6 +195,20 @@ def test_an_unknown_format_in_env_never_stops_the_app(monkeypatch):
 def test_the_formats_cover_what_the_page_offers():
     assert DATE_FORMATS == ("browser", "DD/MM/YYYY", "MM/DD/YYYY", "DD.MM.YYYY", "YYYY-MM-DD")
     assert TIME_FORMATS == ("24h", "12h", "browser")
+
+
+# What the page reads
+
+def test_api_info_sends_the_formats_to_the_page(jobs, monkeypatch):
+    from fastapi.testclient import TestClient
+    from app.main import app
+    monkeypatch.setattr(cfg.settings._inner, "date_format", "DD.MM.YYYY")
+    monkeypatch.setattr(cfg.settings._inner, "time_format", "12h")
+    body = TestClient(app).get("/api/info").json()
+
+    assert (body["date_format"], body["time_format"]) == ("DD.MM.YYYY", "12h")
+    config = TestClient(app).get("/api/settings/info").json()["configuration"]
+    assert (config["date_format"], config["time_format"]) == ("DD.MM.YYYY", "12h")
 
 
 # The jobs list

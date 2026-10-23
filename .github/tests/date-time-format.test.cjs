@@ -154,6 +154,30 @@ test('a list cell names its instant, so it sorts whatever the text says', () => 
     assert.equal(c.uiSortValue(empty).n, null);
 });
 
+// A cell as the sorter reads it, from the markup a page renders
+function sortedCell(c, html) {
+    const time = /<time[^>]*datetime="([^"]+)"[^>]*>([^<]*)<\/time>/.exec(html);
+    const sort = /data-sort="([^"]*)"/.exec(html);
+    return c.uiSortValue({
+        hasAttribute: a => a === 'data-sort' && !!sort, getAttribute: () => sort[1], matches: () => false,
+        querySelector: () => (time ? { getAttribute: () => time[1], textContent: time[2] } : null),
+    }).n;
+}
+
+test('the lists the pages render sort their times by the instant', () => {
+    const c = load({ date: 'DD/MM/YYYY', time: '12h', files: ['devices.js', 'rate-limits.js'] });
+    const early = '2026-01-10T08:00:00Z', late = '2026-03-02T07:00:00Z';
+    // Devices: First seen and Last seen
+    const row = c.renderDeviceRow({ username: 'a@example.com', device_id: 'x', first_seen: late, last_seen: early, client: '' }, 0, 0);
+    const cells = row.split('<span class="ui-td').filter(s => /First seen|Last seen/.test(s));
+    assert.equal(cells.length, 2);
+    assert.equal(sortedCell(c, cells.find(s => s.includes('First seen'))), Date.parse(late));
+    assert.equal(sortedCell(c, cells.find(s => s.includes('Last seen'))), Date.parse(early));
+    // Rate Limits: an event's time in two spans (phone and wide) sorts by its instant
+    const event = c.renderRateLimitEventRow({ time: late, rcpt: 'b@example.com', subject: 's' });
+    assert.equal(sortedCell(c, event.split('</td>')[0]), Date.parse(late));
+});
+
 test('a list row shows the time today, the day and month this year, the whole date before', () => {
     const c = load({ date: 'DD.MM.YYYY', time: '12h' });
     const now = new Date();
@@ -238,35 +262,65 @@ function enclosingFunction(source, index) {
     return matches.length ? matches[matches.length - 1][1] : null;
 }
 
-test('no page formats a date or time on its own', () => {
+// A source with its comments blanked out (same length, so positions and lines
+// stay), so a comment that names a method is not a use of it
+function withoutComments(source) {
+    return source
+        .replace(/\/\*[\s\S]*?\*\//g, m => m.replace(/[^\n]/g, ' '))
+        .replace(/(^|[ \t])\/\/[^\n]*/gm, m => m.replace(/[^\n]/g, ' '));
+}
+
+// What formats a date on its own in one file: [line, what, function] for each
+function scanSource(name, original) {
+    const source = withoutComments(original);
+    const rules = [
+        [/Intl\s*\.\s*DateTimeFormat\s*\(/g, i => (ALLOWED_INTL[name] || []).includes(enclosingFunction(source, i))],
+        [/toLocale(Date|Time)String\s*\(/g, () => false],
+        // toLocaleString is fine on a count; on a date it writes the browser's zone and order
+        [/(?:\bDate\s*\([^)]*\)|\b[\w$.]*(?:date|time|when|moment|instant|seen|_at|At)\b)\s*\.toLocaleString\s*\(/gi, () => false],
+        [/\bhour12\b|\bhourCycle\b|\bdateStyle\b|\btimeStyle\b/g, i => name === 'utils.js' && ['tzPartFormat', 'writeClock'].includes(enclosingFunction(source, i))],
+        [/\bformatInZone\s*\(/g, () => false],
+        // The browser's own zone and clock: every time on screen is in the app's zone
+        [/\.get(Hours|Minutes|Seconds|Date|Day|Month|FullYear)\s*\(/g, () => false],
+    ];
     const problems = [];
-    for (const file of frontendScripts()) {
-        const name = path.relative(frontend, file).replace(/\\/g, '/');
-        const source = fs.readFileSync(file, 'utf8');
-        const rules = [
-            [/Intl\.DateTimeFormat\(/g, (i) => (ALLOWED_INTL[name] || []).includes(enclosingFunction(source, i))],
-            [/toLocale(Date|Time)String\(/g, () => false],
-            [/Date\([^)]*\)\.toLocaleString\(/g, () => false],
-            [/\bhour12\b|\bhourCycle\b/g, (i) => name === 'utils.js' && ['tzPartFormat', 'writeClock'].includes(enclosingFunction(source, i))],
-            [/\bformatInZone\(/g, () => false],
-            // The browser's own zone and clock: every time on screen is in the app's zone
-            [/\.get(Hours|Minutes|Seconds|Date|Day|Month|FullYear)\(/g, () => false],
-        ];
-        for (const [pattern, allowed] of rules) {
-            for (const m of source.matchAll(pattern)) {
-                if (!allowed(m.index)) {
-                    const line = source.slice(0, m.index).split('\n').length;
-                    problems.push(`${name}:${line} ${m[0]} (in ${enclosingFunction(source, m.index) || 'top level'})`);
-                }
+    for (const [pattern, allowed] of rules) {
+        for (const m of source.matchAll(pattern)) {
+            if (!allowed(m.index)) {
+                problems.push(`${name}:${source.slice(0, m.index).split('\n').length} ${m[0].trim()} (in ${enclosingFunction(source, m.index) || 'top level'})`);
             }
         }
     }
+    return problems;
+}
+
+test('no page formats a date or time on its own', () => {
+    const problems = frontendScripts().flatMap(file =>
+        scanSource(path.relative(frontend, file).split(path.sep).join('/'), fs.readFileSync(file, 'utf8')));
     assert.deepEqual(problems, [], 'format dates with formatTime, formatDay, formatDayMonth, formatDayKey or formatClock (utils.js)');
 });
 
-test('the check above catches a page that formats a date on its own', () => {
-    const source = 'function renderThing(d) {\n    return new Intl.DateTimeFormat(undefined, { hour12: false }).format(d);\n}\n';
-    const index = source.indexOf('Intl.DateTimeFormat(');
-    assert.equal(enclosingFunction(source, index), 'renderThing');
-    assert.ok(!(ALLOWED_INTL['app.js'] || []).includes(enclosingFunction(source, index)));
+test('the check above catches a page that formats a date on its own, and only that', () => {
+    const caught = [
+        'function a(d) { return new Intl.DateTimeFormat(undefined, { hour12: false }).format(d); }',
+        'function a(d) { return new Intl.DateTimeFormat (undefined, { dateStyle: \'short\' }).format(d); }',
+        'function a(date) { return date.toLocaleString(); }',
+        'function a(row) { return row.created_at.toLocaleString(); }',
+        'function a() { return new Date().toLocaleString(); }',
+        'function a(d) { return d.toLocaleDateString(); }',
+        'function a(d) { return formatInZone(d, {}); }',
+        'function a(d) { return d.getHours(); }',
+    ];
+    for (const source of caught) assert.notDeepEqual(scanSource('pages.js', source), [], source);
+    const fine = [
+        'function a(count) { return count.toLocaleString(); }',
+        'function a(r) { return Number(r.count).toLocaleString(); }',
+        '// date.getDay() and new Intl.DateTimeFormat() named in a comment\nfunction a() {}',
+        '/* d.toLocaleDateString() */ function a() {}',
+        'function a() { return "https://example.com/getHours"; }',
+        'function setAppTimezone(z) { new Intl.DateTimeFormat(\'en-US\', { timeZone: z }); }',
+    ];
+    for (const source of fine) assert.deepEqual(scanSource(source.includes('setAppTimezone') ? 'app.js' : 'pages.js', source), [], source);
+    // Allowed by the function it is in, not by the file
+    assert.notDeepEqual(scanSource('app.js', 'function other(z) { new Intl.DateTimeFormat(\'en-US\', { timeZone: z }); }'), []);
 });
