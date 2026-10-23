@@ -373,14 +373,16 @@ function renderMarkdown(markdownText) {
 }
 
 // Time for a list row: the time of day for today, the day and month before
-// that, in the app timezone. The full timestamp goes in the row tooltip.
+// that, and the whole date before this year, in the app timezone. The full
+// timestamp goes in the row tooltip.
 function formatListTime(isoString) {
     if (!isoString) return '-';
     const date = new Date(isoString);
-    if (zonedDateString(date) === zonedDateString(new Date())) {
-        return formatInZone(date, { hour: '2-digit', minute: '2-digit', hour12: false });
-    }
-    return formatInZone(date, { day: 'numeric', month: 'short' });
+    if (isNaN(date)) return '-';
+    const today = zonedDateString(new Date());
+    const day = zonedDateString(date);
+    if (day === today) return formatClock(date);
+    return day.slice(0, 4) === today.slice(0, 4) ? formatDayMonth(date) : formatDay(date);
 }
 
 // A "More" menu for a table row. It opens as a popover, so the table's own
@@ -511,6 +513,12 @@ function zonedDayStart(dateStr, tz = appTz()) {
     return zonedTimeToDate(y, m, d, 0, 0, 0, tz);
 }
 
+// Whether an instant is the very start of a day in the app's zone
+function isZonedMidnight(t) {
+    const p = zonedParts(t);
+    return new Date(t).getTime() % 1000 === 0 && p.hour === 0 && p.minute === 0 && p.second === 0;
+}
+
 // The same wall-clock time n days later (or earlier) in the app's zone, so a
 // daylight saving change in between does not move the hour
 function addDaysInZone(value, days, tz = appTz()) {
@@ -518,11 +526,11 @@ function addDaysInZone(value, days, tz = appTz()) {
     return zonedTimeToDate(p.year, p.month, p.day + days, p.hour, p.minute, p.second, tz);
 }
 
-// A day (YYYY-MM-DD) written as it is, with Intl options; no zone moves it
-function formatDayKey(dateStr, options, locale = 'en-US') {
+// A day (YYYY-MM-DD) written as it is, as formatDay writes a date; no zone moves it
+function formatDayKey(dateStr, { year = true, weekday = '' } = {}) {
     const [y, m, d] = String(dateStr).slice(0, 10).split('-').map(Number);
     if (!y || !m || !d) return '-';
-    return new Intl.DateTimeFormat(locale, { ...options, timeZone: 'UTC' }).format(new Date(Date.UTC(y, m - 1, d)));
+    return writeDate({ year: y, month: m, day: d }, { year, weekday });
 }
 
 // The value of an <input type="datetime-local"> for an instant, in the app's zone
@@ -538,41 +546,115 @@ function fromZonedInputValue(text, tz = appTz()) {
     return zonedTimeToDate(+m[1], +m[2], +m[3], +(m[4] || 0), +(m[5] || 0), +(m[6] || 0), tz);
 }
 
-// Intl formatting in the app's zone
-function formatInZone(value, options, locale = undefined) {
+// ---------------------------------------------------------------------------
+// How dates and times are written: Settings > Application > Time (/api/info
+// `date_format` and `time_format`). "browser" leaves the order of the date, or
+// the clock, to the browser's language; every other choice is written the same
+// in every browser. Every date and time on screen goes through these helpers,
+// in the app's zone (or, for a day key, as the day it names); a check in
+// .github/tests keeps formatting out of the other files.
+// ---------------------------------------------------------------------------
+
+const DATE_FORMAT_ORDERS = {
+    'DD/MM/YYYY': { order: ['day', 'month', 'year'], sep: '/' },
+    'MM/DD/YYYY': { order: ['month', 'day', 'year'], sep: '/' },
+    'DD.MM.YYYY': { order: ['day', 'month', 'year'], sep: '.' },
+    'YYYY-MM-DD': { order: ['year', 'month', 'day'], sep: '-' },
+};
+
+function appDateFmt() {
+    return (typeof appDateFormat === 'string' && DATE_FORMAT_ORDERS[appDateFormat]) ? appDateFormat : 'browser';
+}
+
+function appTimeFmt() {
+    return (typeof appTimeFormat === 'string' && ['24h', '12h', 'browser'].includes(appTimeFormat)) ? appTimeFormat : '24h';
+}
+
+// Browser formats are cached: Intl.DateTimeFormat is slow to build for every row
+const browserFormats = new Map();
+function browserFormat(options) {
+    const key = JSON.stringify(options);
+    if (!browserFormats.has(key)) browserFormats.set(key, new Intl.DateTimeFormat(undefined, { ...options, timeZone: 'UTC' }));
+    return browserFormats.get(key);
+}
+
+// A calendar date ({ year, month 1-12, day }) as the setting writes it; weekday
+// 'short' or 'long' puts its English name first ("Tue, 14/10/2026")
+function writeDate(p, { year = true, weekday = '', fmt = appDateFmt() } = {}) {
+    const utc = new Date(Date.UTC(p.year, p.month - 1, p.day));
+    let text;
+    if (!DATE_FORMAT_ORDERS[fmt]) fmt = 'browser';
+    if (fmt === 'browser') {
+        text = browserFormat({ day: '2-digit', month: '2-digit', ...(year ? { year: 'numeric' } : {}) }).format(utc);
+    } else {
+        const { order, sep } = DATE_FORMAT_ORDERS[fmt];
+        const part = { day: pad2(p.day), month: pad2(p.month), year: String(p.year).padStart(4, '0') };
+        text = order.filter(k => year || k !== 'year').map(k => part[k]).join(sep);
+    }
+    if (!weekday) return text;
+    return `${new Intl.DateTimeFormat('en-US', { weekday, timeZone: 'UTC' }).format(utc)}, ${text}`;
+}
+
+// A time of day ({ hour 0-23, minute, second }) as the setting writes it: 13:05,
+// 1:05 PM, or the browser's own clock
+function writeClock(p, { seconds = false, fmt = appTimeFmt() } = {}) {
+    if (!['24h', '12h', 'browser'].includes(fmt)) fmt = '24h';
+    if (fmt === 'browser') {
+        // The hour as the language writes it: 1:05 PM on a 12-hour clock, 01:05 on a 24-hour one
+        const rest = { minute: '2-digit', ...(seconds ? { second: '2-digit' } : {}) };
+        const twelve = ['h11', 'h12'].includes(browserFormat({ hour: 'numeric', ...rest }).resolvedOptions().hourCycle);
+        return browserFormat({ hour: twelve ? 'numeric' : '2-digit', ...rest }).format(new Date(Date.UTC(2000, 0, 1, p.hour, p.minute, p.second || 0)));
+    }
+    const tail = `${pad2(p.minute)}${seconds ? `:${pad2(p.second || 0)}` : ''}`;
+    if (fmt === '12h') return `${(p.hour % 12) || 12}:${tail} ${p.hour < 12 ? 'AM' : 'PM'}`;
+    return `${pad2(p.hour)}:${tail}`;
+}
+
+function zonedOrNull(value) {
+    if (value === null || value === undefined || value === '') return null;
     const date = value instanceof Date ? value : new Date(value);
-    if (isNaN(date)) return '-';
-    return new Intl.DateTimeFormat(locale, { ...options, timeZone: appTz() }).format(date);
+    return isNaN(date) ? null : zonedParts(date);
 }
 
-function formatTime(isoString) {
-    if (!isoString) return '-';
-    return formatInZone(isoString, {
-        day: '2-digit', month: '2-digit', year: 'numeric',
-        hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false
-    });
+// The full timestamp: date and time to the second ("14/10/2026, 13:05:22");
+// seconds: false leaves them out
+function formatTime(value, { seconds = true } = {}) {
+    const p = zonedOrNull(value);
+    return p ? `${writeDate(p)}, ${writeClock(p, { seconds })}` : '-';
 }
 
-// A day as formatTime writes it (its date part), and its day and month alone (a chart's axis)
-function formatDay(value) {
-    return formatInZone(value, { day: '2-digit', month: '2-digit', year: 'numeric' });
+// formatTime under another name, kept for the places that call it so
+function formatDate(value) {
+    return formatTime(value);
 }
 
-function formatDayMonth(value) {
-    return formatInZone(value, { day: '2-digit', month: '2-digit' });
+// The date of an instant, and its day and month alone (an axis, a list row)
+function formatDay(value, { year = true, weekday = '' } = {}) {
+    const p = zonedOrNull(value);
+    return p ? writeDate(p, { year, weekday }) : '-';
 }
 
-function formatDate(isoString) {
-    if (!isoString) return '-';
-    // Use formatTime for consistent date/time formatting
-    return formatTime(isoString);
+function formatDayMonth(value, { weekday = '' } = {}) {
+    return formatDay(value, { year: false, weekday });
 }
 
-// DD/MM of a day (YYYY-MM-DD) as written, or of an instant in the app's zone
-function formatDateShort(dateStr) {
-    const day = /^\d{4}-\d{2}-\d{2}$/.test(dateStr) ? dateStr : zonedDateString(dateStr);
-    const [, month, date] = day.split('-');
-    return `${date}/${month}`;
+// The time of day of an instant: 13:05, or 1:05 PM
+function formatClock(value, { seconds = false } = {}) {
+    const p = zonedOrNull(value);
+    return p ? writeClock(p, { seconds }) : '-';
+}
+
+// A clock time given as numbers, such as a job that runs at 02:00
+function formatClockAt(hour, minute) {
+    return writeClock({ hour, minute, second: 0 });
+}
+
+// An instant in a list cell: its text in a <time> that names the instant, so
+// the list sorts by the instant whatever the text says (uiSortValue)
+function uiTime(value, text, { title = '', cls = '' } = {}) {
+    const ms = value === null || value === undefined || value === '' ? NaN : new Date(value).getTime();
+    const attrs = `${cls ? ` class="${escapeHtml(cls)}"` : ''}${isNaN(ms) ? '' : ` datetime="${new Date(ms).toISOString()}"`}${title ? ` title="${escapeHtml(title)}"` : ''}`;
+    return `<time${attrs}>${escapeHtml(text)}</time>`;
 }
 
 function formatSeconds(seconds) {
@@ -1001,7 +1083,8 @@ function renderJobCard(name, jobKey, job) {
 
     const runs = [
         job.interval,
-        job.schedule,
+        // A clock-time job's time as the setting writes it, in the app's zone
+        job.clock ? `${job.clock.weekday ? `Weekly, ${job.clock.weekday}` : 'Daily'} at ${formatClockAt(job.clock.hour, job.clock.minute)} (${job.clock.zone})` : job.schedule,
         job.retention ? `keeps ${job.retention}` : '',
         job.max_age ? `Max: ${job.max_age}` : '',
         job.expire_after ? `Expire: ${job.expire_after}` : '',
@@ -1121,7 +1204,13 @@ function uiSortValue(cell) {
     if (!cell) return { n: null, t: '' };
     if (cell.hasAttribute && cell.hasAttribute('data-sort')) {
         const v = cell.getAttribute('data-sort');
-        return isNaN(Number(v)) ? { n: null, t: v.toLowerCase() } : { n: Number(v), t: v };
+        return v === '' || isNaN(Number(v)) ? { n: null, t: v.toLowerCase() } : { n: Number(v), t: v };
+    }
+    // A time names its instant (uiTime): it sorts by that, whatever date format the text uses
+    const time = cell.matches && cell.matches('time[datetime]') ? cell : cell.querySelector && cell.querySelector('time[datetime]');
+    if (time) {
+        const n = Date.parse(time.getAttribute('datetime'));
+        if (!isNaN(n)) return { n, t: (time.textContent || '').trim().toLowerCase() };
     }
     const copy = cell.cloneNode(true);
     copy.querySelectorAll('.ui-sec-unit, .ui-phone-only').forEach(el => el.remove());
@@ -2132,7 +2221,7 @@ function uiSparkline(points, { days = 7, now = Date.now(), format = v => String(
         .sort((a, b) => Date.parse(a.slot) - Date.parse(b.slot));
     // The words use the samples as read: the first and the latest
     const firstRead = hourly.length ? Number(hourly[0].value) : null, lastRead = hourly.length ? Number(hourly[hourly.length - 1].value) : null;
-    const when = t => `${formatDay(t)}, ${formatInZone(t, { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }, 'en-US')}`;
+    const when = t => formatTime(t, { seconds: false });
     // Nothing until the samples span a day: a dot or a stub says nothing yet (the place stays, the card keeps its size)
     if (hourly.length < 2 || Date.parse(hourly[hourly.length - 1].slot) - Date.parse(hourly[0].slot) < 86400000) return '';
     // Runs of samples with no missing hour between them (an hour and a half or more

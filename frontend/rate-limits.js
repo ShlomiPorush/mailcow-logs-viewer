@@ -213,27 +213,25 @@ function renderRateLimitActivityCard() {
 
 // An hour bucket is the UTC instant the hour starts, shown in the app's zone; a
 // day bucket is already a day in the app's zone, so it is labelled as it is.
-// Labels are numeric (14.09) like every other date in the app, never month
-// names, which would follow the browser language instead of the UI language.
+// Labels are written like every other date in the app: the day and month alone.
 function rateLimitBucketLabel(bucket, granularity) {
     if (!bucket) return '';
 
     if (granularity === 'hour') {
         // An older server sends the UTC hour without a zone (YYYY-MM-DDTHH:00)
         const date = new Date(/(Z|[+-]\d{2}:?\d{2})$/.test(bucket) ? bucket : `${bucket}:00Z`);
-        return formatInZone(date, { hour: '2-digit', minute: '2-digit', hour12: false });
+        return formatClock(date);
     }
 
-    const [, month, day] = bucket.split('-');
-    return `${day}.${month}`;
+    return formatDayKey(bucket, { year: false });
 }
 
 
-// Short timestamp for narrow screens: day.month and the time, no year, no
-// seconds, in the app's zone like formatTime in utils.js.
+// Short timestamp for narrow screens: the day and month and the time, no year,
+// no seconds, in the app's zone like formatTime in utils.js.
 function rateLimitShortTime(isoString) {
     if (!isoString) return '-';
-    return formatInZone(isoString, { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
+    return `${formatDayMonth(isoString)}, ${formatClock(isoString)}`;
 }
 
 
@@ -360,9 +358,9 @@ function renderRateLimitSendersTable(senders) {
                 onclick="if (!uiRowHeld(event)) selectRateLimitSender('${escapeJsArg(group.user)}')">
                 <td class="ui-dtable-wrap">${copyableText(group.user)}</td>
                 <td>${uiTag(group.events, 'fail')}</td>
-                <td class="ui-nowrap" title="${escapeHtml(formatTime(group.last_seen))}">${formatAgo(group.last_seen)}</td>
+                <td class="ui-nowrap">${uiTime(group.last_seen, formatAgo(group.last_seen), { title: formatTime(group.last_seen) })}</td>
                 <td class="hide-mobile">${renderRateLimitBadge(group.current_limit)}</td>
-                <td class="hide-mobile">${group.last_reset ? uiTag(`Reset ${formatAgo(group.last_reset)}`, 'ok') : ''}</td>
+                <td class="hide-mobile" data-sort="${Date.parse(group.last_reset) || ''}">${group.last_reset ? uiTag(`Reset ${formatAgo(group.last_reset)}`, 'ok') : ''}</td>
                 <!-- On a phone the action lives in the detail view a tap away;
                      a button beyond the scroll edge is a button nobody finds -->
                 <td class="ui-td-end ui-nowrap hide-mobile">${resetButton}</td>
@@ -563,7 +561,7 @@ function renderRateLimitEventRow(event) {
     // in half are worse than a scroll.
     return `
         <tr>
-            <td class="ui-nowrap"><span class="ui-phone-only">${escapeHtml(rateLimitShortTime(event.time))}</span><span class="ui-phone-hide">${escapeHtml(formatTime(event.time))}</span></td>
+            <td class="ui-nowrap" data-sort="${Date.parse(event.time) || ''}"><span class="ui-phone-only">${escapeHtml(rateLimitShortTime(event.time))}</span><span class="ui-phone-hide">${escapeHtml(formatTime(event.time))}</span></td>
             <td class="ui-dtable-wrap">${copyableText(event.rcpt)}</td>
             <td>${shortened ? `<span dir="auto">${escapeHtml(shortened)}</span>` : '<span class="ui-muted">No subject</span>'}</td>
             <td class="ui-mono ui-muted ui-nowrap hide-mobile">${copyableText(event.qid)}</td>

@@ -139,7 +139,7 @@ Public. Returns 200 with `{ "status": "healthy", "database": "connected" }`, or 
 
 Public. Without valid credentials while authentication is on, the response has only `name`, `app_title`, `app_logo_url`, `auth_enabled`, `basic_auth_enabled` and `oauth2_enabled`.
 
-Signed-in callers, or any caller while authentication is off, also get `version` (from the running image), `mailcow_url`, `local_domains`, `fetch_interval`, `retention_days`, `timezone` (the zone in use, `UTC` when unset or unknown), `timezone_valid` (false when the configured name is unknown), `timezone_configured` (the configured name, empty when unset), `blacklist_count`, `disabled_features` and `settings_edit_via_ui_enabled`. The top-bar search leaves out settings while `settings_edit_via_ui_enabled` is `false`.
+Signed-in callers, or any caller while authentication is off, also get `version` (from the running image), `mailcow_url`, `local_domains`, `fetch_interval`, `retention_days`, `timezone` (the zone in use, `UTC` when unset or unknown), `timezone_valid` (false when the configured name is unknown), `timezone_configured` (the configured name, empty when unset), `date_format` and `time_format` (how the page writes dates and times, see `DATE_FORMAT` and `TIME_FORMAT`), `blacklist_count`, `disabled_features` and `settings_edit_via_ui_enabled`. The top-bar search leaves out settings while `settings_edit_via_ui_enabled` is `false`.
 
 ---
 
@@ -1210,6 +1210,7 @@ Configuration, import state, correlation state and background job state, for the
 | Field | Description |
 |-------|-------------|
 | `interval` / `schedule` | How often the job runs. A job that is off says why, such as `Disabled (feature off)`. |
+| `clock` | For a job that runs at a clock time and is on: `hour`, `minute`, `weekday` (`null` for a daily job) and `zone`, so a page can write the time in its own format. |
 | `status` | See [Status Values](#status-values) |
 | `last_run` | Time of the last run, or null |
 | `error` | Error of the last failed run, else null |

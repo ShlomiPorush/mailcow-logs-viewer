@@ -83,13 +83,15 @@ def local_now() -> datetime:
 
 
 def format_date(when: datetime, time: bool = False, zone: bool = True) -> str:
-    """Day/month/year in the app's time zone, as the numeric dates in the app.
-    With the time, the zone follows it (13:00 CET) unless zone is False.
-    A naive value is a stored one, so it is UTC."""
+    """The date in the app's time zone, written as Settings > Application > Time
+    says (DD/MM/YYYY when that follows the browser). With the time, the zone
+    follows it (13:00 CET) unless zone is False. A naive value is a stored
+    one, so it is UTC."""
     local = app_time.to_local(when)
+    text = app_time.format_day(local.date())
     if not time:
-        return local.strftime('%d/%m/%Y')
-    text = local.strftime('%d/%m/%Y %H:%M')
+        return text
+    text = f"{text} {app_time.format_clock(local.hour, local.minute)}"
     return f"{text} {app_time.zone_label(local)}" if zone else text
 
 

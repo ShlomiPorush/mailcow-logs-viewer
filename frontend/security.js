@@ -681,7 +681,7 @@ function renderSecurityOverview() {
 // The period as it really is: the logs may start after the chosen one
 function securityPeriodSince() {
     const since = securityPage && securityPage.days === securityDays ? securityPage.since : null;
-    return since ? formatInZone(since, { day: 'numeric', month: 'short' }, 'en-US') : null;
+    return since ? formatDay(since) : null;
 }
 
 // A period as the picker names it

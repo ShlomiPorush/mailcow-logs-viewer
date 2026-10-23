@@ -152,3 +152,68 @@ def zone_label(value: Optional[datetime] = None) -> str:
     """The zone as people read it next to a time, for example CET, CEST or UTC."""
     moment = to_local(value) if value is not None else local_now()
     return moment.tzname() or app_tz().key
+
+
+# ---------------------------------------------------------------------------
+# How dates and times are written (Settings > Application > Time). The screen
+# writes them in the browser (formatDate and friends in utils.js); the server
+# writes the ones it sends itself, such as the date in an email. "browser"
+# means the browser's own order or clock; the server has no browser, so there
+# it writes dates as DD/MM/YYYY and times on the 24-hour clock.
+# ---------------------------------------------------------------------------
+
+DATE_FORMATS = ("browser", "DD/MM/YYYY", "MM/DD/YYYY", "DD.MM.YYYY", "YYYY-MM-DD")
+TIME_FORMATS = ("24h", "12h", "browser")
+DEFAULT_DATE_FORMAT = "browser"
+DEFAULT_TIME_FORMAT = "24h"
+_SERVER_DATE_FORMAT = "DD/MM/YYYY"
+
+
+def _normalize(value, known, default: str, name: str) -> str:
+    text = str(value if value is not None else "").strip()
+    match = next((k for k in known if k.lower() == text.lower()), None)
+    if match:
+        return match
+    if text:
+        logger.warning(f"Unknown {name} {text!r}: using {default}. Use one of: {', '.join(known)}.")
+    return default
+
+
+def normalize_date_format(value) -> str:
+    """A known date format, the default when empty or unknown."""
+    return _normalize(value, DATE_FORMATS, DEFAULT_DATE_FORMAT, "date format")
+
+
+def normalize_time_format(value) -> str:
+    """A known time format, the default when empty or unknown."""
+    return _normalize(value, TIME_FORMATS, DEFAULT_TIME_FORMAT, "time format")
+
+
+def display_formats() -> dict:
+    """What /api/info tells the browser about writing dates and times."""
+    from .config import settings
+    return {
+        "date_format": normalize_date_format(settings.date_format),
+        "time_format": normalize_time_format(settings.time_format),
+    }
+
+
+def format_day(day: date) -> str:
+    """A day as the server writes it, for example 14/10/2026."""
+    fmt = display_formats()["date_format"]
+    if fmt == "browser":
+        fmt = _SERVER_DATE_FORMAT
+    d, m, y = f"{day.day:02d}", f"{day.month:02d}", f"{day.year:04d}"
+    return {
+        "DD/MM/YYYY": f"{d}/{m}/{y}",
+        "MM/DD/YYYY": f"{m}/{d}/{y}",
+        "DD.MM.YYYY": f"{d}.{m}.{y}",
+        "YYYY-MM-DD": f"{y}-{m}-{d}",
+    }[fmt]
+
+
+def format_clock(hour: int, minute: int) -> str:
+    """A time of day as the server writes it: 13:05, or 1:05 PM on the 12-hour clock."""
+    if display_formats()["time_format"] == "12h":
+        return f"{(hour % 12) or 12}:{minute:02d} {'AM' if hour < 12 else 'PM'}"
+    return f"{hour:02d}:{minute:02d}"

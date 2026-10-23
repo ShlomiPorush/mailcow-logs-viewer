@@ -69,6 +69,8 @@ The `db` service in `docker-compose.yml` falls back to `mailcowlogs` and `change
 | `APP_TITLE` | `mailcow Logs Viewer` | Name in the sidebar and the browser tab. |
 | `APP_LOGO_URL` | Empty | Logo image address. Empty shows the project icon. |
 | `TZ` | Unset (UTC) | The app's time zone, an IANA name such as `Europe/Berlin`. Times on screen, days, times you type, emails, CSV exports and scheduled jobs follow it; the browser's and the containers' zones do not. An unknown name means UTC, and Settings and About say so. Use the time zone of your mailcow server. |
+| `DATE_FORMAT` | `browser` | How dates are written on every page and in emails: `browser` (in the order of the browser's language), `DD/MM/YYYY`, `MM/DD/YYYY`, `DD.MM.YYYY` or `YYYY-MM-DD`. With `browser`, emails use `DD/MM/YYYY`. An unknown value means `browser`. |
+| `TIME_FORMAT` | `24h` | How times are written on every page and in emails: `24h`, `12h` or `browser` (the clock of the browser's language). With `browser`, emails use the 24-hour clock. An unknown value means `24h`. |
 | `LOG_LEVEL` | `WARNING` | `DEBUG`, `INFO`, `WARNING`, `ERROR` or `CRITICAL`. Anything else means `WARNING`. |
 | `DEBUG` | `false` | Logs every SQL statement, puts exception text in API error responses and turns off database connection pooling. Keep off in production. |
 | `MAX_SEARCH_RESULTS` | `1000` | Not used by this version. |

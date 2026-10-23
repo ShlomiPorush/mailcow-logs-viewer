@@ -188,6 +188,9 @@ let currentTab = 'dashboard';
 let appTimezone = 'UTC'; // The app's time zone (utils.js appTz), from /api/info
 // Whether the configured TZ is a known zone, and the name as configured ('' when unset)
 let appTimezoneStatus = { valid: true, configured: '' };
+// How dates and times are written (utils.js appDateFmt, appTimeFmt), from /api/info
+let appDateFormat = 'browser';
+let appTimeFormat = '24h';
 let currentPage = {
     netfilter: 1,
     messages: 1
@@ -545,6 +548,9 @@ function setAppTimezone(info) {
         valid: !info || info.timezone_valid !== false,
         configured: (info && typeof info.timezone_configured === 'string') ? info.timezone_configured : '',
     };
+    // utils.js falls back to the defaults for a value it does not know
+    if (info && typeof info.date_format === 'string') appDateFormat = info.date_format;
+    if (info && typeof info.time_format === 'string') appTimeFormat = info.time_format;
 }
 
 // The browser tab names the page and its open tab: "Mailbox Stats · Rate Limits · mailcow Logs Viewer"
@@ -1216,7 +1222,7 @@ function renderMessageRow(msg) {
         <div class="ui-msg-item${tone ? ` ui-msg-${tone}` : ''}" data-key="${escapeHtml(msg.correlation_key || '')}"${msg.message_id ? ` data-mid="${encodeURIComponent(msg.message_id)}"` : ''} role="button" tabindex="0" data-row-open onclick="if (!uiRowHeld(event)) viewMessageDetails('${escapeJsArg(msg.correlation_key)}')">
             <div class="ui-msg-l1">
                 <b class="ui-msg-from">${escapeHtml(msg.sender || 'Unknown')}</b>
-                <time title="${escapeHtml(formatTime(msg.first_seen))}">${formatListTime(msg.first_seen)}</time>
+                ${uiTime(msg.first_seen, formatListTime(msg.first_seen), { title: formatTime(msg.first_seen) })}
             </div>
             <p class="ui-msg-sub" dir="auto" title="${escapeHtml(msg.subject || 'No subject')}">${escapeHtml(msg.subject || 'No subject')}</p>
             <div class="ui-msg-l3">
@@ -1503,7 +1509,7 @@ function renderNetfilterData(data) {
                     : (log.attempts_left !== null && log.attempts_left !== undefined ? `<span class="ui-muted">${escapeHtml(String(log.attempts_left))} attempts left</span>` : '<span class="ui-muted">-</span>');
                 return `
                 <div class="ui-ev-row ui-msg-${uiActionTone(log.action)}">
-                    <time class="ui-muted" title="${escapeHtml(formatTime(log.time))}">${formatListTime(log.time)}</time>
+                    ${uiTime(log.time, formatListTime(log.time), { title: formatTime(log.time), cls: 'ui-muted' })}
                     <b class="ui-mono">${log.ip ? copyableText(log.ip) : '-'}</b>
                     <span class="ui-ev-account">${account}</span>
                     <span>${uiActionTag(log.action)}</span>
@@ -2486,16 +2492,18 @@ const dashFlow = {
 };
 
 function mailFlowHour(t) {
-    return formatInZone(t, { hour: '2-digit', minute: '2-digit', hour12: false });
+    return formatClock(t);
 }
 
 // A span with the dates as the rest of the app writes them: "21/10/2026, 06:00 to 12:00",
-// "14/10/2026 to 16/10/2026" (the order of day and month follows the browser, as formatTime)
+// "14/10/2026 to 16/10/2026", or one whole day: "14/10/2026". `to` is where the span ends
+// (not in it), so a span of whole days ends at the midnight after its last day.
 function mailFlowSpan(from, to) {
     const end = to - 1;
-    if (zonedDateString(from) === zonedDateString(end)) return `${formatDay(from)}, ${mailFlowHour(from)} to ${mailFlowHour(to)}`;
-    const whole = mailFlowHour(from) === '00:00' && mailFlowHour(to) === '00:00';
-    return whole ? `${formatDay(from)} to ${formatDay(end)}` : `${formatDay(from)}, ${mailFlowHour(from)} to ${formatDay(end)}, ${mailFlowHour(to)}`;
+    const sameDay = zonedDateString(from) === zonedDateString(end);
+    if (isZonedMidnight(from) && isZonedMidnight(to)) return sameDay ? formatDay(from) : `${formatDay(from)} to ${formatDay(end)}`;
+    if (sameDay) return `${formatDay(from)}, ${mailFlowHour(from)} to ${mailFlowHour(to)}`;
+    return `${formatDay(from)}, ${mailFlowHour(from)} to ${formatDay(end)}, ${mailFlowHour(to)}`;
 }
 
 // The bar length for a span: an hour up to two days, six hours up to ten, else a day
@@ -4467,7 +4475,7 @@ async function loadQuarantineRuleHistory() {
             <div class="ui-qt-hrow">
                 ${uiTag(log.action, log.action === 'delete' ? 'fail' : 'ok')}
                 <span class="ui-q-who" title="${escapeHtml(log.sender || '')} → ${escapeHtml(log.recipient || '')}">${escapeHtml(log.sender || '?')} → ${escapeHtml(log.recipient || '?')}</span>
-                <span class="ui-muted" title="Rule: ${escapeHtml(log.rule_name || '')}">${formatTime(log.created_at)}</span>
+                ${uiTime(log.created_at, formatTime(log.created_at), { title: `Rule: ${log.rule_name || ''}`, cls: 'ui-muted' })}
             </div>
         `).join('')}</div>`;
     } catch (err) {
@@ -4643,7 +4651,7 @@ function applyMessagesCustomDateRange() {
     document.getElementById('messages-end-date').value = endDate.toISOString();
 
     // The label names the days as picked
-    const fmt = day => formatDayKey(day, { month: 'short', day: 'numeric' });
+    const fmt = day => formatDayKey(day);
     document.getElementById('messages-date-range-label').textContent = `${fmt(startInput)} - ${fmt(endInput)}`;
 
     setMessagesDatePresetActive(null);
@@ -5417,7 +5425,7 @@ function renderBlacklistStatus(data) {
                     <span class="ui-tag ui-tag-line">${escapeHtml(host.source || 'system')}</span>
                     ${result}
                     <span class="ui-st-host-tools">
-                        <span class="ui-muted" title="${host.checked_at ? escapeHtml(formatTime(host.checked_at)) : ''}">${host.checked_at ? `checked ${formatAgo(host.checked_at)}` : 'never checked'}</span>
+                        ${host.checked_at ? uiTime(host.checked_at, `checked ${formatAgo(host.checked_at)}`, { title: formatTime(host.checked_at), cls: 'ui-muted' }) : '<span class="ui-muted">never checked</span>'}
                         <button onclick="checkHost('${escapeJsArg(host.hostname)}')" class="ui-btn ui-btn-sm" title="Run Check for this Host">Check now</button>
                     </span>
                 </div>
@@ -5474,10 +5482,10 @@ function renderStatusImport(imports) {
         <div class="ui-tr">
             <b class="ui-td">${title}</b>
             ${d ? `
-            <span class="ui-td" title="${d.last_fetch_run ? escapeHtml(formatTime(d.last_fetch_run)) : ''}"><small class="ui-sec-unit">Last Fetch Run </small>${d.last_fetch_run ? formatAgo(d.last_fetch_run) : 'Never'}</span>
-            <span class="ui-td" title="${d.last_import ? escapeHtml(formatTime(d.last_import)) : ''}"><small class="ui-sec-unit">Last Import </small>${d.last_import ? formatAgo(d.last_import) : 'Never'}</span>
+            <span class="ui-td"><small class="ui-sec-unit">Last Fetch Run </small>${d.last_fetch_run ? uiTime(d.last_fetch_run, formatAgo(d.last_fetch_run), { title: formatTime(d.last_fetch_run) }) : 'Never'}</span>
+            <span class="ui-td"><small class="ui-sec-unit">Last Import </small>${d.last_import ? uiTime(d.last_import, formatAgo(d.last_import), { title: formatTime(d.last_import) }) : 'Never'}</span>
             <span class="ui-td ui-td-end"><small class="ui-sec-unit">Total Entries </small>${Number(d.total_entries || 0).toLocaleString()}</span>
-            <span class="ui-td"><small class="ui-sec-unit">Oldest Entry </small>${d.oldest_entry ? formatTime(d.oldest_entry) : '-'}</span>
+            <span class="ui-td"><small class="ui-sec-unit">Oldest Entry </small>${d.oldest_entry ? uiTime(d.oldest_entry, formatTime(d.oldest_entry)) : '-'}</span>
             ` : '<span class="ui-td ui-muted">No data</span><span></span><span></span><span></span>'}
         </div>`;
     container.innerHTML = `

@@ -82,12 +82,13 @@ test('the auto refresh still leaves a search alone', async () => {
 
 test('a custom range covers the chosen days in the app time zone', () => {
     const h = harness({});
+    h.run("appDateFormat = 'DD.MM.YYYY'");
     h.element('messages-date-range-start').value = '2026-10-13';
     h.element('messages-date-range-end').value = '2026-10-14';
     h.run('applyMessagesCustomDateRange()');
     assert.equal(h.element('messages-start-date').value, '2026-10-12T22:00:00.000Z');
     assert.equal(h.element('messages-end-date').value, '2026-10-14T21:59:59.999Z');
-    assert.equal(h.element('messages-date-range-label').textContent, 'Oct 13 - Oct 14');
+    assert.equal(h.element('messages-date-range-label').textContent, '13.10.2026 - 14.10.2026');
     assert.equal(h.calls.applied, 1);
 });
 
@@ -104,7 +105,7 @@ test('a one-day custom range is that whole day', () => {
     assert.equal(end.day, 13);
     assert.equal(end.hour, 23);
     assert.equal(end.minute, 59);
-    assert.equal(h.element('messages-date-range-label').textContent, 'Oct 13 - Oct 13');
+    assert.equal(h.element('messages-date-range-label').textContent, `${h.run("formatDayKey('2026-10-13')")} - ${h.run("formatDayKey('2026-10-13')")}`);
 });
 
 test('a one-day range on a daylight saving change is 23 or 25 hours long', () => {

@@ -48,9 +48,10 @@ function dmarcNum(value) {
     return (Number(value) || 0).toLocaleString();
 }
 
-// A report day from the server, already a day in the app's zone, named as it is
+// A report day from the server, already a day in the app's zone, named as it is:
+// its day and month, or in full with its weekday for a report's title
 function dmarcDay(date, long = false) {
-    return formatDayKey(date, long ? { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' } : { month: 'short', day: 'numeric' });
+    return long ? formatDayKey(date, { weekday: 'long' }) : formatDayKey(date, { year: false });
 }
 
 function dmarcTag(tone, label, solid = false) {
@@ -300,9 +301,8 @@ function dmarcCalendarCard(x) {
     const max = Math.max(1, ...(cal.days || []).map(d => d.total));
     const old = cal.maybe_incomplete_before ? dayNum(cal.maybe_incomplete_before) : -Infinity;
     const domain = escapeJsArg(x.name);
-    // The day as the app writes dates (formatDay's numbers, in the browser's order), from the date alone
-    const fmt = new Intl.DateTimeFormat(undefined, { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC' });
-    const dayWords = date => { const [y, m, d] = ymd(date); return fmt.format(new Date(Date.UTC(y, m - 1, d))); };
+    // The day as the app writes dates, from the date alone
+    const dayWords = date => formatDayKey(date);
     const cells = [];
     for (let i = 0; i < lead; i++) cells.push('<span class="ui-dm-cal-pad" aria-hidden="true"></span>');
     for (let n = first; n <= last; n++) {
@@ -580,7 +580,7 @@ function dmarcDaysCard(x) {
     const open = dmarcState.daysOpen ?? !window.matchMedia('(max-width: 760px)').matches;
     return `<details class="ui-dm-card ui-dm-fold"${open ? ' open' : ''} ontoggle="dmarcState.daysOpen = this.open"><summary>Daily reports <span class="ui-count">${x.days.length}</span></summary>
         <table class="ui-dm-tbl"><thead><tr><th>Day</th><th class="r">Messages</th><th class="r ui-dm-hm">Senders</th><th class="ui-dm-hm">Reported by</th><th class="r">Passed DMARC</th></tr></thead><tbody>
-        ${x.days.map(r => `<tr class="is-go" onclick="if (!uiRowHeld(event)) loadReportDetails('${name}', '${escapeJsArg(r.date)}')"><td><button type="button" class="ui-dm-link">${dmarcDay(r.date)}</button></td>
+        ${x.days.map(r => `<tr class="is-go" onclick="if (!uiRowHeld(event)) loadReportDetails('${name}', '${escapeJsArg(r.date)}')"><td data-sort="${Date.parse(r.date) || ''}"><button type="button" class="ui-dm-link">${dmarcDay(r.date)}</button></td>
             <td class="r ui-num">${dmarcNum(r.total_messages)}</td><td class="r ui-dm-hm">${dmarcNum(r.unique_ips)}</td><td class="ui-dm-hm ui-muted">${escapeHtml((r.reporters || []).join(', '))}</td>
             <td class="r">${dmarcRate(r.dmarc_pass_pct, r.total_messages)}</td></tr>`).join('')}</tbody></table></details>`;
 }
@@ -1146,7 +1146,7 @@ async function showDmarcSyncHistory() {
                 <div class="ui-tr ui-tr-head"><span data-sort-kind="date">Date</span><span data-sort-kind="text">Type</span><span data-sort-kind="text">Status</span><span class="ui-td-end" data-sort-kind="number">Emails</span><span class="ui-td-end" data-sort-kind="number">Created</span><span class="ui-td-end" data-sort-kind="number">Duplicate</span><span class="ui-td-end" data-sort-kind="number">Failed</span><span data-sort-kind="number">Duration</span></div>
                 ${data.data.map(sync => `
                 <div class="ui-tr">
-                    <span class="ui-td">${formatDate(sync.started_at)}</span>
+                    <span class="ui-td">${uiTime(sync.started_at, formatTime(sync.started_at))}</span>
                     <span class="ui-td">${uiTag(sync.sync_type, sync.sync_type === 'manual' ? 'info' : '')}</span>
                     <span class="ui-td">${uiTag(sync.status, STATUS_TONE[sync.status] || '')}</span>
                     <span class="ui-tr-break" aria-hidden="true"></span>
@@ -1247,7 +1247,7 @@ function renderReportsDomains() {
         content.innerHTML = '';
         return;
     }
-    const day = ts => ts ? formatInZone(ts * 1000, { month: 'short', day: 'numeric', year: 'numeric' }, 'en-US') : '-';
+    const day = ts => ts ? formatDay(ts * 1000) : '-';
     content.innerHTML = `
         <h4 class="ui-md-h">Reports by domain</h4>
         ${allowDelete ? '' : `<div class="ui-list-note ui-flush">${uiLocked('Deleting reports is off', 'Turn on report deletion in Settings, DMARC.',
@@ -1382,8 +1382,8 @@ function renderReportsManagementTable(reports, allowDelete, { total, page, total
         ${pageButton('Last', totalPages, page === totalPages)}
     </nav>` : '';
     // Import Date is an instant, the period two epochs: all shown in the app's zone
-    const dateTime = value => value ? formatInZone(value, { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' }, 'en-US') : '-';
-    const day = ts => ts ? formatInZone(ts * 1000, { month: 'short', day: 'numeric' }, 'en-US') : '-';
+    const dateTime = value => value ? formatTime(value, { seconds: false }) : '-';
+    const day = ts => ts ? formatDay(ts * 1000) : '-';
     const cols = allowDelete
         ? '--ui-cols: minmax(150px, 1.2fr) 70px minmax(140px, 1.2fr) minmax(120px, 1fr) 70px minmax(110px, .9fr) 80px'
         : '--ui-cols: minmax(150px, 1.2fr) 70px minmax(140px, 1.2fr) minmax(120px, 1fr) 70px minmax(110px, .9fr)';

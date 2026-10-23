@@ -21,8 +21,8 @@ from ..services.bounce_policy import cleanup_blocks
 from ..config import settings, EDITABLE_SETTING_KEYS, FEATURE_IDS, reload_settings, Settings
 from ..config import normalize_disabled_features
 from ..config import _get_field_annotations, get_env_locked_keys
-from ..app_time import app_tz, configured_zone_name, is_valid_zone
-from ..scheduler import last_fetch_run_time, get_job_status, update_job_status, JOB_SKIPPED, JOB_STATUS_SET, reschedule_interval_jobs, clock_schedule, dovecot_correlation_available, cleanup_disabled_feature_data, run_feature_data_sweep_soon, _mailbox_sync_needed
+from ..app_time import app_tz, configured_zone_name, is_valid_zone, DATE_FORMATS, TIME_FORMATS
+from ..scheduler import last_fetch_run_time, get_job_status, update_job_status, JOB_SKIPPED, JOB_STATUS_SET, reschedule_interval_jobs, clock_schedule, clock_parts, CLOCK_JOBS, dovecot_correlation_available, cleanup_disabled_feature_data, run_feature_data_sweep_soon, _mailbox_sync_needed
 from ..services.settings_store import get_config_overrides_from_db, save_config_overrides_to_db, has_config_overrides_in_db, get_maxmind_validation_status, save_maxmind_validation_status, clear_maxmind_validation_status
 from ..services.settings_store import credential_fingerprint, get_credential_check_status, save_credential_check_status
 from ..services.connection_test import test_smtp_connection, test_imap_connection
@@ -241,6 +241,22 @@ def _validate_bounce_actions(allowed: Dict[str, Any]) -> None:
             raise HTTPException(status_code=400, detail=f"{key} accepts only: {', '.join(known)}.")
 
 
+def _validate_display_formats(allowed: Dict[str, Any]) -> None:
+    """Refuse a date or time format nobody knows. The value in effect sent back
+    as it is never blocks saving the other settings (the page posts every key)."""
+    for key, known in (('date_format', DATE_FORMATS), ('time_format', TIME_FORMATS)):
+        if key not in allowed:
+            continue
+        value = str(allowed[key] or '').strip()
+        match = next((k for k in known if k.lower() == value.lower()), None)
+        if match:
+            allowed[key] = match
+        elif value == str(getattr(settings, key) or ''):
+            allowed.pop(key)
+        else:
+            raise HTTPException(status_code=400, detail=f"{key} accepts only: {', '.join(known)}.")
+
+
 def _validate_time_zone(allowed: Dict[str, Any], db: Session) -> None:
     """Refuse a time zone name nobody knows, such as Europe/Berlinn ('' is UTC),
     also while TZ in the environment locks the field: the stored value becomes
@@ -390,6 +406,8 @@ def get_settings_info(db: Session = Depends(get_db)):
                 "max_correlation_age_minutes": settings.max_correlation_age_minutes,
                 "correlation_check_interval": settings.correlation_check_interval,
                 "timezone": app_tz().key,
+                "date_format": settings.date_format,
+                "time_format": settings.time_format,
                 "app_title": settings.app_title,
                 "log_level": settings.log_level,
                 "blacklist_enabled": len(settings.blacklist_emails_list) > 0,
@@ -748,6 +766,9 @@ def get_settings_info(db: Session = Depends(get_db)):
             off = None if job.get("feature_disabled") else _job_off_reason(key)
             if off:
                 job["disabled_reason"], job["settings_section"] = off
+            # A clock-time job that runs: its time as parts, for the page to write
+            if key in CLOCK_JOBS and job.get("schedule") == clock_schedule(key):
+                job["clock"] = clock_parts(key)
         # Raw log services other pages read, collected whatever the Logs page settings are
         result["raw_logs_required"] = settings.raw_logs_required
         # When UI editing is enabled, include full editable config and migration status
@@ -812,6 +833,7 @@ def update_settings(body: Dict[str, Any], request: Request = None, response: Res
     _reject_moved_secrets(allowed)
     _normalize_address_lists(allowed)
     _validate_time_zone(allowed, db)
+    _validate_display_formats(allowed)
     _validate_bounce_actions(allowed)
     # For sensitive keys, mask placeholder means "do not change" - omit from payload
     # Empty string means "clear this value" and should be kept
