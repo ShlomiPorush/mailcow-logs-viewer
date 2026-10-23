@@ -656,7 +656,7 @@ function renderSuppressionItem(s) {
             <span class="ui-td"><small class="ui-sec-unit">Bounces </small>${s.bounce_count > 0 ? `${escapeHtml(String(s.bounce_count))} <small class="ui-muted">(H:${escapeHtml(String(s.hard_bounce_count))} S:${escapeHtml(String(s.soft_bounce_count))})</small>` : '<span class="ui-muted">-</span>'}</span>
             <span class="ui-td">${expiry}</span>
             <span class="ui-td">${syncBadge}</span>
-            <span class="ui-td" title="${escapeHtml(formatTime(s.created_at))}"><small class="ui-sec-unit">Added </small>${formatAgo(s.created_at)}</span>
+            <span class="ui-td"><small class="ui-sec-unit">Added </small>${uiTime(s.created_at, formatAgo(s.created_at), { title: formatTime(s.created_at) })}</span>
             <span class="ui-td ui-td-end ui-row-actions">
                 <button onclick="showBlockDetails(${Number(s.id)})" class="ui-btn ui-btn-sm">Block details</button>
                 <button onclick="showEditSuppressionModalById(${Number(s.id)})" class="ui-btn ui-btn-sm" title="Edit suppression">Edit</button>

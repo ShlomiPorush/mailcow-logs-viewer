@@ -195,6 +195,14 @@ class Settings(BaseSettings):
         default="",
         description="The app time zone, an IANA name such as Europe/Berlin (UTC when empty or unknown, see app_time.py)"
     )
+    date_format: str = Field(
+        default="browser",
+        description="How dates are written: browser, DD/MM/YYYY, MM/DD/YYYY, DD.MM.YYYY or YYYY-MM-DD (see app_time.py)"
+    )
+    time_format: str = Field(
+        default="24h",
+        description="How times are written: 24h, 12h or browser (see app_time.py)"
+    )
     app_title: str = Field(default="mailcow Logs Viewer", description="Application title")
     app_logo_url: str = Field(default="", description="Application logo URL (optional)")
     disabled_features: str = Field(
@@ -865,7 +873,19 @@ class Settings(BaseSettings):
             logger.warning(f"Invalid log level '{v}', using WARNING")
             return 'WARNING'
         return v
-    
+
+    # An unknown format never stops the app: it falls back to the default.
+    # Settings refuses a new unknown value when it is saved (routers/settings.py).
+    @validator('date_format')
+    def validate_date_format(cls, v):
+        from .app_time import normalize_date_format
+        return normalize_date_format(v)
+
+    @validator('time_format')
+    def validate_time_format(cls, v):
+        from .app_time import normalize_time_format
+        return normalize_time_format(v)
+
     @property
     def is_basic_auth_enabled(self) -> bool:
         """Check if Basic Auth is enabled (with backward compatibility)"""
@@ -1189,6 +1209,10 @@ def build_settings(db: Optional[Any] = None) -> Settings:
             object.__setattr__(merged, 'log_level', v)
         if 'scheduler_workers' in allowed:
             object.__setattr__(merged, 'scheduler_workers', max(1, min(64, merged.scheduler_workers)))
+        if 'date_format' in allowed or 'time_format' in allowed:
+            from .app_time import normalize_date_format, normalize_time_format
+            object.__setattr__(merged, 'date_format', normalize_date_format(merged.date_format))
+            object.__setattr__(merged, 'time_format', normalize_time_format(merged.time_format))
     except Exception as e:
         logger.warning("Post-validation of DB overrides failed: %s", e)
     return merged

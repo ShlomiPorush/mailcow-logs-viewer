@@ -40,7 +40,7 @@ All features are on by default. A feature that is off disappears from the menu, 
 
 ## Application
 
-**Time Zone** is the time zone the whole app works in; see [Using the app](../Using_the_App.md#time-zone). Saving a new one reloads the page and moves the scheduled jobs at once. The port is set in `docker-compose.yml`, not here.
+**Time Zone** is the time zone the whole app works in; see [Using the app](../Using_the_App.md#time-zone). Saving a new one reloads the page and moves the scheduled jobs at once. **Date Format** and **Time Format** set how dates and times are written on every page and in emails; the example under them shows your choice before you save. The port is set in `docker-compose.yml`, not here.
 
 ## Mailcow
 

@@ -150,7 +150,7 @@ function alertActivityChart(data, span) {
     const usualIn = c => (a.baseline_value || 0) * (c.end - c.start) / 3600000;
     const usual = spike ? (a.baseline_value || 0) * minutes / 60 : null;
     // The date as the rest of the app writes it, on a 24-hour clock
-    const fmt = d => `${formatDay(d)}, ${formatInZone(d, { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }, 'en-US')}`;
+    const fmt = d => formatTime(d, { seconds: false });
     const what = sent ? 'sent' : 'failed logins';
     const markAt = cols.findIndex(c => at >= c.start && at < c.end);
     const ranges = [['24h', '24 hours'], ['48h', '2 days'], ['7d', `${escapeHtml(String(data.baseline_days))} days`]];
@@ -171,7 +171,7 @@ function alertActivityChart(data, span) {
                 return `<button type="button" class="ui-aa-col${inAlert ? ' is-alert' : ''}" data-start="${s}" data-end="${c.end.getTime()}" aria-pressed="${alertActivityPick === s}" aria-label="${escapeHtml(tip)}" title="${escapeHtml(tip)}" onclick="pickAlertActivityColumn(${s})"><i style="height:${c.count / top * 100}%"></i>${norm}</button>`;
             }).join('')}</div>
             ${usual !== null ? `<div class="ui-aa-usual" style="bottom:${Math.max(usual / top * 100, .6)}%"><span>usual: ${(a.baseline_value || 0).toFixed(2)} an hour</span></div>` : ''}
-            ${markAt >= 0 ? `<div class="ui-aa-mark" style="left:${(markAt + .5) / cols.length * 100}%"><span>Alert ${formatInZone(at, { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }, 'en-US')}</span></div>` : ''}
+            ${markAt >= 0 ? `<div class="ui-aa-mark" style="left:${(markAt + .5) / cols.length * 100}%"><span>Alert ${formatClock(at)}</span></div>` : ''}
             <div class="ui-flow-band hidden" aria-hidden="true"></div>
         </div>
         <div class="ui-aa-x"><span>${escapeHtml(fmt(cols[0].start))}</span><span>${escapeHtml(fmt(cols[cols.length - 1].start))}</span></div>
@@ -256,7 +256,7 @@ function alertActivityOverview(data, span) {
     const max = Math.max(1, ...cols.map(c => c.count));
     strip.innerHTML = `<div class="ui-ov-bars" aria-hidden="true">${cols.map(c => `<i style="height:${Math.max(6, c.count / max * 100)}%"></i>`).join('')}</div>`;
     const edges = cols.map(c => c.start.getTime()).concat(l.to);
-    const fmt = t => `${formatDay(t)}, ${formatInZone(t, { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }, 'en-US')}`;
+    const fmt = t => formatTime(t, { seconds: false });
     alertActivityOverviewer = uiTimeOverview(strip, {
         limits: () => l,
         // Its edges where the chart's columns are

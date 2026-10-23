@@ -210,7 +210,7 @@ function renderMailboxStatsSummary(summary) {
         const startDate = document.getElementById('mailbox-stats-start-date')?.value;
         const endDate = document.getElementById('mailbox-stats-end-date')?.value;
         if (startDate && endDate) {
-            dateLabel = `${formatDateShort(startDate)} - ${formatDateShort(endDate)}`;
+            dateLabel = `${formatDayKey(startDate)} - ${formatDayKey(endDate)}`;
         } else {
             dateLabel = 'Custom Range';
         }
@@ -393,9 +393,8 @@ function mailboxSparkline(mb) {
 // instant the hour starts, named in the app's zone (so the hour a daylight saving
 // change repeats shows twice, not as one)
 function mailboxActivityLabel(bucket, unit) {
-    const options = { weekday: 'short', day: 'numeric', month: 'short' };
-    if (unit !== 'hour') return formatDayKey(bucket, options);
-    return `${formatInZone(bucket, options, 'en-US')}, ${formatInZone(bucket, { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }, 'en-US')}`;
+    if (unit !== 'hour') return formatDayKey(bucket, { year: false, weekday: 'short' });
+    return `${formatDayMonth(bucket, { weekday: 'short' })}, ${formatClock(bucket)}`;
 }
 
 function openMailboxActivity(username) {
@@ -649,8 +648,8 @@ function applyCustomDateRange() {
     // Update label with date range
     const label = document.getElementById('date-range-label');
     if (label) {
-        const startFormatted = formatDateShort(startInput.value);
-        const endFormatted = formatDateShort(endInput.value);
+        const startFormatted = formatDayKey(startInput.value);
+        const endFormatted = formatDayKey(endInput.value);
         label.textContent = `${startFormatted} - ${endFormatted}`;
     }
 

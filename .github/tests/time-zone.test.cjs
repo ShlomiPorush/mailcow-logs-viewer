@@ -24,7 +24,7 @@ function stub() {
 }
 
 // The page scripts in one global scope, as in the browser, with the app's zone set
-function load(files, zone = 'Europe/Berlin') {
+function load(files, zone = 'Europe/Berlin', dateFormat = 'browser', timeFormat = '24h') {
     const context = vm.createContext({
         document: stub(), window: { matchMedia: () => ({ matches: false }), addEventListener() {} }, localStorage: stub(),
         sessionStorage: stub(), navigator: stub(), location: stub(), console: { log() {}, error() {}, warn() {} },
@@ -33,7 +33,7 @@ function load(files, zone = 'Europe/Berlin') {
     for (const file of ['utils.js', 'app.js', ...files]) {
         vm.runInContext(fs.readFileSync(path.join(frontend, file), 'utf8'), context);
     }
-    vm.runInContext(`appTimezone = ${JSON.stringify(zone)}`, context);
+    vm.runInContext(`appTimezone = ${JSON.stringify(zone)}; appDateFormat = ${JSON.stringify(dateFormat)}; appTimeFormat = ${JSON.stringify(timeFormat)}`, context);
     return context;
 }
 
@@ -82,23 +82,23 @@ test('n days later keeps the wall time in the app zone across a daylight saving 
 });
 
 test('a day key is named as it is, in any browser zone', () => {
-    const c = load([]);
-    assert.equal(c.formatDayKey('2026-10-25', { weekday: 'short', month: 'short', day: 'numeric' }), 'Sun, Oct 25');
-    assert.equal(c.formatDayKey('2026-03-29T00:00:00', { month: 'short', day: 'numeric' }), 'Mar 29');
+    const c = load([], 'Europe/Berlin', 'DD/MM/YYYY');
+    assert.equal(c.formatDayKey('2026-10-25', { weekday: 'short' }), 'Sun, 25/10/2026');
+    assert.equal(c.formatDayKey('2026-03-29T00:00:00', { year: false }), '29/03');
 });
 
-test('formatDateShort keeps a day key as it is, also in an app zone west of UTC', () => {
+test('a day key keeps its day in an app zone west of UTC, an instant takes the day of the app zone', () => {
     // Read as UTC midnight, 2026-10-25 would be the 24th in Los Angeles
-    const west = load([], 'America/Los_Angeles');
-    assert.equal(west.formatDateShort('2026-10-25'), '25/10');
-    const c = load([]);
-    assert.equal(c.formatDateShort('2026-10-24T22:30:00Z'), '25/10');
+    const west = load([], 'America/Los_Angeles', 'DD/MM/YYYY');
+    assert.equal(west.formatDayKey('2026-10-25', { year: false }), '25/10');
+    const c = load([], 'Europe/Berlin', 'DD/MM/YYYY');
+    assert.equal(c.formatDayMonth('2026-10-24T22:30:00Z'), '25/10');
 });
 
 test('the app zone is used when it is UTC, and an unknown zone falls back to UTC', () => {
     const c = load([]);
     c.setAppTimezone({ timezone: 'UTC', timezone_valid: true, timezone_configured: 'UTC' });
-    assert.equal(c.formatInZone('2026-10-25T00:30:00Z', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }, 'en-US'), '00:30');
+    assert.equal(c.formatClock('2026-10-25T00:30:00Z'), '00:30');
     // The server sends only known zones; one the browser cannot use must not break every time
     c.setAppTimezone({ timezone: 'Europe/Berlinn', timezone_valid: false, timezone_configured: 'Europe/Berlinn' });
     assert.equal(vm.runInContext('appTimezone', c), 'UTC');
@@ -232,7 +232,7 @@ test('a raw log time is shown in the app zone, also when it is UTC', () => {
 // ---------- finding 5: hour buckets ----------
 
 test('a Rate Limits hour bucket is a UTC instant shown in the app zone', () => {
-    const c = load(['rate-limits.js']);
+    const c = load(['rate-limits.js'], 'Europe/Berlin', 'DD.MM.YYYY');
     // The two hours that start at 02:00 in Berlin on 2026-10-25 stay two buckets
     assert.equal(c.rateLimitBucketLabel('2026-10-25T00:00:00Z', 'hour'), '02:00');
     assert.equal(c.rateLimitBucketLabel('2026-10-25T01:00:00Z', 'hour'), '02:00');
@@ -246,12 +246,12 @@ test('a Rate Limits hour bucket is a UTC instant shown in the app zone', () => {
 });
 
 test('a Mailbox Stats hour slot is a UTC instant shown in the app zone, a day slot as it is', () => {
-    const c = load(['mailbox-stats.js']);
-    assert.equal(c.mailboxActivityLabel('2026-10-25T00:00:00Z', 'hour'), 'Sun, Oct 25, 02:00');
-    assert.equal(c.mailboxActivityLabel('2026-10-25T01:00:00Z', 'hour'), 'Sun, Oct 25, 02:00');
-    assert.equal(c.mailboxActivityLabel('2026-10-24T22:00:00Z', 'hour'), 'Sun, Oct 25, 00:00');
-    assert.equal(c.mailboxActivityLabel('2026-10-25', 'day'), 'Sun, Oct 25');
-    assert.equal(c.mailboxActivityLabel('2026-03-29T00:00:00', 'day'), 'Sun, Mar 29');
+    const c = load(['mailbox-stats.js'], 'Europe/Berlin', 'DD/MM/YYYY');
+    assert.equal(c.mailboxActivityLabel('2026-10-25T00:00:00Z', 'hour'), 'Sun, 25/10, 02:00');
+    assert.equal(c.mailboxActivityLabel('2026-10-25T01:00:00Z', 'hour'), 'Sun, 25/10, 02:00');
+    assert.equal(c.mailboxActivityLabel('2026-10-24T22:00:00Z', 'hour'), 'Sun, 25/10, 00:00');
+    assert.equal(c.mailboxActivityLabel('2026-10-25', 'day'), 'Sun, 25/10');
+    assert.equal(c.mailboxActivityLabel('2026-03-29T00:00:00', 'day'), 'Sun, 29/03');
 });
 
 // ---------- finding 6: the Mailbox Stats range ----------
@@ -268,9 +268,9 @@ test('the Mailbox Stats custom range starts as the last 30 days of the app zone'
 // ---------- finding 8: Security ----------
 
 test('the Security period names the day its logs start on in the app zone', () => {
-    const c = load(['smtp-abuse.js', 'protection.js', 'security.js']);
+    const c = load(['smtp-abuse.js', 'protection.js', 'security.js'], 'Europe/Berlin', 'DD/MM/YYYY');
     vm.runInContext("securityDays = 7; securityPage = { days: 7, since: '2026-10-25T23:30:00Z' }", c);
-    assert.equal(c.securityPeriodSince(), 'Oct 26');
+    assert.equal(c.securityPeriodSince(), '26/10/2026');
 });
 
 test('the allowlist and denylist count failed logins over the last 24 hours, not "today"', () => {
@@ -297,23 +297,23 @@ test('Mailbox Stats names its own dates First seen and Last synced, not mailcow\
 // ---------- DMARC and TLS: report periods and Import Date ----------
 
 test('Manage Reports shows the Import Date and the period in the app zone', () => {
-    const c = load(['dmarc.js']);
+    const c = load(['dmarc.js'], 'Europe/Berlin', 'MM/DD/YYYY', '12h');
     const element = page(c);
     const at = Date.parse('2026-10-24T22:30:00Z') / 1000;
     c.renderReportsManagementTable([{ id: 1, type: 'tls', domain: 'example.com', org_name: 'Reporter', record_count: 1,
         created_at: '2026-10-25T00:30:00Z', begin_date: at, end_date: Date.parse('2026-10-25T23:30:00Z') / 1000 }], false, { total: 1, page: 1, total_pages: 1 });
     const html = element('dmarc-reports-management-content').innerHTML;
-    assert.match(html, /Oct 25, 2026, 02:30 AM/);
-    assert.match(html, /Oct 25 - Oct 26/);
+    assert.ok(html.includes('10/25/2026, 2:30 AM'), html);
+    assert.ok(html.includes('10/25/2026 - 10/26/2026'), html);
     vm.runInContext("reportsManagementState.domains = [{ domain: 'example.com', dmarc_reports: 1, tls_reports: 0, last_report: " + at + ' }]', c);
     c.renderReportsDomains();
-    assert.match(element('dmarc-reports-domains').innerHTML, /Oct 25, 2026/);
+    assert.ok(element('dmarc-reports-domains').innerHTML.includes('10/25/2026'));
 });
 
 test('a DMARC day from the server is named as it is', () => {
-    const c = load(['dmarc.js']);
-    assert.equal(c.dmarcDay('2026-10-25'), 'Oct 25');
-    assert.equal(c.dmarcDay('2026-03-29', true), 'Sunday, March 29, 2026');
+    const c = load(['dmarc.js'], 'Europe/Berlin', 'DD/MM/YYYY');
+    assert.equal(c.dmarcDay('2026-10-25'), '25/10');
+    assert.equal(c.dmarcDay('2026-03-29', true), 'Sunday, 29/03/2026');
 });
 
 // ---------- Settings > Application > Time Zone, and About ----------
