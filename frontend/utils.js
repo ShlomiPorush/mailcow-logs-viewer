@@ -596,17 +596,20 @@ function writeDate(p, { year = true, weekday = '', fmt = appDateFmt() } = {}) {
 }
 
 // A time of day ({ hour 0-23, minute, second }) as the setting writes it: 13:05,
-// 1:05 PM, or the browser's own clock
-function writeClock(p, { seconds = false, fmt = appTimeFmt() } = {}) {
+// 1:05 PM, or the browser's own clock. compact leaves out the minutes of a whole
+// hour on the 12-hour clock (3 PM), for a chart's axis
+function writeClock(p, { seconds = false, compact = false, fmt = appTimeFmt() } = {}) {
     if (!['24h', '12h', 'browser'].includes(fmt)) fmt = '24h';
+    const whole = compact && !seconds && p.minute === 0;
     if (fmt === 'browser') {
         // The hour as the language writes it: 1:05 PM on a 12-hour clock, 01:05 on a 24-hour one
         const rest = { minute: '2-digit', ...(seconds ? { second: '2-digit' } : {}) };
         const twelve = ['h11', 'h12'].includes(browserFormat({ hour: 'numeric', ...rest }).resolvedOptions().hourCycle);
-        return browserFormat({ hour: twelve ? 'numeric' : '2-digit', ...rest }).format(new Date(Date.UTC(2000, 0, 1, p.hour, p.minute, p.second || 0)));
+        const options = twelve && whole ? { hour: 'numeric' } : { hour: twelve ? 'numeric' : '2-digit', ...rest };
+        return browserFormat(options).format(new Date(Date.UTC(2000, 0, 1, p.hour, p.minute, p.second || 0)));
     }
     const tail = `${pad2(p.minute)}${seconds ? `:${pad2(p.second || 0)}` : ''}`;
-    if (fmt === '12h') return `${(p.hour % 12) || 12}:${tail} ${p.hour < 12 ? 'AM' : 'PM'}`;
+    if (fmt === '12h') return `${(p.hour % 12) || 12}${whole ? '' : `:${tail}`} ${p.hour < 12 ? 'AM' : 'PM'}`;
     return `${pad2(p.hour)}:${tail}`;
 }
 
@@ -638,10 +641,10 @@ function formatDayMonth(value, { weekday = '' } = {}) {
     return formatDay(value, { year: false, weekday });
 }
 
-// The time of day of an instant: 13:05, or 1:05 PM
-function formatClock(value, { seconds = false } = {}) {
+// The time of day of an instant: 13:05, or 1:05 PM (3 PM on an axis, compact)
+function formatClock(value, { seconds = false, compact = false } = {}) {
     const p = zonedOrNull(value);
-    return p ? writeClock(p, { seconds }) : '-';
+    return p ? writeClock(p, { seconds, compact }) : '-';
 }
 
 // A clock time given as numbers, such as a job that runs at 02:00

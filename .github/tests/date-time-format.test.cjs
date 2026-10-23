@@ -90,6 +90,14 @@ test('the 24-hour clock is the default, the 12-hour clock says AM or PM', () => 
     assert.equal(h12.formatClockAt(2, 15), '2:15 AM');
 });
 
+test('an axis writes a whole hour short on the 12-hour clock, and as it is on the 24-hour one', () => {
+    assert.equal(load({ time: '12h' }).formatClock('2026-01-15T14:00:00Z', { compact: true }), '3 PM');
+    assert.equal(load({ time: '12h' }).formatClock(NOON, { compact: true }), '1:05 PM');
+    assert.equal(load({ time: '24h' }).formatClock('2026-01-15T14:00:00Z', { compact: true }), '15:00');
+    assert.equal(load({ time: 'browser', language: 'en-US' }).formatClock('2026-01-15T14:00:00Z', { compact: true }), '3 PM');
+    assert.equal(load({ time: 'browser', language: 'de-DE' }).formatClock('2026-01-15T14:00:00Z', { compact: true }), '15:00');
+});
+
 test('the browser clock follows the browser language', () => {
     assert.equal(load({ time: 'browser', language: 'en-US' }).formatClock(NOON), '1:05 PM');
     assert.equal(load({ time: 'browser', language: 'en-GB' }).formatClock(NOON), '13:05');

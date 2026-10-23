@@ -1357,7 +1357,7 @@ function renderSettingsEditField(key, value, sensitiveKeys, description, envLock
             descHtml +
             '<select id="edit-' + keyAttr + '" name="' + keyAttr + '" ' + disabledAttr + ' class="ui-select' + changed + '">' +
             optionsHtml + '</select>' +
-            (key === 'time_format' ? '<p class="ui-set-desc" id="settings-format-example" aria-live="polite"></p>' : '') +
+            (key === 'time_format' ? '<small class="ui-muted" id="settings-format-example" aria-live="polite"></small>' : '') +
             clearBtnHtml +
             envLockedHtml + '</div>';
     }

@@ -2769,7 +2769,7 @@ function renderMailFlowChart() {
     const label = (b, i) => {
         const p = zonedParts(b.s);
         if (i === n - 1 && b.partial) return '<span class="is-major">Now</span>';
-        if (d.bucket === 'hour') return p.hour % 6 === 0 ? `<span class="is-major">${mailFlowHour(b.s)}</span>` : p.hour % 3 === 0 ? `<span class="is-minor">${mailFlowHour(b.s)}</span>` : '<span></span>';
+        if (d.bucket === 'hour') return p.hour % 6 === 0 ? `<span class="is-major">${formatClock(b.s, { compact: true })}</span>` : p.hour % 3 === 0 ? `<span class="is-minor">${formatClock(b.s, { compact: true })}</span>` : '<span></span>';
         if (d.bucket === '6h') return p.hour < 6 ? `<span class="is-major">${escapeHtml(formatDayMonth(b.s))}</span>` : '<span></span>';
         // Every fifth day, not near Now
         return (n <= 10 || (i % 5 === 0 && i < n - 5)) ? `<span class="is-major">${escapeHtml(formatDayMonth(b.s))}</span>` : '<span></span>';

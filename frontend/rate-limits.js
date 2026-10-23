@@ -220,7 +220,7 @@ function rateLimitBucketLabel(bucket, granularity) {
     if (granularity === 'hour') {
         // An older server sends the UTC hour without a zone (YYYY-MM-DDTHH:00)
         const date = new Date(/(Z|[+-]\d{2}:?\d{2})$/.test(bucket) ? bucket : `${bucket}:00Z`);
-        return formatClock(date);
+        return formatClock(date, { compact: true });
     }
 
     return formatDayKey(bucket, { year: false });
