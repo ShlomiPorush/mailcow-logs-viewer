@@ -252,8 +252,8 @@ var SETTINGS_FIELD_DESCRIPTIONS = {
     app_title: 'Application title (shown in browser tab).',
     app_logo_url: 'Logo URL (optional; leave empty to use the default project icon).',
     tz: "The app's time zone. Default: UTC.",
-    date_format: "How dates are written on every page and in emails. Browser: in the order of the browser's language; emails then use DD/MM/YYYY. Default: Browser.",
-    time_format: "How times are written on every page and in emails. Browser: the clock of the browser's language; emails then use the 24-hour clock. Default: 24-hour.",
+    date_format: "How dates are written. Default: Browser.",
+    time_format: "How times are written. Default: 24-hour.",
     debug: 'Enable debug mode (shows detailed errors). Use only for development. Never enable in production. Default: false.',
     max_search_results: 'Maximum records to return in search results. Default: 1000.',
     csv_export_limit: 'CSV export row limit. Default: 10000.',
@@ -816,7 +816,7 @@ const SETTINGS_FIELD_OPTIONS = {
     ],
     // How dates and times are written (utils.js); the example under them shows the choice
     date_format: [
-        { value: 'browser', label: "Browser (the order of the browser's language)" },
+        { value: 'browser', label: 'Browser' },
         { value: 'DD/MM/YYYY', label: 'DD/MM/YYYY' },
         { value: 'MM/DD/YYYY', label: 'MM/DD/YYYY' },
         { value: 'DD.MM.YYYY', label: 'DD.MM.YYYY' },
@@ -825,7 +825,7 @@ const SETTINGS_FIELD_OPTIONS = {
     time_format: [
         { value: '24h', label: '24-hour (13:05)' },
         { value: '12h', label: '12-hour (1:05 PM)' },
-        { value: 'browser', label: "Browser (the clock of the browser's language)" }
+        { value: 'browser', label: 'Browser' }
     ],
     // The Outbound bounce choices (settingsBounceChoice): {count} is the number field
     suppression_hard_bounce_action: [
