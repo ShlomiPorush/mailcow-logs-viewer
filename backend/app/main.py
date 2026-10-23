@@ -54,7 +54,7 @@ from .origin_guard import SameOriginGuardMiddleware
 from .session import get_session_from_request
 from .services.auth_cleanup import auth_store_maintenance
 from .version import __version__
-from .app_time import app_tz, tz_status
+from .app_time import app_tz, tz_status, display_formats
 
 from .services.geoip_downloader import (
     is_license_configured,
@@ -491,6 +491,8 @@ async def app_info(request: Request):
             "retention_days": settings.retention_days,
             # The zone every time on screen follows (app_time.py)
             **tz_status(),
+            # How it writes dates and times (Settings > Application > Time)
+            **display_formats(),
             "blacklist_count": len(settings.blacklist_emails_list),
             "disabled_features": sorted(settings.disabled_features_set),
             # The search offers settings only while the edit form exists

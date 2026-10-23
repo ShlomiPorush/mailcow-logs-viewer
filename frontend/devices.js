@@ -150,7 +150,7 @@ function renderDeviceRow(d, newAfter, staleBefore) {
             </div>
             <div class="ui-td ui-q-who ui-dev-ip"><div><small class="ui-sec-unit">IP </small>${d.last_ip ? copyableText(d.last_ip, 'ui-mono') : '<span class="ui-muted">-</span>'}</div>${deviceLocation(d)}</div>
             <span class="ui-td ui-td-wrap"><small class="ui-sec-unit">Last request </small>${escapeHtml(d.last_command || '-')} ${deviceStatusTag(d.last_status)}</span>
-            <span class="ui-td" title="${escapeHtml(formatTime(d.first_seen))}"><small class="ui-sec-unit">First seen </small>${formatAgo(d.first_seen)}</span>
-            <span class="ui-td${isStale ? ' ui-muted' : ''}" title="${escapeHtml(formatTime(d.last_seen))}"><small class="ui-sec-unit">Last seen </small>${formatAgo(d.last_seen)}</span>
+            <span class="ui-td"><small class="ui-sec-unit">First seen </small>${uiTime(d.first_seen, formatAgo(d.first_seen), { title: formatTime(d.first_seen) })}</span>
+            <span class="ui-td${isStale ? ' ui-muted' : ''}"><small class="ui-sec-unit">Last seen </small>${uiTime(d.last_seen, formatAgo(d.last_seen), { title: formatTime(d.last_seen) })}</span>
         </div>`;
 }

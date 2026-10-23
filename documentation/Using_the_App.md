@@ -28,6 +28,8 @@ Changing mailcow needs the read-write API key (`MAILCOW_API_KEY_RW`): queue and 
 
 The app works in one time zone: `TZ` in `.env`, or **Time Zone** under **Settings** > **Application**, for example `Europe/Berlin`. Times on screen, what counts as a day, times you type, emails, CSV exports and scheduled jobs all follow it. The time zone of your browser and of the containers does not matter. Without a time zone the app uses UTC, so set the one your mailcow server uses.
 
+**Date Format** and **Time Format**, in the same place, set how dates and times are written on every page and in emails: for example `14/10/2026` or `2026-10-14`, and `13:05` or `1:05 PM`. **Browser** follows the language of your browser; emails then use `DD/MM/YYYY` and the 24-hour clock. The date fields you type in are the browser's own and keep its format.
+
 ## Copying
 
 Values with a copy icon copy on click. The browser allows this only over HTTPS or on `localhost`; over plain HTTP, select the text and copy it yourself.

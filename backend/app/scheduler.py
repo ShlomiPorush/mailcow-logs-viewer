@@ -18,7 +18,7 @@ from sqlalchemy import desc, or_, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 
-from .app_time import UTC, app_tz
+from .app_time import UTC, app_tz, format_clock
 from .config import settings, set_cached_active_domains
 from .database import get_db_context, SessionLocal
 from .mailcow_api import mailcow_api, mailcow_handled_items
@@ -534,12 +534,21 @@ def clock_trigger(job_id: str) -> CronTrigger:
 
 
 def clock_schedule(job_id: str) -> str:
-    """When a clock-time job runs, as the jobs list shows it: 'Daily at 02:00 (Europe/Berlin)'."""
+    """When a clock-time job runs, as the server writes it: 'Daily at 02:00 (Europe/Berlin)'."""
     spec = CLOCK_JOBS[job_id]
-    at = f"{spec['hour']:02d}:{spec['minute']:02d}"
+    at = format_clock(spec['hour'], spec['minute'])
     day = spec.get('day_of_week')
     when = f"Weekly, {_WEEKDAY_NAMES[day]} at {at}" if day else f"Daily at {at}"
     return f"{when} ({app_tz().key})"
+
+
+def clock_parts(job_id: str) -> dict:
+    """When a clock-time job runs, as parts: the jobs list writes the time
+    itself, so it follows the browser's clock when the setting says so."""
+    spec = CLOCK_JOBS[job_id]
+    day = spec.get('day_of_week')
+    return {'hour': spec['hour'], 'minute': spec['minute'],
+            'weekday': _WEEKDAY_NAMES[day] if day else None, 'zone': app_tz().key}
 
 
 def apply_app_time_zone() -> None:
