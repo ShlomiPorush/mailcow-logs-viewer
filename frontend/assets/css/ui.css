@@ -177,6 +177,8 @@
 .ui-textarea { height: auto; min-height: 90px; padding: 8px 12px; }
 .ui-input:focus, .ui-select:focus, .ui-textarea:focus { outline: none; border-color: var(--ui-accent); }
 .ui-input:disabled, .ui-select:disabled, .ui-textarea:disabled { opacity: .6; cursor: not-allowed; }
+/* A hint, not a value: as dim as the other fields' hints in both themes */
+.ui-input::placeholder, .ui-textarea::placeholder { color: var(--ui-muted); opacity: .8; }
 .ui-label { display: block; margin-bottom: 5px; color: var(--ui-muted); font-size: var(--ui-fs-sm); font-weight: 600; }
 
 /* ---------- Tags (status) and chips (filters) ---------- */

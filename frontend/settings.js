@@ -875,37 +875,20 @@ function settingsAgentUrlSuggestion(redirectUri, pageOrigin) {
     return '';
 }
 
-// Turning agent access on with no address fills in the suggestion; while the
-// field is empty, a button under it offers the suggestion
-function settingsSuggestAgentUrl(root, toggled) {
+// The suggestion shows in the empty field. With agent access on, it becomes the
+// field's value (an unsaved change) when the form opens and when the switch is
+// turned on; fill is false while typing, so a cleared field stays empty
+function settingsSuggestAgentUrl(root, fill) {
     const field = root && root.querySelector('#edit-agent_access_url');
     if (!field || field.disabled) return;
     const redirect = root.querySelector('#edit-oauth2_redirect_uri');
     const suggestion = settingsAgentUrlSuggestion(redirect ? redirect.value : '', location.origin);
+    field.placeholder = suggestion;
     const on = root.querySelector('#edit-agent_access_enabled');
-    if (toggled && on && on.checked && !field.value.trim() && suggestion) {
+    if (fill && on && on.checked && !field.value.trim() && suggestion) {
         field.value = suggestion;
         field.dispatchEvent(new Event('input', { bubbles: true }));
     }
-    let offer = field.parentElement.querySelector('[data-agent-url-offer]');
-    if (field.value.trim() || !suggestion) {
-        if (offer) offer.remove();
-        return;
-    }
-    if (!offer) {
-        offer = document.createElement('button');
-        offer.type = 'button';
-        offer.className = 'ui-set-clear';
-        offer.dataset.agentUrlOffer = '';
-        offer.addEventListener('click', () => {
-            field.value = offer.dataset.agentUrlOffer;
-            field.dispatchEvent(new Event('input', { bubbles: true }));
-            field.focus();
-        });
-        field.insertAdjacentElement('afterend', offer);
-    }
-    offer.dataset.agentUrlOffer = suggestion;
-    offer.textContent = 'Use ' + suggestion;
 }
 
 // The IANA time zones this browser knows, UTC first; none where the browser
@@ -2072,7 +2055,7 @@ function renderSettings(content, data) {
             form.addEventListener('change', () => settingsShowFormatExample(content));
             settingsShowNeeds(content);
             settingsApplySync(false);
-            settingsSuggestAgentUrl(content, false);
+            settingsSuggestAgentUrl(content, true);
             form.addEventListener('change', event => {
                 if (event.target && event.target.id === 'edit-suppression_rspamd_sync') settingsApplySync(true);
                 settingsSuggestAgentUrl(content, !!event.target && event.target.id === 'edit-agent_access_enabled');

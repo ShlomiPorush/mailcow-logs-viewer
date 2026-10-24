@@ -1,6 +1,6 @@
-// Settings > Agents > App address for agents in a real DOM (jsdom): turning
-// agent access on with no address fills in the suggestion, an empty field
-// offers it on a button, and a typed or locked address is left alone.
+// Settings > Agents > App address for agents in a real DOM (jsdom): the empty
+// field shows the suggestion, turning agent access on (or opening the form with
+// it on) makes it the value, and a typed or locked address is left alone.
 // Set A11Y_MODULES to jsdom's node_modules to run it locally (see layers.a11y.cjs).
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -31,8 +31,7 @@ function page({ on = false, url = '', redirect = '', locked = false, at = 'https
     form.addEventListener('input', () => { inputs.push(1); w.settingsSuggestAgentUrl(form, false); });
     const field = w.document.getElementById('edit-agent_access_url');
     const toggle = w.document.getElementById('edit-agent_access_enabled');
-    const offer = () => form.querySelector('[data-agent-url-offer]');
-    return { w, form, field, toggle, offer, inputs };
+    return { w, form, field, toggle, inputs };
 }
 
 function turnOn(p) {
@@ -40,14 +39,19 @@ function turnOn(p) {
     p.w.settingsSuggestAgentUrl(p.form, true);
 }
 
-test('turning agent access on fills in the address and counts as a change', () => {
+test('the empty field shows the address while agent access is off', () => {
     const p = page({ redirect: 'https://mail-logs.example.com/api/auth/callback' });
-    p.w.settingsSuggestAgentUrl(p.form, false);
-    assert.equal(p.offer().textContent, 'Use https://mail-logs.example.com');
+    p.w.settingsSuggestAgentUrl(p.form, true);
+    assert.equal(p.field.placeholder, 'https://mail-logs.example.com');
+    assert.equal(p.field.value, '', 'opening the form changes nothing');
+    assert.equal(p.inputs.length, 0);
+});
+
+test('turning agent access on makes it the value, as an unsaved change', () => {
+    const p = page({ redirect: 'https://mail-logs.example.com/api/auth/callback' });
     turnOn(p);
     assert.equal(p.field.value, 'https://mail-logs.example.com');
     assert.equal(p.inputs.length, 1, 'the save bar hears about it');
-    assert.equal(p.offer(), null);
 });
 
 test('the page address is used without an OAuth2 callback', () => {
@@ -56,34 +60,30 @@ test('the page address is used without an OAuth2 callback', () => {
     assert.equal(p.field.value, 'https://logs.example.com');
 });
 
-test('an empty field offers the address on a button and keeps it until clicked', () => {
+test('opened with agent access on and no address, the field is filled; a cleared field stays empty', () => {
     const p = page({ on: true });
-    p.w.settingsSuggestAgentUrl(p.form, false);
-    assert.equal(p.field.value, '', 'opening the form changes nothing');
-    assert.equal(p.offer().getAttribute('type'), 'button');
-    p.offer().click();
+    p.w.settingsSuggestAgentUrl(p.form, true);
     assert.equal(p.field.value, 'https://logs.example.com');
-    assert.equal(p.offer(), null);
+    assert.equal(p.inputs.length, 1);
     p.field.value = '';
     p.field.dispatchEvent(new p.w.Event('input', { bubbles: true }));
-    assert.equal(p.offer().textContent, 'Use https://logs.example.com', 'cleared again: offered again');
+    assert.equal(p.field.value, '', 'typing never refills it');
+    assert.equal(p.field.placeholder, 'https://logs.example.com');
 });
 
 test('a typed address, a locked field or an address the server refuses is left alone', () => {
     const typed = page({ url: 'https://agents.example.com' });
     turnOn(typed);
     assert.equal(typed.field.value, 'https://agents.example.com');
-    assert.equal(typed.offer(), null);
 
     const locked = page({ locked: true });
     turnOn(locked);
     assert.equal(locked.field.value, '');
-    assert.equal(locked.offer(), null);
 
     const inside = page({ at: 'http://10.0.0.5:8080/settings/agents' });
     turnOn(inside);
     assert.equal(inside.field.value, '');
-    assert.equal(inside.offer(), null);
+    assert.equal(inside.field.placeholder, '');
 });
 
 test('turning it off fills in nothing', () => {
