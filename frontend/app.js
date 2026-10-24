@@ -1309,28 +1309,34 @@ function messagesSameAsShown(data) {
 }
 
 // The element the list scrolls in: its own column on wide screens, the page
-// below 1000 px (null)
+// below 1000 px (whichever element of it scrolls)
 function messagesScroller(container) {
-    return container.scrollHeight > container.clientHeight + 1 || getComputedStyle(container).overflowY !== 'visible' ? container : null;
+    for (let el = container; el && el !== document.body; el = el.parentElement) {
+        const overflow = getComputedStyle(el).overflowY;
+        if ((overflow === 'auto' || overflow === 'scroll') && el.scrollHeight > el.clientHeight + 1) return el;
+    }
+    return document.scrollingElement || document.documentElement;
 }
 
-// Whether the list shows the edge where new mail lands: its top, newest first;
-// the end of the whole list, oldest first. An empty list is all edge
+// The part of the screen the scroller shows
+function messagesInView(scroller) {
+    if (scroller === document.scrollingElement || scroller === document.documentElement) return { top: 0, bottom: window.innerHeight };
+    const box = scroller.getBoundingClientRect();
+    return { top: box.top, bottom: box.bottom };
+}
+
+// Whether the list shows the edge where new mail lands: its first row, newest
+// first; the last row of the whole list, oldest first. An empty list is all edge
 function messagesAtNewEdge() {
     const container = document.getElementById('messages-logs');
     if (!container || !container.getClientRects().length) return false;
     const rows = container.querySelectorAll('.ui-msg-item');
     if (!rows.length) return true;
-    const scroller = messagesScroller(container);
+    const view = messagesInView(messagesScroller(container));
     if (messagesOrder === 'asc') {
-        if (messagesPaging.cursor) return false;
-        const end = rows[rows.length - 1].getBoundingClientRect();
-        const bottom = scroller ? scroller.getBoundingClientRect().bottom : window.innerHeight;
-        return end.bottom <= bottom + 8;
+        return !messagesPaging.cursor && rows[rows.length - 1].getBoundingClientRect().bottom <= view.bottom + 8;
     }
-    if (scroller) return scroller.scrollTop <= 8;
-    // The page scrolls: the first row is still in view
-    return rows[0].getBoundingClientRect().top >= -8;
+    return rows[0].getBoundingClientRect().top >= view.top - 8;
 }
 
 // "N new messages" at the edge where new mail lands, sticky so it stays in view
@@ -1352,6 +1358,10 @@ function renderMessagesNew() {
     }
     const top = messagesOrder !== 'asc';
     wrap.classList.toggle('is-top', top);
+    // Where the page scrolls, the search bar stays on top: the button goes under it
+    const bar = document.querySelector('#content-messages .ui-msg-searchbar');
+    const sticky = bar && getComputedStyle(bar).position === 'sticky';
+    wrap.style.setProperty('--ui-msg-new-top', sticky ? `${bar.offsetHeight}px` : '0px');
     if (top ? list.previousElementSibling !== wrap : list.nextElementSibling !== wrap) {
         if (top) list.before(wrap); else list.after(wrap);
     }
@@ -1373,20 +1383,15 @@ async function messagesShowNew({ quiet = false } = {}) {
         await loadMessages({ quiet, rows: Math.max(50, shown + messagesNew.count), toEnd: true, applyIf: quiet ? stillFree : null });
         return;
     }
-    await loadMessages();
+    // Where the page scrolls, back to the start of the list (its own column starts at the top on loading)
     const scroller = messagesScroller(container);
-    if (!scroller) {
-        const col = container.closest('.ui-msg-col') || container;
-        if (col.getBoundingClientRect().top < 0) col.scrollIntoView({ block: 'start' });
-    }
+    await loadMessages();
+    if (scroller !== container) scroller.scrollTop = 0;
 }
 
 function messagesScrollToEnd(container) {
-    const rows = container.querySelectorAll('.ui-msg-item');
-    if (!rows.length) return;
     const scroller = messagesScroller(container);
-    if (scroller) scroller.scrollTop = scroller.scrollHeight;
-    else rows[rows.length - 1].scrollIntoView({ block: 'end' });
+    scroller.scrollTop = scroller.scrollHeight;
 }
 
 // Render messages without loading spinner
