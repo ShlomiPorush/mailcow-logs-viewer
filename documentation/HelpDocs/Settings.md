@@ -66,7 +66,7 @@ Basic authentication and OAuth2/OIDC can be on together. Turning on **Basic Auth
 
 ## Agents
 
-Lets AI agents such as Claude Code and Codex connect, and lists the connected ones with **Activity** and **Disconnect**. The list works even while editing settings is off. See [AI agents](../AI_Agents.md).
+Lets AI agents such as Claude Code and Codex connect, and lists the allowed ones with **Activity** and **Disconnect**. The list works even while editing settings is off. See [AI agents](../AI_Agents.md).
 
 ## Anomaly Detection (Beta)
 

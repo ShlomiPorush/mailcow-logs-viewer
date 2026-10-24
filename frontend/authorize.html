@@ -31,7 +31,7 @@
         <div id="consent-loading" class="ui-loading" role="status">Loading the request...</div>
 
         <div id="consent-error" class="hidden ui-banner ui-banner-fail" role="alert">
-            <div><b id="consent-error-title">This request cannot be answered</b><p id="consent-error-text"></p></div>
+            <div><b id="consent-error-title">Access request unavailable</b><p id="consent-error-text"></p></div>
         </div>
 
         <form id="consent-form" class="hidden ui-consent-form" novalidate>
@@ -39,9 +39,9 @@
                 <h2 class="ui-consent-h" id="consent-who-h">Who is asking</h2>
                 <p class="ui-consent-agent" id="consent-declared"></p>
                 <p class="ui-consent-id" id="consent-identity"></p>
-                <p class="ui-set-desc">The answer goes to <span class="ui-mono ui-consent-uri" id="consent-redirect"></span></p>
+                <p class="ui-set-desc">Browser returns to <span class="ui-mono ui-consent-uri" id="consent-redirect"></span></p>
                 <div>
-                    <label class="ui-label" for="consent-name">Name for this connection</label>
+                    <label class="ui-label" for="consent-name">Name in Settings → Agents</label>
                     <input type="text" id="consent-name" class="ui-input" maxlength="100" autocomplete="off">
                 </div>
             </section>
@@ -50,15 +50,16 @@
                 <div class="ui-consent-head">
                     <h2 class="ui-consent-h" id="consent-what-h">What it may do</h2>
                     <div class="ui-consent-quick">
-                        <button type="button" class="ui-btn ui-btn-sm" id="consent-view-all">View all</button>
-                        <button type="button" class="ui-btn ui-btn-sm" id="consent-clear">Clear</button>
+                        <button type="button" class="ui-btn ui-btn-sm" id="consent-view-all">Set all to View</button>
+                        <button type="button" class="ui-btn ui-btn-sm" id="consent-clear">Clear all</button>
                     </div>
                 </div>
-                <p class="ui-set-desc"><b>View</b> reads. <b>Act</b> changes the mail server, for example with bans, releases and deletions. Act includes View.</p>
+                <p class="ui-set-desc"><b>View</b> allows reading and exporting data. <b>Take action</b> also allows the actions listed for each area.</p>
                 <div class="ui-consent-areas" id="consent-areas" role="group" aria-labelledby="consent-what-h"></div>
+                <p class="ui-set-desc">Agents can never change settings or notification destinations, run background jobs by hand, upload files, or manage agents.</p>
                 <div id="consent-act-warning" class="hidden ui-banner ui-banner-warn" role="note">
-                    <div><b>This agent will be able to change your mail server.</b>
-                        <p>Text in emails and logs can mislead an agent. Give Act only where you need it, for the shortest time.</p></div>
+                    <div><b>Actions do not ask for another approval in this app.</b>
+                        <p>Emails and logs can contain instructions that mislead an agent. Allow actions only in the areas it needs, for the shortest time it needs.</p></div>
                 </div>
             </section>
 
@@ -69,7 +70,7 @@
 
             <div id="consent-form-error" class="hidden ui-banner ui-banner-fail" role="alert"><span id="consent-form-error-text"></span></div>
 
-            <p class="ui-set-desc" id="consent-footnote">You can disconnect it at any time in Settings → Agents.</p>
+            <p class="ui-set-desc" id="consent-footnote">Disconnect this agent at any time in Settings → Agents.</p>
             <div class="ui-consent-actions">
                 <button type="button" class="ui-btn" id="consent-deny">Deny</button>
                 <button type="submit" class="ui-btn ui-btn-primary" id="consent-allow">Allow</button>
@@ -77,7 +78,7 @@
         </form>
 
         <div id="consent-done" class="hidden ui-banner ui-banner-ok" role="status">
-            <div><b id="consent-done-title">Done</b><p>You can close this window and go back to the agent.</p></div>
+            <div><b id="consent-done-title">Request answered</b><p>You can close this window and go back to the agent.</p></div>
         </div>
     </main>
     <script src="/static/authorize.js?v=1"></script>

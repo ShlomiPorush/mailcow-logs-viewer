@@ -73,10 +73,10 @@ def _who(request: Request) -> Optional[str]:
 @router.get("/consent/{request_id}", dependencies=[Depends(operator)])
 def get_consent(request_id: str, request: Request):
     if not live.is_live():
-        raise HTTPException(status_code=404, detail="Agent access is turned off.")
+        raise HTTPException(status_code=404, detail="Agent connections are unavailable. Check Settings → Agents → Access.")
     entry = pending.get(request_id, session_key_from_request(request))
     if entry is None:
-        raise HTTPException(status_code=404, detail="This request has expired or was already answered. Connect the agent again.")
+        raise HTTPException(status_code=404, detail="This access request has expired or was already answered. Start a new request from your agent.")
     max_days = settings.agent_access_max_days
     return {
         "client": {
@@ -106,21 +106,21 @@ class ConsentAnswer(BaseModel):
 def answer_consent(request_id: str, answer: ConsentAnswer, request: Request, db: Session = Depends(get_db)):
     """Allow or deny; the answer is the address to send the browser back to the agent."""
     if not live.is_live():
-        raise HTTPException(status_code=404, detail="Agent access is turned off.")
+        raise HTTPException(status_code=404, detail="Agent connections are unavailable. Check Settings → Agents → Access.")
     session_key = session_key_from_request(request)
     scopes = grant_scopes(answer.views, answer.acts)
     if answer.allow and not scopes and pending.get(request_id, session_key) is not None:
         # Nothing to allow: the request stays open so the page can be fixed
-        raise HTTPException(status_code=400, detail="Choose at least one area to allow.")
+        raise HTTPException(status_code=400, detail="Select View for at least one area, or choose Deny.")
     entry = pending.take(request_id, session_key)
     if entry is None:
-        raise HTTPException(status_code=404, detail="This request has expired or was already answered. Connect the agent again.")
+        raise HTTPException(status_code=404, detail="This access request has expired or was already answered. Start a new request from your agent.")
     if not answer.allow:
         logger.info(f"Agent access: a person denied '{entry.declared_name}'")
         return {"redirect": client_redirect(entry.redirect_uri, entry.state, error="access_denied",
                                             error_description="The request was denied.").headers["location"]}
     if not scopes:
-        raise HTTPException(status_code=400, detail="Choose at least one area to allow.")
+        raise HTTPException(status_code=400, detail="Select View for at least one area, or choose Deny.")
     allowed_days = {p["days"] for p in periods()}
     days = answer.days if answer.days in allowed_days else min(DEFAULT_PERIOD_DAYS, settings.agent_access_max_days)
     name = " ".join(answer.name.split())[:100] or entry.declared_name

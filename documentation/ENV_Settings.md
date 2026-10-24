@@ -129,7 +129,7 @@ The names are `netfilter` (Security), `queue`, `quarantine`, `suppressions`, `rs
 | `SESSION_MAX_ENTRIES` | `50` | Most signed-in sessions at once, at least 1. When full, new sign-ins wait; existing sessions stay. |
 | `AGENT_ACCESS_ENABLED` | `false` | Lets AI agents connect over MCP after a signed-in person approves them. It needs sign-in and `AGENT_ACCESS_URL`. |
 | `AGENT_ACCESS_URL` | Empty | The address agents reach the app at, such as `https://logs.example.com`. It must be `https` without a path. `http` works only on `localhost` or `127.0.0.1`. |
-| `AGENT_ACCESS_MAX_DAYS` | `90` | The longest period a person can give an agent, from 1 to 365 days. |
+| `AGENT_ACCESS_MAX_DAYS` | `90` | The longest access a person can give an agent, from 1 to 365 days. Applies to new access only. |
 
 See [Sign-in configuration](OAuth2_Configuration.md) for provider recipes and [AI agents](AI_Agents.md) for agent access.
 

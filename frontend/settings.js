@@ -30,9 +30,9 @@ const SETTINGS_LABEL_OVERRIDES = {
     suppression_base_expiry_days: 'Base block length (days)',
     suppression_max_expiry_days: 'Maximum block length (days)',
     suppression_whitelist_domains: 'Exclude these domains',
-    agent_access_enabled: 'Agent access',
-    agent_access_url: 'App address for agents',
-    agent_access_max_days: 'Longest period (days)'
+    agent_access_enabled: 'Allow agents to connect',
+    agent_access_url: 'App URL',
+    agent_access_max_days: 'Maximum access duration (days)'
 };
 
 const SETTINGS_LOCK_ICON = '<svg width="12" height="12" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true"><path fill-rule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clip-rule="evenodd"></path></svg>';
@@ -280,9 +280,9 @@ var SETTINGS_FIELD_DESCRIPTIONS = {
     session_secret_key: 'Secret key for signing session cookies. REQUIRED if OAuth2 enabled. Generate: openssl rand -hex 32. Use a strong secret in production.',
     session_expiry_hours: 'Session expiration in hours. Default: 24.',
     session_max_entries: 'Maximum active login sessions per process. At capacity, new logins wait until a session expires or a user signs out. Existing sessions stay signed in. Default: 50.',
-    agent_access_enabled: 'It needs sign-in and the address below. Default: off.',
-    agent_access_url: 'The https address agents reach this app at, without a path. Changing it stops the connected agents.',
-    agent_access_max_days: 'From 1 to 365. Default: 90.',
+    agent_access_enabled: 'Requires Basic Auth or OAuth2 sign-in. Changing sign-in settings disconnects every agent. Default: off.',
+    agent_access_url: 'The app\'s HTTPS address, without /mcp or another path. Changing it stops every agent until you change it back.',
+    agent_access_max_days: 'Applies to new access only. From 1 to 365. Default: 90.',
     auth_max_failure_clients: 'Maximum client addresses tracked for failed Basic Auth attempts per process. At capacity, new addresses must wait before trying Basic Auth. Existing sessions remain usable. Default: 10000.',
     smtp_enabled: 'Enable SMTP for sending notifications (alerts, weekly summary).',
     smtp_host: 'SMTP server hostname.',
@@ -1012,7 +1012,7 @@ var SETTINGS_EDIT_TABS = [
         ]
     },
     {
-        id: 'agents', label: 'Agents', description: 'Let AI agents such as Claude Code and Codex use this app over MCP. Each agent asks in the browser, and a signed-in person chooses what it may see and do, and for how long. Changing sign-in disconnects every agent.', groups: [
+        id: 'agents', label: 'Agents', description: 'Which AI agents, such as Claude Code and Codex, can use this app, what they can do, and when their access ends.', groups: [
             { label: 'Access', keys: ['agent_access_enabled', 'agent_access_url', 'agent_access_max_days'] }
         ]
     },

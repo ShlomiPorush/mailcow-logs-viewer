@@ -15,22 +15,22 @@ const agentsOpenActivity = new Set();
 function agentsProblemText(problem) {
     const form = !!document.querySelector('[data-tab-extra="agents"]');
     switch (problem) {
-        case 'off': return form ? '' : 'Agent access is off. Set <code>AGENT_ACCESS_ENABLED=true</code> in <code>.env</code>.';
-        case 'no_sign_in': return 'Agent access needs sign-in, so a person can approve each agent. Turn on Basic or OAuth2 sign-in in Settings → Authentication.';
-        case 'no_url': return form ? 'Fill in <strong>App address for agents</strong> above.'
-            : 'Agent access needs the address agents reach this app at. Set <code>AGENT_ACCESS_URL</code> in <code>.env</code>.';
-        case 'bad_url': return 'The app address for agents must be an <code>https://</code> address without a path, such as <code>https://logs.example.com</code>.';
-        default: return 'Agent access is not available.';
+        case 'off': return form ? '' : 'Agent connections are off. Set <code>AGENT_ACCESS_ENABLED=true</code> in <code>.env</code>.';
+        case 'no_sign_in': return 'Agents need sign-in, so a person can allow each one. Turn on Basic Auth or OAuth2 in Settings → Authentication.';
+        case 'no_url': return form ? 'Fill in <strong>App URL</strong> above.'
+            : 'The app URL is missing. Set <code>AGENT_ACCESS_URL</code> in <code>.env</code> to the address agents use to reach this app.';
+        case 'bad_url': return 'Use an HTTPS app URL without a path, such as <code>https://logs.example.com</code>. HTTP works only on <code>localhost</code>, for a local test.';
+        default: return 'Agent connections are unavailable. Check Settings → Agents → Access.';
     }
 }
 
 const AGENTS_END_REASONS = {
     disconnected: 'Disconnected',
-    sign_in_changed: 'Sign-in settings changed',
-    code_reused: 'Its sign-in code was used twice',
-    refresh_reused: 'Its token was used twice',
+    sign_in_changed: 'Disconnected after sign-in settings changed',
+    code_reused: 'Disconnected: authorization code reused',
+    refresh_reused: 'Disconnected: refresh token reused',
     revoked_by_agent: 'Disconnected by the agent',
-    expired: 'Period ended',
+    expired: 'Access expired',
 };
 
 async function loadAgentsPanel() {
@@ -43,7 +43,7 @@ async function loadAgentsPanel() {
         renderAgentsPanel();
     } catch (e) {
         console.error('Agents error:', e);
-        panel.innerHTML = '<p class="ui-empty ui-text-fail">Could not load the connected agents.</p>';
+        panel.innerHTML = '<p class="ui-empty ui-text-fail">Could not load agents. Reload this page to try again.</p>';
     }
 }
 
@@ -51,15 +51,15 @@ function agentsAreaChips(areas) {
     const labels = {};
     (agentsData.areas || []).forEach(a => { labels[a.id] = a.label; });
     const entries = Object.entries(areas || {});
-    if (!entries.length) return '<span class="ui-muted">Nothing</span>';
+    if (!entries.length) return '<span class="ui-muted">No access</span>';
     // Actions first, each by name; views by name too, unless they cover every other area
     const acts = entries.filter(([, mode]) => mode === 'act');
     const views = entries.filter(([, mode]) => mode !== 'act');
-    const chips = acts.map(([id]) => uiTag(`${labels[id] || id}: View + Act`, 'warn'));
+    const chips = acts.map(([id]) => uiTag(`${labels[id] || id}: Take action`, 'warn'));
     if (views.length && entries.length === (agentsData.areas || []).length) {
-        chips.push(uiTag(acts.length ? 'All other areas: View' : 'All areas: View', ''));
+        chips.push(uiTag(acts.length ? 'All other areas: View only' : 'All areas: View only', ''));
     } else {
-        views.forEach(([id]) => chips.push(uiTag(`${labels[id] || id}: View`, '')));
+        views.forEach(([id]) => chips.push(uiTag(`${labels[id] || id}: View only`, '')));
     }
     return chips.join(' ');
 }
@@ -70,18 +70,18 @@ function agentsWhen(iso) {
 
 function agentsIdentity(agent) {
     const declared = agent.declared_name && agent.declared_name !== agent.name
-        ? ` <span class="ui-muted">(calls itself ${escapeHtml(agent.declared_name)})</span>` : '';
+        ? ` <span class="ui-muted">(Agent name: ${escapeHtml(agent.declared_name)})</span>` : '';
     const who = agent.publisher
-        ? uiTag(`Published by ${agent.publisher}`, 'info')
-        : uiTag('Not verified', '');
+        ? uiTag(`Name from ${agent.publisher}`, 'info')
+        : uiTag('Name supplied by agent', '');
     return `${who}${declared}`;
 }
 
 function agentsRow(agent) {
     const connected = agent.state === 'connected';
     const facts = connected
-        ? `Approved ${agentsWhen(agent.created_at)}${agent.approved_by ? ` by ${escapeHtml(agent.approved_by)}` : ''} · ends ${agentsWhen(agent.expires_at)} · last used ${agentsWhen(agent.last_used_at)}`
-        : `${escapeHtml(AGENTS_END_REASONS[agent.end_reason] || 'Ended')} ${agentsWhen(agent.ended_at)}`;
+        ? `Allowed ${agentsWhen(agent.created_at)}${agent.approved_by ? ` by ${escapeHtml(agent.approved_by)}` : ''} · expires ${agentsWhen(agent.expires_at)} · last used ${agentsWhen(agent.last_used_at)}`
+        : `${escapeHtml(AGENTS_END_REASONS[agent.end_reason] || 'Access ended')} ${agentsWhen(agent.ended_at)}`;
     const open = agentsOpenActivity.has(agent.id);
     return `
         <div class="ui-channel ui-agent${connected ? '' : ' is-off'}">
@@ -108,12 +108,13 @@ function agentsConnectHelp() {
             <div class="ui-agent-cmd"><code class="ui-mono">${escapeHtml(text)}</code>
             <button type="button" class="ui-btn ui-btn-sm" onclick="copyToClipboard(${escapeHtml(JSON.stringify(text))}, event)">Copy</button></div>
         </div>`;
-    return `<div class="ui-md-ids ui-set-facts ui-agent-help">
-        ${line('MCP address', url)}
+    return `<p class="ui-set-desc">Run the command for your agent in a terminal on its computer, then allow access in the browser page it opens.</p>
+    <div class="ui-md-ids ui-set-facts ui-agent-help">
+        ${line('MCP server URL', url)}
         ${line('Claude Code', claude)}
         ${line('Codex', codex)}
     </div>
-    <p class="ui-set-desc">If the browser does not open, run <code>claude mcp login mailcow</code> or <code>codex mcp login mailcow</code>.</p>`;
+    <p class="ui-set-desc">If the browser does not open, run <code>claude mcp login mailcow</code> for Claude Code or <code>codex mcp login mailcow</code> for Codex.</p>`;
 }
 
 function renderAgentsPanel() {
@@ -126,12 +127,12 @@ function renderAgentsPanel() {
     panel.innerHTML = `
         <div class="ui-list-head">
             <div>
-                <h4 class="ui-md-h">Connected agents</h4>
+                <h4 class="ui-md-h">Allowed agents</h4>
             </div>
             ${connected.length ? `<button type="button" onclick="disconnectAllAgents()" class="ui-btn ui-btn-sm ui-btn-danger ui-head-actions">Disconnect all</button>` : ''}
         </div>
         ${intro}
-        <div class="ui-channels">${agents.map(agentsRow).join('') || '<p class="ui-empty">No agents connected.</p>'}</div>`;
+        <div class="ui-channels">${agents.map(agentsRow).join('') || '<p class="ui-empty">No agents have been allowed yet.</p>'}</div>`;
     agentsOpenActivity.forEach(id => loadAgentActivity(id));
 }
 
@@ -151,11 +152,16 @@ function agentsActivityRow(row) {
         : escapeHtml(row.event === 'grant_created' ? 'Connected' : row.event === 'grant_revoked'
             ? (AGENTS_END_REASONS[row.detail] || 'Disconnected') : row.event);
     const tone = row.outcome === 'ok' ? 'ok' : row.outcome === 'accepted' ? 'info' : row.outcome ? 'fail' : '';
-    const outcome = row.event === 'denied' ? uiTag('Refused', 'fail')
-        : row.http_status ? uiTag(`${row.outcome === 'ok' ? 'Done' : row.outcome === 'accepted' ? 'Started' : 'Failed'} ${row.http_status}`, tone) : '';
-    const action = row.tool === 'perform_action' ? uiTag('Act', 'warn') : '';
-    const detail = row.detail && (row.event === 'denied' || row.outcome === 'error')
-        ? `<small class="ui-muted" title="${escapeHtml(row.detail)}">${escapeHtml(row.detail)}</small>` : '';
+    // A call that got no answer in time (504) may still be running: its outcome is unknown
+    const unknown = row.outcome === 'accepted' && row.http_status === 504;
+    const result = row.outcome === 'ok' ? 'Succeeded' : unknown ? 'Outcome unknown' : row.outcome === 'accepted' ? 'Accepted' : 'Failed';
+    const outcome = row.event === 'denied' ? uiTag('Denied', 'fail')
+        : row.http_status ? uiTag(unknown ? result : `${result} ${row.http_status}`, tone) : '';
+    const action = row.tool === 'perform_action' ? uiTag('Action', 'warn') : '';
+    const detail = unknown
+        ? '<small class="ui-muted">No answer within 60 seconds. It may still be running.</small>'
+        : row.detail && (row.event === 'denied' || row.outcome === 'error')
+            ? `<small class="ui-muted" title="${escapeHtml(row.detail)}">${escapeHtml(row.detail)}</small>` : '';
     return `<li><span class="ui-agent-when">${uiTime(row.at, formatTime(row.at))}</span><span>${action} ${what} ${outcome}${detail ? '<br>' + detail : ''}</span></li>`;
 }
 
@@ -168,10 +174,10 @@ async function loadAgentActivity(grantId) {
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const rows = (await response.json()).activity || [];
         box.innerHTML = rows.length
-            ? `<ul class="ui-agent-log">${rows.map(agentsActivityRow).join('')}</ul>${rows.length >= 50 ? '<p class="ui-set-desc">The last 50 entries.</p>' : ''}`
-            : '<p class="ui-muted">Nothing yet.</p>';
+            ? `<ul class="ui-agent-log">${rows.map(agentsActivityRow).join('')}</ul>${rows.length >= 50 ? '<p class="ui-set-desc">Showing the latest 50 entries.</p>' : ''}`
+            : '<p class="ui-muted">No activity yet.</p>';
     } catch (e) {
-        box.innerHTML = '<p class="ui-text-fail">Could not load the activity.</p>';
+        box.innerHTML = '<p class="ui-text-fail">Could not load activity. Close and open it again to retry.</p>';
     }
 }
 
@@ -179,7 +185,7 @@ async function disconnectAgent(grantId) {
     const agent = (agentsData?.agents || []).find(a => a.id === grantId);
     const confirmed = await showConfirmModal({
         title: 'Disconnect agent',
-        message: `Disconnect "${agent ? agent.name : 'this agent'}"? It stops working at once. To use it again, connect it again.`,
+        message: `Disconnect "${agent ? agent.name : 'this agent'}"? It cannot make new requests. To use it again, allow it again from the agent.`,
         confirmText: 'Disconnect',
         isDangerous: true
     });
@@ -189,7 +195,7 @@ async function disconnectAgent(grantId) {
         if (!response.ok && response.status !== 404) throw new Error(`HTTP ${response.status}`);
         showToast('Agent disconnected', 'success');
     } catch (e) {
-        showToast('Could not disconnect the agent', 'error');
+        showToast('Could not disconnect the agent. Try again.', 'error');
     }
     loadAgentsPanel();
 }
@@ -198,7 +204,7 @@ async function disconnectAllAgents() {
     const count = (agentsData?.agents || []).filter(a => a.state === 'connected').length;
     const confirmed = await showConfirmModal({
         title: 'Disconnect all agents',
-        message: `Disconnect ${uiCountLabel(count, 'agent', 'agents')}? They stop working at once.`,
+        message: `Disconnect ${uiCountLabel(count, 'agent', 'agents')}? They cannot make new requests. Each one must be allowed again to reconnect.`,
         confirmText: 'Disconnect all',
         isDangerous: true
     });
@@ -208,7 +214,7 @@ async function disconnectAllAgents() {
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         showToast('All agents disconnected', 'success');
     } catch (e) {
-        showToast('Could not disconnect the agents', 'error');
+        showToast('Could not disconnect all agents. Try again.', 'error');
     }
     loadAgentsPanel();
 }

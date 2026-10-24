@@ -37,7 +37,7 @@ function consentCheckbox(areaId, kind, label) {
     input.className = 'ui-check';
     input.dataset.area = areaId;
     input.dataset.kind = kind;
-    input.setAttribute('aria-label', `${kind === 'act' ? 'Act' : 'View'}: ${label}`);
+    input.setAttribute('aria-label', `${kind === 'act' ? 'Take action' : 'View'}: ${label}`);
     return input;
 }
 
@@ -47,7 +47,7 @@ function consentRenderAreas(areas, preselected) {
     const head = document.createElement('div');
     head.className = 'ui-consent-row ui-consent-row-head';
     head.setAttribute('aria-hidden', 'true');
-    ['Area', 'View', 'Act'].forEach(text => {
+    ['Area', 'View', 'Take action'].forEach(text => {
         const cell = document.createElement('span');
         cell.textContent = text;
         head.appendChild(cell);
@@ -66,7 +66,7 @@ function consentRenderAreas(areas, preselected) {
         if (area.act) {
             const act = document.createElement('small');
             act.className = 'ui-consent-act-text';
-            act.textContent = 'Act: ' + area.act;
+            act.textContent = 'Actions: ' + area.act;
             text.appendChild(act);
         }
         const view = consentCheckbox(area.id, 'view', area.label);
@@ -81,8 +81,7 @@ function consentRenderAreas(areas, preselected) {
         } else {
             const none = document.createElement('small');
             none.className = 'ui-muted';
-            none.textContent = 'None';
-            none.title = 'This area has no actions';
+            none.textContent = 'No actions';
             actCell.appendChild(none);
         }
         row.append(text, viewCell, actCell);
@@ -161,24 +160,24 @@ function consentRender(data) {
     if (client.publisher) {
         const tag = document.createElement('span');
         tag.className = 'ui-tag ui-tag-info';
-        tag.textContent = `Details published by ${client.publisher}`;
+        tag.textContent = `Name from ${client.publisher}`;
         const note = document.createElement('span');
-        note.textContent = ' The app cannot check which program on your computer is asking. Continue only if you just started this connection.';
+        note.textContent = ' This does not verify the program asking to connect. Allow only if you started this connection.';
         identity.append(tag, note);
     } else {
         const tag = document.createElement('span');
         tag.className = 'ui-tag ui-tag-warn';
-        tag.textContent = 'Not verified';
+        tag.textContent = 'Name supplied by agent';
         const note = document.createElement('span');
-        note.textContent = ' Any program can use this name. Continue only if you just started this connection.';
+        note.textContent = ' Any program can use this name. Allow only if you started this connection.';
         identity.append(tag, note);
     }
     consentEl('consent-redirect').textContent = client.redirect_uri || '';
     consentEl('consent-name').value = client.declared_name || '';
     consentRenderAreas(data.areas || [], data.preselected_views || []);
     consentRenderPeriods(data.periods || [], data.default_days);
-    consentEl('consent-footnote').textContent = (data.signed_in_as ? `You approve as ${data.signed_in_as}. ` : '')
-        + 'You can disconnect it at any time in Settings → Agents.';
+    consentEl('consent-footnote').textContent = (data.signed_in_as ? `Signed in as ${data.signed_in_as}. ` : '')
+        + 'Disconnect this agent at any time in Settings → Agents.';
     consentEl('consent-loading').classList.add('hidden');
     consentEl('consent-form').classList.remove('hidden');
     consentShowActWarning();
@@ -196,7 +195,7 @@ async function consentAnswer(allow) {
         payload.name = consentEl('consent-name').value;
         payload.days = consentDays;
         if (!payload.views.length) {
-            consentEl('consent-form-error-text').textContent = 'Choose at least one area to allow, or deny the request.';
+            consentEl('consent-form-error-text').textContent = 'Select View for at least one area, or choose Deny.';
             error.classList.remove('hidden');
             return;
         }
@@ -214,23 +213,23 @@ async function consentAnswer(allow) {
             return;
         }
         if (!response.ok) {
-            const text = await consentErrorText(response, 'Could not save the answer. Try again.');
+            const text = await consentErrorText(response, 'Could not save your choice. Try again.');
             if (response.status === 400) {
                 consentEl('consent-form-error-text').textContent = text;
                 error.classList.remove('hidden');
                 buttons.forEach(b => { b.disabled = false; });
                 return;
             }
-            consentShowError('This request cannot be answered', text);
+            consentShowError('Access request unavailable', text);
             return;
         }
         const body = await response.json();
         consentEl('consent-form').classList.add('hidden');
-        consentEl('consent-done-title').textContent = allow ? 'Allowed' : 'Denied';
+        consentEl('consent-done-title').textContent = allow ? 'Access allowed' : 'Access denied';
         consentEl('consent-done').classList.remove('hidden');
         window.location.replace(body.redirect);
     } catch (e) {
-        consentEl('consent-form-error-text').textContent = 'Unable to connect. Check your connection and try again.';
+        consentEl('consent-form-error-text').textContent = 'Could not save your choice. Check your connection and try again.';
         error.classList.remove('hidden');
         buttons.forEach(b => { b.disabled = false; });
     }
@@ -249,7 +248,7 @@ async function consentLoad() {
     consentEl('consent-view-all').addEventListener('click', () => consentSetAll(true));
     consentEl('consent-clear').addEventListener('click', () => consentSetAll(false));
     if (!consentRequestId) {
-        consentShowError('No request', 'This page opens when an agent asks to connect. Start the connection from the agent.');
+        consentShowError('No access request', 'Start a connection from your agent to request access.');
         return;
     }
     try {
@@ -259,13 +258,13 @@ async function consentLoad() {
             return;
         }
         if (!response.ok) {
-            consentShowError('This request cannot be answered',
-                await consentErrorText(response, 'Connect the agent again.'));
+            consentShowError('Access request unavailable',
+                await consentErrorText(response, 'Start a new access request from your agent.'));
             return;
         }
         consentRender(await response.json());
     } catch (e) {
-        consentShowError('Unable to connect', 'Check your connection and reload this page.');
+        consentShowError('Could not load the access request', 'Check your connection and reload this page.');
     }
 }
 
