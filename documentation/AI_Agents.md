@@ -32,7 +32,7 @@ The agent finishes on its own. The skill keeps the connection on that computer, 
 
 ## Connect over MCP
 
-For apps that add MCP servers but do not run commands, use the **MCP** tab. Add the **MCP server URL** as an MCP server in the app, or run the command shown there. Approve the request in the browser that opens, the same way.
+For apps that add MCP servers but do not run commands, use the **MCP** tab. Add the **MCP server URL** as an MCP server in the app, the way that app adds servers. Approve the request in the browser that opens, the same way.
 
 ## What an agent can do
 

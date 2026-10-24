@@ -43,7 +43,7 @@ async function loadAgentsPanel() {
         renderAgentsPanel();
     } catch (e) {
         console.error('Agents error:', e);
-        panel.innerHTML = '<p class="ui-empty ui-text-fail">Could not load agents. Reload this page to try again.</p>';
+        panel.innerHTML = '<section class="ui-panel ui-set-channels"><p class="ui-empty ui-text-fail">Could not load agents. Reload this page to try again.</p></section>';
     }
 }
 
@@ -119,10 +119,7 @@ function agentsConnectHelp() {
         ${panel('skill', `<p class="ui-set-desc">Paste this sentence to your AI agent. It replies with a link and a code that you approve from any device.</p>
             <div class="ui-md-ids ui-set-facts ui-agent-help">${line('Sentence for the agent', agentsData.skill_sentence || '')}</div>`)}
         ${panel('mcp', `<p class="ui-set-desc">Add this address as an MCP server in your app. Approve the request in the browser that opens.</p>
-            <div class="ui-md-ids ui-set-facts ui-agent-help">
-                ${line('MCP server URL', url)}
-                ${line('Claude Code', `claude mcp add --transport http mailcow ${url}`)}
-            </div>`)}
+            <div class="ui-md-ids ui-set-facts ui-agent-help">${line('MCP server URL', url)}</div>`)}
     </div>`;
 }
 
@@ -146,15 +143,20 @@ function renderAgentsPanel() {
     const connected = agents.filter(a => a.state === 'connected');
     const problem = agentsData.live ? '' : agentsProblemText(agentsData.problem);
     const intro = agentsData.live ? agentsConnectHelp() : problem ? uiLocked('Agents cannot connect', problem, '') : '';
-    panel.innerHTML = `
-        <div class="ui-list-head">
-            <div>
-                <h4 class="ui-md-h">Allowed agents</h4>
+    // Two parts: how to connect an agent, and the agents that were allowed
+    const connect = intro ? `
+        <section class="ui-panel ui-set-channels" aria-labelledby="agents-connect-h">
+            <div class="ui-list-head"><h4 class="ui-md-h" id="agents-connect-h">Connect an agent</h4></div>
+            ${intro}
+        </section>` : '';
+    panel.innerHTML = `${connect}
+        <section class="ui-panel ui-set-channels" aria-labelledby="agents-allowed-h">
+            <div class="ui-list-head">
+                <h4 class="ui-md-h" id="agents-allowed-h">Allowed agents</h4>
+                ${connected.length ? `<button type="button" onclick="disconnectAllAgents()" class="ui-btn ui-btn-sm ui-btn-danger ui-head-actions">Disconnect all</button>` : ''}
             </div>
-            ${connected.length ? `<button type="button" onclick="disconnectAllAgents()" class="ui-btn ui-btn-sm ui-btn-danger ui-head-actions">Disconnect all</button>` : ''}
-        </div>
-        ${intro}
-        <div class="ui-channels">${agents.map(agentsRow).join('') || '<p class="ui-empty">No agents have been allowed yet.</p>'}</div>`;
+            <div class="ui-channels">${agents.map(agentsRow).join('') || '<p class="ui-empty">No agents have been allowed yet.</p>'}</div>
+        </section>`;
     agentsOpenActivity.forEach(id => loadAgentActivity(id));
 }
 

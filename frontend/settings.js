@@ -1886,7 +1886,7 @@ function renderSettings(content, data) {
                 </form>
                 <!-- Connected agents (agents.js) under the Agents section. Outside the form:
                      its buttons act at once, and the fieldset above is disabled until migration -->
-                <div class="hidden" data-tab-extra="agents"><section id="agents-panel" class="ui-panel ui-set-channels"></section></div>
+                <div class="hidden" data-tab-extra="agents"><div id="agents-panel" class="ui-agent-sections"></div></div>
             </div>
         </div>
         ${uiSaveBar('settings-savebar', { form: 'settings-edit-form', discard: 'loadSettings()' })}
@@ -1917,7 +1917,7 @@ function renderSettings(content, data) {
         </div>
 
         <!-- Connected agents (agents.js): managed here even while editing settings is off -->
-        <section id="agents-panel" class="ui-panel ui-set-channels"></section>
+        <div id="agents-panel" class="ui-agent-sections"></div>
         ` : ''}
     `;
 

@@ -2203,7 +2203,9 @@ html body .ui-main .ui-set-choice-opt > input[type="radio"] { accent-color: var(
 
 /* Settings > Agents (agents.js): the channel rows, with the areas and an activity list */
 .ui-set-channels .ui-agent-help { margin: 12px 0 8px; grid-template-columns: 1fr; }
-.ui-agent-connect { margin: 4px 0 12px; }
+/* Settings > Agents: how to connect, then the agents that were allowed, as two panels */
+.ui-agent-sections { display: grid; gap: var(--ui-gap); }
+.ui-agent-connect { margin: 4px 0 4px; }
 .ui-agent-tabs { padding: 0; margin-bottom: 10px; }
 .ui-agent-tabs .modal-tab { flex: 0 0 auto; }
 .ui-agent-tabpanel > .ui-set-desc { margin: 0; }
