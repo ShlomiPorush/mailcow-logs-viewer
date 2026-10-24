@@ -120,7 +120,8 @@ async def handle(request: Request) -> Response:
     if result.outcome == "accepted" and result.status == 504:
         return _error(504, "outcome_unknown", result.text)
     if result.path_template is None and result.status in (404, 405):
-        return _error(result.status, "not_found", result.text)
+        return _error(result.status, "not_found", "No such API call for this method. Take the path from "
+                                                  "`mailcow-logs endpoints`; do not guess it.")
     if result.path_template and policy.POLICY.get((method, result.path_template), None) is not None \
             and policy.POLICY[(method, result.path_template)].kind == policy.WRITE:
         logger.info(f"Agent '{grant.name}' ran {method} {path}: HTTP {result.status} ({result.outcome})")

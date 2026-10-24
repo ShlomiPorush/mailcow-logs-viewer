@@ -46,6 +46,23 @@ is in) and is shared by all its sessions. Run `disconnect` only when the person 
    (the API calls you may make: method, path, parameters, body, and `kind`: read or act).
 2. Read with `mailcow-logs get '<path>'`, a path under `/api/` with its query, for example
    `get 'messages?limit=20'`. Quote the path; percent-encode spaces and other characters in query values.
+   Never guess a path: use one from the table below or from `endpoints`, with its `{...}` parts filled in.
+
+   | Path | What it returns |
+   |---|---|
+   | `status/summary` | Containers, storage and mailcow versions, in one answer. |
+   | `messages?limit=20` | Recent messages with sender, recipients, status and delivery details. |
+   | `queue` | Mail waiting in the Postfix queue. |
+   | `quarantine` | Quarantined messages. |
+   | `security-alerts` | Security alerts and how many wait for a look. |
+   | `logs/netfilter?limit=50` | Blocked and banned connection attempts. |
+   | `fail2ban` | Fail2ban settings and bans. |
+   | `suppressions` | Addresses the server does not send to. |
+   | `rspamd/maps` | Rspamd maps. |
+   | `dmarc/domains` | DMARC and TLS report summaries per domain. |
+   | `domains/all` | The mail server's domains with their DNS check results. |
+   | `mailbox-stats/summary` | Mailbox totals. |
+   | `raw-logs/postfix?limit=100` | Raw logs of one mailcow service; `raw-logs/services` lists the services. |
 3. An action is any endpoint whose kind is `act`, whatever its method (a GET can be an action). Before every action,
    tell the person what you will do and get their OK. Then run `post`, `put`, `patch` or `delete` with
    `--json-file <file>` (or `--json '<body>'` in a POSIX shell).

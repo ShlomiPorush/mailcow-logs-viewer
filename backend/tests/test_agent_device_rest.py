@@ -253,6 +253,25 @@ def test_people_only_routes_are_refused(live_agents):
     assert _api(agent, token, "GET", "/api/raw-logs/ws-token").status_code == 403
 
 
+def test_a_guessed_path_points_the_agent_to_the_list(live_agents):
+    agent, _, tokens = _connect_with_code()
+    r = _api(agent, tokens["access_token"], "GET", "/api/status")
+    assert r.status_code == 404 and r.json()["error"] == "not_found"
+    assert "mailcow-logs endpoints" in r.json()["message"]
+
+
+def test_the_skill_lists_only_paths_that_exist(live_agents):
+    import re
+    text = (store.__file__.rsplit("store.py", 1)[0] + "skill_files/SKILL.md")
+    with open(text, encoding="utf-8") as f:
+        paths = re.findall(r"^\s*\| `([a-z][^`?]*)(?:\?[^`]*)?` \|", f.read(), re.M)
+    assert len(paths) >= 10
+    templates = {path for (method, path) in scopes.POLICY if method == "GET"}
+    for p in paths:
+        full = "/api/" + p
+        assert any(re.fullmatch(re.sub(r"\{[^}]+\}", "[^/]+", t), full) for t in templates), p
+
+
 def test_access_and_endpoints_describe_this_connection(live_agents):
     agent, _, tokens = _connect_with_code(views=("security", "messages"), acts=("security",))
     access = _api(agent, tokens["access_token"], "GET", "/api/agent/access").json()
