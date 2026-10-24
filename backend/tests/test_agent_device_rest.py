@@ -446,6 +446,61 @@ def test_a_new_end_moves_the_refresh_token_with_it(live_agents):
     assert r.status_code == 200
 
 
+def test_a_call_waiting_while_its_access_is_narrowed_runs_under_the_new_access(live_agents):
+    import asyncio
+    from app.agent_access import dispatch
+    from app.database import SessionLocal
+    from app.main import app
+    agent, browser, tokens = _connect_with_code(views=("security",), acts=("security",))
+    db = SessionLocal()
+    try:
+        grant = store.validate_access_token(db, tokens["access_token"], APP_URL + "/api")
+    finally:
+        db.close()
+    agent_id = browser.get("/api/agents").json()["agents"][0]["id"]
+    # Take action is taken away while the call waits for its body or a slot
+    assert browser.put(f"/api/agents/{agent_id}", json={"views": ["security"], "acts": []}).status_code == 200
+
+    async def run():
+        dispatch._slots = None
+        return await dispatch.call_api(app, grant, None, "POST", "/api/security-alerts/acknowledge-all",
+                                       None, {"ids": [1]}, None)
+    result = asyncio.run(run())
+    assert result.outcome == "denied" and "Take action" in result.text
+
+
+def test_an_edit_made_on_an_older_copy_is_refused(live_agents):
+    _, browser, _ = _connect_with_code(views=("security",), acts=("security",))
+    row = browser.get("/api/agents").json()["agents"][0]
+    old = row["version"]
+    # Another window takes Take action away
+    assert browser.put(f"/api/agents/{row['id']}", json={"views": ["security"], "version": old}).status_code == 200
+    # This window still shows the old access and changes something else
+    r = browser.put(f"/api/agents/{row['id']}", json={"views": ["security", "messages"], "acts": ["security"],
+                                                      "version": old})
+    assert r.status_code == 409 and "changed meanwhile" in r.json()["detail"]
+    assert browser.get("/api/agents").json()["agents"][0]["areas"] == {"security": "view"}
+
+
+def test_a_longer_end_keeps_catching_a_reused_refresh_token(live_agents):
+    agent, browser, tokens = _connect_with_code(days=1)
+    first = tokens["refresh_token"]
+    r = agent.post("/oauth/token", data={"grant_type": "refresh_token", "client_id": CLIENT, "refresh_token": first})
+    assert r.status_code == 200
+    agent_id = browser.get("/api/agents").json()["agents"][0]["id"]
+    assert browser.put(f"/api/agents/{agent_id}", json={"views": ["security"], "days": 30}).status_code == 200
+    from app.database import get_db_context
+    from app.models import AgentGrant, AgentToken
+    with get_db_context() as db:
+        end = db.query(AgentGrant).filter(AgentGrant.id == agent_id).one().expires_at
+        assert {t.expires_at for t in db.query(AgentToken).filter(AgentToken.grant_id == agent_id,
+                                                                  AgentToken.kind == "refresh")} == {end}
+    # The spent token, presented again, still ends the connection
+    r = agent.post("/oauth/token", data={"grant_type": "refresh_token", "client_id": CLIENT, "refresh_token": first})
+    assert r.json()["error"] == "invalid_grant"
+    assert browser.get("/api/agents").json()["agents"][0]["end_reason"] == "refresh_reused"
+
+
 @pytest.mark.parametrize("body, status", [
     ({"views": [], "acts": []}, 400),
     ({"views": ["security"], "days": 3}, 400),

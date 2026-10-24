@@ -10,6 +10,7 @@ Each call holds a slot until the app has finished with it, including work a
 route started after answering (BackgroundTasks): two per agent, four in all.
 """
 import asyncio
+import dataclasses
 import json
 import logging
 import posixpath
@@ -106,12 +107,12 @@ def decide(app, call: AgentCall, endpoint, method: str, path_params: Dict[str, A
     return _guard_problem(rule.guard, path_params)
 
 
-def _still_active(grant) -> bool:
+def _scopes_now(grant):
     from ..database import SessionLocal
-    from .store import grant_still_active
+    from .store import grant_scopes_now
     db = SessionLocal()
     try:
-        return grant_still_active(db, grant)
+        return grant_scopes_now(db, grant)
     finally:
         db.close()
 
@@ -124,11 +125,15 @@ async def enforce_agent_policy(connection: HTTPConnection) -> None:
     call = agent_call(connection.scope)
     if call is None:
         return
-    reason = decide(connection.app, call, connection.scope.get("endpoint"), connection.scope["method"],
-                    connection.path_params)
-    if reason is None and not await run_in_threadpool(_still_active, call.grant):
-        # The call may have waited for its body or a slot since the token was checked
+    # The call may have waited for its body or a slot since its token was checked:
+    # the grant is read again here, and the policy runs on what it allows now
+    scopes = await run_in_threadpool(_scopes_now, call.grant)
+    if scopes is None:
         reason = "This connection has ended. The person who connected you can connect you again."
+    else:
+        call.grant = dataclasses.replace(call.grant, scopes=scopes)
+        reason = decide(connection.app, call, connection.scope.get("endpoint"), connection.scope["method"],
+                        connection.path_params)
     call.checked = True
     if reason:
         call.denied = reason

@@ -182,6 +182,7 @@ def _grant_row(grant) -> dict:
         "ended_at": format_datetime_for_api(grant.revoked_at or (grant.expires_at if state == "expired" else None)),
         "end_reason": grant.revoke_reason if grant.revoked_at else (state if state == "expired" else None),
         "state": state,
+        "version": store.grant_version(grant),
     }
 
 
@@ -210,6 +211,7 @@ class AgentChange(BaseModel):
     views: List[str] = Field(default_factory=list, max_length=50)
     acts: List[str] = Field(default_factory=list, max_length=50)
     days: Optional[float] = None        # a new end, counted from now; None keeps the end
+    version: Optional[str] = Field(default=None, max_length=64)   # the copy the edit was made on
 
 
 @router.put("/{grant_id}", dependencies=[Depends(operator)])
@@ -220,7 +222,12 @@ def change_agent(grant_id: int, change: AgentChange, request: Request, db: Sessi
         raise HTTPException(status_code=400, detail="Select View for at least one area. To end its access, use Disconnect.")
     if change.days is not None and change.days not in {p["days"] for p in periods()}:
         raise HTTPException(status_code=400, detail="Choose one of the offered periods.")
-    if not store.change_grant(db, grant_id, scopes=scopes, days=change.days, changed_by=_who(request)):
+    try:
+        changed = store.change_grant(db, grant_id, scopes=scopes, days=change.days, changed_by=_who(request),
+                                     version=change.version)
+    except store.GrantChanged:
+        raise HTTPException(status_code=409, detail="This agent's access changed meanwhile. Open Edit again to see it.")
+    if not changed:
         raise HTTPException(status_code=404, detail="This agent is not connected.")
     return {"changed": 1}
 

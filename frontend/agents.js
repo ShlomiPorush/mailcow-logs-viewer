@@ -284,6 +284,7 @@ function closeAgentEditModal(saved = false) {
 
 async function saveAgentAccess(event, grantId) {
     event.preventDefault();
+    const version = (agentsData?.agents || []).find(a => a.id === grantId)?.version || null;
     const modal = document.getElementById('agent-edit-modal');
     const error = document.getElementById('agent-edit-error');
     const chosen = kind => [...modal.querySelectorAll(`input[data-kind="${kind}"]:checked`)].map(i => i.dataset.area);
@@ -294,11 +295,19 @@ async function saveAgentAccess(event, grantId) {
         const response = await authenticatedFetch(`/api/agents/${grantId}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ views: chosen('view'), acts: chosen('act'), days: end === '' ? null : Number(end) }),
+            body: JSON.stringify({ views: chosen('view'), acts: chosen('act'), days: end === '' ? null : Number(end), version }),
         });
         if (!response.ok) {
             const body = await response.json().catch(() => ({}));
-            return say(typeof body.detail === 'string' ? body.detail : 'Could not save the change. Try again.');
+            const text = typeof body.detail === 'string' ? body.detail : 'Could not save the change. Try again.';
+            if (response.status === 409 || response.status === 404) {
+                // Changed or disconnected meanwhile: show the list as it is now
+                closeAgentEditModal(true);
+                showToast(text, 'error');
+                loadAgentsPanel();
+                return;
+            }
+            return say(text);
         }
         closeAgentEditModal(true);
         showToast('Access changed', 'success');

@@ -275,20 +275,33 @@ def revoke_grant(db: Session, grant_id: int, reason: str = "disconnected") -> bo
     return changed
 
 
-def change_grant(db: Session, grant_id: int, *, scopes: str, days: Optional[float], changed_by: Optional[str]) -> bool:
+class GrantChanged(Exception):
+    """The grant changed since the copy an edit was made on."""
+
+
+def change_grant(db: Session, grant_id: int, *, scopes: str, days: Optional[float], changed_by: Optional[str],
+                 version: Optional[str] = None) -> bool:
     """A person changes what a connected agent may do, and optionally sets a new end
     counted from now. Tokens are checked against the grant on every call, so the
-    change applies from the agent's next call; its refresh token follows a new end."""
+    change applies from the agent's next call; its refresh tokens follow a new end.
+
+    `version` (grant_version of the copy the edit was made on) must still match:
+    otherwise GrantChanged, so an older window never undoes a newer change.
+    """
     grant = db.query(AgentGrant).filter(AgentGrant.id == grant_id).with_for_update().first()
     if not _grant_active(grant):
         db.rollback()
         return False
+    if version is not None and not secrets.compare_digest(version, grant_version(grant)):
+        db.rollback()
+        raise GrantChanged()
     before, before_end = grant.scopes, grant.expires_at
     grant.scopes = scopes
     if days is not None:
         grant.expires_at = now() + timedelta(days=float(days))
-        db.query(AgentToken).filter(AgentToken.grant_id == grant.id, AgentToken.kind == "refresh",
-                                    AgentToken.rotated_at.is_(None)) \
+        # Spent refresh tokens too: they are kept until the grant ends, so a reused
+        # one is still caught (refresh_reused) for the whole new period
+        db.query(AgentToken).filter(AgentToken.grant_id == grant.id, AgentToken.kind == "refresh") \
             .update({"expires_at": grant.expires_at}, synchronize_session=False)
         db.query(AgentToken).filter(AgentToken.grant_id == grant.id, AgentToken.kind == "access",
                                     AgentToken.expires_at > grant.expires_at) \
@@ -483,6 +496,25 @@ def validate_access_token(db: Session, token: str, resource: str) -> Optional[Gr
         grant.last_used_at = now()
         db.commit()
     return _info(grant, row.token_hash)
+
+
+def grant_scopes_now(db: Session, info: GrantInfo) -> Optional[FrozenSet[str]]:
+    """The grant's scopes as they are now, or None when it may no longer act
+    (the same checks as grant_still_active). A person may have changed them
+    while the request waited for its body or a slot."""
+    if not grant_still_active(db, info):
+        return None
+    grant = db.query(AgentGrant).filter(AgentGrant.id == info.id).first()
+    scopes = parse_scopes(grant.scopes) if grant is not None else None
+    db.rollback()
+    return scopes
+
+
+def grant_version(grant: AgentGrant) -> str:
+    """Stands for what a grant allows and until when: an edit made on an older
+    copy (another window, another person) is refused instead of undoing a newer one."""
+    raw = f"{grant.scopes}|{grant.expires_at.isoformat()}"
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
 
 
 def grant_still_active(db: Session, info: GrantInfo) -> bool:
