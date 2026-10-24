@@ -1,6 +1,9 @@
 """The OAuth 2.1 authorization server agents sign in through.
 
-Public clients only, PKCE (S256) required, authorization code + refresh token.
+Public clients only. Two ways in: authorization code with PKCE (S256) for MCP
+apps, where the browser runs on the agent's computer, and the device
+authorization grant (RFC 8628) for agents that run the skill's script, where a
+person approves with a short code on any device. Refresh tokens rotate.
 Discovery follows RFC 9728 (protected resource) and RFC 8414 (authorization
 server). Clients identify with a metadata document URL (CIMD, cimd.py) or
 register themselves (RFC 7591, deprecated in MCP but still used). Every answer
@@ -11,6 +14,7 @@ Every route here answers 404 while agent access is not live.
 import html
 import json
 import logging
+import unicodedata
 from typing import Dict, List, Optional
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
@@ -37,6 +41,9 @@ _FORBIDDEN_SCHEMES = frozenset({"javascript", "data", "file", "vbscript", "about
 
 registrations = Window(limit=10, seconds=3600)
 token_requests = Window(limit=30, seconds=60)
+device_requests = Window(limit=10, seconds=3600)      # codes asked for, per address
+code_lookups = Window(limit=10, seconds=600)          # codes typed or opened, per address and per session
+unknown_device_codes = Window(limit=20, seconds=60)   # polls with a device code never issued, per address
 
 _NO_STORE = {"Cache-Control": "no-store", "Pragma": "no-cache"}
 
@@ -166,7 +173,8 @@ def authorization_server_metadata():
         "revocation_endpoint": base + "/oauth/revoke",
         "response_types_supported": ["code"],
         "response_modes_supported": ["query"],
-        "grant_types_supported": ["authorization_code", "refresh_token"],
+        "device_authorization_endpoint": base + "/oauth/device",
+        "grant_types_supported": ["authorization_code", "refresh_token", DEVICE_GRANT],
         "code_challenge_methods_supported": ["S256"],
         "token_endpoint_auth_methods_supported": ["none"],
         "revocation_endpoint_auth_methods_supported": ["none"],
@@ -228,6 +236,117 @@ async def authorize(request: Request):
     return RedirectResponse(f"{CONSENT_PAGE}?request={entry.id}", status_code=302, headers=_NO_STORE)
 
 
+# ── Agents that connect with a code (RFC 8628) ─────────────────────────────
+
+DEVICE_GRANT = "urn:ietf:params:oauth:grant-type:device_code"
+_LABEL_PUNCTUATION = frozenset(" ._-()@:/")
+
+
+def clean_label(raw: Optional[str]) -> Optional[str]:
+    """The script's name for itself when it is plain text (letters, marks, digits, spaces and . _ - ( ) @ : /,
+    1 to 60 characters); anything else, such as control or direction marks, quotes or markup, drops it."""
+    if not isinstance(raw, str):
+        return None
+    label = unicodedata.normalize("NFC", raw).strip()
+    if not 1 <= len(label) <= 60:
+        return None
+    if all(c in _LABEL_PUNCTUATION or unicodedata.category(c)[0] in "LMN" for c in label):
+        return label
+    return None
+
+
+@router.post("/oauth/device")
+async def device_authorization(request: Request):
+    """An agent asks to connect: a secret device code for it, and a short code for the person to approve."""
+    require_live()
+    ip = _client_ip(request)
+    if device_requests.full(ip):
+        return _oauth_error("slow_down", "Too many connection requests from this address. Try again later.", 429)
+    try:
+        form = await _form(request)
+    except HTTPException as e:
+        return _oauth_error("invalid_request", str(e.detail), e.status_code if e.status_code == 413 else 400)
+    if form.get("client_id") != store.DEVICE_CLIENT_ID:
+        return _oauth_error("invalid_client", f"Use client_id={store.DEVICE_CLIENT_ID}.", 401)
+    resource = form.get("resource")
+    if resource is not None and not live.same_resource(resource, live.api_resource()):
+        return _oauth_error("invalid_target", "The resource is not this server's API.")
+    requested = " ".join(sorted(parse_scopes(form.get("scope"))))
+    label = clean_label(form.get("client_label")) or "Script"
+    if not device_requests.hit(ip):
+        return _oauth_error("slow_down", "Too many connection requests from this address. Try again later.", 429)
+    made = await db_call(store.create_device_request, client_id=store.DEVICE_CLIENT_ID, label=label,
+                         requested=requested, resource=live.api_resource())
+    if made is None:
+        return _oauth_error("temporarily_unavailable", "Too many agents are waiting for approval. Try again in a few minutes.", 503)
+    device_code, user_code = made
+    shown = store.format_user_code(user_code)
+    page = live.issuer() + "/oauth/device"
+    return JSONResponse({
+        "device_code": device_code,
+        "user_code": shown,
+        "verification_uri": page,
+        "verification_uri_complete": f"{page}?user_code={shown}",
+        "expires_in": store.DEVICE_SECONDS,
+        "interval": store.DEVICE_INTERVAL,
+    }, headers=_NO_STORE)
+
+
+def code_page(message: Optional[str] = None, status_code: int = 200, value: str = "") -> HTMLResponse:
+    """Where a person types the code their agent shows, when they did not open the agent's link."""
+    note = f'<p class="ui-banner ui-banner-fail" role="alert">{html.escape(message)}</p>' if message else ""
+    page = f"""<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Connect an agent - mailcow Logs Viewer</title>
+<link rel="stylesheet" href="/static/assets/css/ui.css">
+<script>if(localStorage.getItem('theme')==='dark'||(!localStorage.getItem('theme')&&matchMedia('(prefers-color-scheme: dark)').matches))document.documentElement.classList.add('dark')</script>
+</head><body class="ui-login"><main class="ui-login-card ui-consent-card">
+<div class="ui-login-head"><img src="/static/assets/icons/app-icon.svg" alt="" class="ui-login-logo">
+<h1 class="ui-h1">Connect an agent</h1></div>
+{note}
+<form method="get" action="/oauth/device" class="ui-consent-form">
+<label class="ui-label" for="user-code">Enter the code your agent shows</label>
+<input id="user-code" name="user_code" class="ui-input ui-consent-code-input" autocomplete="off" autocapitalize="characters"
+ spellcheck="false" placeholder="XXXX-XXXX" maxlength="16" required value="{html.escape(value)}" autofocus>
+<div class="ui-consent-actions"><button type="submit" class="ui-btn ui-btn-primary">Continue</button></div>
+</form></main></body></html>"""
+    return HTMLResponse(page, status_code=status_code, headers=_NO_STORE)
+
+
+@router.get("/oauth/device")
+async def device_page(request: Request):
+    """The link the agent shows: checks the code, then opens the approval page for it.
+
+    The middleware has already sent a signed-out browser to the login page.
+    Every code tried counts against the person's address and session.
+    """
+    require_live()
+    session_key = session_key_from_request(request)
+    if not session_key:
+        return error_page("Sign in first", "Open this page again after signing in.", 401)
+    raw = request.query_params.get("user_code")
+    if raw is None or not raw.strip():
+        return code_page()
+    ip = _client_ip(request)
+    by_session = "session:" + session_key
+    if code_lookups.full(ip) or code_lookups.full(by_session):
+        return code_page("Too many codes tried. Wait 10 minutes, then try again.", 429)
+    code_lookups.hit(ip)
+    code_lookups.hit(by_session)
+    found = await db_call(store.find_device_request, raw)
+    if found is None:
+        return code_page("This code is not valid or has expired. Check the code your agent shows, "
+                         "or ask it to connect again.", 404, raw[:16])
+    entry = pending.add(
+        session_key=session_key, client_id=found["client_id"], client_kind="device",
+        declared_name=found["label"], publisher=None, redirect_uri="", state=None, code_challenge="",
+        resource=found["resource"], requested=parse_scopes(found["requested"]),
+        sign_in=await db_call(store.sign_in_stamp),
+        device_id=found["id"], user_code=store.format_user_code(found["user_code"]),
+    )
+    return RedirectResponse(f"{CONSENT_PAGE}?request={entry.id}", status_code=302, headers=_NO_STORE)
+
+
 # ── Token, registration and revocation ─────────────────────────────────────
 
 def _oauth_error(error: str, description: str, status_code: int = 400) -> JSONResponse:
@@ -254,18 +373,30 @@ async def _form(request: Request) -> Dict[str, str]:
 @router.post("/oauth/token")
 async def token(request: Request):
     require_live()
-    if not token_requests.hit(_client_ip(request)):
-        return _oauth_error("slow_down", "Too many requests. Try again in a minute.", 429)
+    ip = _client_ip(request)
     try:
         form = await _form(request)
     except HTTPException as e:
         return _oauth_error("invalid_request", str(e.detail), e.status_code if e.status_code == 413 else 400)
     grant_type = form.get("grant_type")
+    # Polls of a known code are paced by the code itself (slow_down); several
+    # agents behind one address must not use up the budget of the others
+    if grant_type != DEVICE_GRANT and not token_requests.hit(ip):
+        return _oauth_error("slow_down", "Too many requests. Try again in a minute.", 429)
+    if grant_type == DEVICE_GRANT and unknown_device_codes.full(ip):
+        return _oauth_error("slow_down", "Too many requests with an unknown code. Try again in a minute.", 429)
     client_id = form.get("client_id") or ""
     if not client_id:
         return _oauth_error("invalid_client", "client_id is required.", 401)
     try:
-        if grant_type == "authorization_code":
+        if grant_type == DEVICE_GRANT:
+            try:
+                result = await db_call(store.redeem_device_code, device_code=form.get("device_code", ""),
+                                       client_id=client_id)
+            except store.UnknownDeviceCode:
+                unknown_device_codes.hit(ip)
+                raise
+        elif grant_type == "authorization_code":
             result = await db_call(store.exchange_code, code=form.get("code", ""), client_id=client_id,
                                    redirect_uri=form.get("redirect_uri", ""), verifier=form.get("code_verifier", ""),
                                    resource=form.get("resource"))
@@ -273,7 +404,7 @@ async def token(request: Request):
             result = await db_call(store.refresh_tokens, refresh_token=form.get("refresh_token", ""),
                                    client_id=client_id, scope=form.get("scope"), resource=form.get("resource"))
         else:
-            return _oauth_error("unsupported_grant_type", "Use authorization_code or refresh_token.")
+            return _oauth_error("unsupported_grant_type", "Use authorization_code, refresh_token or the device code grant.")
     except store.TokenError as e:
         return _oauth_error(e.error, e.description)
     return JSONResponse(result, headers=_NO_STORE)
@@ -340,6 +471,6 @@ async def revoke(request: Request):
 
 
 def cleanup() -> None:
-    registrations.cleanup()
-    token_requests.cleanup()
+    for window in (registrations, token_requests, device_requests, code_lookups, unknown_device_codes):
+        window.cleanup()
     pending.cleanup()

@@ -50,6 +50,7 @@ from .routers import (
 )
 from .migrations import run_migrations
 from .agent_access import consent as agent_consent, live as agent_live, mcp as agent_mcp, oauth as agent_oauth
+from .agent_access import skill as agent_skill
 from .agent_access.dispatch import enforce_agent_policy
 from .auth import BasicAuthMiddleware, safe_return_path
 from .origin_guard import SameOriginGuardMiddleware
@@ -125,12 +126,12 @@ def log_agent_access_state() -> None:
     was off must not be undone by changing the setting back later.
     """
     problem = agent_live.problem()
-    if problem == agent_live.OFF:
+    if problem == agent_live.OFF or not settings.agent_access_enabled:
         pass
     elif problem:
         logger.warning(f"Agent access is switched on but not available ({problem}): see Settings > Agents")
     else:
-        logger.info(f"Agent access is ON: agents connect to {agent_live.resource()}")
+        logger.info(f"Agent access is ON: skill at {agent_live.issuer()}/agents/skill/, MCP at {agent_live.resource()}")
     try:
         from .agent_access import store as agent_store
         from .database import get_db_context
@@ -435,6 +436,7 @@ app.include_router(agent_consent.router, prefix="/api")
 # access is not live; the middleware lets the public ones through.
 app.include_router(agent_oauth.router)
 app.include_router(agent_mcp.router)
+app.include_router(agent_skill.router)
 
 # WebSocket endpoint needs root-level mount (not under /api prefix) so it is
 # reachable at wss://host/ws/raw-logs  # nosemgrep: javascript.lang.security.detect-insecure-websocket.detect-insecure-websocket

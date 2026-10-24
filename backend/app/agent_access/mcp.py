@@ -126,9 +126,14 @@ def _text(value: Any, is_error: bool = False) -> Dict[str, Any]:
 
 
 def _get_access(grant: store.GrantInfo) -> Dict[str, Any]:
+    return _text(access_info(grant))
+
+
+def access_info(grant: store.GrantInfo) -> Dict[str, Any]:
+    """What this connection may do, for get_access and GET /api/agent/access."""
     areas = policy.areas_of(grant.scopes)
     labels = {a.id: a.label for a in policy.AREAS}
-    return _text({
+    return {
         "connection": grant.name,
         "ends": grant.expires_at.isoformat(timespec="minutes") + "Z",
         "areas": [{"area": a, "name": labels[a], "may": "view and act" if m == "act" else "view"}
@@ -136,7 +141,7 @@ def _get_access(grant: store.GrantInfo) -> Dict[str, Any]:
         "not_allowed": [a.id for a in policy.AREAS if a.id not in areas],
         "app_version": __version__,
         **{k: v for k, v in tz_status().items() if k in ("timezone",)},
-    })
+    }
 
 
 def _openapi_params(operation: Dict[str, Any]) -> list:
@@ -174,6 +179,11 @@ def _openapi_body(operation: Dict[str, Any], components: Dict[str, Any]) -> Opti
 
 
 def _list_endpoints(app, grant: store.GrantInfo, area: Optional[str]) -> Dict[str, Any]:
+    return _text(endpoints_info(app, grant, area))
+
+
+def endpoints_info(app, grant: store.GrantInfo, area: Optional[str]) -> Dict[str, Any]:
+    """The API calls this connection may make, for list_endpoints and GET /api/agent/endpoints."""
     spec = app.openapi()
     paths, components = spec.get("paths", {}), spec.get("components", {}).get("schemas", {})
     out = []
@@ -200,7 +210,7 @@ def _list_endpoints(app, grant: store.GrantInfo, area: Optional[str]) -> Dict[st
         if rule.guard == "own_domain":
             entry["limit"] = "only this mail server's own domains"
         out.append(entry)
-    return _text({"endpoints": out, "count": len(out)})
+    return {"endpoints": out, "count": len(out)}
 
 
 async def _call(request: Request, grant: store.GrantInfo, tool: str, args: Dict[str, Any]) -> Dict[str, Any]:
@@ -294,7 +304,7 @@ async def _authenticate(request: Request) -> Tuple[Optional[store.GrantInfo], Op
     authorization = request.headers.get("authorization", "")
     if not authorization.lower().startswith("bearer "):
         return None, _unauthorized("")
-    grant = await db_call(store.validate_access_token, authorization[7:].strip())
+    grant = await db_call(store.validate_access_token, authorization[7:].strip(), live.resource())
     if grant is None:
         failed_tokens.hit(ip)
         return None, _unauthorized("The token is not valid or has ended.")

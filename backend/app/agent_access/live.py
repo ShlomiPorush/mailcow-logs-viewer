@@ -91,8 +91,17 @@ def issuer() -> str:
 
 
 def resource() -> str:
-    """The MCP server's canonical URI, which every token is bound to."""
+    """The MCP server's canonical URI: tokens of agents that connected over MCP are bound to it."""
     return issuer() + "/mcp"
+
+
+def api_resource() -> str:
+    """The REST API's canonical URI: tokens of agents that connected with a code (the skill) are bound to it."""
+    return issuer() + "/api"
+
+
+def resources() -> tuple:
+    return (resource(), api_resource())
 
 
 def same_resource(given: str, expected: str) -> bool:

@@ -80,7 +80,7 @@ function agentsIdentity(agent) {
 function agentsRow(agent) {
     const connected = agent.state === 'connected';
     const facts = connected
-        ? `Allowed ${agentsWhen(agent.created_at)}${agent.approved_by ? ` by ${escapeHtml(agent.approved_by)}` : ''} · expires ${agentsWhen(agent.expires_at)} · last used ${agentsWhen(agent.last_used_at)}`
+        ? `${agent.kind === 'device' ? 'Skill' : 'MCP'} · Allowed ${agentsWhen(agent.created_at)}${agent.approved_by ? ` by ${escapeHtml(agent.approved_by)}` : ''} · expires ${agentsWhen(agent.expires_at)} · last used ${agentsWhen(agent.last_used_at)}`
         : `${escapeHtml(AGENTS_END_REASONS[agent.end_reason] || 'Access ended')} ${agentsWhen(agent.ended_at)}`;
     const open = agentsOpenActivity.has(agent.id);
     return `
@@ -99,22 +99,44 @@ function agentsRow(agent) {
         </div>`;
 }
 
+// How an agent connects, one tab per kind of agent (as in n8n-ops): agents that
+// run commands paste one sentence and approve with a code; MCP apps add the address
+let agentsTab = 'skill';
+
 function agentsConnectHelp() {
     const url = agentsData.mcp_url;
-    const claude = `claude mcp add --transport http mailcow ${url}`;
-    const codex = `codex mcp add mailcow --url ${url}`;
     const line = (label, text) => `
         <div class="ui-md-fact"><span>${label}</span>
             <div class="ui-agent-cmd"><code class="ui-mono">${escapeHtml(text)}</code>
             <button type="button" class="ui-btn ui-btn-sm" onclick="copyToClipboard(${escapeHtml(JSON.stringify(text))}, event)">Copy</button></div>
         </div>`;
-    return `<p class="ui-set-desc">To connect an agent, run its command in a terminal on the computer where it runs, then approve access in the browser.</p>
-    <div class="ui-md-ids ui-set-facts ui-agent-help">
-        ${line('MCP server URL', url)}
-        ${line('Claude Code', claude)}
-        ${line('Codex', codex)}
-    </div>
-    <p class="ui-set-desc">If the browser does not open, run <code>claude mcp login mailcow</code> (Claude Code) or <code>codex mcp login mailcow</code> (Codex).</p>`;
+    const tab = (id, label) => `<button type="button" id="agents-tab-${id}" class="modal-tab${agentsTab === id ? ' active' : ''}" role="tab"
+        aria-selected="${agentsTab === id}" aria-controls="agents-connect-${id}" onclick="agentsShowTab('${id}')">${label}</button>`;
+    const panel = (id, html) => `<div id="agents-connect-${id}" role="tabpanel" aria-labelledby="agents-tab-${id}"
+        class="ui-agent-tabpanel${agentsTab === id ? '' : ' hidden'}">${html}</div>`;
+    return `<div class="ui-agent-connect">
+        <div class="ui-tabs ui-agent-tabs" role="tablist" aria-label="Kind of agent">${tab('skill', 'Coding agent')}${tab('mcp', 'MCP app')}</div>
+        ${panel('skill', `<p class="ui-set-desc">For Claude Code, Codex, T3 Code and other agents that run commands. Paste this sentence to the agent. It shows you a link and a code to approve from any device.</p>
+            <div class="ui-md-ids ui-set-facts ui-agent-help">${line('Sentence for the agent', agentsData.skill_sentence || '')}</div>`)}
+        ${panel('mcp', `<p class="ui-set-desc">For apps that add MCP servers, such as Claude Desktop or Cursor. A browser opens on that computer to approve it.</p>
+            <div class="ui-md-ids ui-set-facts ui-agent-help">
+                ${line('MCP server URL', url)}
+                ${line('Claude Code', `claude mcp add --transport http mailcow ${url}`)}
+            </div>`)}
+    </div>`;
+}
+
+function agentsShowTab(id) {
+    agentsTab = id;
+    ['skill', 'mcp'].forEach(other => {
+        const button = document.getElementById(`agents-tab-${other}`);
+        const panel = document.getElementById(`agents-connect-${other}`);
+        if (button) {
+            button.classList.toggle('active', other === id);
+            button.setAttribute('aria-selected', String(other === id));
+        }
+        if (panel) panel.classList.toggle('hidden', other !== id);
+    });
 }
 
 function renderAgentsPanel() {

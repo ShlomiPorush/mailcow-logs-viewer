@@ -47,8 +47,9 @@ def _postgres_available() -> bool:
 
 def _wipe():
     from app.database import get_db_context
-    from app.models import AgentAudit, AgentClient, AgentCode, AgentGrant, AgentToken, SystemSetting
+    from app.models import AgentAudit, AgentClient, AgentCode, AgentDeviceRequest, AgentGrant, AgentToken, SystemSetting
     with get_db_context() as db:
+        db.query(AgentDeviceRequest).delete(synchronize_session=False)
         for model in (AgentAudit, AgentToken, AgentCode, AgentGrant, AgentClient):
             db.query(model).delete(synchronize_session=False)
         db.query(SystemSetting).filter(SystemSetting.key == store._FINGERPRINT_KEY).delete(synchronize_session=False)
@@ -70,7 +71,8 @@ def live_agents(monkeypatch):
     monkeypatch.setattr(inner, "agent_access_url", APP_URL)
     monkeypatch.setattr(inner, "agent_access_max_days", 90)
     monkeypatch.setattr(store, "_known_fingerprint", None)
-    for window in (oauth.registrations, oauth.token_requests, mcp.failed_tokens):
+    for window in (oauth.registrations, oauth.token_requests, oauth.device_requests, oauth.code_lookups,
+                   oauth.unknown_device_codes, mcp.failed_tokens):
         monkeypatch.setattr(window, "_events", type(window._events)())
     pending.clear()
     _wipe()
@@ -503,7 +505,7 @@ def test_a_call_waiting_past_its_token_does_not_run(live_agents):
     from app.database import SessionLocal
     db = SessionLocal()
     try:
-        grant = store.validate_access_token(db, tokens["access_token"])
+        grant = store.validate_access_token(db, tokens["access_token"], APP_URL + "/mcp")
     finally:
         db.close()
     # The agent refreshes meanwhile: the token the waiting call came with is gone
@@ -572,7 +574,7 @@ def test_a_call_waiting_while_the_agent_is_disconnected_does_not_run(live_agents
     from app.database import SessionLocal
     db = SessionLocal()
     try:
-        grant = store.validate_access_token(db, tokens["access_token"])
+        grant = store.validate_access_token(db, tokens["access_token"], APP_URL + "/mcp")
     finally:
         db.close()
     agent_id = client.get("/api/agents").json()["agents"][0]["id"]

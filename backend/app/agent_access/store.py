@@ -20,7 +20,7 @@ from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
 
 from ..config import settings
-from ..models import AgentAudit, AgentClient, AgentCode, AgentGrant, AgentToken, SystemSetting
+from ..models import AgentAudit, AgentClient, AgentCode, AgentDeviceRequest, AgentGrant, AgentToken, SystemSetting
 from . import live
 from .scopes import parse_scopes
 
@@ -39,6 +39,17 @@ LAST_USED_RESOLUTION = timedelta(seconds=60)
 ACCESS_PREFIX = "mlva_"
 REFRESH_PREFIX = "mlvr_"
 CLIENT_PREFIX = "mlvc_"
+DEVICE_PREFIX = "mlvd_"
+
+# Agents that connect with a code (RFC 8628): the skill's script
+DEVICE_CLIENT_ID = "mailcow-logs-cli"
+DEVICE_SECONDS = 600
+DEVICE_INTERVAL = 5
+DEVICE_COLLECT_GRACE = timedelta(minutes=5)   # an approved code can still be collected this long after it expires
+DEVICE_KEPT_HOURS = 24
+MAX_OPEN_DEVICE_REQUESTS = 100
+# Consonants only (base-20 as in RFC 8628 6.1): no vowels, so no words, and nothing to confuse
+USER_CODE_ALPHABET = "BCDFGHJKLMNPQRSTVWXZ"
 
 
 def now() -> datetime:
@@ -216,11 +227,12 @@ class GrantInfo:
     expires_at: datetime
     publisher: Optional[str]
     token_hash: Optional[str] = None   # the access token the request came with
+    resource: str = ""                 # what its tokens are for: the MCP server or the REST API
 
 
 def _info(grant: AgentGrant, access_hash: Optional[str] = None) -> GrantInfo:
     return GrantInfo(grant.id, grant.display_name, grant.client_id, parse_scopes(grant.scopes),
-                     grant.expires_at, grant.publisher, access_hash)
+                     grant.expires_at, grant.publisher, access_hash, grant.resource)
 
 
 def _grant_active(grant: Optional[AgentGrant]) -> bool:
@@ -245,7 +257,11 @@ def _revoke(db: Session, grant: AgentGrant, reason: str) -> bool:
 def _revoke_all(db: Session, reason: str) -> int:
     grants = db.query(AgentGrant).filter(AgentGrant.revoked_at.is_(None)) \
         .order_by(AgentGrant.id).with_for_update().all()
-    return sum(1 for g in grants if _revoke(db, g, reason))
+    count = sum(1 for g in grants if _revoke(db, g, reason))
+    # Codes waiting for a person, or approved and not collected yet, end too
+    db.query(AgentDeviceRequest).filter(AgentDeviceRequest.state.in_(("pending", "approved"))) \
+        .update({"state": "expired"}, synchronize_session=False)
+    return count
 
 
 def revoke_grant(db: Session, grant_id: int, reason: str = "disconnected") -> bool:
@@ -413,8 +429,12 @@ def revoke_token(db: Session, token: str, client_id: str) -> None:
     db.commit()
 
 
-def validate_access_token(db: Session, token: str) -> Optional[GrantInfo]:
-    """The grant behind a bearer token, or None when it is not good for this server now."""
+def validate_access_token(db: Session, token: str, resource: str) -> Optional[GrantInfo]:
+    """The grant behind a bearer token, or None when it is not good for `resource` now.
+
+    `resource` is where the token was presented (live.resource() at /mcp,
+    live.api_resource() at /api): a token is good only where it was issued for.
+    """
     if not token or not token.startswith(ACCESS_PREFIX) or len(token) > 100:
         return None
     check_sign_in_unchanged(db)
@@ -423,7 +443,7 @@ def validate_access_token(db: Session, token: str) -> Optional[GrantInfo]:
     if row is None or row.expires_at <= now():
         return None
     grant = db.query(AgentGrant).filter(AgentGrant.id == row.grant_id).first()
-    if not _grant_active(grant) or not live.same_resource(grant.resource, live.resource()):
+    if not _grant_active(grant) or not live.same_resource(grant.resource, resource):
         return None
     if grant.last_used_at is None or now() - grant.last_used_at > LAST_USED_RESOLUTION:
         grant.last_used_at = now()
@@ -441,10 +461,155 @@ def grant_still_active(db: Session, info: GrantInfo) -> bool:
     grant = db.query(AgentGrant).filter(AgentGrant.id == info.id).first()
     token = db.query(AgentToken).filter(AgentToken.token_hash == (info.token_hash or ""),
                                         AgentToken.kind == "access", AgentToken.grant_id == info.id).first()
-    active = (_grant_active(grant) and token is not None and token.expires_at > now()
-              and live.is_live() and live.same_resource(grant.resource, live.resource()))
+    active = (_grant_active(grant) and token is not None and token.expires_at > now() and live.is_live()
+              and live.same_resource(grant.resource, info.resource)
+              and any(live.same_resource(info.resource, r) for r in live.resources()))
     db.rollback()
     return active
+
+
+# ── Agents that connect with a code (RFC 8628) ─────────────────────────────
+# The agent asks and gets a secret device code (stored hashed) and a short user
+# code. A person opens the approval page on any device, compares the user code
+# and answers; the agent polls with its device code and collects its tokens
+# once. Every change of state happens under the request's row lock, after the
+# sign-in fingerprint (the lock order above).
+
+class UnknownDeviceCode(TokenError):
+    """A device code this server never issued (counted against the caller's address)."""
+
+
+def normalize_user_code(value: Any) -> Optional[str]:
+    """The 8 letters of a user code as typed (any case, with or without the dash), or None."""
+    letters = "".join(c for c in str(value or "")[:32].upper() if not c.isspace() and c != "-")
+    if len(letters) != 8 or any(c not in USER_CODE_ALPHABET for c in letters):
+        return None
+    return letters
+
+
+def format_user_code(code: str) -> str:
+    return f"{code[:4]}-{code[4:]}"
+
+
+def _open_requests(db: Session):
+    return db.query(AgentDeviceRequest).filter(AgentDeviceRequest.state.in_(("pending", "approved")),
+                                               AgentDeviceRequest.expires_at > now())
+
+
+def create_device_request(db: Session, *, client_id: str, label: str, requested: str,
+                          resource: str) -> Optional[Tuple[str, str]]:
+    """(device code, user code) for a new request; None when too many are open."""
+    if _open_requests(db).count() >= MAX_OPEN_DEVICE_REQUESTS:
+        db.rollback()
+        return None
+    for _ in range(10):
+        user_code = "".join(secrets.choice(USER_CODE_ALPHABET) for _ in range(8))
+        if _open_requests(db).filter(AgentDeviceRequest.user_code == user_code).first() is None:
+            break
+    else:
+        db.rollback()
+        return None
+    device_code = new_secret(DEVICE_PREFIX)
+    t = now()
+    db.add(AgentDeviceRequest(
+        device_code_hash=token_hash(device_code), user_code=user_code, client_id=client_id, label=label,
+        requested=requested, resource=resource, state="pending", created_at=t,
+        expires_at=t + timedelta(seconds=DEVICE_SECONDS), interval=DEVICE_INTERVAL,
+    ))
+    db.commit()
+    return device_code, user_code
+
+
+def find_device_request(db: Session, user_code: Any) -> Optional[Dict[str, Any]]:
+    """The pending request a person may answer for this user code, or None."""
+    code = normalize_user_code(user_code)
+    row = None
+    if code:
+        row = db.query(AgentDeviceRequest).filter(AgentDeviceRequest.user_code == code,
+                                                  AgentDeviceRequest.state == "pending",
+                                                  AgentDeviceRequest.expires_at > now()).first()
+    found = None if row is None else {
+        "id": row.id, "user_code": row.user_code, "client_id": row.client_id, "label": row.label,
+        "requested": row.requested, "resource": row.resource,
+    }
+    db.rollback()
+    return found
+
+
+def answer_device_request(db: Session, request_id: int, *, approve: bool, details: Optional[Dict[str, Any]]) -> bool:
+    """A person's answer; False when the request is no longer open (a second answer changes nothing)."""
+    check_sign_in_unchanged(db)
+    sign_in = _hold_sign_in(db)
+    row = db.query(AgentDeviceRequest).filter(AgentDeviceRequest.id == request_id).with_for_update().first()
+    if row is None or row.state != "pending" or row.expires_at <= now():
+        db.rollback()
+        return False
+    if approve and (details or {}).get("sign_in") != sign_in:
+        # Sign-in changed since the page opened: nothing is approved under the old settings
+        row.state = "expired"
+        db.commit()
+        return False
+    row.state = "approved" if approve else "denied"
+    row.details = details if approve else None
+    row.answered_at = now()
+    db.commit()
+    return True
+
+
+def redeem_device_code(db: Session, *, device_code: str, client_id: str) -> Dict[str, Any]:
+    """The agent's poll: tokens once a person approved, else the RFC 8628 error for where it stands."""
+    check_sign_in_unchanged(db)
+    sign_in = _hold_sign_in(db)
+    row = None
+    if device_code and device_code.startswith(DEVICE_PREFIX) and len(device_code) <= 100:
+        row = db.query(AgentDeviceRequest).filter(
+            AgentDeviceRequest.device_code_hash == token_hash(device_code)).with_for_update().first()
+    if row is None or row.client_id != client_id:
+        db.rollback()
+        raise UnknownDeviceCode("invalid_grant", "The device code is not valid.")
+    t = now()
+    if row.state == "consumed":
+        db.rollback()
+        raise TokenError("invalid_grant", "This code was already used. Connect again.")
+    if row.state == "denied":
+        db.rollback()
+        raise TokenError("access_denied", "The person denied the request.")
+    if row.state == "pending":
+        if row.expires_at <= t:
+            row.state = "expired"
+            db.commit()
+            raise TokenError("expired_token", "The code expired before anyone approved it. Connect again.")
+        too_soon = row.last_poll_at is not None and (t - row.last_poll_at).total_seconds() < row.interval
+        row.last_poll_at = t
+        if too_soon:
+            row.interval = min(row.interval + 5, 60)
+            db.commit()
+            raise TokenError("slow_down", f"Poll at most every {row.interval} seconds.")
+        db.commit()
+        raise TokenError("authorization_pending", "Waiting for a person to approve.")
+    d = row.details or {}
+    if row.state != "approved" or row.expires_at + DEVICE_COLLECT_GRACE <= t or d.get("sign_in") != sign_in:
+        if row.state == "approved":
+            row.state = "expired"
+        db.commit()
+        raise TokenError("expired_token", "This request has ended. Connect again.")
+    # The period counts from the approval and is a fixed end
+    ends = (row.answered_at or t) + timedelta(days=float(d["days"]))
+    grant = AgentGrant(
+        client_id=client_id, client_kind="device", display_name=d["display_name"], declared_name=row.label,
+        publisher=None, redirect_uri="", scopes=d["scopes"], resource=row.resource,
+        approved_by=d.get("approved_by"), created_at=t, expires_at=ends,
+    )
+    db.add(grant)
+    db.flush()
+    row.state = "consumed"
+    row.grant_id = grant.id
+    tokens = _issue_tokens(db, grant)
+    audit(db, "grant_created", grant_id=grant.id, agent_name=grant.display_name, outcome="ok",
+          detail=f"{grant.scopes} until {grant.expires_at.isoformat(timespec='minutes')}Z", commit=False)
+    db.commit()
+    logger.info(f"Agent '{grant.display_name}' connected with a code ({grant.scopes})")
+    return tokens
 
 
 # ── Management ─────────────────────────────────────────────────────────────
@@ -471,6 +636,8 @@ def activity(db: Session, grant_id: int, limit: int = 50) -> List[AgentAudit]:
 def cleanup(db: Session) -> None:
     """Delete what is no longer needed: old codes, ended tokens and grants, old activity, unused clients."""
     t = now()
+    db.query(AgentDeviceRequest).filter(AgentDeviceRequest.created_at < t - timedelta(hours=DEVICE_KEPT_HOURS)) \
+        .delete(synchronize_session=False)
     db.query(AgentCode).filter(AgentCode.created_at < t - timedelta(minutes=CODES_KEPT_MINUTES)) \
         .delete(synchronize_session=False)
     db.query(AgentToken).filter(AgentToken.expires_at < t - timedelta(days=1)).delete(synchronize_session=False)

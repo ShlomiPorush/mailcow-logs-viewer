@@ -1012,6 +1012,33 @@ class AgentCode(Base):
     grant_id = Column(Integer, ForeignKey("agent_grants.id", ondelete="CASCADE"))
 
 
+class AgentDeviceRequest(Base):
+    """An agent that asked to connect with a code (RFC 8628), until a person answers and it collects its tokens.
+
+    state: pending -> approved | denied | expired; approved -> consumed. The
+    device code is a secret only the agent holds (stored hashed); the user code
+    is the short code the person compares on the approval page.
+    """
+    __tablename__ = "agent_device_requests"
+
+    id = Column(Integer, primary_key=True)
+    device_code_hash = Column(String(64), nullable=False, unique=True)
+    user_code = Column(String(8), nullable=False, index=True)
+    client_id = Column(String(64), nullable=False)
+    label = Column(String(100), nullable=False)               # the agent's own name for itself
+    requested = Column(Text, nullable=False)                  # scopes it asked for, space separated
+    resource = Column(String(512), nullable=False)
+    state = Column(String(10), nullable=False, default="pending")
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    expires_at = Column(DateTime, nullable=False, index=True)
+    interval = Column(Integer, nullable=False, default=5)
+    last_poll_at = Column(DateTime)
+    # What the person chose, applied when the agent collects its tokens
+    details = Column(JSONB)
+    answered_at = Column(DateTime)
+    grant_id = Column(Integer, ForeignKey("agent_grants.id", ondelete="SET NULL"))
+
+
 class AgentToken(Base):
     """An access or refresh token of a grant."""
     __tablename__ = "agent_tokens"

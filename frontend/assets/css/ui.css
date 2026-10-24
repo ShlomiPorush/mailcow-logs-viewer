@@ -1083,6 +1083,11 @@ body.ui-login { height: 100vh; height: 100dvh; overflow: auto; margin: 0; displa
 .ui-consent-quick { display: flex; gap: 6px; margin-inline-start: auto; }
 .ui-consent-agent { margin: 0; font-size: 22px; font-weight: 800; letter-spacing: -.02em; overflow-wrap: anywhere; }
 .ui-consent-id { margin: 0; font-size: var(--ui-fs-sm); line-height: 1.6; }
+/* An agent that connects with a code: the person compares it with what the agent shows */
+.ui-consent-code { display: grid; gap: 4px; padding: 12px 14px; border: 1px solid var(--ui-line); border-radius: var(--ui-radius-sm); background: var(--ui-panel); }
+.ui-consent-code .ui-label { margin: 0; }
+.ui-consent-code b { font-size: 28px; font-weight: 800; letter-spacing: .12em; }
+.ui-consent-code-input { font-family: var(--ui-mono); font-size: 20px; letter-spacing: .12em; text-transform: uppercase; height: auto; padding: 10px 12px; }
 .ui-consent-uri { overflow-wrap: anywhere; }
 .ui-consent-areas { display: grid; border: 1px solid var(--ui-line); border-radius: var(--ui-radius-sm); overflow: hidden; }
 .ui-consent-row { display: grid; grid-template-columns: 1fr 56px 56px; align-items: center; gap: 8px; padding: 9px 12px; border-top: 1px solid var(--ui-line); }
@@ -2198,6 +2203,10 @@ html body .ui-main .ui-set-choice-opt > input[type="radio"] { accent-color: var(
 
 /* Settings > Agents (agents.js): the channel rows, with the areas and an activity list */
 .ui-set-channels .ui-agent-help { margin: 12px 0 8px; grid-template-columns: 1fr; }
+.ui-agent-connect { margin: 4px 0 12px; }
+.ui-agent-tabs { padding: 0; margin-bottom: 10px; }
+.ui-agent-tabs .modal-tab { flex: 0 0 auto; }
+.ui-agent-tabpanel > .ui-set-desc { margin: 0; }
 .ui-set-channels .ui-agent-help + .ui-set-desc { margin-bottom: 12px; }
 .ui-set-channels > .ui-locked { margin: 12px 0; }
 .ui-agent-cmd { display: flex; align-items: center; gap: 8px; min-width: 0; }

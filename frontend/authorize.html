@@ -38,8 +38,12 @@
             <section class="ui-consent-sec" aria-labelledby="consent-who-h">
                 <h2 class="ui-consent-h" id="consent-who-h">Who is asking</h2>
                 <p class="ui-consent-agent" id="consent-declared"></p>
+                <div id="consent-code" class="hidden ui-consent-code">
+                    <span class="ui-label">Code</span>
+                    <b class="ui-mono" id="consent-code-value"></b>
+                </div>
                 <p class="ui-consent-id" id="consent-identity"></p>
-                <p class="ui-set-desc">Browser returns to <span class="ui-mono ui-consent-uri" id="consent-redirect"></span></p>
+                <p class="ui-set-desc" id="consent-return">Browser returns to <span class="ui-mono ui-consent-uri" id="consent-redirect"></span></p>
                 <div>
                     <label class="ui-label" for="consent-name">Name in Settings → Agents</label>
                     <input type="text" id="consent-name" class="ui-input" maxlength="100" autocomplete="off">

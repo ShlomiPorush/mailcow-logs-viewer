@@ -36,8 +36,18 @@ AGENT_PUBLIC_PATHS = frozenset({
 })
 
 
+# Public by method too: an agent asks for a code and downloads the skill without
+# a session, but the approval page (GET /oauth/device) needs a signed-in person
+AGENT_PUBLIC_REQUESTS = frozenset({("POST", "/oauth/device")})
+SKILL_PREFIX = "/agents/skill"
+
+
 def _is_agent_path(path: str) -> bool:
-    return path == "/mcp" or path.startswith(("/oauth/", "/.well-known/oauth-"))
+    return path == "/mcp" or path.startswith(("/oauth/", "/.well-known/oauth-", SKILL_PREFIX))
+
+
+def _has_bearer(request: Request) -> bool:
+    return any(v[:7].lower() == "bearer " for v in request.headers.getlist("authorization"))
 
 logger = logging.getLogger(__name__)
 
@@ -266,19 +276,29 @@ class BasicAuthMiddleware(BaseHTTPMiddleware):
         if _is_agent_path(path) and not agent_live.is_live():
             return Response(content="Not Found", status_code=status.HTTP_404_NOT_FOUND)
 
+        # An agent's call made inside the app by agent_access/dispatch.py: its
+        # bearer token was checked at /mcp or below, and the policy guard checks
+        # the route. Only the app itself can put this marker into the ASGI scope.
+        if agent_call(request.scope) is not None:
+            return await call_next(request)
+
+        # A bearer token on /api is an agent's request, decided before anything
+        # else: never a session's, and never let through because sign-in is off
+        # (agent_access/rest.py refuses it then)
+        if path.startswith("/api/") and _has_bearer(request):
+            from .agent_access import rest
+            return await rest.handle(request)
+
         # Skip authentication check if disabled
         if not settings.is_authentication_enabled:
             return await call_next(request)
 
-        # An agent's call made inside the app by agent_access/dispatch.py: its
-        # bearer token was checked at /mcp, and the policy guard checks the
-        # route. Only the app itself can put this marker into the ASGI scope.
-        if agent_call(request.scope) is not None:
-            return await call_next(request)
-
         # Agent endpoints that check their own credentials (a bearer token at
-        # /mcp, PKCE at /oauth/token) or publish discovery documents
-        if path in AGENT_PUBLIC_PATHS:
+        # /mcp, PKCE or a device code at /oauth/token), publish discovery
+        # documents, or serve the skill's files
+        if path in AGENT_PUBLIC_PATHS or (request.method, path) in AGENT_PUBLIC_REQUESTS:
+            return await call_next(request)
+        if request.method in ("GET", "HEAD") and (path == SKILL_PREFIX or path.startswith(SKILL_PREFIX + "/")):
             return await call_next(request)
 
         # Allow access to login page, static files, health check, info endpoint, and auth endpoints without authentication

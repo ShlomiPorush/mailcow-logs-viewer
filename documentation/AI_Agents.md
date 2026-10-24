@@ -1,6 +1,6 @@
 # AI agents
 
-An AI agent such as Claude Code or Codex can read what the app shows and, if you allow it, take action on the mail server. The agent connects over [MCP](https://modelcontextprotocol.io). It never gets a password or a key. Instead it opens a page in your browser, where you choose which areas it may view or take action in, and for how long.
+An AI agent such as Claude Code, Codex or T3 Code can read what the app shows and, if you allow it, take action on the mail server. It never gets a password or a key. It asks to connect, and you approve it on any device, including your phone. You choose which areas it may view or take action in, and for how long.
 
 ## Turn on agent access
 
@@ -12,28 +12,31 @@ Agent access is off by default. It needs three things:
 
 The switch and the address are in **Settings** > **Agents**. Until all three are set, every agent address answers 404, and **Settings** > **Agents** shows what is missing.
 
-## Connect an agent
+## Connect an agent that runs commands
 
-1. In a terminal on the computer where the agent runs, add the app with the command from **Settings** > **Agents**:
+This is the way for Claude Code, Codex, T3 Code and other agents that run commands.
+
+1. In **Settings** > **Agents**, on the **Coding agent** tab, copy the sentence and paste it to the agent. It looks like this:
 
 	```
-	claude mcp add --transport http mailcow https://logs.example.com/mcp
-	codex mcp add mailcow --url https://logs.example.com/mcp
+	Install the mailcow-logs skill into your personal skills folder as described at https://logs.example.com/agents/skill/, then connect to mailcow Logs Viewer.
 	```
 
-2. The agent opens a page in your browser. If it does not, run `claude mcp login mailcow` for Claude Code or `codex mcp login mailcow` for Codex.
-3. Sign in if the app asks you to.
-4. Check **Who is asking**. **Name from claude.ai** means the name came from that site. The page cannot verify the program asking to connect, so allow it only if you just started the connection yourself.
-5. Choose **View** or **Take action** for each area. **Take action** includes **View**. The agent may ask for areas, but **Take action** always starts off.
+2. The agent downloads the skill from the app, runs `mailcow-logs connect`, and shows you a link and a code such as `BCDF-GHJK`.
+3. Open the link on any device and sign in if the app asks you to. If you only have the code, open `https://logs.example.com/oauth/device` and type it.
+4. Check that the page shows the same code as the agent. The name on the page is what the agent calls itself, and the app cannot check it, so approve only a request you just started in your own agent.
+5. Choose **View** or **Take action** for each area. **Take action** includes **View**, and it always starts off.
 6. Choose how long, up to **Maximum access duration (days)** (`AGENT_ACCESS_MAX_DAYS`, 90 by default), and click **Allow**.
 
-The browser goes back to the agent, and the agent shows under **Allowed agents** in **Settings** > **Agents**.
+The agent finishes on its own. The skill keeps the connection on that computer, shared by every conversation of that agent, and renews it until the time you chose ends.
+
+## Connect an MCP app
+
+Apps that add MCP servers but do not run commands, such as Claude Desktop or Cursor, use the **MCP app** tab. Add the **MCP server URL** in the app, or run the Claude Code command shown there. A browser opens on the same computer, where you approve the request the same way.
 
 ## What an agent can do
 
-The agent sees up to four tools. `get_access` tells it what it may do. `list_endpoints` lists the app's API calls in its areas. `read_api` runs a call that only reads. `perform_action` runs a call that changes something, and appears only when the agent may take action in some area.
-
-The areas follow the menu: Dashboard & Status, Messages, Outbound, Quarantine, Security, Rspamd, DMARC & TLS, Domains, Mailboxes, Logs, and Settings. The consent page lists what each area allows. A call outside the agent's areas fails and tells the agent which permission is missing.
+The areas follow the menu: Dashboard & Status, Messages, Outbound, Quarantine, Security, Rspamd, DMARC & TLS, Domains, Mailboxes, Logs, and Settings. The approval page lists what each area allows. A call outside the agent's areas fails and tells the agent which permission is missing.
 
 An agent can never do the following, whatever you allow:
 
@@ -52,12 +55,12 @@ Much of what the app shows comes from strangers, such as subjects, sender names,
 
 ## Disconnect an agent
 
-**Allowed agents** in **Settings** > **Agents** lists each agent with its areas, who allowed it, when its access expires and when it was last used. **Activity** shows its recent calls. **Disconnect** stops new requests from the agent at once. **Disconnect all** does the same for every agent. To use a disconnected agent again, allow it again from the agent.
+**Allowed agents** in **Settings** > **Agents** lists each agent with how it connected (Skill or MCP), its areas, who allowed it, when its access expires and when it was last used. **Activity** shows its recent calls. **Disconnect** stops new requests from the agent at once. **Disconnect all** does the same for every agent and ends codes that are waiting for approval. To use a disconnected agent again, connect it again from the agent.
 
 Access also ends:
 
 - When it expires.
-- When the agent revokes its own access.
+- When the agent disconnects itself (`mailcow-logs disconnect`).
 - When a sign-in setting changes, such as the password or the OAuth2 provider. This happens whether you change it on the Settings page or in `.env`, and changing it back does not restore the access.
 
 Turning off **Enable agent access** stops every agent at once. So does a new **App URL**, because each agent's access works only with the address it was given for. Access that has not expired works again when you turn the switch back on or return to the old address.

@@ -18,6 +18,7 @@ from ..utils import format_datetime_for_api
 from . import live, pending, store
 from .context import agent_call
 from .oauth import client_redirect
+from .skill import sentence as skill_sentence
 from .scopes import AREAS, areas_of, grant_scopes, parse_scopes, requested_views
 
 logger = logging.getLogger(__name__)
@@ -83,7 +84,9 @@ def get_consent(request_id: str, request: Request):
             "declared_name": entry.declared_name,
             "publisher": entry.publisher,
             "kind": entry.client_kind,
-            "redirect_uri": entry.redirect_uri,
+            "redirect_uri": entry.redirect_uri or None,
+            # An agent that connects with a code: the person compares it with what the agent shows
+            "user_code": entry.user_code,
         },
         "areas": [{"id": a.id, "label": a.label, "view": a.view, "act": a.act} for a in AREAS],
         "preselected_views": list(requested_views(entry.requested)),
@@ -115,6 +118,10 @@ def answer_consent(request_id: str, answer: ConsentAnswer, request: Request, db:
     entry = pending.take(request_id, session_key)
     if entry is None:
         raise HTTPException(status_code=404, detail="This access request has expired or was already answered. Start a new request from your agent.")
+    if entry.device_id is not None and not answer.allow:
+        logger.info(f"Agent access: a person denied '{entry.declared_name}' (code {entry.user_code})")
+        store.answer_device_request(db, entry.device_id, approve=False, details=None)
+        return {"done": True}
     if not answer.allow:
         logger.info(f"Agent access: a person denied '{entry.declared_name}'")
         return {"redirect": client_redirect(entry.redirect_uri, entry.state, error="access_denied",
@@ -124,6 +131,18 @@ def answer_consent(request_id: str, answer: ConsentAnswer, request: Request, db:
     allowed_days = {p["days"] for p in periods()}
     days = answer.days if answer.days in allowed_days else min(DEFAULT_PERIOD_DAYS, settings.agent_access_max_days)
     name = " ".join(answer.name.split())[:100] or entry.declared_name
+    if entry.device_id is not None:
+        # The agent collects its tokens with its device code (store.redeem_device_code)
+        approved = store.answer_device_request(db, entry.device_id, approve=True, details={
+            "display_name": name,
+            "scopes": scopes,
+            "days": days,
+            "approved_by": _who(request),
+            "sign_in": entry.sign_in,
+        })
+        if not approved:
+            raise HTTPException(status_code=404, detail="This access request has expired or was already answered. Start a new request from your agent.")
+        return {"done": True}
     code = store.create_code(db, client_id=entry.client_id, redirect_uri=entry.redirect_uri,
                              code_challenge=entry.code_challenge, resource=entry.resource, details={
                                  "client_kind": entry.client_kind,
@@ -177,6 +196,8 @@ def list_agents(db: Session = Depends(get_db)):
         "enabled": settings.agent_access_enabled,
         "url": settings.agent_access_url,
         "mcp_url": live.resource() if problem is None else None,
+        # The sentence a person pastes to an agent that runs commands (skill.py)
+        "skill_sentence": skill_sentence(live.issuer()) if problem is None else None,
         "max_days": settings.agent_access_max_days,
         "areas": [{"id": a.id, "label": a.label} for a in AREAS],
         "agents": [_grant_row(g) for g in store.list_grants(db)],

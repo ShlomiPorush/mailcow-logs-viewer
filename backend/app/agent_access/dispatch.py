@@ -93,7 +93,8 @@ def decide(app, call: AgentCall, endpoint, method: str, path_params: Dict[str, A
     rule = rules.pop()
     call.path_template = paths[0]
     call.area = rule.area
-    if rule.kind != call.mode:
+    # MCP says read or act by the tool it used; a REST call (mode None) takes the route's own kind
+    if call.mode is not None and rule.kind != call.mode:
         if rule.kind == policy.WRITE:
             return "This call changes something: use perform_action."
         return "This call only reads: use read_api."
@@ -236,23 +237,34 @@ def _reports_error(data: Any) -> bool:
     return isinstance(data, dict) and (data.get("status") == "error" or data.get("success") is False)
 
 
-async def call_api(app, grant, mode: str, method: str, path: str, query: Optional[Dict[str, Any]],
-                   body: Any, client: Optional[Tuple[str, int]]) -> CallResult:
+async def call_api(app, grant, mode: Optional[str], method: str, path: str, query: Optional[Dict[str, Any]],
+                   body: Any, client: Optional[Tuple[str, int]], *, raw_body: Optional[bytes] = None,
+                   content_type: Optional[str] = None, query_string: Optional[bytes] = None,
+                   raw_path: Optional[bytes] = None, max_chars: int = MAX_RESULT_CHARS) -> CallResult:
+    """Run one /api call for an agent. MCP passes `query` and `body` as JSON
+    values; a REST call (rest.py, mode None) passes the request's own raw body,
+    content type, query string and raw path."""
     method = method.upper()
     body_bytes = b""
     headers: List[Tuple[bytes, bytes]] = [(b"accept", b"application/json, text/csv;q=0.9, */*;q=0.1"),
                                           (b"user-agent", b"mlv-agent")]
-    if body is not None:
+    if raw_body is not None:
+        body_bytes = raw_body
+        if content_type:
+            headers.append((b"content-type", content_type.encode("latin-1", "replace")))
+    elif body is not None:
         body_bytes = json.dumps(body).encode("utf-8")
-        if len(body_bytes) > MAX_BODY_BYTES:
-            return CallResult(413, "text/plain", "The body is too large (256 KB at most).", False, "error")
         headers.append((b"content-type", b"application/json"))
+    if len(body_bytes) > MAX_BODY_BYTES:
+        return CallResult(413, "text/plain", "The body is too large (256 KB at most).", False, "error")
     headers.append((b"content-length", str(len(body_bytes)).encode("ascii")))
     call = AgentCall(grant=grant, mode=mode)
     scope = {
         "type": "http", "asgi": {"version": "3.0", "spec_version": "2.3"}, "http_version": "1.1",
-        "method": method, "scheme": "http", "path": path, "raw_path": quote(path).encode("ascii"),
-        "root_path": "", "query_string": _query_string(query), "headers": headers,
+        "method": method, "scheme": "http", "path": path,
+        "raw_path": raw_path if raw_path is not None else quote(path).encode("ascii"),
+        "root_path": "", "query_string": query_string if query_string is not None else _query_string(query),
+        "headers": headers,
         "client": client or ("127.0.0.1", 0), "server": ("mlv-agent", 80),
         SCOPE_KEY: call,
     }
@@ -323,8 +335,8 @@ async def call_api(app, grant, mode: str, method: str, path: str, query: Optiona
                           path_template=call.path_template)
     text, data = _summarize(content_type, bytes(response["body"]))
     truncated = response["truncated"]
-    if len(text) > MAX_RESULT_CHARS:
-        text, truncated = text[:MAX_RESULT_CHARS], True
+    if len(text) > max_chars:
+        text, truncated = text[:max_chars], True
     if status >= 400 or _reports_error(data):
         outcome = "error"
     elif status == 202:

@@ -19,7 +19,7 @@ class PendingRequest:
     id: str
     session_key: str
     client_id: str
-    client_kind: str                  # 'dcr' | 'cimd'
+    client_kind: str                  # 'dcr' | 'cimd' | 'device'
     declared_name: str
     publisher: Optional[str]
     redirect_uri: str
@@ -29,6 +29,8 @@ class PendingRequest:
     requested: FrozenSet[str]
     sign_in: str                      # the sign-in fingerprint when the request was opened
     created: float
+    device_id: Optional[int] = None   # an agent that connects with a code: its request (store.py)
+    user_code: Optional[str] = None   # the code the person compares, as XXXX-XXXX
 
 
 _pending: Dict[str, PendingRequest] = {}

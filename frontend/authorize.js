@@ -157,7 +157,17 @@ function consentRender(data) {
     consentEl('consent-declared').textContent = client.declared_name || 'Unnamed agent';
     const identity = consentEl('consent-identity');
     identity.textContent = '';
-    if (client.publisher) {
+    const byCode = client.kind === 'device' && !!client.user_code;
+    consentEl('consent-code').classList.toggle('hidden', !byCode);
+    consentEl('consent-code-value').textContent = byCode ? client.user_code : '';
+    if (byCode) {
+        const tag = document.createElement('span');
+        tag.className = 'ui-tag ui-tag-warn';
+        tag.textContent = 'Name supplied by agent';
+        const note = document.createElement('span');
+        note.textContent = ' Approve only if you just started this in your own agent and it shows this same code.';
+        identity.append(tag, note);
+    } else if (client.publisher) {
         const tag = document.createElement('span');
         tag.className = 'ui-tag ui-tag-info';
         tag.textContent = `Name from ${client.publisher}`;
@@ -173,6 +183,7 @@ function consentRender(data) {
         identity.append(tag, note);
     }
     consentEl('consent-redirect').textContent = client.redirect_uri || '';
+    consentEl('consent-return').classList.toggle('hidden', !client.redirect_uri);
     consentEl('consent-name').value = client.declared_name || '';
     consentRenderAreas(data.areas || [], data.preselected_views || []);
     consentRenderPeriods(data.periods || [], data.default_days);
@@ -181,7 +192,9 @@ function consentRender(data) {
     consentEl('consent-loading').classList.add('hidden');
     consentEl('consent-form').classList.remove('hidden');
     consentShowActWarning();
-    consentEl('consent-allow').focus();
+    // The page opens at its top, where the person checks who asks and the code.
+    // Nothing takes focus: Allow is chosen on purpose, never by a stray Enter
+    window.scrollTo(0, 0);
 }
 
 async function consentAnswer(allow) {
@@ -227,7 +240,8 @@ async function consentAnswer(allow) {
         consentEl('consent-form').classList.add('hidden');
         consentEl('consent-done-title').textContent = allow ? 'Access allowed' : 'Access denied';
         consentEl('consent-done').classList.remove('hidden');
-        window.location.replace(body.redirect);
+        // An agent that connects with a code collects the answer itself: nothing to go back to here
+        if (body.redirect) window.location.replace(body.redirect);
     } catch (e) {
         consentEl('consent-form-error-text').textContent = 'Could not save your choice. Check your connection and try again.';
         error.classList.remove('hidden');

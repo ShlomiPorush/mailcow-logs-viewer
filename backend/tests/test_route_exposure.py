@@ -45,6 +45,13 @@ ALLOWED_ROOT_PATHS = {
     "/.well-known/oauth-protected-resource",
     "/.well-known/oauth-protected-resource/mcp",
     "/.well-known/oauth-authorization-server",
+    # Agents that run commands: POST /oauth/device asks for a code (public, the
+    # code is worth nothing until a signed-in person approves it); GET is the
+    # approval link and needs a session. The skill's files are public text with
+    # no secret, served only while agent access is live.
+    "/oauth/device",
+    "/agents/skill",
+    "/agents/skill/{name:path}",
 }
 
 
