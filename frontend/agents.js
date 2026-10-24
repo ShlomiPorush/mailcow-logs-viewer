@@ -129,7 +129,7 @@ function renderAgentsPanel() {
         <div class="ui-list-head">
             <div>
                 <h4 class="ui-md-h">Connected agents</h4>
-                <p class="ui-set-desc">Each agent may only do what the person who approved it chose, until its period ends. Up to ${Number(agentsData.max_days)} days.</p>
+                <p class="ui-set-desc">Each agent may do only what the person who approved it chose, until its period ends. The longest period is ${Number(agentsData.max_days)} days.</p>
             </div>
             ${connected.length ? `<button type="button" onclick="disconnectAllAgents()" class="ui-btn ui-btn-sm ui-btn-danger ui-head-actions">Disconnect all</button>` : ''}
         </div>

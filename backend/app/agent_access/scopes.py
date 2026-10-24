@@ -211,8 +211,8 @@ POLICY: Dict[Tuple[str, str], Rule] = {
          area="settings", kind=READ),
 }
 
-_SIGN_IN = "sign-in and sessions belong to people"
-_SETTINGS = "changing settings stays with people: it could turn off sign-in or agent limits, or send alerts elsewhere"
+_SIGN_IN = "sign-in and sessions are for people only"
+_SETTINGS = "only people change settings, because a change could turn off sign-in or agent limits, or send alerts elsewhere"
 
 EXCLUDED: Dict[Tuple[str, str], str] = {
     **{(m, p): _SIGN_IN for m, p in (

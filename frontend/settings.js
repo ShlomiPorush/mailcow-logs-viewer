@@ -280,8 +280,8 @@ var SETTINGS_FIELD_DESCRIPTIONS = {
     session_secret_key: 'Secret key for signing session cookies. REQUIRED if OAuth2 enabled. Generate: openssl rand -hex 32. Use a strong secret in production.',
     session_expiry_hours: 'Session expiration in hours. Default: 24.',
     session_max_entries: 'Maximum active login sessions per process. At capacity, new logins wait until a session expires or a user signs out. Existing sessions stay signed in. Default: 50.',
-    agent_access_enabled: 'Let AI agents such as Claude Code and Codex connect over MCP. Each agent opens a page in the browser where a signed-in person chooses what it may see and do. Needs sign-in and the address below. Default: off.',
-    agent_access_url: 'The address agents reach this app at, https and without a path, such as https://logs.example.com. Turning agent access on fills it in; change it if agents use another address. Agents connected through another address stop working.',
+    agent_access_enabled: 'Let AI agents such as Claude Code and Codex connect over MCP. Each agent opens a page in the browser where a signed-in person chooses what it may see and do. It needs sign-in and the address below. Default: off.',
+    agent_access_url: 'The address agents reach this app at, https and without a path, such as https://logs.example.com. Turning agent access on fills it in. Change it if agents use another address. Changing it stops the agents connected through the old address.',
     agent_access_max_days: 'The longest period a person can give an agent, from 1 to 365 days. Default: 90.',
     auth_max_failure_clients: 'Maximum client addresses tracked for failed Basic Auth attempts per process. At capacity, new addresses must wait before trying Basic Auth. Existing sessions remain usable. Default: 10000.',
     smtp_enabled: 'Enable SMTP for sending notifications (alerts, weekly summary).',
@@ -1012,7 +1012,7 @@ var SETTINGS_EDIT_TABS = [
         ]
     },
     {
-        id: 'agents', label: 'Agents', description: 'AI agents such as Claude Code and Codex can use this app over MCP. An agent never gets a password or a key: it opens a page in your browser, and a signed-in person chooses which areas it may view or act in and for how long. A change to the sign-in settings disconnects every agent.', groups: [
+        id: 'agents', label: 'Agents', description: 'AI agents such as Claude Code and Codex can use this app over MCP. An agent never gets a password or a key. Instead it opens a page in your browser, where a signed-in person chooses which areas it may view or act in, and for how long. A change to the sign-in settings disconnects every agent.', groups: [
             { label: 'Agent access', keys: ['agent_access_enabled', 'agent_access_url', 'agent_access_max_days'] }
         ]
     },

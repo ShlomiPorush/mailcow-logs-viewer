@@ -163,7 +163,7 @@ function consentRender(data) {
         tag.className = 'ui-tag ui-tag-info';
         tag.textContent = `Details published by ${client.publisher}`;
         const note = document.createElement('span');
-        note.textContent = ' The program on your computer is not verified. Continue only if you just started this connection.';
+        note.textContent = ' The app cannot check which program on your computer is asking. Continue only if you just started this connection.';
         identity.append(tag, note);
     } else {
         const tag = document.createElement('span');
@@ -214,7 +214,7 @@ async function consentAnswer(allow) {
             return;
         }
         if (!response.ok) {
-            const text = await consentErrorText(response, 'The answer could not be saved. Try again.');
+            const text = await consentErrorText(response, 'Could not save the answer. Try again.');
             if (response.status === 400) {
                 consentEl('consent-form-error-text').textContent = text;
                 error.classList.remove('hidden');

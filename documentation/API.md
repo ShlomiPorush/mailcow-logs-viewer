@@ -221,7 +221,7 @@ With Basic authentication off, the handler returns 400; when only OAuth2 is on, 
 
 ## Agent Access
 
-AI agents connect over MCP after a signed-in person approves them; see [AI agents](AI_Agents.md). While agent access is not live (switched off, sign-in off, or `AGENT_ACCESS_URL` missing or not valid), every route in this section except `/api/agents` returns 404. Every address below is built from `AGENT_ACCESS_URL`, never from request headers.
+AI agents connect over MCP after a signed-in person approves them; see [AI agents](AI_Agents.md). While agent access is not live (switched off, sign-in off, or `AGENT_ACCESS_URL` missing or not valid), every route in this section except `/api/agents` returns 404. The app builds every address below from `AGENT_ACCESS_URL`, never from request headers.
 
 ### MCP endpoint
 
@@ -230,7 +230,7 @@ AI agents connect over MCP after a signed-in person approves them; see [AI agent
 | POST | `/mcp` | Streamable HTTP, JSON answers only. Protocol revisions `2026-07-28`, `2025-11-25` and `2025-06-18`. Requires `Authorization: Bearer <access token>`; without a valid token it returns 401 with `WWW-Authenticate: Bearer resource_metadata="<AGENT_ACCESS_URL>/.well-known/oauth-protected-resource/mcp"`. Batches return 400. |
 | GET, DELETE | `/mcp` | 405 with `Allow: POST`. |
 
-The tools are `get_access`, `list_endpoints`, `read_api` and `perform_action`. `read_api` and `perform_action` run an `/api` call inside the app under the connection's areas. The areas, and the routes no agent can call, are listed in `backend/app/agent_access/scopes.py`.
+The tools are `get_access`, `list_endpoints`, `read_api` and `perform_action`. `read_api` and `perform_action` run an `/api` call inside the app under the connection's areas. `backend/app/agent_access/scopes.py` lists the areas and the routes no agent can call.
 
 ### OAuth 2.1 authorization server
 
@@ -240,20 +240,20 @@ The tools are `get_access`, `list_endpoints`, `read_api` and `perform_action`. `
 | GET | `/.well-known/oauth-authorization-server` | Authorization server metadata (RFC 8414). |
 | GET | `/oauth/authorize` | Needs a signed-in session. Checks the client and its redirect address, then opens the consent page `/oauth/consent`. Answers carry `state` and `iss` (RFC 9207). |
 | POST | `/oauth/token` | `authorization_code` with PKCE (`S256` only) and `refresh_token`. Form-encoded, public clients only (`token_endpoint_auth_method: none`). A refresh token works once; using a spent one ends the connection. |
-| POST | `/oauth/register` | Dynamic client registration (RFC 7591): up to 10 `redirect_uris` (`https`, `http` on a loopback host, or a private-use scheme). 10 registrations per hour per client address. |
+| POST | `/oauth/register` | Dynamic client registration (RFC 7591). Accepts up to 10 `redirect_uris` (`https`, `http` on a loopback host, or a private-use scheme). 10 registrations per hour per client address. |
 | POST | `/oauth/revoke` | Token revocation (RFC 7009). Revoking either token of a connection ends the connection. |
 
 A client may also use an `https` URL of its metadata document as `client_id` (Client ID Metadata Documents). The app fetches it only after the person signed in, from a public address, without redirects, and at most 64 KB.
 
-Access tokens last one hour. Refresh tokens last until the end of the period the person chose. Codes and tokens are stored only as SHA-256 hashes.
+Access tokens last one hour. Refresh tokens last until the end of the period the person chose. The app stores codes and tokens only as SHA-256 hashes.
 
 ### Managing agents
 
-For people only: a call an agent makes never reaches these routes.
+These routes are for people only. A call an agent makes never reaches them.
 
 | Method | Path | |
 | --- | --- | --- |
-| GET | `/api/agents` | `live`, `problem` (`off`, `no_sign_in`, `no_url` or `bad_url`), `mcp_url`, `max_days`, `areas` and `agents`: each with `name`, `declared_name`, `publisher`, `areas` (area: `view` or `act`), `approved_by`, `created_at`, `expires_at`, `last_used_at`, `state` (`connected`, `disconnected` or `expired`) and `end_reason`. |
+| GET | `/api/agents` | `live`, `problem` (`off`, `no_sign_in`, `no_url` or `bad_url`), `mcp_url`, `max_days`, `areas` and `agents`, each with `name`, `declared_name`, `publisher`, `areas` (area: `view` or `act`), `approved_by`, `created_at`, `expires_at`, `last_used_at`, `state` (`connected`, `disconnected` or `expired`) and `end_reason`. |
 | DELETE | `/api/agents/{grant_id}` | Disconnects one agent. 404 if it is not connected. |
 | DELETE | `/api/agents` | Disconnects every agent. Returns `{ "disconnected": <count> }`. |
 | GET | `/api/agents/{grant_id}/activity` | The last 50 entries: `at`, `event` (`grant_created`, `grant_revoked`, `call` or `denied`), `tool`, `method`, `path`, `http_status`, `outcome` and `detail`. |
