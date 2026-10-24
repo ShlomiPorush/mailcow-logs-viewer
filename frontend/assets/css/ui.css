@@ -2211,6 +2211,7 @@ html body .ui-main .ui-set-choice-opt > input[type="radio"] { accent-color: var(
 .ui-agent-tabpanel > .ui-set-desc { margin: 0; }
 .ui-set-channels .ui-agent-help + .ui-set-desc { margin-bottom: 12px; }
 .ui-set-channels > .ui-locked { margin: 12px 0; }
+.ui-agent-sections .ui-list-head + .ui-channels { margin-top: 12px; }
 .ui-agent-cmd { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .ui-agent-cmd code { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .ui-agent-areas { margin: 4px 0 2px; }

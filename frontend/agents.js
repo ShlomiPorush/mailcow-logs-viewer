@@ -71,9 +71,11 @@ function agentsWhen(iso) {
 function agentsIdentity(agent) {
     const declared = agent.declared_name && agent.declared_name !== agent.name
         ? ` <span class="ui-muted">(Agent name: ${escapeHtml(agent.declared_name)})</span>` : '';
+    // Where an MCP client's details came from (its metadata document); the approval
+    // page already said whose word the name is, so nothing more here
     const who = agent.publisher
-        ? uiTag(`Name from ${agent.publisher}`, 'info')
-        : uiTag('Name supplied by agent', '');
+        ? `<span title="${escapeHtml(`Details from ${agent.publisher}`)}">${uiTag(agent.publisher, 'info')}</span>`
+        : '';
     return `${who}${declared}`;
 }
 
