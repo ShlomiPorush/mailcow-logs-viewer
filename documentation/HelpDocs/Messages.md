@@ -19,7 +19,7 @@ Messages appear newest first by first-seen time, in batches of 50. Each row repr
 
 **Deliveries** counts all deliveries of that message, including forwarding, multiple recipients and quarantine releases. **SPAM** means Rspamd classed the message as spam. Without a final outcome, **Linked** means its logs are linked; **Pending** means the app still waits for Postfix logs.
 
-Search, address, outcome and direction filters, or loading more messages, stop automatic refreshes. The time filter stays in place during refreshes. Pick a time preset again to include messages newer than when you first selected it.
+The list updates by itself, with every filter. At the top of the list, new messages appear there. Further down, the list stays where it is and **N new messages** appears at the top; select it to go to them. Oldest first, new messages go at the end of the list, and the button appears there. A time preset such as **Today** always runs up to now. A custom range stays as you chose it.
 
 ## Message details
 

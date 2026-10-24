@@ -5,8 +5,8 @@ FIXED: All timestamps now sent with proper UTC timezone ('Z' suffix)
 """
 import logging
 from fastapi import APIRouter, Depends, Query, HTTPException
-from sqlalchemy.orm import Session
-from sqlalchemy import or_, and_, desc, func, select, tuple_, literal
+from sqlalchemy.orm import Session, aliased
+from sqlalchemy import or_, and_, desc, exists, func, select, tuple_, literal
 from datetime import datetime, timedelta, timezone
 import re
 from typing import List, Optional
@@ -345,6 +345,51 @@ def get_message_facets(
         raise internal_error(e)
 
 
+def messages_watermark(db) -> int:
+    """The newest delivery stored: a list read now holds nothing stored after it."""
+    return db.query(func.max(MessageCorrelation.id)).scalar() or 0
+
+
+@router.get("/messages/new")
+def count_new_messages(
+    after_id: int = Query(..., ge=0, description="The watermark of the list shown"),
+    search: Optional[str] = Query(None),
+    sender: Optional[str] = Query(None),
+    recipient: Optional[str] = Query(None),
+    direction: Optional[str] = Query(None),
+    status: Optional[str] = Query(None),
+    user: Optional[str] = Query(None),
+    ip: Optional[str] = Query(None),
+    start_date: Optional[RangeStart] = Query(None),
+    end_date: Optional[RangeEnd] = Query(None),
+    db: Session = Depends(get_db)
+):
+    """
+    How many messages matching the filters came after a list was read: those
+    with a matching delivery stored after its watermark and no delivery stored
+    before it. A message that was there already, whose status changed or which
+    got another delivery, is not new. Returns the count and the watermark now.
+    """
+    try:
+        query = _filtered_messages_query(db, search, sender, recipient, direction, status, user, ip, start_date, end_date)
+        fresh = query.filter(MessageCorrelation.id > after_id).with_entities(
+            MessageCorrelation.message_id.label("message_id"),
+            message_group_key().label("group_key"),
+        ).subquery()
+        # A delivery of the same message (by Message-ID) stored by the watermark
+        earlier = aliased(MessageCorrelation)
+        was_there = exists().where(
+            earlier.id <= after_id,
+            func.nullif(fresh.c.message_id, "").isnot(None),
+            earlier.message_id == fresh.c.message_id,
+        )
+        count = db.query(func.count(func.distinct(fresh.c.group_key))).select_from(fresh).filter(~was_there).scalar() or 0
+        return {"count": count, "watermark": messages_watermark(db)}
+    except Exception as e:
+        logger.error(f"Error counting new messages: {e}")
+        raise internal_error(e)
+
+
 @router.get("/messages")
 def get_unified_messages(
     page: int = Query(1, ge=1, description="Page number"),
@@ -360,6 +405,7 @@ def get_unified_messages(
     end_date: Optional[RangeEnd] = Query(None, description="End date"),
     order: str = Query("desc", pattern="^(asc|desc)$", description="By time first seen: desc newest first, asc oldest first"),
     cursor: Optional[str] = Query(None, max_length=80, description="The next_cursor of the page before: the messages after it, instead of a page number"),
+    upto_id: Optional[int] = Query(None, ge=0, description="The watermark of the list's first page: the next pages hold only what it held"),
     db: Session = Depends(get_db)
 ):
     """
@@ -376,7 +422,13 @@ def get_unified_messages(
         except ValueError:
             raise HTTPException(status_code=422, detail="Invalid cursor")
     try:
+        # The list holds what was stored up to its watermark, and nothing after it: what
+        # comes later is new mail (GET /api/messages/new), never shown and counted twice.
+        # Its next pages pass the first page's watermark, so paging adds no new mail either
+        # A direct call (tests) leaves the Query default, which is no watermark
+        watermark = upto_id if isinstance(upto_id, int) else messages_watermark(db)
         query = _filtered_messages_query(db, search, sender, recipient, direction, status, user, ip, start_date, end_date)
+        query = query.filter(MessageCorrelation.id <= watermark)
 
         # One row per message, not one per delivery leg (issue #36). The filters
         # above select legs; the legs are then grouped by Message-ID and the
@@ -474,6 +526,8 @@ def get_unified_messages(
             "data": result_messages,
             # Where the next page starts, or null at the end
             "next_cursor": f"{found[-1][1].isoformat()}|{found[-1][0].id}" if more and found else None,
+            # What GET /api/messages/new counts from
+            "watermark": watermark,
         }
     except Exception as e:
         logger.error(f"Error fetching unified messages: {e}")

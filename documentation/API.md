@@ -608,6 +608,7 @@ Sets one limit on many mailboxes and domains (**Apply to filtered** on the page)
 | `ip` | string or null | Unset | Substring of the source IP (Rspamd) |
 | `start_date` | datetime or null | Unset | Earliest `first_seen` (ISO 8601) |
 | `end_date` | datetime or null | Unset | Latest `first_seen` (ISO 8601) |
+| `upto_id` | integer or null | Unset | Only legs stored up to this `watermark`, for the next pages of a list |
 
 Messages with their Postfix and Rspamd data combined.
 
@@ -628,6 +629,8 @@ Messages with their Postfix and Rspamd data combined.
 ```
 
 **One row per message:** a message delivered more than once (a forward, a BCC copy, a quarantine release) has one correlation per delivery leg, but the list returns one row for it. Rows are grouped by Message-ID; a correlation without one is grouped by its own `correlation_key` and never merged. The filters apply to the legs first, and the earliest matching leg represents the message, so a search answers with the leg that matched. `deliveries` is the number of legs the message has in the database, including legs the filters did not match. `total` and `pages` count messages, not legs. The legs are listed in `related_deliveries` of the details endpoint.
+
+**`watermark`:** the id of the newest delivery leg stored when the list was read; the list holds nothing stored after it. Pass it as `upto_id` to read the next pages of the same list, and as `after_id` to `GET /api/messages/new` to count what came after.
 
 **Dovecot fields:** `dovecot_status` is the outcome of the final LMTP hop: `stored`, `discarded`, `rejected`, `forwarded`, `failed`, or null without matching Dovecot information (such as mail delivered outside this server). `dovecot_mailbox` is the folder it was filed into. A message dropped by a Sieve `discard` rule gets `final_status` `discarded`, not `delivered`.
 
@@ -671,6 +674,17 @@ The top level also has the list fields (`queue_id`, `sender`, `recipient`, `subj
 | `since` | array of strings | `[]` | Time ranges to count, as `name:ISO-start` (for example `today:2026-09-27T00:00:00Z`). Repeat the parameter for more ranges; up to 8 are read. `name` is 1 to 16 lower-case letters or digits; invalid entries are skipped. |
 
 Filter counts for the message search: `status` (`delivered`, `deferred`, `bounced`, `rejected`, `spam`, `discarded`) and `direction` (`inbound`, `outbound`, `internal`), each with an `all` count. Each count applies the other filters but not its own. With `since`, `time` holds an `all` count and one count per valid range; these ignore `start_date` and `end_date`. Counts are messages, not legs.
+
+---
+
+### GET /api/messages/new
+
+| Parameter | Type | Default | Constraints and purpose |
+| --- | --- | --- | --- |
+| `after_id` | integer | Required | The `watermark` of a `GET /api/messages` answer, at least 0 |
+| `search`, `sender`, `recipient`, `direction`, `status`, `user`, `ip`, `start_date`, `end_date` | as in `GET /api/messages` | Unset | Same filters as the message list |
+
+How many messages matching the filters came after the list was read: `{ "count": 3, "watermark": 51234 }`. A message is new when a leg matching the filters was stored after `after_id` and no leg with its Message-ID was stored before. A status change or another delivery of a message already there is not new. `watermark` is the newest leg now.
 
 ---
 
