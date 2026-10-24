@@ -15,12 +15,12 @@ const agentsOpenActivity = new Set();
 function agentsProblemText(problem) {
     const form = !!document.querySelector('[data-tab-extra="agents"]');
     switch (problem) {
-        case 'off': return form ? '' : 'Agent connections are off. Set <code>AGENT_ACCESS_ENABLED=true</code> in <code>.env</code>.';
-        case 'no_sign_in': return 'Agents need sign-in, so a person can allow each one. Turn on Basic Auth or OAuth2 in Settings → Authentication.';
+        case 'off': return form ? '' : 'Agent access is off. Set <code>AGENT_ACCESS_ENABLED=true</code> in <code>.env</code>.';
+        case 'no_sign_in': return form ? '' : 'Agent access needs sign-in. Turn on Basic Auth or OAuth2 in Settings → Authentication.';
         case 'no_url': return form ? 'Fill in <strong>App URL</strong> above.'
             : 'The app URL is missing. Set <code>AGENT_ACCESS_URL</code> in <code>.env</code> to the address agents use to reach this app.';
         case 'bad_url': return 'Use an HTTPS app URL without a path, such as <code>https://logs.example.com</code>. HTTP works only on <code>localhost</code>, for a local test.';
-        default: return 'Agent connections are unavailable. Check Settings → Agents → Access.';
+        default: return 'Agent access is not available. Check Settings → Agents.';
     }
 }
 
@@ -108,13 +108,13 @@ function agentsConnectHelp() {
             <div class="ui-agent-cmd"><code class="ui-mono">${escapeHtml(text)}</code>
             <button type="button" class="ui-btn ui-btn-sm" onclick="copyToClipboard(${escapeHtml(JSON.stringify(text))}, event)">Copy</button></div>
         </div>`;
-    return `<p class="ui-set-desc">Run the command for your agent in a terminal on its computer, then allow access in the browser page it opens.</p>
+    return `<p class="ui-set-desc">To connect an agent, run its command in a terminal on the computer where it runs, then approve access in the browser.</p>
     <div class="ui-md-ids ui-set-facts ui-agent-help">
         ${line('MCP server URL', url)}
         ${line('Claude Code', claude)}
         ${line('Codex', codex)}
     </div>
-    <p class="ui-set-desc">If the browser does not open, run <code>claude mcp login mailcow</code> for Claude Code or <code>codex mcp login mailcow</code> for Codex.</p>`;
+    <p class="ui-set-desc">If the browser does not open, run <code>claude mcp login mailcow</code> (Claude Code) or <code>codex mcp login mailcow</code> (Codex).</p>`;
 }
 
 function renderAgentsPanel() {

@@ -241,6 +241,25 @@ def _validate_bounce_actions(allowed: Dict[str, Any]) -> None:
             raise HTTPException(status_code=400, detail=f"{key} accepts only: {', '.join(known)}.")
 
 
+def _validate_agent_access(allowed: Dict[str, Any]) -> None:
+    """Refuse a save that turns agent access on, or sign-in off under it: a
+    person must sign in to approve each agent. A state that was already like
+    this (set in .env) never blocks saving the other settings."""
+    locked = get_env_locked_keys()
+
+    def on(key: str, after: bool) -> bool:
+        value = allowed[key] if after and key in allowed and key not in locked else getattr(settings, key)
+        return value is True or str(value).strip().lower() in ("true", "1", "yes", "on")
+
+    def agents_without_sign_in(after: bool) -> bool:
+        sign_in = on("auth_enabled", after) or on("basic_auth_enabled", after) or on("oauth2_enabled", after)
+        return on("agent_access_enabled", after) and not sign_in
+
+    if agents_without_sign_in(True) and not agents_without_sign_in(False):
+        raise HTTPException(status_code=400, detail=(
+            "Agent access needs Basic Auth or OAuth2 sign-in. Turn on sign-in, or turn off agent access."))
+
+
 def _validate_display_formats(allowed: Dict[str, Any]) -> None:
     """Refuse a date or time format nobody knows. The value in effect sent back
     as it is never blocks saving the other settings (the page posts every key)."""
@@ -808,6 +827,8 @@ def get_editable_settings(db: Session = Depends(get_db)):
         "configuration": _effective_config_for_editable(settings),
         "default_config": _get_field_defaults(),
         "env_locked_keys": env_locked,
+        # The old AUTH_ENABLED turns Basic Auth on without a field in the form
+        "legacy_auth_enabled": bool(settings.auth_enabled),
     }
 
 
@@ -835,6 +856,7 @@ def update_settings(body: Dict[str, Any], request: Request = None, response: Res
     _validate_time_zone(allowed, db)
     _validate_display_formats(allowed)
     _validate_bounce_actions(allowed)
+    _validate_agent_access(allowed)
     # For sensitive keys, mask placeholder means "do not change" - omit from payload
     # Empty string means "clear this value" and should be kept
     for sk in _SENSITIVE_SETTING_KEYS:

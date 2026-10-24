@@ -2,13 +2,13 @@
 
 An AI agent such as Claude Code or Codex can read what the app shows and, if you allow it, take action on the mail server. The agent connects over [MCP](https://modelcontextprotocol.io). It never gets a password or a key. Instead it opens a page in your browser, where you choose which areas it may view or take action in, and for how long.
 
-## Turn on agent connections
+## Turn on agent access
 
-Agent connections are off by default. They need three things:
+Agent access is off by default. It needs three things:
 
-- Sign-in is on: Basic Auth, OAuth2, or both. See [Sign-in configuration](OAuth2_Configuration.md).
-- **App URL** (`AGENT_ACCESS_URL`) is the address agents reach the app at, such as `https://logs.example.com`. It must be HTTPS and have no path. An HTTP address works only on `localhost` or `127.0.0.1`, for a local test. If the field is empty when you turn on **Allow agents to connect** in Settings, Settings fills it in. It takes the address from the **OAuth2 Redirect URI**, or else from the address of the page you have open. Change it if agents reach the app at another address.
-- **Allow agents to connect** (`AGENT_ACCESS_ENABLED`) is on.
+- Sign-in is on: Basic Auth, OAuth2, or both. See [Sign-in configuration](OAuth2_Configuration.md). Without sign-in, the switch is locked and agents cannot connect.
+- **App URL** (`AGENT_ACCESS_URL`) is the address agents reach the app at, such as `https://logs.example.com`. It must be HTTPS and have no path. An HTTP address works only on `localhost` or `127.0.0.1`, for a local test. If the field is empty when you turn on **Enable agent access** in Settings, Settings fills it in. It takes the address from the **OAuth2 Redirect URI**, or else from the address of the page you have open. Change it if agents reach the app at another address.
+- **Enable agent access** (`AGENT_ACCESS_ENABLED`) is on.
 
 The switch and the address are in **Settings** > **Agents**. Until all three are set, every agent address answers 404, and **Settings** > **Agents** shows what is missing.
 
@@ -37,7 +37,7 @@ The areas follow the menu: Dashboard & Status, Messages, Outbound, Quarantine, S
 
 An agent can never do the following, whatever you allow:
 
-- Change settings, including sign-in and agent connections.
+- Change settings, including sign-in and agent access.
 - Run jobs from **Settings** > **Background Jobs**.
 - Upload files, such as DMARC reports or a suppression list.
 - Add, change, or test notification destinations.
@@ -60,4 +60,4 @@ Access also ends:
 - When the agent revokes its own access.
 - When a sign-in setting changes, such as the password or the OAuth2 provider. This happens whether you change it on the Settings page or in `.env`, and changing it back does not restore the access.
 
-Turning off **Allow agents to connect** stops every agent at once. So does a new **App URL**, because each agent's access works only with the address it was given for. Access that has not expired works again when you turn the switch back on or return to the old address.
+Turning off **Enable agent access** stops every agent at once. So does a new **App URL**, because each agent's access works only with the address it was given for. Access that has not expired works again when you turn the switch back on or return to the old address.

@@ -30,7 +30,7 @@ const SETTINGS_LABEL_OVERRIDES = {
     suppression_base_expiry_days: 'Base block length (days)',
     suppression_max_expiry_days: 'Maximum block length (days)',
     suppression_whitelist_domains: 'Exclude these domains',
-    agent_access_enabled: 'Allow agents to connect',
+    agent_access_enabled: 'Enable agent access',
     agent_access_url: 'App URL',
     agent_access_max_days: 'Maximum access duration (days)'
 };
@@ -280,9 +280,9 @@ var SETTINGS_FIELD_DESCRIPTIONS = {
     session_secret_key: 'Secret key for signing session cookies. REQUIRED if OAuth2 enabled. Generate: openssl rand -hex 32. Use a strong secret in production.',
     session_expiry_hours: 'Session expiration in hours. Default: 24.',
     session_max_entries: 'Maximum active login sessions per process. At capacity, new logins wait until a session expires or a user signs out. Existing sessions stay signed in. Default: 50.',
-    agent_access_enabled: 'Requires Basic Auth or OAuth2 sign-in. Changing sign-in settings disconnects every agent. Default: off.',
-    agent_access_url: 'The app\'s HTTPS address, without /mcp or another path. Changing it stops every agent until you change it back. Default: empty.',
-    agent_access_max_days: 'Applies to new access only. From 1 to 365. Default: 90.',
+    agent_access_enabled: 'Changing sign-in settings disconnects every agent. Default: off.',
+    agent_access_url: 'The address agents use to reach this app, such as https://logs.example.com. Changing it disconnects every agent until you change it back. Default: empty.',
+    agent_access_max_days: 'The longest access you can give an agent, from 1 to 365 days. Applies to new access only. Default: 90.',
     auth_max_failure_clients: 'Maximum client addresses tracked for failed Basic Auth attempts per process. At capacity, new addresses must wait before trying Basic Auth. Existing sessions remain usable. Default: 10000.',
     smtp_enabled: 'Enable SMTP for sending notifications (alerts, weekly summary).',
     smtp_host: 'SMTP server hostname.',
@@ -891,6 +891,39 @@ function settingsSuggestAgentUrl(root, fill) {
     }
 }
 
+// Agent access needs sign-in, so a person can approve each agent: with Basic
+// Auth and OAuth2 both off the switch is locked and says where to turn sign-in
+// on. Turning the last one off in this form also turns agent access off
+function settingsLockAgentAccess(root, signInChanged, signInElsewhere) {
+    const toggle = root && root.querySelector('#edit-agent_access_enabled');
+    const row = toggle && toggle.closest('.ui-set-bool');
+    if (!row) return;
+    const signIn = !!signInElsewhere || ['basic_auth_enabled', 'oauth2_enabled'].some(key => {
+        const box = root.querySelector('#edit-' + key);
+        return !!box && box.checked;
+    });
+    if (!signIn && signInChanged && toggle.checked && !toggle.disabled) {
+        toggle.checked = false;
+        toggle.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+    row.inert = !signIn;
+    // Only the switch is dimmed: the note says what to do
+    (row.querySelector('.ui-set-bool-main') || row).classList.toggle('is-off', !signIn);
+    let note = row.querySelector('[data-agent-lock]');
+    if (signIn) {
+        if (note) note.remove();
+        return;
+    }
+    if (!note) {
+        note = document.createElement('small');
+        note.className = 'ui-text-warn';
+        note.setAttribute('role', 'status');
+        note.dataset.agentLock = '';
+        note.textContent = 'Turn on Basic Auth or OAuth2 in Settings → Authentication first.';
+        row.appendChild(note);
+    }
+}
+
 // The IANA time zones this browser knows, UTC first; none where the browser
 // cannot list them (the field is then a text box)
 function settingsTimeZoneNames() {
@@ -1012,7 +1045,7 @@ var SETTINGS_EDIT_TABS = [
         ]
     },
     {
-        id: 'agents', label: 'Agents', description: 'Which AI agents, such as Claude Code and Codex, can use this app, what they can do, and when their access ends.', groups: [
+        id: 'agents', label: 'Agents', description: 'Allow AI agents, such as Claude Code and Codex, to access and use this app.', groups: [
             { label: 'Access', keys: ['agent_access_enabled', 'agent_access_url', 'agent_access_max_days'] }
         ]
     },
@@ -1506,6 +1539,7 @@ async function loadSettings() {
                 if (editableData.default_config) data.default_config = editableData.default_config;
                 if (editableData.settings_migrated !== undefined) data.settings_migrated = editableData.settings_migrated;
                 if (editableData.env_locked_keys) data.env_locked_keys = editableData.env_locked_keys;
+                data.legacy_auth_enabled = editableData.legacy_auth_enabled === true;
             }
         } catch (e) {
             console.warn('Could not load editable settings:', e);
@@ -2056,8 +2090,10 @@ function renderSettings(content, data) {
             settingsShowNeeds(content);
             settingsApplySync(false);
             settingsSuggestAgentUrl(content, true);
+            settingsLockAgentAccess(content, false, data.legacy_auth_enabled);
             form.addEventListener('change', event => {
                 if (event.target && event.target.id === 'edit-suppression_rspamd_sync') settingsApplySync(true);
+                if (event.target && ['edit-basic_auth_enabled', 'edit-oauth2_enabled'].includes(event.target.id)) settingsLockAgentAccess(content, true, data.legacy_auth_enabled);
                 settingsSuggestAgentUrl(content, !!event.target && event.target.id === 'edit-agent_access_enabled');
                 settingsShowNeeds(content);
             });

@@ -73,7 +73,7 @@ def _who(request: Request) -> Optional[str]:
 @router.get("/consent/{request_id}", dependencies=[Depends(operator)])
 def get_consent(request_id: str, request: Request):
     if not live.is_live():
-        raise HTTPException(status_code=404, detail="Agent connections are unavailable. Check Settings → Agents → Access.")
+        raise HTTPException(status_code=404, detail="Agent access is not available. Check Settings → Agents.")
     entry = pending.get(request_id, session_key_from_request(request))
     if entry is None:
         raise HTTPException(status_code=404, detail="This access request has expired or was already answered. Start a new request from your agent.")
@@ -106,7 +106,7 @@ class ConsentAnswer(BaseModel):
 def answer_consent(request_id: str, answer: ConsentAnswer, request: Request, db: Session = Depends(get_db)):
     """Allow or deny; the answer is the address to send the browser back to the agent."""
     if not live.is_live():
-        raise HTTPException(status_code=404, detail="Agent connections are unavailable. Check Settings → Agents → Access.")
+        raise HTTPException(status_code=404, detail="Agent access is not available. Check Settings → Agents.")
     session_key = session_key_from_request(request)
     scopes = grant_scopes(answer.views, answer.acts)
     if answer.allow and not scopes and pending.get(request_id, session_key) is not None:

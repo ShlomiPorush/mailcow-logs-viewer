@@ -196,6 +196,45 @@ def test_sign_in_keys_match_the_session_bound_settings():
     assert tuple(store.SIGN_IN_KEYS) == tuple(_SESSION_BOUND_SETTING_KEYS)
 
 
+def _sign_in_state(monkeypatch, *, agents=False, basic=False, oauth=False, legacy=False, locked=()):
+    from app.routers import settings as settings_router
+    for key, value in (("agent_access_enabled", agents), ("basic_auth_enabled", basic),
+                       ("oauth2_enabled", oauth), ("auth_enabled", legacy)):
+        monkeypatch.setattr(settings._inner, key, value)
+    monkeypatch.setattr(settings_router, "get_env_locked_keys", lambda: set(locked))
+    return settings_router._validate_agent_access
+
+
+@pytest.mark.parametrize("state, payload", [
+    ({}, {"agent_access_enabled": True}),
+    ({}, {"agent_access_enabled": "true", "basic_auth_enabled": False}),
+    ({"agents": True, "basic": True}, {"basic_auth_enabled": False}),
+    ({"agents": True, "oauth": True}, {"oauth2_enabled": False, "agent_access_enabled": True}),
+])
+def test_agent_access_cannot_be_on_without_sign_in(monkeypatch, state, payload):
+    from fastapi import HTTPException
+    validate = _sign_in_state(monkeypatch, **state)
+    with pytest.raises(HTTPException) as refused:
+        validate(dict(payload))
+    assert refused.value.status_code == 400
+    assert "Basic Auth or OAuth2" in refused.value.detail
+
+
+@pytest.mark.parametrize("state, payload", [
+    ({}, {"agent_access_enabled": True, "basic_auth_enabled": True}),
+    ({}, {"agent_access_enabled": True, "oauth2_enabled": True}),
+    ({"legacy": True}, {"agent_access_enabled": True}),
+    ({"agents": True, "basic": True}, {"basic_auth_enabled": False, "agent_access_enabled": False}),
+    ({"agents": True, "basic": True}, {"basic_auth_enabled": False, "oauth2_enabled": True}),
+    # Already like this (from .env): saving the other settings still works
+    ({"agents": True}, {"agent_access_enabled": True, "app_title": "Logs"}),
+    # A key set in .env is not changed by the form
+    ({"locked": ("agent_access_enabled",)}, {"agent_access_enabled": True}),
+])
+def test_agent_access_saves_that_keep_sign_in(monkeypatch, state, payload):
+    _sign_in_state(monkeypatch, **state)(dict(payload))
+
+
 def test_act_never_starts_ticked_and_act_includes_view():
     asked = scopes.parse_scopes("security:write messages:read bogus")
     assert asked == frozenset({"security:write", "messages:read"})

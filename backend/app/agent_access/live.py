@@ -63,11 +63,14 @@ def normalize_base_url(value: str) -> Optional[str]:
 
 
 def problem() -> Optional[str]:
-    """None when agents are served, else the first reason they are not."""
-    if not settings.agent_access_enabled:
-        return OFF
+    """None when agents are served, else the first reason they are not.
+
+    Missing sign-in comes first: without it the switch cannot be turned on.
+    """
     if not settings.is_authentication_enabled:
         return NO_SIGN_IN
+    if not settings.agent_access_enabled:
+        return OFF
     if not (settings.agent_access_url or "").strip():
         return NO_URL
     if normalize_base_url(settings.agent_access_url) is None:
