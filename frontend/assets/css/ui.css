@@ -2214,7 +2214,9 @@ html body .ui-main .ui-set-choice-opt > input[type="radio"] { accent-color: var(
 .ui-agent-sections .ui-list-head + .ui-channels { margin-top: 12px; }
 .ui-agent-cmd { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .ui-agent-cmd code { flex: 1; min-width: 0; overflow-wrap: anywhere; }
-.ui-agent-areas { margin: 4px 0 2px; }
+/* The agent's name, where its details came from, and its areas on one line (wraps on a phone) */
+.ui-agent-title { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; margin-bottom: 2px; }
+.ui-agent-edit .ui-consent-areas { margin: 4px 0 0; }
 .ui-agent-activity { flex-basis: 100%; padding-top: 8px; border-top: 1px solid var(--ui-line); }
 .ui-agent-log { display: grid; gap: 6px; margin: 0 0 6px; padding: 0; list-style: none; font-size: var(--ui-fs-sm); }
 .ui-agent-log li { display: grid; grid-template-columns: 150px 1fr; gap: 10px; align-items: baseline; }

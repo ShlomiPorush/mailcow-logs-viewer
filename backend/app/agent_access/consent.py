@@ -200,9 +200,29 @@ def list_agents(db: Session = Depends(get_db)):
         "skill_sentence": skill_sentence(live.issuer()) if problem is None else None,
         "mcp_sentence": mcp_sentence(live.issuer()) if problem is None else None,
         "max_days": settings.agent_access_max_days,
-        "areas": [{"id": a.id, "label": a.label} for a in AREAS],
+        "areas": [{"id": a.id, "label": a.label, "view": a.view, "act": a.act} for a in AREAS],
+        "periods": periods(),
         "agents": [_grant_row(g) for g in store.list_grants(db)],
     }
+
+
+class AgentChange(BaseModel):
+    views: List[str] = Field(default_factory=list, max_length=50)
+    acts: List[str] = Field(default_factory=list, max_length=50)
+    days: Optional[float] = None        # a new end, counted from now; None keeps the end
+
+
+@router.put("/{grant_id}", dependencies=[Depends(operator)])
+def change_agent(grant_id: int, change: AgentChange, request: Request, db: Session = Depends(get_db)):
+    """Change what a connected agent may do, and optionally when its access ends."""
+    scopes = grant_scopes(change.views, change.acts)
+    if not scopes:
+        raise HTTPException(status_code=400, detail="Select View for at least one area. To end its access, use Disconnect.")
+    if change.days is not None and change.days not in {p["days"] for p in periods()}:
+        raise HTTPException(status_code=400, detail="Choose one of the offered periods.")
+    if not store.change_grant(db, grant_id, scopes=scopes, days=change.days, changed_by=_who(request)):
+        raise HTTPException(status_code=404, detail="This agent is not connected.")
+    return {"changed": 1}
 
 
 @router.delete("/{grant_id}", dependencies=[Depends(operator)])

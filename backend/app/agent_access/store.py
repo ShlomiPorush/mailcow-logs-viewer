@@ -275,6 +275,33 @@ def revoke_grant(db: Session, grant_id: int, reason: str = "disconnected") -> bo
     return changed
 
 
+def change_grant(db: Session, grant_id: int, *, scopes: str, days: Optional[float], changed_by: Optional[str]) -> bool:
+    """A person changes what a connected agent may do, and optionally sets a new end
+    counted from now. Tokens are checked against the grant on every call, so the
+    change applies from the agent's next call; its refresh token follows a new end."""
+    grant = db.query(AgentGrant).filter(AgentGrant.id == grant_id).with_for_update().first()
+    if not _grant_active(grant):
+        db.rollback()
+        return False
+    before, before_end = grant.scopes, grant.expires_at
+    grant.scopes = scopes
+    if days is not None:
+        grant.expires_at = now() + timedelta(days=float(days))
+        db.query(AgentToken).filter(AgentToken.grant_id == grant.id, AgentToken.kind == "refresh",
+                                    AgentToken.rotated_at.is_(None)) \
+            .update({"expires_at": grant.expires_at}, synchronize_session=False)
+        db.query(AgentToken).filter(AgentToken.grant_id == grant.id, AgentToken.kind == "access",
+                                    AgentToken.expires_at > grant.expires_at) \
+            .update({"expires_at": grant.expires_at}, synchronize_session=False)
+    end = grant.expires_at.isoformat(timespec="minutes") + "Z"
+    detail = f"{before} -> {scopes}" + (f"; ends {end}" if grant.expires_at != before_end else "")
+    audit(db, "grant_changed", grant_id=grant.id, agent_name=grant.display_name, outcome="ok",
+          detail=(f"by {changed_by}: " if changed_by else "") + detail, commit=False)
+    db.commit()
+    logger.info(f"Agent '{grant.display_name}' changed by {changed_by or 'a person'}: {detail}")
+    return True
+
+
 def revoke_all(db: Session, reason: str = "disconnected") -> int:
     # The sign-in fingerprint row, exclusively: a code being collected or
     # exchanged holds it shared, so it finishes before this (and is then

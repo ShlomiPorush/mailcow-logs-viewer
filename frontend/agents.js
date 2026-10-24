@@ -89,13 +89,13 @@ function agentsRow(agent) {
         <div class="ui-channel ui-agent${connected ? '' : ' is-off'}">
             <svg class="ui-channel-icon" width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="8" width="14" height="11" rx="3" stroke-width="2"></rect><path stroke-linecap="round" stroke-width="2" d="M12 4v4M9 13h.01M15 13h.01M2 13v2M22 13v2"></path></svg>
             <div class="ui-q-who">
-                <div><b>${escapeHtml(agent.name)}</b> ${agentsIdentity(agent)}</div>
-                <div class="ui-chip-row ui-agent-areas">${agentsAreaChips(agent.areas)}</div>
+                <div class="ui-agent-title"><b>${escapeHtml(agent.name)}</b> ${agentsIdentity(agent)} ${agentsAreaChips(agent.areas)}</div>
                 <small>${facts}</small>
             </div>
             <div class="ui-row-actions">
                 <button type="button" onclick="toggleAgentActivity(${Number(agent.id)})" class="ui-btn ui-btn-sm" aria-expanded="${open}" aria-controls="agent-activity-${Number(agent.id)}">Activity</button>
-                ${connected ? `<button type="button" onclick="disconnectAgent(${Number(agent.id)})" class="ui-btn ui-btn-sm ui-btn-danger">Disconnect</button>` : ''}
+                ${connected ? `<button type="button" onclick="editAgentAccess(${Number(agent.id)})" class="ui-btn ui-btn-sm">Edit</button>
+                <button type="button" onclick="disconnectAgent(${Number(agent.id)})" class="ui-btn ui-btn-sm ui-btn-danger">Disconnect</button>` : ''}
             </div>
             <div id="agent-activity-${Number(agent.id)}" class="ui-agent-activity${open ? '' : ' hidden'}"></div>
         </div>`;
@@ -179,7 +179,9 @@ function agentsActivityRow(row) {
     const what = row.event === 'call' || row.event === 'denied'
         ? `<span class="ui-mono">${escapeHtml(row.method || '')} ${escapeHtml(row.path || '')}</span>`
         : escapeHtml(row.event === 'grant_created' ? 'Connected' : row.event === 'grant_revoked'
-            ? (AGENTS_END_REASONS[row.detail] || 'Disconnected') : row.event);
+            ? (AGENTS_END_REASONS[row.detail] || 'Disconnected')
+            : row.event === 'grant_changed' ? `Access changed${(/^by ([^:]+):/.exec(row.detail || '') || [])[1] ? ` by ${/^by ([^:]+):/.exec(row.detail)[1]}` : ''}`
+            : row.event);
     const tone = row.outcome === 'ok' ? 'ok' : row.outcome === 'accepted' ? 'info' : row.outcome ? 'fail' : '';
     // A call that got no answer in time (504) may still be running: its outcome is unknown
     const unknown = row.outcome === 'accepted' && row.http_status === 504;
@@ -208,6 +210,102 @@ async function loadAgentActivity(grantId) {
     } catch (e) {
         box.innerHTML = '<p class="ui-text-fail">Could not load activity. Close and open it again to retry.</p>';
     }
+}
+
+// Edit: the areas a connected agent may view or take action in, and optionally a
+// new end. The same table as the approval page; applies from the agent's next request.
+function editAgentAccess(grantId) {
+    const agent = (agentsData?.agents || []).find(a => a.id === grantId && a.state === 'connected');
+    if (!agent) return;
+    document.getElementById('agent-edit-modal')?.remove();
+    const current = agent.areas || {};
+    const box = (area, kind, on) => `<label class="ui-consent-box"><input type="checkbox" class="ui-check" data-area="${escapeHtml(area.id)}"
+        data-kind="${kind}" ${on ? 'checked' : ''} aria-label="${kind === 'act' ? 'Take action' : 'View'}: ${escapeHtml(area.label)}"></label>`;
+    const rows = (agentsData.areas || []).map(area => `
+        <div class="ui-consent-row">
+            <div class="ui-consent-area"><b>${escapeHtml(area.label)}</b><small>${escapeHtml(area.view || '')}</small>
+                ${area.act ? `<small class="ui-consent-act-text">Actions: ${escapeHtml(area.act)}</small>` : ''}</div>
+            ${box(area, 'view', !!current[area.id])}
+            ${area.act ? box(area, 'act', current[area.id] === 'act') : '<span class="ui-consent-box"><small class="ui-muted">No actions</small></span>'}
+        </div>`).join('');
+    const ends = (agentsData.periods || []).map(p => `<option value="${Number(p.days)}">${escapeHtml(p.label)} from now</option>`).join('');
+    const modal = document.createElement('div');
+    modal.id = 'agent-edit-modal';
+    modal.className = 'ui-dialog-backdrop';
+    modal.setAttribute('role', 'dialog');
+    modal.setAttribute('aria-labelledby', 'agent-edit-h');
+    modal.innerHTML = `
+        <div class="ui-dialog ui-dialog-fit">
+            <div class="ui-dialog-head">
+                <h3 id="agent-edit-h">Edit access</h3>
+                <button type="button" onclick="closeAgentEditModal()" class="ui-icon-btn" title="Close" aria-label="Close">
+                    <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                </button>
+            </div>
+            <form id="agent-edit-form" class="ui-dialog-body ui-form ui-agent-edit" onsubmit="saveAgentAccess(event, ${Number(agent.id)})">
+                <p class="ui-set-desc"><b>${escapeHtml(agent.name)}</b>. Changes apply from its next request.</p>
+                <div class="ui-consent-areas" role="group" aria-label="What it may do">
+                    <div class="ui-consent-row ui-consent-row-head" aria-hidden="true"><span>Area</span><span>View</span><span>Take action</span></div>
+                    ${rows}
+                </div>
+                <label for="agent-edit-end"><span class="ui-label">Access ends</span>
+                    <select id="agent-edit-end" class="ui-select">
+                        <option value="">Keep the current end (${escapeHtml(formatTime(agent.expires_at, { seconds: false }))})</option>${ends}
+                    </select>
+                </label>
+                <p id="agent-edit-error" class="ui-text-fail hidden" role="alert"></p>
+                <div class="ui-form-actions">
+                    <span class="ui-toolbar-gap"></span>
+                    <button type="button" onclick="closeAgentEditModal()" class="ui-btn">Cancel</button>
+                    <button type="submit" class="ui-btn ui-btn-primary">Save</button>
+                </div>
+            </form>
+        </div>`;
+    document.body.appendChild(modal);
+    // Take action includes View: ticking it ticks View, and clearing View clears it
+    modal.querySelector('.ui-consent-areas').addEventListener('change', event => {
+        const changed = event.target;
+        if (!changed.dataset || !changed.dataset.area) return;
+        const other = modal.querySelector(`input[data-area="${CSS.escape(changed.dataset.area)}"][data-kind="${changed.dataset.kind === 'act' ? 'view' : 'act'}"]`);
+        if (changed.dataset.kind === 'act' && changed.checked && other) other.checked = true;
+        if (changed.dataset.kind === 'view' && !changed.checked && other) other.checked = false;
+    });
+    uiGuardDialog(modal);
+}
+
+function closeAgentEditModal(saved = false) {
+    const modal = document.getElementById('agent-edit-modal');
+    const close = () => modal?.remove();
+    if (saved || !modal) {
+        uiDialogSaved(modal);
+        close();
+    } else uiCloseGuarded(modal, close);
+}
+
+async function saveAgentAccess(event, grantId) {
+    event.preventDefault();
+    const modal = document.getElementById('agent-edit-modal');
+    const error = document.getElementById('agent-edit-error');
+    const chosen = kind => [...modal.querySelectorAll(`input[data-kind="${kind}"]:checked`)].map(i => i.dataset.area);
+    const end = document.getElementById('agent-edit-end').value;
+    const say = text => { error.textContent = text; error.classList.remove('hidden'); };
+    if (!chosen('view').length) return say('Select View for at least one area. To end its access, use Disconnect.');
+    try {
+        const response = await authenticatedFetch(`/api/agents/${grantId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ views: chosen('view'), acts: chosen('act'), days: end === '' ? null : Number(end) }),
+        });
+        if (!response.ok) {
+            const body = await response.json().catch(() => ({}));
+            return say(typeof body.detail === 'string' ? body.detail : 'Could not save the change. Try again.');
+        }
+        closeAgentEditModal(true);
+        showToast('Access changed', 'success');
+    } catch (e) {
+        return say('Could not save the change. Check your connection and try again.');
+    }
+    loadAgentsPanel();
 }
 
 async function disconnectAgent(grantId) {

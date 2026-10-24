@@ -277,6 +277,7 @@ These routes are for people only. A call an agent makes never reaches them.
 | Method | Path | |
 | --- | --- | --- |
 | GET | `/api/agents` | `live`, `problem` (`no_sign_in`, `off`, `no_url` or `bad_url`), `mcp_url`, `skill_sentence`, `mcp_sentence`, `max_days`, `areas` and `agents`, each with `name`, `declared_name`, `publisher`, `kind` (`device` for the skill, `cimd` or `dcr` for MCP apps), `areas` (area: `view` or `act`), `approved_by`, `created_at`, `expires_at`, `last_used_at`, `state` (`connected`, `disconnected` or `expired`) and `end_reason`. |
+| PUT | `/api/agents/{grant_id}` | Changes what a connected agent may do: `views` and `acts` (area ids; an act includes its view), and optionally `days`, a new end counted from now (one of the offered periods). Applies from the agent's next request. 400 without any view, 404 if it is not connected. |
 | DELETE | `/api/agents/{grant_id}` | Disconnects one agent. 404 if it is not connected. |
 | DELETE | `/api/agents` | Disconnects every agent. Returns `{ "disconnected": <count> }`. |
 | GET | `/api/agents/{grant_id}/activity` | The last 50 entries: `at`, `event` (`grant_created`, `grant_revoked`, `call` or `denied`), `tool`, `method`, `path`, `http_status`, `outcome` and `detail`. |

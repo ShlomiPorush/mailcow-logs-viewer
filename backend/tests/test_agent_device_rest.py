@@ -415,6 +415,56 @@ def test_the_live_log_stream_never_takes_an_agent_token(live_agents):
         assert closed.value.code == 4401
 
 
+def test_a_person_changes_what_a_connected_agent_may_do(live_agents):
+    agent, browser, tokens = _connect_with_code(views=("security",), acts=("security",))
+    token = tokens["access_token"]
+    agent_id = browser.get("/api/agents").json()["agents"][0]["id"]
+    assert _api(agent, token, "GET", "/api/messages").status_code == 403
+    # Take action away from Security, add View of Messages: applies to the next request
+    r = browser.put(f"/api/agents/{agent_id}", json={"views": ["security", "messages"], "acts": []})
+    assert r.status_code == 200, r.text
+    assert _api(agent, token, "GET", "/api/messages").status_code == 200
+    assert _api(agent, token, "POST", "/api/security-alerts/acknowledge-all", json={"ids": [1]}).status_code == 403
+    row = browser.get("/api/agents").json()["agents"][0]
+    assert row["areas"] == {"security": "view", "messages": "view"}
+    activity = browser.get(f"/api/agents/{agent_id}/activity").json()["activity"]
+    assert any(a["event"] == "grant_changed" and a["detail"].startswith("by admin:") for a in activity)
+
+
+def test_a_new_end_moves_the_refresh_token_with_it(live_agents):
+    agent, browser, tokens = _connect_with_code(days=1)
+    agent_id = browser.get("/api/agents").json()["agents"][0]["id"]
+    assert browser.put(f"/api/agents/{agent_id}", json={"views": ["security"], "days": 30}).status_code == 200
+    from app.database import get_db_context
+    from app.models import AgentGrant, AgentToken
+    with get_db_context() as db:
+        grant = db.query(AgentGrant).filter(AgentGrant.id == agent_id).one()
+        refresh = db.query(AgentToken).filter(AgentToken.grant_id == agent_id, AgentToken.kind == "refresh").one()
+        assert timedelta(days=29) < grant.expires_at - datetime.utcnow() and refresh.expires_at == grant.expires_at
+    r = agent.post("/oauth/token", data={"grant_type": "refresh_token", "client_id": CLIENT,
+                                         "refresh_token": tokens["refresh_token"]})
+    assert r.status_code == 200
+
+
+@pytest.mark.parametrize("body, status", [
+    ({"views": [], "acts": []}, 400),
+    ({"views": ["security"], "days": 3}, 400),
+])
+def test_a_change_must_leave_some_access_and_a_known_period(live_agents, body, status):
+    _, browser, _ = _connect_with_code()
+    agent_id = browser.get("/api/agents").json()["agents"][0]["id"]
+    assert browser.put(f"/api/agents/{agent_id}", json=body).status_code == status
+
+
+def test_only_a_connected_agent_can_be_changed_and_never_by_an_agent(live_agents):
+    agent, browser, tokens = _connect_with_code()
+    agent_id = browser.get("/api/agents").json()["agents"][0]["id"]
+    assert _api(agent, tokens["access_token"], "PUT", f"/api/agents/{agent_id}",
+                json={"views": ["security"], "acts": ["security"]}).status_code == 403
+    assert browser.delete(f"/api/agents/{agent_id}").status_code == 200
+    assert browser.put(f"/api/agents/{agent_id}", json={"views": ["security"]}).status_code == 404
+
+
 def test_revoking_ends_the_connection_and_settings_say_how_it_connected(live_agents):
     agent, browser, tokens = _connect_with_code()
     row = browser.get("/api/agents").json()["agents"][0]
