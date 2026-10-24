@@ -228,7 +228,7 @@ function editAgentAccess(grantId) {
             ${box(area, 'view', !!current[area.id])}
             ${area.act ? box(area, 'act', current[area.id] === 'act') : '<span class="ui-consent-box"><small class="ui-muted">No actions</small></span>'}
         </div>`).join('');
-    const ends = (agentsData.periods || []).map(p => `<option value="${Number(p.days)}">${escapeHtml(p.label)} from now</option>`).join('');
+    const ends = (agentsData.periods || []).map(p => `<option value="${Number(p.days)}">In ${escapeHtml(p.label)}</option>`).join('');
     const modal = document.createElement('div');
     modal.id = 'agent-edit-modal';
     // The version of the access this dialog shows: saving it after the list
@@ -246,14 +246,14 @@ function editAgentAccess(grantId) {
                 </button>
             </div>
             <form id="agent-edit-form" class="ui-dialog-body ui-form ui-agent-edit" onsubmit="saveAgentAccess(event, ${Number(agent.id)})">
-                <p class="ui-set-desc"><b>${escapeHtml(agent.name)}</b>. Changes apply from its next request.</p>
+                <p class="ui-set-desc">Changes to <b>${escapeHtml(agent.name)}</b> apply from its next request.</p>
                 <div class="ui-consent-areas" role="group" aria-label="What it may do">
                     <div class="ui-consent-row ui-consent-row-head" aria-hidden="true"><span>Area</span><span>View</span><span>Take action</span></div>
                     ${rows}
                 </div>
                 <label for="agent-edit-end"><span class="ui-label">Access ends</span>
                     <select id="agent-edit-end" class="ui-select">
-                        <option value="">Keep the current end (${escapeHtml(formatTime(agent.expires_at, { seconds: false }))})</option>${ends}
+                        <option value="">Keep ${escapeHtml(formatTime(agent.expires_at, { seconds: false }))}</option>${ends}
                     </select>
                 </label>
                 <p id="agent-edit-error" class="ui-text-fail hidden" role="alert"></p>

@@ -221,12 +221,12 @@ def change_agent(grant_id: int, change: AgentChange, request: Request, db: Sessi
     if not scopes:
         raise HTTPException(status_code=400, detail="Select View for at least one area. To end its access, use Disconnect.")
     if change.days is not None and change.days not in {p["days"] for p in periods()}:
-        raise HTTPException(status_code=400, detail="Choose one of the offered periods.")
+        raise HTTPException(status_code=400, detail="Choose when access ends from the list.")
     try:
         changed = store.change_grant(db, grant_id, scopes=scopes, days=change.days, changed_by=_who(request),
                                      version=change.version)
     except store.GrantChanged:
-        raise HTTPException(status_code=409, detail="This agent's access changed meanwhile. Open Edit again to see it.")
+        raise HTTPException(status_code=409, detail="Someone changed this agent's access while you were editing. Open Edit again to see the change.")
     if not changed:
         raise HTTPException(status_code=404, detail="This agent is not connected.")
     return {"changed": 1}

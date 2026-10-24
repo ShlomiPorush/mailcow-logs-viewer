@@ -478,7 +478,7 @@ def test_an_edit_made_on_an_older_copy_is_refused(live_agents):
     # This window still shows the old access and changes something else
     r = browser.put(f"/api/agents/{row['id']}", json={"views": ["security", "messages"], "acts": ["security"],
                                                       "version": old})
-    assert r.status_code == 409 and "changed meanwhile" in r.json()["detail"]
+    assert r.status_code == 409 and "while you were editing" in r.json()["detail"]
     assert browser.get("/api/agents").json()["agents"][0]["areas"] == {"security": "view"}
 
 
