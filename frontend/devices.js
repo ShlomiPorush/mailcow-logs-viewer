@@ -31,7 +31,12 @@ function resetDevicesFilters() {
     loadDevices(1);
 }
 
-async function loadDevices(page) {
+// The answer the list shows, to tell whether a refresh brings anything new
+let devicesShownJson = null;
+
+// quiet (the refresh, every minute): drawn again only when something changed,
+// and not while the type picker is in use or text in the list is selected
+async function loadDevices(page, { quiet = false } = {}) {
     devicesPage = page || devicesPage || 1;
     const request = ++devicesRequest;
     const container = document.getElementById('devices-list');
@@ -44,18 +49,24 @@ async function loadDevices(page) {
     if (type) params.append('device_type', type);
 
     try {
-        const response = await authenticatedFetch(`/api/devices?${params}`);
+        const response = await authenticatedFetch(`/api/devices?${params}`, quiet ? { timeout: PAGE_REFRESH_TIMEOUT } : {});
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const data = await response.json();
         // A slower answer to an older filter must not replace a newer one
         if (request !== devicesRequest) return;
+        const json = JSON.stringify(data);
+        if (quiet && (json === devicesShownJson || document.activeElement === document.getElementById('devices-type-filter') || uiTextHeld(container))) return;
+        devicesShownJson = json;
         renderDevicesSummary(data);
         renderDevicesTypes(data.device_types, type);
         renderDevicesList(container, data);
     } catch (error) {
         if (request !== devicesRequest) return;
         console.error('Failed to load devices:', error);
-        container.innerHTML = `<p class="ui-empty ui-text-fail">Could not load the devices: ${escapeHtml(error.message)}. Try again in a moment.</p>`;
+        // A refresh that failed leaves the list as it was
+        if (quiet && devicesShownJson !== null) return;
+        devicesShownJson = null;
+        container.innerHTML = `<p class="ui-empty ui-text-fail">Could not load the devices: ${escapeHtml(error.message)}. <button type="button" class="ui-link-row ui-link" onclick="loadDevices()">Try again</button></p>`;
     }
 }
 

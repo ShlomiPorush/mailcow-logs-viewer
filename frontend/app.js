@@ -1222,6 +1222,10 @@ registerPageRefresh('quarantine', 30000, async () => {
 });
 registerPageRefresh('status', 30000, () => loadStatus());
 registerPageRefresh('settings', 30000, () => smartRefreshSettings());
+// DNS is checked every six hours and mailcow is asked for the domains on each read
+registerPageRefresh('domains', 5 * 60 * 1000, () => refreshDomains());
+// The ActiveSync log is read every minute
+registerPageRefresh('devices', 60000, () => loadDevices(devicesPage, { quiet: true }));
 
 // Helper to check if data changed
 function hasDataChanged(newData, cacheKey) {
