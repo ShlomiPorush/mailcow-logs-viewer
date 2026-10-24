@@ -55,7 +55,7 @@ Much of what the app shows comes from strangers, such as subjects, sender names,
 
 ## Disconnect an agent
 
-**Allowed agents** in **Settings** > **Agents** lists each agent with how it connected (Skill or MCP), its areas, who allowed it, when its access expires and when it was last used. **Activity** shows its recent calls. **Disconnect** stops new requests from the agent at once. **Disconnect all** does the same for every agent and ends codes that are waiting for approval. To use a disconnected agent again, connect it again from the agent.
+**Connected agents** in **Settings** > **Agents** lists each agent with how it connected (Skill or MCP), its areas, who allowed it, when its access expires and when it was last used. **Activity** shows its recent calls. **Disconnect** stops new requests from the agent at once. **Disconnect all** does the same for every agent and ends codes that are waiting for approval. To use a disconnected agent again, connect it again from the agent.
 
 Access also ends:
 

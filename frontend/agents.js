@@ -150,12 +150,12 @@ function renderAgentsPanel() {
             ${intro}
         </section>` : '';
     panel.innerHTML = `${connect}
-        <section class="ui-panel ui-set-channels" aria-labelledby="agents-allowed-h">
+        <section class="ui-panel ui-set-channels" aria-labelledby="agents-connected-h">
             <div class="ui-list-head">
-                <h4 class="ui-md-h" id="agents-allowed-h">Allowed agents</h4>
+                <h4 class="ui-md-h" id="agents-connected-h">Connected agents</h4>
                 ${connected.length ? `<button type="button" onclick="disconnectAllAgents()" class="ui-btn ui-btn-sm ui-btn-danger ui-head-actions">Disconnect all</button>` : ''}
             </div>
-            <div class="ui-channels">${agents.map(agentsRow).join('') || '<p class="ui-empty">No agents have been allowed yet.</p>'}</div>
+            <div class="ui-channels">${agents.map(agentsRow).join('') || '<p class="ui-empty">No agents connected yet.</p>'}</div>
         </section>`;
     agentsOpenActivity.forEach(id => loadAgentActivity(id));
 }
