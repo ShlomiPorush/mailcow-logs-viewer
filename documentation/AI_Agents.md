@@ -43,7 +43,7 @@ An agent can never do the following, whatever you allow:
 - Change settings, including sign-in and agent access.
 - Run jobs from **Settings** > **Background Jobs**.
 - Upload files, such as DMARC reports or a suppression list.
-- Add, change, or test notification destinations.
+- Add, change, or test alert destinations.
 - Read passwords and keys. An agent sees them hidden in **Settings**, as you do on the page.
 - Manage agents.
 

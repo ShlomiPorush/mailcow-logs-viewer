@@ -38,7 +38,7 @@ AREAS: Tuple[Area, ...] = (
     Area("quarantine", "Quarantine",
          "Quarantined messages, quarantine rules and their activity",
          "Release or delete quarantined messages, train the spam filter with them, "
-         "and create, edit, turn on or off, or delete quarantine rules"),
+         "and create, change or delete quarantine rules"),
     Area("security", "Security",
          "Netfilter logs, Fail2ban status, security alerts, protection rules and matches, and SMTP abuse history",
          "Ban, unban or allow IP addresses and networks. Change Fail2ban and protection rules, dismiss alerts "
@@ -54,12 +54,12 @@ AREAS: Tuple[Area, ...] = (
          "Run DNS checks for domains on this mail server"),
     Area("mailboxes", "Mailboxes",
          "Mailbox statistics, devices and rate limits",
-         "Set mailbox and domain sending limits, also in bulk, and reset rate limits"),
+         "Set sending limits for mailboxes and domains, one at a time or in bulk, and reset rate limits"),
     Area("logs", "Logs",
          "Raw mailcow service logs",
          ""),
     Area("settings", "Settings",
-         "App settings and notification destinations, with stored passwords and keys hidden",
+         "App settings and alert destinations, without passwords and keys",
          ""),
 )
 
