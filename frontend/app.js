@@ -1203,6 +1203,8 @@ registerPageRefresh('netfilter', 30000, async () => {
     fail2banSettingsLoaded = false;
     loadFail2BanSettings();
     if (typeof refreshProtectionHits === 'function') refreshProtectionHits();
+    // Outgoing spam: its check runs every minute
+    if (typeof refreshSmtpAbusePanel === 'function' && Date.now() - smtpAbuseLoadedAt >= 58000) refreshSmtpAbusePanel();
 });
 registerPageRefresh('outbound', 30000, async () => {
     // The queue feeds the page's summary and the sidebar counter on both tabs
@@ -1220,7 +1222,16 @@ registerPageRefresh('quarantine', 30000, async () => {
     const history = document.getElementById('quarantine-rules-history');
     if (history && !history.classList.contains('hidden')) await loadQuarantineRuleHistory({ quiet: true });
 });
-registerPageRefresh('status', 30000, () => loadStatus());
+registerPageRefresh('status', 30000, async () => {
+    statusQuiet = true;
+    try {
+        await loadStatus();
+    } finally {
+        statusQuiet = false;
+    }
+});
+// The maps list (never a map open in the editor)
+registerPageRefresh('rspamd', 60000, () => refreshRspamdMaps());
 registerPageRefresh('settings', 30000, () => smartRefreshSettings());
 // DNS is checked every six hours and mailcow is asked for the domains on each read
 registerPageRefresh('domains', 5 * 60 * 1000, () => refreshDomains());
@@ -1966,13 +1977,22 @@ async function smartRefreshQuarantine() {
 }
 
 // Smart refresh for Dashboard
+// When the Dashboard's blocklist and health figures were last read
+let dashboardKpisAt = 0;
+
 async function smartRefreshDashboard() {
     try {
         refreshMailFlowChart();
         loadDashboardStatusSummary();
         loadDashboardSecurity();
-        // Needs attention has its own refresh on every page (attentionRefresh); the trends every five minutes
+        // Needs attention has its own refresh on every page (attentionRefresh); the trends,
+        // the blocklists and the health figures every five minutes
         if (Date.now() - dashboardTrendsAt >= 300000) loadDashboardTrends();
+        if (Date.now() - dashboardKpisAt >= 300000) {
+            dashboardKpisAt = Date.now();
+            loadDashboardBlacklistSummary();
+            loadDashboardHealth();
+        }
     } catch (error) {
         console.error('Dashboard refresh error:', error);
     }
@@ -2204,6 +2224,7 @@ async function loadDashboard() {
         loadDashboardStatusSummary();
         loadDashboardBlacklistSummary();
         loadDashboardHealth();
+        dashboardKpisAt = Date.now();
         // Needs attention as last read, and read again what is due
         renderAttention();
         attentionRefresh();
@@ -5239,6 +5260,16 @@ function renderStatusAttention() {
         </div>`).join('');
 }
 
+// Set while the page's refresh reads Status: a read that fails keeps what is
+// shown, and a section with selected text or the keyboard on one of its
+// controls is drawn on the next refresh (checked when the answer is drawn)
+let statusQuiet = false;
+function statusHold(container) {
+    if (!statusQuiet || !container) return false;
+    const active = document.activeElement;
+    return uiTextHeld(container) || Boolean(active && container.contains(active) && active.matches(':focus-visible'));
+}
+
 async function loadStatus() {
     try {
         await Promise.all([
@@ -5344,7 +5375,7 @@ async function loadStatusContainers() {
             const rank = c => c.ignored ? 2 : (isRunning(c) ? 1 : 0);
             const ordered = [...containersList].sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
             // One tile per container: state dot, name, uptime, and Ignore where it applies
-            container.innerHTML = `<div class="ui-ctrs">${ordered.map(c => {
+            if (!statusHold(container)) container.innerHTML = `<div class="ui-ctrs">${ordered.map(c => {
                 const up = isRunning(c);
                 const since = c.started_at ? formatAgo(c.started_at).replace(' ago', '') : '';
                 const arg = escapeJsArg(c.container);
@@ -5365,12 +5396,12 @@ async function loadStatusContainers() {
         } else {
             setStatusKpi('status-kpi-containers', '-');
             if (note) note.textContent = '';
-            container.innerHTML = '<p class="ui-empty ui-panel">No container information available</p>';
+            if (!statusHold(container)) container.innerHTML = '<p class="ui-empty ui-panel">No container information available</p>';
         }
     } catch (error) {
         console.error('Failed to load containers status:', error);
         setStatusKpi('status-kpi-containers', '-');
-        document.getElementById('status-containers').innerHTML = `<p class="ui-empty ui-panel ui-text-fail">Failed to load containers: ${escapeHtml(error.message)}</p>`;
+        if (!statusQuiet) document.getElementById('status-containers').innerHTML = `<p class="ui-empty ui-panel ui-text-fail">Failed to load containers: ${escapeHtml(error.message)}</p>`;
     }
 }
 
@@ -5409,7 +5440,7 @@ async function loadStatusSystem() {
         }
 
         const row = (label, part) => `<dt>${label}</dt><dd>${Number(part.total || 0).toLocaleString()} <small>${Number(part.active || 0).toLocaleString()} active</small></dd>`;
-        container.innerHTML = `
+        if (!statusHold(container)) container.innerHTML = `
             <div class="ui-srv-big">${versionHtml || 'mailcow'}</div>
             <dl class="ui-srv-dl">
                 ${row('Domains', data.domains || {})}
@@ -5419,7 +5450,7 @@ async function loadStatusSystem() {
         `;
     } catch (error) {
         console.error('Failed to load system info:', error);
-        document.getElementById('status-system').innerHTML = `<p class="ui-empty ui-text-fail">Failed to load system info: ${escapeHtml(error.message)}</p>`;
+        if (!statusQuiet) document.getElementById('status-system').innerHTML = `<p class="ui-empty ui-text-fail">Failed to load system info: ${escapeHtml(error.message)}</p>`;
     }
 }
 
@@ -5463,7 +5494,7 @@ async function loadStatusStorage() {
         if (storageNote) storageNote.textContent = [data.used && data.total ? `${data.used} of ${data.total}` : '', data.disk || ''].filter(Boolean).join(', ');
 
         const size = [data.used && data.total ? `${data.used} of ${data.total}` : '', data.disk ? `on ${data.disk}` : ''].filter(Boolean).join(' ');
-        container.innerHTML = `
+        if (!statusHold(container)) container.innerHTML = `
             <div class="ui-srv-big${level === 'ok' ? '' : ` ui-text-${level}`}">${escapeHtml(String(data.used_percent || '0%'))} used</div>
             <div class="ui-meter ui-${level}"><i style="width: ${usedPercent}%"></i></div>
             ${size ? `<small>${escapeHtml(size)}</small>` : ''}
@@ -5471,7 +5502,7 @@ async function loadStatusStorage() {
     } catch (error) {
         console.error('Failed to load storage info:', error);
         setStatusKpi('status-kpi-storage', '-');
-        document.getElementById('status-storage').innerHTML = `<p class="ui-empty ui-text-fail">Failed to load storage info: ${escapeHtml(error.message)}</p>`;
+        if (!statusQuiet) document.getElementById('status-storage').innerHTML = `<p class="ui-empty ui-text-fail">Failed to load storage info: ${escapeHtml(error.message)}</p>`;
     }
 }
 
@@ -5494,14 +5525,14 @@ async function loadStatusExtended() {
         // Render Background Jobs
         renderStatusJobs(data.background_jobs || {});
 
-        // Load Blacklist Status separately
-        loadBlacklistStatus();
+        // Load Blacklist Status separately (awaited, so the refresh knows when it is drawn)
+        await loadBlacklistStatus();
 
     } catch (error) {
         console.error('Failed to load extended status:', error);
-        document.getElementById('status-import').innerHTML = `<p class="ui-empty ui-text-fail">Failed to load: ${escapeHtml(error.message)}</p>`;
-        document.getElementById('status-correlation').innerHTML = `<p class="ui-empty ui-text-fail">Failed to load: ${escapeHtml(error.message)}</p>`;
-        document.getElementById('status-jobs').innerHTML = `<p class="ui-empty ui-text-fail">Failed to load: ${escapeHtml(error.message)}</p>`;
+        if (!statusQuiet) document.getElementById('status-import').innerHTML = `<p class="ui-empty ui-text-fail">Failed to load: ${escapeHtml(error.message)}</p>`;
+        if (!statusQuiet) document.getElementById('status-correlation').innerHTML = `<p class="ui-empty ui-text-fail">Failed to load: ${escapeHtml(error.message)}</p>`;
+        if (!statusQuiet) document.getElementById('status-jobs').innerHTML = `<p class="ui-empty ui-text-fail">Failed to load: ${escapeHtml(error.message)}</p>`;
     }
 }
 
@@ -5640,7 +5671,7 @@ async function loadBlacklistStatus() {
         renderBlacklistStatus(data);
     } catch (error) {
         console.error('Failed to load blacklist status:', error);
-        container.innerHTML = `<p class="ui-empty ui-text-fail">Failed to load: ${escapeHtml(error.message)}</p>`;
+        if (!statusQuiet) container.innerHTML = `<p class="ui-empty ui-text-fail">Failed to load: ${escapeHtml(error.message)}</p>`;
     }
 }
 
@@ -5684,7 +5715,7 @@ function renderBlacklistStatus(data) {
 
     if (!data.hosts || data.hosts.length === 0) {
         setStatusKpi('status-kpi-blocklists', '-');
-        container.innerHTML = `
+        if (!statusHold(container)) container.innerHTML = `
             <div class="ui-empty ui-panel">
                 <b>No Monitored Hosts</b>
                 <p>Syncing monitoring targets...</p>
@@ -5708,7 +5739,8 @@ function renderBlacklistStatus(data) {
     const blSummary = document.getElementById('status-blacklist-summary');
     if (blSummary) blSummary.textContent = `${data.hosts.length} address${data.hosts.length === 1 ? '' : 'es'}${listed ? `, ${listed} listed` : ''}`;
 
-    // Preserve which hosts show all their lists
+    // Preserve which hosts show all their lists, and a scan's progress at the top
+    const progress = document.getElementById('blacklist-temp-progress');
     const openStates = {};
     container.querySelectorAll('details').forEach(el => {
         if (el.open && el.id) openStates[el.id] = true;
@@ -5723,10 +5755,10 @@ function renderBlacklistStatus(data) {
         ? `<button type="button" class="ui-bl-ign" onclick="setBlocklistIgnored('${escapeJsArg(r.zone)}', ${!r.ignored})" title="${r.ignored ? 'Count and alert on this list again' : 'Keep checking this list but never count or alert on it'}">${r.ignored ? 'Stop ignoring' : 'Ignore'}</button>`
         : '';
 
-    container.innerHTML = `
+    if (!statusHold(container)) container.innerHTML = `
         <div class="ui-st-hosts">
-        ${data.hosts.map((host, index) => {
-            const hostId = `host-${index}`;
+        ${data.hosts.map(host => {
+            const hostId = `bl-host-${String(host.hostname).replace(/[^A-Za-z0-9_-]/g, '-')}`;
             const results = host.results || [];
             const listedOn = results.filter(r => r.listed && !r.ignored);
             const others = results.filter(r => !(r.listed && !r.ignored));
@@ -5776,6 +5808,7 @@ function renderBlacklistStatus(data) {
             </section>` : ''}
         </div>
     `;
+    if (progress) container.prepend(progress);
     renderStatusAttention();
 }
 
@@ -5806,7 +5839,7 @@ function renderStatusImport(imports) {
             <span class="ui-td"><small class="ui-sec-unit">Oldest Entry </small>${d.oldest_entry ? uiTime(d.oldest_entry, formatTime(d.oldest_entry)) : '-'}</span>
             ` : '<span class="ui-td ui-muted">No data</span><span></span><span></span><span></span>'}
         </div>`;
-    container.innerHTML = `
+    if (!statusHold(container)) container.innerHTML = `
         <div class="ui-table ui-stack" data-nosort style="--ui-cols: minmax(130px, 1fr) minmax(110px, 1fr) minmax(110px, 1fr) 110px minmax(150px, 1.2fr); --ui-table-min: 660px">
             <div class="ui-tr ui-tr-head"><span>Source</span><span>Last Fetch Run</span><span>Last Import</span><span class="ui-td-end">Total Entries</span><span>Oldest Entry</span></div>
             ${row('Postfix Logs', imports.postfix)}
@@ -5821,7 +5854,7 @@ function renderStatusCorrelation(correlation, incompleteList, maxAgeMinutes) {
     setStatusKpi('status-kpi-linking', `${correlation.completion_rate || 0}%`, correlation.incomplete ? 'warn' : '');
     const linkingNote = document.getElementById('status-kpi-linking-note');
     if (linkingNote) linkingNote.textContent = `${(correlation.complete || 0).toLocaleString()} of ${(correlation.total || 0).toLocaleString()} complete, ${(correlation.incomplete || 0).toLocaleString()} waiting`;
-    container.innerHTML = `
+    if (!statusHold(container)) container.innerHTML = `
         <div class="ui-srv-big${correlation.incomplete ? ' ui-text-warn' : ''}">${escapeHtml(String(correlation.completion_rate || 0))}%</div>
         <small>${Number(correlation.complete || 0).toLocaleString()} of ${Number(correlation.total || 0).toLocaleString()} complete, ${Number(correlation.incomplete || 0).toLocaleString()} incomplete, ${Number(correlation.expired || 0).toLocaleString()} expired</small>
         ${correlation.last_update ? `<small title="${escapeHtml(formatTime(correlation.last_update))}">Updated ${formatAgo(correlation.last_update)}</small>` : ''}
@@ -5980,7 +6013,7 @@ function renderStatusJobsTable(container, categories, jobs) {
                 <div class="ui-jg-body">${validJobs.map(j => renderJobCard(j[0], j[1], j[2])).join('')}</div>
             </details>`;
     }
-    container.innerHTML = `<div class="ui-jgs">${html}</div>`;
+    if (!statusHold(container)) container.innerHTML = `<div class="ui-jgs">${html}</div>`;
     statusJobFilter(statusJobFilterValue);
     renderStatusAttention();
 }

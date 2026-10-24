@@ -1778,6 +1778,14 @@ function uiSheetShow(id, { label = '', head = '', body = '', expand = false, pro
         document.body.appendChild(sheet);
     }
     uiSheetClosers[id] = onClose;
+    // Drawn again with nothing new (a page's refresh), or while text in it is
+    // selected: left as it is, with its focus, selection and scroll
+    const shown = JSON.stringify([label, head, body, expand, progress]);
+    if (!fresh && (sheet.dataset.shown === shown || uiTextHeld(sheet))) return sheet;
+    sheet.dataset.shown = shown;
+    // Drawn again with new content: the focus goes back to the same control
+    const focused = !fresh && document.activeElement && sheet.contains(document.activeElement) ? document.activeElement : null;
+    const focusName = focused ? (focused.getAttribute('aria-label') || focused.textContent.trim()) : '';
     const old = sheet.querySelector('.ui-sheet-body');
     const keep = old ? old.scrollTop : 0;
     sheet.classList.toggle('is-expand', expand);
@@ -1807,6 +1815,11 @@ function uiSheetShow(id, { label = '', head = '', body = '', expand = false, pro
         }, { passive: true });
     }
     if (progress) uiReadProgress(sheet.querySelector('.ui-sheet-head'), bodyEl);
+    if (focused) {
+        const again = [...sheet.querySelectorAll('button, a, input, select, [tabindex]')]
+            .find(el => el.tagName === focused.tagName && (el.getAttribute('aria-label') || el.textContent.trim()) === focusName);
+        if (again) again.focus({ preventScroll: true });
+    }
     uiSheetSwipe(sheet, bodyEl, id);
     document.body.classList.add('ui-sheet-on');
     return sheet;

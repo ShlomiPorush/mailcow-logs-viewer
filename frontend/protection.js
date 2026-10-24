@@ -56,8 +56,10 @@ async function loadProtection() {
     loadProtectionOverview();
 }
 
-// Only the hits refresh on the page's timer; the rule editors keep their state
+// Only the hits refresh on the page's timer; the rule editors keep their state.
+// Rules that could not load are tried again
 function refreshProtectionHits() {
+    if (protectionLoadError || !protectionRules) return loadProtection();
     loadProtectionOverview();
 }
 
