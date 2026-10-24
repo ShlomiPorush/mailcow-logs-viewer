@@ -441,6 +441,20 @@ def test_the_skill_is_served_with_this_apps_address(live_agents):
     assert client.get("/agents/skill", follow_redirects=False).headers["location"] == "/agents/skill/"
 
 
+def test_an_older_skill_is_told_to_install_again(live_agents):
+    from app.agent_access.skill import skill_version
+    agent, _, tokens = _connect_with_code()
+    script = agent.get("/agents/skill/scripts/mailcow-logs.mjs").text
+    assert "__MAILCOW_LOGS_SKILL_VERSION__" not in script and f'"{skill_version()}"' in script
+    token = tokens["access_token"]
+    current = _api(agent, token, "GET", "/api/agent/access", headers={"X-Mailcow-Logs-Skill": skill_version()}).json()
+    assert "update_skill" not in current
+    for headers in ({"X-Mailcow-Logs-Skill": "000000000000"}, {}):
+        older = _api(agent, token, "GET", "/api/agent/access", headers=headers).json()
+        assert f"{APP_URL}/agents/skill/" in older["update_skill"]
+    assert "keep the folder's `.install-id`" in agent.get("/agents/skill/").text
+
+
 def test_the_skill_is_not_served_while_agent_access_is_not_live(live_agents, monkeypatch):
     monkeypatch.setattr(settings._inner, "agent_access_enabled", False)
     assert _client().get("/agents/skill/").status_code == 404

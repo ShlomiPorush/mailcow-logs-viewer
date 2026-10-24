@@ -12,6 +12,8 @@ umask 077
 
 # Filled in with the mailcow Logs Viewer address when the file is downloaded from it.
 DEFAULT_URL="__MAILCOW_LOGS_URL__"
+# Filled in with the skill's version when downloaded: the app says when a newer one is out (access)
+SKILL_VERSION="__MAILCOW_LOGS_SKILL_VERSION__"
 CLIENT_ID="mailcow-logs-cli"
 SCOPE="status:read status:write messages:read outbound:read outbound:write quarantine:read quarantine:write security:read security:write rspamd:read rspamd:write dmarc:read dmarc:write domains:read domains:write mailboxes:read mailboxes:write logs:read settings:read"
 WAIT_SECONDS="${MAILCOW_LOGS_WAIT_SECONDS:-90}"
@@ -747,7 +749,7 @@ api_url() {
 
 # api_call METHOD URL TOKEN [BODYFILE]
 api_call() {
-  settings=$(printf 'header = "Authorization: Bearer %s"' "$3")
+  settings=$(printf 'header = "Authorization: Bearer %s"\nheader = "X-Mailcow-Logs-Skill: %s"' "$3" "$SKILL_VERSION")
   if [ -n "${4:-}" ]; then settings=$(printf '%s\nheader = "Content-Type: application/json"\ndata-binary = "@%s"' "$settings" "$4"); fi
   http "$1" "$2" "$settings" "$API_TIMEOUT"
 }

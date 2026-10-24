@@ -43,7 +43,9 @@ is in) and is shared by all its sessions. Run `disconnect` only when the person 
 ## What you may do
 
 1. Run `mailcow-logs access` (the areas you may view or act on, and until when) and `mailcow-logs endpoints [area]`
-   (the API calls you may make: method, path, parameters, body, and `kind`: read or act).
+   (the API calls you may make: method, path, parameters, body, and `kind`: read or act). If `access` answers
+   `update_skill`, install the skill again as it says, read the new SKILL.md, and then go on. Tell the person in one
+   line. The connection is kept, so there is nothing to approve again.
 2. Read with `mailcow-logs get '<path>'`, a path under `/api/` with its query, for example
    `get 'messages?limit=20'`. Quote the path; percent-encode spaces and other characters in query values.
    Never guess a path: use one from the table below or from `endpoints`, with its `{...}` parts filled in.

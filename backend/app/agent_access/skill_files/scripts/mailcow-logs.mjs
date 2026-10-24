@@ -24,6 +24,8 @@ import { fileURLToPath } from "node:url"
 
 // Filled in with the mailcow Logs Viewer address when the file is downloaded from it.
 const DEFAULT_URL = "__MAILCOW_LOGS_URL__"
+// Filled in with the skill's version when downloaded: the app says when a newer one is out (access)
+const SKILL_VERSION = "__MAILCOW_LOGS_SKILL_VERSION__"
 const CLIENT_ID = "mailcow-logs-cli"
 const SCOPE =
   "status:read status:write messages:read outbound:read outbound:write quarantine:read quarantine:write " +
@@ -601,7 +603,10 @@ async function request(ctx, method, url, { form, bearer, json, timeout = OAUTH_T
     headers["content-type"] = "application/json"
     payload = json
   }
-  if (bearer) headers.authorization = `Bearer ${bearer}`
+  if (bearer) {
+    headers.authorization = `Bearer ${bearer}`
+    headers["x-mailcow-logs-skill"] = SKILL_VERSION
+  }
   let res
   try {
     // No redirects: a secret never follows one to another address.

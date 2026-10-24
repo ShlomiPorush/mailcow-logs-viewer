@@ -24,6 +24,7 @@ from . import scopes as policy
 from .limits import read_body
 from .mcp import access_info, endpoints_info, failed_tokens
 from .oauth import db_call
+from .skill import skill_version
 
 logger = logging.getLogger(__name__)
 
@@ -81,7 +82,13 @@ async def handle(request: Request) -> Response:
         if method != "GET":
             return _error(405, "not_found", "Use GET.", {"Allow": "GET"})
         if path == ACCESS_PATH:
-            return JSONResponse(access_info(grant), headers=_NO_STORE)
+            info = access_info(grant)
+            # The skill's script says which version it is; an older copy (or one that says
+            # nothing) is told to install the skill again. Its connection is kept.
+            if request.headers.get("x-mailcow-logs-skill") != skill_version():
+                info["update_skill"] = (f"A newer mailcow-logs skill is available. Install it again as described at "
+                                        f"{live.issuer()}/agents/skill/ and then go on; the connection is kept.")
+            return JSONResponse(info, headers=_NO_STORE)
         area = request.query_params.get("area") or None
         if area is not None and area not in policy.AREA_IDS:
             return _error(400, "bad_request", f"Unknown area. Use one of: {', '.join(sorted(policy.AREA_IDS))}.")

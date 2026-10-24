@@ -7,6 +7,7 @@ there, reads SKILL.md and connects with a code (oauth.py, RFC 8628). Public
 on an https address (or this computer): an agent runs what it downloads here.
 Only the files in FILES are served, from this version of the app.
 """
+import hashlib
 import re
 from pathlib import Path
 from typing import Dict, Optional
@@ -28,6 +29,7 @@ FILES: Dict[str, str] = {
     "scripts/mailcow-logs.sh": "text/plain; charset=utf-8",
 }
 PLACEHOLDER = "__MAILCOW_LOGS_URL__"
+VERSION_PLACEHOLDER = "__MAILCOW_LOGS_SKILL_VERSION__"
 # The canonical address (live.normalize_base_url) is only ever this shape; it
 # goes into JavaScript, PowerShell and sh source, so nothing else is accepted
 _SAFE_URL = re.compile(r"^https?://(\[[0-9a-f:.]+\]|[a-z0-9.-]+)(:[0-9]{1,5})?$")
@@ -53,6 +55,19 @@ def _read(name: str) -> Optional[str]:
     return text
 
 
+def skill_version() -> str:
+    """A short hash of the skill's files as shipped: the scripts send it, and the app
+    tells an agent with another one to install the skill again (rest.py, access)."""
+    version = _cache.get("__version__")
+    if version is None:
+        digest = hashlib.sha256()
+        for name in sorted(FILES):
+            digest.update(name.encode("utf-8") + b"\0" + (_read(name) or "").encode("utf-8") + b"\0")
+        version = digest.hexdigest()[:12]
+        _cache["__version__"] = version
+    return version
+
+
 def sentence(base: str) -> str:
     """The sentence the person pastes to the agent (shown in Settings > Agents)."""
     return (f"Install the {SKILL_NAME} skill into your personal skills folder as described at "
@@ -71,6 +86,9 @@ and never change the address of the existing one.
 {files}
 
 On Linux and macOS, make `scripts/{SKILL_NAME}` and `scripts/{SKILL_NAME}.sh` executable (`chmod +x`).
+
+Installing again over an older copy: replace only these files and keep the folder's `.install-id` file. It ties
+this install to its connection, so nothing has to be approved again.
 
 Then read `{SKILL_NAME}/SKILL.md` now, without waiting for skills to reload, and follow its Connecting steps.
 Show the person the link and the code that `{SKILL_NAME} connect` prints in the reply that ends your turn.
@@ -102,4 +120,5 @@ def skill_file(name: str):
     text = _read(name) if kind else None
     if text is None:
         return JSONResponse({"error": "not_found"}, status_code=404, headers=_HEADERS)
-    return PlainTextResponse(text.replace(PLACEHOLDER, base), media_type=kind, headers=_HEADERS)
+    text = text.replace(PLACEHOLDER, base).replace(VERSION_PLACEHOLDER, skill_version())
+    return PlainTextResponse(text, media_type=kind, headers=_HEADERS)

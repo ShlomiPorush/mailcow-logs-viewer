@@ -23,6 +23,8 @@ if (-not $env:MAILCOW_LOGS_NO_NODE) {
 
 # Filled in with the mailcow Logs Viewer address when the file is downloaded from it.
 $DefaultUrl = '__MAILCOW_LOGS_URL__'
+# Filled in with the skill's version when downloaded: the app says when a newer one is out (access)
+$SkillVersion = '__MAILCOW_LOGS_SKILL_VERSION__'
 $ClientId = 'mailcow-logs-cli'
 $Scope = 'status:read status:write messages:read outbound:read outbound:write quarantine:read quarantine:write ' +
   'security:read security:write rspamd:read rspamd:write dmarc:read dmarc:write domains:read domains:write ' +
@@ -466,7 +468,7 @@ function Invoke-Ops($ctx, [string]$method, [string]$url, $form, [string]$bearer,
     $bodyBytes = $Utf8.GetBytes([string]$json); $contentType = 'application/json'
   }
   $head = "$method $($u.PathAndQuery) HTTP/1.1`r`nHost: $($u.Authority)`r`nAccept: application/json`r`nConnection: close`r`nUser-Agent: mailcow-logs`r`n"
-  if ($bearer) { $head += "Authorization: Bearer $bearer`r`n" }
+  if ($bearer) { $head += "Authorization: Bearer $bearer`r`nX-Mailcow-Logs-Skill: $SkillVersion`r`n" }
   if ($null -ne $bodyBytes) { $head += "Content-Type: $contentType`r`nContent-Length: $($bodyBytes.Length)`r`n" }
   elseif (@('POST', 'PUT', 'PATCH') -contains $method) { $head += "Content-Length: 0`r`n" }
   $head += "`r`n"
