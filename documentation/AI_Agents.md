@@ -31,14 +31,14 @@ The browser goes back to the agent, and the agent shows under **Allowed agents**
 
 ## What an agent can do
 
-The agent sees four tools. `get_access` tells it what it may do. `list_endpoints` lists the app's API calls in its areas. `read_api` runs a call that only reads. `perform_action` runs a call that changes something, and appears only when the agent may take action in some area.
+The agent sees up to four tools. `get_access` tells it what it may do. `list_endpoints` lists the app's API calls in its areas. `read_api` runs a call that only reads. `perform_action` runs a call that changes something, and appears only when the agent may take action in some area.
 
 The areas follow the menu: Dashboard & Status, Messages, Outbound, Quarantine, Security, Rspamd, DMARC & TLS, Domains, Mailboxes, Logs, and Settings. The consent page lists what each area allows. A call outside the agent's areas fails and tells the agent which permission is missing.
 
 An agent can never do the following, whatever you allow:
 
 - Change settings, including sign-in and agent connections.
-- Run background jobs by hand.
+- Run jobs from **Settings** > **Background Jobs**.
 - Upload files, such as DMARC reports or a suppression list.
 - Add, change, or test notification destinations.
 - Read passwords and keys. An agent sees them hidden in **Settings**, as you do on the page.

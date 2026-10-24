@@ -281,7 +281,7 @@ var SETTINGS_FIELD_DESCRIPTIONS = {
     session_expiry_hours: 'Session expiration in hours. Default: 24.',
     session_max_entries: 'Maximum active login sessions per process. At capacity, new logins wait until a session expires or a user signs out. Existing sessions stay signed in. Default: 50.',
     agent_access_enabled: 'Requires Basic Auth or OAuth2 sign-in. Changing sign-in settings disconnects every agent. Default: off.',
-    agent_access_url: 'The app\'s HTTPS address, without /mcp or another path. Changing it stops every agent until you change it back.',
+    agent_access_url: 'The app\'s HTTPS address, without /mcp or another path. Changing it stops every agent until you change it back. Default: empty.',
     agent_access_max_days: 'Applies to new access only. From 1 to 365. Default: 90.',
     auth_max_failure_clients: 'Maximum client addresses tracked for failed Basic Auth attempts per process. At capacity, new addresses must wait before trying Basic Auth. Existing sessions remain usable. Default: 10000.',
     smtp_enabled: 'Enable SMTP for sending notifications (alerts, weekly summary).',
