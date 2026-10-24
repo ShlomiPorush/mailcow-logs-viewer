@@ -239,15 +239,19 @@ def test_agent_access_saves_that_keep_sign_in(monkeypatch, state, payload):
 
 def test_agent_access_is_checked_again_against_a_save_that_ran_meanwhile(monkeypatch):
     """Basic Auth on, agents off. This save turns agents on; another save turned
-    Basic Auth off after this one was checked. The check under the save lock sees it."""
+    Basic Auth off after this one was checked. The check under the save lock reads
+    the stored settings itself, so it sees it."""
     from fastapi import HTTPException
     from app.routers import settings as settings_router
     _sign_in_state(monkeypatch, basic=True)
     monkeypatch.setattr(settings._inner, "edit_settings_via_ui_enabled", True)
     saved = []
     monkeypatch.setattr(settings_router, "save_config_overrides_to_db", lambda db, values: saved.append(values))
-    monkeypatch.setattr(settings_router, "reload_settings",
-                        lambda db: monkeypatch.setattr(settings._inner, "basic_auth_enabled", False))
+    # The database already holds the other save; the shared settings, reloaded
+    # elsewhere with older values, still say Basic Auth is on
+    monkeypatch.setattr(settings_router, "build_settings",
+                        lambda db: settings._inner.model_copy(update={"basic_auth_enabled": False}))
+    monkeypatch.setattr(settings_router, "reload_settings", lambda db: None)
     with pytest.raises(HTTPException) as refused:
         settings_router.update_settings({"agent_access_enabled": True}, db=object())
     assert refused.value.status_code == 400

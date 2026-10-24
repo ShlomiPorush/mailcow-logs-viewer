@@ -20,7 +20,7 @@ from ..models import PostfixLog, RspamdLog, NetfilterLog, MessageCorrelation
 from ..services.bounce_policy import cleanup_blocks
 from ..config import settings, EDITABLE_SETTING_KEYS, FEATURE_IDS, reload_settings, Settings
 from ..config import normalize_disabled_features
-from ..config import _get_field_annotations, get_env_locked_keys
+from ..config import _get_field_annotations, build_settings, get_env_locked_keys
 from ..app_time import app_tz, configured_zone_name, is_valid_zone, DATE_FORMATS, TIME_FORMATS
 from ..scheduler import last_fetch_run_time, get_job_status, update_job_status, JOB_SKIPPED, JOB_STATUS_SET, reschedule_interval_jobs, clock_schedule, clock_parts, CLOCK_JOBS, dovecot_correlation_available, cleanup_disabled_feature_data, run_feature_data_sweep_soon, _mailbox_sync_needed
 from ..services.settings_store import get_config_overrides_from_db, save_config_overrides_to_db, has_config_overrides_in_db, get_maxmind_validation_status, save_maxmind_validation_status, clear_maxmind_validation_status
@@ -241,10 +241,12 @@ def _validate_bounce_actions(allowed: Dict[str, Any]) -> None:
             raise HTTPException(status_code=400, detail=f"{key} accepts only: {', '.join(known)}.")
 
 
-def _validate_agent_access(allowed: Dict[str, Any]) -> None:
+def _validate_agent_access(allowed: Dict[str, Any], current: Optional[Settings] = None) -> None:
     """Refuse a save that turns agent access on, or sign-in off under it: a
     person must sign in to approve each agent. A state that was already like
-    this (set in .env) never blocks saving the other settings."""
+    this (set in .env) never blocks saving the other settings. `current` is the
+    state before the save; the shared settings when not given."""
+    current = settings if current is None else current
     locked = get_env_locked_keys()
     # Saved as the stored settings read them back (settings_store._deserialize_value),
     # so the check and the setting that takes effect never disagree
@@ -253,7 +255,7 @@ def _validate_agent_access(allowed: Dict[str, Any]) -> None:
             allowed[key] = str(allowed[key]).strip().lower() in ("true", "1", "yes")
 
     def on(key: str, after: bool) -> bool:
-        value = allowed[key] if after and key in allowed and key not in locked else getattr(settings, key)
+        value = allowed[key] if after and key in allowed and key not in locked else getattr(current, key)
         return value is True
 
     def agents_without_sign_in(after: bool) -> bool:
@@ -978,10 +980,9 @@ def update_settings(body: Dict[str, Any], request: Request = None, response: Res
         raise HTTPException(status_code=503, detail="The settings could not be saved right now. Nothing was changed. Try again in a moment.")
     try:
         with _LIST_TRANSITION_LOCK:
-            # Again against the settings as saved now: a save that ran meanwhile
-            # may have turned sign-in off or agent access on
-            reload_settings(db)
-            _validate_agent_access(allowed)
+            # Again against the settings as saved now, read here and not from the
+            # shared settings, which a request elsewhere may reload with older values
+            _validate_agent_access(allowed, build_settings(db))
             list_was_kept, switches_before = spam_list_kept(), _spam_list_switches()
             save_config_overrides_to_db(db, allowed)
             reload_settings(db)
