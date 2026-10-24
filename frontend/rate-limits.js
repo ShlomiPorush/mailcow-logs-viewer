@@ -68,6 +68,7 @@ async function loadRateLimits() {
 
     loading.classList.remove('hidden');
     content.classList.add('hidden');
+    rateLimitsGen++;
     rateLimitEditing = null;
     rateLimitBulkOpen = false;
     // Fresh data means the cached histories are stale
@@ -108,11 +109,61 @@ async function loadRateLimits() {
             <div class="ui-empty">
                 <p class="ui-text-fail">Failed to load rate limits</p>
                 <p>${escapeHtml(error.message)}</p>
+                <button type="button" onclick="loadRateLimits()" class="ui-btn ui-btn-sm">Try again</button>
             </div>
         `;
     }
 }
 
+
+// Each load, edit, save and bulk apply starts a new generation: a refresh that
+// was asked before it is dropped, so it never draws what was there before a save
+let rateLimitsGen = 0;
+
+// The refresh, every minute: the events and the limits read again and drawn
+// again only when they changed. Nothing while a limit is open for editing, the
+// bulk panel is open, a field of the view has the focus or text is selected. A
+// first load that failed is tried again
+async function refreshRateLimits() {
+    const content = document.getElementById('rate-limits-content');
+    if (!content) return;
+    if (content.classList.contains('hidden') || !rateLimitEventsData) return loadRateLimits();
+    const working = () => {
+        const active = document.activeElement;
+        return rateLimitEditing || rateLimitBulkOpen || uiTextHeld(content)
+            || Boolean(active && content.contains(active) && active.matches('input, select, textarea'));
+    };
+    if (working()) return;
+    const gen = rateLimitsGen;
+    try {
+        const hours = rateLimitWindowHours;
+        const [eventsResponse, limitsResponse] = await Promise.all([
+            authenticatedFetch(`/api/rate-limits/events?hours=${hours}`, { timeout: PAGE_REFRESH_TIMEOUT }),
+            authenticatedFetch('/api/rate-limits/limits', { timeout: PAGE_REFRESH_TIMEOUT })
+        ]);
+        if (!eventsResponse.ok || !limitsResponse.ok) return;
+        const events = await eventsResponse.json();
+        const limits = await limitsResponse.json();
+        // Meanwhile the window changed, the view was loaded, edited or saved, or the user is working in it
+        if (gen !== rateLimitsGen || hours !== rateLimitWindowHours || working()) return;
+        const eventsChanged = JSON.stringify(events) !== JSON.stringify(rateLimitEventsData);
+        const limitsChanged = JSON.stringify(limits) !== JSON.stringify(rateLimitConfigData);
+        if (!eventsChanged && !limitsChanged) return;
+        rateLimitEventsData = events;
+        rateLimitConfigData = limits;
+        if (eventsChanged) {
+            // An open sender's history is read again with the new events
+            rateLimitSenderEvents = {};
+            rateLimitSenderEventsInFlight = null;
+            destroyRateLimitChart();
+            renderRateLimitActivityCard();
+            renderRateLimitSendersCard();
+        }
+        if (limitsChanged) renderRateLimitConfigCard();
+    } catch (error) {
+        console.error('Rate limits refresh failed:', error);
+    }
+}
 
 async function changeRateLimitWindow(value) {
     const hours = parseInt(value, 10);
@@ -571,6 +622,7 @@ function renderRateLimitEventRow(event) {
 
 
 async function resetRateLimitCounter(user, rlHash) {
+    rateLimitsGen++;
     const confirmed = await showConfirmModal({
         title: 'Reset rate limit counter',
         message: `Let ${user} send again straight away? This clears the counter they are stuck behind. Their limit stays as it is.`,
@@ -872,6 +924,7 @@ function setRateLimitBulkFrame(frame) {
 
 
 async function toggleRateLimitBulkPanel() {
+    rateLimitsGen++;
     // Opening the bulk form closes a limit being edited
     if (!rateLimitBulkOpen && rateLimitEditing && !(await rateLimitsConfirmDrop())) return;
     rateLimitBulkOpen = !rateLimitBulkOpen;
@@ -889,6 +942,7 @@ function closeRateLimitBulkPanel() {
 
 
 async function applyRateLimitBulk() {
+    rateLimitsGen++;
     const targets = rateLimitFilteredTargets();
     if (!targets.mailboxes.length && !targets.domains.length) return;
 
@@ -1047,6 +1101,7 @@ function renderRateLimitEditForm(kind, name, value, frame) {
 
 async function openRateLimitEdit(kind, name) {
     if (!(await rateLimitsConfirmDrop())) return;
+    rateLimitsGen++;
     rateLimitEditing = { kind: kind, name: name };
     // One open form at a time, in both directions
     rateLimitBulkOpen = false;
@@ -1090,6 +1145,7 @@ async function removeRateLimit(kind, name) {
 
 
 async function submitRateLimit(kind, name, value, frame) {
+    rateLimitsGen++;
     const url = kind === 'mailbox' ? '/api/rate-limits/mailbox' : '/api/rate-limits/domain';
     const payload = kind === 'mailbox'
         ? { mailbox: name, value: value, frame: frame }

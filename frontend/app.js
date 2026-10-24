@@ -1226,6 +1226,7 @@ registerPageRefresh('settings', 30000, () => smartRefreshSettings());
 registerPageRefresh('domains', 5 * 60 * 1000, () => refreshDomains());
 // The server keeps the DMARC lists for five minutes, and clears them when reports come in or go
 registerPageRefresh('dmarc', 5 * 60 * 1000, () => dmarcReload(true));
+registerPageRefresh('mailbox-stats', () => mailboxStatsRefreshEvery(), () => refreshMailboxStatsPage());
 // The ActiveSync log is read every minute
 registerPageRefresh('devices', 60000, () => loadDevices(devicesPage, { quiet: true }));
 
