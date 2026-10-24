@@ -16,7 +16,7 @@ The switch and the address are in **Settings** > **Agents**. Until all three are
 
 This is the way for Claude Code, Codex, T3 Code and other agents that run commands.
 
-1. In **Settings** > **Agents**, on the **Coding agent** tab, copy the sentence and paste it to the agent. It looks like this:
+1. In **Settings** > **Agents**, on the **Agent** tab, copy the sentence and paste it to the agent. It looks like this:
 
 	```
 	Install the mailcow-logs skill into your personal skills folder as described at https://logs.example.com/agents/skill/, then connect to mailcow Logs Viewer.
@@ -30,9 +30,9 @@ This is the way for Claude Code, Codex, T3 Code and other agents that run comman
 
 The agent finishes on its own. The skill keeps the connection on that computer, shared by every conversation of that agent, and renews it until the time you chose ends.
 
-## Connect an MCP app
+## Connect over MCP
 
-Apps that add MCP servers but do not run commands, such as Claude Desktop or Cursor, use the **MCP app** tab. Add the **MCP server URL** in the app, or run the Claude Code command shown there. A browser opens on the same computer, where you approve the request the same way.
+For apps that add MCP servers but do not run commands, use the **MCP** tab. Add the **MCP server URL** as an MCP server in the app, or run the command shown there. Approve the request in the browser that opens, the same way.
 
 ## What an agent can do
 

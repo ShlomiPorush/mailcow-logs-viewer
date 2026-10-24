@@ -100,7 +100,7 @@ function agentsRow(agent) {
 }
 
 // How an agent connects, one tab per kind of agent (as in n8n-ops): agents that
-// run commands paste one sentence and approve with a code; MCP apps add the address
+// run commands get one sentence and approve with a code; MCP clients add the address
 let agentsTab = 'skill';
 
 function agentsConnectHelp() {
@@ -115,10 +115,10 @@ function agentsConnectHelp() {
     const panel = (id, html) => `<div id="agents-connect-${id}" role="tabpanel" aria-labelledby="agents-tab-${id}"
         class="ui-agent-tabpanel${agentsTab === id ? '' : ' hidden'}">${html}</div>`;
     return `<div class="ui-agent-connect">
-        <div class="ui-tabs ui-agent-tabs" role="tablist" aria-label="Kind of agent">${tab('skill', 'Coding agent')}${tab('mcp', 'MCP app')}</div>
-        ${panel('skill', `<p class="ui-set-desc">For Claude Code, Codex, T3 Code and other agents that run commands. Paste this sentence to the agent. It shows you a link and a code to approve from any device.</p>
+        <div class="ui-tabs ui-agent-tabs" role="tablist" aria-label="How to connect">${tab('skill', 'Agent')}${tab('mcp', 'MCP')}</div>
+        ${panel('skill', `<p class="ui-set-desc">Paste this sentence to your AI agent. It replies with a link and a code that you approve from any device.</p>
             <div class="ui-md-ids ui-set-facts ui-agent-help">${line('Sentence for the agent', agentsData.skill_sentence || '')}</div>`)}
-        ${panel('mcp', `<p class="ui-set-desc">For apps that add MCP servers, such as Claude Desktop or Cursor. A browser opens on that computer to approve it.</p>
+        ${panel('mcp', `<p class="ui-set-desc">Add this address as an MCP server in your app. Approve the request in the browser that opens.</p>
             <div class="ui-md-ids ui-set-facts ui-agent-help">
                 ${line('MCP server URL', url)}
                 ${line('Claude Code', `claude mcp add --transport http mailcow ${url}`)}
