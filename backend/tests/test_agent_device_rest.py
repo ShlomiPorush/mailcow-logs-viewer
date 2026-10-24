@@ -328,6 +328,23 @@ def test_disconnect_all_and_collecting_a_code_at_once_leave_nothing_connected(li
             assert db.query(AgentGrant).filter(AgentGrant.revoked_at.is_(None)).count() == 0
 
 
+def test_disconnect_all_ends_an_mcp_code_not_exchanged_yet(live_agents):
+    from urllib.parse import parse_qs, urlsplit
+    from test_agent_access import REDIRECT, _authorize, _pkce, _register
+    browser = _signed_in()
+    client_id = _register(browser)
+    verifier, challenge = _pkce()
+    request_id = _request_id(_authorize(browser, client_id, challenge))
+    answer = browser.post(f"/api/agents/consent/{request_id}", json={
+        "allow": True, "name": "MCP app", "views": ["security"], "acts": [], "days": 7})
+    code = parse_qs(urlsplit(answer.json()["redirect"]).query)["code"][0]
+    assert browser.delete("/api/agents").status_code == 200
+    r = browser.post("/oauth/token", data={"grant_type": "authorization_code", "code": code, "client_id": client_id,
+                                           "redirect_uri": REDIRECT, "code_verifier": verifier,
+                                           "resource": APP_URL + "/mcp"})
+    assert r.status_code == 400 and r.json()["error"] == "invalid_grant"
+
+
 def test_two_authorization_headers_are_refused(live_agents):
     agent, _, tokens = _connect_with_code()
     r = agent.get("/api/security-alerts", headers=[("Authorization", f"Bearer {tokens['access_token']}"),

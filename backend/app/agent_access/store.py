@@ -258,7 +258,9 @@ def _revoke_all(db: Session, reason: str) -> int:
     grants = db.query(AgentGrant).filter(AgentGrant.revoked_at.is_(None)) \
         .order_by(AgentGrant.id).with_for_update().all()
     count = sum(1 for g in grants if _revoke(db, g, reason))
-    # Codes waiting for a person, or approved and not collected yet, end too
+    # Codes not exchanged yet end too: an MCP app's authorization code, and a
+    # code waiting for a person or approved and not collected yet
+    db.query(AgentCode).filter(AgentCode.used_at.is_(None)).delete(synchronize_session=False)
     db.query(AgentDeviceRequest).filter(AgentDeviceRequest.state.in_(("pending", "approved"))) \
         .update({"state": "expired"}, synchronize_session=False)
     return count
