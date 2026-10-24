@@ -165,21 +165,21 @@ function consentRender(data) {
         tag.className = 'ui-tag ui-tag-warn';
         tag.textContent = 'Name supplied by agent';
         const note = document.createElement('span');
-        note.textContent = ' Approve only if you just started this in your own agent and it shows this same code.';
+        note.textContent = ' Allow only if you just started this in your agent and it shows the same code.';
         identity.append(tag, note);
     } else if (client.publisher) {
         const tag = document.createElement('span');
         tag.className = 'ui-tag ui-tag-info';
         tag.textContent = `Name from ${client.publisher}`;
         const note = document.createElement('span');
-        note.textContent = ' This does not verify the program asking to connect. Allow only if you started this connection.';
+        note.textContent = ' The app cannot check which program is asking. Allow only if you just started this connection.';
         identity.append(tag, note);
     } else {
         const tag = document.createElement('span');
         tag.className = 'ui-tag ui-tag-warn';
         tag.textContent = 'Name supplied by agent';
         const note = document.createElement('span');
-        note.textContent = ' Any program can use this name. Allow only if you started this connection.';
+        note.textContent = ' Any program can use this name. Allow only if you just started this connection.';
         identity.append(tag, note);
     }
     consentEl('consent-redirect').textContent = client.redirect_uri || '';

@@ -32,7 +32,7 @@ The agent finishes on its own. The skill keeps the connection on that computer, 
 
 ## Connect over MCP
 
-The **MCP** tab is for apps that add MCP servers, such as those that cannot run commands. Paste its sentence to the agent: it points to `https://logs.example.com/agents/mcp/`, which tells the agent how to add the server in the common MCP clients. Or add the **MCP server URL** yourself in the app's MCP settings. Approve the request in the browser that opens on that computer, the same way.
+The **MCP** tab is for apps that add MCP servers, such as those that cannot run commands. Paste its sentence to the agent. It points to `https://logs.example.com/agents/mcp/`, which tells the agent how to add the server in the common MCP clients. Or add the **MCP server URL** yourself in the app's MCP settings. Approve the request in the browser that opens on that computer, the same way.
 
 ## What an agent can do
 

@@ -237,7 +237,7 @@ The agent collects its tokens at `/oauth/token` with `grant_type=urn:ietf:params
 
 ### REST for agents
 
-Every `/api` route an agent may call takes `Authorization: Bearer <access token>` from the code flow. The route's area and kind decide, not the HTTP method: a read needs **View** of its area, and an action needs **Take action**. A request with a bearer token is always an agent's request: a bad token returns 401 even with a valid session cookie. Errors are JSON `{"error", "message"}`: `invalid_token` (401), `forbidden` (403), `not_found` (404, 405), `too_large` (413, body over 256 KB), `busy` (429, nothing started), `answer_too_large` (502, answer over 1 MB) and `outcome_unknown` (504, no answer in 60 seconds; the action may still run).
+Every `/api` route an agent may call takes `Authorization: Bearer <access token>` from the code flow. The route's area and kind decide, not the HTTP method: a read needs **View** of its area, and an action needs **Take action**. A request with a bearer token is always an agent's request, so a bad token returns 401 even with a valid session cookie. Errors are JSON `{"error", "message"}`: `invalid_token` (401), `forbidden` (403), `not_found` (404, 405), `too_large` (413, body over 256 KB), `busy` (429, nothing started), `answer_too_large` (502, answer over 1 MB) and `outcome_unknown` (504, no answer in 60 seconds; the action may still run).
 
 | Method | Path | |
 | --- | --- | --- |

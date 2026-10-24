@@ -27,8 +27,8 @@ function agentsProblemText(problem) {
 const AGENTS_END_REASONS = {
     disconnected: 'Disconnected',
     sign_in_changed: 'Disconnected after sign-in settings changed',
-    code_reused: 'Disconnected: authorization code reused',
-    refresh_reused: 'Disconnected: refresh token reused',
+    code_reused: 'Disconnected after its sign-in code was used twice',
+    refresh_reused: 'Disconnected after an old token was used again',
     revoked_by_agent: 'Disconnected by the agent',
     expired: 'Access expired',
 };
@@ -325,7 +325,7 @@ async function disconnectAgent(grantId) {
     const agent = (agentsData?.agents || []).find(a => a.id === grantId);
     const confirmed = await showConfirmModal({
         title: 'Disconnect agent',
-        message: `Disconnect "${agent ? agent.name : 'this agent'}"? It cannot make new requests. To use it again, allow it again from the agent.`,
+        message: `Disconnect "${agent ? agent.name : 'this agent'}"? Its next request is refused. To use it again, connect it again from the agent.`,
         confirmText: 'Disconnect',
         isDangerous: true
     });
@@ -344,7 +344,7 @@ async function disconnectAllAgents() {
     const count = (agentsData?.agents || []).filter(a => a.state === 'connected').length;
     const confirmed = await showConfirmModal({
         title: 'Disconnect all agents',
-        message: `Disconnect ${uiCountLabel(count, 'agent', 'agents')}? They cannot make new requests. Each one must be allowed again to reconnect.`,
+        message: `Disconnect ${uiCountLabel(count, 'agent', 'agents')}? Their next requests are refused. Each one has to connect again from its agent.`,
         confirmText: 'Disconnect all',
         isDangerous: true
     });

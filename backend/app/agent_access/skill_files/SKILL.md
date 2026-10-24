@@ -6,8 +6,8 @@ description: Read and act on mailcow Logs Viewer at __MAILCOW_LOGS_URL__, the mo
 # mailcow-logs
 
 mailcow Logs Viewer (__MAILCOW_LOGS_URL__) watches a mailcow mail server. This skill uses it through its REST API
-with the `mailcow-logs` command in `scripts/`. A person approves this agent once; after that the command keeps the
-connection by itself. Tokens stay inside the command: never open, print or copy the files it keeps.
+with the `mailcow-logs` command in `scripts/`. A person approves this agent once. After that the command keeps the
+connection by itself. Tokens stay inside the command, so never open, print or copy the files it keeps.
 
 ## Running the command
 
@@ -18,20 +18,20 @@ connection by itself. Tokens stay inside the command: never open, print or copy 
 
 It uses Node 20+ when installed, otherwise PowerShell on Windows or sh, curl and awk elsewhere. Every answer is one
 line of JSON on stdout: `{"status": <http>, "data": ...}`. On failure the exit code is 1 and the answer is
-`{"error": "<code>", "message": "..."}`: tell the person the message as it is.
+`{"error": "<code>", "message": "..."}`. Tell the person the message as it is.
 
 ## Connecting (once)
 
 1. Run `mailcow-logs connect`. It answers `{"status": "pending", "link": "...", "code": "..."}`.
 2. Show the person the link and the code exactly as printed in the reply that ends your turn, with the code on its
-   own line: text written between commands is often folded away and never seen. Ask them to open the link on any
+   own line, because text written between commands is often folded away and never seen. Ask them to open the link on any
    device, sign in, check that the page shows the same code, choose what you may view or act on and for how long,
    approve, and then reply to you.
 3. When the person replies, run `mailcow-logs connect --wait`. While it answers `still_waiting`, run it again.
    `connected` means done; `denied` or `expired` means start again only if the person wants to. If the person says
    the link or the code did not work, `mailcow-logs connect --replace` gives a new one.
 
-Only if your tools can keep a command running after your turn ends and wake you when it finishes: start
+Only if your tools can keep a command running after your turn ends and wake you when it finishes, start
 `mailcow-logs connect --wait` in the background just before that reply and end your turn without waiting for it, so
 the person does not have to reply. Each time it wakes you with `still_waiting`, start it again the same way; at any
 other answer stop waiting and tell the person the result.
@@ -43,12 +43,12 @@ is in) and is shared by all its sessions. Run `disconnect` only when the person 
 ## What you may do
 
 1. Run `mailcow-logs access` (the areas you may view or act on, and until when) and `mailcow-logs endpoints [area]`
-   (the API calls you may make: method, path, parameters, body, and `kind`: read or act). If `access` answers
+   (the API calls you may make, each with its method, path, parameters, body, and `kind`, which is read or act). If `access` answers
    `update_skill`, install the skill again as it says, read the new SKILL.md, and then go on. Tell the person in one
    line. The connection is kept, so there is nothing to approve again.
 2. Read with `mailcow-logs get '<path>'`, a path under `/api/` with its query, for example
    `get 'messages?limit=20'`. Quote the path; percent-encode spaces and other characters in query values.
-   Never guess a path: use one from the table below or from `endpoints`, with its `{...}` parts filled in.
+   Never guess a path. Use one from the table below or from `endpoints`, with its `{...}` parts filled in.
 
    | Path | What it returns |
    |---|---|

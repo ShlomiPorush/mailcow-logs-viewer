@@ -87,7 +87,7 @@ and never change the address of the existing one.
 
 On Linux and macOS, make `scripts/{SKILL_NAME}` and `scripts/{SKILL_NAME}.sh` executable (`chmod +x`).
 
-Installing again over an older copy: replace only these files and keep the folder's `.install-id` file. It ties
+When you install again over an older copy, replace only these files and keep the folder's `.install-id` file. It ties
 this install to its connection, so nothing has to be approved again.
 
 Then read `{SKILL_NAME}/SKILL.md` now, without waiting for skills to reload, and follow its Connecting steps.
@@ -106,7 +106,7 @@ def mcp_note(base: str) -> str:
     url = f"{base}/mcp"
     return f"""# Connect to mailcow Logs Viewer over MCP
 
-MCP server URL: `{url}` (Streamable HTTP). There is no key: the client signs in with OAuth, and a person
+MCP server URL: `{url}` (Streamable HTTP). There is no key. The client signs in with OAuth, and a person
 approves it in a browser on the same computer, choosing what it may view or act on and for how long.
 
 Add the server the way your client adds remote MCP servers:
