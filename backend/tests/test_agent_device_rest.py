@@ -455,9 +455,23 @@ def test_an_older_skill_is_told_to_install_again(live_agents):
     assert "keep the folder's `.install-id`" in agent.get("/agents/skill/").text
 
 
+def test_the_mcp_instructions_carry_this_apps_address(live_agents):
+    client = _client()
+    for path in ("/agents/mcp", "/agents/mcp/"):
+        r = client.get(path)
+        assert r.status_code == 200 and r.headers["content-type"].startswith("text/markdown")
+        assert f"MCP server URL: `{APP_URL}/mcp`" in r.text
+        assert f"claude mcp add --transport http mailcow {APP_URL}/mcp" in r.text
+        assert f"{APP_URL}/agents/skill/" in r.text
+    listed = _signed_in().get("/api/agents").json()
+    assert listed["mcp_sentence"] == ("Connect yourself to mailcow Logs Viewer over MCP as described at "
+                                      f"{APP_URL}/agents/mcp/, then tell me what to approve.")
+
+
 def test_the_skill_is_not_served_while_agent_access_is_not_live(live_agents, monkeypatch):
     monkeypatch.setattr(settings._inner, "agent_access_enabled", False)
     assert _client().get("/agents/skill/").status_code == 404
+    assert _client().get("/agents/mcp/").status_code == 404
     assert _client().post("/oauth/device", data={"client_id": CLIENT}).status_code == 404
 
 

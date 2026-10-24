@@ -18,7 +18,7 @@ from ..utils import format_datetime_for_api
 from . import live, pending, store
 from .context import agent_call
 from .oauth import client_redirect
-from .skill import sentence as skill_sentence
+from .skill import mcp_sentence, sentence as skill_sentence
 from .scopes import AREAS, areas_of, grant_scopes, parse_scopes, requested_views
 
 logger = logging.getLogger(__name__)
@@ -198,6 +198,7 @@ def list_agents(db: Session = Depends(get_db)):
         "mcp_url": live.resource() if problem is None else None,
         # The sentence a person pastes to an agent that runs commands (skill.py)
         "skill_sentence": skill_sentence(live.issuer()) if problem is None else None,
+        "mcp_sentence": mcp_sentence(live.issuer()) if problem is None else None,
         "max_days": settings.agent_access_max_days,
         "areas": [{"id": a.id, "label": a.label} for a in AREAS],
         "agents": [_grant_row(g) for g in store.list_grants(db)],

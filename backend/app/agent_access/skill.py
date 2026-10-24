@@ -95,6 +95,50 @@ Show the person the link and the code that `{SKILL_NAME} connect` prints in the 
 """
 
 
+def mcp_sentence(base: str) -> str:
+    """The sentence a person pastes to an agent that should connect over MCP (Settings > Agents > MCP)."""
+    return (f"Connect yourself to mailcow Logs Viewer over MCP as described at {base}/agents/mcp/, "
+            "then tell me what to approve.")
+
+
+def mcp_note(base: str) -> str:
+    """How to add this app as an MCP server, for an agent or a person, in the common clients."""
+    url = f"{base}/mcp"
+    return f"""# Connect to mailcow Logs Viewer over MCP
+
+MCP server URL: `{url}` (Streamable HTTP). There is no key: the client signs in with OAuth, and a person
+approves it in a browser on the same computer, choosing what it may view or act on and for how long.
+
+Add the server the way your client adds remote MCP servers:
+
+- Claude Code: `claude mcp add --transport http mailcow {url}`. Then sign in with `/mcp` (choose mailcow,
+  then Authenticate) or `claude mcp login mailcow`.
+- Codex: `codex mcp add mailcow --url {url}`. If the browser does not open, run `codex mcp login mailcow`.
+- Cursor: in `~/.cursor/mcp.json`, add `"mailcow": {{"url": "{url}"}}` under `"mcpServers"`.
+- VS Code: in `.vscode/mcp.json`, add `"mailcow": {{"type": "http", "url": "{url}"}}` under `"servers"`.
+- Claude Desktop or claude.ai: Settings, Connectors, Add custom connector, with this URL. The app must be
+  reachable from the internet for this.
+- Any other client: add a remote (HTTP) MCP server with this URL.
+
+The first time, a browser opens on this computer. Ask the person to sign in, check who is asking, choose
+what you may view or act on, and approve. Most clients load the new tools only in a new session.
+
+If the person cannot approve in a browser on this computer, for example because they are on a phone, and you
+can run commands, connect with the skill instead: {base}/agents/skill/
+"""
+
+
+@router.get("/agents/mcp")
+@router.get("/agents/mcp/")
+def mcp_instructions():
+    base = _base()
+    if base is None:
+        return JSONResponse({"error": "not_available",
+                             "message": "Agent access is off on this server. Turn it on in Settings > Agents."},
+                            status_code=404, headers=_HEADERS)
+    return Response(mcp_note(base), media_type="text/markdown; charset=utf-8", headers=_HEADERS)
+
+
 def _host(base: str) -> str:
     return re.sub(r"[^a-z0-9.-]", "-", base.split("://", 1)[-1].lower())
 

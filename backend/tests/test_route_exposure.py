@@ -52,6 +52,8 @@ ALLOWED_ROOT_PATHS = {
     "/oauth/device",
     "/agents/skill",
     "/agents/skill/{name:path}",
+    "/agents/mcp",
+    "/agents/mcp/",
 }
 
 

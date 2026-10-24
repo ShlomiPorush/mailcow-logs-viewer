@@ -118,8 +118,11 @@ function agentsConnectHelp() {
         <div class="ui-tabs ui-agent-tabs" role="tablist" aria-label="How to connect">${tab('skill', 'Agent')}${tab('mcp', 'MCP')}</div>
         ${panel('skill', `<p class="ui-set-desc">Paste this sentence to your AI agent. It replies with a link and a code that you approve from any device.</p>
             <div class="ui-md-ids ui-set-facts ui-agent-help">${line('Sentence for the agent', agentsData.skill_sentence || '')}</div>`)}
-        ${panel('mcp', `<p class="ui-set-desc">Add this address as an MCP server in your app. Approve the request in the browser that opens.</p>
-            <div class="ui-md-ids ui-set-facts ui-agent-help">${line('MCP server URL', url)}</div>`)}
+        ${panel('mcp', `<p class="ui-set-desc">Paste this sentence to your AI agent, or add the address yourself in your app's MCP settings. Approve the request in the browser that opens on that computer.</p>
+            <div class="ui-md-ids ui-set-facts ui-agent-help">
+                ${line('Sentence for the agent', agentsData.mcp_sentence || '')}
+                ${line('MCP server URL', url)}
+            </div>`)}
     </div>`;
 }
 

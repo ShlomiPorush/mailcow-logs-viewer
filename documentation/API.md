@@ -229,6 +229,7 @@ AI agents connect after a signed-in person approves them; see [AI agents](AI_Age
 | --- | --- | --- |
 | GET | `/agents/skill/` | Install note (Markdown) for the agent: the files to download and what to do next. Public. |
 | GET | `/agents/skill/<file>` | `SKILL.md`, `scripts/mailcow-logs`, `scripts/mailcow-logs.mjs`, `scripts/mailcow-logs.ps1` and `scripts/mailcow-logs.sh`, with this app's address filled in. Public. Only from an `https` address or this computer. |
+| GET | `/agents/mcp/` | How to add this app as an MCP server in the common clients (Markdown), with its address filled in. Public. |
 | POST | `/oauth/device` | Device authorization (RFC 8628). Form: `client_id=mailcow-logs-cli`, `client_label` (the agent's own name), `scope`, `resource=<AGENT_ACCESS_URL>/api`. Returns `device_code`, `user_code` (`XXXX-XXXX`), `verification_uri`, `verification_uri_complete`, `expires_in` (600) and `interval` (5). Public; 10 requests per hour per address. |
 | GET | `/oauth/device` | The link the agent shows. Needs a signed-in session. With `user_code`, it opens the approval page for that code; without one, a field to type it. 10 codes per 10 minutes per address and per session. |
 
@@ -275,7 +276,7 @@ These routes are for people only. A call an agent makes never reaches them.
 
 | Method | Path | |
 | --- | --- | --- |
-| GET | `/api/agents` | `live`, `problem` (`no_sign_in`, `off`, `no_url` or `bad_url`), `mcp_url`, `skill_sentence`, `max_days`, `areas` and `agents`, each with `name`, `declared_name`, `publisher`, `kind` (`device` for the skill, `cimd` or `dcr` for MCP apps), `areas` (area: `view` or `act`), `approved_by`, `created_at`, `expires_at`, `last_used_at`, `state` (`connected`, `disconnected` or `expired`) and `end_reason`. |
+| GET | `/api/agents` | `live`, `problem` (`no_sign_in`, `off`, `no_url` or `bad_url`), `mcp_url`, `skill_sentence`, `mcp_sentence`, `max_days`, `areas` and `agents`, each with `name`, `declared_name`, `publisher`, `kind` (`device` for the skill, `cimd` or `dcr` for MCP apps), `areas` (area: `view` or `act`), `approved_by`, `created_at`, `expires_at`, `last_used_at`, `state` (`connected`, `disconnected` or `expired`) and `end_reason`. |
 | DELETE | `/api/agents/{grant_id}` | Disconnects one agent. 404 if it is not connected. |
 | DELETE | `/api/agents` | Disconnects every agent. Returns `{ "disconnected": <count> }`. |
 | GET | `/api/agents/{grant_id}/activity` | The last 50 entries: `at`, `event` (`grant_created`, `grant_revoked`, `call` or `denied`), `tool`, `method`, `path`, `http_status`, `outcome` and `detail`. |

@@ -41,10 +41,11 @@ AGENT_PUBLIC_PATHS = frozenset({
 # a session, but the approval page (GET /oauth/device) needs a signed-in person
 AGENT_PUBLIC_REQUESTS = frozenset({("POST", "/oauth/device")})
 SKILL_PREFIX = "/agents/skill"
+MCP_NOTE_PATHS = frozenset({"/agents/mcp", "/agents/mcp/"})
 
 
 def _is_agent_path(path: str) -> bool:
-    return path == "/mcp" or path.startswith(("/oauth/", "/.well-known/oauth-", SKILL_PREFIX))
+    return path == "/mcp" or path in MCP_NOTE_PATHS or path.startswith(("/oauth/", "/.well-known/oauth-", SKILL_PREFIX))
 
 
 def _has_bearer(request: Request) -> bool:
@@ -304,7 +305,8 @@ class BasicAuthMiddleware(BaseHTTPMiddleware):
         # documents, or serve the skill's files
         if path in AGENT_PUBLIC_PATHS or (request.method, path) in AGENT_PUBLIC_REQUESTS:
             return await call_next(request)
-        if request.method in ("GET", "HEAD") and (path == SKILL_PREFIX or path.startswith(SKILL_PREFIX + "/")):
+        if request.method in ("GET", "HEAD") and (path == SKILL_PREFIX or path.startswith(SKILL_PREFIX + "/")
+                                                  or path in MCP_NOTE_PATHS):
             return await call_next(request)
 
         # Allow access to login page, static files, health check, info endpoint, and auth endpoints without authentication
