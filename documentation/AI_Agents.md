@@ -7,7 +7,7 @@ An AI agent such as Claude Code or Codex can read what the app shows and, if you
 Agent access is off by default. It needs three things:
 
 - Sign-in is on: Basic authentication, OAuth2, or both. See [Sign-in configuration](OAuth2_Configuration.md).
-- **App address for agents** (`AGENT_ACCESS_URL`) is the address agents reach the app at, such as `https://logs.example.com`. It must be `https` and have no path. An `http` address works only on `localhost` or `127.0.0.1`, for a local test.
+- **App address for agents** (`AGENT_ACCESS_URL`) is the address agents reach the app at, such as `https://logs.example.com`. It must be `https` and have no path. An `http` address works only on `localhost` or `127.0.0.1`, for a local test. When you turn **Agent access** on in Settings with no address, the field is filled from the **OAuth2 Redirect URI**, or else from the address the page is open at. Change it if agents reach the app at another address.
 - **Agent access** (`AGENT_ACCESS_ENABLED`) is on.
 
 All three are in **Settings** > **Agents**. Until all three are set, that section says what is missing, and every agent address answers 404.

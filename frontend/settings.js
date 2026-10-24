@@ -281,7 +281,7 @@ var SETTINGS_FIELD_DESCRIPTIONS = {
     session_expiry_hours: 'Session expiration in hours. Default: 24.',
     session_max_entries: 'Maximum active login sessions per process. At capacity, new logins wait until a session expires or a user signs out. Existing sessions stay signed in. Default: 50.',
     agent_access_enabled: 'Let AI agents such as Claude Code and Codex connect over MCP. Each agent opens a page in the browser where a signed-in person chooses what it may see and do. Needs sign-in and the address below. Default: off.',
-    agent_access_url: 'The address agents reach this app at, such as https://logs.example.com. It must be https and have no path. Agents connected through another address stop working.',
+    agent_access_url: 'The address agents reach this app at, https and without a path, such as https://logs.example.com. Turning agent access on fills it in; change it if agents use another address. Agents connected through another address stop working.',
     agent_access_max_days: 'The longest period a person can give an agent, from 1 to 365 days. Default: 90.',
     auth_max_failure_clients: 'Maximum client addresses tracked for failed Basic Auth attempts per process. At capacity, new addresses must wait before trying Basic Auth. Existing sessions remain usable. Default: 10000.',
     smtp_enabled: 'Enable SMTP for sending notifications (alerts, weekly summary).',
@@ -854,6 +854,58 @@ function settingsShowFormatExample(root) {
     const picked = (key, fallback) => { const el = root.querySelector('#edit-' + key); return el && el.value ? el.value : fallback; };
     const now = zonedParts(new Date());
     out.textContent = `Example: ${writeDate(now, { fmt: picked('date_format', appDateFmt()) })}, ${writeClock(now, { fmt: picked('time_format', appTimeFmt()) })}`;
+}
+
+// Agents > App address for agents: the address to offer, which the person can
+// change. The OAuth2 callback names the app's public address when it is set;
+// otherwise the address this page is open at. Only an address the server
+// accepts (https, or http on this computer) is offered, else ''
+function settingsAgentUrlSuggestion(redirectUri, pageOrigin) {
+    for (const candidate of [redirectUri, pageOrigin]) {
+        let url;
+        try {
+            url = new URL(String(candidate || '').trim());
+        } catch (e) {
+            continue;
+        }
+        const host = url.hostname.toLowerCase();
+        const loopback = host === 'localhost' || host === '[::1]' || /^127\.\d+\.\d+\.\d+$/.test(host);
+        if (url.protocol === 'https:' || (url.protocol === 'http:' && loopback)) return url.origin;
+    }
+    return '';
+}
+
+// Turning agent access on with no address fills in the suggestion; while the
+// field is empty, a button under it offers the suggestion
+function settingsSuggestAgentUrl(root, toggled) {
+    const field = root && root.querySelector('#edit-agent_access_url');
+    if (!field || field.disabled) return;
+    const redirect = root.querySelector('#edit-oauth2_redirect_uri');
+    const suggestion = settingsAgentUrlSuggestion(redirect ? redirect.value : '', location.origin);
+    const on = root.querySelector('#edit-agent_access_enabled');
+    if (toggled && on && on.checked && !field.value.trim() && suggestion) {
+        field.value = suggestion;
+        field.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+    let offer = field.parentElement.querySelector('[data-agent-url-offer]');
+    if (field.value.trim() || !suggestion) {
+        if (offer) offer.remove();
+        return;
+    }
+    if (!offer) {
+        offer = document.createElement('button');
+        offer.type = 'button';
+        offer.className = 'ui-set-clear';
+        offer.dataset.agentUrlOffer = '';
+        offer.addEventListener('click', () => {
+            field.value = offer.dataset.agentUrlOffer;
+            field.dispatchEvent(new Event('input', { bubbles: true }));
+            field.focus();
+        });
+        field.insertAdjacentElement('afterend', offer);
+    }
+    offer.dataset.agentUrlOffer = suggestion;
+    offer.textContent = 'Use ' + suggestion;
 }
 
 // The IANA time zones this browser knows, UTC first; none where the browser
@@ -2020,12 +2072,15 @@ function renderSettings(content, data) {
             form.addEventListener('change', () => settingsShowFormatExample(content));
             settingsShowNeeds(content);
             settingsApplySync(false);
+            settingsSuggestAgentUrl(content, false);
             form.addEventListener('change', event => {
                 if (event.target && event.target.id === 'edit-suppression_rspamd_sync') settingsApplySync(true);
+                settingsSuggestAgentUrl(content, !!event.target && event.target.id === 'edit-agent_access_enabled');
                 settingsShowNeeds(content);
             });
+            form.addEventListener('input', () => settingsSuggestAgentUrl(content, false));
             // Clearing and resetting change a field without an input event
-            content.querySelectorAll('.settings-clear-btn').forEach(btn => btn.addEventListener('click', () => setTimeout(() => { updateDirty(); settingsShowNeeds(content); settingsShowFormatExample(content); })));
+            content.querySelectorAll('.settings-clear-btn').forEach(btn => btn.addEventListener('click', () => setTimeout(() => { updateDirty(); settingsShowNeeds(content); settingsShowFormatExample(content); settingsSuggestAgentUrl(content, false); })));
         }
 
         if (form) {
