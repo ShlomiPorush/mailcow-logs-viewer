@@ -231,6 +231,9 @@ function editAgentAccess(grantId) {
     const ends = (agentsData.periods || []).map(p => `<option value="${Number(p.days)}">${escapeHtml(p.label)} from now</option>`).join('');
     const modal = document.createElement('div');
     modal.id = 'agent-edit-modal';
+    // The version of the access this dialog shows: saving it after the list
+    // reloaded meanwhile must not pass for an edit of the newer access
+    modal.dataset.version = agent.version || '';
     modal.className = 'ui-dialog-backdrop';
     modal.setAttribute('role', 'dialog');
     modal.setAttribute('aria-labelledby', 'agent-edit-h');
@@ -284,8 +287,9 @@ function closeAgentEditModal(saved = false) {
 
 async function saveAgentAccess(event, grantId) {
     event.preventDefault();
-    const version = (agentsData?.agents || []).find(a => a.id === grantId)?.version || null;
+
     const modal = document.getElementById('agent-edit-modal');
+    const version = modal.dataset.version || null;
     const error = document.getElementById('agent-edit-error');
     const chosen = kind => [...modal.querySelectorAll(`input[data-kind="${kind}"]:checked`)].map(i => i.dataset.area);
     const end = document.getElementById('agent-edit-end').value;
