@@ -309,17 +309,21 @@ test('a press that begins in the window and ends beside it (a text selection) le
     assert.equal(w.document.getElementById('attn-window'), null);
 });
 
-test('Refresh reads Needs attention again at once, even when it was just read', async () => {
+test('a hidden browser tab reads nothing, and shown again reads what is due', async () => {
     const w = page();
     state(w).ready = true;
     await loadAll(w);
-    w.uiConfirmLeave = async () => true;
-    w.loadNavCounters = () => {};
+    // The alerts are due, the server checks were just read
+    state(w).alerts.at = Date.now() - 60000;
     w.asked.length = 0;
-    await w.refreshAllData();
-    await Promise.all([state(w).alerts.busy, state(w).checks.busy]);
+    Object.defineProperty(w.document, 'hidden', { configurable: true, get: () => true });
+    w.attentionRefresh();
+    assert.equal(w.asked.length, 0);
+    Object.defineProperty(w.document, 'hidden', { configurable: true, get: () => false });
+    w.attentionRefresh();
+    await state(w).alerts.busy;
     assert.ok(w.asked.includes('/api/security-alerts'));
-    assert.ok(w.asked.includes('/api/status/summary'));
+    assert.ok(!w.asked.includes('/api/status/summary'));
 });
 
 test('an alerts read that never answers has failed by the time limit, and the next refresh asks again', async () => {

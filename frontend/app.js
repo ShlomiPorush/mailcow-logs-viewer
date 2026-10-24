@@ -671,7 +671,7 @@ async function loadAppInfo() {
 // SIDEBAR: SERVER CARD, COUNTERS AND TOOLS
 // =============================================================================
 
-// The Refresh and theme buttons live in the sidebar foot; on phones, where the
+// The theme and logout buttons live in the sidebar foot; on phones, where the
 // sidebar is hidden, the same elements move into the top bar.
 function placeShellUtilities() {
     const tools = document.getElementById('ui-utilities');
@@ -2196,22 +2196,6 @@ function switchTab(tab, params = {}) {
             console.warn('Unknown tab:', tab);
     }
     queueDocumentTitle();
-}
-
-async function refreshAllData() {
-    if (!(await uiConfirmLeave({ route: currentTab, reload: true }))) return;
-    if (currentTab === 'dmarc') {
-        try {
-            await authenticatedFetch('/api/dmarc/cache/clear', { method: 'POST' });
-            console.log('DMARC cache cleared');
-        } catch (e) {
-            console.error('Failed to clear DMARC cache:', e);
-        }
-    }
-    switchTab(currentTab);
-    loadNavCounters();
-    // Needs attention now, not when its next refresh is due
-    attentionRefresh({ force: true });
 }
 
 // =============================================================================
