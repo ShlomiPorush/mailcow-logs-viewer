@@ -4,6 +4,7 @@ Supports both OAuth2 (session cookies) and Basic Auth
 Protects ALL endpoints when authentication is enabled
 """
 import ipaddress
+import re
 import logging
 import time
 from threading import RLock
@@ -47,7 +48,12 @@ def _is_agent_path(path: str) -> bool:
 
 
 def _has_bearer(request: Request) -> bool:
-    return any(v[:7].lower() == "bearer " for v in request.headers.getlist("authorization"))
+    """Whether any Authorization header names the Bearer scheme anywhere, also mixed
+    with another scheme or without a token. Such a request is an agent's and never a
+    cookie's: rest.py accepts only one plain `Bearer <token>` header and refuses the rest."""
+    return any(part.lower() == "bearer"
+               for value in request.headers.getlist("authorization")
+               for part in re.split(r"[\s,]+", value))
 
 logger = logging.getLogger(__name__)
 

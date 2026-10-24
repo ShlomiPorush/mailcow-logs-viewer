@@ -270,6 +270,64 @@ def test_a_bad_bearer_never_falls_back_to_the_owners_cookie(live_agents):
     assert "invalid_token" in r.headers["www-authenticate"]
 
 
+@pytest.mark.parametrize("value", ["Basic dW51c2Vk, Bearer mlva_invalid", "Bearer", "bearer  ", "Basic x,Bearer y"])
+def test_an_authorization_that_mixes_in_bearer_never_falls_back_to_the_cookie(live_agents, value):
+    browser = _signed_in()
+    r = browser.get("/api/security-alerts", headers={"Authorization": value})
+    assert r.status_code == 401 and r.json()["error"] == "invalid_token"
+
+
+def test_codes_that_can_never_succeed_count_against_the_address(live_agents):
+    agent, _, _ = _connect_with_code()
+    from app.database import get_db_context
+    from app.models import AgentDeviceRequest
+    d = _device(agent)
+    _answer(d["user_code"], allow=False)
+    for _ in range(oauth.unknown_device_codes.limit):
+        assert _poll(agent, d["device_code"]).json()["error"] == "access_denied"
+    assert _poll(agent, d["device_code"]).status_code == 429
+
+
+def test_disconnect_all_and_collecting_a_code_at_once_leave_nothing_connected(live_agents):
+    import threading
+    from app.database import SessionLocal, get_db_context
+    from app.models import AgentGrant
+    for _ in range(6):
+        agent = _client()
+        d = _device(agent)
+        _answer(d["user_code"])
+        errors, barrier = [], threading.Barrier(2)
+
+        def collect():
+            db = SessionLocal()
+            try:
+                barrier.wait()
+                store.redeem_device_code(db, device_code=d["device_code"], client_id=CLIENT)
+            except store.TokenError:
+                pass
+            except Exception as e:
+                errors.append(e)
+            finally:
+                db.close()
+
+        def disconnect_all():
+            db = SessionLocal()
+            try:
+                barrier.wait()
+                store.revoke_all(db)
+            except Exception as e:
+                errors.append(e)
+            finally:
+                db.close()
+        threads = [threading.Thread(target=collect), threading.Thread(target=disconnect_all)]
+        [t.start() for t in threads]
+        [t.join() for t in threads]
+        assert not errors, errors
+        # Either the code was collected first and then disconnected, or it found its request ended
+        with get_db_context() as db:
+            assert db.query(AgentGrant).filter(AgentGrant.revoked_at.is_(None)).count() == 0
+
+
 def test_two_authorization_headers_are_refused(live_agents):
     agent, _, tokens = _connect_with_code()
     r = agent.get("/api/security-alerts", headers=[("Authorization", f"Bearer {tokens['access_token']}"),

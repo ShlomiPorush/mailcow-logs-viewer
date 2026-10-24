@@ -30,6 +30,9 @@ const SCOPE =
   "security:read security:write rspamd:read rspamd:write dmarc:read dmarc:write domains:read domains:write " +
   "mailboxes:read mailboxes:write logs:read settings:read"
 const WAIT_SECONDS = Number(process.env.MAILCOW_LOGS_WAIT_SECONDS) || 90
+// A pending code is dropped locally only this long after its expiry: until then the server decides
+// (an approved code can be collected for a few minutes after it expires)
+const STALE_CODE_SECONDS = 600
 const LOCK_WAIT_MS = Number(process.env.MAILCOW_LOGS_LOCK_WAIT_MS) || 20_000
 const OAUTH_TIMEOUT_MS = 15_000
 // The server answers an API call within 60 s (or says the outcome is unknown).
@@ -754,7 +757,9 @@ async function waitForApproval(ctx) {
         throw new Fail("not_connected", "No connection is being made. Run: mailcow-logs connect")
       }
       const t = now()
-      if (rec.deviceExpiresAt <= t) {
+      // The server decides when a code has ended: one approved at the last minute can
+      // still be collected for a while after. Only a code long past that is dropped here.
+      if (rec.deviceExpiresAt + STALE_CODE_SECONDS <= t) {
         writeRecord(ctx, clearPending(rec))
         throw new Fail("expired", "The code expired before it was approved. Run: mailcow-logs connect")
       }

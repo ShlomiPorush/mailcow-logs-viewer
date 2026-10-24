@@ -29,6 +29,8 @@ $Scope = 'status:read status:write messages:read outbound:read outbound:write qu
   'mailboxes:read mailboxes:write logs:read settings:read'
 $WaitSeconds = 90
 if ($env:MAILCOW_LOGS_WAIT_SECONDS) { $WaitSeconds = [int]$env:MAILCOW_LOGS_WAIT_SECONDS }
+# A pending code is dropped locally only this long after its expiry: until then the server decides
+$StaleCodeSeconds = 600
 # A refresh is retried only once it cannot be in flight any more: twice the request timeout (tests shorten it).
 $RefreshGrace = 30
 if ($null -ne $env:MAILCOW_LOGS_TEST_REFRESH_GRACE) { $RefreshGrace = [long]$env:MAILCOW_LOGS_TEST_REFRESH_GRACE }
@@ -478,8 +480,13 @@ function Invoke-Ops($ctx, [string]$method, [string]$url, $form, [string]$bearer,
       $stream = $tcp.GetStream()
       if ($u.Scheme -eq 'https') {
         $ssl = New-Object System.Net.Security.SslStream($stream, $false)
-        # The system's TLS versions; the certificate is checked as usual.
-        $ssl.AuthenticateAsClient($u.DnsSafeHost, $null, [Security.Authentication.SslProtocols]::None, $true)
+        # The system's TLS versions; the certificate is checked as usual. The handshake gets
+        # what is left of the request's time: a server that stops in it cannot hold the lock.
+        $left = $timeoutMs - [int]$clock.ElapsedMilliseconds
+        if ($left -le 0) { throw 'the connection timed out' }
+        $tcp.ReceiveTimeout = $left; $tcp.SendTimeout = $left
+        $handshake = $ssl.AuthenticateAsClientAsync($u.DnsSafeHost, $null, [Security.Authentication.SslProtocols]::None, $true)
+        if (-not $handshake.Wait($left)) { $tcp.Close(); throw 'the TLS handshake timed out' }
         $stream = $ssl
       }
     } catch {
@@ -669,7 +676,7 @@ function Invoke-Wait($ctx) {
         else { Fail 'not_connected' 'No connection is being made. Run: mailcow-logs connect' }
       } else {
         $t = Now
-        if ($rec.deviceExpiresAt -le $t) {
+        if ($rec.deviceExpiresAt + $StaleCodeSeconds -le $t) {
           Write-Record $ctx (Clear-Pending $rec)
           Fail 'expired' 'The code expired before it was approved. Run: mailcow-logs connect'
         }

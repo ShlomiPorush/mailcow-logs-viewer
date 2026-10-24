@@ -15,6 +15,8 @@ DEFAULT_URL="__MAILCOW_LOGS_URL__"
 CLIENT_ID="mailcow-logs-cli"
 SCOPE="status:read status:write messages:read outbound:read outbound:write quarantine:read quarantine:write security:read security:write rspamd:read rspamd:write dmarc:read dmarc:write domains:read domains:write mailboxes:read mailboxes:write logs:read settings:read"
 WAIT_SECONDS="${MAILCOW_LOGS_WAIT_SECONDS:-90}"
+# A pending code is dropped locally only this long after its expiry: until then the server decides
+STALE_CODE_SECONDS=600
 POLL_SECONDS="${MAILCOW_LOGS_TEST_POLL_SECONDS:-5}"
 # A refresh is retried only once it cannot be in flight any more: twice the request timeout (tests shorten it).
 REFRESH_GRACE="${MAILCOW_LOGS_TEST_REFRESH_GRACE:-30}"
@@ -587,7 +589,7 @@ cmd_wait() {
       fail not_connected "No connection is being made. Run: mailcow-logs connect"
     fi
     t=$(now)
-    if [ "$R_deviceExpiresAt" -le "$t" ]; then
+    if [ $((R_deviceExpiresAt + STALE_CODE_SECONDS)) -le "$t" ]; then
       clear_pending
       record_write
       fail expired "The code expired before it was approved. Run: mailcow-logs connect"

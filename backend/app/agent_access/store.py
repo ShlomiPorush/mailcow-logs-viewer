@@ -274,6 +274,11 @@ def revoke_grant(db: Session, grant_id: int, reason: str = "disconnected") -> bo
 
 
 def revoke_all(db: Session, reason: str = "disconnected") -> int:
+    # The sign-in fingerprint row, exclusively: a code being collected or
+    # exchanged holds it shared, so it finishes before this (and is then
+    # disconnected here) or starts after it (and finds its request ended)
+    check_sign_in_unchanged(db)
+    db.query(SystemSetting).filter(SystemSetting.key == _FINGERPRINT_KEY).with_for_update().first()
     count = _revoke_all(db, reason)
     db.commit()
     return count

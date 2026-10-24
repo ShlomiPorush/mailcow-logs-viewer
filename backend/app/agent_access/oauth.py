@@ -43,7 +43,7 @@ registrations = Window(limit=10, seconds=3600)
 token_requests = Window(limit=30, seconds=60)
 device_requests = Window(limit=10, seconds=3600)      # codes asked for, per address
 code_lookups = Window(limit=10, seconds=600)          # codes typed or opened, per address and per session
-unknown_device_codes = Window(limit=20, seconds=60)   # polls with a device code never issued, per address
+unknown_device_codes = Window(limit=20, seconds=60)   # polls with a code that cannot succeed, per address
 
 _NO_STORE = {"Cache-Control": "no-store", "Pragma": "no-cache"}
 
@@ -393,8 +393,11 @@ async def token(request: Request):
             try:
                 result = await db_call(store.redeem_device_code, device_code=form.get("device_code", ""),
                                        client_id=client_id)
-            except store.UnknownDeviceCode:
-                unknown_device_codes.hit(ip)
+            except store.TokenError as e:
+                # Only a code still waiting is paced by the code itself; one that
+                # can never succeed (unknown, used, denied, expired) counts here
+                if e.error not in ("authorization_pending", "slow_down"):
+                    unknown_device_codes.hit(ip)
                 raise
         elif grant_type == "authorization_code":
             result = await db_call(store.exchange_code, code=form.get("code", ""), client_id=client_id,
