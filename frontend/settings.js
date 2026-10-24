@@ -280,9 +280,9 @@ var SETTINGS_FIELD_DESCRIPTIONS = {
     session_secret_key: 'Secret key for signing session cookies. REQUIRED if OAuth2 enabled. Generate: openssl rand -hex 32. Use a strong secret in production.',
     session_expiry_hours: 'Session expiration in hours. Default: 24.',
     session_max_entries: 'Maximum active login sessions per process. At capacity, new logins wait until a session expires or a user signs out. Existing sessions stay signed in. Default: 50.',
-    agent_access_enabled: 'Let AI agents such as Claude Code and Codex connect over MCP. Each agent opens a page in the browser where a signed-in person chooses what it may see and do. It needs sign-in and the address below. Default: off.',
-    agent_access_url: 'The address agents reach this app at, https and without a path, such as https://logs.example.com. Turning agent access on fills it in. Change it if agents use another address. Changing it stops the agents connected through the old address.',
-    agent_access_max_days: 'The longest period a person can give an agent, from 1 to 365 days. Default: 90.',
+    agent_access_enabled: 'It needs sign-in and the address below. Default: off.',
+    agent_access_url: 'The https address agents reach this app at, without a path. Changing it stops the connected agents.',
+    agent_access_max_days: 'From 1 to 365. Default: 90.',
     auth_max_failure_clients: 'Maximum client addresses tracked for failed Basic Auth attempts per process. At capacity, new addresses must wait before trying Basic Auth. Existing sessions remain usable. Default: 10000.',
     smtp_enabled: 'Enable SMTP for sending notifications (alerts, weekly summary).',
     smtp_host: 'SMTP server hostname.',
@@ -1012,8 +1012,8 @@ var SETTINGS_EDIT_TABS = [
         ]
     },
     {
-        id: 'agents', label: 'Agents', description: 'AI agents such as Claude Code and Codex can use this app over MCP. An agent never gets a password or a key. Instead it opens a page in your browser, where a signed-in person chooses which areas it may view or act in, and for how long. A change to the sign-in settings disconnects every agent.', groups: [
-            { label: 'Agent access', keys: ['agent_access_enabled', 'agent_access_url', 'agent_access_max_days'] }
+        id: 'agents', label: 'Agents', description: 'Let AI agents such as Claude Code and Codex use this app over MCP. Each agent asks in the browser, and a signed-in person chooses what it may see and do, and for how long. Changing sign-in disconnects every agent.', groups: [
+            { label: 'Access', keys: ['agent_access_enabled', 'agent_access_url', 'agent_access_max_days'] }
         ]
     },
     {
@@ -1298,7 +1298,7 @@ function renderSettingsEditField(key, value, sensitiveKeys, description, envLock
         'dmarc_imap_user', 'dmarc_imap_password', 'dmarc_imap_folder',
         'maxmind_account_id', 'maxmind_license_key',
         'app_title', 'app_logo_url', 'blacklist_emails', 'local_domains',
-        'enable_weekly_summary'
+        'enable_weekly_summary', 'agent_access_enabled', 'agent_access_url'
     ]);
     const isUserSpecific = USER_SPECIFIC_KEYS.has(key);
     const isChanged = hasDefault && !sensitive && !isUserSpecific && (function() {

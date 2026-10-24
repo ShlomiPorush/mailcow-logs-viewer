@@ -10,7 +10,7 @@ Agent access is off by default. It needs three things:
 - **App address for agents** (`AGENT_ACCESS_URL`) is the address agents reach the app at, such as `https://logs.example.com`. It must be `https` and have no path. An `http` address works only on `localhost` or `127.0.0.1`, for a local test. If the field is empty when you turn **Agent access** on in Settings, Settings fills it in. It takes the address from the **OAuth2 Redirect URI**, or else from the address of the page you have open. Change it if agents reach the app at another address.
 - **Agent access** (`AGENT_ACCESS_ENABLED`) is on.
 
-All three are in **Settings** > **Agents**. Until all three are set, that section says what is missing, and every agent address answers 404.
+The switch and the address are in **Settings** > **Agents**. Until all three are set, every agent address answers 404, and **Settings** > **Agents** shows what is missing.
 
 ## Connect an agent
 

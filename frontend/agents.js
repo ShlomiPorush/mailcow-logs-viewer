@@ -10,16 +10,15 @@
 let agentsData = null;
 const agentsOpenActivity = new Set();
 
-// What is missing. With the edit form there is a field above the list; without it, only the variable
+// What is missing, or '' when the field right above already shows it. Without
+// the edit form, only the variable can say it
 function agentsProblemText(problem) {
     const form = !!document.querySelector('[data-tab-extra="agents"]');
-    const set = (field, variable, value) => form
-        ? `Set <strong>${field}</strong> above, or <code>${variable}</code>.`
-        : `Set <code>${variable}${value}</code> in <code>.env</code>.`;
     switch (problem) {
-        case 'off': return `Agent access is off. ${set('Agent access', 'AGENT_ACCESS_ENABLED', '=true')}`;
+        case 'off': return form ? '' : 'Agent access is off. Set <code>AGENT_ACCESS_ENABLED=true</code> in <code>.env</code>.';
         case 'no_sign_in': return 'Agent access needs sign-in, so a person can approve each agent. Turn on Basic or OAuth2 sign-in in Settings → Authentication.';
-        case 'no_url': return `Agent access needs the address agents reach this app at, such as <code>https://logs.example.com</code>. ${set('App address for agents', 'AGENT_ACCESS_URL', '')}`;
+        case 'no_url': return form ? 'Fill in <strong>App address for agents</strong> above.'
+            : 'Agent access needs the address agents reach this app at. Set <code>AGENT_ACCESS_URL</code> in <code>.env</code>.';
         case 'bad_url': return 'The app address for agents must be an <code>https://</code> address without a path, such as <code>https://logs.example.com</code>.';
         default: return 'Agent access is not available.';
     }
@@ -114,7 +113,7 @@ function agentsConnectHelp() {
         ${line('Claude Code', claude)}
         ${line('Codex', codex)}
     </div>
-    <p class="ui-set-desc">The agent opens a page in the browser. Sign in there, choose what it may see and do and for how long, and allow it. If the page does not open, run <code>claude mcp login mailcow</code> or <code>codex mcp login mailcow</code>.</p>`;
+    <p class="ui-set-desc">If the browser does not open, run <code>claude mcp login mailcow</code> or <code>codex mcp login mailcow</code>.</p>`;
 }
 
 function renderAgentsPanel() {
@@ -122,14 +121,12 @@ function renderAgentsPanel() {
     if (!panel || !agentsData) return;
     const agents = agentsData.agents || [];
     const connected = agents.filter(a => a.state === 'connected');
-    const intro = agentsData.live
-        ? agentsConnectHelp()
-        : uiLocked('Agents cannot connect', agentsProblemText(agentsData.problem), '');
+    const problem = agentsData.live ? '' : agentsProblemText(agentsData.problem);
+    const intro = agentsData.live ? agentsConnectHelp() : problem ? uiLocked('Agents cannot connect', problem, '') : '';
     panel.innerHTML = `
         <div class="ui-list-head">
             <div>
                 <h4 class="ui-md-h">Connected agents</h4>
-                <p class="ui-set-desc">Each agent may do only what the person who approved it chose, until its period ends. The longest period is ${Number(agentsData.max_days)} days.</p>
             </div>
             ${connected.length ? `<button type="button" onclick="disconnectAllAgents()" class="ui-btn ui-btn-sm ui-btn-danger ui-head-actions">Disconnect all</button>` : ''}
         </div>
