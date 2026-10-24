@@ -246,10 +246,15 @@ def _validate_agent_access(allowed: Dict[str, Any]) -> None:
     person must sign in to approve each agent. A state that was already like
     this (set in .env) never blocks saving the other settings."""
     locked = get_env_locked_keys()
+    # Saved as the stored settings read them back (settings_store._deserialize_value),
+    # so the check and the setting that takes effect never disagree
+    for key in ("agent_access_enabled", "basic_auth_enabled", "oauth2_enabled"):
+        if key in allowed and not isinstance(allowed[key], bool):
+            allowed[key] = str(allowed[key]).strip().lower() in ("true", "1", "yes")
 
     def on(key: str, after: bool) -> bool:
         value = allowed[key] if after and key in allowed and key not in locked else getattr(settings, key)
-        return value is True or str(value).strip().lower() in ("true", "1", "yes", "on")
+        return value is True
 
     def agents_without_sign_in(after: bool) -> bool:
         sign_in = on("auth_enabled", after) or on("basic_auth_enabled", after) or on("oauth2_enabled", after)
@@ -973,6 +978,10 @@ def update_settings(body: Dict[str, Any], request: Request = None, response: Res
         raise HTTPException(status_code=503, detail="The settings could not be saved right now. Nothing was changed. Try again in a moment.")
     try:
         with _LIST_TRANSITION_LOCK:
+            # Again against the settings as saved now: a save that ran meanwhile
+            # may have turned sign-in off or agent access on
+            reload_settings(db)
+            _validate_agent_access(allowed)
             list_was_kept, switches_before = spam_list_kept(), _spam_list_switches()
             save_config_overrides_to_db(db, allowed)
             reload_settings(db)

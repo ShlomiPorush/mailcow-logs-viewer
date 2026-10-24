@@ -906,9 +906,10 @@ function settingsLockAgentAccess(root, signInChanged, signInElsewhere) {
         toggle.checked = false;
         toggle.dispatchEvent(new Event('input', { bubbles: true }));
     }
-    row.inert = !signIn;
-    // Only the switch is dimmed: the note says what to do
-    (row.querySelector('.ui-set-bool-main') || row).classList.toggle('is-off', !signIn);
+    // Only the switch is locked and dimmed: the note stays readable, also to a screen reader
+    const main = row.querySelector('.ui-set-bool-main') || toggle;
+    main.inert = !signIn;
+    main.classList.toggle('is-off', !signIn);
     let note = row.querySelector('[data-agent-lock]');
     if (signIn) {
         if (note) note.remove();

@@ -43,8 +43,10 @@ function page({ basic = false, oauth = false, agents = false } = {}) {
 test('without sign-in the switch is locked and says where to turn sign-in on', () => {
     const p = page();
     p.w.settingsLockAgentAccess(p.form, false, false);
-    assert.equal(p.row.inert, true);
-    assert.ok(p.row.querySelector('.ui-set-bool-main').classList.contains('is-off'));
+    const main = p.row.querySelector('.ui-set-bool-main');
+    assert.equal(main.inert, true);
+    assert.equal(p.row.inert, false, 'the note stays outside the locked part');
+    assert.ok(main.classList.contains('is-off'));
     assert.ok(!p.row.classList.contains('is-off'), 'the note is not dimmed');
     assert.match(p.note().textContent, /Turn on Basic Auth or OAuth2 in Settings → Authentication first/);
 });
@@ -53,7 +55,7 @@ test('either sign-in method unlocks it', () => {
     for (const on of [{ basic: true }, { oauth: true }]) {
         const p = page(on);
         p.w.settingsLockAgentAccess(p.form, false, false);
-        assert.equal(p.row.inert, false);
+        assert.equal(p.row.querySelector('.ui-set-bool-main').inert, false);
         assert.equal(p.note(), null);
     }
 });
@@ -61,7 +63,7 @@ test('either sign-in method unlocks it', () => {
 test('the old AUTH_ENABLED, which has no field, unlocks it too', () => {
     const p = page();
     p.w.settingsLockAgentAccess(p.form, false, true);
-    assert.equal(p.row.inert, false);
+    assert.equal(p.row.querySelector('.ui-set-bool-main').inert, false);
 });
 
 test('turning the last sign-in method off turns agent access off, as an unsaved change', () => {
@@ -71,10 +73,10 @@ test('turning the last sign-in method off turns agent access off, as an unsaved 
     p.w.settingsLockAgentAccess(p.form, true, false);
     assert.equal(p.$('edit-agent_access_enabled').checked, false);
     assert.equal(p.inputs.length, 1, 'the save bar hears about it');
-    assert.equal(p.row.inert, true);
+    assert.equal(p.row.querySelector('.ui-set-bool-main').inert, true);
     p.$('edit-oauth2_enabled').checked = true;
     p.w.settingsLockAgentAccess(p.form, true, false);
-    assert.equal(p.row.inert, false);
+    assert.equal(p.row.querySelector('.ui-set-bool-main').inert, false);
     assert.equal(p.note(), null);
     assert.equal(p.$('edit-agent_access_enabled').checked, false, 'turning sign-in on does not turn agents on');
 });

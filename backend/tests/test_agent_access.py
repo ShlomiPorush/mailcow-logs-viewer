@@ -210,6 +210,8 @@ def _sign_in_state(monkeypatch, *, agents=False, basic=False, oauth=False, legac
     ({}, {"agent_access_enabled": "true", "basic_auth_enabled": False}),
     ({"agents": True, "basic": True}, {"basic_auth_enabled": False}),
     ({"agents": True, "oauth": True}, {"oauth2_enabled": False, "agent_access_enabled": True}),
+    # Read back as off once saved, so it is not sign-in here either
+    ({}, {"agent_access_enabled": True, "oauth2_enabled": "on"}),
 ])
 def test_agent_access_cannot_be_on_without_sign_in(monkeypatch, state, payload):
     from fastapi import HTTPException
@@ -233,6 +235,23 @@ def test_agent_access_cannot_be_on_without_sign_in(monkeypatch, state, payload):
 ])
 def test_agent_access_saves_that_keep_sign_in(monkeypatch, state, payload):
     _sign_in_state(monkeypatch, **state)(dict(payload))
+
+
+def test_agent_access_is_checked_again_against_a_save_that_ran_meanwhile(monkeypatch):
+    """Basic Auth on, agents off. This save turns agents on; another save turned
+    Basic Auth off after this one was checked. The check under the save lock sees it."""
+    from fastapi import HTTPException
+    from app.routers import settings as settings_router
+    _sign_in_state(monkeypatch, basic=True)
+    monkeypatch.setattr(settings._inner, "edit_settings_via_ui_enabled", True)
+    saved = []
+    monkeypatch.setattr(settings_router, "save_config_overrides_to_db", lambda db, values: saved.append(values))
+    monkeypatch.setattr(settings_router, "reload_settings",
+                        lambda db: monkeypatch.setattr(settings._inner, "basic_auth_enabled", False))
+    with pytest.raises(HTTPException) as refused:
+        settings_router.update_settings({"agent_access_enabled": True}, db=object())
+    assert refused.value.status_code == 400
+    assert saved == []
 
 
 def test_act_never_starts_ticked_and_act_includes_view():
