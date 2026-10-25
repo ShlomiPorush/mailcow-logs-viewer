@@ -195,3 +195,71 @@ def test_a_discovery_answer_for_the_old_provider_is_not_applied(monkeypatch):
     assert client.token_url == "https://new-id.example.test/token"
     assert client.authorization_url is None and client.userinfo_url is None
     assert client._discovery_cache is None
+
+
+def test_discovery_waits_for_a_settings_reload_on_another_thread(monkeypatch):
+    """A settings save reloads the client on a worker thread while a login runs
+    discovery on the event loop. Discovery that starts while the reload is half
+    done must not ask the old provider and keep its endpoints as the new ones."""
+    import asyncio
+    import threading
+
+    values = {"oauth2_issuer_url": "https://old-id.example.test", "oauth2_client_id": "viewer-test",
+              "oauth2_client_secret": "viewer-test-secret", "oauth2_scopes": "openid",
+              "oauth2_redirect_uri": "https://viewer.example.com/api/auth/callback",
+              "oauth2_authorization_url": None, "oauth2_token_url": None, "oauth2_userinfo_url": None}
+    inside, go, reload_done = threading.Event(), threading.Event(), threading.Event()
+    reload_thread = {}
+
+    class HalfDoneReload:
+        """The settings as the client reads them; the reload thread stops at the issuer."""
+        def __getattr__(self, name):
+            if name == "oauth2_issuer_url" and threading.current_thread() is reload_thread.get("thread"):
+                inside.set()
+                go.wait(timeout=2)
+            return values[name]
+
+    monkeypatch.setattr(oauth2_module, "settings", HalfDoneReload())
+    client = oauth2_module.OAuth2Client()
+    asked = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        asked.append(request.url.host)
+        if request.url.host == "old-id.example.test":
+            # The old provider answers after the reload is complete
+            for _ in range(500):
+                if reload_done.is_set():
+                    break
+                await asyncio.sleep(0.01)
+        base = f"https://{request.url.host}"
+        return httpx.Response(200, json={"authorization_endpoint": base + "/authorize",
+                                         "token_endpoint": base + "/token", "userinfo_endpoint": base + "/userinfo"})
+
+    real_async_client = httpx.AsyncClient
+    monkeypatch.setattr(oauth2_module.httpx, "AsyncClient",
+                        lambda *a, **kw: real_async_client(*a, **{**kw, "transport": httpx.MockTransport(handler)}))
+
+    async def run():
+        values["oauth2_issuer_url"] = "https://new-id.example.test"
+        thread = reload_thread["thread"] = threading.Thread(target=client.reload_config, daemon=True)
+        thread.start()
+        assert inside.wait(timeout=5)
+        discovery = asyncio.create_task(client.discover_endpoints())
+        await asyncio.sleep(0.05)
+        go.set()
+        await asyncio.to_thread(thread.join, 5)
+        reload_done.set()
+        try:
+            await asyncio.wait_for(discovery, timeout=10)
+        except oauth2_module.OAuth2ClientError:
+            pass
+
+    try:
+        asyncio.run(run())
+    finally:
+        go.set()
+        reload_done.set()
+    assert "old-id.example.test" not in (client.token_url or "")
+    assert client.issuer_url == "https://new-id.example.test"
+    assert asked == ["new-id.example.test"]
+    assert (client._discovery_cache or {}).get("token_endpoint") in (None, "https://new-id.example.test/token")
