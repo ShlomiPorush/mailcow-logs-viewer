@@ -2626,7 +2626,7 @@ function attnWindowOpen(bell) {
         el.id = 'attn-window';
         el.className = 'ui-dialog-backdrop ui-attn-backdrop';
         el.innerHTML = `<section class="ui-attn-win" role="dialog" aria-labelledby="attn-win-title">
-            <div class="ui-attn-win-head">${head}<button type="button" class="ui-icon-btn ui-attn-win-x" onclick="attnWindowClose()" aria-label="Close" title="Close">&times;</button></div>
+            <div class="ui-attn-win-head">${head}<button type="button" class="ui-icon-btn ui-attn-win-x" onclick="attnWindowClose()" aria-label="Close" title="Close">${UI_CLOSE_ICON}</button></div>
             <div id="attn-win-scroll" class="ui-attn-scroll ui-attn-win-list" data-keep-scroll tabindex="0">${list}</div>${foot}</section>`;
         // A click beside it; not a press that began inside (a text selection) and ended there
         el.addEventListener('click', event => { if (uiBackdropClick(event)) attnWindowClose(); });
@@ -4128,27 +4128,14 @@ async function showQuarantineDetails(itemId) {
     const existing = document.getElementById('quarantine-detail-modal');
     if (existing) existing.remove();
 
-    const modal = document.createElement('div');
-    modal.id = 'quarantine-detail-modal';
-    modal.className = 'ui-dialog-backdrop';
-    modal.setAttribute('role', 'dialog');
-    modal.setAttribute('aria-label', 'Quarantine Item Details');
-    modal.onclick = event => { if (uiBackdropClick(event)) closeQuarantineDetails(); };
-    modal.innerHTML = `
-        <div class="ui-dialog ui-dialog-fit">
-            <div class="ui-dialog-head">
-                <h3>Quarantine Item Details</h3>
-                <button onclick="closeQuarantineDetails()" class="ui-icon-btn" title="Close" aria-label="Close">
-                    <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
-                </button>
-            </div>
-            <div class="ui-dialog-body" id="quarantine-detail-content">
-                <div class="ui-loading" role="status"><div class="loading"></div><p>Loading details...</p></div>
-            </div>
-            <div id="quarantine-detail-footer" class="hidden"></div>
-        </div>
-    `;
-    document.body.appendChild(modal);
+    uiDialog({
+        id: 'quarantine-detail-modal', title: 'Quarantine Item Details', size: 'wide',
+        close: closeQuarantineDetails, backdropClose: closeQuarantineDetails,
+        bodyId: 'quarantine-detail-content',
+        body: '<div class="ui-loading" role="status"><div class="loading"></div><p>Loading details...</p></div>',
+        // Filled with the actions (or why they are locked) once the item has loaded
+        footId: 'quarantine-detail-footer', footHidden: true,
+    });
     document.body.style.overflow = 'hidden';
 
     try {
@@ -4459,16 +4446,7 @@ function _showQuarantineRuleModal(rule, prefill) {
         </div>
     ` : '';
 
-    const html = `
-    <div class="ui-dialog-backdrop" id="quarantine-rule-modal-overlay" role="dialog" aria-label="${title}">
-        <div class="ui-dialog ui-dialog-fit ui-dialog-sm">
-            <div class="ui-dialog-head">
-                <h3>${title}</h3>
-                <button onclick="closeQuarantineRuleModal()" class="ui-icon-btn" title="Close" aria-label="Close">
-                    <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
-                </button>
-            </div>
-            <div class="ui-dialog-body ui-form">
+    const body = `
                 ${prefillButtons}
                 <label><span class="ui-label">Rule Name</span>
                     <input type="text" id="qrule-name" value="${defaultName}" class="ui-input" placeholder="e.g., Allow notifications from service X">
@@ -4506,16 +4484,13 @@ function _showQuarantineRuleModal(rule, prefill) {
                 <div class="ui-alert ui-alert-warn ui-qr-note">
                     <span class="ui-alert-bar"></span>
                     <div class="ui-alert-text"><p><b>Priority:</b> Delete rules always take priority over Release rules. If both match, the email will be deleted.</p></div>
-                </div>
-            </div>
-            <div class="ui-dialog-foot">
-                <button onclick="closeQuarantineRuleModal()" class="ui-btn">Cancel</button>
-                <button onclick="saveQuarantineRule(${isEdit ? Number(rule.id) : 'null'})" class="ui-btn ui-btn-primary">${isEdit ? 'Save Changes' : 'Create Rule'}</button>
-            </div>
-        </div>
-    </div>`;
+                </div>`;
 
-    document.body.insertAdjacentHTML('beforeend', html); // nosemgrep: typescript.react.security.audit.react-unsanitized-method.react-unsanitized-method
+    uiDialog({
+        id: 'quarantine-rule-modal-overlay', title, size: 'sm', close: closeQuarantineRuleModal, bodyClass: 'ui-form', body,
+        foot: `<button onclick="closeQuarantineRuleModal()" class="ui-btn">Cancel</button>
+            <button onclick="saveQuarantineRule(${isEdit ? Number(rule.id) : 'null'})" class="ui-btn ui-btn-primary">${isEdit ? 'Save Changes' : 'Create Rule'}</button>`,
+    });
     updateQRuleMatchHelp();
     uiGuardDialog(document.getElementById('quarantine-rule-modal-overlay'));
 }
@@ -4694,30 +4669,19 @@ async function testQuarantineRules() {
 
         document.getElementById('qrule-test-modal')?.remove();
         uiLayerOpener(opener);
-        const html = `
-        <div class="ui-dialog-backdrop" id="qrule-test-modal" role="dialog" aria-label="Test Results">
-            <div class="ui-dialog ui-dialog-fit ui-dialog-sm">
-                <div class="ui-dialog-head">
-                    <h3>Test Results</h3>
-                    <button onclick="document.getElementById('qrule-test-modal').remove()" class="ui-icon-btn" title="Close" aria-label="Close">
-                        <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
-                    </button>
-                </div>
-                <div class="ui-dialog-body ui-form">
+        // Results only, nothing typed: a click outside closes it
+        const closeTest = () => document.getElementById('qrule-test-modal')?.remove();
+        uiDialog({
+            id: 'qrule-test-modal', title: 'Test Results', size: 'sm', close: closeTest, backdropClose: closeTest, bodyClass: 'ui-form',
+            body: `
                     <div class="ui-kpis">
                         <div class="ui-kpi"><b>${escapeHtml(String(data.total_matches))}</b>matched</div>
                         <div class="ui-kpi"><b class="ui-muted">${escapeHtml(String(data.total_quarantine))}</b>total</div>
                     </div>
                     ${disabledCount > 0 ? `<p class="ui-text-warn">${disabledCount} from disabled rules</p>` : ''}
                     ${noMatches ? '<p class="ui-empty">No quarantine items matched any rules.</p>' : groupsHtml}
-                    <p class="ui-kv-note ui-list-foot">This is a dry-run preview. No actions were taken.</p>
-                </div>
-            </div>
-        </div>`;
-        document.body.insertAdjacentHTML('beforeend', html);
-        // Results only, nothing typed: a click outside closes it
-        const testModal = document.getElementById('qrule-test-modal');
-        testModal.addEventListener('click', e => { if (uiBackdropClick(e)) testModal.remove(); });
+                    <p class="ui-kv-note ui-list-foot">This is a dry-run preview. No actions were taken.</p>`,
+        });
     } catch (err) {
         showToast('Test failed: ' + err.message, 'error');
     }
@@ -6435,16 +6399,22 @@ function loadContainerLogs() {
         document.body.style.overflow = 'hidden';
     }
 
-    // Initial load
-    fetchContainerLogs(false);
-
     // Clear existing interval just in case
     if (containerLogsInterval) clearInterval(containerLogsInterval);
 
-    // Set auto-refresh every 2 seconds
-    containerLogsInterval = setInterval(() => {
-        fetchContainerLogs(true);
-    }, 2000);
+    // A log opens at its end, so on a phone its sheet fills the screen first: after
+    // this frame, once the dialog watcher (uiDialogSheet) has prepared the sheet,
+    // which would undo it. Then the log loads, goes to its end and keeps following
+    requestAnimationFrame(() => {
+        if (modal && modal.classList.contains('hidden')) return;
+        if (modal) uiDialogSheetFull(modal);
+        fetchContainerLogs(false);
+        // Set auto-refresh every 2 seconds
+        if (containerLogsInterval) clearInterval(containerLogsInterval);
+        containerLogsInterval = setInterval(() => {
+            fetchContainerLogs(true);
+        }, 2000);
+    });
 }
 
 function closeContainerLogsModal() {

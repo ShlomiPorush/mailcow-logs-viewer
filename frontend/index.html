@@ -25,7 +25,7 @@
     <!-- Utility classes still used by the markup, compiled once
          (.github/scripts/build-utilities-css.sh); the design system comes last -->
     <link rel="stylesheet" href="/static/assets/css/utilities.css?v=2">
-    <link rel="stylesheet" href="/static/assets/css/ui.css?v=77">
+    <link rel="stylesheet" href="/static/assets/css/ui.css?v=78">
     <style>
         .tab-active {
             border-bottom: 2px solid #3b82f6;
@@ -909,16 +909,16 @@
                             <span class="ui-toolbar-gap"></span>
                             <button onclick="showAddSuppressionModal()" class="ui-btn ui-btn-primary">Add Suppression</button>
                             <div class="ui-more-wrap">
-                                <button onclick="toggleSuppressionMoreMenu()" class="ui-btn" title="More" aria-label="More">⋯</button>
-                                <div id="suppression-more-menu" class="ui-menu-panel hidden">
-                                    <button onclick="exportSuppressions()">Export CSV</button>
+                                <!-- A popover menu like the row menus (uiMenu): a choice closes it -->
+                                <button id="suppression-more-btn" type="button" onclick="toggleSuppressionMoreMenu()" class="ui-btn" title="More" aria-label="More"
+                                    aria-haspopup="menu" aria-controls="suppression-more-menu"><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.8"></circle><circle cx="12" cy="12" r="1.8"></circle><circle cx="19" cy="12" r="1.8"></circle></svg></button>
+                                <div id="suppression-more-menu" popover class="ui-menu" role="menu" onclick="if (event.target.closest('button')) this.hidePopover()">
+                                    <button type="button" role="menuitem" onclick="exportSuppressions()">Export CSV</button>
                                     <!-- The map the list is written to; gone while the Rspamd page is off -->
-                                    <button id="suppression-open-map" onclick="openRspamdMap('global_rcpt_blacklist.map')">Open in Rspamd</button>
-                                    <label>
-                                        Import CSV
-                                        <input type="file" accept=".csv" class="hidden" onchange="importSuppressions(event)">
-                                    </label>
+                                    <button type="button" role="menuitem" id="suppression-open-map" onclick="openRspamdMap('global_rcpt_blacklist.map')">Open in Rspamd</button>
+                                    <button type="button" role="menuitem" onclick="document.getElementById('suppression-import-file').click()">Import CSV</button>
                                 </div>
+                                <input type="file" id="suppression-import-file" accept=".csv" class="hidden" onchange="importSuppressions(event)" aria-label="CSV file to import">
                             </div>
                         </div>
                         <div class="ui-fbar-pickers">
@@ -1522,49 +1522,31 @@
         </div>
     </div> <!-- Close app-content div -->
 
-    <!-- Container log dialog: in the body, so no sidebar stacking context can put page content above it -->
-    <div id="container-logs-modal" role="dialog" aria-modal="true" aria-labelledby="container-logs-title"
-        onclick="if (uiBackdropClick(event)) closeContainerLogsModal()"
-        class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
-        <div
-            class="bg-gray-900 rounded-lg max-w-5xl w-full max-h-[85vh] flex flex-col shadow-2xl border border-gray-700">
-            <div
-                class="flex-shrink-0 bg-gray-900 border-b border-gray-700 px-6 py-4 flex justify-between items-center rounded-t-lg">
-                <div class="flex items-center gap-2">
-                    <svg class="w-5 h-5 text-green-500" fill="none" stroke="currentColor"
-                        viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                            d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z">
-                        </path>
-                    </svg>
-                    <h3 id="container-logs-title" class="text-lg font-mono font-bold text-green-500">container.log</h3>
-                </div>
-                <div class="flex items-center gap-3">
-                    <button type="button" onclick="closeContainerLogsModal()"
-                        class="text-gray-400 hover:text-white transition" title="Close" aria-label="Close">
-                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                d="M6 18L18 6M6 6l12 12"></path>
-                        </svg>
-                    </button>
-                </div>
+    <!-- Container log dialog: in the body, so no sidebar stacking context can put page content above it.
+         The shared dialog frame (a sheet on a phone); inside, the log keeps its terminal look -->
+    <div id="container-logs-modal" class="hidden ui-dialog-backdrop" role="dialog" aria-labelledby="container-logs-title"
+        onclick="if (uiBackdropClick(event)) closeContainerLogsModal()">
+        <div class="ui-dialog ui-log-dialog">
+            <div class="ui-dialog-head">
+                <h3 id="container-logs-title" class="ui-log-dialog-title"><svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>container.log</h3>
+                <button type="button" onclick="closeContainerLogsModal()" class="ui-icon-btn" title="Close" aria-label="Close"><svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg></button>
             </div>
-            <div class="flex-1 overflow-y-auto p-4 bg-black font-mono text-xs sm:text-sm text-gray-300">
-                <pre id="container-logs-content" class="whitespace-pre-wrap break-all" data-line-select=".ui-log-line"></pre>
+            <div class="ui-dialog-body ui-log-term">
+                <pre id="container-logs-content" data-line-select=".ui-log-line"></pre>
             </div>
         </div>
     </div>
 
     <!-- JavaScript -->
-    <script src="/static/utils.js?v=28"></script>
-    <script src="/static/router.js?v=11"></script>
-    <script src="/static/app.js?v=87"></script>
+    <script src="/static/utils.js?v=29"></script>
+    <script src="/static/router.js?v=12"></script>
+    <script src="/static/app.js?v=88"></script>
     <script src="/static/alert-activity.js?v=5"></script>
     <script src="/static/export.js?v=2"></script>
     <script src="/static/message-details.js?v=20"></script>
     <script src="/static/dmarc.js?v=23"></script>
     <script src="/static/logs-viewer.js?v=6"></script>
-    <script src="/static/settings.js?v=50"></script>
+    <script src="/static/settings.js?v=51"></script>
     <script src="/static/about.js?v=4"></script>
     <script src="/static/domains.js?v=11"></script>
     <script src="/static/mailbox-stats.js?v=11"></script>
@@ -1574,9 +1556,9 @@
     <script src="/static/protection.js?v=3"></script>
     <script src="/static/security.js?v=12"></script>
     <script src="/static/search.js?v=14"></script>
-    <script src="/static/notifications.js?v=9"></script>
-    <script src="/static/agents.js?v=1"></script>
-    <script src="/static/spam_filter.js?v=21"></script>
+    <script src="/static/notifications.js?v=10"></script>
+    <script src="/static/agents.js?v=2"></script>
+    <script src="/static/spam_filter.js?v=22"></script>
 
     <!-- DMARC fetch history -->
     <div id="dmarc-sync-history-modal" class="hidden ui-dialog-backdrop" role="dialog" aria-label="Fetch history">

@@ -42,8 +42,6 @@ let rspamdMapToOpen = null;
 
 // Open one map on the Rspamd page, such as the recipient denylist the suppression list writes to
 function openRspamdMap(filename) {
-    const menu = document.getElementById('suppression-more-menu');
-    if (menu) menu.classList.add('hidden');
     rspamdMapToOpen = filename;
     navigateTo('rspamd');
 }
@@ -784,11 +782,12 @@ async function showBlockDetails(id, more) {
     if (!more) {
         if (existing) existing.remove();
         blockDetailsState = { id, page: 0, events: [], total: 0, email: '' };
-        const modal = suppressionDialog('block-details-modal', 'Block details', '<div id="block-details-body"><div class="ui-loading" role="status"><div class="loading"></div></div></div>',
-            '<button type="button" class="ui-btn" onclick="document.getElementById(\'block-details-modal\').remove()">Close</button>');
-        modal.querySelector('.ui-dialog').classList.replace('ui-dialog-sm', 'ui-dialog-md');
-        // Escape closes the top dialog only (router.js): a message opened from here closes first
-        modal.addEventListener('click', e => { if (uiBackdropClick(e)) modal.remove(); });
+        // Details only, nothing typed: a click outside closes it. Escape closes the top
+        // dialog only (router.js): a message opened from here closes first
+        const closeDetails = () => document.getElementById('block-details-modal')?.remove();
+        suppressionDialog('block-details-modal', 'Block details', '<div id="block-details-body"><div class="ui-loading" role="status"><div class="loading"></div></div></div>',
+            '<button type="button" class="ui-btn" onclick="document.getElementById(\'block-details-modal\').remove()">Close</button>',
+            { size: 'md', close: closeDetails, backdropClose: closeDetails });
     }
     const body = document.getElementById('block-details-body');
     if (!body) return;
@@ -816,21 +815,10 @@ async function showBlockDetails(id, more) {
         + older;
 }
 
-function suppressionDialog(id, title, body, actions) {
-    const modal = document.createElement('div');
-    modal.id = id;
-    modal.className = 'ui-dialog-backdrop';
-    modal.setAttribute('role', 'dialog');
-    modal.setAttribute('aria-label', title);
-    modal.innerHTML = `
-        <div class="ui-dialog ui-dialog-fit ui-dialog-sm" onclick="event.stopPropagation()">
-            <div class="ui-dialog-head"><h3>${escapeHtml(title)}</h3></div>
-            <div class="ui-dialog-body ui-form">${body}</div>
-            <div class="ui-dialog-foot">${actions}</div>
-        </div>
-    `;
-    document.body.appendChild(modal);
-    return modal;
+// The suppression dialogs (Add, Edit, Block details). Their X asks before it drops
+// what was typed, as Cancel does (uiCancelDialog); Block details passes its own
+function suppressionDialog(id, title, body, actions, { size = 'sm', close = () => uiCancelDialog(id), backdropClose = null } = {}) {
+    return uiDialog({ id, title, size, close, backdropClose, bodyClass: 'ui-form', body, foot: actions }).backdrop;
 }
 
 // A block made from a queued message (Queue > Suppress) keeps that message in its Block details
@@ -1165,7 +1153,6 @@ function exportSuppressions() {
     document.body.appendChild(link);
     link.click();
     link.remove();
-    toggleSuppressionMoreMenu();
 }
 
 async function importSuppressions(event) {
@@ -1194,7 +1181,6 @@ async function importSuppressions(event) {
     }
     
     event.target.value = '';
-    toggleSuppressionMoreMenu();
 }
 
 function clearSuppressionFilters() {
@@ -1207,18 +1193,26 @@ function clearSuppressionFilters() {
     loadSuppressions(1);
 }
 
+// The More menu of Suppressions is a popover (index.html): a click outside, Escape
+// and a choice close it. Its button is the one toggle. A press on the button while
+// the menu is open already closes it (the click outside), so the click that ends
+// that press must not open it again: the state is read when the press begins
+let suppressionMenuWasOpen = null;
+document.addEventListener('pointerdown', event => {
+    if (!(event.target instanceof Element) || !event.target.closest('#suppression-more-btn')) return;
+    const menu = document.getElementById('suppression-more-menu');
+    suppressionMenuWasOpen = !!menu && menu.matches(':popover-open');
+}, true);
 function toggleSuppressionMoreMenu() {
     const menu = document.getElementById('suppression-more-menu');
-    if (menu) menu.classList.toggle('hidden');
+    const wasOpen = suppressionMenuWasOpen;
+    suppressionMenuWasOpen = null;
+    if (!menu || typeof menu.showPopover !== 'function') return;
+    const open = menu.matches(':popover-open');
+    if (wasOpen ?? open) {
+        if (open) menu.hidePopover();
+    } else menu.showPopover();
 }
-
-// Close menu on outside click
-document.addEventListener('click', function(e) {
-    const menu = document.getElementById('suppression-more-menu');
-    if (menu && !menu.classList.contains('hidden') && !e.target.closest('#suppression-more-menu') && !e.target.closest('[onclick*="toggleSuppressionMoreMenu"]')) {
-        menu.classList.add('hidden');
-    }
-});
 
 
 // =============================================================================

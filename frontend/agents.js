@@ -229,23 +229,14 @@ function editAgentAccess(grantId) {
             ${area.act ? box(area, 'act', current[area.id] === 'act') : '<span class="ui-consent-box"><small class="ui-muted">No actions</small></span>'}
         </div>`).join('');
     const ends = (agentsData.periods || []).map(p => `<option value="${Number(p.days)}">In ${escapeHtml(p.label)}</option>`).join('');
-    const modal = document.createElement('div');
-    modal.id = 'agent-edit-modal';
-    // The version of the access this dialog shows: saving it after the list
-    // reloaded meanwhile must not pass for an edit of the newer access
-    modal.dataset.version = agent.version || '';
-    modal.className = 'ui-dialog-backdrop';
-    modal.setAttribute('role', 'dialog');
-    modal.setAttribute('aria-labelledby', 'agent-edit-h');
-    modal.innerHTML = `
-        <div class="ui-dialog ui-dialog-fit">
-            <div class="ui-dialog-head">
-                <h3 id="agent-edit-h">Edit access</h3>
-                <button type="button" onclick="closeAgentEditModal()" class="ui-icon-btn" title="Close" aria-label="Close">
-                    <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
-                </button>
-            </div>
-            <form id="agent-edit-form" class="ui-dialog-body ui-form ui-agent-edit" onsubmit="saveAgentAccess(event, ${Number(agent.id)})">
+    const { backdrop: modal } = uiDialog({
+        id: 'agent-edit-modal', title: 'Edit access', titleId: 'agent-edit-h', size: 'md', close: closeAgentEditModal,
+        // The version of the access this dialog shows: saving it after the list
+        // reloaded meanwhile must not pass for an edit of the newer access
+        dataset: { version: agent.version || '' },
+        bodyClass: 'ui-form ui-agent-edit',
+        form: { id: 'agent-edit-form', onsubmit: `saveAgentAccess(event, ${Number(agent.id)})` },
+        body: `
                 <p class="ui-set-desc">Changes to <b>${escapeHtml(agent.name)}</b> apply from its next request.</p>
                 <div class="ui-consent-areas" role="group" aria-label="What it may do">
                     <div class="ui-consent-row ui-consent-row-head" aria-hidden="true"><span>Area</span><span>View</span><span>Take action</span></div>
@@ -255,15 +246,12 @@ function editAgentAccess(grantId) {
                     <select id="agent-edit-end" class="ui-select">
                         <option value="">Keep ${escapeHtml(formatTime(agent.expires_at, { seconds: false }))}</option>${ends}
                     </select>
-                </label>
-            </form>
-            <div class="ui-dialog-foot ui-agent-edit-foot">
-                <p id="agent-edit-error" class="ui-text-fail hidden" role="alert"></p>
-                <button type="button" onclick="closeAgentEditModal()" class="ui-btn">Cancel</button>
-                <button type="submit" form="agent-edit-form" class="ui-btn ui-btn-primary">Save</button>
-            </div>
-        </div>`;
-    document.body.appendChild(modal);
+                </label>`,
+        footClass: 'ui-agent-edit-foot',
+        foot: `<p id="agent-edit-error" class="ui-text-fail hidden" role="alert"></p>
+            <button type="button" onclick="closeAgentEditModal()" class="ui-btn">Cancel</button>
+            <button type="submit" form="agent-edit-form" class="ui-btn ui-btn-primary">Save</button>`,
+    });
     // Take action includes View: ticking it ticks View, and clearing View clears it
     modal.querySelector('.ui-consent-areas').addEventListener('change', event => {
         const changed = event.target;

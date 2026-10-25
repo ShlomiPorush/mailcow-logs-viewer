@@ -195,8 +195,10 @@ function pageOf(file, idx, files) {
         if (best) return best[0];
         // Every element this function writes to is missing from the markup and
         // from every rendered template: nothing on screen can show its output.
+        // A dialog from the shared builder (utils.js, uiDialog) gets its ids as options
         const rendered = files.map(f => f.text).join('\n');
-        if (ids.length && ids.every(id => !rendered.includes(`id="${id}"`) && !rendered.includes(`id=\\"${id}\\"`))) {
+        const builtIds = new Set([...rendered.matchAll(/\b(?:id|bodyId|footId|titleId):\s*['"`]([^'"`$]+)['"`]/g)].map(m => m[1]));
+        if (ids.length && ids.every(id => !rendered.includes(`id="${id}"`) && !rendered.includes(`id=\\"${id}\\"`) && !builtIds.has(id))) {
             return UNREACHABLE;
         }
         for (const [re, page] of PAGE_BY_FUNCTION) if (fn.name && re.test(fn.name)) return page;

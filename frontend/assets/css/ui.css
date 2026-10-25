@@ -1233,6 +1233,8 @@ body { font-family: var(--ui-font); background: var(--ui-bg); color: var(--ui-in
 .ui-icon-btn { display: inline-grid; place-items: center; width: 34px; height: 34px; flex: none; border: 0; border-radius: var(--ui-radius-sm);
     background: none; color: var(--ui-muted); cursor: pointer; }
 @media (hover: hover) { .ui-icon-btn:hover { background: color-mix(in srgb, var(--ui-ink) 7%, transparent); color: var(--ui-ink); } }
+/* Off looks off, as a button does (GeoIP setup's X while it runs) */
+.ui-icon-btn:disabled { opacity: .5; cursor: not-allowed; background: none; color: var(--ui-muted); }
 .ui-icon-btn svg { width: 18px; height: 18px; }
 
 /* Tablet: the sidebar becomes an icon rail; counters become dots */
@@ -2025,12 +2027,6 @@ button.ui-st-card { cursor: pointer; }
 @media (min-width: 761px) { .ui-supp-table .ui-row-actions { flex-wrap: nowrap; } }
 .ui-row-off > .ui-td { opacity: .6; }
 .ui-more-wrap { position: relative; }
-.ui-menu-panel { position: absolute; top: calc(100% + 4px); inset-inline-end: 0; z-index: 40; min-width: 170px; padding: 4px;
-    border: 1px solid var(--ui-line); border-radius: var(--ui-radius-sm); background: var(--ui-bg); box-shadow: 0 8px 24px rgba(0, 0, 0, .14); }
-.ui-menu-panel.hidden { display: none; }
-.ui-menu-panel > button, .ui-menu-panel > label { display: block; width: 100%; padding: 7px 10px; border: 0; border-radius: 6px; background: none;
-    color: inherit; font: inherit; font-size: var(--ui-fs-sm); text-align: start; cursor: pointer; }
-@media (hover: hover) { .ui-menu-panel > button:hover, .ui-menu-panel > label:hover { background: color-mix(in srgb, var(--ui-ink) 7%, transparent); } }
 .ui-map-table { --ui-cols: minmax(240px, 2fr) minmax(200px, 1.2fr) 110px 24px; --ui-table-min: 640px; }
 .ui-map-body { display: grid; gap: 12px; padding: 4px var(--ui-pad-x) var(--ui-pad-x); }
 .ui-map-editor { min-height: 280px; font-family: var(--ui-mono); font-size: 13px; line-height: 1.55; }
@@ -2400,6 +2396,7 @@ html body .ui-main .ui-set-choice-opt > input[type="radio"] { accent-color: var(
     border-radius: var(--ui-radius-sm); background: var(--ui-bg); color: var(--ui-ink); box-shadow: 0 10px 30px rgba(0, 0, 0, .16); }
 .ui-toast p { flex: 1; margin: 1px 0 0; font-size: var(--ui-fs-sm); overflow-wrap: anywhere; }
 .ui-toast .ui-icon-btn { margin-block: -4px 0; margin-inline: 0 -2px; font-size: 18px; line-height: 1; }
+.ui-toast .ui-icon-btn svg { width: 16px; height: 16px; }
 .ui-toast .ui-toast-action { margin-block: -4px; flex: none; }
 .ui-toast-icon { font-weight: 800; color: var(--ui-info); }
 .ui-toast-success { border-inline-start-color: var(--ui-ok); }
@@ -3123,7 +3120,17 @@ button.ui-aa-col:focus-visible { outline: 2px solid var(--ui-focus); outline-off
     /* With a foot, the foot is the sheet's bottom edge and clears the home bar instead */
     .ui-dialog-backdrop:not(.ui-docked) .ui-dialog:has(> .ui-dialog-foot) > .ui-dialog-body { padding-bottom: var(--ui-pad-x); }
     .ui-dialog-backdrop:not(.ui-docked) .ui-dialog > .ui-dialog-foot { padding-bottom: calc(12px + env(safe-area-inset-bottom)); }
+    /* Message details scroll in their own content (DS-14), which must clear the home bar too */
+    #message-modal:not(.ui-docked) .ui-md-content { padding-bottom: calc(var(--ui-pad-x) + env(safe-area-inset-bottom)); }
 }
+
+/* The container log (index.html): the shared dialog frame, a terminal inside */
+.ui-dialog.ui-log-dialog { width: min(1024px, 100%); }
+.ui-log-dialog-title { display: flex; align-items: center; gap: 8px; min-width: 0; font-family: var(--ui-mono); }
+.ui-log-dialog-title svg { flex: none; color: var(--ui-ok); }
+.ui-dialog-body.ui-log-term { padding: 16px; background: #000; color: #d1d5db; font-family: var(--ui-mono); font-size: 12px; }
+@media (min-width: 640px) { .ui-dialog-body.ui-log-term { font-size: 14px; } }
+.ui-log-term pre { margin: 0; font: inherit; white-space: pre-wrap; word-break: break-all; }
 
 /* An information sheet's or dialog's top (grip and head) is its reading gauge:
    it fills from the start as the text is read (utils.js, uiReadProgress) */
