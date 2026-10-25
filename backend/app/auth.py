@@ -4,6 +4,7 @@ Supports both OAuth2 (session cookies) and Basic Auth
 Protects ALL endpoints when authentication is enabled
 """
 import ipaddress
+import re
 import logging
 import time
 from threading import RLock
@@ -19,6 +20,41 @@ import base64
 
 from .config import settings
 from .session import get_session_from_request
+from .agent_access import live as agent_live
+from .agent_access.context import agent_call
+
+# Agent access (agent_access/): reachable without a session because they check
+# their own credentials or are public discovery documents. /oauth/authorize and
+# /oauth/consent are not here: a person must be signed in to approve an agent.
+AGENT_PUBLIC_PATHS = frozenset({
+    "/mcp",
+    "/oauth/token",
+    "/oauth/register",
+    "/oauth/revoke",
+    "/.well-known/oauth-protected-resource",
+    "/.well-known/oauth-protected-resource/mcp",
+    "/.well-known/oauth-authorization-server",
+})
+
+
+# Public by method too: an agent asks for a code and downloads the skill without
+# a session, but the approval page (GET /oauth/device) needs a signed-in person
+AGENT_PUBLIC_REQUESTS = frozenset({("POST", "/oauth/device")})
+SKILL_PREFIX = "/agents/skill"
+MCP_NOTE_PATHS = frozenset({"/agents/mcp", "/agents/mcp/"})
+
+
+def _is_agent_path(path: str) -> bool:
+    return path == "/mcp" or path in MCP_NOTE_PATHS or path.startswith(("/oauth/", "/.well-known/oauth-", SKILL_PREFIX))
+
+
+def _has_bearer(request: Request) -> bool:
+    """Whether any Authorization header names the Bearer scheme anywhere, also mixed
+    with another scheme or without a token. Such a request is an agent's and never a
+    cookie's: rest.py accepts only one plain `Bearer <token>` header and refuses the rest."""
+    return any(part.lower() == "bearer"
+               for value in request.headers.getlist("authorization")
+               for part in re.split(r"[\s,]+", value))
 
 logger = logging.getLogger(__name__)
 
@@ -240,12 +276,39 @@ class BasicAuthMiddleware(BaseHTTPMiddleware):
     """
     
     async def dispatch(self, request: Request, call_next):
+        path = request.url.path
+
+        # Agent access answers 404 while it is not live, before any sign-in
+        # redirect (agent_access/live.py)
+        if _is_agent_path(path) and not agent_live.is_live():
+            return Response(content="Not Found", status_code=status.HTTP_404_NOT_FOUND)
+
+        # An agent's call made inside the app by agent_access/dispatch.py: its
+        # bearer token was checked at /mcp or below, and the policy guard checks
+        # the route. Only the app itself can put this marker into the ASGI scope.
+        if agent_call(request.scope) is not None:
+            return await call_next(request)
+
+        # A bearer token on /api is an agent's request, decided before anything
+        # else: never a session's, and never let through because sign-in is off
+        # (agent_access/rest.py refuses it then)
+        if path.startswith("/api/") and _has_bearer(request):
+            from .agent_access import rest
+            return await rest.handle(request)
+
         # Skip authentication check if disabled
         if not settings.is_authentication_enabled:
             return await call_next(request)
-        
-        path = request.url.path
-        
+
+        # Agent endpoints that check their own credentials (a bearer token at
+        # /mcp, PKCE or a device code at /oauth/token), publish discovery
+        # documents, or serve the skill's files
+        if path in AGENT_PUBLIC_PATHS or (request.method, path) in AGENT_PUBLIC_REQUESTS:
+            return await call_next(request)
+        if request.method in ("GET", "HEAD") and (path == SKILL_PREFIX or path.startswith(SKILL_PREFIX + "/")
+                                                  or path in MCP_NOTE_PATHS):
+            return await call_next(request)
+
         # Allow access to login page, static files, health check, info endpoint, and auth endpoints without authentication
         # Health check endpoint must be accessible for Docker health monitoring
         # Info endpoint is used to check if authentication is enabled

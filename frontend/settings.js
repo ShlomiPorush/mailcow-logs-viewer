@@ -29,7 +29,10 @@ const SETTINGS_LABEL_OVERRIDES = {
     suppression_soft_bounce_threshold: 'Temporary failures before blocking',
     suppression_base_expiry_days: 'Base block length (days)',
     suppression_max_expiry_days: 'Maximum block length (days)',
-    suppression_whitelist_domains: 'Exclude these domains'
+    suppression_whitelist_domains: 'Exclude these domains',
+    agent_access_enabled: 'Enable agent access',
+    agent_access_url: 'App URL',
+    agent_access_max_days: 'Maximum access duration (days)'
 };
 
 const SETTINGS_LOCK_ICON = '<svg width="12" height="12" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true"><path fill-rule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clip-rule="evenodd"></path></svg>';
@@ -277,6 +280,9 @@ var SETTINGS_FIELD_DESCRIPTIONS = {
     session_secret_key: 'Secret key for signing session cookies. REQUIRED if OAuth2 enabled. Generate: openssl rand -hex 32. Use a strong secret in production.',
     session_expiry_hours: 'Session expiration in hours. Default: 24.',
     session_max_entries: 'Maximum active login sessions per process. At capacity, new logins wait until a session expires or a user signs out. Existing sessions stay signed in. Default: 50.',
+    agent_access_enabled: 'Default: off.',
+    agent_access_url: 'The address agents use to reach this app, such as https://logs.example.com. Changing it disconnects every agent until you change it back. Default: empty.',
+    agent_access_max_days: 'The longest access you can give an agent, from 1 to 365 days. Applies to new access only. Default: 90.',
     auth_max_failure_clients: 'Maximum client addresses tracked for failed Basic Auth attempts per process. At capacity, new addresses must wait before trying Basic Auth. Existing sessions remain usable. Default: 10000.',
     smtp_enabled: 'Enable SMTP for sending notifications (alerts, weekly summary).',
     smtp_host: 'SMTP server hostname.',
@@ -850,6 +856,75 @@ function settingsShowFormatExample(root) {
     out.textContent = `Example: ${writeDate(now, { fmt: picked('date_format', appDateFmt()) })}, ${writeClock(now, { fmt: picked('time_format', appTimeFmt()) })}`;
 }
 
+// Agents > App address for agents: the address to offer, which the person can
+// change. The OAuth2 callback names the app's public address when it is set;
+// otherwise the address this page is open at. Only an address the server
+// accepts (https, or http on this computer) is offered, else ''
+function settingsAgentUrlSuggestion(redirectUri, pageOrigin) {
+    for (const candidate of [redirectUri, pageOrigin]) {
+        let url;
+        try {
+            url = new URL(String(candidate || '').trim());
+        } catch (e) {
+            continue;
+        }
+        const host = url.hostname.toLowerCase();
+        const loopback = host === 'localhost' || host === '[::1]' || /^127\.\d+\.\d+\.\d+$/.test(host);
+        if (url.protocol === 'https:' || (url.protocol === 'http:' && loopback)) return url.origin;
+    }
+    return '';
+}
+
+// The suggestion shows in the empty field. With agent access on, it becomes the
+// field's value (an unsaved change) when the form opens and when the switch is
+// turned on; fill is false while typing, so a cleared field stays empty
+function settingsSuggestAgentUrl(root, fill) {
+    const field = root && root.querySelector('#edit-agent_access_url');
+    if (!field || field.disabled) return;
+    const redirect = root.querySelector('#edit-oauth2_redirect_uri');
+    const suggestion = settingsAgentUrlSuggestion(redirect ? redirect.value : '', location.origin);
+    field.placeholder = suggestion;
+    const on = root.querySelector('#edit-agent_access_enabled');
+    if (fill && on && on.checked && !field.value.trim() && suggestion) {
+        field.value = suggestion;
+        field.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+}
+
+// Agent access needs sign-in, so a person can approve each agent: with Basic
+// Auth and OAuth2 both off the switch is locked and says where to turn sign-in
+// on. Turning the last one off in this form also turns agent access off
+function settingsLockAgentAccess(root, signInChanged, signInElsewhere) {
+    const toggle = root && root.querySelector('#edit-agent_access_enabled');
+    const row = toggle && toggle.closest('.ui-set-bool');
+    if (!row) return;
+    const signIn = !!signInElsewhere || ['basic_auth_enabled', 'oauth2_enabled'].some(key => {
+        const box = root.querySelector('#edit-' + key);
+        return !!box && box.checked;
+    });
+    if (!signIn && signInChanged && toggle.checked && !toggle.disabled) {
+        toggle.checked = false;
+        toggle.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+    // Only the switch is locked and dimmed: the note stays readable, also to a screen reader
+    const main = row.querySelector('.ui-set-bool-main') || toggle;
+    main.inert = !signIn;
+    main.classList.toggle('is-off', !signIn);
+    let note = row.querySelector('[data-agent-lock]');
+    if (signIn) {
+        if (note) note.remove();
+        return;
+    }
+    if (!note) {
+        note = document.createElement('small');
+        note.className = 'ui-text-warn';
+        note.setAttribute('role', 'status');
+        note.dataset.agentLock = '';
+        note.textContent = 'Turn on Basic Auth or OAuth2 in Settings → Authentication first.';
+        row.appendChild(note);
+    }
+}
+
 // The IANA time zones this browser knows, UTC first; none where the browser
 // cannot list them (the field is then a text box)
 function settingsTimeZoneNames() {
@@ -961,13 +1036,18 @@ var SETTINGS_EDIT_TABS = [
         ]
     },
     {
-        id: 'auth', label: 'Authentication', description: 'How users sign in to this app. Basic authentication protects every page and API endpoint with a username and password. OAuth2/OIDC signs users in through an external provider (mailcow, Keycloak, ...). Both can be enabled at the same time.', groups: [
+        id: 'auth', label: 'Authentication', description: 'How users sign in to this app. Basic authentication protects every page and API endpoint with a username and password. OAuth2/OIDC signs users in through an external provider (mailcow, Keycloak, ...). Both can be enabled at the same time. Changing these settings disconnects every AI agent.', groups: [
             { label: 'Basic Auth', keys: ['basic_auth_enabled', 'auth_username', 'auth_password', 'auth_max_failure_clients'] },
             { label: 'OAuth2 / OIDC', keys: ['oauth2_enabled', 'oauth2_provider_name'] },
             { label: 'OAuth2 - Discovery (automatic)', keys: ['oauth2_issuer_url', 'oauth2_use_oidc_discovery'] },
             { label: 'OAuth2 - Endpoints (only without discovery)', keys: ['oauth2_authorization_url', 'oauth2_token_url', 'oauth2_userinfo_url'] },
             { label: 'OAuth2 - Credentials', keys: ['oauth2_client_id', 'oauth2_client_secret', 'oauth2_redirect_uri', 'oauth2_scopes'] },
             { label: 'Sessions', keys: ['session_secret_key', 'session_expiry_hours', 'session_max_entries'] }
+        ]
+    },
+    {
+        id: 'agents', label: 'Agents', description: 'Allow AI agents, such as Claude Code and Codex, to access and use this app.', groups: [
+            { label: 'Access', keys: ['agent_access_enabled', 'agent_access_url', 'agent_access_max_days'] }
         ]
     },
     {
@@ -1066,7 +1146,7 @@ var SETTINGS_TAB_GROUPS = [
     { label: 'General', tabs: ['features', 'application'] },
     { label: 'mailcow', tabs: ['mailcow', 'fetch', 'correlation', 'logs'] },
     { label: 'Alerts', tabs: ['notifications', 'smtp'] },
-    { label: 'Security', tabs: ['auth', 'anomaly', 'smtp_abuse'] },
+    { label: 'Security', tabs: ['auth', 'agents', 'anomaly', 'smtp_abuse'] },
     { label: 'Data', tabs: ['domains', 'dmarc', 'dmarc_imap', 'maxmind', 'blacklist', 'outbound', 'quarantine', 'devices', 'other'] }
 ];
 
@@ -1252,7 +1332,7 @@ function renderSettingsEditField(key, value, sensitiveKeys, description, envLock
         'dmarc_imap_user', 'dmarc_imap_password', 'dmarc_imap_folder',
         'maxmind_account_id', 'maxmind_license_key',
         'app_title', 'app_logo_url', 'blacklist_emails', 'local_domains',
-        'enable_weekly_summary'
+        'enable_weekly_summary', 'agent_access_enabled', 'agent_access_url'
     ]);
     const isUserSpecific = USER_SPECIFIC_KEYS.has(key);
     const isChanged = hasDefault && !sensitive && !isUserSpecific && (function() {
@@ -1460,6 +1540,7 @@ async function loadSettings() {
                 if (editableData.default_config) data.default_config = editableData.default_config;
                 if (editableData.settings_migrated !== undefined) data.settings_migrated = editableData.settings_migrated;
                 if (editableData.env_locked_keys) data.env_locked_keys = editableData.env_locked_keys;
+                data.legacy_auth_enabled = editableData.legacy_auth_enabled === true;
             }
         } catch (e) {
             console.warn('Could not load editable settings:', e);
@@ -1803,6 +1884,9 @@ function renderSettings(content, data) {
                     ` + tabsHtml + `
                     </fieldset>
                 </form>
+                <!-- Connected agents (agents.js) under the Agents section. Outside the form:
+                     its buttons act at once, and the fieldset above is disabled until migration -->
+                <div class="hidden" data-tab-extra="agents"><div id="agents-panel" class="ui-agent-sections"></div></div>
             </div>
         </div>
         ${uiSaveBar('settings-savebar', { form: 'settings-edit-form', discard: 'loadSettings()' })}
@@ -1831,8 +1915,15 @@ function renderSettings(content, data) {
                 ${data.dmarc_configuration?.imap_sync_enabled ? `<div class="ui-kv"><span>IMAP Server</span><b class="ui-mono ui-kv-small">${escapeHtml(data.dmarc_configuration.imap_host || 'N/A')}</b></div>` : ''}
             </section>
         </div>
+
+        <!-- Connected agents (agents.js): managed here even while editing settings is off -->
+        <div id="agents-panel" class="ui-agent-sections"></div>
         ` : ''}
     `;
+
+    if (typeof loadAgentsPanel === 'function') {
+        loadAgentsPanel();
+    }
 
     // Edit configuration: form submit, Import from ENV, and tab switching
     if (data.settings_edit_via_ui_enabled && data.editable_config) {
@@ -1856,6 +1947,10 @@ function renderSettings(content, data) {
             });
             const panel = content.querySelector('#settings-tab-panel-' + tabId);
             if (panel) panel.classList.remove('hidden');
+            // Parts of a section that live outside the form (Agents)
+            content.querySelectorAll('[data-tab-extra]').forEach(function (extra) {
+                extra.classList.toggle('hidden', extra.getAttribute('data-tab-extra') !== tabId);
+            });
 
             const select = content.querySelector('#settings-tab-select');
             if (select && select.value !== tabId) select.value = tabId;
@@ -1995,12 +2090,17 @@ function renderSettings(content, data) {
             form.addEventListener('change', () => settingsShowFormatExample(content));
             settingsShowNeeds(content);
             settingsApplySync(false);
+            settingsSuggestAgentUrl(content, true);
+            settingsLockAgentAccess(content, false, data.legacy_auth_enabled);
             form.addEventListener('change', event => {
                 if (event.target && event.target.id === 'edit-suppression_rspamd_sync') settingsApplySync(true);
+                if (event.target && ['edit-basic_auth_enabled', 'edit-oauth2_enabled'].includes(event.target.id)) settingsLockAgentAccess(content, true, data.legacy_auth_enabled);
+                settingsSuggestAgentUrl(content, !!event.target && event.target.id === 'edit-agent_access_enabled');
                 settingsShowNeeds(content);
             });
+            form.addEventListener('input', () => settingsSuggestAgentUrl(content, false));
             // Clearing and resetting change a field without an input event
-            content.querySelectorAll('.settings-clear-btn').forEach(btn => btn.addEventListener('click', () => setTimeout(() => { updateDirty(); settingsShowNeeds(content); settingsShowFormatExample(content); })));
+            content.querySelectorAll('.settings-clear-btn').forEach(btn => btn.addEventListener('click', () => setTimeout(() => { updateDirty(); settingsShowNeeds(content); settingsShowFormatExample(content); settingsSuggestAgentUrl(content, false); })));
         }
 
         if (form) {

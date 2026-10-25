@@ -10,7 +10,7 @@ import asyncio
 import mimetypes
 import time
 
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 from .frontend_assets import stamp_asset_versions
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
@@ -49,6 +49,9 @@ from .routers import (
     rate_limits as rate_limits_router,
 )
 from .migrations import run_migrations
+from .agent_access import consent as agent_consent, live as agent_live, mcp as agent_mcp, oauth as agent_oauth
+from .agent_access import skill as agent_skill
+from .agent_access.dispatch import enforce_agent_policy
 from .auth import BasicAuthMiddleware, safe_return_path
 from .origin_guard import SameOriginGuardMiddleware
 from .session import get_session_from_request
@@ -116,6 +119,29 @@ def log_authentication_state() -> None:
         )
 
 
+def log_agent_access_state() -> None:
+    """Say whether agents can connect, and disconnect them all if sign-in changed while the app was down.
+
+    The sign-in check runs with agent access off too: a change made while it
+    was off must not be undone by changing the setting back later.
+    """
+    problem = agent_live.problem()
+    if problem == agent_live.OFF or not settings.agent_access_enabled:
+        pass
+    elif problem:
+        logger.warning(f"Agent access is switched on but not available ({problem}): see Settings > Agents")
+    else:
+        logger.info(f"Agent access is ON: skill at {agent_live.issuer()}/agents/skill/, MCP at {agent_live.resource()}")
+    try:
+        from .agent_access import store as agent_store
+        from .database import get_db_context
+        with get_db_context() as db:
+            agent_store.check_sign_in_unchanged(db)
+    except Exception as e:
+        # Checked again on every agent request, so nothing gets through meanwhile
+        logger.error(f"Could not compare the sign-in settings for agent access: {e}")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifecycle management"""
@@ -164,6 +190,7 @@ async def lifespan(app: FastAPI):
         logger.info(f"Blacklist enabled with {len(settings.blacklist_emails_list)} email(s)")
     
     log_authentication_state()
+    log_agent_access_state()
 
     # Every clock in the app follows this zone; an unknown TZ is logged here, by name, and UTC is used
     logger.info(f"Time zone: {app_tz().key}")
@@ -254,7 +281,10 @@ app = FastAPI(
     title="mailcow Logs Viewer",
     description="Modern dashboard for viewing and analyzing mailcow mail server logs",
     version=__version__,
-    lifespan=lifespan
+    lifespan=lifespan,
+    # An agent's call (agent_access/dispatch.py) may run a route only when its
+    # grant covers it; for every other request this does nothing
+    dependencies=[Depends(enforce_agent_policy)],
 )
 
 # Add Basic Auth Middleware FIRST (innermost)
@@ -399,6 +429,14 @@ app.include_router(smtp_abuse_router.router, prefix="/api", tags=["SMTP Abuse Pr
 app.include_router(protection_router.router, prefix="/api", tags=["Protection Rules"])
 app.include_router(notifications_router.router, prefix="/api", tags=["Notifications"])
 app.include_router(rate_limits_router.router, prefix="/api", tags=["Rate Limits"])
+app.include_router(agent_consent.router, prefix="/api")
+
+# Agent access: OAuth discovery, sign-in and the MCP endpoint live outside /api
+# because the standards fix their addresses. Each answers 404 while agent
+# access is not live; the middleware lets the public ones through.
+app.include_router(agent_oauth.router)
+app.include_router(agent_mcp.router)
+app.include_router(agent_skill.router)
 
 # WebSocket endpoint needs root-level mount (not under /api prefix) so it is
 # reachable at wss://host/ws/raw-logs  # nosemgrep: javascript.lang.security.detect-insecure-websocket.detect-insecure-websocket
@@ -426,6 +464,16 @@ def login_page(request: Request, next: Optional[str] = None):
             content="<h1>mailcow Logs Viewer</h1><p>Login page not found. Please check installation.</p>",
             status_code=500
         )
+
+
+@app.get(agent_oauth.CONSENT_PAGE, response_class=HTMLResponse, include_in_schema=False)
+def agent_consent_page():
+    """The page where a signed-in person approves an agent (the middleware requires the session)"""
+    if not agent_live.is_live():
+        return HTMLResponse(content="Not Found", status_code=404)
+    with open("/app/frontend/authorize.html", "r") as f:
+        html = f.read()
+    return HTMLResponse(content=stamp_asset_versions(html, "/app/frontend"), headers={"Cache-Control": "no-store"})
 
 
 @app.get("/", response_class=HTMLResponse)

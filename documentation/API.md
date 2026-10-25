@@ -16,6 +16,7 @@ What applies to every endpoint:
 - [Error Responses](#error-responses)
 - [Health & Info](#health--info)
 - [OAuth2 Authentication Endpoints](#oauth2-authentication-endpoints)
+- [Agent Access](#agent-access)
 - [Job Status Tracking](#job-status-tracking)
 - [Domains](#domains)
 - [Mailbox Statistics](#mailbox-statistics)
@@ -215,6 +216,72 @@ Returns `{ "verified": true }` once the authentication middleware accepts the re
 Exchanges valid Basic credentials in the `Authorization` header for the `session_id` cookie. No body. Returns `{ "authenticated": true, "auth_type": "basic" }`.
 
 With Basic authentication off, the handler returns 400; when only OAuth2 is on, a request without a valid session is rejected first with 401. Invalid Basic credentials return 401; a locked-out client gets 429; a full session store 503 with `Retry-After: 60`.
+
+---
+
+## Agent Access
+
+AI agents connect after a signed-in person approves them; see [AI agents](AI_Agents.md). Agents that run commands install a skill and connect with a code (RFC 8628), then call `/api` with a bearer token. MCP apps connect over MCP. While agent access is not live (switched off, sign-in off, or `AGENT_ACCESS_URL` missing or not valid), every route in this section except `/api/agents` returns 404, and a bearer token on `/api` returns 401. The app builds every address below from `AGENT_ACCESS_URL`, never from request headers.
+
+### The skill and the code
+
+| Method | Path | |
+| --- | --- | --- |
+| GET | `/agents/skill/` | Install note (Markdown) for the agent: the files to download and what to do next. Public. |
+| GET | `/agents/skill/<file>` | `SKILL.md`, `scripts/mailcow-logs`, `scripts/mailcow-logs.mjs`, `scripts/mailcow-logs.ps1` and `scripts/mailcow-logs.sh`, with this app's address filled in. Public. Only from an `https` address or this computer. |
+| GET | `/agents/mcp/` | How to add this app as an MCP server in the common clients (Markdown), with its address filled in. Public. |
+| POST | `/oauth/device` | Device authorization (RFC 8628). Form: `client_id=mailcow-logs-cli`, `client_label` (the agent's own name), `scope`, `resource=<AGENT_ACCESS_URL>/api`. Returns `device_code`, `user_code` (`XXXX-XXXX`), `verification_uri`, `verification_uri_complete`, `expires_in` (600) and `interval` (5). Public; 10 requests per hour per address. |
+| GET | `/oauth/device` | The link the agent shows. Needs a signed-in session. With `user_code`, it opens the approval page for that code; without one, a field to type it. 10 codes per 10 minutes per address and per session. |
+
+The agent collects its tokens at `/oauth/token` with `grant_type=urn:ietf:params:oauth:grant-type:device_code`. Until a person answers it gets `authorization_pending`. Polling faster than `interval` gets `slow_down` and a longer interval. Then it gets `access_denied`, `expired_token`, or the tokens, once.
+
+### REST for agents
+
+Every `/api` route an agent may call takes `Authorization: Bearer <access token>` from the code flow. The route's area and kind decide, not the HTTP method: a read needs **View** of its area, and an action needs **Take action**. A request with a bearer token is always an agent's request, so a bad token returns 401 even with a valid session cookie. Errors are JSON `{"error", "message"}`: `invalid_token` (401), `forbidden` (403), `not_found` (404, 405), `too_large` (413, body over 256 KB), `busy` (429, nothing started), `answer_too_large` (502, answer over 1 MB) and `outcome_unknown` (504, no answer in 60 seconds; the action may still run).
+
+| Method | Path | |
+| --- | --- | --- |
+| GET | `/api/agent/access` | The areas this connection may view or take action in, when it ends, the app version and the time zone. |
+| GET | `/api/agent/endpoints` | The API calls this connection may make: `method`, `path`, `kind` (`read` or `act`), `area`, and when known `summary`, `parameters` and `body`. `?area=` limits it to one area. |
+
+Tokens work only where they were issued: tokens from the code flow on `/api`, tokens from MCP apps on `/mcp`.
+
+### MCP endpoint
+
+| Method | Path | |
+| --- | --- | --- |
+| POST | `/mcp` | Streamable HTTP, JSON answers only. Protocol revisions `2026-07-28`, `2025-11-25` and `2025-06-18`. Requires `Authorization: Bearer <access token>`; without a valid token it returns 401 with `WWW-Authenticate: Bearer resource_metadata="<AGENT_ACCESS_URL>/.well-known/oauth-protected-resource/mcp"`. Batches return 400. |
+| GET, DELETE | `/mcp` | 405 with `Allow: POST`. |
+
+The tools are `get_access`, `list_endpoints`, `read_api` and `perform_action`. `read_api` and `perform_action` run an `/api` call inside the app under the connection's areas. `backend/app/agent_access/scopes.py` lists the areas and the routes no agent can call.
+
+### OAuth 2.1 authorization server
+
+| Method | Path | |
+| --- | --- | --- |
+| GET | `/.well-known/oauth-protected-resource`, `/.well-known/oauth-protected-resource/mcp` | Protected resource metadata (RFC 9728). |
+| GET | `/.well-known/oauth-authorization-server` | Authorization server metadata (RFC 8414). |
+| GET | `/oauth/authorize` | Needs a signed-in session. Checks the client and its redirect address, then opens the consent page `/oauth/consent`. Answers carry `state` and `iss` (RFC 9207). |
+| POST | `/oauth/token` | `authorization_code` with PKCE (`S256` only), the device code grant, and `refresh_token`. Form-encoded, public clients only (`token_endpoint_auth_method: none`). A refresh token works once; using a spent one ends the connection. |
+| POST | `/oauth/register` | Dynamic client registration (RFC 7591). Accepts up to 10 `redirect_uris` (`https`, `http` on a loopback host, or a private-use scheme). 10 registrations per hour per client address. |
+| POST | `/oauth/revoke` | Token revocation (RFC 7009). Revoking either token of a connection ends the connection. |
+
+A client may also use an `https` URL of its metadata document as `client_id` (Client ID Metadata Documents). The app fetches it only after the person signed in, from a public address, without redirects, and at most 64 KB.
+
+Access tokens last one hour. Refresh tokens last until the end of the period the person chose. The app stores codes and tokens only as SHA-256 hashes.
+
+### Managing agents
+
+These routes are for people only. A call an agent makes never reaches them.
+
+| Method | Path | |
+| --- | --- | --- |
+| GET | `/api/agents` | `live`, `problem` (`no_sign_in`, `off`, `no_url` or `bad_url`), `mcp_url`, `skill_sentence`, `mcp_sentence`, `max_days`, `areas` and `agents`, each with `name`, `declared_name`, `publisher`, `kind` (`device` for the skill, `cimd` or `dcr` for MCP apps), `areas` (area: `view` or `act`), `approved_by`, `created_at`, `expires_at`, `last_used_at`, `state` (`connected`, `disconnected` or `expired`), `end_reason` and `version`. |
+| PUT | `/api/agents/{grant_id}` | Changes what a connected agent may do: `views` and `acts` (area ids; an act includes its view), and optionally `days`, a new end counted from now (one of the offered periods), and `version`, the agent's `version` from `GET /api/agents` when the edit started. Applies from the agent's next request. 400 without any view, 404 if it is not connected, 409 if its access changed since `version`. |
+| DELETE | `/api/agents/{grant_id}` | Disconnects one agent. 404 if it is not connected. |
+| DELETE | `/api/agents` | Disconnects every agent. Returns `{ "disconnected": <count> }`. |
+| GET | `/api/agents/{grant_id}/activity` | The last 50 entries: `at`, `event` (`grant_created`, `grant_revoked`, `call` or `denied`), `tool`, `method`, `path`, `http_status`, `outcome` and `detail`. |
+| GET, POST | `/api/agents/consent/{request_id}` | The consent page's request and answer. Only the browser session that opened the request can read or answer it, once. |
 
 ---
 

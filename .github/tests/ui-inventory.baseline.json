@@ -99,6 +99,8 @@
     "deleteReport",
     "deleteSuppression",
     "discardSecuritySettings",
+    "disconnectAgent",
+    "disconnectAllAgents",
     "dismissAuthOffBanner",
     "dismissProtectionHit",
     "dmarcCalendarKey",
@@ -357,6 +359,7 @@
     "testNotificationChannelDraft",
     "testQuarantineRules",
     "testSmtpConnection",
+    "toggleAgentActivity",
     "toggleAutoScroll",
     "toggleCreateExpiryField",
     "toggleDarkMode",
@@ -465,6 +468,8 @@
     "deleteReport",
     "deleteSuppression",
     "discardSecuritySettings",
+    "disconnectAgent",
+    "disconnectAllAgents",
     "dismissAuthOffBanner",
     "dismissProtectionHit",
     "dmarcCalendarKey",
@@ -638,6 +643,7 @@
     "testNotificationChannelDraft",
     "testQuarantineRules",
     "testSmtpConnection",
+    "toggleAgentActivity",
     "toggleAutoScroll",
     "toggleCreateExpiryField",
     "toggleDarkMode",
@@ -687,6 +693,10 @@
     "viewMessageDetails"
   ],
   "api": [
+    "/api/agents",
+    "/api/agents/consent/{param}",
+    "/api/agents/{param}",
+    "/api/agents/{param}/activity",
     "/api/auth/logout",
     "/api/auth/status",
     "/api/blacklist/check{param}",
@@ -824,6 +834,7 @@
     "/api/suppressions/{param}/events"
   ],
   "controls": [
+    "consent-name",
     "date-range-end",
     "date-range-start",
     "devices-search",
@@ -987,6 +998,9 @@
   ],
   "settings": [
     "admin_email",
+    "agent_access_enabled",
+    "agent_access_max_days",
+    "agent_access_url",
     "anomaly_alert_cooldown_hours",
     "anomaly_auth_failure_threshold",
     "anomaly_baseline_days",

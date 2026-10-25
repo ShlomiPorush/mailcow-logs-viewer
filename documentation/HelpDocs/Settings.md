@@ -64,6 +64,10 @@ For port 587, turn on **SMTP Use TLS** (STARTTLS); port 465 always uses implicit
 
 Basic authentication and OAuth2/OIDC can be on together. Turning on **Basic Auth Enabled** asks you to type the username and password again before it saves, so a typo cannot lock you out. See [Sign-in configuration](../OAuth2_Configuration.md).
 
+## Agents
+
+Lets AI agents such as Claude Code and Codex connect, and lists the allowed ones with **Activity** and **Disconnect**. The list works even while editing settings is off. See [AI agents](../AI_Agents.md).
+
 ## Anomaly Detection (Beta)
 
 This beta feature only alerts; it never blocks. It compares what each mailbox sends with its own normal rate and counts failed logins per username. Alerts go to email and your alert destinations and appear on the [Dashboard](Dashboard.md#security-alerts).

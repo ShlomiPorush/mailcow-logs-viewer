@@ -177,6 +177,8 @@
 .ui-textarea { height: auto; min-height: 90px; padding: 8px 12px; }
 .ui-input:focus, .ui-select:focus, .ui-textarea:focus { outline: none; border-color: var(--ui-accent); }
 .ui-input:disabled, .ui-select:disabled, .ui-textarea:disabled { opacity: .6; cursor: not-allowed; }
+/* A hint, not a value: as dim as the other fields' hints in both themes */
+.ui-input::placeholder, .ui-textarea::placeholder { color: var(--ui-muted); opacity: .8; }
 .ui-label { display: block; margin-bottom: 5px; color: var(--ui-muted); font-size: var(--ui-fs-sm); font-weight: 600; }
 
 /* ---------- Tags (status) and chips (filters) ---------- */
@@ -1077,6 +1079,42 @@ body.ui-login { height: 100vh; height: 100dvh; overflow: auto; margin: 0; displa
 .ui-spin .opacity-25 { opacity: .25; }
 .ui-spin .opacity-75 { opacity: .75; }
 @keyframes spin { to { transform: rotate(360deg); } }
+
+/* ---------- Connect an agent (authorize.html) ---------- */
+
+/* The login page's layout, wider: the permissions are a small table */
+.ui-consent-card { max-width: 640px; }
+.ui-consent-form { display: grid; gap: 18px; }
+.ui-consent-sec { display: grid; gap: 10px; padding: 16px; border: 1px solid var(--ui-line); border-radius: var(--ui-radius); background: var(--ui-bg); }
+.ui-consent-h { margin: 0; font-size: 15px; font-weight: 700; letter-spacing: -.01em; }
+.ui-consent-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.ui-consent-quick { display: flex; gap: 6px; margin-inline-start: auto; }
+.ui-consent-agent { margin: 0; font-size: 22px; font-weight: 800; letter-spacing: -.02em; overflow-wrap: anywhere; }
+.ui-consent-id { margin: 0; font-size: var(--ui-fs-sm); line-height: 1.6; }
+/* An agent that connects with a code: the person compares it with what the agent shows */
+.ui-consent-code { display: grid; gap: 4px; padding: 12px 14px; border: 1px solid var(--ui-line); border-radius: var(--ui-radius-sm); background: var(--ui-panel); }
+.ui-consent-code .ui-label { margin: 0; }
+.ui-consent-code b { font-size: 28px; font-weight: 800; letter-spacing: .12em; }
+.ui-consent-code-input { font-family: var(--ui-mono); font-size: 20px; letter-spacing: .12em; text-transform: uppercase; height: auto; padding: 10px 12px; }
+.ui-consent-uri { overflow-wrap: anywhere; }
+.ui-consent-areas { display: grid; border: 1px solid var(--ui-line); border-radius: var(--ui-radius-sm); overflow: hidden; }
+.ui-consent-row { display: grid; grid-template-columns: 1fr 56px 56px; align-items: center; gap: 8px; padding: 9px 12px; border-top: 1px solid var(--ui-line); }
+.ui-consent-row:first-child { border-top: 0; }
+.ui-consent-row-head { background: var(--ui-panel); color: var(--ui-muted); font-size: var(--ui-fs-sm); font-weight: 600; }
+.ui-consent-row-head span:not(:first-child) { text-align: center; }
+.ui-consent-area { display: grid; gap: 2px; min-width: 0; }
+.ui-consent-area small { color: var(--ui-muted); font-size: 12px; line-height: 1.45; }
+.ui-consent-area .ui-consent-act-text { color: var(--ui-ink); opacity: .75; }
+.ui-consent-box { display: flex; justify-content: center; align-items: center; min-height: 32px; cursor: pointer; }
+.ui-consent-box .ui-check { width: 18px; height: 18px; }
+.ui-consent-periods { display: flex; flex-wrap: wrap; gap: 6px; }
+.ui-consent-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.ui-consent-actions .ui-btn { min-width: 110px; height: 40px; }
+@media (max-width: 520px) {
+    .ui-consent-sec { padding: 12px; }
+    .ui-consent-row { grid-template-columns: 1fr 44px 44px; padding: 8px 10px; }
+    .ui-consent-actions .ui-btn { flex: 1; }
+}
 
 /* ---------- Token bridge for markup not rebuilt on components yet ----------
  *
@@ -2170,6 +2208,36 @@ html body .ui-main .ui-set-choice-opt > input[type="radio"] { accent-color: var(
 .ui-check-top { align-items: flex-start; }
 .ui-check-top .ui-check { margin-top: 2px; }
 .ui-check-top > span { display: grid; gap: 1px; }
+
+/* Settings > Agents (agents.js): the channel rows, with the areas and an activity list */
+.ui-set-channels .ui-agent-help { margin: 12px 0 8px; grid-template-columns: 1fr; }
+/* Settings > Agents: how to connect, then the agents that were allowed, as two panels */
+.ui-agent-sections { display: grid; gap: var(--ui-gap); }
+.ui-agent-connect { margin: 4px 0 4px; }
+.ui-agent-tabs { padding: 0; margin-bottom: 10px; }
+.ui-agent-tabs .modal-tab { flex: 0 0 auto; }
+.ui-agent-tabpanel > .ui-set-desc { margin: 0; }
+.ui-set-channels .ui-agent-help + .ui-set-desc { margin-bottom: 12px; }
+.ui-set-channels > .ui-locked { margin: 12px 0; }
+.ui-agent-sections .ui-list-head + .ui-channels { margin-top: 12px; }
+.ui-agent-cmd { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.ui-agent-cmd code { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+/* The agent's name, where its details came from, and its areas on one line (wraps on a phone) */
+.ui-agent-title { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; margin-bottom: 2px; }
+/* Edit access: the table keeps every area (its overflow: hidden would let the grid squeeze it); the dialog scrolls */
+.ui-dialog-body.ui-agent-edit { grid-auto-rows: max-content; }
+.ui-agent-edit .ui-consent-areas { margin: 4px 0 0; min-height: max-content; }
+/* Its buttons and error stay below the list, so they show without scrolling */
+.ui-agent-edit-foot { flex-wrap: wrap; align-items: center; }
+.ui-agent-edit-foot > p { flex-basis: 100%; margin: 0; }
+.ui-agent-activity { flex-basis: 100%; padding-top: 8px; border-top: 1px solid var(--ui-line); }
+.ui-agent-log { display: grid; gap: 6px; margin: 0 0 6px; padding: 0; list-style: none; font-size: var(--ui-fs-sm); }
+.ui-agent-log li { display: grid; grid-template-columns: 150px 1fr; gap: 10px; align-items: baseline; }
+.ui-agent-log .ui-mono { overflow-wrap: anywhere; }
+.ui-agent-when { color: var(--ui-muted); font-variant-numeric: tabular-nums; }
+@media (max-width: 640px) {
+    .ui-agent-log li { grid-template-columns: 1fr; gap: 2px; }
+}
 .ui-form-split { padding-top: 14px; border-top: 1px solid var(--ui-line); gap: 10px; }
 .ui-form-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .ui-dialog.ui-dialog-md { width: min(680px, 100%); }
@@ -3052,6 +3120,9 @@ button.ui-aa-col:focus-visible { outline: 2px solid var(--ui-focus); outline-off
     .ui-dialog-backdrop.is-grown:not(.ui-docked) > .ui-dialog { max-height: 100vh; max-height: 100dvh; }
     .ui-dialog-backdrop.is-full:not(.ui-docked) > .ui-dialog { border-radius: 0; padding-top: env(safe-area-inset-top); }
     .ui-dialog-backdrop:not(.ui-docked) .ui-dialog-body { overscroll-behavior: contain; padding-bottom: calc(var(--ui-pad-x) + env(safe-area-inset-bottom)); }
+    /* With a foot, the foot is the sheet's bottom edge and clears the home bar instead */
+    .ui-dialog-backdrop:not(.ui-docked) .ui-dialog:has(> .ui-dialog-foot) > .ui-dialog-body { padding-bottom: var(--ui-pad-x); }
+    .ui-dialog-backdrop:not(.ui-docked) .ui-dialog > .ui-dialog-foot { padding-bottom: calc(12px + env(safe-area-inset-bottom)); }
 }
 
 /* An information sheet's or dialog's top (grip and head) is its reading gauge:
