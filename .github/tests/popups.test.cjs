@@ -65,9 +65,22 @@ const FLOATING_CSS = {
 const FRAME_CLASSES = ['ui-dialog-backdrop', 'ui-dialog', 'ui-sheet', 'ui-sheet-panel', 'ui-menu', 'ui-menu-panel',
     'ui-popover', 'ui-attn-win', 'ui-fly', 'ui-toast', 'mobile-menu'];
 
+// Each block from open to the first close after it, cut out (an unclosed one stays)
+function dropBlocks(text, open, close) {
+    let out = '';
+    let from = 0;
+    for (;;) {
+        const start = text.indexOf(open, from);
+        const end = start === -1 ? -1 : text.indexOf(close, start + open.length);
+        if (end === -1) return out + text.slice(from);
+        out += text.slice(from, start);
+        from = end + close.length;
+    }
+}
+
 // Comments say anything; strings and code are what count
 function stripComments(text) {
-    return text.replace(/<!--[\s\S]*?-->/g, '').replace(/\/\*[\s\S]*?\*\//g, '')
+    return dropBlocks(dropBlocks(text, '<!--', '-->'), '/*', '*/')
         .split('\n').map(line => {
             if (/^\s*\/\//.test(line)) return '';
             // A trailing comment, where the quotes before it are closed
@@ -245,7 +258,7 @@ test('the listed exceptions still exist', () => {
     for (const id of Object.keys(STATIC_LAYERS)) assert.ok(html.includes(`id="${id}"`), `#${id} is listed in STATIC_LAYERS but gone`);
     const css = fs.readFileSync(path.join(FRONTEND, 'assets/css/ui.css'), 'utf8');
     for (const selector of Object.keys(FLOATING_CSS)) {
-        assert.match(css, new RegExp(`${selector.replace(/[.#]/g, '\\$&')}(?![\\w-])`), `${selector} is listed in FLOATING_CSS but gone`);
+        assert.match(css, new RegExp(`${selector.replace(/[\\^$.*+?()[\]{}|#]/g, '\\$&')}(?![\\w-])`), `${selector} is listed in FLOATING_CSS but gone`);
     }
 });
 

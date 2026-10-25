@@ -16,7 +16,12 @@ const { JSDOM } = require(path.join(modules, 'jsdom'));
 const frontend = path.join(__dirname, '../../frontend');
 const read = name => fs.readFileSync(path.join(frontend, name), 'utf8');
 const SCRIPTS = ['utils.js', 'router.js', 'app.js', 'settings.js', 'notifications.js', 'agents.js', 'spam_filter.js'].map(read);
-const HTML = read('index.html').replace(/<script\b[^>]*\bsrc=[^>]*><\/script>/g, '').replace(/<link\b[^>]*>/g, '');
+// The page without its script files and style sheets; the tests add the scripts themselves
+const HTML = (() => {
+    const dom = new JSDOM(read('index.html'));
+    dom.window.document.querySelectorAll('script[src], link').forEach(el => el.remove());
+    return dom.serialize();
+})();
 const STYLE = '<style>.hidden { display: none; } .ui-dialog-backdrop { z-index: 50; } .ui-sheet { z-index: 70; } .ui-confirm { z-index: 99999; }</style>';
 
 // Every window a test opened closes after it, timers and all, so a failing test
@@ -367,8 +372,8 @@ test('the container log on a phone: More opens it, in place of the More sheet, w
 });
 
 test('the Suppressions More menu is a popover menu of buttons with an icon button', () => {
-    const html = read('index.html');
-    const w = new JSDOM(html.replace(/<script\b[\s\S]*?<\/script>/g, '')).window;
+    // jsdom runs no script unless asked to
+    const w = new JSDOM(read('index.html')).window;
     const button = w.document.getElementById('suppression-more-btn');
     const menu = w.document.getElementById('suppression-more-menu');
     assert.ok(button.querySelector('svg'), 'an icon, not a text glyph');
