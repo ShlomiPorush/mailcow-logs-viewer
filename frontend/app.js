@@ -89,24 +89,46 @@ function redirectToLogin() {
 // Both login methods (OAuth2 and Basic Auth) end up with the same HttpOnly
 // session cookie, which the browser attaches automatically. No credential is
 // held in JavaScript, so an XSS in the page has nothing to read.
+// timeout (ms, for the pages' own refreshes): a request that has not answered by
+// then, its body included, is aborted, so it neither holds the next refresh nor
+// answers after it
 async function authenticatedFetch(url, options = {}) {
+    const { timeout, ...rest } = options;
     const headers = {
-        ...options.headers,
+        ...rest.headers,
     };
-
-    const response = await fetch(url, {
-        ...options,
-        headers,
-        credentials: 'include' // Send the session cookie
-    });
-
-    // Handle 401 Unauthorized - the session expired or the server restarted
-    if (response.status === 401) {
-        redirectToLogin();
-        throw new Error('Authentication required');
+    let timer = null;
+    if (timeout && typeof AbortController === 'function') {
+        const control = new AbortController();
+        const outer = rest.signal;
+        if (outer) {
+            if (outer.aborted) control.abort();
+            else outer.addEventListener('abort', () => control.abort(), { once: true });
+        }
+        timer = setTimeout(() => control.abort(), timeout);
+        rest.signal = control.signal;
     }
 
-    return response;
+    try {
+        const response = await fetch(url, {
+            ...rest,
+            headers,
+            credentials: 'include' // Send the session cookie
+        });
+
+        // Handle 401 Unauthorized - the session expired or the server restarted
+        if (response.status === 401) {
+            redirectToLogin();
+            throw new Error('Authentication required');
+        }
+
+        // The timer stays to the end of the body (reading it is part of the request);
+        // after that its abort does nothing
+        return response;
+    } catch (error) {
+        clearTimeout(timer);
+        throw error;
+    }
 }
 
 // The reason the server gave for a failed request (FastAPI's `detail`), or its status
@@ -460,10 +482,6 @@ function showQuarantineRulesAccess() {
     return mailcowRwConfigured;
 }
 
-// Auto-refresh configuration
-const AUTO_REFRESH_INTERVAL = 30000; // 30 seconds
-let autoRefreshTimer = null;
-
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', async () => {
     uiInitMenus();
@@ -509,8 +527,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Load the initial tab (use switchTab to ensure proper initialization)
     switchTab(initialTab, initialParams);
 
-    // Start auto-refresh for all tabs
-    startAutoRefresh();
+    // The open page refreshes itself from now on
+    startPageRefresh();
 
     console.log('=== Initialization Complete ===');
 });
@@ -641,8 +659,7 @@ async function loadAppInfo() {
         window.matchMedia('(max-width: 760px)').addEventListener('change', placeShellUtilities);
         window.matchMedia('(max-width: 760px)').addEventListener('change', () => placeTopbar());
         watchTopbarCrumbs();
-        loadNavCounters();
-        setInterval(loadNavCounters, 5 * 60 * 1000);
+        startNavCounters();
         // Needs attention, for the Dashboard and the bell on every page
         startAttention();
     } catch (error) {
@@ -833,7 +850,23 @@ function setNavCount(page, count, isFail, title) {
 
 // Counters next to the pages that can need attention, and the problems shown
 // on the server card, the phone top bar and the Status tab.
+// The counters are read every five minutes; a hidden browser tab reads nothing
+// and catches up when it is shown
+const NAV_COUNTERS_EVERY = 5 * 60 * 1000;
+let navCountersAt = 0;
+
+function navCountersTick() {
+    if (!document.hidden && Date.now() - navCountersAt >= NAV_COUNTERS_EVERY - 2000) loadNavCounters();
+}
+
+function startNavCounters() {
+    loadNavCounters();
+    setInterval(navCountersTick, PAGE_REFRESH_TICK);
+    document.addEventListener('visibilitychange', navCountersTick);
+}
+
 async function loadNavCounters() {
+    navCountersAt = Date.now();
     const off = feature => (window.disabledFeatures || []).includes(feature);
     const get = async url => {
         try {
@@ -1077,7 +1110,7 @@ async function loadMailcowVersionStatus() {
 }
 
 // =============================================================================
-// AUTO-REFRESH SYSTEM - Smart refresh (only updates when data changes)
+// PAGE REFRESH - the open page reads its data again on its own
 // =============================================================================
 
 // Cache for last fetched data (to compare and detect changes)
@@ -1096,75 +1129,92 @@ let versionInfoCache = {
     version_info: null
 };
 
-function startAutoRefresh() {
-    // Clear existing timer if any
-    if (autoRefreshTimer) {
-        clearInterval(autoRefreshTimer);
-    }
+// Every page that changes by itself has a refresher: how often it runs (a
+// number, or a function of the page's open tab) and what it reads. A tick every
+// 30 seconds runs the open page's refresher when it is due and not already on
+// its way; an answer that has not come in 20 seconds frees the next one. A
+// hidden browser tab reads nothing and catches up when it is shown. Each
+// refresher draws only what changed, and checks when its answer arrives that
+// nobody is working in what it would redraw.
+const PAGE_REFRESH_TICK = 30000;
+const PAGE_REFRESH_TIMEOUT = 20000;
+const pageRefreshers = {};
+const pageRefreshState = { route: null, at: 0, timer: null };
 
-    // Set up auto-refresh interval
-    autoRefreshTimer = setInterval(() => {
-        smartRefreshCurrentTab();
-    }, AUTO_REFRESH_INTERVAL);
-
-    console.log(`[OK] Auto-refresh started (every ${AUTO_REFRESH_INTERVAL / 1000}s)`);
+function registerPageRefresh(route, every, run) {
+    pageRefreshers[route] = { every, run, busy: false };
 }
 
-function stopAutoRefresh() {
-    if (autoRefreshTimer) {
-        clearInterval(autoRefreshTimer);
-        autoRefreshTimer = null;
-        console.log('[STOP] Auto-refresh stopped');
-    }
+function pageRefreshEvery(refresher) {
+    return typeof refresher.every === 'function' ? refresher.every() : refresher.every;
 }
 
-// Smart refresh - fetches data silently and only updates if changed
-async function smartRefreshCurrentTab() {
-    // A page that says it is disabled asks for nothing
-    if (pageIsOff(currentTab)) return;
-    // Don't refresh if modal is open
+// The page was just loaded: its next refresh is a full cadence away
+function pageRefreshLoaded(route) {
+    pageRefreshState.route = route;
+    pageRefreshState.at = Date.now();
+}
+
+// A load that failed: the next tick tries again, whatever the cadence
+function pageRefreshRetry(route) {
+    if (pageRefreshState.route === route) pageRefreshState.at = 0;
+}
+
+// The open page's refresher, now. Nothing for a page that is off, while a
+// message dialog covers the page, or while the last run is still on its way
+async function pageRefreshNow() {
+    const route = currentTab;
+    const refresher = pageRefreshers[route];
+    if (!refresher || refresher.busy || pageIsOff(route)) return;
     const modal = document.getElementById('message-modal');
-    if (modal && !modal.classList.contains('hidden') && !modal.classList.contains('ui-docked')) {
-        return;
-    }
-
+    if (modal && !modal.classList.contains('hidden') && !modal.classList.contains('ui-docked')) return;
+    refresher.busy = true;
+    pageRefreshState.route = route;
+    pageRefreshState.at = Date.now();
     try {
-        switch (currentTab) {
-            case 'dashboard':
-                await smartRefreshDashboard();
-                break;
-            case 'messages':
-                await smartRefreshMessages();
-                break;
-            case 'netfilter':
-                await smartRefreshNetfilter();
-                await loadSecurityOverview();
-                fail2banSettingsLoaded = false;
-                loadFail2BanSettings();
-                if (typeof refreshProtectionHits === 'function') refreshProtectionHits();
-                break;
-            case 'outbound':
-                // The queue feeds the page's summary and the sidebar counter on both tabs
-                if (!isFeatureDisabled('queue')) await smartRefreshQueue();
-                if (!isFeatureDisabled('suppressions')) {
-                    if (outboundTab === 'suppressions') await smartRefreshSuppressions();
-                    else await loadSuppressionStats();
-                }
-                break;
-            case 'quarantine':
-                await smartRefreshQuarantine();
-                break;
-            case 'status':
-                await loadStatus(); // Status is fast, just reload
-                break;
-            case 'settings':
-                await smartRefreshSettings();
-                break;
-        }
+        await Promise.race([refresher.run(), new Promise(resolve => setTimeout(resolve, PAGE_REFRESH_TIMEOUT))]);
     } catch (error) {
-        console.error('Auto-refresh error:', error);
+        console.error(`Refresh of ${route} failed:`, error);
+    } finally {
+        refresher.busy = false;
     }
 }
+
+function pageRefreshTick() {
+    if (document.hidden) return;
+    const refresher = pageRefreshers[currentTab];
+    if (!refresher) return;
+    // A page opened before the first tick counts from when it was opened
+    if (pageRefreshState.route !== currentTab) pageRefreshLoaded(currentTab);
+    if (Date.now() - pageRefreshState.at >= pageRefreshEvery(refresher) - 2000) pageRefreshNow();
+}
+
+function startPageRefresh() {
+    if (pageRefreshState.timer) return;
+    pageRefreshState.timer = setInterval(pageRefreshTick, PAGE_REFRESH_TICK);
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) pageRefreshTick(); });
+}
+
+registerPageRefresh('dashboard', 30000, () => smartRefreshDashboard());
+registerPageRefresh('messages', 30000, () => smartRefreshMessages());
+registerPageRefresh('netfilter', 30000, async () => {
+    await smartRefreshNetfilter();
+    await loadSecurityOverview();
+    fail2banSettingsLoaded = false;
+    loadFail2BanSettings();
+    if (typeof refreshProtectionHits === 'function') refreshProtectionHits();
+});
+registerPageRefresh('outbound', 30000, async () => {
+    // The queue feeds the page's summary and the sidebar counter on both tabs
+    if (!isFeatureDisabled('queue')) await smartRefreshQueue();
+    if (!isFeatureDisabled('suppressions')) {
+        if (outboundTab === 'suppressions') await smartRefreshSuppressions();
+        else await loadSuppressionStats();
+    }
+});
+registerPageRefresh('quarantine', 30000, () => smartRefreshQuarantine());
+registerPageRefresh('status', 30000, () => loadStatus());
+registerPageRefresh('settings', 30000, () => smartRefreshSettings());
 
 // Helper to check if data changed
 function hasDataChanged(newData, cacheKey) {
@@ -1863,6 +1913,8 @@ function switchTab(tab, params = {}) {
     }
 
     currentTab = tab;
+    // The page loads below: its own refresh comes a full cadence later
+    pageRefreshLoaded(tab);
 
     // Mark the current page in the sidebar and in the phone tab bar; "More"
     // is marked when the page is only reachable through the sheet
@@ -6047,11 +6099,18 @@ console.log('UI: Dark mode, Modals with tabs, Responsive design');
 
 let containerLogsInterval = null;
 
+// Whether the log is scrolled to its newest line (a few pixels short counts)
+function containerLogsAtEnd(content) {
+    const box = content.parentElement;
+    return !box || box.scrollHeight - box.scrollTop - box.clientHeight <= 4;
+}
+
 async function fetchContainerLogs(silent = false) {
     const content = document.getElementById('container-logs-content');
 
-    // The refresh leaves the log as it is while the user selects text in it
-    if (content && silent && uiTextHeld(content)) return;
+    // The refresh leaves the log as it is while the user selects text in it or
+    // reads further up, and while the browser tab is hidden
+    if (content && silent && (uiTextHeld(content) || !containerLogsAtEnd(content) || document.hidden)) return;
 
     if (content && !silent) {
         content.textContent = 'Loading logs...';
@@ -6066,10 +6125,8 @@ async function fetchContainerLogs(silent = false) {
         const data = await response.json();
 
         if (content && data.logs) {
-            if (silent && uiTextHeld(content)) return;
-            const isScrolledToBottom = content.parentElement
-                ? (content.parentElement.scrollHeight - content.parentElement.scrollTop === content.parentElement.clientHeight)
-                : true;
+            if (silent && (uiTextHeld(content) || !containerLogsAtEnd(content))) return;
+            const isScrolledToBottom = containerLogsAtEnd(content);
 
             if (data.logs.length === 0) {
                 if (!silent) content.textContent = 'No logs available.';

@@ -276,7 +276,7 @@ test('a page that says it is disabled is not refreshed on the timer', async () =
     a.context.smartRefreshQuarantine = async () => { asked++; };
     a.context.document.getElementById('message-modal').classList.add('hidden');
     a.context.switchTab('quarantine', { sub: 'messages' });
-    await a.context.smartRefreshCurrentTab();
+    await a.context.pageRefreshNow();
     assert.equal(asked, 0);
     const b = loadApp([]);
     b.context.smartRefreshQuarantine = async () => { asked++; };
@@ -284,6 +284,6 @@ test('a page that says it is disabled is not refreshed on the timer', async () =
     b.context.initQuarantineRules = () => {};
     b.context.document.getElementById('message-modal').classList.add('hidden');
     b.context.switchTab('quarantine', { sub: 'messages' });
-    await b.context.smartRefreshCurrentTab();
+    await b.context.pageRefreshNow();
     assert.equal(asked, 1);
 });
