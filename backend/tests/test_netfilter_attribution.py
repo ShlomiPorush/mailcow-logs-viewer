@@ -328,6 +328,7 @@ def test_the_upgrade_keeps_catches_whose_lines_aged_out_or_confirm(db, caplog):
     confirming = _stored_before_the_fix(db, VICTIM, sasl(VICTIM, 'admin'), username='admin')
     allowlisted = _stored_before_the_fix(db, VICTIM, f'Address {VICTIM}/32 is allowlisted by rule 198.51.100.0/24')
     neutral = _stored_before_the_fix(db, VICTIM, 'Allowlist was changed, it has 3 entries')
+    contradicting = _stored_before_the_fix(db, VICTIM, sasl(CLIENT6, f'x@{VICTIM}'))
     deleted = [_stored_before_the_fix(db, VICTIM, sasl(CLIENT6, f'u{n}@{VICTIM}')) for n in range(3)]
     many = [_stored_before_the_fix(db, GENUINE, sasl(GENUINE, f'u{n}@example.com')) for n in range(200)]
 
@@ -337,7 +338,8 @@ def test_the_upgrade_keeps_catches_whose_lines_aged_out_or_confirm(db, caplog):
         'empty': _hit(db, GENUINE, 'country', 'watching', []),
         'capped': _hit(db, GENUINE, 'unknown_accounts', 'watching', many),
         'allowlisted and neutral': _hit(db, VICTIM, 'country', 'watching', [allowlisted, neutral]),
-        'alert': _hit(db, VICTIM, 'breach', 'alert', [confirming]),
+        # A breach alert never bans, so even a contradicted one is left alone
+        'alert': _hit(db, VICTIM, 'breach', 'alert', [contradicting]),
     }
     banned = _hit(db, VICTIM, 'repeat_offender', 'banned', deleted[2:], mode='enforce')
     # Its forged lines aged out before the upgrade, so nothing is left to contradict it
