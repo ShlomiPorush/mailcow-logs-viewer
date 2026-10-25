@@ -926,13 +926,13 @@ No configuration from mailcow returns 503; a failed mailcow request 502.
 
 #### POST /fail2ban
 
-Replaces the Fail2ban configuration on mailcow. Send the complete configuration, unchanged values included, inside an `attr` object or as the top-level object:
+Changes the Fail2ban settings on mailcow, inside an `attr` object or as the top-level object, such as the object `GET /fail2ban` returns:
 
 ```json
-{ "attr": { "ban_time": "86400", "ban_time_increment": "1", "max_ban_time": "86400", "max_attempts": "5", "retry_window": "600", "netban_ipv4": "24", "netban_ipv6": "64", "whitelist": "192.0.2.0/24", "blacklist": "192.0.2.5/32" } }
+{ "attr": { "ban_time": "86400", "ban_time_increment": "1", "max_ban_time": "86400", "max_attempts": "5", "retry_window": "600", "netban_ipv4": "24", "netban_ipv6": "64" } }
 ```
 
-Without `manage_external`, mailcow's current value is kept. Returns `{ "status": "success", "msg": ["fail2ban_edit_ok"] }` from mailcow's first result, plus `raw` when mailcow does not answer with a list. A body that is not valid JSON returns 500.
+This route never changes the allowlist or denylist: they are read fresh right before writing, so a ban written meanwhile is kept. `whitelist` and `blacklist` may be left out; when sent, they must be the current lists, otherwise the answer is 409 with `detail.code` `lists_changed`. Change the lists with `ban`, `allow` and `remove`. A setting left out, `manage_external` included, keeps mailcow's current value. Returns `{ "status": "success", "msg": ["fail2ban_edit_ok"] }` from mailcow's first result, plus `raw` when mailcow does not answer with a list. A body that is not a JSON object returns 400, invalid JSON 500, unreadable current settings 503.
 
 #### POST /fail2ban/ban
 
@@ -2101,7 +2101,7 @@ Without a Rspamd password, `configured` is false and `message` says what to add.
 
 #### GET /api/rspamd/maps/{filename}
 
-`{ "filename": "global_smtp_from_whitelist.map", "content": "/^alice@example\\.com$/i", "entry_count": 1 }`, sometimes with the map's `metadata`. A known map that is not loaded yet returns empty content, zero entries and a message. An unknown filename returns 404, a missing Rspamd password 400, an Rspamd failure 502.
+`{ "filename": "global_smtp_from_whitelist.map", "content": "/^alice@example\\.com$/i", "content_hash": "<sha256 of content>", "entry_count": 1 }`, sometimes with the map's `metadata`. Send `content_hash` back as `base_hash` when saving. A known map that is not loaded yet returns empty content, zero entries and a message. An unknown filename returns 404, a missing Rspamd password 400, an Rspamd failure 502.
 
 ---
 
@@ -2110,14 +2110,15 @@ Without a Rspamd password, `configured` is false and `message` says what to add.
 | Field | Type | Default | Constraints and purpose |
 | --- | --- | --- | --- |
 | `content` | string | Required | The whole new map, one entry per line; lines starting with `#` are comments |
+| `base_hash` | string or null | Unset | `content_hash` of the map the content was edited from |
 
 Replaces the map through the mailcow API. Before saving, bare addresses become anchored, escaped regular expressions:
 
 ```json
-{ "success": true, "filename": "global_smtp_from_whitelist.map", "entry_count": 2, "normalized_entries": 2, "content": "/^user@example\\.com$/i\n/^admin@example\\.com$/i", "warnings": [], "api_response": [] }
+{ "success": true, "filename": "global_smtp_from_whitelist.map", "entry_count": 2, "normalized_entries": 2, "content": "/^user@example\\.com$/i\n/^admin@example\\.com$/i\n", "content_hash": "<sha256 of content>", "warnings": [], "api_response": [] }
 ```
 
-`normalized_entries` counts the converted lines; `content` is what was saved. Warnings do not block the save. Invalid entries return 400 with `detail` holding `message` and `validation_errors`. No read-write key returns 403; an unknown filename 404; a mailcow failure 502.
+With `base_hash`, a map that changed since it was read, for example by the suppression sync, is not saved: the answer is 409 with `detail.code` `map_changed`. Without it the map is saved as sent. `normalized_entries` counts the converted lines; `content` is the map as saved, read back, and `content_hash` its hash for the next save, or null when it could not be read back. Warnings do not block the save. Invalid entries return 400 with `detail` holding `message` and `validation_errors`. No read-write key returns 403; an unknown filename 404; another map write still running 409 with a text `detail`; a mailcow failure 502.
 
 ---
 
