@@ -149,6 +149,25 @@ def test_a_failed_import_records_and_reports_what_failed(run):
     assert [[e['email_id'] for e in failed] for failed, _ in run.notified] == [['1', '2']]
 
 
+def test_failures_reported_before_a_late_error_are_reported_once(run, monkeypatch):
+    import app.services.dmarc_imap_service as imap_module
+    real_build = imap_module.DMARCImapService._build_result
+    calls = []
+
+    def build(self, sync_record):
+        # The success path fails at its very end, after its notification
+        calls.append(1)
+        if len(calls) == 1:
+            raise RuntimeError("late failure")
+        return real_build(self, sync_record)
+    monkeypatch.setattr(imap_module.DMARCImapService, "_build_result", build)
+
+    done = run({1: ORDINARY})
+
+    assert done.result['status'] == 'error' and done.result['notified'] is True
+    assert len(run.notified) == 1
+
+
 def test_the_job_does_not_report_failures_the_import_already_reported(monkeypatch):
     import asyncio
     from unittest.mock import Mock

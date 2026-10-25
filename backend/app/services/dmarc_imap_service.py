@@ -633,7 +633,8 @@ class DMARCImapService:
             # Return error result instead of raising exception
             # This allows the scheduler to handle it gracefully
             if not notified:
-                result['notified'] = self._notify_failures(failed_emails, result.get('sync_id'))
+                notified = self._notify_failures(failed_emails, result.get('sync_id'))
+            result['notified'] = notified
             return result
 
         finally:
