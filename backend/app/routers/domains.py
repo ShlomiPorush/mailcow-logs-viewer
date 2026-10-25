@@ -1303,6 +1303,9 @@ async def _host_address_validated(host: str) -> Optional[bool]:
     return None
 
 
+MAX_DANE_MX_HOSTS = 10  # MX hosts checked for DANE per domain; each costs a port 25 probe
+
+
 async def check_tlsa_record(domain: str) -> Dict[str, Any]:
     """
     Check DANE for a domain's mail servers: TLSA records, their DNSSEC
@@ -1322,7 +1325,7 @@ async def check_tlsa_record(domain: str) -> Dict[str, Any]:
         null_mx = False
         mx_validated = False
         mx_lookup_failed = False
-        hosts = set()
+        hosts = {}   # host -> its lowest MX preference
         try:
             mx_answer = await resolve_dnssec_with_fallback(domain, 'MX', timeout=5)
             if mx_answer.rcode not in (dns.rcode.NOERROR, dns.rcode.NXDOMAIN):
@@ -1335,10 +1338,20 @@ async def check_tlsa_record(domain: str) -> Dict[str, Any]:
                         # RFC 7505 "null MX" (0 .) - the domain accepts no mail at all
                         null_mx = True
                         continue
-                    hosts.add(exchange)
+                    preference = getattr(r, 'preference', 0)
+                    hosts[exchange] = min(hosts.get(exchange, preference), preference)
         except Exception:
             mx_lookup_failed = True
         mx_hosts = sorted(hosts)
+        # The domain's DNS decides how many MX hosts there are, and each one
+        # costs a port 25 probe, so only the most preferred ones are checked.
+        by_preference = sorted(hosts, key=lambda h: (hosts[h], h))
+        checked_hosts = sorted(by_preference[:MAX_DANE_MX_HOSTS])
+        not_checked = sorted(by_preference[MAX_DANE_MX_HOSTS:])
+        not_checked_warnings = [
+            f'Not checked: {", ".join(not_checked)}. '
+            f'Only the first {MAX_DANE_MX_HOSTS} mail servers are checked.'
+        ] if not_checked else []
 
         if not mx_hosts:
             if null_mx:
@@ -1396,6 +1409,9 @@ async def check_tlsa_record(domain: str) -> Dict[str, Any]:
             if any(r['usage'] == dane.USAGE_DANE_EE for r in host_records):
                 try:
                     certificate = await _fetch_mx_certificate(host)
+                except dane.ProbeBusy as e:
+                    host_result['certificate'] = 'busy'
+                    host_result['certificate_error'] = str(e)
                 except Exception as e:
                     host_result['certificate'] = 'unreachable'
                     host_result['certificate_error'] = str(e)
@@ -1410,8 +1426,8 @@ async def check_tlsa_record(domain: str) -> Dict[str, Any]:
         hosts_with_tlsa = []
         lookup_failed = []
         host_results = []
-        outcomes = await asyncio.gather(*(check_host(host) for host in mx_hosts))
-        for host, outcome in zip(mx_hosts, outcomes):
+        outcomes = await asyncio.gather(*(check_host(host) for host in checked_hosts))
+        for host, outcome in zip(checked_hosts, outcomes):
             if outcome is None:
                 lookup_failed.append(host)
                 continue
@@ -1429,24 +1445,32 @@ async def check_tlsa_record(domain: str) -> Dict[str, Any]:
                     'record': None,
                     'records': [],
                     'mx_hosts': mx_hosts,
-                    'warnings': [],
+                    'not_checked': not_checked,
+                    'warnings': not_checked_warnings,
                 }
+            if not_checked:
+                # A host that was not checked may publish TLSA, so this must
+                # not read as "No DANE" to change detection (_definitely_absent)
+                message = f'No TLSA records on the {len(checked_hosts)} mail servers checked'
+            else:
+                message = f'No DANE/TLSA records published for {", ".join(mx_hosts)}'
             return {
                 'status': 'warning',
-                'message': f'No DANE/TLSA records published for {", ".join(mx_hosts)}',
+                'message': message,
                 'record': None,
                 'records': [],
                 'mx_hosts': mx_hosts,
-                'warnings': [
+                'not_checked': not_checked,
+                'warnings': not_checked_warnings + [
                     'DANE is optional. If you publish TLSA records, senders can verify your '
                     'TLS certificate through DNSSEC. Requires a DNSSEC-signed zone.'
                 ],
             }
 
         # 3. Assess what was published
-        warnings = []
+        warnings = list(not_checked_warnings)
         info = []
-        missing = [h for h in mx_hosts if h not in hosts_with_tlsa and h not in lookup_failed]
+        missing = [h for h in checked_hosts if h not in hosts_with_tlsa and h not in lookup_failed]
         if missing:
             warnings.append(
                 f'No TLSA record for: {", ".join(missing)}. Every MX host should publish one, '
@@ -1479,6 +1503,7 @@ async def check_tlsa_record(domain: str) -> Dict[str, Any]:
             'mismatch': 'certificate does not match the TLSA record',
             'unreachable': 'certificate not compared - could not connect on port 25 from this server',
             'not_verifiable': 'certificate not compared - only DANE-EE (usage 3) records can be checked',
+            'busy': 'certificate not compared - too many checks were running at once, run the check again',
         }
         for host_result in host_results:
             info.append(f'{host_result["host"]}: {certificate_lines[host_result["certificate"]]}')
@@ -1514,6 +1539,7 @@ async def check_tlsa_record(domain: str) -> Dict[str, Any]:
             'hosts': host_results,
             'dane_active': dane_active,
             'certificate_mismatch': mismatched if dane_active else [],
+            'not_checked': not_checked,
             'warnings': warnings,
             'info': info,
         }
@@ -1530,7 +1556,7 @@ async def check_tlsa_record(domain: str) -> Dict[str, Any]:
         }
 
 
-MTA_STS_POLICY_TIMEOUT = 10          # seconds for the HTTPS policy fetch
+MTA_STS_POLICY_TIMEOUT = 10          # seconds for the whole HTTPS policy fetch
 MTA_STS_POLICY_MAX_BYTES = 64 * 1024  # RFC 8461 policies are a few lines; cap reads
 
 
@@ -1542,15 +1568,37 @@ async def _fetch_mta_sts_policy(domain: str) -> str:
 
     RFC 8461: the policy host must present a valid certificate and HTTP
     redirects must not be followed.
+
+    The domain's owner runs the policy host, so the fetch is bounded the same
+    way as the agent client documents (agent_access/cimd.py): no compressed
+    body, whose decoded size the server chooses; reading stops at the cap;
+    and one deadline for the whole fetch, since httpx's timeout applies to
+    each read and a server sending a byte every few seconds never trips it.
     """
     url = f"https://mta-sts.{domain}/.well-known/mta-sts.txt"
-    async with httpx.AsyncClient(timeout=MTA_STS_POLICY_TIMEOUT,
-                                 follow_redirects=False, verify=True) as client:
-        response = await client.get(url)
-        response.raise_for_status()
-        if len(response.content) > MTA_STS_POLICY_MAX_BYTES:
-            raise ValueError("policy file larger than expected")
-        return response.text
+    try:
+        async with asyncio.timeout(MTA_STS_POLICY_TIMEOUT):
+            async with httpx.AsyncClient(timeout=MTA_STS_POLICY_TIMEOUT,
+                                         follow_redirects=False, verify=True) as client:
+                async with client.stream("GET", url,
+                                         headers={"Accept-Encoding": "identity"}) as response:
+                    response.raise_for_status()
+                    encoding = response.headers.get("content-encoding", "identity").strip().lower()
+                    if encoding not in ("", "identity"):
+                        raise ValueError("policy file is compressed")
+                    length = response.headers.get("content-length")
+                    if length and length.isdigit() and int(length) > MTA_STS_POLICY_MAX_BYTES:
+                        raise ValueError("policy file larger than expected")
+                    # With every Content-Encoding refused above, these are the
+                    # bytes as sent (httpx decodes nothing), read a piece at a time
+                    body = bytearray()
+                    async for chunk in response.aiter_bytes():
+                        body.extend(chunk)
+                        if len(body) > MTA_STS_POLICY_MAX_BYTES:
+                            raise ValueError("policy file larger than expected")
+    except TimeoutError:
+        raise ValueError("policy host took too long to answer") from None
+    return bytes(body).decode("utf-8", errors="replace")
 
 
 def _parse_mta_sts_policy(text: str) -> Dict[str, Any]:
