@@ -192,13 +192,52 @@ async function loadSecurityAddresses(more = false, limit = SECURITY_PAGE_SIZE) {
 }
 
 // Read the list again, keeping as many rows as are shown. The page timer, Fail2ban
-// and the rules' loaders all call this; together they make one request.
+// and the rules' loaders all call this; together they make one request (more,
+// 200 rows each, when more are shown).
 function refreshSecurityAddresses() {
     clearTimeout(securityRefreshTimer);
     securityRefreshTimer = setTimeout(() => {
         const shown = securityPage ? securityPage.items.length : 0;
-        loadSecurityAddresses(false, Math.min(200, Math.max(SECURITY_PAGE_SIZE, shown)));
+        if (shown <= 200) loadSecurityAddresses(false, Math.max(SECURITY_PAGE_SIZE, shown));
+        else reloadSecurityAddresses(shown);
     }, 150);
+}
+
+// As many rows as are shown, past the 200 one request answers: read in turn,
+// and the list drawn once, when all have come
+async function reloadSecurityAddresses(shown) {
+    if (securityFilter === 'history' || securityPageLoading) return;
+    const seq = ++securityPageSeq;
+    securityPageLoading = true;
+    try {
+        let page = null;
+        const items = [];
+        do {
+            const params = new URLSearchParams({ list: securityFilter, limit: String(Math.min(200, shown - items.length)), days: String(securityDays) });
+            if (securityCountry) params.set('country', securityCountry);
+            if (securityNetwork) params.set('network', securityNetwork);
+            if (page) params.set('after', page.next);
+            const res = await authenticatedFetch(`/api/security/addresses?${params}`);
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            page = await res.json();
+            if (seq !== securityPageSeq) return;
+            const have = new Set(items.map(a => a.ip));
+            items.push(...page.items.map(securityFromServer).filter(a => !have.has(a.ip)));
+        } while (page.next && items.length < shown);
+        const first = { ...page, items };
+        securityPage = first;
+        securityPageError = null;
+        securityCountries = { data: page.countries || [], since: page.since };
+        securityNetworks = { data: page.networks || [], since: page.since };
+        renderSecurityCountries();
+    } catch (err) {
+        if (seq !== securityPageSeq) return;
+        console.error('Failed to refresh the security addresses:', err);
+        securityPageError = err.message;
+    } finally {
+        if (seq === securityPageSeq) securityPageLoading = false;
+    }
+    if (seq === securityPageSeq) renderSecurityOverview();
 }
 
 // ----------------------------------------------------------------- what protects the server

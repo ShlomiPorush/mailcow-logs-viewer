@@ -80,7 +80,32 @@ async function loadRspamdMaps() {
         
     } catch (error) {
         console.error('Failed to load Rspamd maps:', error);
-        container.innerHTML = `<p class="ui-empty ui-text-fail">Failed to load maps: ${escapeHtml(error.message)}</p>`;
+        container.innerHTML = `<p class="ui-empty ui-text-fail">Failed to load maps: ${escapeHtml(error.message)}. <button type="button" class="ui-link-row ui-link" onclick="loadRspamdMaps()">Try again</button></p>`;
+    }
+}
+
+// The maps list read again by the page's refresh: only while the list is shown
+// (never a map open in the editor), drawn again only when something changed
+async function refreshRspamdMaps() {
+    const container = document.getElementById('rspamd-maps-list');
+    if (!container) return;
+    // A map open in the editor (or loading into it) is never touched
+    if (container.querySelector('#map-entry-count, textarea') || /Loading map content/.test(container.textContent)) return;
+    // No list (its load failed, or Rspamd is not set up): read it again
+    if (!container.querySelector('.ui-map-table')) return loadRspamdMaps();
+    const listShown = () => container.querySelector('.ui-map-table') && !uiTextHeld(container);
+    if (!listShown()) return;
+    try {
+        const response = await authenticatedFetch('/api/rspamd/maps', { timeout: PAGE_REFRESH_TIMEOUT });
+        if (!response.ok) return;
+        const data = await response.json();
+        if (!listShown() || !data.configured || data.error) return;
+        if (JSON.stringify(data.maps || []) === JSON.stringify(rspamdMapsData) && (data.rw_key_configured !== false) === rspamdMapsCanSave) return;
+        rspamdMapsData = data.maps || [];
+        rspamdMapsCanSave = data.rw_key_configured !== false;
+        renderRspamdMapsList(data.maps || [], data.rw_key_configured);
+    } catch (error) {
+        console.error('Rspamd maps refresh failed:', error);
     }
 }
 
