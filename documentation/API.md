@@ -1130,7 +1130,7 @@ Bars follow the app zone's clock, so a day can be 23 or 25 hours long. Each bar 
 
 | Parameter | Type | Default | Constraints and purpose |
 | --- | --- | --- | --- |
-| `limit` | integer | `10` | Number of symbols to return |
+| `limit` | integer | `10` | Number of symbols to return, 1 to 500 |
 
 The Rspamd symbols seen most often on spam in the last 7 days: `{ "triggers": [ {"symbol": "RCVD_IN_DNSWL_NONE", "count": 456} ] }`. A read error returns `{ "triggers": [], "error": "..." }` with HTTP 200.
 
@@ -1140,7 +1140,7 @@ The Rspamd symbols seen most often on spam in the last 7 days: `{ "triggers": [ 
 
 | Parameter | Type | Default | Constraints and purpose |
 | --- | --- | --- | --- |
-| `limit` | integer | `10` | Number of addresses to return |
+| `limit` | integer | `10` | Number of addresses to return, 1 to 500 |
 
 The addresses with the most Netfilter (Fail2ban) lines in the last 7 days: `{ "blocked_ips": [ {"ip": "198.51.100.53", "count": 45, "last_seen": "2025-12-25T10:30:00Z"} ] }`. A read error returns `{ "blocked_ips": [], "error": "..." }` with HTTP 200.
 
@@ -1150,9 +1150,9 @@ The addresses with the most Netfilter (Fail2ban) lines in the last 7 days: `{ "b
 
 | Parameter | Type | Default | Constraints and purpose |
 | --- | --- | --- | --- |
-| `limit` | integer | `20` | Number of messages to return |
+| `limit` | integer | `20` | Number of messages to return, 1 to 500 |
 
-The most recently updated messages, newest first: `{ "activity": [ ... ] }`, each with `time`, `sender`, `recipient`, `subject`, `direction`, `status` and `correlation_key`.
+The most recently updated messages, newest first, without excluded addresses (`BLACKLIST_EMAILS`): `{ "activity": [ ... ] }`, each with `time`, `sender`, `recipient`, `subject`, `direction`, `status` and `correlation_key`. An AI agent needs View for Messages.
 
 ---
 
@@ -1278,6 +1278,7 @@ Configuration, import state, correlation state and background job state, for the
 
 - `configuration` also holds the effective fetch, retention, correlation, title, log level, blacklist, export, scheduler and sign-in values.
 - `editable_config`, `default_config` and `settings_migrated` are present only while UI editing is on.
+- `recent_incomplete_correlations` leaves out excluded addresses (`BLACKLIST_EMAILS`), and is empty for an AI agent without View for Messages.
 - `auth_username` is null unless Basic is on; `oauth2_provider_name` is null unless OAuth2 is on.
 - `mailcow_rw_key_status` and `rspamd_password_status` are `{"configured": false, "valid": false, "error": null}` without that credential, and null when it has not been checked since it or its address last changed.
 - The response also has `smtp_configuration`, `dmarc_configuration`, `geoip_configuration` and `raw_logs_required`. Without MaxMind credentials, `geoip_configuration.databases` is `{"City": {"installed": false, "version": null, "last_updated": null}, "ASN": {...}}`.
@@ -1718,7 +1719,7 @@ Report summary and DNS record state for one domain: `domain`, `policy`, `daily_s
 | --- | --- | --- | --- |
 | `days` | integer | `30` | How many days back to read, by report start date |
 | `page` | integer | `1` | Page of days, starting at 1 |
-| `limit` | integer | `50` | Days per page |
+| `limit` | integer | `50` | Days per page, 1 to 500 |
 
 DMARC data per day, newest first: `domain`, `total`, `page`, `limit`, `pages` (0 without data) and `data`. Each day has `date`, `total_messages`, `dmarc_pass_pct`, `spf_pass_pct`, `dkim_pass_pct`, `unique_ips`, `reporters` and `reports` (`report_id`, `org_name`, `begin_date`, `end_date`, `volume`, `dmarc_pass_pct`).
 
@@ -1730,7 +1731,7 @@ DMARC data per day, newest first: `domain`, `total`, `page`, `limit`, `pages` (0
 | --- | --- | --- | --- |
 | `days` | integer | `30` | How many days back to read, by report start date |
 | `page` | integer | `1` | Page of source addresses, starting at 1 |
-| `limit` | integer | `50` | Source addresses per page |
+| `limit` | integer | `50` | Source addresses per page, 1 to 500 |
 
 Sending addresses by message count, with GeoIP data, paged like the reports. Each row has `source_ip`, `country_code`, `country_name`, `country_emoji`, `city`, `asn`, `asn_org`, `total_count`, `dmarc_pass`, `dmarc_pass_pct`, `spf_pass`, `spf_pass_pct`, `dkim_pass`, `dkim_pass_pct` and `reporters` (`org_name`, `count`, `dmarc_pass`). Location values can be null.
 
@@ -1797,7 +1798,7 @@ Manual and scheduled imports send the same notification when some emails fail: b
 
 | Parameter | Type | Default | Constraints and purpose |
 | --- | --- | --- | --- |
-| `limit` | integer | `20` | Sync runs per page |
+| `limit` | integer | `20` | Sync runs per page, 1 to 500 |
 | `page` | integer | `1` | Page to return, starting at 1 |
 
 Import runs, newest first: `total`, `page`, `limit`, `pages` (0 without history) and `data`.
@@ -1838,7 +1839,7 @@ The domain's TLS-RPT record, from the stored DNS check or a live lookup when the
 | --- | --- | --- | --- |
 | `days` | integer | `30` | How many days back to read, by report start date |
 | `page` | integer | `1` | Page of reports, starting at 1 |
-| `limit` | integer | `50` | Reports per page |
+| `limit` | integer | `50` | Reports per page, 1 to 500 |
 
 Single TLS reports, newest start first: `domain`, `total`, `page`, `limit`, `pages`, `totals` and `data`.
 
@@ -1852,7 +1853,7 @@ Single TLS reports, newest start first: `domain`, `total`, `page`, `limit`, `pag
 | --- | --- | --- | --- |
 | `days` | integer | `30` | How many days back to read, by report start date |
 | `page` | integer | `1` | Page of days, starting at 1 |
-| `limit` | integer | `30` | Days per page |
+| `limit` | integer | `30` | Days per page, 1 to 500 |
 
 TLS reports per UTC day: `domain`, `total`, `page`, `limit`, `pages`, `totals` (`total_days`, `total_reports`, `total_successful_sessions`, `total_failed_sessions`, `overall_success_rate`) and `data` (`date`, `report_count`, `total_success`, `total_fail`, `total_sessions`, `success_rate`, `organizations`, `organization_count`, `reports`).
 

@@ -46,7 +46,7 @@ from .routers.domains import check_domain_dns, store_dns_check_worker
 from .routers.suppressions import auto_suppression_address, AUTOMATIC_SOURCES, RSPAMD_SOURCE
 from .services.dmarc_imap_service import sync_dmarc_reports_from_imap
 from .services.dmarc_notifications import send_dmarc_error_notification
-from .services import geoip_service, correlation_jobs
+from .services import geoip_service, correlation_jobs, excluded_addresses
 from .services.correlation_jobs import (
     TERMINAL_FINAL_STATUSES,
     PUSH_SKIP_FINAL_STATUSES,
@@ -588,29 +588,8 @@ last_fetch_run_time: Dict[str, Optional[datetime]] = {
 }
 
 def is_blacklisted(email: Optional[str]) -> bool:
-    """
-    Check if email is in blacklist.
-    
-    Args:
-        email: Email address to check
-    
-    Returns:
-        True if blacklisted, False otherwise
-    """
-    if not email:
-        return False
-    
-    email_lower = email.lower().strip()
-    blacklist = settings.blacklist_emails_list
-    
-    if not blacklist:
-        return False
-    
-    is_blocked = email_lower in blacklist
-    if is_blocked:
-        logger.debug(f"Blacklist: blocking {email_lower}")
-    
-    return is_blocked
+    """Whether an address is excluded (BLACKLIST_EMAILS); see services.excluded_addresses."""
+    return excluded_addresses.is_listed(email)
 
 
 def _column_length(model, name: str) -> Optional[int]:
@@ -808,6 +787,16 @@ def _clean_entries(logs):
     return [strip_nul(entry) if isinstance(entry, dict) else entry for entry in logs]
 
 
+def _postfix_entry_listed(parsed: Dict[str, Any], message: str) -> bool:
+    return excluded_addresses.postfix_line_listed(
+        parsed.get('sender'), parsed.get('recipient'), message, parsed.get('orig_to'))
+
+
+def _postfix_entry_time(log_entry) -> datetime:
+    """The line's time as stored (naive UTC)."""
+    return datetime.fromtimestamp(int(log_entry.get('time', 0)), tz=timezone.utc).replace(tzinfo=None)
+
+
 def _store_postfix_page(logs):
     """Process one page with a session and duplicate cache owned by the worker.
 
@@ -826,34 +815,27 @@ def _store_postfix_page(logs):
         page_seen: Set[str] = set()
 
         with get_db_context() as db:
-            blacklisted_queue_ids: Set[str] = set()
+            # A line naming an excluded address (sender, recipient or orig_to)
+            # takes the rest of its queue occurrence with it: lines stored
+            # before, and lines that come later in this or another page
+            excluded_addresses.forget_old_queues(datetime.utcnow())
+            listed_occurrences = []
 
             for log_entry in logs:
-                message = log_entry.get('message', '')
+                message = log_entry.get('message', '') or ''
                 parsed = parse_postfix_message(message)
-                queue_id = parsed.get('queue_id')
-
-                if not queue_id:
+                if not _postfix_entry_listed(parsed, message):
                     continue
+                queue_id = parsed.get('queue_id')
+                if queue_id:
+                    listed_occurrences.append((queue_id, _postfix_entry_time(log_entry)))
 
-                sender = parsed.get('sender')
-                recipient = parsed.get('recipient')
-
-                if is_blacklisted(sender) or is_blacklisted(recipient):
-                    blacklisted_queue_ids.add(queue_id)
-                    logger.debug(f"Blacklist: Queue ID {queue_id} marked for deletion (sender={sender}, recipient={recipient})")
-
-            if blacklisted_queue_ids:
-                deleted_count = db.query(PostfixLog).filter(
-                    PostfixLog.queue_id.in_(blacklisted_queue_ids)
-                ).delete(synchronize_session=False)
-
-                db.query(MessageCorrelation).filter(
-                    MessageCorrelation.queue_id.in_(blacklisted_queue_ids)
-                ).delete(synchronize_session=False)
+            if listed_occurrences:
+                # Also remembers them for the lines of later pages
+                deleted_count, _ = excluded_addresses.delete_queue_occurrences(db, listed_occurrences)
 
                 if deleted_count > 0:
-                    logger.info(f"[BLACKLIST] Deleted {deleted_count} Postfix logs for {len(blacklisted_queue_ids)} blacklisted queue IDs")
+                    logger.info(f"[BLACKLIST] Deleted {deleted_count} Postfix logs of excluded addresses' queues")
 
                 db.commit()
 
@@ -890,7 +872,8 @@ def _store_postfix_page(logs):
                     parsed = parse_postfix_message(message)
                     queue_id = parsed.get('queue_id')
 
-                    if queue_id and queue_id in blacklisted_queue_ids:
+                    if _postfix_entry_listed(parsed, message) or excluded_addresses.queue_was_listed(
+                            queue_id, _postfix_entry_time(log_entry)):
                         page_blacklisted += 1
                         page_seen.add(unique_id)
                         continue
@@ -1174,25 +1157,32 @@ def _store_rspamd_page(logs):
                 candidates = db.query(MessageCorrelation).filter(
                     MessageCorrelation.message_id.in_(blacklisted_message_ids)
                 ).all()
+                # A queue id names the same message only near its own time:
+                # Postfix reuses queue ids
+                window = excluded_addresses.QUEUE_WINDOW
+                seen_at = {c.id: c.first_seen or c.created_at for c in candidates}
                 candidate_queues = {c.queue_id for c in candidates if c.queue_id}
-                listed_queues = set()
+                listed_lines = []
                 if candidate_queues:
-                    for queue_id, p_sender, p_recipient in db.query(
-                        PostfixLog.queue_id, PostfixLog.sender, PostfixLog.recipient
-                    ).filter(PostfixLog.queue_id.in_(candidate_queues)).all():
-                        if is_blacklisted(p_sender) or is_blacklisted(p_recipient):
-                            listed_queues.add(queue_id)
+                    listed_lines = [
+                        (queue_id, time) for queue_id, time, p_sender, p_recipient, p_message in db.query(
+                            PostfixLog.queue_id, PostfixLog.time, PostfixLog.sender, PostfixLog.recipient,
+                            PostfixLog.message,
+                        ).filter(PostfixLog.queue_id.in_(candidate_queues)).all()
+                        if excluded_addresses.postfix_line_listed(p_sender, p_recipient, p_message)
+                    ]
+
+                def listed_near(c) -> list:
+                    """The listed lines of the delivery's own queue occurrence."""
+                    at = seen_at.get(c.id)
+                    if not c.queue_id or at is None:
+                        return []
+                    return [(q, t) for q, t in listed_lines if q == c.queue_id and abs(t - at) <= window]
 
                 correlations_to_delete = [
                     c for c in candidates
-                    if is_blacklisted(c.sender) or is_blacklisted(c.recipient)
-                    or (c.queue_id and c.queue_id in listed_queues)
+                    if is_blacklisted(c.sender) or is_blacklisted(c.recipient) or listed_near(c)
                 ]
-
-                queue_ids_to_delete = set()
-                for corr in correlations_to_delete:
-                    if corr.queue_id:
-                        queue_ids_to_delete.add(corr.queue_id)
 
                 deleted_corr = 0
                 if correlations_to_delete:
@@ -1200,10 +1190,18 @@ def _store_rspamd_page(logs):
                         MessageCorrelation.id.in_([c.id for c in correlations_to_delete])
                     ).delete(synchronize_session=False)
 
-                if queue_ids_to_delete:
-                    deleted_postfix = db.query(PostfixLog).filter(
-                        PostfixLog.queue_id.in_(queue_ids_to_delete)
-                    ).delete(synchronize_session=False)
+                # Around the listed line that proves it (or the delivery's own
+                # time when its own address is listed), so the window cannot
+                # reach another message under the same queue id
+                occurrences = []
+                for c in correlations_to_delete:
+                    near = listed_near(c)
+                    if near:
+                        occurrences.extend(near)
+                    elif c.queue_id and seen_at.get(c.id) is not None:
+                        occurrences.append((c.queue_id, seen_at[c.id]))
+                if occurrences:
+                    deleted_postfix, _ = excluded_addresses.delete_queue_occurrences(db, occurrences)
 
                     if deleted_postfix > 0:
                         logger.info(f"[BLACKLIST] Deleted {deleted_postfix} Postfix logs linked to blacklisted messages")
@@ -1567,51 +1565,39 @@ async def cleanup_blacklisted_queues():
 
 def _cleanup_blacklisted_queues_sync():
     """
-    Clean up Postfix queues where the recipient is blacklisted.
-    
-    This handles the BCC scenario:
-    - Same message-id appears with multiple queue-ids
-    - One queue is for the real recipient
-    - Another queue is for the BCC address (which is blacklisted)
-    
-    We need to delete ALL logs for queues where the recipient is blacklisted,
-    so that correlation only finds the "real" queue.
+    Remove what the message tables hold for excluded addresses, before correlation.
+
+    Runs when a pass is due: at startup, and after a settings change added an
+    address. The ingest stores nothing new for a listed address, so between
+    changes there is nothing to remove. The BCC case: a copy of a message goes
+    through its own queue to the listed address, and all of that queue's lines
+    go, so correlation only finds the real recipient's.
     """
-    blacklist = settings.blacklist_emails_list
-    if not blacklist:
+    if not excluded_addresses.listed():
         return
-    
+    request = excluded_addresses.full_pass_due()
+    if request is None:
+        return
     try:
-        with get_db_context() as db:
-            blacklisted_queue_ids = set()
-            
-            for email in blacklist:
-                logs_with_blacklisted_recipient = db.query(PostfixLog).filter(
-                    PostfixLog.recipient == email,
-                    PostfixLog.queue_id.isnot(None)
-                ).all()
-                
-                for log in logs_with_blacklisted_recipient:
-                    if log.queue_id:
-                        blacklisted_queue_ids.add(log.queue_id)
-            
-            if not blacklisted_queue_ids:
-                return
-            
-            deleted_count = 0
-            for queue_id in blacklisted_queue_ids:
-                count = db.query(PostfixLog).filter(
-                    PostfixLog.queue_id == queue_id
-                ).delete(synchronize_session=False)
-                deleted_count += count
-            
-            db.commit()
-            
-            if deleted_count > 0:
-                logger.info(f"[CLEANUP] Cleaned up {deleted_count} Postfix logs from {len(blacklisted_queue_ids)} blacklisted BCC queues")
-    
+        # With the ingest held: a page checked against the list from before
+        # a change is committed before this pass reads, never after it
+        with _postfix_ingest_lock, _rspamd_ingest_lock, get_db_context() as db:
+            counts = excluded_addresses.cleanup(db)
+        if counts is None:
+            logger.info("[BLACKLIST] The excluded addresses changed during the cleanup; it runs again")
+            return
+        excluded_addresses.full_pass_done(request)
+        if any(counts.values()):
+            logger.info(f"[BLACKLIST] Removed for excluded addresses: {counts['deliveries']} deliveries, "
+                        f"{counts['postfix']} Postfix lines, {counts['rspamd']} Rspamd entries")
     except Exception as e:
-        logger.error(f"[ERROR] Blacklisted queue cleanup error: {e}")
+        logger.error(f"[ERROR] Excluded addresses cleanup error: {e}")
+
+
+def cleanup_blacklisted_data():
+    """A full pass over the message tables for the excluded addresses, now."""
+    excluded_addresses.request_full_pass()
+    _cleanup_blacklisted_queues_sync()
 
 
 async def run_correlation():
@@ -2580,100 +2566,6 @@ def _cleanup_old_dmarc_reports_sync():
     except Exception as e:
         logger.error(f"[ERROR] DMARC cleanup error: {e}")
         update_job_status('cleanup_dmarc_reports', 'failed', str(e))
-
-
-def cleanup_blacklisted_data():
-    """
-    One-time cleanup of existing blacklisted data.
-    Called on startup to purge any data that was imported before
-    the blacklist was properly configured.
-    """
-    blacklist = settings.blacklist_emails_list
-    if not blacklist:
-        logger.info("[BLACKLIST] No blacklist configured, skipping cleanup")
-        return
-    
-    logger.info(f"[BLACKLIST] Running startup cleanup for {len(blacklist)} blacklisted emails...")
-    
-    try:
-        with get_db_context() as db:
-            total_deleted = 0
-            
-            # 1. Find and delete correlations with blacklisted sender or recipient
-            for email in blacklist:
-                # Delete correlations where sender matches
-                deleted = db.query(MessageCorrelation).filter(
-                    MessageCorrelation.sender.ilike(email)
-                ).delete(synchronize_session=False)
-                total_deleted += deleted
-                
-                # Delete correlations where recipient matches
-                deleted = db.query(MessageCorrelation).filter(
-                    MessageCorrelation.recipient.ilike(email)
-                ).delete(synchronize_session=False)
-                total_deleted += deleted
-            
-            if total_deleted > 0:
-                logger.info(f"[BLACKLIST] Deleted {total_deleted} correlations with blacklisted emails")
-            
-            # 2. Find Postfix logs with blacklisted emails and get their queue IDs
-            blacklisted_queue_ids: Set[str] = set()
-            
-            for email in blacklist:
-                # Find queue IDs from logs with blacklisted sender
-                postfix_with_sender = db.query(PostfixLog.queue_id).filter(
-                    PostfixLog.sender.ilike(email),
-                    PostfixLog.queue_id.isnot(None)
-                ).distinct().all()
-                
-                for row in postfix_with_sender:
-                    if row[0]:
-                        blacklisted_queue_ids.add(row[0])
-                
-                # Find queue IDs from logs with blacklisted recipient
-                postfix_with_recipient = db.query(PostfixLog.queue_id).filter(
-                    PostfixLog.recipient.ilike(email),
-                    PostfixLog.queue_id.isnot(None)
-                ).distinct().all()
-                
-                for row in postfix_with_recipient:
-                    if row[0]:
-                        blacklisted_queue_ids.add(row[0])
-            
-            # 3. Delete all Postfix logs with blacklisted queue IDs
-            if blacklisted_queue_ids:
-                deleted_postfix = db.query(PostfixLog).filter(
-                    PostfixLog.queue_id.in_(blacklisted_queue_ids)
-                ).delete(synchronize_session=False)
-                
-                if deleted_postfix > 0:
-                    logger.info(f"[BLACKLIST] Deleted {deleted_postfix} Postfix logs from {len(blacklisted_queue_ids)} blacklisted queue IDs")
-                
-                # Also delete any remaining correlations for these queue IDs
-                deleted_corr = db.query(MessageCorrelation).filter(
-                    MessageCorrelation.queue_id.in_(blacklisted_queue_ids)
-                ).delete(synchronize_session=False)
-                
-                if deleted_corr > 0:
-                    logger.info(f"[BLACKLIST] Deleted {deleted_corr} additional correlations")
-            
-            # 4. Delete Rspamd logs with blacklisted emails
-            deleted_rspamd = 0
-            for email in blacklist:
-                # Delete by sender
-                deleted = db.query(RspamdLog).filter(
-                    RspamdLog.sender_smtp.ilike(email)
-                ).delete(synchronize_session=False)
-                deleted_rspamd += deleted
-            
-            if deleted_rspamd > 0:
-                logger.info(f"[BLACKLIST] Deleted {deleted_rspamd} Rspamd logs with blacklisted senders")
-            
-            db.commit()
-            logger.info("[BLACKLIST] Startup cleanup completed")
-            
-    except Exception as e:
-        logger.error(f"[BLACKLIST] Cleanup error: {e}")
 
 
 async def check_all_domains_dns_background():
@@ -4063,9 +3955,6 @@ def run_feature_data_sweep_soon() -> None:
 def start_scheduler():
     """Start the background scheduler"""
     try:
-        # Run one-time blacklist cleanup on startup
-        cleanup_blacklisted_data()
-
         # Features switched off in the meantime should not leave data behind
         cleanup_disabled_feature_data()
 

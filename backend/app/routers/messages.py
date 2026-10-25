@@ -15,7 +15,8 @@ from ..database import get_db
 from ..models import MessageCorrelation, PostfixLog, RspamdLog, NetfilterLog, RawServiceLog
 from ..config import settings
 from ..app_time import range_bound
-from ..services.dovecot_parser import parse_dovecot_message
+from ..services import excluded_addresses
+from ..services.dovecot_parser import dovecot_line_user, parse_dovecot_message
 from ..utils import internal_error, format_datetime_for_api as format_datetime_utc, RangeStart, RangeEnd
 
 logger = logging.getLogger(__name__)
@@ -68,6 +69,9 @@ def _get_dovecot_logs(
     entries = []
     for row in rows:
         message = (row.raw_data or {}).get('message')
+        # The raw logs keep every line; Messages does not show an excluded mailbox's
+        if excluded_addresses.is_listed(dovecot_line_user(message)):
+            continue
         parsed = parse_dovecot_message(message)
         line_recipient = (parsed.get('recipient') or '').strip().lower() if parsed else ''
         if not single_leg and leg_recipient and line_recipient and line_recipient != leg_recipient:
@@ -87,25 +91,6 @@ def _get_dovecot_logs(
             "mailbox": parsed.get('mailbox') if parsed else None,
         })
     return entries
-
-
-def is_blacklisted(email: str) -> bool:
-    """
-    Check if email is in blacklist
-    
-    Args:
-        email: Email address to check
-    
-    Returns:
-        True if blacklisted, False otherwise
-    """
-    if not email:
-        return False
-    
-    email_lower = email.lower().strip()
-    blacklist = settings.blacklist_emails_list
-    
-    return email_lower in blacklist
 
 
 def _group_postfix_by_recipient(postfix_logs) -> dict:
@@ -154,11 +139,6 @@ def _group_postfix_by_recipient(postfix_logs) -> dict:
     return grouped
 
 
-# Every character Python's str.strip() removes around an address (str.isspace),
-# so the SQL match hides exactly what is_blacklisted hid
-BLANKS = "".join(chr(c) for c in range(0x110000) if chr(c).isspace())
-
-
 def message_group_key():
     """What makes deliveries one message: the Message-ID, else (none, or empty)
     the delivery's own key, so it is never merged with another"""
@@ -176,17 +156,10 @@ def _filtered_messages_query(db, search=None, sender=None, recipient=None, direc
                              user=None, ip=None, start_date=None, end_date=None):
     """The message legs matching the Messages filters. Shared by the list and
     its facet counts, so a count always equals what the list shows for it."""
-    query = db.query(MessageCorrelation)
+    # Excluded addresses, here in the query, so pages, totals and facet
+    # counts leave them out alike (no page comes out empty)
+    query = db.query(MessageCorrelation).filter(excluded_addresses.correlation_visible())
 
-    # Exclude blacklisted correlations
-    query = query.filter(MessageCorrelation.correlation_key != "BLACKLISTED")
-    # Addresses hidden with Blacklist Emails, here in the query, so pages,
-    # totals and facet counts leave them out alike (no page comes out empty)
-    hidden = settings.blacklist_emails_list
-    if hidden:
-        for column in (MessageCorrelation.sender, MessageCorrelation.recipient):
-            query = query.filter(or_(column.is_(None), func.lower(func.btrim(column, BLANKS)).notin_(hidden)))
-    
     # Apply filters
     if search:
         search_term = f"%{search}%"
@@ -549,16 +522,17 @@ def get_message_full_details(
             MessageCorrelation.correlation_key == correlation_key
         ).first()
         
-        if not correlation:
+        # A delivery to or from an excluded address is not shown in Messages
+        if not correlation or excluded_addresses.any_listed(correlation.sender, correlation.recipient):
             raise HTTPException(status_code=404, detail="Message not found")
-        
+
         # Get Rspamd log
         rspamd_log = None
         if correlation.rspamd_log_id:
             rspamd_log = db.query(RspamdLog).filter(
                 RspamdLog.id == correlation.rspamd_log_id
             ).first()
-        
+
         # Get Postfix logs - Use queue_id instead of postfix_log_ids
         # This ensures we always get ALL logs, even if they arrive after correlation is marked complete
         postfix_logs = []
@@ -574,7 +548,7 @@ def get_message_full_details(
             postfix_logs = db.query(PostfixLog).filter(
                 PostfixLog.id.in_(unique_ids)
             ).order_by(PostfixLog.time).all()
-        
+
         # Deduplicate postfix_logs by message content (same time + same message = duplicate)
         seen_messages = set()
         deduplicated_postfix_logs = []
@@ -584,7 +558,9 @@ def get_message_full_details(
             if msg_key not in seen_messages:
                 seen_messages.add(msg_key)
                 deduplicated_postfix_logs.append(log)
-        postfix_logs = deduplicated_postfix_logs
+        if excluded_addresses.delivery_hidden(correlation, deduplicated_postfix_logs):
+            raise HTTPException(status_code=404, detail="Message not found")
+        postfix_logs = excluded_addresses.visible_postfix_lines(deduplicated_postfix_logs)
         
         # Get Netfilter logs by IP from Rspamd, limited to ±1 hour around the
         # message (issue #68) - the Security tab explicitly promises "events
@@ -610,6 +586,7 @@ def get_message_full_details(
                 MessageCorrelation.message_id == correlation.message_id,
                 MessageCorrelation.correlation_key != correlation.correlation_key
             ).order_by(MessageCorrelation.first_seen).all()
+            other_legs = [leg for leg in other_legs if not excluded_addresses.any_listed(leg.sender, leg.recipient)]
             related_deliveries = [
                 {
                     "correlation_key": leg.correlation_key,
@@ -640,7 +617,7 @@ def get_message_full_details(
         # Get all recipients - from Rspamd (primary source) or from Postfix logs
         recipients = []
         if rspamd_log and rspamd_log.recipients_smtp:
-            recipients = rspamd_log.recipients_smtp if isinstance(rspamd_log.recipients_smtp, list) else []
+            recipients = excluded_addresses.visible_recipients(rspamd_log.recipients_smtp)
         
         # If no recipients from Rspamd, collect unique recipients from Postfix logs
         if not recipients:

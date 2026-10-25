@@ -2,7 +2,7 @@
 API endpoints for statistics and dashboard data
 """
 import logging
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import func, and_, cast, Integer
 from datetime import datetime, timedelta, timezone
@@ -10,6 +10,7 @@ from typing import Optional
 
 from ..database import get_db
 from ..models import PostfixLog, RspamdLog, NetfilterLog, MessageCorrelation
+from ..services import excluded_addresses
 
 from ..utils import format_datetime_for_api as format_datetime_utc
 
@@ -188,7 +189,7 @@ def get_timeline_stats(
         message_key = func.coalesce(func.nullif(MessageCorrelation.message_id, ""), MessageCorrelation.correlation_key)
         # Messages as the Messages page counts them in that hour (one per message), beside the deliveries
         unique = dict(db.query(corr_hour, func.count(func.distinct(message_key))).filter(
-            MessageCorrelation.first_seen >= cutoff, MessageCorrelation.correlation_key != "BLACKLISTED"
+            MessageCorrelation.first_seen >= cutoff, excluded_addresses.correlation_visible()
         ).group_by('hour').all())
         messages = db.query(
             corr_hour,
@@ -236,7 +237,7 @@ def get_timeline_stats(
 
 @router.get("/stats/top-spam-triggers")
 def get_top_spam_triggers(
-    limit: int = 10,
+    limit: int = Query(10, ge=1, le=500),
     db: Session = Depends(get_db)
 ):
     """
@@ -280,7 +281,7 @@ def get_top_spam_triggers(
 
 @router.get("/stats/top-blocked-ips")
 def get_top_blocked_ips(
-    limit: int = 10,
+    limit: int = Query(10, ge=1, le=500),
     db: Session = Depends(get_db)
 ):
     """
@@ -318,14 +319,14 @@ def get_top_blocked_ips(
 
 @router.get("/stats/recent-activity")
 def get_recent_activity(
-    limit: int = 20,
+    limit: int = Query(20, ge=1, le=500),
     db: Session = Depends(get_db)
 ):
     """
     Get recent message activity stream
     """
     try:
-        recent = db.query(MessageCorrelation).order_by(
+        recent = db.query(MessageCorrelation).filter(excluded_addresses.correlation_visible()).order_by(
             MessageCorrelation.last_seen.desc()
         ).limit(limit).all()
         

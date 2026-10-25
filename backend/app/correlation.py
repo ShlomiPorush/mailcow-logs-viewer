@@ -182,25 +182,6 @@ def detect_direction(rspamd_log: Dict[str, Any]) -> str:
     return direction
 
 
-def is_blacklisted(email: str) -> bool:
-    """
-    Check if an email address is in the blacklist
-    
-    Args:
-        email: Email address to check
-    
-    Returns:
-        True if blacklisted, False otherwise
-    """
-    if not email:
-        return False
-    
-    email_lower = email.lower().strip()
-    blacklist = settings.blacklist_emails_list
-    
-    return email_lower in blacklist
-
-
 # Postfix programs that log a delivery result (the last part of the syslog
 # program name, e.g. postfix/smtp, postfix/lmtp).
 POSTFIX_DELIVERY_AGENTS = ('smtp', 'lmtp', 'local', 'virtual', 'error', 'retry', 'discard', 'pipe')

@@ -66,7 +66,7 @@ Text cells starting with `=`, `+`, `-` or `@` get a leading apostrophe so a spre
 
 ## Settings that change this page
 
-- **Settings** > **Fetch** > **Retention Days** (`RETENTION_DAYS`) keeps messages and their logs for 7 days by default. **Blacklist Emails** (`BLACKLIST_EMAILS`) excludes listed addresses from storage and display; use a comma-separated list.
+- **Settings** > **Fetch** > **Retention Days** (`RETENTION_DAYS`) keeps messages and their logs for 7 days by default. **Blacklist Emails** (`BLACKLIST_EMAILS`) keeps mail to or from the listed addresses out of Messages; use a comma-separated list.
 - **Settings** > **Logs** > **Raw Logs Retention Days** (`RAW_LOGS_RETENTION_DAYS`) keeps Dovecot lines for 2 days by default. The mailbox delivery result itself stays with the message.
 - **Settings** > **Correlation** > **Max Correlation Age Minutes** and **Correlation Check Interval** control how long and how often the app tries to link logs.
 

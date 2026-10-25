@@ -96,7 +96,7 @@ POLICY: Dict[Tuple[str, str], Rule] = {
 
     # Dashboard & Status
     **_r("GET /api/stats/dashboard", "GET /api/stats/timeline", "GET /api/stats/top-spam-triggers",
-         "GET /api/stats/top-blocked-ips", "GET /api/stats/recent-activity", "GET /api/stats/flow",
+         "GET /api/stats/top-blocked-ips", "GET /api/stats/flow",
          "GET /api/stats/trends", "GET /api/system/summary",
          "GET /api/status/containers", "GET /api/status/storage", "GET /api/status/version",
          "GET /api/status/app-version", "GET /api/status/mailcow-info", "GET /api/status/mailcow-connection",
@@ -109,11 +109,12 @@ POLICY: Dict[Tuple[str, str], Rule] = {
          "POST /api/blacklist/check", "POST /api/system/summary/email",
          area="status", kind=WRITE),
 
-    # Messages
+    # Messages: every route that returns a message's sender, recipient or
+    # subject, whatever page it serves
     **_r("GET /api/messages", "GET /api/messages/facets", "GET /api/messages/new","GET /api/message/{correlation_key}/details",
          "GET /api/message/{correlation_key}", "GET /api/logs/postfix", "GET /api/logs/postfix/by-queue/{queue_id}",
          "GET /api/logs/rspamd", "GET /api/export/postfix/csv", "GET /api/export/rspamd/csv",
-         "GET /api/export/messages/csv",
+         "GET /api/export/messages/csv", "GET /api/stats/recent-activity",
          area="messages", kind=READ),
 
     # Outbound

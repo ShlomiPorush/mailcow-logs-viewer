@@ -18,6 +18,7 @@ from ..database import get_db
 from ..models import SecurityAlert, MessageCorrelation, NetfilterLog, SMTPAbuseAction
 from ..config import settings
 from ..correlation import authenticated_submissions, submitting_mailbox
+from ..services import excluded_addresses
 from ..utils import internal_error, format_datetime_for_api as format_datetime_utc
 
 logger = logging.getLogger(__name__)
@@ -181,6 +182,7 @@ def _events(db: Session, alert: SecurityAlert, start, end):
             MessageCorrelation.direction == 'outbound',
             submitting_mailbox() == subject,
             MessageCorrelation.first_seen >= start, MessageCorrelation.first_seen < end,
+            excluded_addresses.correlation_visible(),
         ).all()
     return db.query(NetfilterLog.time, NetfilterLog.ip, NetfilterLog.country_name, NetfilterLog.asn_org).filter(
         func.lower(NetfilterLog.username) == subject,
