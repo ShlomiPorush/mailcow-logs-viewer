@@ -1212,7 +1212,14 @@ registerPageRefresh('outbound', 30000, async () => {
         else await loadSuppressionStats();
     }
 });
-registerPageRefresh('quarantine', 30000, () => smartRefreshQuarantine());
+registerPageRefresh('quarantine', 30000, async () => {
+    await smartRefreshQuarantine();
+    // The Auto-Rules tab: the rules with their hits, and the history while it is open
+    if (quarantineTab !== 'rules' || !showQuarantineRulesAccess()) return;
+    await loadQuarantineRules({ quiet: true });
+    const history = document.getElementById('quarantine-rules-history');
+    if (history && !history.classList.contains('hidden')) await loadQuarantineRuleHistory({ quiet: true });
+});
 registerPageRefresh('status', 30000, () => loadStatus());
 registerPageRefresh('settings', 30000, () => smartRefreshSettings());
 
@@ -1909,6 +1916,7 @@ async function smartRefreshNetfilter() {
 
 // Smart refresh for Queue
 async function smartRefreshQueue() {
+    if (queueActing) return;
     const id = ++queueAsked;
     const kept = queueListKept();
     const response = await authenticatedFetch('/api/queue');
@@ -1917,7 +1925,7 @@ async function smartRefreshQueue() {
     const data = await response.json();
     await rwStatusReady;
     const listKept = await kept;
-    if (!queueTakeTurn(id)) return;
+    if (queueActing || !queueTakeTurn(id)) return;
     const suppressChanged = listKept !== queueSuppressOn;
     queueSuppressOn = listKept;
 
@@ -1934,11 +1942,14 @@ async function smartRefreshQueue() {
 
 // Smart refresh for Quarantine
 async function smartRefreshQuarantine() {
-    const response = await authenticatedFetch('/api/quarantine');
+    if (quarantineActing) return;
+    const id = ++quarantineAsked;
+    const response = await authenticatedFetch('/api/quarantine', { timeout: PAGE_REFRESH_TIMEOUT });
     if (!response.ok) return;
 
     const data = await response.json();
     await rwStatusReady;
+    if (quarantineActing || !quarantineTakeTurn(id)) return;
 
     if (hasDataChanged(data, 'quarantine')) {
         console.log('[REFRESH] Quarantine data changed, updating UI');
@@ -3559,7 +3570,24 @@ function updateQueueSummary() {
     el.textContent = `${allQueueData.length} ${allQueueData.length === 1 ? 'message' : 'messages'}: ${parts.join(', ')}. Postfix retries deferred mail on its own.`;
 }
 
+// A list's checked rows across a redraw: checked again by value, the ones
+// gone (or filtered out) dropped, and its selection bar told
+function keepCheckedRows(selector, draw, update) {
+    const checked = new Set([...document.querySelectorAll(`${selector}:checked`)].map(cb => cb.value));
+    draw();
+    if (!checked.size) return;
+    document.querySelectorAll(selector).forEach(cb => { if (checked.has(cb.value)) cb.checked = true; });
+    update();
+}
+
+// Set while a queue action runs: the refresh leaves the list alone until it is done
+let queueActing = 0;
+
 function applyQueueFilters() {
+    keepCheckedRows('.queue-checkbox', drawQueueRows, queueUpdateSelection);
+}
+
+function drawQueueRows() {
     const searchTerm = document.getElementById('queue-filter-search')?.value.toLowerCase() || '';
     const queueId = document.getElementById('queue-filter-queue-id')?.value.toLowerCase() || '';
 
@@ -3676,6 +3704,9 @@ function queueUpdateSelection() {
     const bulkRetry = document.getElementById('queue-bulk-retry-btn');
     const bulkDelete = document.getElementById('queue-bulk-delete-btn');
     const countLabel = document.getElementById('queue-selection-count');
+    const selectAll = document.getElementById('queue-select-all-btn');
+    const rows = document.querySelectorAll('.queue-checkbox').length;
+    if (selectAll) selectAll.textContent = rows && checked.length === rows ? 'Deselect All' : 'Select All';
 
     if (checked.length > 0) {
         if (bulkRetry) { bulkRetry.classList.remove('hidden'); bulkRetry.classList.add('inline-flex'); }
@@ -3745,6 +3776,7 @@ async function queueDeleteAll() {
 }
 
 async function queueAction(action, itemIds) {
+    queueActing++;
     document.querySelectorAll('.queue-action-btn, .queue-checkbox, #queue-flush-all-btn, #queue-delete-all-btn, #queue-select-all-btn, #queue-bulk-retry-btn, #queue-bulk-delete-btn')
         .forEach(el => { el.disabled = true; el.style.opacity = '0.5'; });
 
@@ -3767,12 +3799,14 @@ async function queueAction(action, itemIds) {
     } catch (err) {
         showToast(`Queue action failed: ` + err.message, 'error');
     } finally {
+        queueActing--;
         document.querySelectorAll('.queue-action-btn, .queue-checkbox, #queue-flush-all-btn, #queue-delete-all-btn, #queue-select-all-btn, #queue-bulk-retry-btn, #queue-bulk-delete-btn')
             .forEach(el => { el.disabled = false; el.style.opacity = ''; });
     }
 }
 
 async function queueDeleteRequest(itemIds) {
+    queueActing++;
     document.querySelectorAll('.queue-action-btn, .queue-checkbox, #queue-flush-all-btn, #queue-delete-all-btn, #queue-select-all-btn, #queue-bulk-retry-btn, #queue-bulk-delete-btn')
         .forEach(el => { el.disabled = true; el.style.opacity = '0.5'; });
 
@@ -3794,6 +3828,7 @@ async function queueDeleteRequest(itemIds) {
     } catch (err) {
         showToast('Failed to delete from queue: ' + err.message, 'error');
     } finally {
+        queueActing--;
         document.querySelectorAll('.queue-action-btn, .queue-checkbox, #queue-flush-all-btn, #queue-delete-all-btn, #queue-select-all-btn, #queue-bulk-retry-btn, #queue-bulk-delete-btn')
             .forEach(el => { el.disabled = false; el.style.opacity = ''; });
     }
@@ -3813,9 +3848,22 @@ function quarantineActionTone(action) {
 }
 
 
+// Loads, refreshes and the reload after an action share one order: an answer
+// older than the one drawn is dropped, so a handled message never comes back
+let quarantineAsked = 0;
+let quarantineApplied = 0;
+let quarantineActing = 0;   // an action runs: the refresh leaves the list alone
+
+function quarantineTakeTurn(id) {
+    if (id < quarantineApplied) return false;
+    quarantineApplied = id;
+    return true;
+}
+
 async function loadQuarantine() {
     const container = document.getElementById('quarantine-logs');
     uiFilterBarSync();
+    const id = ++quarantineAsked;
 
     try {
         container.innerHTML = '<div class="ui-loading" role="status"><div class="loading"></div><p>Loading...</p></div>';
@@ -3830,16 +3878,25 @@ async function loadQuarantine() {
         const data = await response.json();
         console.log('Quarantine data:', data);
         await rwStatusReady;
+        if (!quarantineTakeTurn(id)) return;
 
+        lastDataCache.quarantine = data;
         renderQuarantineData(data);
     } catch (error) {
+        if (!quarantineTakeTurn(id)) return;
+        // Nothing is shown: the next refresh draws what it gets, even an answer like the last one
+        lastDataCache.quarantine = null;
         console.error('Failed to load quarantine:', error);
         document.getElementById('quarantine-logs').innerHTML = `<p class="ui-empty ui-text-fail">Failed to load quarantine: ${escapeHtml(error.message)}</p>`;
     }
 }
 
-// Render quarantine without loading spinner (for smart refresh)
+// The list, also from the smart refresh and a new sort: checked rows stay checked
 function renderQuarantineData(data) {
+    keepCheckedRows('.quarantine-checkbox', () => drawQuarantineRows(data), quarantineUpdateSelection);
+}
+
+function drawQuarantineRows(data) {
     const container = document.getElementById('quarantine-logs');
     if (!container) return;
 
@@ -3928,6 +3985,9 @@ function quarantineUpdateSelection() {
     const checked = document.querySelectorAll('.quarantine-checkbox:checked');
     const bulkBtns = ['quarantine-bulk-release-btn', 'quarantine-bulk-delete-btn', 'quarantine-bulk-learnham-btn', 'quarantine-bulk-learnspam-btn'];
     const countLabel = document.getElementById('quarantine-selection-count');
+    const selectAll = document.getElementById('quarantine-select-all-btn');
+    const rows = document.querySelectorAll('.quarantine-checkbox').length;
+    if (selectAll) selectAll.textContent = rows && checked.length === rows ? 'Deselect All' : 'Select All';
 
     // With rows selected the actions are about them; Release All and Delete All step aside
     ['quarantine-release-all-btn', 'quarantine-delete-all-btn'].forEach(id => { const el = document.getElementById(id); if (el) el.classList.toggle('hidden', checked.length > 0); });
@@ -4017,6 +4077,7 @@ async function quarantineDeleteAll() {
 async function quarantineAction(action, itemIds) {
     const allBtns = '.quarantine-action-btn, .quarantine-checkbox, #quarantine-bulk-release-btn, #quarantine-bulk-delete-btn, #quarantine-bulk-learnham-btn, #quarantine-bulk-learnspam-btn, #quarantine-select-all-btn, #quarantine-release-all-btn, #quarantine-delete-all-btn';
     document.querySelectorAll(allBtns).forEach(el => { el.disabled = true; el.style.opacity = '0.5'; });
+    quarantineActing++;
 
     try {
         const endpoints = {
@@ -4044,6 +4105,7 @@ async function quarantineAction(action, itemIds) {
     } catch (err) {
         showToast(`Failed to ${action} message(s): ` + err.message, 'error');
     } finally {
+        quarantineActing--;
         document.querySelectorAll(allBtns).forEach(el => { el.disabled = false; el.style.opacity = ''; });
     }
 }
@@ -4260,12 +4322,13 @@ function loadOutbound() {
     else if (suppressionsOn) loadSuppressionStats();
 }
 
-async function loadQuarantineRules() {
+// quiet (the refresh): a read that fails leaves the rules shown as they are
+async function loadQuarantineRules({ quiet = false } = {}) {
     const container = document.getElementById('quarantine-rules-list');
     if (!container) return;
     
     try {
-        const res = await authenticatedFetch('/api/quarantine/rules');
+        const res = await authenticatedFetch('/api/quarantine/rules', quiet ? { timeout: PAGE_REFRESH_TIMEOUT } : {});
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         _quarantineRulesCache = data;
@@ -4276,18 +4339,19 @@ async function loadQuarantineRules() {
         const tabCount = document.getElementById('quarantine-tab-n-rules');
         if (tabCount) { tabCount.textContent = activeCount || ''; tabCount.classList.toggle('hidden', !activeCount); }
         
+        // Drawn again only when something changed, the focus kept on its row (the refresh calls this too)
         if (!data.data || data.data.length === 0) {
-            container.innerHTML = '<p class="ui-empty">No rules configured. Click "Add Rule" to create one.</p>';
+            uiReplaceKeepingFocus(container, '<p class="ui-empty">No rules configured. Click "Add Rule" to create one.</p>');
             return;
         }
         
-        container.innerHTML = `<div class="ui-table ui-stack ui-qr-table">${data.data.map(rule => {
+        uiReplaceKeepingFocus(container, `<div class="ui-table ui-stack ui-qr-table">${data.data.map(rule => {
             const matchLabels = { sender: 'Sender', sender_domain: 'Sender Domain', recipient: 'Recipient', subject: 'Subject' };
             const actionLabel = rule.action === 'delete' ? 'Delete' : 'Release';
             const repair = quarantineRuleRepair(rule);
 
             return `
-            <div class="ui-tr${rule.enabled ? '' : ' ui-row-off'}">
+            <div class="ui-tr${rule.enabled ? '' : ' ui-row-off'}" data-key="rule-${Number(rule.id)}">
                 <div class="ui-td ui-q-who">
                     <div><b dir="auto">${escapeHtml(rule.name)}</b> ${uiTag(actionLabel, rule.action === 'delete' ? 'fail' : 'ok')}
                         ${rule.is_regex ? uiTag('Regex', 'info') : ''} ${!rule.enabled ? uiTag('Disabled', '') : ''} ${repair ? uiTag('Check', 'warn') : ''}</div>
@@ -4303,10 +4367,11 @@ async function loadQuarantineRules() {
                     <button onclick="deleteQuarantineRule(${Number(rule.id)}, '${escapeJsArg(rule.name)}')" title="Delete" class="ui-btn ui-btn-sm ui-btn-danger">Delete</button>
                 </span>
             </div>`;
-        }).join('')}</div>`;
+        }).join('')}</div>`);
     } catch (err) {
         console.error('Failed to load quarantine rules:', err);
-        container.innerHTML = `<p class="ui-empty ui-text-fail">Failed to load rules: ${escapeHtml(err.message)}</p>`;
+        if (quiet && _quarantineRulesCache) return;
+        uiReplaceKeepingFocus(container, `<p class="ui-empty ui-text-fail">Failed to load rules: ${escapeHtml(err.message)}</p>`);
     }
 }
 
@@ -4658,31 +4723,34 @@ function toggleQuarantineRuleHistory() {
     }
 }
 
-async function loadQuarantineRuleHistory() {
+// quiet (the refresh): no Loading, and drawn again only when something changed
+async function loadQuarantineRuleHistory({ quiet = false } = {}) {
     const container = document.getElementById('quarantine-rules-history-list');
     if (!container) return;
     
-    container.innerHTML = '<p class="ui-empty">Loading...</p>';
+    if (!quiet) uiReplaceKeepingFocus(container, '<p class="ui-empty">Loading...</p>');
 
     try {
-        const res = await authenticatedFetch('/api/quarantine/rules/logs?limit=20');
+        const res = await authenticatedFetch('/api/quarantine/rules/logs?limit=20', quiet ? { timeout: PAGE_REFRESH_TIMEOUT } : {});
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
 
         if (!data.data || data.data.length === 0) {
-            container.innerHTML = '<p class="ui-empty">No actions recorded yet</p>';
+            uiReplaceKeepingFocus(container, '<p class="ui-empty">No actions recorded yet</p>');
             return;
         }
 
-        container.innerHTML = `<div class="ui-qt-history">${data.data.map(log => `
+        uiReplaceKeepingFocus(container, `<div class="ui-qt-history">${data.data.map(log => `
             <div class="ui-qt-hrow">
                 ${uiTag(log.action, log.action === 'delete' ? 'fail' : 'ok')}
                 <span class="ui-q-who" title="${escapeHtml(log.sender || '')} → ${escapeHtml(log.recipient || '')}">${escapeHtml(log.sender || '?')} → ${escapeHtml(log.recipient || '?')}</span>
                 ${uiTime(log.created_at, formatTime(log.created_at), { title: `Rule: ${log.rule_name || ''}`, cls: 'ui-muted' })}
             </div>
-        `).join('')}</div>`;
+        `).join('')}</div>`);
     } catch (err) {
-        container.innerHTML = `<p class="ui-empty ui-text-fail">Failed: ${escapeHtml(err.message)}</p>`;
+        // A refresh that failed leaves the history as it was
+        if (quiet) return;
+        uiReplaceKeepingFocus(container, `<p class="ui-empty ui-text-fail">Failed: ${escapeHtml(err.message)}</p>`);
     }
 }
 
