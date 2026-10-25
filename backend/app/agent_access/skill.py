@@ -160,9 +160,10 @@ def skill_file(name: str):
             return JSONResponse({"error": "not_found", "message": "This build has no agent skill."},
                                 status_code=404, headers=_HEADERS)
         return Response(install_note(base), media_type="text/markdown; charset=utf-8", headers=_HEADERS)
-    kind = FILES.get(name)
-    text = _read(name) if kind else None
+    # Read by the allowlist's own name, never by the one in the request
+    known = next((n for n in FILES if n == name), None)
+    text = _read(known) if known else None
     if text is None:
         return JSONResponse({"error": "not_found"}, status_code=404, headers=_HEADERS)
     text = text.replace(PLACEHOLDER, base).replace(VERSION_PLACEHOLDER, skill_version())
-    return PlainTextResponse(text, media_type=kind, headers=_HEADERS)
+    return PlainTextResponse(text, media_type=FILES[known], headers=_HEADERS)

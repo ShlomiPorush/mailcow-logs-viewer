@@ -882,6 +882,14 @@ def test_cimd_refuses_unsafe_addresses(url):
         cimd._check_url(url)
 
 
+def test_the_page_shows_a_fixed_text_for_every_reason():
+    for reason, text in cimd.REASONS.items():
+        error = cimd.ClientDocumentError(reason)
+        assert str(error) == text and cimd.reason_text(error) == text
+    with pytest.raises(KeyError):
+        cimd.ClientDocumentError("The client's document answered 500.")
+
+
 @pytest.mark.parametrize("address", ["10.0.0.5", "127.0.0.1", "169.254.169.254", "100.64.0.1", "fec0::1",
                                      "fd00::1", "::1", "fe80::1", "::ffff:10.0.0.1", "2002:a00:1::1",
                                      "64:ff9b::a00:1", "ff02::1", "0.0.0.0"])

@@ -33,8 +33,42 @@ CACHE_MAX_SECONDS = 86400
 MAX_CONCURRENT_FETCHES = 4
 
 
+# Why a client's metadata document cannot be used, as shown to the person
+REASONS: Dict[str, str] = {
+    "address_too_long": "The client's address is too long.",
+    "address_invalid": "The client's address is not valid.",
+    "address_not_https": "The client's address must be a plain https address.",
+    "address_port": "The client's address must use the standard https port.",
+    "address_no_document": "The client's address must name a document.",
+    "address_ip": "The client's address must use a host name.",
+    "host_unknown": "The client's host could not be found.",
+    "host_private": "The client's host is not a public address.",
+    "not_json": "The client's document is not valid JSON.",
+    "not_object": "The client's document is not a JSON object.",
+    "other_client": "The client's document names another client.",
+    "no_name": "The client's document has no usable name.",
+    "no_redirects": "The client's document has no usable redirect addresses.",
+    "auth_method": "The client wants a sign-in method this app does not offer.",
+    "too_slow": "The client's document took too long to fetch.",
+    "http_error": "The client's document answered with an error.",
+    "compressed": "The client's document came compressed.",
+    "too_large": "The client's document is too large.",
+    "fetch_failed": "The client's document could not be fetched.",
+}
+
+
 class ClientDocumentError(Exception):
-    """The client's metadata document cannot be used; the message is shown to the person."""
+    """The client's metadata document cannot be used; reason is a key of REASONS."""
+
+    def __init__(self, reason: str):
+        super().__init__(REASONS[reason])
+        self.reason = reason
+
+
+def reason_text(error: ClientDocumentError) -> str:
+    """The text for the person, taken from REASONS rather than from the exception."""
+    return next((text for reason, text in REASONS.items() if reason == error.reason),
+                "The client's details cannot be used.")
 
 
 @dataclass(frozen=True)
@@ -56,22 +90,22 @@ def is_document_client_id(client_id: str) -> bool:
 def _check_url(url: str) -> Tuple[str, str]:
     """(host, path with query) of an acceptable document URL."""
     if len(url) > MAX_URL_LENGTH:
-        raise ClientDocumentError("The client's address is too long.")
+        raise ClientDocumentError("address_too_long")
     try:
         parts = urlsplit(url)
         port = parts.port
     except ValueError:
-        raise ClientDocumentError("The client's address is not valid.")
+        raise ClientDocumentError("address_invalid")
     if parts.scheme != "https" or not parts.hostname or parts.username or parts.password or parts.fragment:
-        raise ClientDocumentError("The client's address must be a plain https address.")
+        raise ClientDocumentError("address_not_https")
     if port not in (None, 443):
-        raise ClientDocumentError("The client's address must use the standard https port.")
+        raise ClientDocumentError("address_port")
     if not parts.path or parts.path == "/":
-        raise ClientDocumentError("The client's address must name a document.")
+        raise ClientDocumentError("address_no_document")
     host = parts.hostname.lower()
     try:
         ipaddress.ip_address(host)
-        raise ClientDocumentError("The client's address must use a host name.")
+        raise ClientDocumentError("address_ip")
     except ValueError:
         pass
     target = parts.path + (f"?{parts.query}" if parts.query else "")
@@ -108,12 +142,12 @@ async def _resolve(host: str) -> str:
     try:
         infos = await asyncio.wait_for(loop.getaddrinfo(host, 443, type=socket.SOCK_STREAM), TIMEOUT_SECONDS)
     except (OSError, asyncio.TimeoutError):
-        raise ClientDocumentError("The client's host could not be found.")
+        raise ClientDocumentError("host_unknown")
     addresses = [info[4][0] for info in infos]
     if not addresses:
-        raise ClientDocumentError("The client's host could not be found.")
+        raise ClientDocumentError("host_unknown")
     if not all(_public(a) for a in addresses):
-        raise ClientDocumentError("The client's host is not a public address.")
+        raise ClientDocumentError("host_private")
     return addresses[0]
 
 
@@ -135,21 +169,21 @@ def parse_document(url: str, body: bytes, publisher: str) -> ClientDocument:
     try:
         doc = json.loads(body.decode("utf-8"))
     except (UnicodeDecodeError, ValueError):
-        raise ClientDocumentError("The client's document is not valid JSON.")
+        raise ClientDocumentError("not_json")
     if not isinstance(doc, dict):
-        raise ClientDocumentError("The client's document is not a JSON object.")
+        raise ClientDocumentError("not_object")
     if doc.get("client_id") != url:
-        raise ClientDocumentError("The client's document names another client.")
+        raise ClientDocumentError("other_client")
     name = doc.get("client_name")
     if not isinstance(name, str) or not name.strip() or len(name) > 100:
-        raise ClientDocumentError("The client's document has no usable name.")
+        raise ClientDocumentError("no_name")
     uris = doc.get("redirect_uris")
     if not isinstance(uris, list) or not uris or len(uris) > 20 \
             or not all(isinstance(u, str) and valid_redirect_uri(u) for u in uris):
-        raise ClientDocumentError("The client's document has no usable redirect addresses.")
+        raise ClientDocumentError("no_redirects")
     method = doc.get("token_endpoint_auth_method", "none")
     if method != "none":
-        raise ClientDocumentError("The client wants a sign-in method this app does not offer.")
+        raise ClientDocumentError("auth_method")
     return ClientDocument(url, name.strip(), tuple(uris), publisher)
 
 
@@ -169,7 +203,7 @@ async def fetch(url: str) -> ClientDocument:
             return await _fetch(url, host, target)
     except TimeoutError:
         logger.info(f"Agent access: the client document of {host} took too long")
-        raise ClientDocumentError("The client's document took too long to fetch.")
+        raise ClientDocumentError("too_slow")
 
 
 async def _fetch(url: str, host: str, target: str) -> ClientDocument:
@@ -188,24 +222,25 @@ async def _fetch(url: str, host: str, target: str) -> ClientDocument:
                     extensions={"sni_hostname": host},
                 ) as response:
                     if response.status_code != 200:
-                        raise ClientDocumentError(f"The client's document answered {response.status_code}.")
+                        logger.info(f"Agent access: the client document of {host} answered {response.status_code}")
+                        raise ClientDocumentError("http_error")
                     encoding = response.headers.get("content-encoding", "identity").strip().lower()
                     if encoding not in ("", "identity"):
-                        raise ClientDocumentError("The client's document came compressed.")
+                        raise ClientDocumentError("compressed")
                     length = response.headers.get("content-length")
                     if length and length.isdigit() and int(length) > MAX_BYTES:
-                        raise ClientDocumentError("The client's document is too large.")
+                        raise ClientDocumentError("too_large")
                     body = bytearray()
                     async for chunk in response.aiter_raw():
                         body.extend(chunk)
                         if len(body) > MAX_BYTES:
-                            raise ClientDocumentError("The client's document is too large.")
+                            raise ClientDocumentError("too_large")
                     cache_control = response.headers.get("cache-control", "")
         except ClientDocumentError:
             raise
         except (httpx.HTTPError, OSError) as e:
             logger.info(f"Agent access: could not fetch the client document of {host}: {type(e).__name__}")
-            raise ClientDocumentError("The client's document could not be fetched.")
+            raise ClientDocumentError("fetch_failed")
     document = parse_document(url, bytes(body), host)
     if len(_cache) >= CACHE_MAX_ENTRIES:
         _cache.pop(min(_cache, key=lambda k: _cache[k][0]), None)

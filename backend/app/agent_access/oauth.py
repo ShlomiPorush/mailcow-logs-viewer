@@ -205,7 +205,7 @@ async def authorize(request: Request):
         try:
             document = await cimd.fetch(client_id)
         except cimd.ClientDocumentError as e:
-            return error_page("This agent cannot connect", str(e))
+            return error_page("This agent cannot connect", cimd.reason_text(e))
         kind, declared, publisher, registered = "cimd", document.client_name, document.publisher, list(document.redirect_uris)
     else:
         client = await db_call(store.get_client, client_id)
