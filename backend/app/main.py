@@ -282,6 +282,10 @@ app = FastAPI(
     description="Modern dashboard for viewing and analyzing mailcow mail server logs",
     version=__version__,
     lifespan=lifespan,
+    # FastAPI's own pages load Swagger UI and ReDoc from a CDN, which the CSP
+    # blocks; /docs below serves the reference from this server instead
+    docs_url=None,
+    redoc_url=None,
     # An agent's call (agent_access/dispatch.py) may run a route only when its
     # grant covers it; for every other request this does nothing
     dependencies=[Depends(enforce_agent_policy)],
@@ -451,7 +455,7 @@ mimetypes.add_type("font/woff2", ".woff2")
 app.mount("/static", StaticFiles(directory="/app/frontend"), name="static")
 
 
-@app.get("/login", response_class=HTMLResponse)
+@app.get("/login", response_class=HTMLResponse, include_in_schema=False)
 def login_page(request: Request, next: Optional[str] = None):
     """Serve the login page, or skip it when there is nothing to sign in to"""
     if not settings.is_authentication_enabled or get_session_from_request(request):
@@ -476,7 +480,21 @@ def agent_consent_page():
     return HTMLResponse(content=stamp_asset_versions(html, "/app/frontend"), headers={"Cache-Control": "no-store"})
 
 
-@app.get("/", response_class=HTMLResponse)
+@app.get("/docs", response_class=HTMLResponse, include_in_schema=False)
+def api_docs_page():
+    """The interactive API reference (frontend/api-docs.js); it needs a session like any page"""
+    with open("/app/frontend/api-docs.html", "r") as f:
+        html = f.read()
+    return HTMLResponse(content=stamp_asset_versions(html, "/app/frontend"), headers={"Cache-Control": "no-cache"})
+
+
+@app.get("/redoc", include_in_schema=False)
+def redoc_moved():
+    """The old ReDoc address goes to the same reference"""
+    return RedirectResponse(url="/docs", status_code=301)
+
+
+@app.get("/", response_class=HTMLResponse, include_in_schema=False)
 def root():
     """Serve the main HTML page - requires authentication"""
     # Authentication is handled by middleware
@@ -594,7 +612,7 @@ register_url_convertor("spa_path", SpaPathConvertor())
 
 # SPA catch-all route - must be AFTER all other routes and exception handlers
 # Returns index.html for all frontend routes (e.g., /dashboard, /messages, /dmarc)
-@app.get("/{full_path:spa_path}", response_class=HTMLResponse)
+@app.get("/{full_path:spa_path}", response_class=HTMLResponse, include_in_schema=False)
 def spa_catch_all(full_path: str):
     """Serve the SPA for all frontend routes - enables clean URLs"""
     # API and static routes are handled by their respective routers/mounts

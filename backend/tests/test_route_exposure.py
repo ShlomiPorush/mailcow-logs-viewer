@@ -20,7 +20,6 @@ ALLOWED_ROOT_PATHS = {
     "/logout",
     "/openapi.json",
     "/docs",
-    "/docs/oauth2-redirect",
     "/redoc",
     "/static",
     "/favicon.ico",
