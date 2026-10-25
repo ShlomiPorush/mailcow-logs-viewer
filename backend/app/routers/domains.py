@@ -1593,9 +1593,9 @@ async def _fetch_mta_sts_policy(domain: str) -> str:
                     # bytes as sent (httpx decodes nothing), read a piece at a time
                     body = bytearray()
                     async for chunk in response.aiter_bytes():
-                        body.extend(chunk)
-                        if len(body) > MTA_STS_POLICY_MAX_BYTES:
+                        if len(body) + len(chunk) > MTA_STS_POLICY_MAX_BYTES:
                             raise ValueError("policy file larger than expected")
+                        body.extend(chunk)
     except TimeoutError:
         raise ValueError("policy host took too long to answer") from None
     return bytes(body).decode("utf-8", errors="replace")

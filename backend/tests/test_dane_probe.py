@@ -283,7 +283,9 @@ def test_probes_beyond_the_thread_limit_are_refused_and_not_cached(monkeypatch):
     async def scenario():
         held = [asyncio.create_task(dane.fetch_smtp_certificate(f'mx{i}.example.test'))
                 for i in range(dane.MAX_PROBES)]
+        started = time.monotonic()
         while len(calls) < dane.MAX_PROBES:
+            assert time.monotonic() - started < 5, 'the probes did not all start'
             await asyncio.sleep(0.01)
         with pytest.raises(dane.ProbeBusy):
             await dane.fetch_smtp_certificate('late.example.test')
