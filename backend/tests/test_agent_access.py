@@ -10,6 +10,7 @@ sign-in settings change.
 import asyncio
 import base64
 import hashlib
+import html
 import secrets
 import threading
 from datetime import datetime, timedelta
@@ -888,6 +889,17 @@ def test_the_page_shows_a_fixed_text_for_every_reason():
         assert str(error) == text and cimd.reason_text(error) == text
     with pytest.raises(KeyError):
         cimd.ClientDocumentError("The client's document answered 500.")
+
+
+def test_the_consent_page_shows_only_the_fixed_text_of_a_document_error(live_agents, monkeypatch):
+    async def fetch(url):
+        error = cimd.ClientDocumentError("too_slow")
+        error.args = ("internal detail 7f3a",)
+        raise error
+    monkeypatch.setattr(cimd, "fetch", fetch)
+    page = _authorize(_signed_in(), "https://agent.example/oauth/client.json", _pkce()[1])
+    assert page.status_code == 400
+    assert html.escape(cimd.REASONS["too_slow"]) in page.text and "7f3a" not in page.text
 
 
 @pytest.mark.parametrize("address", ["10.0.0.5", "127.0.0.1", "169.254.169.254", "100.64.0.1", "fec0::1",
