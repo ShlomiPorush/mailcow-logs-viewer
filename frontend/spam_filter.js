@@ -188,6 +188,7 @@ async function openMapEditor(filename) {
         const meta = data.metadata || {};
         const canSave = rspamdMapsCanSave;
         mapEditorSaved = data.content || '';
+        mapEditorHash = data.content_hash || null;
 
         container.innerHTML = `
             ${rspamdMapCrumbs(meta.name || filename)}
@@ -241,6 +242,7 @@ async function openMapEditor(filename) {
                         placeholder="${canSave ? 'Enter entries, one per line...' : 'This map is empty.'}"
                         oninput="onMapContentChange('${escapeJsArg(filename)}')">${escapeHtml(data.content || '')}</textarea>
                     <div id="map-validation-errors" class="hidden ui-map-errors"></div>
+                    <div id="map-conflict" class="hidden"></div>
                     <div class="ui-map-foot">
                         <p class="ui-muted">Lines starting with # are comments. Empty lines are ignored.</p>
                         ${canSave ? `
@@ -264,6 +266,9 @@ async function openMapEditor(filename) {
 }
 
 let mapEditorSaved = null;  // the map text as stored, to tell whether there is anything to save
+// The map as it was read: a save is refused when the map changed since
+// (the suppression sync writes the recipient denylist)
+let mapEditorHash = null;
 
 // An edited map is lost by going back to the list, leaving the page or the app
 uiUnsavedRegister('rspamd-map', {
@@ -331,6 +336,18 @@ async function validateMapContent(filename) {
     }
 }
 
+// Shows or hides the note that the map changed under the editor
+function showMapConflict(filename, show) {
+    const el = document.getElementById('map-conflict');
+    if (!el) return;
+    el.classList.toggle('hidden', !show);
+    el.innerHTML = show ? `<div class="ui-banner ui-banner-warn" role="alert">
+            <div><b>The map changed since you opened it</b>
+                <p>Your edits were not saved. Reload shows the map as it is now and drops your edits, so copy them first if you need them.</p></div>
+            <button type="button" class="ui-btn ui-btn-sm" onclick="openMapEditor('${escapeJsArg(filename)}')">Reload</button>
+        </div>` : '';
+}
+
 async function saveMapContent(filename) {
     const content = document.getElementById('map-editor-content').value;
     
@@ -360,15 +377,29 @@ async function saveMapContent(filename) {
         const response = await authenticatedFetch(`/api/rspamd/maps/${encodeURIComponent(filename)}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ content })
+            body: JSON.stringify({ content, base_hash: mapEditorHash })
         });
-        
+
         if (!response.ok) {
             const err = await response.json();
+            if (response.status === 409 && err.detail?.code === 'map_changed') {
+                // The edits stay in the editor; Reload shows the map as it is now
+                showMapConflict(filename, true);
+                return;
+            }
             throw new Error(err.detail?.message || err.detail || 'Save failed');
         }
-        
+
         const result = await response.json();
+        showMapConflict(filename, false);
+        mapEditorHash = result.content_hash || null;
+        if (!mapEditorHash) {
+            // Saved, but not read back: open it again so the next save checks the map as it is
+            showToast(`Map saved (${uiCountLabel(result.entry_count, 'entry', 'entries')}). It is opened again to show it as saved.`, 'success');
+            mapEditorSaved = null;
+            openMapEditor(filename);
+            return;
+        }
         if (result.normalized_entries > 0) {
             // Bare addresses were anchored server side - reflect the saved form
             const textarea = document.getElementById('map-editor-content');

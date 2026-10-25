@@ -173,7 +173,9 @@ POLICY: Dict[Tuple[str, str], Rule] = {
     **_r("GET /api/rspamd/config", "GET /api/rspamd/maps", "GET /api/rspamd/maps/{filename}",
          "POST /api/rspamd/validate",
          area="rspamd", kind=READ),
-    **_r("PUT /api/rspamd/maps/{filename}", area="rspamd", kind=WRITE),
+    **_r("PUT /api/rspamd/maps/{filename}", area="rspamd", kind=WRITE,
+         body='{"content": "<the whole map>", "base_hash": "<content_hash from GET>"} - 409 when the map '
+              'changed since it was read; the answer has the saved map and its new content_hash'),
 
     # DMARC & TLS
     **_r("GET /api/dmarc/insights", "GET /api/dmarc/reports/config", "GET /api/dmarc/reports/all",
