@@ -275,7 +275,7 @@ def _login(session, ip, username, minutes_ago=0):
     from app.models import PostfixLog
     session.add(PostfixLog(time=datetime.utcnow() - timedelta(minutes=minutes_ago), queue_id=MARKER[:20],
                            program='postfix/submission/smtpd',
-                           message=f'{MARKER[:10]}: client=unknown[{ip}], sasl_method=LOGIN, sasl_username={username}'))
+                           message=f'4Fq2Lk7Xz: client=unknown[{ip}], sasl_method=LOGIN, sasl_username={username}'))
     session.commit()
 
 

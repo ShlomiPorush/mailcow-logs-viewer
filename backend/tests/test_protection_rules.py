@@ -178,7 +178,7 @@ def test_an_address_that_logged_in_successfully_is_not_noted(db):
     from app.models import PostfixLog
     from app.services import protection_rules
     db.add(PostfixLog(time=datetime.utcnow() - timedelta(hours=2), queue_id=MARKER[:20], program='postfix/submission/smtpd',
-                      message=f'{MARKER[:10]}: client=unknown[{TYPO_IP}], sasl_method=PLAIN, sasl_username=info@{DOMAIN}'))
+                      message=f'4Fq2Lk7Xz: client=unknown[{TYPO_IP}], sasl_method=PLAIN, sasl_username=info@{DOMAIN}'))
     db.commit()
     _rules(db, unknown_accounts={'enabled': True, 'threshold': 3, 'window_minutes': 60})
     for name in ('inof', 'ifno', f'inf@{DOMAIN}'):
@@ -278,7 +278,7 @@ def test_a_successful_ipv6_login_protects_the_address(db):
     ip6 = '2001:db8::77'
     ALL_IPS.append(ip6)
     db.add(PostfixLog(time=datetime.utcnow() - timedelta(hours=1), queue_id=MARKER[:20], program='postfix/submission/smtpd',
-                      message=f'{MARKER[:10]}: client=unknown[IPv6:{ip6}], sasl_method=PLAIN, sasl_username=info@{DOMAIN}'))
+                      message=f'4Fq2Lk7Xz: client=unknown[IPv6:{ip6}], sasl_method=PLAIN, sasl_username=info@{DOMAIN}'))
     db.commit()
     _rules(db, unknown_accounts={'enabled': True, 'threshold': 3, 'window_minutes': 60})
     for name in ('inof', 'ifno', 'nifo'):
