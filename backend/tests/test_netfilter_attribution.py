@@ -10,6 +10,7 @@ and clears the addresses they left behind.
 """
 import asyncio
 import importlib.util
+import logging
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -74,6 +75,10 @@ def test_an_ipv6_line_is_attributed_to_the_ipv6_client_not_to_an_ipv4_in_its_tex
     ('Add host/network 198.51.100.7/32 to blacklist', '198.51.100.7'),
     ('Remove host/network 2001:db8::1/128 from blacklist', '2001:db8::1'),
     ('::ffff:192.0.2.9 matched rule id 3 (x)', '192.0.2.9'),
+    ('Address 198.51.100.7/32 is allowlisted by rule 198.51.100.0/24', '198.51.100.7'),
+    ('Address 2001:db8::1/128 is allowlisted by rule 2001:db8::/32', '2001:db8::1'),
+    ('Address 198.51.100.7/32 is whitelisted by rule 198.51.100.7/32', '198.51.100.7'),
+    ('198.51.100.7/32 is not banned, skipping unban and deleting from queue (if any)', '198.51.100.7'),
 ])
 def test_mailcow_own_fields_still_give_the_address(message, ip):
     from app.scheduler import parse_netfilter_message
@@ -274,48 +279,88 @@ def _hit(session, ip, rule, status, rows, mode='watch'):
     return hit.id
 
 
-def test_the_upgrade_closes_open_catches_its_log_lines_do_not_confirm(db):
+def test_the_upgrade_closes_open_catches_a_stored_line_contradicts(db, caplog):
     from app.models import NetfilterLog, ProtectionHit
     forged = [_stored_before_the_fix(db, VICTIM, sasl(CLIENT6, f'u{n}@{VICTIM}'), username=f'u{n}@{VICTIM}')
               for n in range(4)]
     genuine = _stored_before_the_fix(db, VICTIM, sasl(VICTIM, 'u4@example.com'), username='u4@example.com')
     net_forged = _stored_before_the_fix(db, NET_IPS[0], dovecot(CLIENT6, f'a@{NET_IPS[0]}'))
     net_genuine = [_stored_before_the_fix(db, ip, sasl(ip, 'root')) for ip in NET_IPS[1:]]
-    trap_genuine = _stored_before_the_fix(db, GENUINE, sasl(GENUINE, 'admin'), username='admin')
-    purged = _stored_before_the_fix(db, CLIENT6, sasl(CLIENT6, 'admin'), username='admin')
+    # Inside the network, but stored under another address than the one netfilter named
+    net_shifted = _stored_before_the_fix(db, NET_IPS[1], sasl(NET_IPS[2], 'root'))
+    other = _stored_before_the_fix(db, GENUINE, sasl(GENUINE, 'admin'), username='admin')
+    deleted = _stored_before_the_fix(db, VICTIM, sasl(VICTIM, 'admin'), username='admin')
+    many = [_stored_before_the_fix(db, VICTIM, sasl(VICTIM, f'u{n}@example.com')) for n in range(199)]
 
-    many = [_stored_before_the_fix(db, GENUINE, sasl(GENUINE, f'u{n}@example.com')) for n in range(200)]
-
-    pending = _hit(db, VICTIM, 'unknown_accounts', 'pending', forged, mode='enforce')
-    empty = _hit(db, GENUINE, 'country', 'watching', [])
-    capped = _hit(db, GENUINE, 'unknown_accounts', 'watching', many)
-    mixed = _hit(db, VICTIM, 'trap', 'watching', forged[:1] + [genuine])
-    mixed_net = _hit(db, NET, 'subnet', 'watching', [net_forged] + net_genuine)
+    closed = {
+        'pending': _hit(db, VICTIM, 'unknown_accounts', 'pending', forged, mode='enforce'),
+        'mixed': _hit(db, VICTIM, 'trap', 'watching', forged[:1] + [genuine]),
+        'mixed network': _hit(db, NET, 'subnet', 'watching', [net_forged] + net_genuine),
+        'shifted in network': _hit(db, NET, 'subnet', 'watching', net_genuine + [net_shifted]),
+        'another address': _hit(db, VICTIM, 'trap', 'watching', [other]),
+        'deleted and forged': _hit(db, VICTIM, 'unknown_accounts', 'watching', [deleted, forged[1]]),
+        'forged after 199': _hit(db, VICTIM, 'unknown_accounts', 'watching', many + [forged[2]]),
+    }
     clean_net = _hit(db, NET, 'subnet', 'pending', net_genuine, mode='enforce')
-    clean = _hit(db, GENUINE, 'trap', 'watching', [trap_genuine])
     banned = _hit(db, VICTIM, 'country', 'banned', forged[:1], mode='enforce')
-    alert = _hit(db, VICTIM, 'breach', 'alert', forged)
-    gone = _hit(db, CLIENT6, 'trap', 'watching', [purged])
-    db.query(NetfilterLog).filter(NetfilterLog.id == purged.id).delete()
+    db.query(NetfilterLog).filter(NetfilterLog.id == deleted.id).delete()
     db.commit()
 
-    _repair()
+    with caplog.at_level(logging.WARNING, logger='app.migrations'):
+        _repair()
 
     db.expire_all()
-    status = {h.id: (h.status, h.mode) for h in db.query(ProtectionHit).filter(ProtectionHit.ip.in_(TARGETS))}
-    for closed in (pending, mixed, mixed_net, gone, empty, capped):
-        assert status[closed] == ('expired', 'watch'), closed
-    assert status[clean_net] == ('pending', 'enforce')
-    assert status[clean] == ('watching', 'watch')
-    assert status[banned] == ('banned', 'enforce')
-    assert status[alert] == ('alert', 'watch')
-    closed = db.query(ProtectionHit).filter(ProtectionHit.id == pending).one()
-    assert closed.ended_at and 'could not confirm' in closed.reason
+    hits = {h.id: h for h in db.query(ProtectionHit).filter(ProtectionHit.ip.in_(TARGETS))}
+    for name, hit_id in closed.items():
+        assert (hits[hit_id].status, hits[hit_id].mode) == ('expired', 'watch'), name
+        assert hits[hit_id].ended_at and 'another address' in hits[hit_id].reason, name
+    assert (hits[clean_net].status, hits[banned].status) == ('pending', 'banned')
+    assert f'{VICTIM} stays banned by the country rule' in caplog.text
 
     api = FakeMailcow()
     from app.services import protection_rules
     asyncio.run(protection_rules.enforce(api))
     assert api.black() == [NET]
+
+
+def test_the_upgrade_keeps_catches_whose_lines_aged_out_or_confirm(db, caplog):
+    from app.models import NetfilterLog, ProtectionHit
+    confirming = _stored_before_the_fix(db, VICTIM, sasl(VICTIM, 'admin'), username='admin')
+    allowlisted = _stored_before_the_fix(db, VICTIM, f'Address {VICTIM}/32 is allowlisted by rule 198.51.100.0/24')
+    neutral = _stored_before_the_fix(db, VICTIM, 'Allowlist was changed, it has 3 entries')
+    deleted = [_stored_before_the_fix(db, VICTIM, sasl(CLIENT6, f'u{n}@{VICTIM}')) for n in range(3)]
+    many = [_stored_before_the_fix(db, GENUINE, sasl(GENUINE, f'u{n}@example.com')) for n in range(200)]
+
+    kept = {
+        'partly aged out': _hit(db, VICTIM, 'trap', 'watching', deleted[:1] + [confirming]),
+        'all aged out': _hit(db, VICTIM, 'unknown_accounts', 'watching', deleted[1:2]),
+        'empty': _hit(db, GENUINE, 'country', 'watching', []),
+        'capped': _hit(db, GENUINE, 'unknown_accounts', 'watching', many),
+        'allowlisted and neutral': _hit(db, VICTIM, 'country', 'watching', [allowlisted, neutral]),
+        'alert': _hit(db, VICTIM, 'breach', 'alert', [confirming]),
+    }
+    banned = _hit(db, VICTIM, 'repeat_offender', 'banned', deleted[2:], mode='enforce')
+    # Its forged lines aged out before the upgrade, so nothing is left to contradict it
+    pending = _hit(db, VICTIM, 'country', 'pending', deleted, mode='enforce')
+    db.query(NetfilterLog).filter(NetfilterLog.id.in_([r.id for r in deleted])).delete(synchronize_session=False)
+    db.commit()
+    before = {h.id: (h.status, h.mode) for h in db.query(ProtectionHit).filter(ProtectionHit.ip.in_(TARGETS))}
+
+    with caplog.at_level(logging.WARNING, logger='app.migrations'):
+        _repair()
+
+    db.expire_all()
+    after = {h.id: (h.status, h.mode) for h in db.query(ProtectionHit).filter(ProtectionHit.ip.in_(TARGETS))}
+    for name, hit_id in kept.items():
+        assert after[hit_id] == before[hit_id], name
+    assert after[banned] == ('banned', 'enforce') and after[pending] == ('pending', 'enforce')
+    assert '[PROTECTION]' not in caplog.text
+    assert db.query(NetfilterLog).filter(NetfilterLog.id == allowlisted.id).one().ip == VICTIM
+
+    api = FakeMailcow()
+    from app.services import protection_rules
+    asyncio.run(protection_rules.enforce(api))
+    assert api.black() == [f'{VICTIM}/32']
 
 
 def test_the_upgrade_clears_addresses_taken_from_client_text(db):
@@ -327,6 +372,7 @@ def test_the_upgrade_clears_addresses_taken_from_client_text(db):
     genuine.rule_id = 3
     ban = _stored_before_the_fix(db, GENUINE, f'Banning {GENUINE}/32 for 30 minutes')
     later = _stored_before_the_fix(db, VICTIM, dovecot(CLIENT6, f'a@{VICTIM}'))
+    allowlisted = _stored_before_the_fix(db, GENUINE, f'Address {GENUINE}/32 is allowlisted by rule {GENUINE}/32')
     db.commit()
     before = {s['ip'] for s in security_addresses.attempt_sources(db, 24)}
     assert VICTIM in before
@@ -342,6 +388,7 @@ def test_the_upgrade_clears_addresses_taken_from_client_text(db):
     assert (rows[genuine.id].ip, rows[genuine.id].country_code) == (GENUINE, 'XX')
     assert rows[ban.id].ip == GENUINE
     assert rows[later.id].ip is None
+    assert (rows[allowlisted.id].ip, rows[allowlisted.id].country_code) == (GENUINE, 'XX')
     after = {s['ip'] for s in security_addresses.attempt_sources(db, 24)}
     assert VICTIM not in after and GENUINE in after
 
@@ -353,5 +400,8 @@ def test_the_upgrade_reads_addresses_like_the_app():
                     'Banning 2001:db8:beef::/64 for 30 minutes', 'Unbanning 192.0.2.10/32',
                     '9 more attempts in the next 600 seconds until 192.0.2.10/32 is banned',
                     'Added host/network 198.51.100.7/32 to denylist', f'Something about {VICTIM}',
-                    '::ffff:192.0.2.9 matched rule id 3 (x)', '']:
+                    '::ffff:192.0.2.9 matched rule id 3 (x)', '',
+                    'Address 2001:db8::1/128 is allowlisted by rule 2001:db8::/32',
+                    'Address 198.51.100.7/32 is whitelisted by rule 198.51.100.7/32',
+                    '198.51.100.7/32 is not banned, skipping unban and deleting from queue (if any)']:
         assert frozen(message) == netfilter_address(message), message

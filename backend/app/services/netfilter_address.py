@@ -12,10 +12,13 @@ import re
 from typing import Optional
 
 _RULE_MATCH = re.compile(r'^(\S+) matched rule id \d+')
-# Older mailcow versions write "Add/Remove host/network ... blacklist", newer ones "Added/Removed ... denylist"
+# Older mailcow versions write "Add/Remove host/network ... blacklist" and "whitelisted",
+# newer ones "Added/Removed ... denylist" and "allowlisted"
 _OWN_LINES = re.compile(
     r'^(?:Banning|Unbanning|(?:Add|Added|Remove|Removed) host/network) (\S+)'
     r'|^\d+ more attempts in the next \d+ seconds until (\S+) is banned'
+    r'|^Address (\S+) is (?:allowlisted|whitelisted) by rule '
+    r'|^(\S+) is not banned, skipping unban'
 )
 
 

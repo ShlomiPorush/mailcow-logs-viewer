@@ -5,11 +5,12 @@ address from the first IPv4 anywhere in the line, which holds text the client
 chose (a sasl_username, a Dovecot user=<...>, a non-SMTP command). The
 protection rules could catch, and ban, that address.
 
-The open catches that wait to be banned or reviewed (watching, pending) stay
-only when every log line behind them is still stored and names the caught
-address the way netfilter wrote it; the others are closed as expired, so a
-rule catches the address again if it really attacks. Bans already written to
-Fail2ban are left as they are and logged for review. Lines whose stored
+An open catch that waits to be banned or reviewed (watching, pending) is
+closed as expired when one of its stored log lines names another address
+than the caught one, so a rule catches the address again if it really
+attacks. Lines that retention already deleted prove nothing and close
+nothing. Bans already written to Fail2ban are left as they are; a
+contradicted one is logged for review. Lines whose stored
 address is not the one netfilter named lose the address and its GeoIP data;
 the message itself is kept.
 
@@ -37,14 +38,15 @@ depends_on = None
 logger = logging.getLogger("app.migrations")
 
 BAN_RULES = ["trap", "unknown_accounts", "repeat_offender", "subnet", "country"]
-MAX_EVIDENCE = 200  # a catch keeps the ids of its first 200 lines only
 BATCH = 5000
-CLOSED_REASON = "Closed on upgrade: its log lines could not confirm this address as the source."
+CLOSED_REASON = "Closed on upgrade: its log lines name another address as the source."
 
 _RULE_MATCH = re.compile(r'^(\S+) matched rule id \d+')
 _OWN_LINES = re.compile(
     r'^(?:Banning|Unbanning|(?:Add|Added|Remove|Removed) host/network) (\S+)'
     r'|^\d+ more attempts in the next \d+ seconds until (\S+) is banned'
+    r'|^Address (\S+) is (?:allowlisted|whitelisted) by rule '
+    r'|^(\S+) is not banned, skipping unban'
 )
 
 
@@ -73,13 +75,19 @@ def _names(target, ip):
         return False
 
 
-def _confirmed(bind, hit):
+def _contradicted(bind, hit):
+    """One of the catch's stored lines names another address than the caught one,
+    or than the address stored with it. Lines that retention already deleted,
+    and lines that name no address, prove nothing either way."""
     ids = sorted({i for i in (hit.log_ids or []) if isinstance(i, int)})
-    if not ids or len(hit.log_ids or []) >= MAX_EVIDENCE:
-        return False  # nothing to check, or lines past the first 200 were never kept
+    if not ids:
+        return False
     rows = bind.execute(text("SELECT ip, message FROM netfilter_logs WHERE id = ANY(:ids)"), {"ids": ids}).all()
-    return len(rows) == len(ids) and all(
-        r.ip and netfilter_address(r.message) == r.ip and _names(hit.ip, r.ip) for r in rows)
+    for row in rows:
+        named = netfilter_address(row.message)
+        if named is not None and (named != row.ip or not _names(hit.ip, named)):
+            return True
+    return False
 
 
 def _repair_hits(bind):
@@ -89,18 +97,18 @@ def _repair_hits(bind):
         "WHERE status IN ('watching', 'pending', 'banned') AND rule = ANY(:rules) ORDER BY id"
     ), {"rules": BAN_RULES}).all()
     for hit in hits:
-        if _confirmed(bind, hit):
+        if not _contradicted(bind, hit):
             continue
         if hit.status == "banned":
             logger.warning(f"[PROTECTION] Upgrade: {hit.ip} stays banned by the {hit.rule} rule, but its log lines "
-                           f"could not confirm the address as the source. Review it on the Security page.")
+                           f"name another address as the source. Review it on the Security page.")
             continue
         bind.execute(text(
             "UPDATE protection_hits SET status = 'expired', mode = 'watch', ended_at = :now, error = NULL, "
             "reason = :reason WHERE id = :id"
         ), {"now": now, "reason": CLOSED_REASON, "id": hit.id})
         logger.warning(f"[PROTECTION] Upgrade: closed the {hit.status} catch of {hit.ip} by the {hit.rule} rule, "
-                       f"its log lines could not confirm the address as the source")
+                       f"its log lines name another address as the source")
 
 
 def _repair_lines(bind):
