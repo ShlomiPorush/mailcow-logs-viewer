@@ -213,27 +213,65 @@ def test_detection_waits_until_every_domain_is_known(env, monkeypatch):
     from app import config
     email = f'later@{REMOTE}'
     env.bounce(email)
-    monkeypatch.setattr(config, '_cached_domains_complete', False)
+    monkeypatch.setattr(config, '_cached_domains_complete', None)
+    monkeypatch.setattr(env.sch_, 'sync_local_domains', AsyncMock(return_value=False))   # mailcow does not answer
     env.detect()
     assert env.row(email) is None
+    env.sch_.sync_local_domains.assert_awaited()
     env.sch_.update_job_status.assert_called_with('detect_suppressions', 'failed', env.sch_._DOMAINS_WAIT)
 
-    monkeypatch.setattr(config, '_cached_domains_complete', True)
+    monkeypatch.setattr(config, '_cached_domains_complete', env.sch_.mailcow_api.base_url)
     env.detect()
     assert env.row(email).active, 'the line is read once the domains are known'
 
 
 def test_only_a_full_domain_sync_counts_as_every_domain_known(monkeypatch):
     from app import config, scheduler
+    url = scheduler.mailcow_api.base_url
     monkeypatch.setattr(config, '_cached_active_domains', None)
     config.set_cached_active_domains([HOSTED])   # the startup load: primary domains only
-    assert not config.local_domains_complete()
+    assert not config.local_domains_complete(url)
 
     monkeypatch.setattr(scheduler.mailcow_api, 'get_active_domains', AsyncMock(return_value=[HOSTED]))
     monkeypatch.setattr(scheduler.mailcow_api, 'get_alias_domain_map', AsyncMock(side_effect=RuntimeError('down')))
     monkeypatch.setattr(scheduler, 'update_job_status', Mock())
     asyncio.run(scheduler.sync_local_domains())
-    assert not config.local_domains_complete(), 'alias domains failed to load'
+    assert not config.local_domains_complete(url), 'alias domains failed to load'
+
+    monkeypatch.setattr(scheduler.mailcow_api, 'get_alias_domain_map', AsyncMock(return_value={}))
+    asyncio.run(scheduler.sync_local_domains())
+    assert config.local_domains_complete(url)
+    assert not config.local_domains_complete('https://other-mailcow.example.com'), 'read from another mailcow'
+
+
+def test_a_mailcow_changed_during_the_sync_leaves_the_list_incomplete(monkeypatch):
+    from app import config, scheduler
+    monkeypatch.setattr(config, '_cached_active_domains', None)
+    monkeypatch.setattr(config, '_cached_domains_complete', None)
+    monkeypatch.setattr(scheduler, 'update_job_status', Mock())
+
+    async def domains():
+        monkeypatch.setattr(scheduler.mailcow_api, 'base_url', 'https://other-mailcow.example.com')
+        return [HOSTED]
+    monkeypatch.setattr(scheduler.mailcow_api, 'get_active_domains', domains)
+    monkeypatch.setattr(scheduler.mailcow_api, 'get_alias_domain_map', AsyncMock(return_value={}))
+    asyncio.run(scheduler.sync_local_domains())
+    assert not config.local_domains_complete('https://other-mailcow.example.com')
+
+
+@pytest.mark.parametrize('answer,expected', [
+    ([], {}), ({}, {}),
+    ([{'alias_domain': f'Alias.{HOSTED}', 'target_domain': HOSTED, 'active': 1}], {f'alias.{HOSTED}': HOSTED}),
+    ({'type': 'error', 'msg': 'access denied'}, None),
+])
+def test_an_alias_domain_answer_that_is_not_a_list_of_them_is_an_error(monkeypatch, answer, expected):
+    from app.mailcow_api import MailcowAPIError, mailcow_api
+    monkeypatch.setattr(mailcow_api, '_make_request', AsyncMock(return_value=answer))
+    if expected is None:
+        with pytest.raises(MailcowAPIError):
+            asyncio.run(mailcow_api.get_alias_domain_map())
+    else:
+        assert asyncio.run(mailcow_api.get_alias_domain_map()) == expected
 
 
 # ---------- the stuck-queue cleanup ----------
@@ -283,7 +321,8 @@ def test_stuck_mail_to_a_hosted_mailbox_stays_in_the_queue_unblocked(queue):
 def test_the_cleanup_waits_until_every_domain_is_known(queue, monkeypatch):
     from app import config
     sch, stored = queue
-    monkeypatch.setattr(config, '_cached_domains_complete', False)
+    monkeypatch.setattr(config, '_cached_domains_complete', 'https://other-mailcow.example.com')
+    monkeypatch.setattr(sch, 'sync_local_domains', AsyncMock(return_value=False))
     asyncio.run(sch.cleanup_deferred_queue_job())
     assert stored == []
     sch.mailcow_api.delete_queue.assert_not_awaited()

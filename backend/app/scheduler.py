@@ -2754,13 +2754,16 @@ async def sync_local_domains():
     update_job_status('sync_local_domains', 'running')
     
     try:
+        # Both lists come from one mailcow: one that changed in Settings
+        # meanwhile leaves the list incomplete until the next sync
+        source = mailcow_api.base_url
         active_domains = await mailcow_api.get_active_domains()
         alias_map = await mailcow_api.get_alias_domain_map()
         alias_domains = sorted(alias_map.keys())
         # Merge: primary domains + alias domains (no duplicates)
         all_domains = list(dict.fromkeys((active_domains or []) + (alias_domains or [])))
         if all_domains:
-            set_cached_active_domains(all_domains, complete=True)
+            set_cached_active_domains(all_domains, complete_for=source if mailcow_api.base_url == source else None)
             # Persist which primary domain each alias points at, so mailbox
             # statistics and the Domains page can use the mapping (issue #92)
             try:
@@ -3666,6 +3669,18 @@ _BOUNCE_AGENTS = tuple(a for a in POSTFIX_DELIVERY_AGENTS if a not in _LOCAL_DEL
 _DOMAINS_WAIT = "Waiting for the list of this mailcow's domains, so mail to them is never blocked or deleted"
 
 
+async def _local_domains_known(job: str) -> bool:
+    """Whether every domain of the mailcow the app talks to now is known,
+    reading them first when not (at startup, or after mailcow changed in
+    Settings). Until then the job does nothing, and Status says why."""
+    if not local_domains_complete(mailcow_api.base_url):
+        await sync_local_domains()
+    if local_domains_complete(mailcow_api.base_url):
+        return True
+    update_job_status(job, 'failed', _DOMAINS_WAIT)
+    return False
+
+
 def _cleanup_deletable(items: Dict[str, List[str]], blocking: bool) -> List[str]:
     """Of the stuck messages the cleanup picked, the ones it may delete now,
     under the map lock (no Rspamd sync between this and the deletion): the
@@ -3755,8 +3770,7 @@ async def cleanup_deferred_queue_job():
         return
     if not mailcow_api.has_rw_key:
         return
-    if not local_domains_complete():
-        update_job_status('cleanup_deferred_queue', 'failed', _DOMAINS_WAIT)
+    if not await _local_domains_known('cleanup_deferred_queue'):
         return
     # Decided once per run: a message picked to be blocked is deleted only with its block
     blocking = cleanup_blocks()
@@ -4719,8 +4733,7 @@ async def detect_suppressions_job():
     """
     if not handling_on() or not settings.suppression_auto_detect:
         return
-    if not local_domains_complete():
-        update_job_status('detect_suppressions', 'failed', _DOMAINS_WAIT)
+    if not await _local_domains_known('detect_suppressions'):
         return
     if not await _spam_blocks_loaded('detect_suppressions'):
         return

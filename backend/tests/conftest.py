@@ -72,4 +72,5 @@ def local_domains_loaded(monkeypatch):
     """The automatic suppression jobs wait until every domain of this mailcow is
     known; a test runs with that list loaded unless it says otherwise."""
     from app import config
-    monkeypatch.setattr(config, "_cached_domains_complete", True)
+    from app.mailcow_api import mailcow_api
+    monkeypatch.setattr(config, "_cached_domains_complete", mailcow_api.base_url)

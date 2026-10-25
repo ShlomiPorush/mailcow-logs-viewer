@@ -392,28 +392,36 @@ async function saveMapContent(filename) {
 
         const result = await response.json();
         showMapConflict(filename, false);
-        mapEditorHash = result.content_hash || null;
-        if (!mapEditorHash) {
+        const textarea = document.getElementById('map-editor-content');
+        // Edits typed while the save ran were not sent: they stay in the editor
+        const typedMeanwhile = !!textarea && textarea.value !== content;
+        const saved = typeof result.content === 'string' ? result.content : content;
+        const entries = uiCountLabel(result.entry_count, 'entry', 'entries');
+        if (!result.content_hash && !typedMeanwhile) {
             // Saved, but not read back: open it again so the next save checks the map as it is
-            showToast(`Map saved (${uiCountLabel(result.entry_count, 'entry', 'entries')}). It is opened again to show it as saved.`, 'success');
+            showToast(`Map saved (${entries}). It is opened again to show it as saved.`, 'success');
             mapEditorSaved = null;
             openMapEditor(filename);
             return;
         }
-        if (result.normalized_entries > 0) {
-            // Bare addresses were anchored server side - reflect the saved form
-            const textarea = document.getElementById('map-editor-content');
-            if (textarea && typeof result.content === 'string') textarea.value = result.content;
-            mapEditorSaved = typeof result.content === 'string' ? result.content : content;
-            showToast(`Map saved (${uiCountLabel(result.entry_count, 'entry', 'entries')}). ${result.normalized_entries} bare address entr${result.normalized_entries === 1 ? 'y was' : 'ies were'} anchored automatically.`, 'success');
+        mapEditorSaved = saved;
+        if (typedMeanwhile) {
+            // The editor no longer shows the map the hash is of: the next save
+            // asks for a Reload instead of writing over what was read back
+            mapEditorHash = '';
         } else {
-            showToast(`Map saved successfully (${uiCountLabel(result.entry_count, 'entry', 'entries')})`, 'success');
+            // The map as saved, with the hash of that same read
+            mapEditorHash = result.content_hash;
+            if (textarea) textarea.value = saved;
         }
-
-        if (!(result.normalized_entries > 0)) mapEditorSaved = content;
+        if (result.normalized_entries > 0) {
+            showToast(`Map saved (${entries}). ${result.normalized_entries} bare address entr${result.normalized_entries === 1 ? 'y was' : 'ies were'} anchored automatically.`, 'success');
+        } else {
+            showToast(`Map saved successfully (${entries})`, 'success');
+        }
         const statusEl = document.getElementById('map-validation-status');
         if (statusEl) statusEl.innerHTML = uiTag('Saved', 'ok');
-        uiSaveBarUpdate('map-savebar', 0);
+        uiSaveBarUpdate('map-savebar', typedMeanwhile ? 1 : 0);
         document.getElementById('map-entry-count').textContent = uiCountLabel(result.entry_count, 'entry', 'entries');
         
     } catch (error) {
