@@ -17,6 +17,10 @@ from app.correlation import correlate_rspamd_log
 LOCAL_A = 'origin-a.example'
 LOCAL_B = 'origin-b.example'
 MARK = uuid.uuid4().hex[:8]
+# An address from outside the server. Not a documentation range (RFC 5737,
+# RFC 3849): Python's is_private covers those, so the origin check reads them as
+# local. 100.64.0.0/10 (RFC 6598) is neither private nor anyone's real client.
+OUTSIDE_IP = '100.64.7.20'
 
 
 def _postgres_available() -> bool:
@@ -80,10 +84,10 @@ def _seed_and_correlate(db, tag, ip, has_auth, user='unknown'):
 
 def test_external_origin_is_not_internal(env):
     """The reported case: local sender domain, local recipient, dovecot
-    delivery - but the mail arrived from a public relay address."""
+    delivery - but the mail arrived from an address outside the server."""
     from app.database import get_db_context
     with get_db_context() as db:
-        c = _seed_and_correlate(db, 'ext', ip='212.199.162.78', has_auth=False)
+        c = _seed_and_correlate(db, 'ext', ip=OUTSIDE_IP, has_auth=False)
         assert c.direction != 'internal', \
             'mail entering from an external address must not be internal'
         assert c.direction == 'inbound'
@@ -92,7 +96,7 @@ def test_external_origin_is_not_internal(env):
 def test_authenticated_submission_is_internal(env):
     from app.database import get_db_context
     with get_db_context() as db:
-        c = _seed_and_correlate(db, 'auth', ip='84.94.10.20', has_auth=True,
+        c = _seed_and_correlate(db, 'auth', ip='203.0.113.20', has_auth=True,
                                 user=f'user@{LOCAL_A}')
         assert c.direction == 'internal'
 
@@ -122,7 +126,7 @@ def test_tainted_stored_internal_is_rederived(env):
                          recipients_smtp=[f'someone@{LOCAL_B}'],
                          action='no action', is_spam=False,
                          direction='internal',
-                         ip='212.199.162.78', user='unknown', has_auth=False)
+                         ip=OUTSIDE_IP, user='unknown', has_auth=False)
         db.add(rlog)
         db.commit()
         c = correlate_rspamd_log(db, rlog)
@@ -151,7 +155,7 @@ def test_leg_created_before_its_scan_is_corrected(env):
                          sender_smtp=f'user@{LOCAL_A}',
                          recipients_smtp=[f'someone@{LOCAL_B}'],
                          action='no action', is_spam=False, direction='inbound',
-                         ip='212.199.162.78', user='unknown', has_auth=False)
+                         ip=OUTSIDE_IP, user='unknown', has_auth=False)
         db.add(rlog)
         db.commit()
         c = correlate_rspamd_log(db, rlog)
@@ -171,4 +175,6 @@ def test_origin_helper_edge_cases():
     s = Stub(); s.ip = '127.0.0.1'
     assert origin_is_local(s) is True
     s = Stub(); s.ip = 'not-an-ip'
+    assert origin_is_local(s) is False
+    s = Stub(); s.ip = OUTSIDE_IP                 # the outside address the tests above use
     assert origin_is_local(s) is False

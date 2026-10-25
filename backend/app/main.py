@@ -324,13 +324,15 @@ configure_cors(app)
 
 # Security headers on every response.
 # CSP notes: the frontend relies on inline event handlers and inline <script>
-# blocks, so script-src needs 'unsafe-inline' (and 'unsafe-eval' for the local
-# Tailwind runtime). The CSP still blocks loading scripts from external hosts,
-# which is the main escalation path for any injected HTML. ws:/wss: are needed
-# for the live log viewer ('self' does not reliably cover WebSocket schemes).
+# blocks, so script-src needs 'unsafe-inline'. Nothing the app serves needs
+# eval, so strings are never run as code ('unsafe-eval' stays out; the Scalar
+# bundle on /docs only probes for it and falls back). The CSP still blocks
+# loading scripts from external hosts, which is the main escalation path for
+# any injected HTML. ws:/wss: are needed for the live log viewer ('self' does
+# not reliably cover WebSocket schemes).
 _CSP = (
     "default-src 'self'; "
-    "script-src 'self' 'unsafe-inline' 'unsafe-eval'; "
+    "script-src 'self' 'unsafe-inline'; "
     "style-src 'self' 'unsafe-inline'; "
     "img-src 'self' data: https:; "
     "font-src 'self' data:; "
