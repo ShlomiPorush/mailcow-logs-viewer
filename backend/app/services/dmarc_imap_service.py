@@ -12,8 +12,6 @@ from typing import List, Dict, Optional, Tuple
 from email.message import EmailMessage
 from email.header import decode_header as decode_rfc2047
 
-from sqlalchemy.exc import SQLAlchemyError
-
 from ..config import settings
 from .mail_tls import mail_tls_context, certificate_error_hint
 from ..database import SessionLocal
@@ -25,7 +23,7 @@ from ..services.report_identity import (
     ReportRejectedError,
     report_kind,
 )
-from ..services.report_store import prepare_report_file, store_report
+from ..services.report_store import ReportNotStored, prepare_report_file, store_report
 from ..services.dmarc_notifications import send_dmarc_error_notification
 from ..services.dmarc_cache import clear_dmarc_cache
 
@@ -391,10 +389,11 @@ class DMARCImapService:
         created = duplicate = 0
         keep = False
         try:
-            for filename, report in prepared:
+            # One order for the report ID locks, whatever the order of the files
+            for filename, report in sorted(prepared, key=lambda item: (item[1].kind, item[1].report_id)):
                 try:
                     status, _ = store_report(db, report)
-                except SQLAlchemyError as e:
+                except ReportNotStored as e:
                     # The report's own savepoint is rolled back; the others stay
                     attachment_errors.append(f"Error processing {filename}: {e}")
                     logger.error(f"Error processing {filename}: {e}")

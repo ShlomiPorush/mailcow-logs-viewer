@@ -38,11 +38,11 @@ def _text(data: dict, key: str, default):
     return value
 
 
-def _session_count(summary: dict, key: str):
-    """0 when missing, None when null, as stored before; else a whole number in range."""
-    value = summary.get(key, 0)
+def _session_count(summary: dict, key: str) -> int:
+    """0 when missing or null (the column default stores null as 0); else a whole number in range."""
+    value = summary.get(key)
     if value is None:
-        return None
+        return 0
     if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= MAX_STORED_COUNT:
         raise ValueError("A session count of the report is not a whole number in range")
     return value

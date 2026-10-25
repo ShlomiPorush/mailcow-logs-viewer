@@ -24,7 +24,6 @@ from unittest.mock import Mock
 import pytest
 from fastapi import HTTPException
 from sqlalchemy import create_engine, inspect, text
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 
 from app.database import Base
@@ -423,13 +422,23 @@ EDGE_DETAILS = [{"result-type": "validation-failure", "a": 1e23, "b": 1e20, "c":
 
 def test_the_hash_of_a_stored_report_equals_its_hash_on_arrival(env):
     content = tls_json(policies=((1, 2, EDGE_DETAILS), (3, 4, None)))
-    upload("t.json", content)
-    upload("a.xml.gz", dmarc_gz(records=distinct_records(5)))
+    # Null values, as some reporters send them
+    nulls = json.loads(tls_json(report_id="nulls"))
+    nulls["organization-name"] = nulls["contact-info"] = None
+    nulls["policies"][0]["policy"]["policy-type"] = None
+    nulls["policies"][0]["summary"] = {"total-successful-session-count": None, "total-failure-session-count": None}
+    nulls["policies"][0]["failure-details"] = None
+    nulls = json.dumps(nulls).encode()
+    for name, file in (("t.json", content), ("n.json", nulls),
+                       ("a.xml.gz", dmarc_gz(records=distinct_records(5)))):
+        assert upload(name, file)["status"] == "success"
     with env.Session() as db:
-        for kind, model in (("tls-rpt", TLSReport), ("dmarc", DMARCReport)):
-            row = db.query(model).one()
+        rows =[("tls-rpt", row) for row in db.query(TLSReport)] + [("dmarc", db.query(DMARCReport).one())]
+        assert len(rows) == 3
+        for kind, row in rows:
             assert report_store.stored_content_hash(db, kind, row) == row.content_hash
     assert upload("t.json", content)["status"] == "duplicate"
+    assert upload("n.json", nulls)["status"] == "duplicate"
 
 
 def test_reports_stored_without_a_hash_are_matched_and_hashed(env):
@@ -478,7 +487,7 @@ def test_the_same_report_stored_at_the_same_moment_is_a_duplicate(env, monkeypat
 
     calls.clear()
     monkeypatch.setattr(report_store, "_constraint", lambda error: "some_other_constraint")
-    with pytest.raises(IntegrityError):
+    with pytest.raises(report_store.ReportNotStored):
         upload("a.xml.gz", report)
 
 
@@ -663,8 +672,9 @@ def test_a_migration_that_fails_midway_changes_nothing(isolated_engine, monkeypa
 
 
 def test_migration_keeps_nulls_an_older_version_stored(isolated_engine):
-    # An older version stored null fields of a TLS report as NULL; the report
-    # sent again must still match the stored one
+    # An older version stored null text fields and failure details of a TLS
+    # report as NULL, and a null count as 0 (the column default); sent again,
+    # the report must still match the stored one
     revision = _revision()
     _old_schema(isolated_engine, legacy=False)
     data = json.loads(tls_json())
@@ -680,7 +690,7 @@ def test_migration_keeps_nulls_an_older_version_stored(isolated_engine):
             "end_datetime": datetime(2026, 11, 2, 23, 59, 59),
             "policies": [{"policy_type": None, "policy_domain": "example.com",
                           "policy_string": ["version: STSv1", "mode: enforce"], "mx_host": ["mail.example.com"],
-                          "successful_session_count": 3, "failed_session_count": None,
+                          "successful_session_count": 3, "failed_session_count": 0,
                           "failure_details": None}]})
     _upgrade(isolated_engine, revision)
     with isolated_engine.connect() as conn:

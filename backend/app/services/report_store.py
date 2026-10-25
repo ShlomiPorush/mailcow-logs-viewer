@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from typing import Dict, Iterable, List, Optional, Set, Tuple
 
 from sqlalchemy import func, text
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from ..models import DMARCReport, DMARCRecord, TLSReport, TLSReportPolicy
@@ -142,6 +142,12 @@ def _hash_unhashed(db: Session, spec: _Kind, kind: str, prepared: PreparedReport
     return match
 
 
+class ReportNotStored(Exception):
+    """The database refused this report; its savepoint is rolled back and the
+    session can store other reports. Any other error leaves the transaction
+    unusable: the caller rolls it back as a whole."""
+
+
 def store_report(db: Session, prepared: PreparedReport) -> Tuple[str, object]:
     """('created', row), ('conflict', row) when it was stored next to another
     report with the same report_id, or ('duplicate', the stored row).
@@ -167,14 +173,14 @@ def store_report(db: Session, prepared: PreparedReport) -> Tuple[str, object]:
                     row = enrich_dmarc_record(row)
                 db.add(spec.child(**row))
             db.flush()
-    except IntegrityError as e:
-        # The same report stored at the same moment by another import
-        if _constraint(e) != spec.constraint:
-            raise
-        existing = _same_report(db, spec, prepared.report_id, prepared.content_hash)
-        if existing is None:
-            raise
-        return 'duplicate', existing
+    except SQLAlchemyError as e:
+        # Only this report's savepoint is rolled back; the session stays usable
+        if isinstance(e, IntegrityError) and _constraint(e) == spec.constraint:
+            # The same report stored at the same moment by another import
+            existing = _same_report(db, spec, prepared.report_id, prepared.content_hash)
+            if existing is not None:
+                return 'duplicate', existing
+        raise ReportNotStored(str(e)) from e
 
     if db.query(spec.report.id).filter(
             spec.report.report_id == prepared.report_id, spec.report.id != report.id).first():
