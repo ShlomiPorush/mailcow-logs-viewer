@@ -1336,7 +1336,7 @@ Saves settings to the database. Needs `SETTINGS_EDIT_VIA_UI_ENABLED=true`, else 
 - A key an environment variable sets can be saved, but has no effect while the variable is set; no error is returned. Keys that are not editable settings are ignored.
 - A changed server or account address cannot reuse a masked stored secret; send the secret again for the new destination.
 
-After saving, the app reloads the settings, the mailcow client and the OAuth2 client, reschedules the interval jobs, and deletes some data of features that are now off (see [purge-feature-data](#post-apisettingspurge-feature-data)). Changing sign-in settings revokes existing sessions; the caller gets a replacement session cookie.
+After saving, the app reloads the settings, the mailcow client and the OAuth2 client, reschedules the interval jobs, and deletes some data of features that are now off (see [purge-feature-data](#post-apisettingspurge-feature-data)). Changing sign-in settings revokes existing sessions; the caller gets a replacement session cookie, unless sign-in changed again since its request began or no session could be issued, in which case it signs in again.
 
 Returns `settings_edit_via_ui_enabled`, `settings_migrated`, `configuration`, `mailcow_rw_key_changed` and `rspamd_password_changed`. Each `*_changed` is `true` when that credential is set after the save and it, or the address it is sent to, changed. A body with no editable change saves nothing and returns the configuration without these two keys.
 

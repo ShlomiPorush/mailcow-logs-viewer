@@ -1279,9 +1279,9 @@ def reload_settings(db: Optional[Any] = None) -> Settings:
             logger.error("Settings reload failed, keeping the current settings: %s", e)
             raise
         _settings_wrapper._inner = new_inner
-    # Re-apply log level to root logger (setup_logging ran at import time with the old level)
-    root = logging.getLogger()
-    root.setLevel(getattr(logging, new_inner.log_level, logging.WARNING))
+        # Re-apply log level to root logger (setup_logging ran at import time with the old level)
+        root = logging.getLogger()
+        root.setLevel(getattr(logging, new_inner.log_level, logging.WARNING))
     return new_inner
 
 

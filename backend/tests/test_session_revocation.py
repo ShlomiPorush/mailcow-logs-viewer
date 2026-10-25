@@ -128,17 +128,34 @@ def test_a_reload_elsewhere_cannot_bring_the_old_password_back(store, monkeypatc
     change's own reload brought the old password back, and the change ended no
     session. Reloads are serialized with the save, so the GET reads after it."""
     stolen, operator = signed_in(), signed_in()
-    get_read, put_reloaded = threading.Event(), threading.Event()
+    # get_arrived: the GET read the stored settings, or waits for the reload lock
+    get_arrived, get_read, put_reloaded = threading.Event(), threading.Event(), threading.Event()
     get_thread, errors = {}, []
     read = ss.get_config_overrides_from_db
 
+    def is_get():
+        return threading.current_thread() is get_thread.get("thread")
+
     def read_stored(db, types_):
         values = read(db, types_)
-        if threading.current_thread() is get_thread.get("thread"):
+        if is_get():
             get_read.set()
+            get_arrived.set()
             # Puts what it read in force only after the save's reload
             put_reloaded.wait(timeout=5)
         return values
+
+    class WatchedLock:
+        def __init__(self, lock):
+            self.lock = lock
+
+        def __enter__(self):
+            if is_get():
+                get_arrived.set()
+            return self.lock.__enter__()
+
+        def __exit__(self, *exc):
+            return self.lock.__exit__(*exc)
 
     def get_settings():
         try:
@@ -149,17 +166,22 @@ def test_a_reload_elsewhere_cannot_bring_the_old_password_back(store, monkeypatc
     def save(db, values):
         thread = get_thread["thread"] = threading.Thread(target=get_settings, daemon=True)
         thread.start()
-        # The GET reads now if nothing holds it back
-        get_read.wait(timeout=1)
+        # The GET reads the settings as they are before this save, or waits
+        assert get_arrived.wait(timeout=5)
         store.update(values)
 
     real_transition = settings_router._record_list_transition
 
     def after_reload(*args, **kwargs):
         put_reloaded.set()
-        get_thread["thread"].join(timeout=1)
+        if get_read.is_set():
+            # It read before the save: it puts the old settings in force now
+            get_thread["thread"].join(timeout=5)
         return real_transition(*args, **kwargs)
 
+    # The GET's reload, not the save's (which holds the lock already)
+    monkeypatch.setattr(cfg, "settings_reload_lock", WatchedLock(getattr(cfg, "settings_reload_lock", None)),
+                        raising=False)
     monkeypatch.setattr(ss, "get_config_overrides_from_db", read_stored)
     monkeypatch.setattr(settings_router, "save_config_overrides_to_db", save)
     monkeypatch.setattr(settings_router, "_record_list_transition", after_reload)
@@ -250,3 +272,25 @@ def test_the_saver_is_not_signed_in_again_after_a_later_change(monkeypatch):
     assert operator.get("/api/auth/verify").status_code == 401
     assert stolen.get("/api/auth/verify").status_code == 401
     assert not session._session_store
+
+
+def test_the_oauth2_client_takes_the_new_provider_before_new_sessions_begin(monkeypatch):
+    """A login let in after the revocation gets a session; it must finish
+    with the new provider, not with the client still set up for the old one."""
+    client = settings_router.oauth2_client
+    for name in ("issuer_url", "client_id", "client_secret", "redirect_uri", "scopes",
+                 "authorization_url", "token_url", "userinfo_url", "_discovery_cache"):
+        monkeypatch.setattr(client, name, getattr(client, name, None), raising=False)
+    monkeypatch.setattr(client, "reload_config", type(client).reload_config.__get__(client))
+    token_url_at_revocation = []
+    revoke = settings_router.revoke_all_sessions
+
+    def note_then_revoke():
+        token_url_at_revocation.append(client.token_url)
+        return revoke()
+
+    monkeypatch.setattr(settings_router, "revoke_all_sessions", note_then_revoke)
+    operator = signed_in()
+    response = operator.put("/api/settings", json={"oauth2_token_url": "https://id.example.test/new-token"})
+    assert response.status_code == 200
+    assert token_url_at_revocation == ["https://id.example.test/new-token"]

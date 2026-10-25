@@ -1017,6 +1017,9 @@ def update_settings(body: Dict[str, Any], request: Request = None, response: Res
                 db, list_was_kept, spam_list_kept(), switched=_spam_list_switches() != switches_before)
     finally:
         guard.__exit__(None, None, None)
+    # The OAuth2 client takes the new provider before the new sessions begin: a
+    # login let in after the revocation below must not finish with the old one
+    oauth2_client.reload_config()
     if _session_bound_values(saved) != prev_sign_in:
         revoked = revoke_all_sessions()
         # Connected agents end with the sessions, for good (agent_access/store.py).
@@ -1041,7 +1044,6 @@ def update_settings(body: Dict[str, Any], request: Request = None, response: Res
     feature_data_errors = cleanup_disabled_feature_data(db)
     run_feature_data_sweep_soon()
     mailcow_api.reload_config()
-    oauth2_client.reload_config()
     reschedule_interval_jobs()
 
     # A transports/relayhosts source that was just switched on should populate
