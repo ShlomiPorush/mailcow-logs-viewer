@@ -463,14 +463,14 @@ Native `title` tooltips. Dynamic ones show the expression that builds the text.
 | Settings | "Last delivery failed" | `frontend/notifications.js:69` (renderNotificationChannels) |
 | Settings | "Not used yet" | `frontend/notifications.js:70` (renderNotificationChannels) |
 | Settings | dynamic: `${escapeHtml(ch.last_error)}` | `frontend/notifications.js:78` (renderNotificationChannels) |
-| Settings | "Set by an environment variable, change it there" | `frontend/settings.js:438` (settingsBounceChoice) |
-| Settings | "Differs from the default" | `frontend/settings.js:439` (settingsBounceChoice) |
-| Settings | "Set by an environment variable, change it there" | `frontend/settings.js:1295` (renderSettingsEditField) |
-| Settings | "Differs from the default" | `frontend/settings.js:1342` (renderSettingsEditField) |
-| Settings | "Differs from the default" | `frontend/settings.js:1377` (renderSettingsEditField) |
-| Settings | dynamic: `${escapeHtml(known[1])}` | `frontend/settings.js:2683` (renderCredentialStatus) |
-| Settings | dynamic: `${escapeHtml(CREDENTIAL_CHECKS[name].missing)}` | `frontend/settings.js:2694` (credentialValidateButton) |
-| Settings | "Add a MaxMind Account ID and License Key first" | `frontend/settings.js:2767` (maxmindValidateButton) |
+| Settings | "Set by an environment variable, change it there" | `frontend/settings.js:440` (settingsBounceChoice) |
+| Settings | "Differs from the default" | `frontend/settings.js:441` (settingsBounceChoice) |
+| Settings | "Set by an environment variable, change it there" | `frontend/settings.js:1297` (renderSettingsEditField) |
+| Settings | "Differs from the default" | `frontend/settings.js:1344` (renderSettingsEditField) |
+| Settings | "Differs from the default" | `frontend/settings.js:1379` (renderSettingsEditField) |
+| Settings | dynamic: `${escapeHtml(known[1])}` | `frontend/settings.js:2685` (renderCredentialStatus) |
+| Settings | dynamic: `${escapeHtml(CREDENTIAL_CHECKS[name].missing)}` | `frontend/settings.js:2696` (credentialValidateButton) |
+| Settings | "Add a MaxMind Account ID and License Key first" | `frontend/settings.js:2769` (maxmindValidateButton) |
 | Shared | dynamic: `${escapeHtml(title)}` | `frontend/utils.js:164` (uiCorrelationTag) |
 | Shared | dynamic: `${escapeHtml(title)}` | `frontend/utils.js:660` (uiTime) |
 | Shared | "Close" | `frontend/utils.js:764` (showToast) |
@@ -652,29 +652,29 @@ Transient notifications from `showToast(message, type)` (utils.js). Type default
 | Settings | "Could not delete destination" [error] | `frontend/notifications.js:253` (deleteNotificationChannel) |
 | Settings | "Destination deleted" [success] | `frontend/notifications.js:254` (deleteNotificationChannel) |
 | Settings | "Could not delete destination" [error] | `frontend/notifications.js:257` (deleteNotificationChannel) |
-| Settings | "Save the mailcow or Rspamd connection change first, then turn Sync with Rspamd on or off." [error] | `frontend/settings.js:679` (settingsRspamdTransition) |
-| Settings | dynamic: `bad.length === 1 ? `${name}: ${first.validationMessage}` : `${bad.length} fie...` [error] | `frontend/settings.js:1485` (settingsCheckFields) |
-| Settings | "Cannot enable Basic Auth without a password. Please set a password first." [error] | `frontend/settings.js:2118` (renderSettings) |
-| Settings | dynamic: ``Sync with Rspamd is still off. ${settingsErrorText(body, res.statusText)}`` [error] | `frontend/settings.js:2169` (renderSettings) |
-| Settings | dynamic: ``Sync with Rspamd is still off. Rspamd could not be reached: ${freshErr.messa...` [error] | `frontend/settings.js:2173` (renderSettings) |
-| Settings | dynamic: `...checkToast` [info] | `frontend/settings.js:2212` (renderSettings) |
-| Settings | "Basic Auth enabled successfully! You will need to log in on your next visit." [success] | `frontend/settings.js:2214` (renderSettings) |
-| Settings | dynamic: ``Purging data for ${purgeableNewlyDisabled.length} disabled feature(s)...`` [info] | `frontend/settings.js:2230` (renderSettings) |
-| Settings | dynamic: `featuresChanged ? 'Features updated - reloading...' : 'Settings saved - reloa...` [success] | `frontend/settings.js:2284` (renderSettings) |
-| Settings | "Settings saved" [success] | `frontend/settings.js:2289` (renderSettings) |
-| Settings | dynamic: `'Failed to save: ' + (err.message \|\| err)` [error] | `frontend/settings.js:2293` (renderSettings) |
-| Settings | dynamic: `'Import failed: ' + (err.message \|\| err)` [error] | `frontend/settings.js:2310` (renderSettings) |
-| Settings | "MaxMind license is valid" [success] | `frontend/settings.js:2552` (validateMaxMindLicense) |
-| Settings | dynamic: `'MaxMind license validation failed: ' + result.error` [error] | `frontend/settings.js:2554` (validateMaxMindLicense) |
-| Settings | "Failed to validate MaxMind license" [error] | `frontend/settings.js:2563` (validateMaxMindLicense) |
-| Settings | "GeoIP database re-download started…" [info] | `frontend/settings.js:2588` (repairGeoIPDatabase) |
-| Settings | "GeoIP databases repaired successfully" [success] | `frontend/settings.js:2611` (repairGeoIPDatabase) |
-| Settings | "GeoIP databases re-downloaded but validation still failed" [error] | `frontend/settings.js:2613` (repairGeoIPDatabase) |
-| Settings | "GeoIP repair timed out - check Status page for progress" [warning] | `frontend/settings.js:2626` (repairGeoIPDatabase) |
-| Settings | dynamic: `'Failed to repair GeoIP databases: ' + error.message` [error] | `frontend/settings.js:2637` (repairGeoIPDatabase) |
-| Settings | dynamic: `...toast` [info] | `frontend/settings.js:2728` (validateCredential) |
-| Settings | dynamic: `...toast` [info] | `frontend/settings.js:2735` (validateCredential) |
-| Settings | dynamic: `String(toast[0])` [toast[1] === 'suc...] | `frontend/settings.js:2752` (showSettingsToastAfterReload) |
+| Settings | "Save the mailcow or Rspamd connection change first, then turn Sync with Rspamd on or off." [error] | `frontend/settings.js:681` (settingsRspamdTransition) |
+| Settings | dynamic: `bad.length === 1 ? `${name}: ${first.validationMessage}` : `${bad.length} fie...` [error] | `frontend/settings.js:1487` (settingsCheckFields) |
+| Settings | "Cannot enable Basic Auth without a password. Please set a password first." [error] | `frontend/settings.js:2120` (renderSettings) |
+| Settings | dynamic: ``Sync with Rspamd is still off. ${settingsErrorText(body, res.statusText)}`` [error] | `frontend/settings.js:2171` (renderSettings) |
+| Settings | dynamic: ``Sync with Rspamd is still off. Rspamd could not be reached: ${freshErr.messa...` [error] | `frontend/settings.js:2175` (renderSettings) |
+| Settings | dynamic: `...checkToast` [info] | `frontend/settings.js:2214` (renderSettings) |
+| Settings | "Basic Auth enabled successfully! You will need to log in on your next visit." [success] | `frontend/settings.js:2216` (renderSettings) |
+| Settings | dynamic: ``Purging data for ${purgeableNewlyDisabled.length} disabled feature(s)...`` [info] | `frontend/settings.js:2232` (renderSettings) |
+| Settings | dynamic: `featuresChanged ? 'Features updated - reloading...' : 'Settings saved - reloa...` [success] | `frontend/settings.js:2286` (renderSettings) |
+| Settings | "Settings saved" [success] | `frontend/settings.js:2291` (renderSettings) |
+| Settings | dynamic: `'Failed to save: ' + (err.message \|\| err)` [error] | `frontend/settings.js:2295` (renderSettings) |
+| Settings | dynamic: `'Import failed: ' + (err.message \|\| err)` [error] | `frontend/settings.js:2312` (renderSettings) |
+| Settings | "MaxMind license is valid" [success] | `frontend/settings.js:2554` (validateMaxMindLicense) |
+| Settings | dynamic: `'MaxMind license validation failed: ' + result.error` [error] | `frontend/settings.js:2556` (validateMaxMindLicense) |
+| Settings | "Failed to validate MaxMind license" [error] | `frontend/settings.js:2565` (validateMaxMindLicense) |
+| Settings | "GeoIP database re-download started…" [info] | `frontend/settings.js:2590` (repairGeoIPDatabase) |
+| Settings | "GeoIP databases repaired successfully" [success] | `frontend/settings.js:2613` (repairGeoIPDatabase) |
+| Settings | "GeoIP databases re-downloaded but validation still failed" [error] | `frontend/settings.js:2615` (repairGeoIPDatabase) |
+| Settings | "GeoIP repair timed out - check Status page for progress" [warning] | `frontend/settings.js:2628` (repairGeoIPDatabase) |
+| Settings | dynamic: `'Failed to repair GeoIP databases: ' + error.message` [error] | `frontend/settings.js:2639` (repairGeoIPDatabase) |
+| Settings | dynamic: `...toast` [info] | `frontend/settings.js:2730` (validateCredential) |
+| Settings | dynamic: `...toast` [info] | `frontend/settings.js:2737` (validateCredential) |
+| Settings | dynamic: `String(toast[0])` [toast[1] === 'suc...] | `frontend/settings.js:2754` (showSettingsToastAfterReload) |
 | Shared | "Download started." [success] | `frontend/export.js:38` (exportCSV) |
 | Shared | dynamic: `error.message \|\| 'Could not export CSV. Please try again.'` [error] | `frontend/export.js:41` (exportCSV) |
 | Shared | "Copying needs HTTPS. Select the text and copy it yourself." [error] | `frontend/utils.js:704` (copyToClipboard) |
@@ -738,9 +738,9 @@ Every action that asks before it acts. Losing one turns a guarded action into a 
 | Mailbox stats | showConfirmModal: dynamic: `{ title: value === 0 ? 'Remove rate limits' : 'Apply rate limit', message: va...` | `frontend/rate-limits.js:959` (applyRateLimitBulk) |
 | Mailbox stats | showConfirmModal: dynamic: `{ title: 'Remove rate limit', message: `Remove the rate limit on ${name}? It ...` | `frontend/rate-limits.js:1134` (removeRateLimit) |
 | Settings | showConfirmModal: dynamic: `{ title: 'Delete destination', message: `Delete "${channel ? channel.name : '...` | `frontend/notifications.js:244` (deleteNotificationChannel) |
-| Settings | confirm: dynamic: `turning // Suppressions off has its own confirmation` | `frontend/settings.js:690` (settingsRspamdTransition) |
-| Settings | showFeatureDisableConfirmModal: dynamic: `confirmNewlyDisabled` | `frontend/settings.js:2152` (renderSettings) |
-| Settings | showConfirmModal: dynamic: `{ title: 'Import from ENV', message: 'Import current configuration from ENV i...` | `frontend/settings.js:2299` (renderSettings) |
+| Settings | confirm: dynamic: `turning // Suppressions off has its own confirmation` | `frontend/settings.js:692` (settingsRspamdTransition) |
+| Settings | showFeatureDisableConfirmModal: dynamic: `confirmNewlyDisabled` | `frontend/settings.js:2154` (renderSettings) |
+| Settings | showConfirmModal: dynamic: `{ title: 'Import from ENV', message: 'Import current configuration from ENV i...` | `frontend/settings.js:2301` (renderSettings) |
 | Shared | confirm: dynamic: `` | `frontend/utils.js:895` |
 | Shared | showConfirmModal: dynamic: `{ title: 'Discard your changes?', message: 'What you changed in this window i...` | `frontend/utils.js:993` (uiCloseGuarded) |
 | Shared | showConfirmModal: dynamic: `{ title: 'Leave without saving?', message: `You have ${changes}. Leaving drop...` | `frontend/utils.js:1074` (uiConfirmLeave) |
@@ -769,7 +769,7 @@ Places that render Markdown (help pages, changelogs) through `renderMarkdown` (m
 | Page | What | Code |
 |---|---|---|
 | Status | renders `versionInfo.changelog` | `frontend/about.js:194` (wireVersionPanel) |
-| Settings | renders `versionInfo.changelog` | `frontend/settings.js:1624` (updateVersionInfoUI) |
+| Settings | renders `versionInfo.changelog` | `frontend/settings.js:1626` (updateVersionInfoUI) |
 | Modal: changelog-modal | renders `markdownContent` | `frontend/app.js:1019` (showMarkdownModal) |
 | Modal: changelog-modal | renders `changelog` | `frontend/app.js:6040` (showChangelogModal) |
 
@@ -787,22 +787,22 @@ Buttons, tabs and fields whose behavior is attached with `addEventListener` inst
 | DMARC | click on `modal` | `frontend/dmarc.js:1242` (showDmarcSyncHistory) |
 | Settings | click on `cancelBtn` | `frontend/settings.js:109` (showBasicAuthVerifyModal) |
 | Settings | click on `confirmBtn` | `frontend/settings.js:110` (showBasicAuthVerifyModal) |
-| Settings | click on `cancelBtn` | `frontend/settings.js:158` (showFeatureDisableConfirmModal) |
-| Settings | click on `confirmBtn` | `frontend/settings.js:159` (showFeatureDisableConfirmModal) |
-| Settings | click on `overlay` | `frontend/settings.js:166` (showFeatureDisableConfirmModal) |
-| Settings | input on `el` | `frontend/settings.js:1469` (settingsCheckFields) |
-| Settings | click on `btn` | `frontend/settings.js:1957` (renderSettings) |
-| Settings | change on `tabSelect` | `frontend/settings.js:1977` (renderSettings) |
-| Settings | click on `btn` | `frontend/settings.js:1984` (renderSettings) |
-| Settings | change on `cb` | `frontend/settings.js:2015` (renderSettings) |
-| Settings | input on `form` | `frontend/settings.js:2061` (renderSettings) |
-| Settings | change on `form` | `frontend/settings.js:2062` (renderSettings) |
-| Settings | input on `form` | `frontend/settings.js:2067` (renderSettings) |
-| Settings | change on `form` | `frontend/settings.js:2069` (renderSettings) |
-| Settings | change on `form` | `frontend/settings.js:2074` (renderSettings) |
-| Settings | input on `form` | `frontend/settings.js:2080` (renderSettings) |
-| Settings | click on `btn` | `frontend/settings.js:2082` (renderSettings) |
-| Settings | click on `closeBtn` | `frontend/settings.js:2375` (showGeoIPSetupModal) |
+| Settings | click on `cancelBtn` | `frontend/settings.js:159` (showFeatureDisableConfirmModal) |
+| Settings | click on `confirmBtn` | `frontend/settings.js:160` (showFeatureDisableConfirmModal) |
+| Settings | click on `overlay` | `frontend/settings.js:168` (showFeatureDisableConfirmModal) |
+| Settings | input on `el` | `frontend/settings.js:1471` (settingsCheckFields) |
+| Settings | click on `btn` | `frontend/settings.js:1959` (renderSettings) |
+| Settings | change on `tabSelect` | `frontend/settings.js:1979` (renderSettings) |
+| Settings | click on `btn` | `frontend/settings.js:1986` (renderSettings) |
+| Settings | change on `cb` | `frontend/settings.js:2017` (renderSettings) |
+| Settings | input on `form` | `frontend/settings.js:2063` (renderSettings) |
+| Settings | change on `form` | `frontend/settings.js:2064` (renderSettings) |
+| Settings | input on `form` | `frontend/settings.js:2069` (renderSettings) |
+| Settings | change on `form` | `frontend/settings.js:2071` (renderSettings) |
+| Settings | change on `form` | `frontend/settings.js:2076` (renderSettings) |
+| Settings | input on `form` | `frontend/settings.js:2082` (renderSettings) |
+| Settings | click on `btn` | `frontend/settings.js:2084` (renderSettings) |
+| Settings | click on `closeBtn` | `frontend/settings.js:2377` (showGeoIPSetupModal) |
 | Shared | click on `button` | `frontend/utils.js:772` (showToast) |
 | Shared | click on `dialog.querySelector('[data-dialog-x]')` | `frontend/utils.js:888` (uiDialog) |
 | Shared | click on `backdrop` | `frontend/utils.js:889` (uiDialog) |
@@ -929,8 +929,8 @@ Text shown when a list or panel has nothing to show.
 | Logs | "No log entries found" | `frontend/logs-viewer.js:493` (renderLogEntries) |
 | Settings | "No logs available" | `frontend/notifications.js:266` (testNotificationChannel) |
 | Settings | "No logs available" | `frontend/notifications.js:283` (testNotificationChannelDraft) |
-| Settings | "No logs available" | `frontend/settings.js:2812` (testSmtpConnection) |
-| Settings | "No logs available" | `frontend/settings.js:2838` (testImapConnection) |
+| Settings | "No logs available" | `frontend/settings.js:2814` (testSmtpConnection) |
+| Settings | "No logs available" | `frontend/settings.js:2840` (testImapConnection) |
 | app.js (mixed) | "No agents connected yet" | `frontend/agents.js:163` (renderAgentsPanel) |
 | app.js (mixed) | "No activity yet" | `frontend/agents.js:209` (loadAgentActivity) |
 | app.js (mixed) | "No changelog available" | `frontend/app.js:1007` (showAppUpdateModal) |
@@ -968,9 +968,9 @@ Functions that render a spinner or "Loading..." while data is fetched.
 | Status | 1 loading indicator(s) | `frontend/app.js:5987` (triggerBackgroundJob) |
 | DMARC | 1 loading indicator(s) | `frontend/dmarc.js:741` (openDmarcRecord) |
 | Logs | 1 loading indicator(s) | `frontend/logs-viewer.js:1153` (loadDateRangeLogs) |
-| Settings | 2 loading indicator(s) | `frontend/settings.js:2334` (showGeoIPSetupModal) |
-| Settings | 1 loading indicator(s) | `frontend/settings.js:2526` (validateMaxMindLicense) |
-| Settings | 1 loading indicator(s) | `frontend/settings.js:2572` (repairGeoIPDatabase) |
+| Settings | 2 loading indicator(s) | `frontend/settings.js:2336` (showGeoIPSetupModal) |
+| Settings | 1 loading indicator(s) | `frontend/settings.js:2528` (validateMaxMindLicense) |
+| Settings | 1 loading indicator(s) | `frontend/settings.js:2574` (repairGeoIPDatabase) |
 | Modal: alert-activity-modal | 1 loading indicator(s) | `frontend/alert-activity.js:31` (openAlertActivity) |
 
 ### Persisted preferences
@@ -994,7 +994,7 @@ Background refreshes and polling.
 | Page | What | Code |
 |---|---|---|
 | Status | every 1000 ms | `frontend/app.js:5537` (checkBlacklists) |
-| Settings | every 2000 ms | `frontend/settings.js:2457` (showGeoIPSetupModal) |
+| Settings | every 2000 ms | `frontend/settings.js:2459` (showGeoIPSetupModal) |
 | Shared | every 30000 ms | `frontend/utils.js:440` (uiAgo) |
 | app.js (mixed) | every PAGE_REFRESH_TICK ms | `frontend/app.js:864` (startNavCounters) |
 | app.js (mixed) | every PAGE_REFRESH_TICK ms | `frontend/app.js:1194` (startPageRefresh) |
@@ -1019,8 +1019,8 @@ Key handlers; the keys are read from the handler body.
 | Shell | keydown | `frontend/router.js:367` |
 | Shell | keydown | `frontend/router.js:391` |
 | Message details | keydown | `frontend/message-details.js:1374` |
-| Settings | keydown: Enter | `frontend/settings.js:114` (showBasicAuthVerifyModal) |
-| Settings | keydown: Enter | `frontend/settings.js:162` (showFeatureDisableConfirmModal) |
+| Settings | keydown: Enter | `frontend/settings.js:115` (showBasicAuthVerifyModal) |
+| Settings | keydown: Enter | `frontend/settings.js:164` (showFeatureDisableConfirmModal) |
 | Shared | keydown | `frontend/utils.js:1475` |
 | Shared | keydown | `frontend/utils.js:2514` (uiTimeOverview) |
 | Shared | keydown: ArrowDown, ArrowUp, Escape | `frontend/utils.js:2940` |

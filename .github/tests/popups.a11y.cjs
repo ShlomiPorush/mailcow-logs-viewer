@@ -8,7 +8,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const { test } = require('node:test');
+const { test, afterEach } = require('node:test');
 
 const modules = process.env.A11Y_MODULES || '/tmp/a11y/node_modules';
 const { JSDOM } = require(path.join(modules, 'jsdom'));
@@ -18,6 +18,11 @@ const read = name => fs.readFileSync(path.join(frontend, name), 'utf8');
 const SCRIPTS = ['utils.js', 'router.js', 'app.js', 'settings.js', 'notifications.js', 'agents.js', 'spam_filter.js'].map(read);
 const HTML = read('index.html').replace(/<script\b[^>]*\bsrc=[^>]*><\/script>/g, '').replace(/<link\b[^>]*>/g, '');
 const STYLE = '<style>.hidden { display: none; } .ui-dialog-backdrop { z-index: 50; } .ui-sheet { z-index: 70; } .ui-confirm { z-index: 99999; }</style>';
+
+// Every window a test opened closes after it, timers and all, so a failing test
+// cannot leave a refresh running that keeps the run from ending
+const opened = [];
+afterEach(() => { while (opened.length) opened.pop().close(); });
 
 // The app, with the network answered by answer(url) (pending when it returns undefined)
 function page({ phone = false, answer = () => undefined } = {}) {
@@ -30,6 +35,7 @@ function page({ phone = false, answer = () => undefined } = {}) {
         },
     });
     const w = dom.window;
+    opened.push(w);
     // jsdom has no scrollingElement; the app resets the window's pan through it
     if (!w.document.scrollingElement) Object.defineProperty(w.document, 'scrollingElement', { value: w.document.documentElement });
     // jsdom does no layout: an element counts as shown when nothing hides it
@@ -201,6 +207,35 @@ test('GeoIP setup: its X is off while the setup runs, like its Close', async () 
     assert.ok(backdrop.isConnected, 'Escape does not stop it halfway');
 });
 
+// Enter on a focused button presses that button (here as its click), never the confirm
+const enterOn = (w, el) => {
+    el.focus();
+    const event = new w.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+    el.dispatchEvent(event);
+    if (!event.defaultPrevented) el.click();
+};
+
+test('Verify credentials: Enter on the X cancels, Enter in a field confirms', async () => {
+    const verify = DIALOGS.find(d => d.id === 'basic-auth-verify-modal');
+    let { w, result, backdrop } = await open(verify);
+    $(w, '#verify-auth-username').value = 'admin';
+    $(w, '#verify-auth-password').value = 'secret';
+    enterOn(w, backdrop.querySelector('.ui-dialog-head [aria-label="Close"]'));
+    assert.equal(await result, null, 'the X cancels, the typed credentials are not used');
+    ({ w, result } = await open(verify));
+    $(w, '#verify-auth-username').value = 'admin';
+    $(w, '#verify-auth-password').value = 'secret';
+    enterOn(w, $(w, '#verify-auth-password'));
+    // Compared as plain values: the answer is an object of the page's own realm
+    assert.deepEqual({ ...(await result) }, { username: 'admin', password: 'secret' });
+});
+
+test('Disable features: Enter on Cancel cancels, it does not delete the data', async () => {
+    const { w, result } = await open(DIALOGS.find(d => d.id === 'feature-disable-confirm-modal'));
+    enterOn(w, $(w, '#feature-disable-cancel'));
+    assert.equal(await result, false);
+});
+
 test('a question asked from a dialog keeps the page locked until the dialog closes', async () => {
     const { w } = await open(DIALOGS.find(d => d.id === 'quarantine-detail-modal'));
     assert.equal(w.document.body.style.overflow, 'hidden');
@@ -251,28 +286,51 @@ test('the builder: sizes, ids, data, a form, and an X called without arguments',
     assert.equal(question.dialog.querySelector('[aria-label="Close"]'), null);
 });
 
-test('the container log: the shared frame, a terminal inside, the whole screen on a phone, opened at its end', async () => {
-    const lines = Array.from({ length: 300 }, (_, i) => `line ${i}\n`);
-    for (let round = 0; round < 2; round++) {
-        const w = page({ phone: true, answer: url => (/container-logs/.test(url) ? { logs: lines } : undefined) });
-        await settle(w);
+// The log box with a size, since jsdom does no layout: 20px a line, 400px tall
+function sizeLogBox(w) {
+    const box = $(w, '#container-logs-content').parentElement;
+    let top = 0;
+    const height = () => w.document.querySelectorAll('#container-logs-content .ui-log-line').length * 20;
+    Object.defineProperty(box, 'scrollHeight', { configurable: true, get: height });
+    Object.defineProperty(box, 'clientHeight', { configurable: true, get: () => 400 });
+    Object.defineProperty(box, 'scrollTop', { configurable: true, get: () => top,
+        set: v => { top = Math.max(0, Math.min(Number(v) || 0, height() - 400)); } });
+    return { box, atEnd: () => top === Math.max(0, height() - 400) };
+}
+const logLines = w => w.document.querySelectorAll('#container-logs-content .ui-log-line').length;
+const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+test('the container log: the shared frame, a terminal inside, the whole screen on a phone, at its end, following', async () => {
+    // Each read returns ten more lines, as a live log does
+    let reads = 0;
+    const w = page({ phone: true, answer: url => (/container-logs/.test(url)
+        ? { logs: Array.from({ length: 300 + 10 * reads++ }, (_, i) => `line ${i}\n`) } : undefined) });
+    await settle(w);
+    const { box, atEnd } = sizeLogBox(w);
+    const backdrop = $(w, '#container-logs-modal');
+    for (let opening = 1; opening <= 2; opening++) {
         w.loadContainerLogs();
         await settle(w);
         await settle(w);
-        const backdrop = $(w, '#container-logs-modal');
         assert.ok(backdrop.matches('.ui-dialog-backdrop:not(.hidden)'));
-        assert.ok(backdrop.classList.contains('is-full'), 'it fills the screen, and the dialog watcher did not undo it');
-        assert.ok($(w, '#container-logs-content').parentElement.matches('.ui-dialog-body.ui-log-term'), 'the terminal body scrolls the log');
-        assert.equal(w.document.querySelectorAll('#container-logs-content .ui-log-line').length, 300);
+        assert.ok(backdrop.classList.contains('is-full'), `opening ${opening}: it fills the screen, and the dialog watcher did not undo it`);
+        assert.ok(box.matches('.ui-dialog-body.ui-log-term'), 'the terminal body scrolls the log');
         assert.ok(backdrop.querySelector('.ui-dialog-head [aria-label="Close"]'));
+        const first = logLines(w);
+        assert.ok(first >= 300, `opening ${opening}: the log loaded`);
+        assert.ok(atEnd() && box.scrollTop > 0, `opening ${opening}: it opens at its end`);
+        // The refresh (every 2 seconds) adds lines and follows them
+        await wait(2300);
+        assert.ok(logLines(w) > first, `opening ${opening}: new lines arrive`);
+        assert.ok(atEnd(), `opening ${opening}: it keeps following the end`);
+        // Scrolled up, the reader keeps the place and the refresh waits
+        box.scrollTop = 0;
+        const held = logLines(w);
+        await wait(2300);
+        assert.equal(logLines(w), held, `opening ${opening}: no refresh while the reader is up the log`);
+        assert.equal(box.scrollTop, 0, `opening ${opening}: the place is kept`);
         w.closeContainerLogsModal();
         assert.ok(backdrop.classList.contains('hidden'));
-        // And again: each opening fills the screen again
-        w.loadContainerLogs();
-        await settle(w);
-        await settle(w);
-        assert.ok(backdrop.classList.contains('is-full'), 'a second opening fills the screen too');
-        w.closeContainerLogsModal();
     }
 });
 

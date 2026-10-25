@@ -112,12 +112,25 @@ function layerMarks(text) {
     add(/<[a-zA-Z][^<>]*?\srole\s*=\s*["'](?:alert)?dialog["']/g, () => 'role dialog');
     add(/setAttribute\(\s*["']role["']\s*,\s*["'](?:alert)?dialog["']/g, () => 'role dialog');
     add(/<dialog[\s>]/g, () => '<dialog>');
+    add(/createElement\(\s*["'`]dialog["'`]\s*\)|\.showModal\(/g, () => '<dialog>');
     add(/<[a-zA-Z][^<>]*?\spopover(?=[\s>=])/g, () => 'popover attribute');
     add(/setAttribute\(\s*["']popover["']|\.popover\s*=/g, () => 'popover attribute');
     add(/\bfixed\s+inset-0\b|class\s*=\s*["'][^"']*\bfixed\b/g, () => 'fixed utility class');
     add(/position\s*:\s*fixed/g, () => 'position fixed');
     add(/\.style\.position\s*=\s*["'`]fixed|setProperty\(\s*["']position["']\s*,\s*["']fixed|\.style\.inset\s*=/g, () => 'position fixed');
     return marks.filter(m => m.what);
+}
+
+// Where the element that opens at `start` closes (same tag name, counting nesting)
+function elementEnd(html, start, tag) {
+    const re = new RegExp(`<${tag}\\b[^>]*>|</${tag}\\s*>`, 'gi');
+    re.lastIndex = start;
+    let depth = 0, m;
+    while ((m = re.exec(html))) {
+        depth += m[0][1] === '/' ? -1 : 1;
+        if (depth === 0) return m.index + m[0].length;
+    }
+    return html.length;
 }
 
 function check(dir = FRONTEND) {
@@ -168,8 +181,10 @@ function check(dir = FRONTEND) {
         const where = `index.html:${lineOf(html, m.index)}${id ? ` #${id}` : ''}`;
         if (m[1].toLowerCase() === 'dialog') { problems.push(`${where} <dialog>: use the shared dialog frame`); continue; }
         if (classes.includes('ui-dialog-backdrop')) {
-            const end = html.indexOf('ui-dialog-body', m.index);
-            const frame = html.slice(m.index, end === -1 ? undefined : end);
+            // Only this dialog: up to the end of its own element, then up to its body
+            const own = html.slice(m.index, elementEnd(html, m.index, m[1]));
+            const body = own.indexOf('ui-dialog-body');
+            const frame = body === -1 ? own : own.slice(0, body);
             if (!role || !/\saria-(?:label|labelledby)="/.test(attrs)) problems.push(`${where} a dialog needs role="dialog" and a label`);
             if (!/class="ui-dialog\b/.test(frame) || !/class="ui-dialog-head"/.test(frame) || !/<h3\b/.test(frame)
                 || !/aria-label="Close"/.test(frame)) {
@@ -187,14 +202,28 @@ function check(dir = FRONTEND) {
     }
 
     // CSS: what floats above the page is one of the shared layers
+    // Read per element styled: the last compound of each selector, across all its
+    // rules, so a position in one rule and a z-index in another count together
     const css = fs.readFileSync(path.join(dir, 'assets/css/ui.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+    const styled = new Map();
     for (const m of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
-        const selector = m[1].trim().replace(/\s+/g, ' ');
-        const fixed = /(^|;)\s*position\s*:\s*fixed/.test(m[2]);
+        const position = (m[2].match(/(?:^|;)\s*position\s*:\s*(fixed|absolute)/) || [])[1];
         const z = Number((m[2].match(/(?:^|;)\s*z-index\s*:\s*(\d+)/) || [])[1] || 0);
-        const raised = /(^|;)\s*position\s*:\s*absolute/.test(m[2]) && z >= 20;
-        if ((fixed || raised) && !FLOATING_CSS[selector]) {
-            problems.push(`ui.css ${selector}: ${fixed ? 'position: fixed' : `position: absolute with z-index ${z}`} floats a layer of its own; ` +
+        if (!position && !z) continue;
+        for (const part of m[1].split(',')) {
+            const key = part.trim().replace(/\s+/g, ' ').split(/\s*[\s>+~]\s*/).pop();
+            if (!key || key.startsWith('@')) continue;
+            const s = styled.get(key) || { fixed: false, absolute: false, z: 0 };
+            if (position === 'fixed') s.fixed = true;
+            if (position === 'absolute') s.absolute = true;
+            s.z = Math.max(s.z, z);
+            styled.set(key, s);
+        }
+    }
+    for (const [selector, s] of styled) {
+        const raised = s.absolute && s.z >= 20;
+        if ((s.fixed || raised) && !FLOATING_CSS[selector]) {
+            problems.push(`ui.css ${selector}: ${s.fixed ? 'position: fixed' : `position: absolute with z-index ${s.z}`} floats a layer of its own; ` +
                 'use the shared dialog, sheet, picker or menu, or list the selector in FLOATING_CSS with the reason');
         }
     }
@@ -239,6 +268,13 @@ const BYPASSES = {
     'a dialog written by hand in utils.js outside the builders': ['utils.js',
         "function myDialog() {\n    const el = document.createElement('div');\n    el.className = 'ui-dialog-backdrop';\n    document.body.appendChild(el);\n}"],
     'a <dialog> element': ['app.js', "function showNative() {\n    document.body.insertAdjacentHTML('beforeend', '<dialog open>Hi</dialog>');\n}"],
+    'a <dialog> element made through the DOM': ['app.js',
+        "function showNative2() {\n    const d = document.createElement('dialog');\n    document.body.appendChild(d);\n    d.showModal();\n}"],
+    'a dialog in index.html with no frame, before one that has it': ['index.html',
+        '<div id="broken-modal" class="hidden ui-dialog-backdrop" role="dialog" aria-label="Broken"><p>No frame</p></div>' +
+        '<div id="fine-modal" class="hidden ui-dialog-backdrop" role="dialog" aria-label="Fine"><div class="ui-dialog"><div class="ui-dialog-head"><h3>Fine</h3>' +
+        '<button aria-label="Close">x</button></div><div class="ui-dialog-body"></div></div></div>', '#broken-modal'],
+    'a layer floating through two CSS rules': ['assets/css/ui.css', '.fresh-popup { position: absolute; }\n.fresh-popup { z-index: 999; inset: 0; }'],
     'a menu panel made by hand': ['app.js', "function rowMenu() {\n    return '<div class=\"ui-menu-panel\"><button>Delete</button></div>';\n}"],
     'a popover element made by hand': ['app.js', "function myPop() {\n    return '<div popover class=\"thing\">x</div>';\n}"],
     'fixed positioning set in JavaScript': ['app.js', "function overlay() {\n    const el = document.createElement('div');\n    el.style.position = 'fixed';\n    el.style.inset = '0';\n}"],
@@ -254,9 +290,11 @@ const BYPASSES = {
     'a uiDialog without an X': ['app.js', "function noX() {\n    uiDialog({ id: 'x', title: 'X', size: 'sm' });\n}"],
 };
 
-for (const [name, [file, text]] of Object.entries(BYPASSES)) {
+for (const [name, [file, text, expect]] of Object.entries(BYPASSES)) {
     test(`the check catches ${name}`, () => {
-        assert.ok(checkWith(file, text).length > 0, `${name} passed the check`);
+        const problems = checkWith(file, text);
+        assert.ok(problems.length > 0, `${name} passed the check`);
+        if (expect) assert.ok(problems.some(p => p.includes(expect)), `no finding names ${expect}: ${problems.join("; ")}`);
     });
 }
 

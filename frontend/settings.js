@@ -109,10 +109,11 @@ function showBasicAuthVerifyModal() {
         cancelBtn.addEventListener('click', doCancel);
         confirmBtn.addEventListener('click', doConfirm);
 
-        // Enter confirms. Escape cancels through the layers (router.js); a click
-        // outside does nothing, since the fields hold what was typed
+        // Enter in a field confirms; on a button (X, Cancel) it presses that button.
+        // Escape cancels through the layers (router.js); a click outside does
+        // nothing, since the fields hold what was typed
         overlay.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter') {
+            if (e.key === 'Enter' && !e.target.closest('button')) {
                 e.preventDefault();
                 doConfirm();
             }
@@ -158,9 +159,10 @@ function showFeatureDisableConfirmModal(featureIds) {
         cancelBtn.addEventListener('click', () => { cleanup(); resolve(false); });
         confirmBtn.addEventListener('click', () => { cleanup(); resolve(true); });
 
-        // Enter confirms; Escape cancels through the layers (router.js)
+        // Enter confirms, but on Cancel it presses Cancel; Escape cancels through
+        // the layers (router.js)
         overlay.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter') { e.preventDefault(); cleanup(); resolve(true); }
+            if (e.key === 'Enter' && !e.target.closest('button')) { e.preventDefault(); cleanup(); resolve(true); }
         });
 
         overlay.addEventListener('click', (e) => {
