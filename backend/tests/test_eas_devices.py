@@ -349,8 +349,13 @@ def test_a_device_the_database_refuses_does_not_stop_the_others(db, bad_id, capl
     t0 = datetime(2026, 10, 1, 12, 0, 0)
     assert store_devices(db, [_device('A', t0), _device(bad_id, t0), _device('B', t0)]) == 2
     assert [r.device_id for r in _rows(db)] == ['A', 'B']
+    # The kind of error only: no statement, no parameters
+    kind = 'DataError 22001' if len(bad_id) > 255 else 'ValueError'
     [warning] = [r for r in caplog.records if r.levelname == 'WARNING']
-    assert 'INSERT' not in warning.getMessage()
+    assert warning.getMessage() == (
+        f"[DEVICES] Skipped an ActiveSync device the database refused - user {USER!r}, "
+        f"device {bad_id[:64]!r} ({kind})"
+    )
     assert store_devices(db, [_device(bad_id, t0)]) == 0
 
 
@@ -390,11 +395,17 @@ def test_only_errors_in_the_row_itself_are_skipped():
     assert not _is_row_error(OperationalError('INSERT', {}, orig('08006')))
 
 
-def test_a_line_the_database_cannot_store_does_not_stop_the_job(raw, monkeypatch):
+@pytest.mark.parametrize('parser_check', [True, False], ids=['parser-skips', 'database-refuses'])
+def test_a_line_the_database_cannot_store_does_not_stop_the_job(raw, monkeypatch, parser_check):
+    import re
     from app import scheduler
     from app.config import settings
     from app.models import RawServiceLog, SystemSetting
+    from app.services import eas_devices
     monkeypatch.setattr(settings._inner, 'disabled_features', '')
+    if not parser_check:
+        # Let the NUL through so the store has to skip it on its own
+        monkeypatch.setattr(eas_devices, '_CONTROL_RE', re.compile(r'(?!)'))
     now = datetime.utcnow().replace(microsecond=0)
 
     def run_and_read_mark():

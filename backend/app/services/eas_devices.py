@@ -204,13 +204,13 @@ def _store_one(db: Session, device: Dict[str, Any]) -> int:
     except Exception as error:
         if not _is_row_error(error):
             raise
-        # Neither the statement nor its parameters: only the fields that name
-        # the device, escaped and cut short, and why it was refused
-        orig = getattr(error, 'orig', None)
-        reason = getattr(getattr(orig, 'diag', None), 'message_primary', None) or str(error)
+        # The fields that name the device, escaped and cut short, and the kind
+        # of error: database messages can quote the statement or the values
+        code = getattr(getattr(error, 'orig', None), 'pgcode', None)
         logger.warning(
-            "[DEVICES] Skipped an ActiveSync device the database refused - user %r, device %r: %s",
-            str(device.get('username'))[:64], str(device.get('device_id'))[:64], reason[:200],
+            "[DEVICES] Skipped an ActiveSync device the database refused - user %r, device %r (%s%s)",
+            str(device.get('username'))[:64], str(device.get('device_id'))[:64],
+            type(error).__name__, f" {code}" if code else '',
         )
         return 0
 
