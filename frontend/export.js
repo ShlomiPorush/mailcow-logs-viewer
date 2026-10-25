@@ -4,7 +4,9 @@
 
 async function exportCSV(type) {
     try {
-        const filters = currentFilters[type] || {};
+        // Messages with a time preset: its period up to now, as the list reads it
+        const filters = type === 'messages' && typeof messagesRangeFilters === 'function'
+            ? messagesRangeFilters(currentFilters.messages || {}) : currentFilters[type] || {};
         const params = new URLSearchParams();
         for (const [key, value] of Object.entries(filters)) {
             if (value == null || (typeof value === 'string' && !value.trim())) continue;

@@ -13,9 +13,13 @@ let smtpAbuseWhitelistDraft = null;  // unsaved whitelist text; survives the pan
 let smtpAbusePage = 1;
 const SMTP_ABUSE_PAGE_SIZE = 5;
 
+// When the panel's data was last read (the page's refresh reads it every minute)
+let smtpAbuseLoadedAt = 0;
+
 // The status loads with the Security page: the Overview shows whether it is on, and
 // the Outgoing spam card shows the mailboxes when it is open
 async function loadSmtpAbusePanel() {
+    smtpAbuseLoadedAt = Date.now();
     try {
         const [statusResponse, whitelistResponse] = await Promise.all([
             authenticatedFetch('/api/smtp-abuse/status?limit=200'),
@@ -30,6 +34,33 @@ async function loadSmtpAbusePanel() {
         console.error('SMTP abuse panel error:', error);
         const panel = document.getElementById('smtp-abuse-panel');
         if (panel) panel.innerHTML = '<p class="ui-empty ui-text-fail">Could not load abuse protection.</p>';
+    }
+}
+
+// The refresh: read again, and drawn again only when something changed, not
+// while the user works in the panel (its focus or a selection); an unsaved
+// whitelist stays as typed
+async function refreshSmtpAbusePanel() {
+    smtpAbuseLoadedAt = Date.now();
+    const panel = document.getElementById('smtp-abuse-panel');
+    const working = () => panel && (uiTextHeld(panel) || panel.contains(document.activeElement));
+    if (!smtpAbuseStatus) return loadSmtpAbusePanel();
+    if (working()) return;
+    try {
+        const [statusResponse, whitelistResponse] = await Promise.all([
+            authenticatedFetch('/api/smtp-abuse/status?limit=200', { timeout: PAGE_REFRESH_TIMEOUT }),
+            authenticatedFetch('/api/smtp-abuse/whitelist', { timeout: PAGE_REFRESH_TIMEOUT })
+        ]);
+        if (!statusResponse.ok || !whitelistResponse.ok) return;
+        const status = await statusResponse.json();
+        const whitelist = await whitelistResponse.json();
+        if (working() || (JSON.stringify(status) === JSON.stringify(smtpAbuseStatus) && JSON.stringify(whitelist) === JSON.stringify(smtpAbuseWhitelist))) return;
+        smtpAbuseStatus = status;
+        smtpAbuseWhitelist = whitelist;
+        renderSmtpAbusePanel();
+        renderSecurityOverview();
+    } catch (error) {
+        console.error('SMTP abuse refresh failed:', error);
     }
 }
 
@@ -86,7 +117,6 @@ function renderSmtpAbusePanel() {
                             : 'A stopped mailbox still receives mail, and IMAP keeps working.'}`
                         : 'Automatic protection is off. Outbound activity of the last window:'}
                 </p>
-                <button type="button" onclick="loadSmtpAbusePanel()" class="ui-btn ui-btn-sm ui-head-actions">Refresh</button>
             </div>
 
             ${blockedRows.length ? `

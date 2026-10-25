@@ -1722,6 +1722,31 @@ async function uiLineCopy(line, button) {
     button.querySelector('svg').innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>';
 }
 
+// The element el scrolls in: the nearest one that scrolls, else the page
+function uiScrollParent(el) {
+    for (let node = el; node && node !== document.body; node = node.parentElement) {
+        const overflow = getComputedStyle(node).overflowY;
+        if ((overflow === 'auto' || overflow === 'scroll') && node.scrollHeight > node.clientHeight + 1) return node;
+    }
+    return document.scrollingElement || document.documentElement;
+}
+
+// Redraws the rows of list (draw) and keeps the row the user was looking at
+// where it was on the screen: the first row in view, found again by its key
+// attribute, so rows added or removed above it do not move the view
+function uiKeepRowInView(list, rowSelector, keyAttr, draw) {
+    const scroller = uiScrollParent(list);
+    const top = scroller === document.scrollingElement || scroller === document.documentElement ? 0 : scroller.getBoundingClientRect().top;
+    const anchor = [...list.querySelectorAll(rowSelector)].find(row => row.getBoundingClientRect().bottom > top);
+    const key = anchor ? anchor.getAttribute(keyAttr) : null;
+    const before = anchor ? anchor.getBoundingClientRect().top : 0;
+    draw();
+    if (key === null) return;
+    const again = [...list.querySelectorAll(rowSelector)].find(row => row.getAttribute(keyAttr) === key);
+    const moved = again ? again.getBoundingClientRect().top - before : 0;
+    if (Math.abs(moved) >= 1) scroller.scrollTop += moved;
+}
+
 // True while the user selects or has selected text in box, so live updates
 // leave that text where it is
 function uiTextHeld(box) {
@@ -1753,6 +1778,14 @@ function uiSheetShow(id, { label = '', head = '', body = '', expand = false, pro
         document.body.appendChild(sheet);
     }
     uiSheetClosers[id] = onClose;
+    // Drawn again with nothing new (a page's refresh), or while text in it is
+    // selected: left as it is, with its focus, selection and scroll
+    const shown = JSON.stringify([label, head, body, expand, progress]);
+    if (!fresh && (sheet.dataset.shown === shown || uiTextHeld(sheet))) return sheet;
+    sheet.dataset.shown = shown;
+    // Drawn again with new content: the focus goes back to the same control
+    const focused = !fresh && document.activeElement && sheet.contains(document.activeElement) ? document.activeElement : null;
+    const focusName = focused ? (focused.getAttribute('aria-label') || focused.textContent.trim()) : '';
     const old = sheet.querySelector('.ui-sheet-body');
     const keep = old ? old.scrollTop : 0;
     sheet.classList.toggle('is-expand', expand);
@@ -1782,6 +1815,11 @@ function uiSheetShow(id, { label = '', head = '', body = '', expand = false, pro
         }, { passive: true });
     }
     if (progress) uiReadProgress(sheet.querySelector('.ui-sheet-head'), bodyEl);
+    if (focused) {
+        const again = [...sheet.querySelectorAll('button, a, input, select, [tabindex]')]
+            .find(el => el.tagName === focused.tagName && (el.getAttribute('aria-label') || el.textContent.trim()) === focusName);
+        if (again) again.focus({ preventScroll: true });
+    }
     uiSheetSwipe(sheet, bodyEl, id);
     document.body.classList.add('ui-sheet-on');
     return sheet;
@@ -2924,4 +2962,30 @@ if (typeof document !== 'undefined' && document.addEventListener) {
         const { panel } = uiPickerParts(uiPickers.open);
         if (panel) uiPickerPlace(panel);
     });
+}
+
+// Draws again what container shows (draw) and gives the focus back: to the same
+// control in the same row (its key attribute), or to the row itself
+function uiKeepFocus(container, keyAttr, draw) {
+    const active = document.activeElement;
+    if (!container || !active || active === document.body || !container.contains(active)) {
+        draw();
+        return;
+    }
+    const row = active.closest(`[${keyAttr}]`);
+    const key = row ? row.getAttribute(keyAttr) : null;
+    const name = el => el.getAttribute('aria-label') || el.textContent.trim();
+    const controls = el => [...el.querySelectorAll('button, a, input, select, [tabindex]')];
+    const label = name(active);
+    // Its place among the row's controls: a count on a button may change with the refresh
+    const index = row && active !== row ? controls(row).indexOf(active) : -1;
+    draw();
+    if (key === null) return;
+    const again = [...container.querySelectorAll(`[${keyAttr}]`)].find(el => el.getAttribute(keyAttr) === key);
+    if (!again) return;
+    const list = controls(again);
+    const same = index >= 0 && list[index] && list[index].tagName === active.tagName ? list[index] : null;
+    const target = active === row ? again
+        : list.find(el => el.tagName === active.tagName && name(el) === label) || same || (again.tabIndex >= 0 ? again : list[0]);
+    if (target && typeof target.focus === 'function') target.focus({ preventScroll: true });
 }

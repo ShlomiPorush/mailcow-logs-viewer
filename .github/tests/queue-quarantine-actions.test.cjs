@@ -33,7 +33,8 @@ function decodeEntities(value) {
 function loadApp() {
     const elements = {};
     const inserted = [];
-    const element = () => ({ innerHTML: '', textContent: '', value: '', style: {}, classList: stub(), remove() {}, focus() {} });
+    const element = () => ({ innerHTML: '', textContent: '', value: '', style: {}, dataset: {}, classList: stub(), remove() {}, focus() {},
+        contains: () => false, closest: () => null, querySelectorAll: () => [] });
     const document = new Proxy(stub(), {
         get: (target, key) => key === 'getElementById' ? id => (elements[id] = elements[id] || element())
             : key === 'body' ? { style: {}, insertAdjacentHTML: (where, html) => inserted.push(html) } : stub(),

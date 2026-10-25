@@ -21,17 +21,33 @@ const extract = name => {
 function harness(filters, appTimezone = 'Europe/Berlin') {
     const elements = {};
     const element = id => elements[id] || (elements[id] = { value: '', textContent: '', style: {}, classList: { add() {} } });
-    const calls = { urls: [], rendered: 0, applied: 0, toasts: [], navigated: [] };
+    const calls = { urls: [], rendered: 0, applied: 0, toasts: [], navigated: [], newShown: 0, showNew: [], facets: 0, loaded: [] };
     let context;
     context = vm.createContext({
+        __edge: true,   // the list shows the edge where new mail lands
+        __newCount: 0,   // what /api/messages/new answers
+        messagesAtNewEdge: () => context.__edge,
+        messagesNew: { watermark: 41, count: 0 },
+        renderMessagesNew: () => { calls.newShown++; },
+        messagesShowNew: options => { calls.showNew.push(options); },
+        MESSAGES_ROLLING_PRESETS: ['today', '7days', '30days', '90days'],
         URLSearchParams,
         appTimezone,
         currentFilters: { messages: filters },
         currentPage: { messages: 1 },
-        lastDataCache: {},
+        lastDataCache: { messages: { data: [{ correlation_key: 'shown' }], total: 1 } },   // a list is shown
+        __held: false,   // text in the list is selected
+        uiTextHeld: () => context.__held,
+        uiKeepFocus: (container, key, draw) => draw(),
+        PAGE_REFRESH_TIMEOUT: 20000,
+        loadMessages: options => { calls.loaded.push(options); },
         dashFlow: { data: null, pick: null, zoom: null },   // the dashboard's mail flow
         document: { getElementById: element },
-        authenticatedFetch: async url => { calls.urls.push(url); return { ok: true, json: async () => ({ data: [] }) }; },
+        authenticatedFetch: async url => {
+            calls.urls.push(url);
+            const answer = url.startsWith('/api/messages/new') ? { count: context.__newCount, watermark: 99 } : { data: [] };
+            return { ok: true, json: async () => answer };
+        },
         hasDataChanged: () => true,
         renderMessagesData: () => { calls.rendered++; },
         showToast: (...args) => calls.toasts.push(args),
@@ -47,12 +63,15 @@ function harness(filters, appTimezone = 'Europe/Berlin') {
         messagesRefreshing: false,
         messagesFetch: url => context.authenticatedFetch(url),   // the list's requests, as the page makes them
         messagesNewGeneration: () => ++context.messagesGen,
-        loadMessageFacets() {},
+        loadMessageFacets: () => { calls.facets++; },
     });
     vm.runInContext(zoneHelpers, context);
     vm.runInContext([
         extract('smartRefreshMessages'),
         extract('messagesQueryParams'),
+        extract('messagesFilterParams'),
+        extract('messagesSameAsShown'),
+        extract('messagesRangeFilters'),
         extract('applyMessagesCustomDateRange'),
         extract('messagesPresetStart'),
         extract('selectMessagesDatePreset'),
@@ -74,10 +93,89 @@ test('the auto refresh keeps a time range that is the only filter', async () => 
     assert.equal(params.get('page'), '1');
 });
 
-test('the auto refresh still leaves a search alone', async () => {
+const query = url => new URL(url, 'http://viewer.test');
+
+test('at its top the auto refresh redraws a searched list too', async () => {
+    const h = harness({ search: 'invoice', status: 'bounced' });
+    await h.run('smartRefreshMessages()');
+    assert.equal(h.calls.urls.length, 1);
+    const params = query(h.calls.urls[0]).searchParams;
+    assert.equal(query(h.calls.urls[0]).pathname, '/api/messages');
+    assert.equal(params.get('search'), 'invoice');
+    assert.equal(params.get('status'), 'bounced');
+    assert.equal(h.calls.rendered, 1);
+});
+
+test('scrolled away, the list stays and the new mail is counted from its watermark', async () => {
     const h = harness({ search: 'invoice' });
+    h.context.__edge = false;
+    h.context.__newCount = 3;
+    await h.run('smartRefreshMessages()');
+    assert.equal(h.calls.urls.length, 1);
+    const url = query(h.calls.urls[0]);
+    assert.equal(url.pathname, '/api/messages/new');
+    assert.equal(url.searchParams.get('after_id'), '41');
+    assert.equal(url.searchParams.get('search'), 'invoice');
+    assert.equal(h.calls.rendered, 0);
+    assert.equal(h.run('messagesNew.count'), 3);
+    assert.equal(h.calls.newShown, 1);
+});
+
+test('an answer that comes after the user scrolled away redraws nothing', async () => {
+    const h = harness({});
+    h.context.authenticatedFetch = async url => { h.calls.urls.push(url); h.context.__edge = false; return { ok: true, json: async () => ({ data: [] }) }; };
+    await h.run('smartRefreshMessages()');
+    assert.equal(h.calls.rendered, 0);
+});
+
+test('a list without a watermark, or loading, asks for nothing', async () => {
+    const h = harness({});
+    h.context.__edge = false;
+    h.run('messagesNew.watermark = null');
+    await h.run('smartRefreshMessages()');
+    h.run('messagesNew.watermark = 41; messagesPaging.loading = true');
     await h.run('smartRefreshMessages()');
     assert.equal(h.calls.urls.length, 0);
+});
+
+test('oldest first, new mail comes by paging until the whole list is loaded', async () => {
+    const h = harness({});
+    h.run("messagesOrder = 'asc'; messagesPaging.cursor = '2026-10-13T07:00:00|5'");
+    h.context.__edge = false;
+    await h.run('smartRefreshMessages()');
+    assert.equal(h.calls.urls.length, 0);
+});
+
+test('oldest first, at the end of the whole list the new mail is taken in quietly', async () => {
+    const h = harness({});
+    h.run("messagesOrder = 'asc'; messagesPaging.cursor = null");
+    h.context.__newCount = 2;
+    await h.run('smartRefreshMessages()');
+    assert.equal(query(h.calls.urls[0]).pathname, '/api/messages/new');
+    assert.deepEqual(JSON.parse(JSON.stringify(h.calls.showNew)), [{ quiet: true }]);
+    // Further up, it is offered instead
+    const away = harness({});
+    away.run("messagesOrder = 'asc'; messagesPaging.cursor = null");
+    away.context.__edge = false;
+    away.context.__newCount = 2;
+    await away.run('smartRefreshMessages()');
+    assert.equal(away.calls.showNew.length, 0);
+    assert.equal(away.calls.newShown, 1);
+});
+
+test('a time preset reads its period up to now at every request', async () => {
+    // Chosen yesterday: Today is now today, up to now
+    const h = harness({ date_range: 'today', start_date: '2026-10-23T22:00:00.000Z', end_date: '2026-10-24T09:00:00.000Z' });
+    await h.run('smartRefreshMessages()');
+    const params = query(h.calls.urls[0]).searchParams;
+    assert.equal(params.get('start_date'), h.run('messagesPresetStart("today")'));
+    // Up to now: no end at all, so nothing stored meanwhile falls outside it
+    assert.equal(params.get('end_date'), null);
+    // A custom range stays as it was chosen
+    const fixed = harness({ date_range: 'custom', start_date: '2026-10-13T07:00:00.000Z', end_date: '2026-10-14T06:59:59.999Z' });
+    fixed.context.__edge = false;
+    await fixed.run('smartRefreshMessages()');
+    assert.equal(query(fixed.calls.urls[0]).searchParams.get('end_date'), '2026-10-14T06:59:59.999Z');
 });
 
 test('a custom range covers the chosen days in the app time zone', () => {
@@ -185,4 +283,40 @@ test('the Dashboard chart with no bar picked opens Messages on the span shown', 
     assert.equal(plain.element('messages-start-date').value, '2026-10-20T12:00:00.000000Z');
     assert.equal(plain.element('messages-end-date').value, '2026-10-21T11:59:59.999999Z');
     assert.deepEqual(plain.calls.navigated, [['messages']]);
+});
+
+test('text selected in the list holds the redraw: the new mail is counted instead', async () => {
+    const h = harness({});
+    h.context.__held = true;
+    h.context.__newCount = 1;
+    await h.run('smartRefreshMessages()');
+    assert.equal(query(h.calls.urls[0]).pathname, '/api/messages/new');
+    assert.equal(h.calls.rendered, 0);
+    assert.equal(h.calls.newShown, 1);
+});
+
+test('the counts beside the list are read on every refresh, also when the list did not change', async () => {
+    const h = harness({ status: 'bounced' });
+    h.run('lastDataCache.messages = { data: [] }');
+    h.context.authenticatedFetch = async url => { h.calls.urls.push(url); return { ok: true, json: async () => ({ data: [], watermark: 77 }) }; };
+    await h.run('smartRefreshMessages()');
+    assert.equal(h.calls.rendered, 0);
+    assert.equal(h.calls.facets, 1);
+    // Nothing new matched up to 77: later counts start from there
+    assert.equal(h.run('messagesNew.watermark'), 77);
+});
+
+test('a list that could not load is loaded again by the refresh', async () => {
+    const h = harness({});
+    h.run('lastDataCache.messages = null');
+    await h.run('smartRefreshMessages()');
+    assert.equal(h.calls.loaded.length, 1);
+    assert.equal(h.calls.urls.length, 0);
+});
+
+test('the next pages of a list hold only what its first page held', () => {
+    const h = harness({});
+    const params = h.run("messagesQueryParams('2026-10-13T07:00:00|5', 50, 41)");
+    assert.equal(params.get('upto_id'), '41');
+    assert.equal(h.run('messagesQueryParams(null, 50, 41)').get('upto_id'), null);
 });

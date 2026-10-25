@@ -110,7 +110,7 @@ POLICY: Dict[Tuple[str, str], Rule] = {
          area="status", kind=WRITE),
 
     # Messages
-    **_r("GET /api/messages", "GET /api/messages/facets", "GET /api/message/{correlation_key}/details",
+    **_r("GET /api/messages", "GET /api/messages/facets", "GET /api/messages/new","GET /api/message/{correlation_key}/details",
          "GET /api/message/{correlation_key}", "GET /api/logs/postfix", "GET /api/logs/postfix/by-queue/{queue_id}",
          "GET /api/logs/rspamd", "GET /api/export/postfix/csv", "GET /api/export/rspamd/csv",
          "GET /api/export/messages/csv",
