@@ -311,8 +311,11 @@ def _run(coro):
     """Run a send on its own event loop in this worker thread. asyncio.run
     would wait at the end for a name lookup the deadline cut off (it runs on a
     thread nothing can stop); closing the loop leaves that lookup to end on its
-    own, so the send still returns on time."""
-    loop = asyncio.new_event_loop()
+    own, so the send still returns on time.
+
+    The loop is asyncio's own, not new_event_loop(): under uvicorn's default
+    policy that is uvloop, whose close() waits for a running name lookup."""
+    loop = asyncio.SelectorEventLoop()
     try:
         return loop.run_until_complete(coro)
     finally:
@@ -326,15 +329,18 @@ async def _settle() -> None:
     """Let the clean-up a send leaves behind finish before its loop closes.
     An httpx answer that is not read to the end leaves inner generators that
     the loop closes in tasks of their own; a closed loop would log each one
-    as destroyed while pending. Whatever still runs after a second is stopped."""
-    await asyncio.get_running_loop().shutdown_asyncgens()
-    await asyncio.sleep(0)
-    others = asyncio.all_tasks() - {asyncio.current_task()}
-    if others:
-        _done, pending = await asyncio.wait(others, timeout=1)
-        for task in pending:
+    as destroyed while pending. All of it gets one second; whatever still runs
+    then is cancelled and left to the closing loop."""
+    try:
+        async with asyncio.timeout(1):
+            await asyncio.get_running_loop().shutdown_asyncgens()
+            await asyncio.sleep(0)
+            others = asyncio.all_tasks() - {asyncio.current_task()}
+            if others:
+                await asyncio.wait(others)
+    except TimeoutError:
+        for task in asyncio.all_tasks() - {asyncio.current_task()}:
             task.cancel()
-        await asyncio.gather(*pending, return_exceptions=True)
 
 
 def send_to_config(channel_type: str, config: Dict, subject: str, message: str) -> Tuple[bool, str]:

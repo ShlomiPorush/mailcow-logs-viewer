@@ -6,6 +6,7 @@ worker thread and buffered all of it. The send now has one deadline for all
 of it, including the name lookup, reads at most a small piece of an error
 answer and none of a success or redirect answer, and refuses to decompress.
 """
+import asyncio
 import contextlib
 import gc
 import logging
@@ -20,6 +21,14 @@ import pytest
 from app.services import notification_channels as nc
 
 TOO_SLOW = "The server took too long to answer."
+
+
+@pytest.fixture(autouse=True)
+def no_proxy(monkeypatch):
+    """The sends here must reach the local servers and the faked lookup, not
+    a proxy from the environment."""
+    monkeypatch.setenv("NO_PROXY", "*")
+    monkeypatch.setenv("no_proxy", "*")
 
 
 def _read_request(sock):
@@ -126,13 +135,29 @@ def test_a_silent_server_is_reported_as_too_slow(monkeypatch):
     assert elapsed < 2
 
 
-def test_a_stuck_name_lookup_stops_at_the_deadline(monkeypatch):
+@pytest.fixture(params=["asyncio", "uvloop"])
+def loop_policy(request):
+    """The app runs under uvicorn's default loop policy, which is uvloop."""
+    if request.param == "asyncio":
+        yield
+        return
+    uvloop = pytest.importorskip("uvloop")
+    previous = asyncio.get_event_loop_policy()
+    asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
+    try:
+        yield
+    finally:
+        asyncio.set_event_loop_policy(previous)
+
+
+def test_a_stuck_name_lookup_stops_at_the_deadline(monkeypatch, loop_policy):
     monkeypatch.setattr(nc, "_TOTAL_SECONDS", 1, raising=False)
-    release = threading.Event()
+    entered, release = threading.Event(), threading.Event()
     real = socket.getaddrinfo
 
     def stuck(host, *args, **kwargs):
         if host in ("slow-dns.test", b"slow-dns.test"):   # anyio passes it encoded
+            entered.set()
             release.wait(5)
             raise socket.gaierror(socket.EAI_NONAME, "Name or service not known")
         return real(host, *args, **kwargs)
@@ -142,8 +167,31 @@ def test_a_stuck_name_lookup_stops_at_the_deadline(monkeypatch):
         (ok, error), elapsed = _send("http://slow-dns.test:8080")
     finally:
         release.set()
+    assert entered.is_set()
     assert (ok, error) == (False, TOO_SLOW)
     assert elapsed < 2.5
+
+
+def test_the_clean_up_after_a_send_is_bounded(monkeypatch):
+    """A generator whose clean-up never ends must not hold the send."""
+    kept = []
+
+    async def stubborn():
+        try:
+            yield 1
+        finally:
+            await asyncio.sleep(5)
+
+    async def send(url, kwargs):
+        generator = stubborn()
+        kept.append(generator)
+        await generator.__anext__()
+        return 200, ""
+
+    monkeypatch.setattr(nc, "_post", send)
+    started = time.monotonic()
+    assert nc.send_to_config("slack", {"webhook_url": "https://hooks.example.com/x"}, "S", "M") == (True, "")
+    assert time.monotonic() - started < 2.5
 
 
 def _answer(status, body=b"", content_type="text/plain"):
