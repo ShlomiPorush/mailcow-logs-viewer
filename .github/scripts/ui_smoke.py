@@ -231,7 +231,8 @@ def check_api_docs(browser):
 
     def check_page(step):
         for href in page.eval_on_selector_all('a[href]', 'as => as.map(a => a.href)'):
-            if 'scalar.com' in href and href not in SCALAR_CREDITS:
+            host = (urlparse(href).hostname or '').rstrip('.')
+            if (host == 'scalar.com' or host.endswith('.scalar.com')) and href not in SCALAR_CREDITS:
                 problems.append(f'{step}: link to {href}')
         text = page.evaluate('document.body.innerText')
         problems.extend(f"{step}: Scalar's '{t}' is shown" for t in SCALAR_FEATURES if t in text)

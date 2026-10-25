@@ -15,6 +15,12 @@ const LIBS = path.join(FRONTEND, 'assets', 'libs');
 // An element the bundle starts a reference of its own on, however the id is written
 const SECOND_REFERENCE_ID = /\bid\s*=\s*["']?api-reference(?=["'\s>/])/i;
 
+// Each comment becomes a space, not nothing, so the pieces around a removed
+// comment cannot join into a new "<!--" that hides real markup
+function withoutComments(html) {
+    return html.replace(/<!--[\s\S]*?-->/g, ' ');
+}
+
 // Runs api-docs.js and returns what it passed to Scalar
 function scalarCall(dark) {
     const calls = [];
@@ -41,7 +47,7 @@ test('the reference reads this server\'s document and nothing on it reaches scal
     assert.equal(options.persistAuth, false);
     assert.ok(!('hideTestRequestButton' in options) || options.hideTestRequestButton === false,
         'Test Request runs on this server and stays');
-    assert.ok(!JSON.stringify(options).includes('scalar.com'));
+    assert.doesNotMatch(JSON.stringify(options), /scalar\.com/i);
 });
 
 test('the reference follows the app\'s theme and has no toggle of its own', () => {
@@ -61,7 +67,7 @@ test('the page loads its files with a version stamp, so an update is never serve
     // Configured by api-docs.js only. The bundle also starts a reference of its
     // own, with Scalar's defaults (its fonts, its hosted client, its proxy), on
     // an element with id="api-reference" or a data-spec/data-spec-url attribute
-    const markup = html.replace(/<!--[\s\S]*?-->/g, '');
+    const markup = withoutComments(html);
     assert.ok(!SECOND_REFERENCE_ID.test(markup), 'no element may have id="api-reference"');
     assert.ok(!/\bdata-(?:spec|spec-url|url|configuration|proxy-url)\b/i.test(markup));
 });
@@ -71,6 +77,13 @@ test('the check for a second reference catches every way to write the id', () =>
         assert.ok(SECOND_REFERENCE_ID.test(html), html);
     }
     assert.ok(!SECOND_REFERENCE_ID.test('<div id="api-reference-x">'));
+});
+
+test('removing comments cannot hide an element behind a comment it builds', () => {
+    // A browser ends "<!<!--x-->" at the first ">" and keeps the div
+    const html = '<!<!--x-->--<div id="api-reference">-->';
+    assert.ok(SECOND_REFERENCE_ID.test(withoutComments(html)));
+    assert.ok(!SECOND_REFERENCE_ID.test(withoutComments('<!-- <div id="api-reference"> -->')));
 });
 
 test('the sidebar tools and the phone\'s More sheet link to the reference and the documentation site', () => {
