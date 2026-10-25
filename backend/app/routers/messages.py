@@ -558,6 +558,8 @@ def get_message_full_details(
             if msg_key not in seen_messages:
                 seen_messages.add(msg_key)
                 deduplicated_postfix_logs.append(log)
+        if excluded_addresses.delivery_hidden(correlation, deduplicated_postfix_logs):
+            raise HTTPException(status_code=404, detail="Message not found")
         postfix_logs = excluded_addresses.visible_postfix_lines(deduplicated_postfix_logs)
         
         # Get Netfilter logs by IP from Rspamd, limited to ±1 hour around the

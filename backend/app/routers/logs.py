@@ -1426,6 +1426,8 @@ def get_message_details(
                 PostfixLog.id.in_(correlation.postfix_log_ids)
             ).order_by(PostfixLog.time).all()
         
+        if excluded_addresses.delivery_hidden(correlation, postfix_logs):
+            raise HTTPException(status_code=404, detail="Message not found")
         postfix_logs = excluded_addresses.visible_postfix_lines(postfix_logs)
 
         # Build response

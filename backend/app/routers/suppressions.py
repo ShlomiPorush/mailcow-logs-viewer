@@ -664,7 +664,9 @@ def get_suppression_events(suppression_id: int, page: int = Query(1, ge=1), db: 
         }
         # Evidence copied before an address was excluded: the event still says
         # what happened to the block, not what the message was
-        if excluded_addresses.any_listed(e.sender, e.recipient):
+        if excluded_addresses.any_listed(e.sender, e.recipient) or any(
+                excluded_addresses.postfix_text_listed(line.get('message'))
+                for line in (e.log_lines or []) if isinstance(line, dict)):
             row.update(sender=None, subject=None, queue_id=None, message_id=None, log_lines=[],
                        correlation_key=None, message_available=False)
         return row

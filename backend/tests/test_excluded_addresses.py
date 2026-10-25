@@ -214,24 +214,14 @@ def test_cleanup_deletes_only_listed_mail(stored):
     assert _state() == state
 
 
-def test_adding_an_address_starts_a_full_pass(stored, monkeypatch):
-    """The light pass of every correlation run looks one hour back; the data
-    here is older, so only a full pass removes it. Adding an address, as a
-    settings save does, makes the next run a full one."""
+def test_adding_an_address_starts_a_pass(stored, monkeypatch):
+    """The correlation job cleans up only when a pass is due: adding an
+    address, as a settings save does, makes the next run one."""
     from app import scheduler
     from app.config import settings
-    from app.database import get_db_context
-    from app.models import MessageCorrelation, PostfixLog
     from app.services import excluded_addresses
-    with get_db_context() as db:
-        db.query(MessageCorrelation).filter(MessageCorrelation.correlation_key.like(f'%{MARK}%')).update(
-            {MessageCorrelation.first_seen: datetime.utcnow() - timedelta(hours=5)}, synchronize_session=False)
-        db.query(PostfixLog).filter(PostfixLog.message.like(f'%{MARK}%')).update(
-            {PostfixLog.time: PostfixLog.time - timedelta(hours=5)}, synchronize_session=False)
-        db.commit()
     monkeypatch.setattr(settings._inner, 'blacklist_emails', 'other@example.test')
     scheduler._cleanup_blacklisted_queues_sync()
-    scheduler._cleanup_blacklisted_queues_sync()  # the startup pass is done; this one is light
     assert excluded_addresses.full_pass_due() is None
     assert 'listed' in _state()['deliveries']
 
@@ -344,25 +334,49 @@ def test_lines_after_the_cleanup_removed_the_evidence_are_dropped(stored, monkey
     assert _stored_lines(Q_LISTED) == [f'{Q_LISTED}: to=<{NORMAL}>, relay=local, status=sent old-message']
 
 
-def test_a_second_full_pass_catches_a_page_stored_with_the_older_list(stored, monkeypatch):
+def test_the_cleanup_waits_for_a_page_being_stored(stored):
+    """A page checked against the list from before a change, and committed
+    while the cleanup is due, is in the database before the cleanup reads."""
+    import threading
     from app import scheduler
     from app.database import get_db_context
     from app.services import excluded_addresses
-    scheduler.cleanup_blacklisted_data()
-    assert excluded_addresses.full_pass_due() is None
-    # A page checked before the change commits now, with old log times
     queue = f'F{MARK.upper()}1'
-    with get_db_context() as db:
-        _line(db, datetime.utcnow() - timedelta(hours=6), queue, f'{queue}: to=<{LISTED}>, relay=local, status=sent',
-              recipient=LISTED)
-        db.commit()
-    scheduler._cleanup_blacklisted_queues_sync()  # light: an hour back only
-    assert _stored_lines(queue) != []
-    monkeypatch.setattr(excluded_addresses, '_second_pass_at', datetime.utcnow() - timedelta(seconds=1))
-    assert excluded_addresses.full_pass_due() == excluded_addresses.SECOND
-    scheduler._cleanup_blacklisted_queues_sync()
+    excluded_addresses.request_full_pass()
+    scheduler._postfix_ingest_lock.acquire()
+    try:
+        worker = threading.Thread(target=scheduler._cleanup_blacklisted_queues_sync)
+        worker.start()
+        worker.join(0.5)
+        assert worker.is_alive(), 'the cleanup did not wait for the page'
+        when = datetime.utcnow() - timedelta(hours=6)
+        with get_db_context() as db:
+            _line(db, when, queue, f'{queue}: message-id=<late-{MSGID}>')
+            _line(db, when + timedelta(seconds=1), queue, f'{queue}: to=<{LISTED}>, relay=local, status=sent',
+                  recipient=LISTED)
+            db.commit()
+    finally:
+        scheduler._postfix_ingest_lock.release()
+    worker.join(60)
     assert _stored_lines(queue) == []
     assert excluded_addresses.full_pass_due() is None
+
+
+def test_an_alias_delivery_of_a_listed_address_has_no_details(client):
+    """Mail to the listed address delivered to NORMAL as an alias (orig_to)."""
+    from app.database import get_db_context
+    from app.models import MessageCorrelation
+    now = datetime.utcnow().replace(microsecond=0) - timedelta(minutes=5)
+    with get_db_context() as db:
+        db.add(MessageCorrelation(correlation_key=f'alias-{MARK}', message_id=f'alias-{MSGID}', queue_id=Q_ORIG,
+                                  sender=SENDER, recipient=NORMAL, subject=f'alias {MARK}',
+                                  first_seen=now, last_seen=now, created_at=now))
+        db.commit()
+    assert client.get(f'/api/message/alias-{MARK}/details').status_code == 404
+    assert client.get(f'/api/message/alias-{MARK}').status_code == 404
+    from app import scheduler
+    scheduler.cleanup_blacklisted_data()
+    assert 'alias' not in _state()['deliveries']
 
 
 def test_block_details_do_not_show_an_excluded_address_message(client):
@@ -372,17 +386,25 @@ def test_block_details_do_not_show_an_excluded_address_message(client):
         block = SpamSuppression(email=f'bounced-{MARK}@example.test', reason='hard_bounce', source='auto')
         db.add(block)
         db.flush()
+        # Sent by the listed address, and (an alias bounce) sent to it as orig_to
         db.add(SuppressionEvent(suppression_id=block.id, kind='hard_bounce', outcome='blocked', dsn='5.1.1',
                                 sender=LISTED, recipient=block.email, subject=f'secret {MARK}', queue_id=Q_LISTED,
                                 message_id=MSGID, correlation_key=f'normal-{MARK}',
                                 log_lines=[{'message': f'to=<{block.email}> from {LISTED}'}]))
+        db.add(SuppressionEvent(suppression_id=block.id, kind='hard_bounce', outcome='extended', dsn='5.1.1',
+                                sender=SENDER, recipient=block.email, subject=f'secret alias {MARK}',
+                                queue_id=Q_ORIG, message_id=MSGID,
+                                log_lines=[{'message': f'{Q_ORIG}: to=<{block.email}>, orig_to=<{LISTED}>, '
+                                                       f'status=bounced (550 unknown)'}]))
         db.commit()
         block_id = block.id
     try:
         r = client.get(f'/api/suppressions/{block_id}/events')
-        event = _no_listed(r).json()['events'][0]
-        assert event['dsn'] == '5.1.1' and event['recipient'] == f'bounced-{MARK}@example.test'
-        assert event['log_lines'] == [] and event['subject'] is None and event['message_available'] is False
+        events = _no_listed(r).json()['events']
+        assert len(events) == 2
+        for event in events:
+            assert event['dsn'] == '5.1.1' and event['recipient'] == f'bounced-{MARK}@example.test'
+            assert event['log_lines'] == [] and event['subject'] is None and event['message_available'] is False
     finally:
         with get_db_context() as db:
             db.query(SpamSuppression).filter(SpamSuppression.id == block_id).delete(synchronize_session=False)

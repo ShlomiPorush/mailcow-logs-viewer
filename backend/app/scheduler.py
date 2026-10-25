@@ -1563,32 +1563,30 @@ async def cleanup_blacklisted_queues():
     )
 
 
-# How far back the light pass of every correlation run looks (log time)
-EXCLUDED_LIGHT_PASS = timedelta(hours=1)
-
-
 def _cleanup_blacklisted_queues_sync():
     """
     Remove what the message tables hold for excluded addresses, before correlation.
 
-    A full pass runs when one is due (at startup, and after a settings change
-    added an address); otherwise a light pass over the last hour catches a page
-    that was stored with the list from before a change. The BCC case: a copy
-    of a message goes through its own queue to the listed address, and all of
-    that queue's lines go, so correlation only finds the real recipient's.
+    Runs when a pass is due: at startup, and after a settings change added an
+    address. The ingest stores nothing new for a listed address, so between
+    changes there is nothing to remove. The BCC case: a copy of a message goes
+    through its own queue to the listed address, and all of that queue's lines
+    go, so correlation only finds the real recipient's.
     """
     if not excluded_addresses.listed():
         return
     request = excluded_addresses.full_pass_due()
-    since = None if request is not None else datetime.utcnow() - EXCLUDED_LIGHT_PASS
+    if request is None:
+        return
     try:
-        with get_db_context() as db:
-            counts = excluded_addresses.cleanup(db, since=since)
+        # With the ingest held: a page checked against the list from before
+        # a change is committed before this pass reads, never after it
+        with _postfix_ingest_lock, _rspamd_ingest_lock, get_db_context() as db:
+            counts = excluded_addresses.cleanup(db)
         if counts is None:
             logger.info("[BLACKLIST] The excluded addresses changed during the cleanup; it runs again")
             return
-        if request is not None:
-            excluded_addresses.full_pass_done(request)
+        excluded_addresses.full_pass_done(request)
         if any(counts.values()):
             logger.info(f"[BLACKLIST] Removed for excluded addresses: {counts['deliveries']} deliveries, "
                         f"{counts['postfix']} Postfix lines, {counts['rspamd']} Rspamd entries")

@@ -18,6 +18,7 @@ from app.models import MessageCorrelation, PostfixLog, RspamdLog
 
 def test_bcc_cleanup_leaves_loop_responsive(monkeypatch):
     monkeypatch.setattr(settings._inner, "blacklist_emails", "bcc@example.com")
+    scheduler.excluded_addresses.request_full_pass()
     started, release, finished = threading.Event(), threading.Event(), threading.Event()
     threads = []
     db = Mock()
@@ -103,6 +104,7 @@ def test_cleanup_preserves_other_queue_chains(monkeypatch):
         Base.metadata.create_all(isolated, tables=[PostfixLog.__table__, MessageCorrelation.__table__,
                                                    RspamdLog.__table__])
         monkeypatch.setattr(settings._inner, "blacklist_emails", "bcc@example.com,archive@example.com")
+        scheduler.excluded_addresses.request_full_pass()
         monkeypatch.setattr(scheduler, "get_db_context", session)
         with session() as db:
             rows = [PostfixLog(time=datetime.utcnow(), message_id="shared@example.com", queue_id=q, recipient=r)
@@ -119,6 +121,7 @@ def test_cleanup_preserves_other_queue_chains(monkeypatch):
         with session() as db:
             assert {row.id for row in db.query(PostfixLog).all()} == expected
         # Running again is harmless when all matched queue chains are gone.
+        scheduler.excluded_addresses.request_full_pass()
         asyncio.run(scheduler.cleanup_blacklisted_queues())
         with session() as db:
             assert {row.id for row in db.query(PostfixLog).all()} == expected

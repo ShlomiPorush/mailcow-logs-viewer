@@ -74,6 +74,12 @@ def postfix_line_listed(sender, recipient, message, orig_to=None) -> bool:
     return any(f'orig_to=<{a}>' in fields for a in listed())
 
 
+def postfix_text_listed(message) -> bool:
+    """A copied Postfix line whose own fields (from=, to=, orig_to=) name a listed address."""
+    fields = str(message or '').lower().split(_STATUS, 1)[0]
+    return any(f'from=<{a}>' in fields or f'to=<{a}>' in fields for a in listed())
+
+
 # ── SQL ────────────────────────────────────────────────────────────────────
 
 def _norm(column):
@@ -147,6 +153,17 @@ def visible_postfix_lines(lines: list) -> list:
     return [l for l in lines if not hidden(l)]
 
 
+def delivery_hidden(correlation, lines: list) -> bool:
+    """A delivery of a listed address: by its own sender or recipient, or by a
+    listed line (such as orig_to) of its queue occurrence among `lines`."""
+    if any_listed(correlation.sender, correlation.recipient):
+        return True
+    at = correlation.first_seen or correlation.created_at
+    return bool(correlation.queue_id) and at is not None and any(
+        l.queue_id == correlation.queue_id and l.time is not None and abs(l.time - at) <= QUEUE_WINDOW
+        and postfix_line_listed(l.sender, l.recipient, l.message) for l in lines)
+
+
 def visible_recipients(recipients) -> list:
     return [r for r in (recipients or []) if not is_listed(r)] if isinstance(recipients, list) else []
 
@@ -178,8 +195,16 @@ def queue_was_listed(queue_id: Optional[str], when: datetime) -> bool:
         return any(abs(when - t) <= QUEUE_WINDOW for t, _ in _listed_queues.get(queue_id, []))
 
 
+_last_forget: Optional[datetime] = None
+
+
 def forget_old_queues(now: datetime) -> None:
+    """Drop what was remembered more than QUEUE_WINDOW ago (at most once a minute)."""
+    global _last_forget
     with _listed_queues_lock:
+        if _last_forget is not None and now - _last_forget < timedelta(minutes=1):
+            return
+        _last_forget = now
         for queue_id in list(_listed_queues):
             kept = [(t, at) for t, at in _listed_queues[queue_id] if now - at <= QUEUE_WINDOW]
             if kept:
@@ -215,14 +240,12 @@ def delete_queue_occurrences(db, occurrences: Iterable[Tuple[str, datetime]]) ->
 
 # ── Cleanup ────────────────────────────────────────────────────────────────
 
-def cleanup(db, since: Optional[datetime] = None) -> Optional[Dict[str, int]]:
+def cleanup(db) -> Optional[Dict[str, int]]:
     """Delete what the message tables still hold for listed addresses.
 
-    since: only rows whose log time is from then on (the light pass of every
-    correlation run, which catches a page stored with the list before a change);
-    None for all of them. Each step commits in chunks. A list that changes
-    while it runs stops it (the next pass starts over with the new list).
-    Returns the counts, or None when stopped.
+    The caller holds the ingest (scheduler). Each step commits in chunks. A
+    list that changes while it runs stops it (the next pass starts over with
+    the new list). Returns the counts, or None when stopped.
     """
     hidden = listed()
     if not hidden:
@@ -236,8 +259,6 @@ def cleanup(db, since: Optional[datetime] = None) -> Optional[Dict[str, int]]:
 
     # 1. Deliveries whose own sender or recipient is listed
     query = db.query(MessageCorrelation.id).filter(not_(correlation_visible()))
-    if since is not None:
-        query = query.filter(MessageCorrelation.first_seen >= since)
     ids = [r[0] for r in query.all()]
     for i in range(0, len(ids), CHUNK):
         if not still_current():
@@ -248,8 +269,6 @@ def cleanup(db, since: Optional[datetime] = None) -> Optional[Dict[str, int]]:
 
     # 2. Listed Postfix lines, the rest of their queue occurrence, and its deliveries
     query = db.query(PostfixLog.id, PostfixLog.queue_id, PostfixLog.time).filter(_postfix_listed(PostfixLog, hidden))
-    if since is not None:
-        query = query.filter(PostfixLog.time >= since)
     rows = query.all()
     occurrences = [(q, t) for _, q, t in rows if q]
     for i in range(0, len(occurrences), CHUNK):
@@ -270,8 +289,6 @@ def cleanup(db, since: Optional[datetime] = None) -> Optional[Dict[str, int]]:
     # 3. Rspamd entries with a listed sender or recipient. A delivery to
     # someone else keeps its row, without the link to the deleted entry
     query = db.query(RspamdLog.id).filter(not_(rspamd_visible()))
-    if since is not None:
-        query = query.filter(RspamdLog.time >= since)
     ids = [r[0] for r in query.all()]
     for i in range(0, len(ids), CHUNK):
         if not still_current():
@@ -285,29 +302,18 @@ def cleanup(db, since: Optional[datetime] = None) -> Optional[Dict[str, int]]:
     return counts
 
 
-# A full pass is due at startup and after a settings change adds an address
+# A pass is due at startup and after a settings change adds an address
 # (listed() notices it). The correlation job runs it (one at a time). A
 # request that comes while a pass runs is not answered by that pass: it
-# started with the older list. Each request gets a second full pass
-# SECOND_PASS_AFTER the first: a page the ingest checked against the older
-# list may commit after the first pass, with log times the light pass does
-# not look at
-SECOND_PASS_AFTER = timedelta(minutes=2)
-SECOND = 'second'
-
+# started with the older list
 _requested = 1
 _done = 0
-_second_pass_at: Optional[datetime] = None
 _last_listed: frozenset = frozenset()
 
 
-def full_pass_due():
-    """What a full pass now answers (a request number, or SECOND), or None."""
-    if _requested != _done:
-        return _requested
-    if _second_pass_at is not None and datetime.utcnow() >= _second_pass_at:
-        return SECOND
-    return None
+def full_pass_due() -> Optional[int]:
+    """The request a pass now answers, or None when none is due."""
+    return _requested if _requested != _done else None
 
 
 def request_full_pass() -> None:
@@ -315,10 +321,6 @@ def request_full_pass() -> None:
     _requested += 1
 
 
-def full_pass_done(request) -> None:
-    global _done, _second_pass_at
-    if request == SECOND:
-        _second_pass_at = None
-    else:
-        _done = request
-        _second_pass_at = datetime.utcnow() + SECOND_PASS_AFTER
+def full_pass_done(request: int) -> None:
+    global _done
+    _done = request
