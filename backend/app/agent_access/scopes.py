@@ -149,7 +149,9 @@ POLICY: Dict[Tuple[str, str], Rule] = {
          "GET /api/smtp-abuse/whitelist", "GET /api/smtp-abuse/history",
          area="security", kind=READ),
     **_r("POST /api/fail2ban", area="security", kind=WRITE,
-         body='{"attr": {<mailcow Fail2ban attributes>}} - the same object GET /api/fail2ban returns'),
+         body='{"attr": {<mailcow Fail2ban attributes>}} - the object GET /api/fail2ban returns. Changes the '
+              'settings only: "blacklist" and "whitelist" may be left out, and when sent must be the current lists '
+              '(409 otherwise). Change the lists with /api/fail2ban/ban, /allow and /remove'),
     **_r("POST /api/fail2ban/policy", area="security", kind=WRITE,
          body='{"ban_time", "max_ban_time", "max_attempts", "retry_window", "netban_ipv4", "netban_ipv6": <int>, '
               '"ban_time_increment": <bool>}'),

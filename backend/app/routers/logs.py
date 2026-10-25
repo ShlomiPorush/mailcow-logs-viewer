@@ -730,17 +730,44 @@ def get_rw_status():
     return {"rw_configured": mailcow_api.has_rw_key}
 
 
+_FAIL2BAN_LISTS = ("blacklist", "whitelist")
+_LISTS_CHANGED = ("The Fail2ban allowlist or denylist is not the one sent: it changed since it was read, or the "
+                  "request tried to change it. Read the settings again, and change the lists with "
+                  "/api/fail2ban/ban, /api/fail2ban/allow or /api/fail2ban/remove.")
+
+
+def _list_entries(value) -> set:
+    if isinstance(value, list):
+        value = ",".join(str(v) for v in value)
+    return set(_split_ip_list(value if isinstance(value, str) else str(value)))
+
+
 @router.post("/fail2ban")
 async def edit_fail2ban(request: Request):
     """
-    Update Fail2Ban configuration on mailcow (requires Read-Write API key)
+    Update Fail2Ban configuration on mailcow (requires Read-Write API key).
+
+    Takes the object GET /api/fail2ban returns, but never changes the
+    allowlist or denylist: they are read fresh under the lock, so a ban a
+    protection rule wrote meanwhile is kept. Lists sent with the settings
+    must be the current ones, or the request is refused with 409.
     """
     try:
         body = await request.json()
-        attrs = body.get("attr", body)
+        attrs = body.get("attr", body) if isinstance(body, dict) else None
+        if not isinstance(attrs, dict):
+            raise HTTPException(status_code=400, detail="Send the Fail2ban settings as an object")
 
         async with protection_rules.fail2ban_lock:
-            result = await mailcow_api.edit_fail2ban(attrs)
+            current = await mailcow_api.get_fail2ban()
+            if current is None:
+                raise HTTPException(status_code=503, detail="Could not fetch current Fail2Ban settings")
+            lists = {name: _split_ip_list(current.get(name, "")) for name in _FAIL2BAN_LISTS}
+            if any(name in attrs and _list_entries(attrs[name]) != set(lists[name]) for name in _FAIL2BAN_LISTS):
+                raise HTTPException(status_code=409, detail={"code": "lists_changed", "message": _LISTS_CHANGED})
+            settings_only = {key: value for key, value in attrs.items() if key not in _FAIL2BAN_LISTS}
+            result = await mailcow_api.edit_fail2ban(protection_rules.fail2ban_attrs(
+                {**current, **settings_only}, lists["blacklist"], lists["whitelist"]))
         
         # mailcow returns a list with status objects
         if isinstance(result, list) and len(result) > 0:
