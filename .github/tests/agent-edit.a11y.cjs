@@ -84,3 +84,17 @@ test('without any View the dialog says so and sends nothing', async () => {
     assert.equal(p.sent.length, 0);
     assert.match(p.$('#agent-edit-error').textContent, /Select View for at least one area/);
 });
+
+test('Save and the error stay in the foot, outside the list that scrolls', async () => {
+    const p = page();
+    p.w.editAgentAccess(5);
+    const save = p.$('#agent-edit-modal .ui-dialog-foot button[type="submit"]');
+    assert.ok(save, 'Save is in the dialog foot');
+    assert.equal(p.$('#agent-edit-form').contains(save), false);
+    assert.equal(save.form, p.$('#agent-edit-form'));
+    assert.ok(p.$('#agent-edit-modal .ui-dialog-foot #agent-edit-error'));
+    // Clicking Save submits the form it points to
+    save.click();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert.equal(p.sent.length, 1);
+});

@@ -256,13 +256,12 @@ function editAgentAccess(grantId) {
                         <option value="">Keep ${escapeHtml(formatTime(agent.expires_at, { seconds: false }))}</option>${ends}
                     </select>
                 </label>
-                <p id="agent-edit-error" class="ui-text-fail hidden" role="alert"></p>
-                <div class="ui-form-actions">
-                    <span class="ui-toolbar-gap"></span>
-                    <button type="button" onclick="closeAgentEditModal()" class="ui-btn">Cancel</button>
-                    <button type="submit" class="ui-btn ui-btn-primary">Save</button>
-                </div>
             </form>
+            <div class="ui-dialog-foot ui-agent-edit-foot">
+                <p id="agent-edit-error" class="ui-text-fail hidden" role="alert"></p>
+                <button type="button" onclick="closeAgentEditModal()" class="ui-btn">Cancel</button>
+                <button type="submit" form="agent-edit-form" class="ui-btn ui-btn-primary">Save</button>
+            </div>
         </div>`;
     document.body.appendChild(modal);
     // Take action includes View: ticking it ticks View, and clearing View clears it

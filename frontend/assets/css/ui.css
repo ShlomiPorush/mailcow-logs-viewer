@@ -2219,6 +2219,9 @@ html body .ui-main .ui-set-choice-opt > input[type="radio"] { accent-color: var(
 /* Edit access: the table keeps every area (its overflow: hidden would let the grid squeeze it); the dialog scrolls */
 .ui-dialog-body.ui-agent-edit { grid-auto-rows: max-content; }
 .ui-agent-edit .ui-consent-areas { margin: 4px 0 0; min-height: max-content; }
+/* Its buttons and error stay below the list, so they show without scrolling */
+.ui-agent-edit-foot { flex-wrap: wrap; align-items: center; }
+.ui-agent-edit-foot > p { flex-basis: 100%; margin: 0; }
 .ui-agent-activity { flex-basis: 100%; padding-top: 8px; border-top: 1px solid var(--ui-line); }
 .ui-agent-log { display: grid; gap: 6px; margin: 0 0 6px; padding: 0; list-style: none; font-size: var(--ui-fs-sm); }
 .ui-agent-log li { display: grid; grid-template-columns: 150px 1fr; gap: 10px; align-items: baseline; }
@@ -3109,6 +3112,9 @@ button.ui-aa-col:focus-visible { outline: 2px solid var(--ui-focus); outline-off
     .ui-dialog-backdrop.is-grown:not(.ui-docked) > .ui-dialog { max-height: 100vh; max-height: 100dvh; }
     .ui-dialog-backdrop.is-full:not(.ui-docked) > .ui-dialog { border-radius: 0; padding-top: env(safe-area-inset-top); }
     .ui-dialog-backdrop:not(.ui-docked) .ui-dialog-body { overscroll-behavior: contain; padding-bottom: calc(var(--ui-pad-x) + env(safe-area-inset-bottom)); }
+    /* With a foot, the foot is the sheet's bottom edge and clears the home bar instead */
+    .ui-dialog-backdrop:not(.ui-docked) .ui-dialog:has(> .ui-dialog-foot) > .ui-dialog-body { padding-bottom: var(--ui-pad-x); }
+    .ui-dialog-backdrop:not(.ui-docked) .ui-dialog > .ui-dialog-foot { padding-bottom: calc(12px + env(safe-area-inset-bottom)); }
 }
 
 /* An information sheet's or dialog's top (grip and head) is its reading gauge:
