@@ -168,6 +168,7 @@ async def ingest():
     # The figures as they are now, then a fictional week before them for the trends
     await _step("trend_samples", scheduler.trend_samples_job)
     await _step("trend_history", asyncio.to_thread, seed_trend_history)
+    await _step("agents", asyncio.to_thread, seed_agents)
 
 
 def seed_trend_history(days=7):
@@ -204,6 +205,85 @@ def seed_trend_history(days=7):
         db.commit()
     logger.warning(f"[DEMO] Seeded {written} trend samples")
     return written
+
+
+# Connected agents to look at in Settings > Agents. The demo has no sign-in,
+# so no agent can connect to it: these have no tokens and only show the list,
+# its activity, Edit and Disconnect. Times are minutes before the start.
+DEMO_AGENTS = (
+    {"name": "Claude Code", "kind": "device", "ago": 2 * 1440, "days": 30, "used": 6,
+     "views": ("messages", "outbound", "security"), "acts": ("security",),
+     "calls": (
+         (2 * 1440 - 1, "denied", "rest", "GET", "/api/status/summary", 403,
+          "This connection does not have View for Dashboard & Status (status:read). "
+          "The person who connected you can reconnect you with that permission."),
+         (1440, "call", "rest", "GET", "/api/messages", 200, None),
+         (40, "call", "rest", "GET", "/api/security-alerts", 200, None),
+         (38, "call", "rest", "GET", "/api/logs/netfilter", 200, None),
+         (35, "denied", "rest", "PUT", "/api/settings", 403,
+          "Not available to agents: only people change settings, because a change could turn off "
+          "sign-in or agent limits, or send alerts elsewhere."),
+         (6, "call", "rest", "GET", "/api/messages", 200, None),
+     )},
+    {"name": "Codex", "kind": "dcr", "ago": 6 * 1440, "days": 7, "used": 180,
+     "views": ("status", "quarantine", "dmarc", "domains"), "acts": ("quarantine",),
+     "before": (("status", "dmarc", "domains"), ()),
+     "calls": (
+         (6 * 1440 - 2, "call", "read_api", "GET", "/api/dmarc/domains", 200, None),
+         (2 * 1440, "changed", None, None, None, None, None),
+         (2 * 1440 - 5, "call", "read_api", "GET", "/api/quarantine", 200, None),
+         (2 * 1440 - 7, "call", "perform_action", "POST", "/api/quarantine/release", 200, None),
+         (180, "call", "read_api", "GET", "/api/status/summary", 200, None),
+     )},
+    {"name": "Cursor", "kind": "dcr", "ago": 12 * 1440, "days": 30, "used": 3 * 1440, "ended": 1440,
+     "views": ("domains",), "acts": (),
+     "calls": ((3 * 1440, "call", "read_api", "GET", "/api/domains/all", 200, None),)},
+)
+
+
+def seed_agents(agents=DEMO_AGENTS):
+    """Fictional connected agents with their activity, for Settings > Agents."""
+    from datetime import datetime, timedelta
+    from app.agent_access.scopes import grant_scopes
+    from app.database import get_db_context
+    from app.models import AgentAudit, AgentGrant
+
+    start = datetime.utcnow()
+    at = lambda minutes: start - timedelta(minutes=minutes)  # noqa: E731
+    with get_db_context() as db:
+        for spec in agents:
+            created = at(spec["ago"])
+            scopes = grant_scopes(spec["views"], spec["acts"])
+            before = grant_scopes(*spec["before"]) if spec.get("before") else scopes
+            device = spec["kind"] == "device"
+            grant = AgentGrant(
+                client_id="mailcow-logs-cli" if device else f"demo-{spec['name'].lower()}",
+                client_kind=spec["kind"], display_name=spec["name"], declared_name=spec["name"],
+                redirect_uri="" if device else "http://127.0.0.1/callback", scopes=scopes,
+                resource="https://logs.example.com/" + ("api" if device else "mcp"),
+                approved_by=DEMO_SETTINGS["admin_email"], created_at=created,
+                expires_at=created + timedelta(days=spec["days"]), last_used_at=at(spec["used"]),
+                revoked_at=at(spec["ended"]) if spec.get("ended") else None,
+                revoke_reason="disconnected" if spec.get("ended") else None,
+            )
+            db.add(grant)
+            db.flush()
+            row = lambda when, event, **kw: db.add(AgentAudit(  # noqa: E731
+                grant_id=grant.id, agent_name=grant.display_name, at=at(when), event=event, **kw))
+            row(spec["ago"], "grant_created", outcome="ok",
+                detail=f"{before} until {grant.expires_at.isoformat(timespec='minutes')}Z")
+            for when, event, tool, method, path, status, detail in spec["calls"]:
+                if event == "changed":
+                    row(when, "grant_changed", outcome="ok",
+                        detail=f"by {DEMO_SETTINGS['admin_email']}: {before} -> {scopes}")
+                    continue
+                row(when, event, tool=tool, method=method, path=path, http_status=status,
+                    outcome="denied" if event == "denied" else "ok", detail=detail)
+            if spec.get("ended"):
+                row(spec["ended"], "grant_revoked", outcome="ok", detail="disconnected")
+        db.commit()
+    logger.warning(f"[DEMO] Seeded {len(agents)} connected agents")
+    return len(agents)
 
 
 def run_ingest_blocking():

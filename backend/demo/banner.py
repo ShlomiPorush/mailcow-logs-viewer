@@ -30,6 +30,10 @@ STYLE = """
 .demo-banner-short { display: none; }
 /* The demo is open on purpose: the "Authentication is off" warning is not news to visitors */
 #auth-off-banner { display: none !important; }
+/* Agent access needs sign-in, and the demo's is off for good: say so instead of where to turn it on */
+[data-agent-lock] { font-size: 0; }
+[data-agent-lock]::before { content: "The demo has no sign-in, so agents cannot connect to it. The agents below are examples.";
+  font-size: var(--ui-fs-sm, 12.5px); }
 @media (max-width: 760px) {
   .demo-banner { flex-wrap: nowrap; }
   .demo-banner-long { display: none; }
