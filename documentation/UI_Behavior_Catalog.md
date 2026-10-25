@@ -91,7 +91,7 @@ Many parts of the UI change with the configuration: a feature can be turned off,
 | `oauth2_enabled` (`/api/auth/provider-info`) | The OAuth2 button with the provider name | `#oauth2-section` |
 | `basic_auth_enabled` is false | The username and password form is hidden | `#login-form` |
 | Both methods on | An "OR" separator between them | `#auth-separator` |
-| `?error=` in the URL | A red error box, with its own text for `oauth2_error`, `invalid_state`, `missing_code`, `no_token`, `session_capacity` ("Login capacity reached...") and `server_error` | `#login-error` |
+| `?error=` in the URL | A red error box, with its own text for `oauth2_error`, `invalid_state`, `missing_code`, `no_token`, `session_capacity` ("Login capacity reached..."), `sign_in_changed` ("Sign-in settings just changed...") and `server_error` | `#login-error` |
 
 ### Missing Read-Write mailcow API key (`MAILCOW_API_KEY_RW`)
 

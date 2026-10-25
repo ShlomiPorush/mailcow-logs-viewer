@@ -191,6 +191,7 @@ OAuth2 off returns 400. Every other failure redirects to `/login?error=<code>`:
 | `missing_code` | No `code` in the callback |
 | `no_token` | The token response had no access token |
 | `session_capacity` | The session store is full (`SESSION_MAX_ENTRIES`) |
+| `sign_in_changed` | Sign-in settings changed while the login was in progress, for example a new password was saved. No session is issued; sign in again. |
 | `server_error` | Any other error |
 
 ---
@@ -217,7 +218,7 @@ Returns `{ "verified": true }` once the authentication middleware accepts the re
 
 Exchanges valid Basic credentials in the `Authorization` header for the `session_id` cookie. No body. Returns `{ "authenticated": true, "auth_type": "basic" }`.
 
-With Basic authentication off, the handler returns 400; when only OAuth2 is on, a request without a valid session is rejected first with 401. Invalid Basic credentials return 401; a locked-out client gets 429; a full session store 503 with `Retry-After: 60`.
+With Basic authentication off, the handler returns 400; when only OAuth2 is on, a request without a valid session is rejected first with 401. Invalid Basic credentials return 401; a locked-out client gets 429; a full session store 503 with `Retry-After: 60`. When sign-in settings changed after the request was accepted (for example a new password was saved), it returns 409 and issues no session; sign in again.
 
 ---
 
@@ -263,7 +264,7 @@ The tools are `get_access`, `list_endpoints`, `read_api` and `perform_action`. `
 | --- | --- | --- |
 | GET | `/.well-known/oauth-protected-resource`, `/.well-known/oauth-protected-resource/mcp` | Protected resource metadata (RFC 9728). |
 | GET | `/.well-known/oauth-authorization-server` | Authorization server metadata (RFC 8414). |
-| GET | `/oauth/authorize` | Needs a signed-in session. Checks the client and its redirect address, then opens the consent page `/oauth/consent`. Answers carry `state` and `iss` (RFC 9207). |
+| GET | `/oauth/authorize` | Needs a signed-in session. Checks the client, its redirect address, `response_type=code`, PKCE S256 and `resource`, then opens the consent page `/oauth/consent`. A problem is shown on a page of this app (400) and never sent to the redirect address. The person's answer on the consent page goes back to the agent with `state` and `iss` (RFC 9207). |
 | POST | `/oauth/token` | `authorization_code` with PKCE (`S256` only), the device code grant, and `refresh_token`. Form-encoded, public clients only (`token_endpoint_auth_method: none`). A refresh token works once; using a spent one ends the connection. |
 | POST | `/oauth/register` | Dynamic client registration (RFC 7591). Accepts up to 10 `redirect_uris` (`https`, `http` on a loopback host, or a private-use scheme). 10 registrations per hour per client address. |
 | POST | `/oauth/revoke` | Token revocation (RFC 7009). Revoking either token of a connection ends the connection. |
@@ -1335,7 +1336,7 @@ Saves settings to the database. Needs `SETTINGS_EDIT_VIA_UI_ENABLED=true`, else 
 - A key an environment variable sets can be saved, but has no effect while the variable is set; no error is returned. Keys that are not editable settings are ignored.
 - A changed server or account address cannot reuse a masked stored secret; send the secret again for the new destination.
 
-After saving, the app reloads the settings, the mailcow client and the OAuth2 client, reschedules the interval jobs, and deletes some data of features that are now off (see [purge-feature-data](#post-apisettingspurge-feature-data)). Changing sign-in settings revokes existing sessions; the caller gets a replacement session cookie.
+After saving, the app reloads the settings, the mailcow client and the OAuth2 client, reschedules the interval jobs, and deletes some data of features that are now off (see [purge-feature-data](#post-apisettingspurge-feature-data)). Changing sign-in settings revokes existing sessions; the caller gets a replacement session cookie, unless sign-in changed again since its request began or no session could be issued, in which case it signs in again.
 
 Returns `settings_edit_via_ui_enabled`, `settings_migrated`, `configuration`, `mailcow_rw_key_changed` and `rspamd_password_changed`. Each `*_changed` is `true` when that credential is set after the save and it, or the address it is sent to, changed. A body with no editable change saves nothing and returns the configuration without these two keys.
 
@@ -1343,7 +1344,7 @@ Returns `settings_edit_via_ui_enabled`, `settings_migrated`, `configuration`, `m
 
 #### Basic Auth Lockout Prevention
 
-When the body sends `basic_auth_enabled` as JSON `true` while Basic is off, it must also confirm the credentials (a string such as `"true"` skips this check):
+When the body turns `basic_auth_enabled` on while Basic is off, it must also confirm the credentials:
 
 | Field | Must match |
 |-------|------------|
@@ -1353,7 +1354,7 @@ When the body sends `basic_auth_enabled` as JSON `true` while Basic is off, it m
 **Errors (400 unless noted), with their `detail`:**
 
 - UI editing off (403): `Editing settings from UI is disabled. Set SETTINGS_EDIT_VIA_UI_ENABLED=true to enable.`
-- Validation: `Invalid settings for: smtp_port`, or `Invalid settings. Check the submitted values.` when no field can be named.
+- Validation: `Invalid settings for: smtp_port`, or `Invalid settings. Check the submitted values.` when no field can be named. An on/off setting takes JSON `true` or `false`, or one of `true`/`false`, `1`/`0`, `yes`/`no`, `on`/`off`, `t`/`f`, `y`/`n` (any case), and is saved as `true` or `false`.
 - Unknown feature in `disabled_features`: `disabled_features accepts only known feature names.`
 - A server address changed but its stored secret was not sent again: `You changed the server the {names} is sent to. Enter the {names} again: ...`
 - A server address changed for a secret set by an environment variable: `The {label} is set by the {SECRET} environment variable, so it can only be sent to a different server from there. ...`

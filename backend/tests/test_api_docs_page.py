@@ -62,7 +62,8 @@ def _sign_in(client, mode):
         client.post("/api/auth/session", headers={"Authorization": "Basic " + raw})
     elif mode == "oauth2":
         # What the OAuth2 callback stores, without a provider
-        cookie = session_module.create_session({"email": "admin@example.com", "auth_method": "oauth2"})
+        cookie = session_module.create_session({"email": "admin@example.com", "auth_method": "oauth2"},
+                                               generation=session_module.auth_generation())
         client.cookies.set(session_module.SESSION_COOKIE_NAME, cookie)
 
 

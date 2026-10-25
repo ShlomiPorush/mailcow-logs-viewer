@@ -156,7 +156,11 @@
             }
             if (url.origin !== window.location.origin) return '/';
             if (url.pathname === '/login' || /^\/(login|api|static)\//.test(url.pathname)) return '/';
-            return url.pathname + url.search + url.hash;
+            // Checked again as rebuilt: removing dot segments turns /.//host into
+            // //host, which the browser reads as another site
+            const path = url.pathname + url.search + url.hash;
+            if (path.startsWith('//') || path.includes('\\')) return '/';
+            return path;
         }
         const returnTo = safeReturnPath(new URLSearchParams(window.location.search).get('next'));
         
@@ -204,9 +208,11 @@
                         ? 'Too many login attempts. Please try again later.'
                         : response.status === 503
                             ? 'Login capacity reached. Please try again later.'
-                            : response.status === 401
-                                ? 'Invalid username or password'
-                                : 'Unable to sign in. Please try again later.';
+                            : response.status === 409
+                                ? 'Sign-in settings just changed. Please sign in again.'
+                                : response.status === 401
+                                    ? 'Invalid username or password'
+                                    : 'Unable to sign in. Please try again later.';
                     const error = new Error(message);
                     error.loginResponse = true;
                     throw error;
@@ -285,6 +291,9 @@
                             break;
                         case 'session_capacity':
                             errorMessage = 'Login capacity reached. Please try again later.';
+                            break;
+                        case 'sign_in_changed':
+                            errorMessage = 'Sign-in settings just changed. Please sign in again.';
                             break;
                         case 'server_error':
                             errorMessage = 'Server error during authentication. Please try again.';

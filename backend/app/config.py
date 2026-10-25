@@ -10,6 +10,7 @@ from pydantic_settings import BaseSettings
 from pydantic import TypeAdapter, Field, validator, field_validator, model_validator
 from typing import List, Optional, Any, Dict
 import logging
+import threading
 
 logger = logging.getLogger(__name__)
 
@@ -1255,24 +1256,33 @@ _settings_wrapper = SettingsWrapper()
 _settings_wrapper._inner = Settings()
 settings = _settings_wrapper
 
+# One reload at a time, from reading the stored settings to putting them in
+# force. A save holds it from before it writes until it has reloaded, so a
+# reload elsewhere never reads the settings before the save and puts them in
+# force after it (that brought an old password back).
+settings_reload_lock = threading.RLock()
 
-def reload_settings(db: Optional[Any] = None) -> None:
+
+def reload_settings(db: Optional[Any] = None) -> Settings:
     """Reload effective settings (e.g. after saving from UI). Updates the global settings wrapper.
 
-    On failure the current settings stay in force and the error is raised, so
-    the caller (an API request, or startup) fails instead of serving with
-    defaults that may have authentication off.
+    Returns the settings it put in force. On failure the current settings stay
+    in force and the error is raised, so the caller (an API request, or
+    startup) fails instead of serving with defaults that may have
+    authentication off.
     """
     global _settings_wrapper
-    try:
-        new_inner = build_settings(db)
-    except Exception as e:
-        logger.error("Settings reload failed, keeping the current settings: %s", e)
-        raise
-    _settings_wrapper._inner = new_inner
-    # Re-apply log level to root logger (setup_logging ran at import time with the old level)
-    root = logging.getLogger()
-    root.setLevel(getattr(logging, _settings_wrapper.log_level, logging.WARNING))
+    with settings_reload_lock:
+        try:
+            new_inner = build_settings(db)
+        except Exception as e:
+            logger.error("Settings reload failed, keeping the current settings: %s", e)
+            raise
+        _settings_wrapper._inner = new_inner
+        # Re-apply log level to root logger (setup_logging ran at import time with the old level)
+        root = logging.getLogger()
+        root.setLevel(getattr(logging, new_inner.log_level, logging.WARNING))
+    return new_inner
 
 
 class AppZoneFormatter(logging.Formatter):

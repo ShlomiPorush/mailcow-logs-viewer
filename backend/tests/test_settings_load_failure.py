@@ -50,13 +50,13 @@ def test_runtime_reload_keeps_authentication_when_the_database_fails(db_only_aut
 def test_settings_api_reports_the_failure_instead_of_opening_the_api(db_only_auth, monkeypatch):
     from fastapi.testclient import TestClient
     from app.database import get_db
-    from app.session import SESSION_COOKIE_NAME, create_session, _session_store
+    from app.session import SESSION_COOKIE_NAME, auth_generation, create_session, _session_store
 
     monkeypatch.setattr(settings_store, "get_config_overrides_from_db", _database_down)
     main.app.dependency_overrides[get_db] = lambda: object()
     try:
         client = TestClient(main.app, raise_server_exceptions=False)
-        client.cookies.set(SESSION_COOKIE_NAME, create_session({"username": "admin"}))
+        client.cookies.set(SESSION_COOKIE_NAME, create_session({"username": "admin"}, generation=auth_generation()))
         assert client.get("/api/settings").status_code == 500
         client.cookies.clear()
         # Still enforced for everyone else after the failed reload
