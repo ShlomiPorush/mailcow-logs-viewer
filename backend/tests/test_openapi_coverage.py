@@ -81,9 +81,16 @@ def test_every_documented_answer_has_a_real_schema():
     assert empty == [], "Documented operations with an empty answer schema:\n  " + "\n  ".join(empty)
 
 
+# Statuses the reader sees in a handler's code that the handler cannot give, and why
+NOT_GIVEN = {
+    ("POST", "/api/fail2ban/unban", 500): "internal_error() is called only for a refused Read-Write key, "
+                                          "which it answers 502",
+}
+
+
 def test_every_status_a_documented_handler_gives_is_documented():
     document = _document()
-    missing = []
+    missing, still_seen = [], set()
     for route in registered_routes(app):
         endpoint = getattr(route, "endpoint", None)
         if endpoint is None or not route.path.startswith("/api/"):
@@ -93,7 +100,11 @@ def test_every_status_a_documented_handler_gives_is_documented():
             if not is_documented(operation):
                 continue
             for status in sorted(statuses_in_source(endpoint) - {int(c) for c in operation["responses"]}):
-                missing.append(f"{method} {route.path} gives {status}")
+                if (method, route.path, status) in NOT_GIVEN:
+                    still_seen.add((method, route.path, status))
+                else:
+                    missing.append(f"{method} {route.path} gives {status}")
+    assert still_seen == set(NOT_GIVEN), "NOT_GIVEN lists statuses the reader no longer sees"
     assert missing == [], "Statuses these handlers give but do not document:\n  " + "\n  ".join(missing)
 
 

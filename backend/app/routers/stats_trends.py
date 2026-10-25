@@ -9,6 +9,8 @@ from ..database import get_db
 from ..models import MetricSnapshot
 from ..services.figures import METRICS, metric_on
 from ..utils import internal_error
+from ..api_models import Invalid, documented
+from ..api_models import stats as m
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +23,7 @@ def _iso(moment: datetime) -> str:
     return moment.isoformat(timespec="seconds") + "Z"
 
 
-@router.get("/stats/trends")
+@router.get("/stats/trends", responses=documented(m.TrendsResponse, errors={422: Invalid, 500: None}))
 def get_trends(
     names: str = Query(..., max_length=400, description="Comma-separated trend names"),
     days: int = Query(7, ge=1, le=90),

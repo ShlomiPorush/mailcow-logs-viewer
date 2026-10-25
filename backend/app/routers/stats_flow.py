@@ -24,6 +24,8 @@ from ..config import settings
 from ..database import get_db
 from ..models import MessageCorrelation, NetfilterLog, RspamdLog
 from .messages import _filtered_messages_query, message_group_key
+from ..api_models import Invalid, documented
+from ..api_models import stats as m
 
 logger = logging.getLogger(__name__)
 
@@ -164,7 +166,7 @@ def flow(db: Session, start: datetime, end: datetime, bucket: str, edges: List[d
     }
 
 
-@router.get("/stats/flow")
+@router.get("/stats/flow", responses=documented(m.FlowResponse, errors={422: Invalid}))
 def get_flow(
     period: Optional[str] = Query(None, pattern="^(24h|7d|30d)$", description="A dashboard period: its bars up to now"),
     previous: bool = Query(False, description="With period: the same number of bars right before it"),

@@ -105,3 +105,25 @@ def api_contract(monkeypatch):
         return response
 
     monkeypatch.setattr(TestClient, "request", request)
+
+
+def pytest_sessionfinish(session, exitstatus):
+    """With CONTRACT_SEEN=<file>, list each documented status the tests reached and each
+    one they did not, so a layer can add the tests it is missing (contract.py)."""
+    target = os.environ.get("CONTRACT_SEEN")
+    if not target:
+        return
+    from contract import is_documented
+    lines = []
+    for contract in _contracts.values():
+        for path, operations in contract.document.get("paths", {}).items():
+            for method, operation in operations.items():
+                if not is_documented(operation):
+                    continue
+                for code, response in operation.get("responses", {}).items():
+                    # FastAPI adds a 422 to every call with parameters, also where none can fail
+                    if response.get("description") == "Validation Error":
+                        continue
+                    reached = (method.upper(), path, int(code)) in contract.seen
+                    lines.append(f"{'reached' if reached else 'MISSING'} {method.upper()} {path} {code}")
+    pathlib.Path(target).write_text("\n".join(sorted(lines)) + "\n")

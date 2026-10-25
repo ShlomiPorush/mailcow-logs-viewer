@@ -132,3 +132,8 @@ def test_a_failure(env, monkeypatch, path):
     response = TestClient(app, raise_server_exceptions=False).get(path)
     assert response.status_code == 500
     assert response.json() == {'detail': 'Internal server error'}
+
+
+def test_facets_with_a_bad_date(env):
+    client, _ = env
+    assert client.get('/api/messages/facets?start_date=not-a-date').status_code == 422
