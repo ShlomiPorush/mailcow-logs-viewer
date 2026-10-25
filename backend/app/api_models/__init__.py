@@ -1,0 +1,74 @@
+"""
+What the API returns, for the OpenAPI document only.
+
+The routes build their answers as plain dicts. These models describe them so
+the API reference (/docs) and agents (list_endpoints) can show each answer.
+They are passed to the route decorator through ``responses=`` (see
+``documented``), which only adds them to /openapi.json: the answer is never
+filtered or validated by them. Never pass them as ``response_model`` and never
+annotate a route with ``-> SomeResponse``; FastAPI would then run every answer
+through the model and could drop fields or turn a mismatch into a 500.
+
+The tests check every answer the app gives against these models
+(tests/contract.py), so a model that drifts from its route fails CI.
+
+Conventions:
+- A fixed shape forbids other keys (``Fixed``), so an undocumented key fails.
+- A key that is sometimes missing has a default and is not required; a key
+  that is always there but may be null is ``X | None`` without a default.
+- Keys chosen at run time (a name, a date) are ``dict[str, Model]``.
+- Data passed through as another system sent it is ``dict[str, Any]``, with
+  a description saying so.
+"""
+from typing import Any, Dict, List, Optional, Union
+
+from pydantic import BaseModel, ConfigDict, Field
+
+
+class Fixed(BaseModel):
+    """A response object with exactly these keys."""
+    model_config = ConfigDict(extra="forbid")
+
+
+class ErrorDetail(Fixed):
+    """An error: what went wrong, in words."""
+    detail: str = Field(description="What went wrong")
+
+
+class ValidationErrorItem(BaseModel):
+    """One problem with the request, as FastAPI reports it."""
+    model_config = ConfigDict(extra="allow")
+    type: str
+    loc: List[Union[str, int]] = Field(description="Where the problem is, such as ['query', 'limit']")
+    msg: str
+
+
+class ValidationErrors(Fixed):
+    """The request's parameters or body did not pass validation."""
+    detail: List[ValidationErrorItem]
+
+
+# A 422 the route raises itself (a detail string) or FastAPI's own (a list)
+Invalid = Union[ValidationErrors, ErrorDetail]
+
+_ERROR_TEXT = {
+    400: "Bad request",
+    404: "Not found",
+    409: "Conflict",
+    422: "Invalid request",
+    500: "Internal error. The details are in the container log.",
+    502: "mailcow did not answer, or refused the request",
+    503: "Not available right now",
+}
+
+
+def documented(ok: Any, *, status: int = 200, description: str = "Success",
+               errors: Optional[Dict[int, Any]] = None) -> Dict[int, Dict[str, Any]]:
+    """The ``responses=`` value for a route: its answer and the errors it gives.
+
+    ``errors`` maps a status to its model, or to None for ErrorDetail.
+    """
+    out: Dict[int, Dict[str, Any]] = {status: {"model": ok, "description": description}}
+    for code, model in (errors or {}).items():
+        out[code] = {"model": model or ErrorDetail, "description": _ERROR_TEXT.get(code, "Error")}
+    return out

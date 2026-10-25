@@ -57,6 +57,9 @@ from .origin_guard import SameOriginGuardMiddleware
 from .session import get_session_from_request
 from .services.auth_cleanup import auth_store_maintenance
 from .version import __version__
+from .api_models import documented
+from .api_models.agents import agent_paths
+from .api_models.system import HealthResponse, InfoResponse
 from .app_time import app_tz, tz_status, display_formats
 
 from .services.geoip_downloader import (
@@ -279,7 +282,11 @@ async def lifespan(app: FastAPI):
 # Create FastAPI app
 app = FastAPI(
     title="mailcow Logs Viewer",
-    description="Modern dashboard for viewing and analyzing mailcow mail server logs",
+    description=(
+        "Modern dashboard for viewing and analyzing mailcow mail server logs\n\n"
+        "With sign-in on, every call except /api/health, /api/info and the sign-in calls needs a session or Basic "
+        "credentials, and answers 401 without them. A write sent from another site's page answers 403."
+    ),
     version=__version__,
     lifespan=lifespan,
     # FastAPI's own pages load Swagger UI and ReDoc from a CDN, which the CSP
@@ -290,6 +297,18 @@ app = FastAPI(
     # grant covers it; for every other request this does nothing
     dependencies=[Depends(enforce_agent_policy)],
 )
+
+_generate_openapi = app.openapi
+
+
+def _openapi_with_agent_calls():
+    """The generated document plus the two agent calls the middleware answers (api_models/agents.py)"""
+    if app.openapi_schema is None:
+        agent_paths(_generate_openapi())
+    return app.openapi_schema
+
+
+app.openapi = _openapi_with_agent_calls
 
 # Add Basic Auth Middleware FIRST (innermost)
 # This ensures ALL requests are authenticated when enabled
@@ -513,7 +532,7 @@ def root():
         )
 
 
-@app.get("/api/health")
+@app.get("/api/health", responses={**documented(HealthResponse), 503: {"model": HealthResponse, "description": "The database cannot be reached"}})
 def health_check():
     """Health check endpoint for Docker monitoring.
 
@@ -531,7 +550,7 @@ def health_check():
     )
 
 
-@app.get("/api/info")
+@app.get("/api/info", responses=documented(InfoResponse))
 async def app_info(request: Request):
     """Application information endpoint.
 

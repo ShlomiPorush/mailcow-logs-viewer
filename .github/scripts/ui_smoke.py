@@ -10,7 +10,9 @@ detail views of the seeded data (smoke_seed.py) and fails on:
     exist at runtime, including handlers rendered from API data,
   - an API call to a path the backend does not serve (checked against
     /openapi.json, because the SPA catch-all answers unknown paths with 200),
-  - an API response of 404 or any 5xx that is not listed in EXPECTED_ERRORS.
+  - an API response of 404 or any 5xx that is not listed in EXPECTED_ERRORS,
+  - an API answer that does not match what /openapi.json says the operation
+    returns (operations that document nothing yet are counted as skipped).
 
 Buttons that act (run, save, delete, ban, release) are never clicked.
 
@@ -24,6 +26,7 @@ import sys
 import urllib.request
 from urllib.parse import urlparse
 
+from jsonschema import Draft202012Validator
 from playwright.sync_api import sync_playwright
 
 BASE = sys.argv[1].rstrip('/') if len(sys.argv) > 1 else 'http://localhost:8080'
@@ -118,11 +121,12 @@ def fetch(path):
         return r.read().decode('utf-8')
 
 
-def route_matchers():
-    """Regexes for every path the backend serves, from its OpenAPI schema."""
-    spec = json.loads(fetch('/openapi.json'))
+def route_matchers(spec):
+    """(regex, path template) for every path the backend serves, from its OpenAPI schema.
+    Templates with fewer parameters come first, so /api/messages/new is not taken
+    for a /api/messages/{id}."""
     out = []
-    for p in spec['paths']:
+    for p in sorted(spec['paths'], key=lambda t: t.count('{')):
         parts = []
         for seg in p.strip('/').split('/'):
             if re.fullmatch(r'\{[^}]+:path\}', seg):
@@ -131,8 +135,64 @@ def route_matchers():
                 parts.append('[^/]+')
             else:
                 parts.append(re.escape(seg))
-        out.append(re.compile('^/' + '/'.join(parts) + '/?$'))
+        out.append((re.compile('^/' + '/'.join(parts) + '/?$'), p))
     return out
+
+
+# Answered by the auth middleware or the origin guard for any call; a route
+# documents them only when it gives them itself (backend/tests/contract.py)
+APP_WIDE_STATUSES = {401, 403, 429}
+
+
+def documented_schema(schema):
+    """Whether a schema says anything: FastAPI's default ({}) and any-object do not."""
+    if not schema:
+        return False
+    return not (schema.get('type') == 'object' and not schema.get('properties')
+                and schema.get('additionalProperties', True) in (True, {}))
+
+
+def is_documented(operation):
+    """Whether an operation says what it returns: a body schema, or a 3xx/204 without a body."""
+    for code, response in (operation.get('responses') or {}).items():
+        if code[:1] not in '23':
+            continue
+        content = response.get('content')
+        if not content:
+            if code[:1] == '3' or code == '204':
+                return True
+        elif any(documented_schema(media.get('schema') or {}) for media in content.values()):
+            return True
+    return False
+
+
+def answer_problem(spec, operation, status, content_type, body):
+    """What is wrong with an answer against the operation's documentation (as tests/contract.py),
+    or None. Returns 'skip' when the operation documents nothing yet."""
+    if not is_documented(operation):
+        return 'skip'
+    responses = operation.get('responses') or {}
+    response = responses.get(str(status))
+    if response is None:
+        return None if status in APP_WIDE_STATUSES else f'HTTP {status}, a status its documentation does not list'
+    content = response.get('content') or {}
+    media = (content_type or '').split(';')[0].strip()
+    if not content or not body:
+        return None
+    if media not in content:
+        return f'HTTP {status} as {media}, documented as {", ".join(content)}'
+    schema = content[media].get('schema') or {}
+    if media != 'application/json' or not schema:
+        return None
+    try:
+        data = json.loads(body)
+    except ValueError:
+        return f'HTTP {status} with a body that is not JSON'
+    errors = list(Draft202012Validator({**schema, 'components': spec.get('components', {})}).iter_errors(data))
+    if not errors:
+        return None
+    return f'HTTP {status} does not match its documentation: ' + '; '.join(
+        f"{'/'.join(str(p) for p in e.absolute_path) or '(top)'}: {e.message[:200]}" for e in errors[:3])
 
 
 def spa_routes():
@@ -195,9 +255,11 @@ def check_api_docs(browser):
 
 
 def main():
-    routes = route_matchers()
+    spec = json.loads(fetch('/openapi.json'))
+    routes = route_matchers(spec)
     pages = spa_routes()
     failures, warnings = [], []
+    checked, skipped = set(), set()
 
     with sync_playwright() as pw:
         browser = pw.chromium.launch()
@@ -216,11 +278,27 @@ def main():
             if not u.path.startswith('/api/'):
                 return
             method = resp.request.method
-            if not any(rx.match(u.path) for rx in routes):
+            template = next((t for rx, t in routes if rx.match(u.path)), None)
+            if template is None:
                 fail(f'{method} {u.path}: the backend has no such route')
-            elif resp.status == 404 or resp.status >= 500:
+                return
+            if resp.status == 404 or resp.status >= 500:
                 if not expected(method, u.path, resp.status):
                     fail(f'{method} {u.path}: HTTP {resp.status}')
+            operation = (spec['paths'].get(template) or {}).get(method.lower())
+            if not operation:
+                return
+            try:
+                body = resp.body()
+            except Exception:   # a redirect or an aborted request has none
+                body = b''
+            problem = answer_problem(spec, operation, resp.status, resp.headers.get('content-type', ''), body)
+            if problem == 'skip':
+                skipped.add(f'{method} {template}')
+            else:
+                checked.add(f'{method} {template}')
+                if problem:
+                    fail(f'{method} {u.path}: {problem}')
         page.on('response', on_response)
 
         def check_handlers():
@@ -255,6 +333,8 @@ def main():
             fail(problem)
         browser.close()
 
+    print(f'\n  answers checked against /openapi.json: {len(checked)} operations; '
+          f'not documented yet, so not checked: {len(skipped)}')
     for w in dict.fromkeys(warnings):
         print(f'  warning {w}')
     if failures:

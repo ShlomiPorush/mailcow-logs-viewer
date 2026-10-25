@@ -3,3 +3,5 @@
 
 pytest>=8.0.0
 pytest-asyncio>=0.23.3
+# Checks every API answer in the tests against /openapi.json (tests/contract.py)
+jsonschema==4.26.0

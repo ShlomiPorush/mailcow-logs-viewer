@@ -1,0 +1,182 @@
+"""What the Messages routes return (routers/messages.py)."""
+from typing import Any, Dict, List, Optional
+
+from pydantic import Field
+
+from . import Fixed
+
+TIME = "UTC, ISO 8601 with Z"
+
+
+class StatusCounts(Fixed):
+    """Messages per outcome; each count applies every filter except the outcome."""
+    all: int
+    delivered: int
+    deferred: int
+    bounced: int
+    rejected: int
+    spam: int
+    discarded: int
+
+
+class DirectionCounts(Fixed):
+    """Messages per direction; each count applies every filter except the direction."""
+    all: int
+    inbound: int
+    outbound: int
+    internal: int
+
+
+class MessageFacetsResponse(Fixed):
+    """Counts for the Messages filters. Counts are messages, not delivery legs."""
+    status: StatusCounts
+    direction: DirectionCounts
+    time: Dict[str, int] = Field(
+        None, description="Only with `since`: an `all` count and one count per valid range name. "
+                          "These ignore start_date and end_date.")
+
+
+class NewMessagesResponse(Fixed):
+    """How many messages matching the filters came after the list was read."""
+    count: int = Field(description="New messages: a matching leg stored after after_id, and no leg "
+                                   "of the same Message-ID stored before it")
+    watermark: int = Field(description="The newest delivery leg now")
+
+
+class MessageRow(Fixed):
+    """One message in the list: the earliest leg that matched the filters."""
+    correlation_key: str
+    message_id: Optional[str]
+    queue_id: Optional[str]
+    sender: Optional[str]
+    recipient: Optional[str]
+    subject: Optional[str]
+    direction: Optional[str] = Field(description="inbound, outbound or internal")
+    final_status: Optional[str] = Field(description="Such as delivered, deferred, bounced, rejected, spam or discarded")
+    is_complete: Optional[bool]
+    first_seen: Optional[str] = Field(description=TIME)
+    last_seen: Optional[str] = Field(description=TIME)
+    dovecot_status: Optional[str] = Field(description="Outcome of the final LMTP hop: stored, discarded, rejected, "
+                                                      "forwarded or failed; null without Dovecot information")
+    dovecot_mailbox: Optional[str] = Field(description="The folder it was filed into")
+    deliveries: int = Field(description="Delivery legs this message has in the database, including legs the "
+                                        "filters did not match")
+    spam_score: Optional[float]
+    is_spam: Optional[bool]
+    user: Optional[str] = Field(description="Authenticated sender, from Rspamd")
+    ip: Optional[str] = Field(description="Client IP, from Rspamd")
+
+
+class MessageListResponse(Fixed):
+    """A page of messages, one row per message (legs are grouped by Message-ID)."""
+    total: int = Field(description="Messages matching the filters, up to the watermark")
+    page: int
+    limit: int
+    pages: int
+    data: List[MessageRow]
+    next_cursor: Optional[str] = Field(description="Pass as `cursor` for the next page; null on the last page")
+    watermark: int = Field(description="The newest leg the list holds. Pass it as upto_id for the next pages, "
+                                       "and as after_id to GET /api/messages/new")
+
+
+class RelatedDelivery(Fixed):
+    """Another delivery leg of the same Message-ID, such as a forward."""
+    correlation_key: str
+    sender: Optional[str]
+    recipient: Optional[str]
+    direction: Optional[str]
+    final_status: Optional[str]
+    first_seen: Optional[str] = Field(description=TIME)
+    queue_id: Optional[str]
+    dovecot_status: Optional[str]
+    dovecot_mailbox: Optional[str]
+
+
+class RspamdScan(Fixed):
+    """Rspamd's scan of the message."""
+    time: Optional[str] = Field(description=TIME)
+    score: Optional[float]
+    required_score: Optional[float]
+    action: Optional[str]
+    symbols: Optional[Dict[str, Any]] = Field(description="The symbols as Rspamd reported them, by name")
+    is_spam: Optional[bool]
+    direction: Optional[str]
+    ip: Optional[str]
+    user: Optional[str]
+    has_auth: Optional[bool]
+    size: Optional[int]
+    country_code: Optional[str]
+    country_name: Optional[str]
+    city: Optional[str]
+    asn: Optional[str]
+    asn_org: Optional[str]
+
+
+class DovecotLine(Fixed):
+    """A raw Dovecot LMTP line about this message, while raw log retention keeps it."""
+    time: Optional[str] = Field(description=TIME)
+    priority: Optional[str]
+    message: Optional[str]
+    verdict: Optional[str]
+    recipient: Optional[str]
+    mailbox: Optional[str]
+
+
+class DovecotOutcome(Fixed):
+    """The outcome of the final LMTP hop."""
+    status: Optional[str] = Field(description="stored, discarded, rejected, forwarded or failed")
+    mailbox: Optional[str]
+    detail: Optional[str] = Field(description="The reject reason, forward target or storage error")
+    logs: List[DovecotLine]
+
+
+class PostfixLine(Fixed):
+    """One Postfix log line of the message's queue."""
+    time: Optional[str] = Field(description=TIME)
+    program: Optional[str]
+    priority: Optional[str]
+    message: Optional[str]
+    status: Optional[str]
+    relay: Optional[str]
+    delay: Optional[float]
+    dsn: Optional[str]
+
+
+class PostfixLineWithRecipient(PostfixLine):
+    recipient: Optional[str]
+
+
+class NetfilterEvent(Fixed):
+    """A Netfilter event for the Rspamd client IP, within an hour of the scan."""
+    time: Optional[str] = Field(description=TIME)
+    ip: Optional[str]
+    username: Optional[str]
+    auth_method: Optional[str]
+    action: Optional[str]
+    attempts_left: Optional[int]
+    message: Optional[str]
+
+
+class MessageDetailsResponse(Fixed):
+    """One delivery leg with its Postfix, Rspamd, Dovecot and Netfilter logs."""
+    correlation_key: str
+    message_id: Optional[str]
+    queue_id: Optional[str]
+    sender: Optional[str]
+    recipient: Optional[str] = Field(description="The leg's recipient")
+    recipients: List[str] = Field(description="Every recipient, from Rspamd, else from the Postfix lines")
+    recipient_count: int
+    subject: Optional[str] = Field(description="Taken from another leg of the same message when this one has none")
+    direction: Optional[str]
+    final_status: Optional[str]
+    is_complete: Optional[bool]
+    first_seen: Optional[str] = Field(description=TIME)
+    last_seen: Optional[str] = Field(description=TIME)
+    related_deliveries: List[RelatedDelivery] = Field(description="Other legs of the same Message-ID, by first_seen; "
+                                                                  "empty for most messages")
+    rspamd: Optional[RspamdScan] = Field(description="Null when the message was not scanned")
+    dovecot: Optional[DovecotOutcome] = Field(description="Null without Dovecot information")
+    postfix_by_recipient: Dict[str, List[PostfixLine]] = Field(
+        description="The Postfix lines by recipient; lines that belong to no recipient are under `_system`")
+    postfix: List[PostfixLineWithRecipient]
+    netfilter: List[NetfilterEvent] = Field(description="At most 100 events, newest first")

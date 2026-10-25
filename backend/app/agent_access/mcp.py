@@ -178,6 +178,41 @@ def _openapi_body(operation: Dict[str, Any], components: Dict[str, Any]) -> Opti
             for name, p in props.items()}
 
 
+def _schema_type(schema: Dict[str, Any], components: Dict[str, Any]) -> str:
+    """A short type name: a model's name, 'array of X', 'X or null', 'one of X, Y'."""
+    ref = schema.get("$ref", "")
+    if ref.startswith("#/components/schemas/"):
+        return ref.rsplit("/", 1)[-1]
+    choices = schema.get("anyOf") or schema.get("oneOf")
+    if choices:
+        names = [_schema_type(s, components) for s in choices if s.get("type") != "null"]
+        text = names[0] if len(names) == 1 else "one of " + ", ".join(names)
+        return text + " or null" if len(names) < len(choices) else text
+    if schema.get("type") == "array":
+        return "array of " + _schema_type(schema.get("items") or {}, components)
+    if schema.get("type") == "object" and isinstance(schema.get("additionalProperties"), dict):
+        return "object of " + _schema_type(schema["additionalProperties"], components)
+    return schema.get("type") or "value"
+
+
+def _openapi_returns(operation: Dict[str, Any], components: Dict[str, Any]) -> Optional[Any]:
+    """What a successful call returns: its top-level fields and their types (api_models/)."""
+    responses = operation.get("responses") or {}
+    for status in sorted(code for code in responses if code.startswith("2")):
+        content = (responses[status].get("content") or {})
+        if "application/json" not in content:
+            return next(iter(content), None)
+        schema = content["application/json"].get("schema") or {}
+        ref = schema.get("$ref", "")
+        if ref.startswith("#/components/schemas/"):
+            schema = components.get(ref.rsplit("/", 1)[-1], schema)
+        props = schema.get("properties")
+        if not props:
+            return _schema_type(schema, components) if schema else None
+        return {name: _schema_type(p, components) for name, p in props.items()}
+    return None
+
+
 def _list_endpoints(app, grant: store.GrantInfo, area: Optional[str]) -> Dict[str, Any]:
     return _text(endpoints_info(app, grant, area))
 
@@ -207,6 +242,9 @@ def endpoints_info(app, grant: store.GrantInfo, area: Optional[str]) -> Dict[str
         body = rule.body or _openapi_body(operation, components)
         if body:
             entry["body"] = body
+        returns = _openapi_returns(operation, components)
+        if returns:
+            entry["returns"] = returns
         if rule.guard == "own_domain":
             entry["limit"] = "only this mail server's own domains"
         out.append(entry)
