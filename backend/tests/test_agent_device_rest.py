@@ -541,6 +541,7 @@ def test_the_skill_is_served_with_this_apps_address(live_agents):
     for name in ("scripts/mailcow-logs", "scripts/mailcow-logs.mjs", "scripts/mailcow-logs.ps1", "scripts/mailcow-logs.sh"):
         r = client.get(f"/agents/skill/{name}")
         assert r.status_code == 200 and "__MAILCOW_LOGS_URL__" not in r.text, name
+    assert client.get("/agents/skill/scripts/mailcow-logs.mjs").headers["content-type"].startswith("text/javascript")
     assert client.get("/agents/skill/..%2F..%2Fmain.py").status_code == 404
     assert client.get("/agents/skill/scripts/other.sh").status_code == 404
     assert client.get("/agents/skill", follow_redirects=False).headers["location"] == "/agents/skill/"
