@@ -63,6 +63,16 @@ function page({ phone = false, answer = () => undefined } = {}) {
 
 const frame = w => new Promise(resolve => w.requestAnimationFrame(() => setTimeout(resolve, 0)));
 const settle = async w => { await frame(w); await frame(w); };
+// Waits for a condition the app reaches through its own timers, up to a limit,
+// so a busy machine does not fail a check that only came late
+async function until(condition, limit = 3000) {
+    const end = Date.now() + limit;
+    while (Date.now() < end) {
+        if (condition()) return true;
+        await new Promise(resolve => setTimeout(resolve, 20));
+    }
+    return !!condition();
+}
 const $ = (w, sel) => w.document.querySelector(sel);
 const escape = w => w.document.body.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
 // A click with no mouse press counts as a click on the backdrop (uiBackdropClick)
@@ -164,14 +174,15 @@ for (const dialog of DIALOGS) {
         if (dialog.kind === 'busy') {
             assert.ok(backdrop.isConnected, 'it stays while it works');
         } else if (dialog.guarded) {
+            assert.ok(await until(() => $(w, '#app-confirm-modal')), 'it asks before it drops the change');
             assert.ok(backdrop.isConnected, 'a change is not dropped');
-            assert.ok($(w, '#app-confirm-modal'), 'it asks before it drops the change');
-            assert.equal(w.document.activeElement && w.document.activeElement.id, 'app-confirm-cancel', 'the question starts on Keep editing');
+            assert.ok(await until(() => w.document.activeElement && w.document.activeElement.id === 'app-confirm-cancel'),
+                'the question starts on Keep editing');
             $(w, '#app-confirm-cancel').click();
             await settle(w);
             assert.ok(backdrop.isConnected, 'Keep editing keeps it');
         } else {
-            assert.ok(!backdrop.isConnected || backdrop.classList.contains('hidden'), 'it closed');
+            assert.ok(await until(() => !backdrop.isConnected || backdrop.classList.contains('hidden')), 'it closed');
             if (dialog.kind === 'question' || 'cancelled' in dialog) assert.equal(await result, dialog.cancelled, 'it closed as Cancel');
         }
     });
@@ -184,11 +195,9 @@ for (const dialog of DIALOGS.filter(d => d.guarded)) {
             const close = () => how === 'x' ? backdrop.querySelector('.ui-dialog-head [aria-label="Close"]').click() : escape(w);
             dialog.change(w);
             close();
-            await settle(w);
-            assert.ok($(w, '#app-confirm-modal'), `${how}: it asks`);
+            assert.ok(await until(() => $(w, '#app-confirm-modal')), `${how}: it asks`);
             $(w, '#app-confirm-ok').click();
-            await settle(w);
-            assert.ok(!backdrop.isConnected, `${how}: Discard closes it`);
+            assert.ok(await until(() => !backdrop.isConnected), `${how}: Discard closes it`);
         }
         const { w, backdrop } = await open(dialog);
         backdrop.querySelector('.ui-dialog-head [aria-label="Close"]').click();
@@ -320,8 +329,7 @@ test('the container log: the shared frame, a terminal inside, the whole screen o
         assert.ok(first >= 300, `opening ${opening}: the log loaded`);
         assert.ok(atEnd() && box.scrollTop > 0, `opening ${opening}: it opens at its end`);
         // The refresh (every 2 seconds) adds lines and follows them
-        await wait(2300);
-        assert.ok(logLines(w) > first, `opening ${opening}: new lines arrive`);
+        assert.ok(await until(() => logLines(w) > first, 6000), `opening ${opening}: new lines arrive`);
         assert.ok(atEnd(), `opening ${opening}: it keeps following the end`);
         // Scrolled up, the reader keeps the place and the refresh waits
         box.scrollTop = 0;

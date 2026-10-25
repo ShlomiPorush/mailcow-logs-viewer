@@ -48,14 +48,14 @@ const STATIC_LAYERS = {
 const FLOATING_CSS = {
     '.ui-dialog-backdrop': 'every dialog',
     '.ui-sheet': 'sheets',
-    '.ui-menu[popover]': 'row menus',
+    '.ui-menu': 'row menus on the popover layer',
     '.ui-popover': 'picker panels',
     '.ui-ms-dropdown': 'the Mailbox Stats period panel, a picker panel',
     '.ui-toast': 'the toast',
     '.ui-attn-win': 'the Needs attention window',
     '.ui-fly': "the sidebar's flyout of a page's tabs",
     '.ui-gs-panel': 'search results under the search field',
-    '.ui-gs.is-sheet': 'the phone search over the whole screen (SR-8)',
+    '.ui-gs': 'the phone search over the whole screen (SR-8)',
     '.mobile-menu': 'the phone More sheet',
     '.ui-tabbar': 'the phone tab bar, part of the page frame',
     '.ui-savebar': 'the save bar, part of the page',
@@ -202,8 +202,9 @@ function check(dir = FRONTEND) {
     }
 
     // CSS: what floats above the page is one of the shared layers
-    // Read per element styled: the last compound of each selector, across all its
-    // rules, so a position in one rule and a z-index in another count together
+    // Read per element styled: the first class (or id) of the last compound of each
+    // selector, across all its rules and states, so a position in one rule and a
+    // z-index in another (.x and .x.is-open, .x:hover, .page .x) count together
     const css = fs.readFileSync(path.join(dir, 'assets/css/ui.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
     const styled = new Map();
     for (const m of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
@@ -211,7 +212,8 @@ function check(dir = FRONTEND) {
         const z = Number((m[2].match(/(?:^|;)\s*z-index\s*:\s*(\d+)/) || [])[1] || 0);
         if (!position && !z) continue;
         for (const part of m[1].split(',')) {
-            const key = part.trim().replace(/\s+/g, ' ').split(/\s*[\s>+~]\s*/).pop();
+            const last = part.trim().replace(/\s+/g, ' ').split(/\s*[\s>+~]\s*/).pop();
+            const key = ((last || '').match(/[.#][\w-]+/) || [last])[0];
             if (!key || key.startsWith('@')) continue;
             const s = styled.get(key) || { fixed: false, absolute: false, z: 0 };
             if (position === 'fixed') s.fixed = true;
@@ -242,7 +244,9 @@ test('the listed exceptions still exist', () => {
     const html = fs.readFileSync(path.join(FRONTEND, 'index.html'), 'utf8');
     for (const id of Object.keys(STATIC_LAYERS)) assert.ok(html.includes(`id="${id}"`), `#${id} is listed in STATIC_LAYERS but gone`);
     const css = fs.readFileSync(path.join(FRONTEND, 'assets/css/ui.css'), 'utf8');
-    for (const selector of Object.keys(FLOATING_CSS)) assert.ok(css.includes(`${selector} {`), `${selector} is listed in FLOATING_CSS but gone`);
+    for (const selector of Object.keys(FLOATING_CSS)) {
+        assert.match(css, new RegExp(`${selector.replace(/[.#]/g, '\\$&')}(?![\\w-])`), `${selector} is listed in FLOATING_CSS but gone`);
+    }
 });
 
 // A copy of the frontend with one file changed, to show the check catches it
@@ -275,6 +279,8 @@ const BYPASSES = {
         '<div id="fine-modal" class="hidden ui-dialog-backdrop" role="dialog" aria-label="Fine"><div class="ui-dialog"><div class="ui-dialog-head"><h3>Fine</h3>' +
         '<button aria-label="Close">x</button></div><div class="ui-dialog-body"></div></div></div>', '#broken-modal'],
     'a layer floating through two CSS rules': ['assets/css/ui.css', '.fresh-popup { position: absolute; }\n.fresh-popup { z-index: 999; inset: 0; }'],
+    'a layer floating only in its open state': ['assets/css/ui.css', '.review-popup { position: absolute; }\n.review-popup.is-open { z-index: 999; inset: 0; }', '.review-popup'],
+    'a layer fixed only in its open state': ['assets/css/ui.css', '.page .late-sheet.is-open { position: fixed; inset: 0; }', '.late-sheet'],
     'a menu panel made by hand': ['app.js', "function rowMenu() {\n    return '<div class=\"ui-menu-panel\"><button>Delete</button></div>';\n}"],
     'a popover element made by hand': ['app.js', "function myPop() {\n    return '<div popover class=\"thing\">x</div>';\n}"],
     'fixed positioning set in JavaScript': ['app.js', "function overlay() {\n    const el = document.createElement('div');\n    el.style.position = 'fixed';\n    el.style.inset = '0';\n}"],
