@@ -521,11 +521,11 @@ def test_limit_errors_reach_the_caller():
         parse_dmarc_file(zipped(("a.xml", dmarc_xml()), ("b.json", "{}")), "a.zip")
 
 
-# -- migration 0024 -------------------------------------------------------------
+# -- migration 0025 -------------------------------------------------------------
 
 def _revision():
     path = next((pathlib.Path(__file__).resolve().parent.parent / "alembic" / "versions")
-                .glob("0024_*.py"))
+                .glob("0025_*.py"))
     spec = importlib.util.spec_from_file_location("report_content_hash", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)

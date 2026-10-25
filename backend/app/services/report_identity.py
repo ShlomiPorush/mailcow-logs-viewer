@@ -6,11 +6,11 @@ Anyone can mail the report address, and the report_id is a field in the
 report body that the sender picks. So a report_id alone proves nothing: a
 report is a duplicate only when its whole content is the same. The content
 hash is computed over exactly the values that are stored, so it can be
-computed again from stored rows (the 0024 migration does that for existing
+computed again from stored rows (the 0025 migration does that for existing
 reports) and a re-delivered report still matches.
 
 The format is frozen: changing it makes every stored report look different
-from its re-delivery. alembic/versions/0024_report_content_hash.py holds a
+from its re-delivery. alembic/versions/0025_report_content_hash.py holds a
 copy that must stay identical.
 """
 import hashlib

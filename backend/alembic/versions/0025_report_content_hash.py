@@ -16,8 +16,8 @@ version can still store reports; the app computes missing ones when needed.
 The fresh-install start creates these tables from the models first, so every
 step only runs when it is still needed.
 
-Revision ID: 0024
-Revises: 0023
+Revision ID: 0025
+Revises: 0024
 Create Date: 2026-10-25
 """
 import hashlib
@@ -33,8 +33,8 @@ import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import JSONB
 
 
-revision = "0024"
-down_revision = "0023"
+revision = "0025"
+down_revision = "0024"
 branch_labels = None
 depends_on = None
 
