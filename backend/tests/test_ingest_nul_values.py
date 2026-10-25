@@ -235,12 +235,17 @@ def test_a_failure_that_is_not_the_rows_own_still_fails_the_page():
     from sqlalchemy.exc import DataError, IntegrityError, OperationalError
     from app.services.db_values import is_row_error, _is_refused_row
 
-    def orig(pgcode):
+    def orig(pgcode, message=None):
         error = Exception('refused')
         error.pgcode = pgcode
+        error.diag = SimpleNamespace(message_primary=message)
         return error
     assert _is_refused_row(DataError('INSERT', {}, orig('22003')))
     assert _is_refused_row(IntegrityError('INSERT', {}, orig('23505')))
+    assert _is_refused_row(OperationalError('INSERT', {}, orig(
+        '54000', 'index row size 4112 exceeds btree version 4 maximum 2704 for index "uq_postfix_log"')))
+    assert not _is_refused_row(OperationalError('INSERT', {}, orig(
+        '54000', 'cannot extend file "base/1/2" beyond 4294967295 blocks')))
     assert not _is_refused_row(IntegrityError('INSERT', {}, orig('23502')))
     assert not _is_refused_row(OperationalError('INSERT', {}, orig('08006')))
     assert not is_row_error(IntegrityError('INSERT', {}, orig('23505')))

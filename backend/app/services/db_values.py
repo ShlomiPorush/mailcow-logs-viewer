@@ -52,10 +52,20 @@ def is_row_error(error: Exception) -> bool:
     return False
 
 
+def _is_index_row_too_large(error: Exception) -> bool:
+    # 54000 also means a table at its size limit, which fails every row. Only
+    # the index entry message counts; a server that words it in another
+    # language fails the batch, as before
+    if _pgcode(error) != _INDEX_ROW_TOO_LARGE:
+        return False
+    diag = getattr(getattr(error, 'orig', None), 'diag', None)
+    return 'index row' in (getattr(diag, 'message_primary', None) or '')
+
+
 def _is_refused_row(error: Exception) -> bool:
     # For a plain insert a duplicate key is the row's own problem too: it is
     # already stored
-    return is_row_error(error) or _pgcode(error) == _INDEX_ROW_TOO_LARGE or (
+    return is_row_error(error) or _is_index_row_too_large(error) or (
         isinstance(error, IntegrityError) and _pgcode(error) == _UNIQUE_VIOLATION)
 
 
