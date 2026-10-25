@@ -427,13 +427,7 @@ Checks SPF, DKIM, DMARC, DNSSEC, TLSA, MTA-STS and TLS-RPT for every active doma
 
 ### POST /api/domains/{domain}/check-dns
 
-Checks one domain now and stores the result as an individual check. Returns `{ "status": "success", "message": "DNS checked for example.com", "data": { ... } }`, where `data` is the same result object as `GET /api/domains/{domain}/dns-check`. An invalid domain name returns 400.
-
----
-
-### GET /api/domains/{domain}/dns-check
-
-Runs the DNS checks for one domain on every request and returns the result directly, without reading or saving the stored checks. The result has `domain`, `checked_at`, `spf`, `dkim`, `dmarc`, `dnssec`, `tlsa`, `mta_sts` and `tls_rpt`. An invalid domain name returns 400.
+Checks one domain now and stores the result as an individual check. Returns `{ "status": "success", "message": "DNS checked for example.com", "data": { ... } }`, where `data` has `domain`, `checked_at`, `spf`, `dkim`, `dmarc`, `dnssec`, `tlsa`, `mta_sts` and `tls_rpt`. An invalid domain name returns 400.
 
 ---
 

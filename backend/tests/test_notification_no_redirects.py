@@ -70,19 +70,24 @@ def test_a_redirect_is_reported_and_not_followed(redirecting_server, channel_typ
 
 def test_every_send_disables_redirects(monkeypatch):
     """Telegram's URL is fixed, so check the request itself for every type."""
-    seen = []
+    seen, hits = [], []
+    real_client = nc.httpx.AsyncClient
 
-    class Answer:
-        status_code = 200
-        text = ""
+    class FakeClient(real_client):
+        def __init__(self, *args, **kwargs):
+            seen.append(kwargs.get("follow_redirects"))
 
-    def fake_post(url, **kwargs):
-        seen.append(kwargs.get("allow_redirects"))
-        return Answer()
+            def handler(request):
+                hits.append(request.url.path)
+                return nc.httpx.Response(307, headers={"Location": "https://elsewhere.example.com/landing"})
+            kwargs["transport"] = nc.httpx.MockTransport(handler)
+            super().__init__(*args, **kwargs)
 
-    monkeypatch.setattr(nc.requests, "post", fake_post)
+    monkeypatch.setattr(nc.httpx, "AsyncClient", FakeClient)
     configs = {**{k: v("https://hooks.example.com") for k, v in CONFIGS.items()},
                "telegram": {"bot_token": "123:ABC", "chat_id": "42"}}
     for channel_type, config in configs.items():
-        assert nc.send_to_config(channel_type, config, "S", "M") == (True, "")
+        ok, error = nc.send_to_config(channel_type, config, "S", "M")
+        assert ok is False and "redirect" in error.lower(), channel_type
     assert seen == [False] * len(configs)
+    assert "/landing" not in hits and len(hits) == len(configs)

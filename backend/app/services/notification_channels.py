@@ -9,22 +9,30 @@ user never has to hand-craft one.
 Multiple channels can be enabled at once. Each channel subscribes to the alert
 topics it cares about (see ALERT_TYPES); a channel with no subscription list
 receives everything.
-Synchronous (requests) - call from a worker thread, never on the event loop.
+Synchronous - call from a worker thread, never on the event loop.
 """
+import asyncio
+import codecs
+import contextlib
 import logging
+import os
 import re
+import ssl
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 
-import requests
+import httpx
 
 from ..database import get_db_context
 from ..models import NotificationChannel
 
 logger = logging.getLogger(__name__)
 
-_TIMEOUT_SECONDS = 10
+_TIMEOUT_SECONDS = 10      # one step: connect, TLS handshake, one read
+_TOTAL_SECONDS = 20        # the whole send, however slowly the server answers
+_MAX_ERROR_BYTES = 1024    # read of an error answer; its first 200 characters are shown
+_TOO_SLOW = "The server took too long to answer."
 # Discord's hard limit is 2000 characters; stay comfortably below it
 _MAX_MESSAGE_CHARS = 1900
 
@@ -176,7 +184,7 @@ def _discord_text(text: str) -> str:
 
 
 def build_request(channel_type: str, config: Dict, subject: str, message: str) -> Tuple[str, Dict]:
-    """Assemble (url, requests-kwargs) for a channel. URLs are built here so
+    """Assemble (url, httpx request kwargs) for a channel. URLs are built here so
     the user only supplies the service-specific pieces.
 
     Alerts quote text that whoever sends the mail chooses, such as a report
@@ -205,7 +213,7 @@ def build_request(channel_type: str, config: Dict, subject: str, message: str) -
             headers["Authorization"] = f"Bearer {config['token']}"
         # Title goes as a query parameter: HTTP headers can't carry the emoji
         # some alert subjects use, ?title= takes percent-encoded UTF-8
-        return url, {"data": text.encode("utf-8"), "headers": headers,
+        return url, {"content": text.encode("utf-8"), "headers": headers,
                      "params": {"title": subject}}
 
     if channel_type == "gotify":
@@ -230,9 +238,9 @@ def build_request(channel_type: str, config: Dict, subject: str, message: str) -
 
 def _sanitize_error(channel_type: str, config: Dict, error_text: str) -> str:
     """Strip channel secrets from an error string before it is logged, stored
-    in last_error, or returned by the API. requests embeds the target URL in
-    its exception messages, and for Telegram/Gotify/Slack/Discord the URL (or
-    its path) contains the token."""
+    in last_error, or returned by the API. HTTP client errors can quote the
+    target URL, and for Telegram/Gotify/Slack/Discord the URL (or its path)
+    contains the token."""
     for key in SECRET_FIELDS.get(channel_type, set()):
         value = str(config.get(key, "") or "").strip()
         if not value:
@@ -246,6 +254,95 @@ def _sanitize_error(channel_type: str, config: Dict, error_text: str) -> str:
     return error_text
 
 
+def _verify():
+    """Honour REQUESTS_CA_BUNDLE and CURL_CA_BUNDLE as requests, the client
+    used here before, did, so a self-hosted ntfy or Gotify behind a private CA
+    keeps working. Otherwise httpx's default, which honours SSL_CERT_FILE and
+    SSL_CERT_DIR."""
+    bundle = os.environ.get("REQUESTS_CA_BUNDLE") or os.environ.get("CURL_CA_BUNDLE")
+    if not bundle:
+        return True
+    if os.path.isdir(bundle):
+        return ssl.create_default_context(capath=bundle)
+    return ssl.create_default_context(cafile=bundle)
+
+
+def _decode(body: bytes, charset: Optional[str]) -> str:
+    """The answer's own charset when Python knows it, else UTF-8."""
+    try:
+        codecs.lookup(charset or "utf-8")
+    except LookupError:
+        charset = None
+    return body.decode(charset or "utf-8", errors="replace")
+
+
+async def _post(url: str, kwargs: Dict) -> Tuple[int, str]:
+    """POST and return (status, the start of the answer for an error status).
+
+    The channel's server decides how slowly and how much it answers, so the
+    send is bounded: one deadline for all of it, since httpx's timeout applies
+    to each step and a server sending a byte every few seconds never trips it;
+    no compressed answer, whose decoded size the server chooses; and at most
+    _MAX_ERROR_BYTES of an error answer read. A success or redirect answer is
+    not read at all.
+    """
+    headers = {**kwargs.get("headers", {}), "Accept-Encoding": "identity"}
+    async with asyncio.timeout(_TOTAL_SECONDS):
+        # A redirect would carry the alert, and any token in the URL or the
+        # Authorization header, to wherever the server points: never follow it
+        async with httpx.AsyncClient(timeout=_TIMEOUT_SECONDS, follow_redirects=False,
+                                     verify=_verify()) as client:
+            async with client.stream("POST", url, **{**kwargs, "headers": headers}) as response:
+                if 200 <= response.status_code < 400:
+                    return response.status_code, ""
+                encoding = response.headers.get("content-encoding", "identity").strip().lower()
+                if encoding not in ("", "identity"):
+                    return response.status_code, ""
+                body = bytearray()
+                async with contextlib.aclosing(response.aiter_raw()) as chunks:
+                    async for chunk in chunks:
+                        body.extend(chunk[:_MAX_ERROR_BYTES - len(body)])
+                        if len(body) >= _MAX_ERROR_BYTES:
+                            break
+                return response.status_code, _decode(bytes(body), response.charset_encoding)
+
+
+def _run(coro):
+    """Run a send on its own event loop in this worker thread. asyncio.run
+    would wait at the end for a name lookup the deadline cut off (it runs on a
+    thread nothing can stop); closing the loop leaves that lookup to end on its
+    own, so the send still returns on time.
+
+    The loop is asyncio's own, not new_event_loop(): under uvicorn's default
+    policy that is uvloop, whose close() waits for a running name lookup."""
+    loop = asyncio.SelectorEventLoop()
+    try:
+        return loop.run_until_complete(coro)
+    finally:
+        try:
+            loop.run_until_complete(_settle())
+        finally:
+            loop.close()
+
+
+async def _settle() -> None:
+    """Let the clean-up a send leaves behind finish before its loop closes.
+    An httpx answer that is not read to the end leaves inner generators that
+    the loop closes in tasks of their own; a closed loop would log each one
+    as destroyed while pending. All of it gets one second; whatever still runs
+    then is cancelled and left to the closing loop."""
+    try:
+        async with asyncio.timeout(1):
+            await asyncio.get_running_loop().shutdown_asyncgens()
+            await asyncio.sleep(0)
+            others = asyncio.all_tasks() - {asyncio.current_task()}
+            if others:
+                await asyncio.wait(others)
+    except TimeoutError:
+        for task in asyncio.all_tasks() - {asyncio.current_task()}:
+            task.cancel()
+
+
 def send_to_config(channel_type: str, config: Dict, subject: str, message: str) -> Tuple[bool, str]:
     """Send one notification. Returns (ok, error_message)."""
     ok, error = validate_config(channel_type, config)
@@ -253,18 +350,17 @@ def send_to_config(channel_type: str, config: Dict, subject: str, message: str) 
         return False, error
     try:
         url, kwargs = build_request(channel_type, config, subject, message)
-        # A redirect would carry the alert, and any token in the URL or the
-        # Authorization header, to wherever the server points: never follow it
-        response = requests.post(url, timeout=_TIMEOUT_SECONDS, allow_redirects=False, **kwargs)
-        if 200 <= response.status_code < 300:
-            return True, ""
-        if 300 <= response.status_code < 400:
-            return False, (f"HTTP {response.status_code}: the server redirected the request, "
-                           f"and redirects are not followed. Enter the final URL of the service.")
-        return False, _sanitize_error(channel_type, config,
-                                      f"HTTP {response.status_code}: {response.text[:200]}")
+        status, text = _run(_post(url, kwargs))
+    except (TimeoutError, httpx.TimeoutException):
+        return False, _TOO_SLOW
     except Exception as e:
-        return False, _sanitize_error(channel_type, config, str(e))
+        return False, _sanitize_error(channel_type, config, str(e) or type(e).__name__)
+    if 200 <= status < 300:
+        return True, ""
+    if 300 <= status < 400:
+        return False, (f"HTTP {status}: the server redirected the request, "
+                       f"and redirects are not followed. Enter the final URL of the service.")
+    return False, _sanitize_error(channel_type, config, f"HTTP {status}: {text[:200]}")
 
 
 def _record_result(channel_id: int, ok: bool, error: str) -> None:

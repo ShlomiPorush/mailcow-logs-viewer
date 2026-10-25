@@ -59,18 +59,16 @@ def dns_checked(monkeypatch):
     return checked
 
 
-@pytest.mark.parametrize("route", ["check_single_domain_dns", "check_single_domain_dns_manual"])
 @pytest.mark.parametrize("bad", ["example.com/../x", "exa mple.com", "example.com?x=1", "-bad.example.com", ""])
-def test_dns_check_rejects_a_value_that_is_not_a_domain(dns_checked, route, bad):
+def test_dns_check_rejects_a_value_that_is_not_a_domain(dns_checked, bad):
     with pytest.raises(HTTPException) as err:
-        asyncio.run(getattr(domains, route)(bad))
+        asyncio.run(domains.check_single_domain_dns_manual(bad))
     assert err.value.status_code == 400
     assert dns_checked == []
 
 
-@pytest.mark.parametrize("route", ["check_single_domain_dns", "check_single_domain_dns_manual"])
-def test_dns_check_accepts_a_domain(dns_checked, route):
-    asyncio.run(getattr(domains, route)("mail.example.com"))
+def test_dns_check_accepts_a_domain(dns_checked):
+    asyncio.run(domains.check_single_domain_dns_manual("mail.example.com"))
     assert dns_checked == ["mail.example.com"]
 
 

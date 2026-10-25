@@ -740,7 +740,7 @@ def test_perform_action_with_act(live_agents):
 def test_dns_check_only_for_own_domains(live_agents):
     client, _, tokens = _connect(acts=("domains",))
     result = _tool(client, tokens["access_token"], "perform_action",
-                   {"method": "GET", "path": "/api/domains/attacker.example/dns-check"})
+                   {"method": "POST", "path": "/api/domains/attacker.example/check-dns"})
     assert result["isError"] and "not one of this mail server's domains" in result["content"][0]["text"]
 
 
