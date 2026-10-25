@@ -74,3 +74,34 @@ def local_domains_loaded(monkeypatch):
     from app import config
     from app.mailcow_api import mailcow_api
     monkeypatch.setattr(config, "_cached_domains_complete", mailcow_api.base_url)
+
+
+# One Contract per app, shared by the whole run: building it copies the document
+_contracts = {}
+
+
+@pytest.fixture(autouse=True)
+def api_contract(monkeypatch):
+    """Check every answer the real app gives a test against /openapi.json (contract.py).
+
+    Only TestClient calls to app.main.app are checked; tests that build an app
+    of their own are left alone. A mismatch fails the test that made the call.
+    """
+    from starlette.testclient import TestClient
+
+    original = TestClient.request
+
+    def request(self, *args, **kwargs):
+        response = original(self, *args, **kwargs)
+        main = sys.modules.get("app.main")
+        if main is not None and self.app is main.app:
+            from contract import Contract, check_response
+            contract = _contracts.get(id(main.app))
+            if contract is None or contract.app is not main.app:
+                contract = _contracts[id(main.app)] = Contract(main.app)
+            # A followed redirect is an answer too
+            for answer in (*response.history, response):
+                check_response(contract, answer)
+        return response
+
+    monkeypatch.setattr(TestClient, "request", request)

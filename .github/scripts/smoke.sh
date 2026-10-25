@@ -153,13 +153,14 @@ if [ "${UI_SMOKE:-0}" = "1" ]; then
 
     # Headless Chromium from the pinned Playwright image; the Python package is
     # pinned to the same release so it uses the browsers the image ships.
+    # jsonschema checks every API answer against /openapi.json.
     PW_VERSION="1.56.0"
     PW_IMAGE="mcr.microsoft.com/playwright/python:v${PW_VERSION}-noble"
     SCRIPTS="$(cd "$(dirname "$0")" && (pwd -W 2>/dev/null || pwd))"
     browser_pass() {
         MSYS_NO_PATHCONV=1 docker run --rm --network "${NET}" --ipc=host \
             -v "${SCRIPTS}:/scripts:ro" "${PW_IMAGE}" \
-            sh -c "pip install -q --disable-pip-version-check --root-user-action=ignore --break-system-packages playwright==${PW_VERSION} \
+            sh -c "pip install -q --disable-pip-version-check --root-user-action=ignore --break-system-packages playwright==${PW_VERSION} jsonschema==4.26.0 \
                    && python /scripts/ui_smoke.py http://${APP}:8080" \
             || fail "browser pass ($1) found problems (see FAIL lines above)"
     }

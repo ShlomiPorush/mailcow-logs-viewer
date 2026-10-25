@@ -18,6 +18,9 @@ from ..app_time import range_bound
 from ..services import excluded_addresses
 from ..services.dovecot_parser import dovecot_line_user, parse_dovecot_message
 from ..utils import internal_error, format_datetime_for_api as format_datetime_utc, RangeStart, RangeEnd
+from ..api_models import Invalid, documented
+from ..api_models.messages import (MessageDetailsResponse, MessageFacetsResponse, MessageListResponse,
+                                   NewMessagesResponse)
 
 logger = logging.getLogger(__name__)
 
@@ -260,7 +263,7 @@ FACET_STATUSES = ("delivered", "deferred", "bounced", "rejected", "spam", "disca
 FACET_DIRECTIONS = ("inbound", "outbound", "internal")
 
 
-@router.get("/messages/facets")
+@router.get("/messages/facets", responses=documented(MessageFacetsResponse, errors={422: Invalid, 500: None}))
 def get_message_facets(
     search: Optional[str] = Query(None),
     sender: Optional[str] = Query(None),
@@ -323,7 +326,7 @@ def messages_watermark(db) -> int:
     return db.query(func.max(MessageCorrelation.id)).scalar() or 0
 
 
-@router.get("/messages/new")
+@router.get("/messages/new", responses=documented(NewMessagesResponse, errors={422: Invalid, 500: None}))
 def count_new_messages(
     after_id: int = Query(..., ge=0, description="The watermark of the list shown"),
     search: Optional[str] = Query(None),
@@ -363,7 +366,7 @@ def count_new_messages(
         raise internal_error(e)
 
 
-@router.get("/messages")
+@router.get("/messages", responses=documented(MessageListResponse, errors={422: Invalid, 500: None}))
 def get_unified_messages(
     page: int = Query(1, ge=1, description="Page number"),
     limit: int = Query(50, ge=1, le=500, description="Items per page"),
@@ -507,7 +510,7 @@ def get_unified_messages(
         raise internal_error(e)
 
 
-@router.get("/message/{correlation_key}/details")
+@router.get("/message/{correlation_key}/details", responses=documented(MessageDetailsResponse, errors={404: None, 500: None}))
 def get_message_full_details(
     correlation_key: str,
     db: Session = Depends(get_db)
