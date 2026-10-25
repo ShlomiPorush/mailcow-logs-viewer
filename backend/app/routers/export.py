@@ -12,7 +12,8 @@ from ..models import PostfixLog, RspamdLog, NetfilterLog, MessageCorrelation
 from ..app_time import local_now, to_local
 from ..config import settings
 from ..utils import internal_error, RangeStart, RangeEnd
-from .messages import BLANKS, message_sort_time
+from .messages import message_sort_time
+from ..services import excluded_addresses
 from ..services.csv_export import csv_download, csv_query_rows, get_csv_db
 
 logger = logging.getLogger(__name__)
@@ -46,7 +47,7 @@ def export_postfix_csv(
             PostfixLog.time, PostfixLog.program, PostfixLog.priority, PostfixLog.queue_id,
             PostfixLog.message_id, PostfixLog.sender, PostfixLog.recipient, PostfixLog.status,
             PostfixLog.relay, PostfixLog.delay, PostfixLog.dsn, PostfixLog.message,
-        ))
+        )).filter(excluded_addresses.postfix_line_visible())
         
         # Apply same filters as the main API
         if search:
@@ -131,7 +132,7 @@ def export_rspamd_csv(
             RspamdLog.recipients_smtp, RspamdLog.score, RspamdLog.required_score,
             RspamdLog.action, RspamdLog.direction, RspamdLog.is_spam, RspamdLog.has_auth,
             RspamdLog.user, RspamdLog.ip, RspamdLog.size, RspamdLog.symbols,
-        ))
+        )).filter(excluded_addresses.rspamd_visible())
         
         # Apply filters
         if search:
@@ -314,8 +315,9 @@ def export_messages_csv(
             MessageCorrelation.rspamd_log_id, MessageCorrelation.is_complete,
         ), load_only(RspamdLog.id, RspamdLog.score, RspamdLog.is_spam, RspamdLog.user, RspamdLog.ip))
 
-        # The filters mean what they mean in the Messages list (messages.py)
-        query = query.filter(MessageCorrelation.correlation_key != "BLACKLISTED")
+        # The filters mean what they mean in the Messages list (messages.py),
+        # excluded addresses included
+        query = query.filter(excluded_addresses.correlation_visible())
 
         # Apply filters
         if search:
@@ -358,13 +360,6 @@ def export_messages_csv(
             query = query.filter(RspamdLog.user.ilike(f"%{user}%"))
         if ip:
             query = query.filter(RspamdLog.ip.ilike(f"%{ip}%"))
-
-        # Addresses hidden with Blacklist Emails stay hidden here, as in the list.
-        # Rows stored before an address was added are left out too
-        hidden = settings.blacklist_emails_list
-        if hidden:
-            for column in (MessageCorrelation.sender, MessageCorrelation.recipient):
-                query = query.filter(or_(column.is_(None), func.lower(func.btrim(column, BLANKS)).notin_(hidden)))
 
         # In the list's order (newest first, or oldest first), so the row limit keeps the same messages
         # By the same time the list sorts by (a delivery with no first-seen time by when it was stored)

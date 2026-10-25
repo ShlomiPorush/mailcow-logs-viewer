@@ -18,6 +18,9 @@ from typing import Dict, Any, Optional
 from ..database import get_db, get_db_context
 from ..models import PostfixLog, RspamdLog, NetfilterLog, MessageCorrelation
 from ..services.bounce_policy import cleanup_blocks
+from ..services import excluded_addresses
+from ..agent_access.context import agent_call
+from ..agent_access.scopes import read_scope
 from ..config import settings, EDITABLE_SETTING_KEYS, FEATURE_IDS, reload_settings, Settings
 from ..config import normalize_disabled_features
 from ..config import _get_field_annotations, build_settings, get_env_locked_keys, settings_reload_lock
@@ -377,8 +380,14 @@ def _get_field_defaults() -> Dict[str, Any]:
     return defaults
 
 
+def _may_read_messages(request: Request) -> bool:
+    """A person always may; an agent only with View for Messages."""
+    call = agent_call(request.scope) if request is not None else None
+    return call is None or read_scope("messages") in call.grant.scopes
+
+
 @router.get("/settings/info")
-def get_settings_info(db: Session = Depends(get_db)):
+def get_settings_info(request: Request = None, db: Session = Depends(get_db)):
     """
     Get system configuration and status information
     
@@ -427,10 +436,15 @@ def get_settings_info(db: Session = Depends(get_db)):
         oldest_rspamd = db.query(func.min(RspamdLog.time)).scalar()
         oldest_netfilter = db.query(func.min(NetfilterLog.time)).scalar()
         
-        # Get recent incomplete correlations (for monitoring)
-        recent_incomplete = db.query(MessageCorrelation).filter(
-            MessageCorrelation.is_complete == False
-        ).order_by(desc(MessageCorrelation.created_at)).limit(5).all()
+        # Get recent incomplete correlations (for monitoring). They name
+        # senders and recipients: an agent gets them only with View for
+        # Messages, and nobody gets an excluded address's
+        recent_incomplete = []
+        if _may_read_messages(request):
+            recent_incomplete = db.query(MessageCorrelation).filter(
+                MessageCorrelation.is_complete == False,
+                excluded_addresses.correlation_visible(),
+            ).order_by(desc(MessageCorrelation.created_at)).limit(5).all()
         
         jobs_status = get_job_status()
 

@@ -24,6 +24,7 @@ from ..config import settings
 from ..models import MessageCorrelation, SpamSuppression, SuppressionEvent
 from ..mailcow_api import mailcow_api, MailcowAPIError, MailcowRwKeyError
 from ..services.rspamd_map_lock import MapBusyError, map_write_lock
+from ..services import excluded_addresses
 from ..services.suppression_events import add_event, disabled_by_hand, postfix_lines
 from ..services.suppression_rows_lock import lock_suppression_rows
 from ..utils import internal_error, format_datetime_for_api
@@ -648,7 +649,8 @@ def get_suppression_events(suppression_id: int, page: int = Query(1, ge=1), db: 
     events = query.order_by(SuppressionEvent.recorded_at.desc(), SuppressionEvent.id.desc())         .offset((page - 1) * EVENTS_PAGE).limit(EVENTS_PAGE).all()
     keys = {e.correlation_key for e in events if e.correlation_key}
     present = {k for (k,) in db.query(MessageCorrelation.correlation_key)
-               .filter(MessageCorrelation.correlation_key.in_(keys)).all()} if keys else set()
+               .filter(MessageCorrelation.correlation_key.in_(keys),
+                       excluded_addresses.correlation_visible()).all()} if keys else set()
     when = lambda value: format_datetime_for_api(value) if value else None  # noqa: E731
     return {
         "suppression": {"id": suppression.id, "email": suppression.email, "type": suppression.type,

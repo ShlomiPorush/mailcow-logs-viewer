@@ -52,7 +52,7 @@ The `db` service in `docker-compose.yml` falls back to `mailcowlogs` and `change
 | `FETCH_COUNT_NETFILTER` | `500` | Netfilter entries per read. |
 | `FETCH_MAX_PAGES` | `50` | Most Postfix and Rspamd pages per read. |
 | `RETENTION_DAYS` | `7` | Days to keep message logs. |
-| `BLACKLIST_EMAILS` | Empty | Comma-separated addresses the viewer never stores, such as a BCC archive. Mail to them is still delivered. |
+| `BLACKLIST_EMAILS` | Empty | Comma-separated addresses, such as a BCC archive. Mail to or from them is not stored or shown in Messages. Mail to them is still delivered. |
 
 ## Correlation configuration
 

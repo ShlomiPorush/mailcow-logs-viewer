@@ -14,7 +14,7 @@ from ..database import get_db
 from ..models import PostfixLog, RspamdLog, NetfilterLog, MessageCorrelation
 from ..mailcow_api import MailcowRwKeyError, mailcow_api
 from ..config import settings
-from ..services import geoip_service, protection_rules, security_addresses
+from ..services import excluded_addresses, geoip_service, protection_rules, security_addresses
 from ..services.security_addresses import netfilter_service  # noqa: F401  (tests import it from here)
 from ..app_time import as_utc
 from ..utils import internal_error, format_datetime_for_api as format_datetime_utc, RangeStart, RangeEnd
@@ -33,10 +33,10 @@ def get_postfix_logs_by_queue(
     Get all Postfix logs for a specific Queue ID with linked Rspamd data
     """
     try:
-        logs = db.query(PostfixLog).filter(
+        logs = excluded_addresses.visible_postfix_lines(db.query(PostfixLog).filter(
             PostfixLog.queue_id == queue_id
-        ).order_by(PostfixLog.time).all()
-        
+        ).order_by(PostfixLog.time).all())
+
         if not logs:
             raise HTTPException(status_code=404, detail="No logs found for this Queue ID")
         
@@ -116,12 +116,16 @@ def get_postfix_logs(
     try:
         from sqlalchemy.sql import case
         
-        # First, filter out logs without queue_id
+        # First, filter out logs without queue_id, and the lines of messages
+        # of excluded addresses (here, and again below where a page's queues
+        # are read in full)
+        visible = excluded_addresses.postfix_line_visible()
         base_query = db.query(PostfixLog).filter(
             and_(
                 PostfixLog.queue_id.isnot(None),
                 PostfixLog.queue_id != ''
-            )
+            ),
+            visible,
         )
         
         # Apply filters to base query
@@ -175,7 +179,7 @@ def get_postfix_logs(
         logs_by_queue = {}
         if page_queue_ids:
             for log in db.query(PostfixLog).filter(
-                PostfixLog.queue_id.in_(page_queue_ids)
+                PostfixLog.queue_id.in_(page_queue_ids), visible
             ).order_by(PostfixLog.time).all():
                 logs_by_queue.setdefault(log.queue_id, []).append(log)
 
@@ -261,8 +265,9 @@ def get_rspamd_logs(
     Get Rspamd logs with filtering and pagination
     """
     try:
-        query = db.query(RspamdLog)
-        
+        # Not an excluded address's mail, as in Messages
+        query = db.query(RspamdLog).filter(excluded_addresses.rspamd_visible())
+
         # Apply filters
         if search:
             search_term = f"%{search}%"
@@ -273,19 +278,19 @@ def get_rspamd_logs(
                     RspamdLog.message_id.ilike(search_term)
                 )
             )
-        
+
         if sender:
             query = query.filter(RspamdLog.sender_smtp.ilike(f"%{sender}%"))
-        
+
         if direction:
             query = query.filter(RspamdLog.direction == direction)
-        
+
         if min_score is not None:
             query = query.filter(RspamdLog.score >= min_score)
-        
+
         if max_score is not None:
             query = query.filter(RspamdLog.score <= max_score)
-        
+
         if action:
             query = query.filter(RspamdLog.action == action)
         
@@ -1396,7 +1401,7 @@ def get_message_details(
             MessageCorrelation.correlation_key == correlation_key
         ).first()
         
-        if not correlation:
+        if not correlation or excluded_addresses.any_listed(correlation.sender, correlation.recipient):
             raise HTTPException(status_code=404, detail="Message not found")
         
         # Get Rspamd log
@@ -1421,6 +1426,8 @@ def get_message_details(
                 PostfixLog.id.in_(correlation.postfix_log_ids)
             ).order_by(PostfixLog.time).all()
         
+        postfix_logs = excluded_addresses.visible_postfix_lines(postfix_logs)
+
         # Build response
         return {
             "correlation_key": correlation.correlation_key,

@@ -18,6 +18,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from ..models import MessageCorrelation, PostfixLog, SuppressionEvent
+from . import excluded_addresses
 
 MAX_LINES = 50
 # Lines read per queue id in one batch, newest first
@@ -146,6 +147,12 @@ def add_event(db: Session, suppression, **fields) -> SuppressionEvent:
     return event
 
 
+def _excluded(sender, recipient) -> bool:
+    """A message of an excluded address: its event keeps why the block
+    changed, not the message's sender, subject, ids or log lines."""
+    return excluded_addresses.any_listed(sender, recipient)
+
+
 def bounce_kind(dsn: str) -> str:
     return 'hard_bounce' if dsn.startswith('5.') else 'soft_bounce' if dsn.startswith('4.') else 'rejected'
 
@@ -167,6 +174,11 @@ def record_bounces(db: Session, captured: List[tuple]) -> None:
     lines = postfix_lines(db, [(log.queue_id, log.recipient, log.time, log.time, log) for _, log, _, _ in captured])
     for (suppression, log, outcome, expires_at), (found, shortened) in zip(captured, lines):
         message = messages.get(log.correlation_key)
+        if _excluded(log.sender or (message.sender if message else None), suppression.email):
+            add_event(db, suppression, kind=bounce_kind(log.dsn or ''), outcome=outcome, message_time=log.time,
+                      server_reply=server_reply(log.message), dsn=log.dsn, recipient=suppression.email,
+                      expires_at=expires_at)
+            continue
         add_event(db, suppression,
                   kind=bounce_kind(log.dsn or ''), outcome=outcome, message_time=log.time,
                   server_reply=server_reply(log.message), dsn=log.dsn,
@@ -192,6 +204,11 @@ def record_stuck(db: Session, captured: List[tuple]) -> None:
     lines = postfix_lines(db, [(item.get('queue_id'), suppression.email, item.get('arrived') or now, now, None)
                                for suppression, item, _, _ in captured])
     for (suppression, item, outcome, expires_at), (found, shortened) in zip(captured, lines):
+        if _excluded(item.get('sender'), suppression.email):
+            add_event(db, suppression, kind='deferred_stuck', outcome=outcome, message_time=item.get('arrived'),
+                      reason=item.get('note'), server_reply=item.get('reason'), recipient=suppression.email,
+                      expires_at=expires_at)
+            continue
         add_event(db, suppression,
                   kind='deferred_stuck', outcome=outcome, message_time=item.get('arrived'),
                   reason=item.get('note'), server_reply=item.get('reason'),

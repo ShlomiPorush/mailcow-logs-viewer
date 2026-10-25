@@ -940,8 +940,8 @@ def get_domain_calendar(
 def get_domain_reports(
     domain: str,
     days: int = 30,
-    page: int = 1,
-    limit: int = 50,
+    page: int = Query(1, ge=1),
+    limit: int = Query(50, ge=1, le=500),
     db: Session = Depends(get_db)
 ):
     """
@@ -1167,8 +1167,8 @@ def get_report_details(
 def get_domain_sources(
     domain: str,
     days: int = 30,
-    page: int = 1,
-    limit: int = 50,
+    page: int = Query(1, ge=1),
+    limit: int = Query(50, ge=1, le=500),
     db: Session = Depends(get_db)
 ):
     """
@@ -1384,8 +1384,8 @@ def get_source_details(
 def get_domain_tls_reports(
     domain: str,
     days: int = 30,
-    page: int = 1,
-    limit: int = 50,
+    page: int = Query(1, ge=1),
+    limit: int = Query(50, ge=1, le=500),
     db: Session = Depends(get_db)
 ):
     """
@@ -1473,8 +1473,8 @@ def get_domain_tls_reports(
 def get_domain_tls_daily_reports(
     domain: str,
     days: int = 30,
-    page: int = 1,
-    limit: int = 30,
+    page: int = Query(1, ge=1),
+    limit: int = Query(30, ge=1, le=500),
     db: Session = Depends(get_db)
 ):
     """
@@ -1796,8 +1796,8 @@ def trigger_manual_sync(background_tasks: BackgroundTasks):
 
 @router.get("/dmarc/imap/history")
 def get_sync_history(
-    limit: int = 20,
-    page: int = 1,
+    limit: int = Query(20, ge=1, le=500),
+    page: int = Query(1, ge=1),
     db: Session = Depends(get_db)
 ):
     """

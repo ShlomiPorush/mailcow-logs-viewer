@@ -242,7 +242,7 @@ var SETTINGS_FIELD_DESCRIPTIONS = {
     max_search_results: 'Maximum records to return in search results. Default: 1000.',
     csv_export_limit: 'CSV export row limit. Default: 10000.',
     scheduler_workers: 'Thread pool size for blocking scheduler jobs (e.g. the DMARC & TLS IMAP import). Valid range: 1-64. Default: 4.',
-    blacklist_emails: 'Comma-separated email addresses to hide from logs (e.g. BCC archive, monitoring). These emails are NOT stored in the database.',
+    blacklist_emails: 'Comma-separated addresses, such as a BCC archive. Mail to or from them is not stored or shown in Messages.',
     auth_enabled: 'Deprecated: use Basic auth enabled. When enabled, enables Basic Auth. Default: false.',
     basic_auth_enabled: 'Enable Basic HTTP authentication. When enabled, ALL pages and API require login. Default: false.',
     auth_username: 'Basic auth username. Default: admin.',

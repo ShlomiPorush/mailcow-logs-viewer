@@ -154,7 +154,7 @@ class Settings(BaseSettings):
     # Blacklist Configuration
     blacklist_emails: str = Field(
         default="",
-        description="Comma-separated list of email addresses to hide from logs"
+        description="Comma-separated addresses whose mail is not stored or shown in Messages"
     )
     
     # Fetch Configuration

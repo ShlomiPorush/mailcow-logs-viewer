@@ -88,6 +88,12 @@ def _extract_user(raw_user: str) -> Optional[str]:
     return candidate if '@' in candidate else None
 
 
+def dovecot_line_user(message: Optional[str]) -> Optional[str]:
+    """The mailbox in a line's lmtp(...) or lda(...) prefix, whatever the action."""
+    match = _PREFIX_RE.match((message or '').strip())
+    return _extract_user(match.group('user') or '') if match else None
+
+
 def parse_dovecot_message(message: Optional[str]) -> Optional[Dict[str, Any]]:
     """
     Parse a single Dovecot log message into a delivery verdict.
