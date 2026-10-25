@@ -187,14 +187,52 @@ def test_fail2ban_settings_when_mailcow_fails(client, monkeypatch):
     assert client.get('/api/fail2ban').status_code == 500
 
 
-@pytest.mark.parametrize('path', ['/api/queue', '/api/quarantine', '/api/quarantine/7/details'])
-@pytest.mark.parametrize('error, status', [(MailcowAPIError('down'), 502), (RuntimeError('broken'), 500)])
-def test_mailcow_lists_that_fail(client, monkeypatch, path, error, status):
-    async def fail(*args, **kwargs):
-        raise error
-    for name in ('get_queue', 'get_quarantine', 'get_quarantine_details'):
-        monkeypatch.setattr(mailcow_api, name, fail)
-    assert client.get(path).status_code == status
+@pytest.mark.parametrize('path', ['/api/queue', '/api/quarantine'])
+def test_mailcow_lists_mailcow_does_not_give(client, monkeypatch, path):
+    async def failing(*args, **kwargs):
+        raise MailcowAPIError('down')
+    monkeypatch.setattr(mailcow_api, '_make_request', failing)
+    assert client.get(path).status_code == 502
+
+
+@pytest.mark.parametrize('path, answer', [
+    # Arrival times of two kinds cannot be sorted
+    ('/api/queue', [{'queue_id': 'A', 'arrival_time': 'soon'}, {'queue_id': 'B', 'arrival_time': 5}]),
+    # A creation time past any date
+    ('/api/quarantine', [{'id': 1, 'created': 10 ** 20}]),
+])
+def test_mailcow_lists_the_route_cannot_read(client, monkeypatch, path, answer):
+    async def odd(*args, **kwargs):
+        return answer
+    monkeypatch.setattr(mailcow_api, '_make_request', odd)
+    assert client.get(path).status_code == 500
+
+
+class _QuarantineView:
+    """mailcow's quarantine view (qitem_details.php) giving a fixed answer"""
+
+    def __init__(self, answer):
+        self.answer = answer
+
+    async def get(self, url, **kwargs):
+        import httpx
+        import json
+        if isinstance(self.answer, Exception):
+            raise self.answer
+        # The body as sent, so null is the JSON null
+        return httpx.Response(200, content=json.dumps(self.answer).encode(), request=httpx.Request('GET', url))
+
+
+@pytest.mark.parametrize('answer', [[{'subject': 's', 'score': 3.5}], {'subject': 's'}, [], None])
+def test_quarantine_details_as_mailcow_gives_them(client, monkeypatch, answer):
+    # An object, or mailcow's empty list or null passed on as they are
+    monkeypatch.setattr(mailcow_api, '_get_client', lambda: _QuarantineView(answer))
+    assert client.get('/api/quarantine/7/details').status_code == 200
+
+
+def test_quarantine_details_mailcow_does_not_give(client, monkeypatch):
+    monkeypatch.setattr(mailcow_api, '_get_client', lambda: _QuarantineView(RuntimeError('no route')))
+    assert client.get('/api/quarantine/7/details').status_code == 502
 
 
 @pytest.mark.parametrize('path', ITEM_ACTIONS)

@@ -83,6 +83,8 @@ def test_every_documented_answer_has_a_real_schema():
 
 # Statuses the reader sees in a handler's code that the handler cannot give, and why
 NOT_GIVEN = {
+    ("GET", "/api/quarantine/{item_id}/details", 500): "the mailcow client turns every failure into "
+                                                      "MailcowAPIError, which internal_error() answers 502",
     ("POST", "/api/fail2ban/unban", 500): "internal_error() is called only for a refused Read-Write key, "
                                           "which it answers 502",
 }

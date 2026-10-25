@@ -102,6 +102,11 @@ class Contract:
         self.seen.add((method, template, status))
         responses = operation.get("responses") or {}
         response = responses.get(str(status))
+        media = (content_type or "").split(";")[0].strip()
+        if status == 500 and media != "application/json":
+            # Not a route's answer: the auth middleware's plain sentence when Basic auth
+            # is on without a password, for any call (the document's description says so)
+            return None
         if response is None:
             if status in APP_WIDE_STATUSES:
                 return None
@@ -109,7 +114,6 @@ class Contract:
         content = response.get("content") or {}
         if not content:
             return None if not body else f"{where} with a body, but its documentation says it has none"
-        media = (content_type or "").split(";")[0].strip()
         if media not in content:
             return f"{where} as {media or 'no type'}, documented as {', '.join(content)}"
         schema = content[media].get("schema") or {}

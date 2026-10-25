@@ -345,9 +345,13 @@ class QuarantineResponse(Fixed):
                                                    "rewritten as " + TIME)
 
 
-class QuarantineDetailsResponse(Fixed):
+class QuarantineDetails(Fixed):
     """One quarantined message as mailcow's quarantine view shows it."""
     model_config = ConfigDict(extra="allow")
+
+
+# mailcow's view may also answer an empty list or null, passed on as they are
+QuarantineDetailsResponse = Optional[Union[QuarantineDetails, List[Any]]]
 
 
 # ---------------------------------------------------------------- the compact message form

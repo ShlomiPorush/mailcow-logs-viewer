@@ -1378,7 +1378,7 @@ async def learnspam_quarantine(request: Request):
         raise internal_error(e)
 
 
-@router.get("/quarantine/{item_id}/details", responses=documented(m.QuarantineDetailsResponse, errors={500: None, 502: None}))
+@router.get("/quarantine/{item_id}/details", responses=documented(m.QuarantineDetailsResponse, errors={502: None}))
 async def get_quarantine_details(item_id: str):
     """
     Get detailed information for a quarantine item.
