@@ -30,6 +30,8 @@ MAX_REPORT_ATTACHMENTS_PER_EMAIL = 10
 MAX_REPORT_ITEMS = 20_000
 MAX_REPORT_DATA_BYTES = 10 * 1024 * 1024
 
+REPORT_TOO_LARGE = "The report is larger than 10 MB, or expands to more than 10 MB."
+
 # DMARCRecord.count and the TLS-RPT session counts are INTEGER columns
 MAX_STORED_COUNT = 2**31 - 1
 

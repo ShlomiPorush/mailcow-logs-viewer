@@ -264,6 +264,7 @@ def test_identical_records_are_stored_once_with_their_counts_added(env):
     "valid and over-limit TLS-RPT",
     "over the total of the email",
     "over the data size",
+    "valid report and one that expands too far",
 ])
 def test_an_email_over_a_limit_stores_nothing_and_is_kept_as_failed(env, files):
     if files == "too many files":
@@ -277,6 +278,8 @@ def test_an_email_over_a_limit_stores_nothing_and_is_kept_as_failed(env, files):
     elif files == "over the total of the email":
         attachments = [("a.xml.gz", dmarc_gz(report_id="a", records=distinct_records(12_000))),
                        ("b.xml.gz", dmarc_gz(report_id="b", records=distinct_records(12_000, 12_000)))]
+    elif files == "valid report and one that expands too far":
+        attachments = [("ok.xml.gz", dmarc_gz()), ("bomb.json.gz", gzip.compress(b" " * (11 * 1024 * 1024)))]
     else:
         big = [{"result-type": "certificate-expired", "additional-information": "x" * 6_000_000}]
         attachments = [("a.json.gz", gzip.compress(tls_json(report_id="a", policies=((1, 1, big),)))),
@@ -361,9 +364,34 @@ def test_a_failed_commit_counts_nothing_and_keeps_the_email(env, monkeypatch):
         result = service._process_reports(EmailMessage_from(mail(("a.xml.gz", dmarc_gz()))), db, {
             "success": False, "reports_created": 0, "reports_duplicate": 0, "error": None,
             "report_type": None, "skipped": None, "keep": False})
+        # Rolled back in this session too, not only invisible to others
+        assert db.query(DMARCReport).count() == 0 and db.query(DMARCRecord).count() == 0
     assert result["success"] is False and result["reports_created"] == 0
     assert "could not be saved" in result["error"]
     assert count(env, DMARCReport) == 0 and count(env, DMARCRecord) == 0
+
+
+def test_two_imports_of_one_report_id_at_once_see_each_other(env):
+    import threading
+    first = report_store.prepare_report("dmarc", parse_dmarc_file(dmarc_gz(records=distinct_records(1)), "a"))
+    second = report_store.prepare_report("dmarc", parse_dmarc_file(dmarc_gz(records=distinct_records(2)), "b"))
+    outcome = {}
+    with env.Session() as db:
+        assert report_store.store_report(db, first)[0] == "created"
+
+        def other_import():
+            with env.Session() as other:
+                outcome["status"] = report_store.store_report(other, second)[0]
+                other.commit()
+
+        thread = threading.Thread(target=other_import)
+        thread.start()
+        thread.join(1)
+        # It waits for the first import to finish
+        assert thread.is_alive() and "status" not in outcome
+        db.commit()
+    thread.join(10)
+    assert outcome["status"] == "conflict"
 
 
 def EmailMessage_from(raw: bytes):
@@ -632,3 +660,56 @@ def test_a_migration_that_fails_midway_changes_nothing(isolated_engine, monkeypa
     inspector = inspect(isolated_engine)
     assert "content_hash" not in {c["name"] for c in inspector.get_columns("dmarc_reports")}
     assert [u["column_names"] for u in inspector.get_unique_constraints("dmarc_reports")] == [["report_id"]]
+
+
+def test_migration_keeps_nulls_an_older_version_stored(isolated_engine):
+    # An older version stored null fields of a TLS report as NULL; the report
+    # sent again must still match the stored one
+    revision = _revision()
+    _old_schema(isolated_engine, legacy=False)
+    data = json.loads(tls_json())
+    data["organization-name"] = data["contact-info"] = None
+    data["policies"][0]["policy"]["policy-type"] = None
+    data["policies"][0]["summary"]["total-failure-session-count"] = None
+    data["policies"][0]["failure-details"] = None
+    content = json.dumps(data).encode()
+    with isolated_engine.begin() as conn:
+        _insert_old_tls(conn, {
+            "report_id": data["report-id"], "organization_name": None, "contact_info": None,
+            "policy_domain": "example.com", "start_datetime": datetime(2026, 11, 2),
+            "end_datetime": datetime(2026, 11, 2, 23, 59, 59),
+            "policies": [{"policy_type": None, "policy_domain": "example.com",
+                          "policy_string": ["version: STSv1", "mode: enforce"], "mx_host": ["mail.example.com"],
+                          "successful_session_count": 3, "failed_session_count": None,
+                          "failure_details": None}]})
+    _upgrade(isolated_engine, revision)
+    with isolated_engine.connect() as conn:
+        stored = conn.execute(text("SELECT content_hash FROM tls_reports")).scalar()
+    assert stored == report_store.prepare_report("tls-rpt", parse_tls_rpt_file(content, "t.json")).content_hash
+
+
+def test_migration_works_in_batches_and_downgrades(isolated_engine, monkeypatch):
+    revision = _revision()
+    monkeypatch.setattr(revision, "BATCH", 2)
+    _old_schema(isolated_engine, legacy=True)
+    files = [dmarc_gz(report_id=f"r{i}", records=distinct_records(i)) for i in range(5)]
+    with isolated_engine.begin() as conn:
+        for i, content in enumerate(files):
+            _insert_old_dmarc(conn, parse_dmarc_file(content, "a.xml.gz"))
+    _upgrade(isolated_engine, revision)
+    with isolated_engine.connect() as conn:
+        stored = dict(conn.execute(text("SELECT report_id, content_hash FROM dmarc_reports")).all())
+    assert stored == {f"r{i}": report_store.prepare_report("dmarc", parse_dmarc_file(content, "a")).content_hash
+                      for i, content in enumerate(files)}
+
+    from alembic.migration import MigrationContext
+    from alembic.operations import Operations
+    with isolated_engine.begin() as conn:
+        with Operations.context(MigrationContext.configure(conn)):
+            revision.downgrade()
+    inspector = inspect(isolated_engine)
+    for table in ("dmarc_reports", "tls_reports"):
+        assert "content_hash" not in {c["name"] for c in inspector.get_columns(table)}
+        assert inspector.get_unique_constraints(table) == []
+        assert [(i["column_names"], i["unique"]) for i in inspector.get_indexes(table)
+                if i["name"] == f"ix_{table}_report_id"] == [(["report_id"], False)]

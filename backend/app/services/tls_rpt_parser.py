@@ -19,6 +19,7 @@ from .safe_decompress import (
 from .report_identity import (
     MAX_REPORT_ITEMS,
     MAX_STORED_COUNT,
+    REPORT_TOO_LARGE,
     ReportLimitError,
     ReportRejectedError,
     zip_report_member,
@@ -27,19 +28,21 @@ from .report_identity import (
 logger = logging.getLogger(__name__)
 
 
-def _text(value, default: str) -> str:
-    """A text field of the report. RFC 8460 makes them JSON strings; anything
+def _text(data: dict, key: str, default):
+    """A text field of the report: the default when it is missing, None when
+    it is null, as stored before. RFC 8460 makes them JSON strings; anything
     else is refused rather than turned into text by the database."""
-    if value is None:
-        return default
-    if not isinstance(value, str):
+    value = data.get(key, default)
+    if value is not None and not isinstance(value, str):
         raise ValueError("A text field of the report is not a string")
     return value
 
 
-def _session_count(value) -> int:
+def _session_count(summary: dict, key: str):
+    """0 when missing, None when null, as stored before; else a whole number in range."""
+    value = summary.get(key, 0)
     if value is None:
-        return 0
+        return None
     if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= MAX_STORED_COUNT:
         raise ValueError("A session count of the report is not a whole number in range")
     return value
@@ -61,7 +64,7 @@ def parse_tls_rpt_file(file_content: bytes, filename: str) -> Optional[Dict[str,
 
         if len(file_content) > MAX_COMPRESSED_BYTES:
             logger.error(f"TLS-RPT file {filename} exceeds compressed size limit, rejecting")
-            return None
+            raise ReportLimitError(REPORT_TOO_LARGE)
 
         # Handle ZIP files (.json.zip)
         if filename_lower.endswith('.zip'):
@@ -100,8 +103,9 @@ def parse_tls_rpt_file(file_content: bytes, filename: str) -> Optional[Dict[str,
         return parse_tls_rpt_json(json_content)
 
     except DecompressionLimitError as e:
+        # A limit: nothing from the email or upload is imported
         logger.error(f"Rejected oversized TLS-RPT file {filename}: {e}")
-        return None
+        raise ReportLimitError(REPORT_TOO_LARGE) from e
     except ReportRejectedError:
         # The caller says why; a limit rejects the whole email or upload
         raise
@@ -147,13 +151,13 @@ def parse_tls_rpt_json(json_content: str) -> Optional[Dict[str, Any]]:
         
         # Extract report metadata. The values are stored as they are and the
         # report's identity is computed from them, so their types are checked.
-        report_id = _text(data.get('report-id'), '')
+        report_id = _text(data, 'report-id', '')
         if not report_id:
             logger.error("TLS-RPT report missing report-id")
             return None
 
-        organization_name = _text(data.get('organization-name'), 'Unknown')
-        contact_info = _text(data.get('contact-info'), '')
+        organization_name = _text(data, 'organization-name', 'Unknown')
+        contact_info = _text(data, 'contact-info', '')
 
         # Parse date range
         date_range = data.get('date-range', {})
@@ -176,24 +180,24 @@ def parse_tls_rpt_json(json_content: str) -> Optional[Dict[str, Any]]:
             policy_data = policy_entry.get('policy', {})
             summary = policy_entry.get('summary', {})
             failure_details = policy_entry.get('failure-details', [])
-            if not isinstance(failure_details, list):
+            if failure_details is not None and not isinstance(failure_details, list):
                 raise ValueError("failure-details is not a list")
-            items += 1 + len(failure_details)
+            items += 1 + len(failure_details or [])
             if items > MAX_REPORT_ITEMS:
                 raise ReportLimitError(
                     f"The report has more than {MAX_REPORT_ITEMS:,} policies and failure details.")
 
             # Get the policy domain from the first policy
             if not policy_domain:
-                policy_domain = _text(policy_data.get('policy-domain'), '')
+                policy_domain = _text(policy_data, 'policy-domain', '')
 
             parsed_policy = {
-                'policy_type': _text(policy_data.get('policy-type'), 'unknown'),
-                'policy_domain': _text(policy_data.get('policy-domain'), ''),
+                'policy_type': _text(policy_data, 'policy-type', 'unknown'),
+                'policy_domain': _text(policy_data, 'policy-domain', ''),
                 'policy_string': policy_data.get('policy-string', []),
                 'mx_host': policy_data.get('mx-host', []),
-                'successful_session_count': _session_count(summary.get('total-successful-session-count')),
-                'failed_session_count': _session_count(summary.get('total-failure-session-count')),
+                'successful_session_count': _session_count(summary, 'total-successful-session-count'),
+                'failed_session_count': _session_count(summary, 'total-failure-session-count'),
                 'failure_details': failure_details
             }
             policies.append(parsed_policy)

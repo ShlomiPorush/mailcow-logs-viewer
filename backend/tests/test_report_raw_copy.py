@@ -27,6 +27,7 @@ from app.routers import dmarc
 from app.services import report_store
 from app.services.dmarc_imap_service import DMARCImapService
 from app.services.dmarc_parser import parse_dmarc_file
+from app.services.report_identity import ReportLimitError
 from app.services.safe_decompress import (
     DecompressionLimitError,
     MAX_COMPRESSED_BYTES,
@@ -105,8 +106,11 @@ def test_gzip_expanding_beyond_ten_mib_is_rejected():
     assert len(bomb) < 100 * 1024
     with pytest.raises(DecompressionLimitError):
         gzip_decompress_limited(bomb)
-    assert parse_dmarc_file(bomb, "report.xml.gz") is None
-    assert parse_tls_rpt_file(bomb, "report.json.gz") is None
+    # A limit: the caller rejects the whole email or upload
+    with pytest.raises(ReportLimitError):
+        parse_dmarc_file(bomb, "report.xml.gz")
+    with pytest.raises(ReportLimitError):
+        parse_tls_rpt_file(bomb, "report.json.gz")
 
 
 def test_large_realistic_report_still_parses():
@@ -122,7 +126,7 @@ def test_large_realistic_report_still_parses():
 def _recording_db():
     db = Mock()
     db.query.return_value.filter.return_value.first.return_value = None
-    db.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = []
+    db.query.return_value.filter.return_value.order_by.return_value.all.return_value = []
     db.begin_nested.return_value = MagicMock()
     added = []
 

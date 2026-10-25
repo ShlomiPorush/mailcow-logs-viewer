@@ -6,11 +6,12 @@ report counts as a duplicate on both paths, and only when its whole content
 is the same (services/report_identity.py). A report with a known report_id
 but other content is stored next to the first one.
 """
+import hashlib
 import logging
 from dataclasses import dataclass
 from typing import Dict, Iterable, List, Optional, Set, Tuple
 
-from sqlalchemy import func
+from sqlalchemy import func, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -30,10 +31,6 @@ from .report_identity import (
 logger = logging.getLogger(__name__)
 
 DMARC_RECORD_FIELDS = DMARC_RECORD_KEY_FIELDS + ('count',)
-
-# Rows an older version wrote without a hash: at most this many are hashed
-# when a report with their report_id arrives
-UNHASHED_ROWS_PER_LOOKUP = 50
 
 
 @dataclass(frozen=True)
@@ -123,10 +120,13 @@ def stored_content_hash(db: Session, kind: str, row) -> str:
 def _hash_unhashed(db: Session, spec: _Kind, kind: str, prepared: PreparedReport):
     """Give rows with this report_id and no hash their hash; the one equal to the
     incoming report, if any. A row whose hash another row already has stays
-    without one: it is the same report, stored twice by an older version."""
+    without one: it is the same report, stored twice by an older version.
+
+    All of them are checked: only an older version writes such rows, and it
+    stores a report_id once, so there are very few."""
     rows = db.query(spec.report).filter(
         spec.report.report_id == prepared.report_id, spec.report.content_hash.is_(None),
-    ).order_by(spec.report.id).limit(UNHASHED_ROWS_PER_LOOKUP).all()
+    ).order_by(spec.report.id).all()
     match = None
     for row in rows:
         content_hash = stored_content_hash(db, kind, row)
@@ -147,11 +147,12 @@ def store_report(db: Session, prepared: PreparedReport) -> Tuple[str, object]:
     report with the same report_id, or ('duplicate', the stored row).
     Flushes, never commits."""
     spec = KINDS[prepared.kind]
+    _lock_report_id(db, prepared)
     existing = _same_report(db, spec, prepared.report_id, prepared.content_hash)
     if existing is None:
         existing = _hash_unhashed(db, spec, prepared.kind, prepared)
     if existing is not None:
-        logger.info(f"Duplicate {prepared.kind} report: {prepared.report_id}")
+        logger.info(f"Duplicate {prepared.kind} report: {_printable(prepared.report_id)}")
         return 'duplicate', existing
 
     try:
@@ -177,11 +178,26 @@ def store_report(db: Session, prepared: PreparedReport) -> Tuple[str, object]:
 
     if db.query(spec.report.id).filter(
             spec.report.report_id == prepared.report_id, spec.report.id != report.id).first():
-        logger.warning(f"{prepared.kind} report {prepared.report_id} from {report_sender(report)} has the "
-                       f"report ID of another stored report with different content; both are kept")
+        logger.warning(f"{prepared.kind} report {_printable(prepared.report_id)} from "
+                       f"{_printable(report_sender(report))} has the report ID of another stored report "
+                       f"with different content; both are kept")
         return 'conflict', report
-    logger.info(f"Created {prepared.kind} report: {prepared.report_id}")
+    logger.info(f"Created {prepared.kind} report: {_printable(prepared.report_id)}")
     return 'created', report
+
+
+def _printable(value: str) -> str:
+    """A value from the report, on one log line."""
+    return str(value).replace('\r', ' ').replace('\n', ' ')
+
+
+def _lock_report_id(db: Session, prepared: PreparedReport):
+    """Two imports of reports with the same report_id (the IMAP import and an
+    upload) decide one after the other: the lock is held until the transaction
+    ends, so the second sees the first report and keeps its email if it conflicts."""
+    digest = hashlib.sha256(f"{prepared.kind}\n{prepared.report_id}".encode('utf-8')).digest()
+    db.execute(text("SELECT pg_advisory_xact_lock(:key)"),
+               {"key": int.from_bytes(digest[:8], 'big', signed=True)})
 
 
 def report_sender(report) -> str:

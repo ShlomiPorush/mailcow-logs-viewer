@@ -20,6 +20,7 @@ from .safe_decompress import (
 from .report_identity import (
     MAX_REPORT_ITEMS,
     MAX_STORED_COUNT,
+    REPORT_TOO_LARGE,
     ReportLimitError,
     ReportRejectedError,
     dmarc_record_key,
@@ -63,7 +64,7 @@ def parse_dmarc_file(file_content: bytes, filename: str) -> Optional[Dict[str, A
     try:
         if len(file_content) > MAX_COMPRESSED_BYTES:
             logger.error(f"DMARC file {filename} exceeds compressed size limit, rejecting")
-            return None
+            raise ReportLimitError(REPORT_TOO_LARGE)
 
         # Determine file type and extract XML
         xml_content = None
@@ -97,8 +98,9 @@ def parse_dmarc_file(file_content: bytes, filename: str) -> Optional[Dict[str, A
         return parse_dmarc_xml(xml_content.decode('utf-8-sig'))
 
     except DecompressionLimitError as e:
+        # A limit: nothing from the email or upload is imported
         logger.error(f"Rejected oversized DMARC file {filename}: {e}")
-        return None
+        raise ReportLimitError(REPORT_TOO_LARGE) from e
     except ReportRejectedError:
         # The caller says why; a limit rejects the whole email or upload
         raise
