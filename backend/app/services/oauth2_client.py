@@ -26,6 +26,8 @@ class OAuth2Client:
         
     def _update_config(self):
         """Update configuration from settings (supports dynamic reload)"""
+        # A discovery answer for an earlier configuration is not applied
+        self._config_version = getattr(self, "_config_version", 0) + 1
         self.issuer_url = settings.oauth2_issuer_url
         self.client_id = settings.oauth2_client_id
         self.client_secret = settings.oauth2_client_secret
@@ -59,13 +61,18 @@ class OAuth2Client:
             return self._discovery_cache
         
         discovery_url = urljoin(self.issuer_url.rstrip('/') + '/', '.well-known/openid-configuration')
+        version = self._config_version
         
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
                 response = await client.get(discovery_url)
                 response.raise_for_status()
                 discovery = response.json()
-                
+
+                if version != self._config_version:
+                    # The settings changed while the provider answered: its
+                    # endpoints must not replace the new provider's
+                    raise OAuth2ClientError("The OAuth2 settings changed during discovery")
                 self._discovery_cache = discovery
                 
                 # Extract endpoints
@@ -80,6 +87,8 @@ class OAuth2Client:
                 
                 return discovery
                 
+        except OAuth2ClientError:
+            raise
         except httpx.HTTPError as e:
             logger.error(f"OIDC discovery failed: {e}")
             raise OAuth2ClientError(f"Failed to discover OIDC endpoints: {e}")

@@ -153,3 +153,45 @@ def test_a_sign_in_change_during_the_callback_issues_no_session(provider, monkey
     assert response.headers["location"] == "/login?error=sign_in_changed"
     assert "session_id" not in client.cookies
     assert not session._session_store
+
+
+def test_a_discovery_answer_for_the_old_provider_is_not_applied(monkeypatch):
+    """Discovery at the old provider was still waiting when the settings named
+    a new one: its endpoints must not replace the new provider's, or a login
+    after the change would finish with the provider that was removed."""
+    import asyncio
+
+    monkeypatch.setattr(settings._inner, "oauth2_issuer_url", "https://old-id.example.test")
+    for key in ("oauth2_authorization_url", "oauth2_token_url", "oauth2_userinfo_url"):
+        monkeypatch.setattr(settings._inner, key, None)
+    client = oauth2_module.OAuth2Client()
+
+    async def run():
+        asked, answer = asyncio.Event(), asyncio.Event()
+
+        async def handler(request: httpx.Request) -> httpx.Response:
+            asked.set()
+            await answer.wait()
+            return httpx.Response(200, json={
+                "authorization_endpoint": "https://old-id.example.test/authorize",
+                "token_endpoint": "https://old-id.example.test/token",
+                "userinfo_endpoint": "https://old-id.example.test/userinfo",
+            })
+
+        real_async_client = httpx.AsyncClient
+        monkeypatch.setattr(oauth2_module.httpx, "AsyncClient",
+                            lambda *a, **kw: real_async_client(*a, **{**kw, "transport": httpx.MockTransport(handler)}))
+        discovery = asyncio.create_task(client.discover_endpoints())
+        await asyncio.wait_for(asked.wait(), timeout=5)
+        # The new provider is saved, with its endpoints set by hand
+        monkeypatch.setattr(settings._inner, "oauth2_issuer_url", "https://new-id.example.test")
+        monkeypatch.setattr(settings._inner, "oauth2_token_url", "https://new-id.example.test/token")
+        client.reload_config()
+        answer.set()
+        with pytest.raises(oauth2_module.OAuth2ClientError):
+            await asyncio.wait_for(discovery, timeout=5)
+
+    asyncio.run(run())
+    assert client.token_url == "https://new-id.example.test/token"
+    assert client.authorization_url is None and client.userinfo_url is None
+    assert client._discovery_cache is None
