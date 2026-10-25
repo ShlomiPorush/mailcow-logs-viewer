@@ -11,6 +11,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 from app.models import DMARCReport, TLSReport
+from app.services import report_store
 from app.services.dmarc_imap_service import DMARCImapService
 from tests.test_report_raw_copy import dmarc_xml, tls_json, _recording_db
 
@@ -153,7 +154,7 @@ class FakeImap:
 
 def _process(raw, monkeypatch):
     import app.services.dmarc_imap_service as imap_module
-    monkeypatch.setattr(imap_module, "enrich_dmarc_record", lambda row: row)
+    monkeypatch.setattr(report_store, "enrich_dmarc_record", lambda row: row)
     service = DMARCImapService()
     service.connection = FakeImap({1: raw})
     db, added = _recording_db()

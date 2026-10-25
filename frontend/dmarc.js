@@ -1506,7 +1506,7 @@ function renderReportsManagementTable(reports, allowDelete, { total, page, total
                 <span class="ui-td">${dateTime(report.created_at)}</span>
                 <span class="ui-td"><span class="ui-tag${report.type === 'dmarc' ? ' ui-tag-info' : ' ui-tag-ok'}">${escapeHtml(String(report.type).toUpperCase())}</span></span>
                 <b class="ui-td">${escapeHtml(report.domain)}</b>
-                <span class="ui-td">${escapeHtml(report.org_name || '-')}</span>
+                <span class="ui-td${report.shared_report_id ? ' ui-td-wrap' : ''}">${escapeHtml(report.org_name || '-')}${report.shared_report_id ?' <span class="ui-tag ui-tag-warn" title="Another report has the same report ID and different content.">Same report ID</span>' : ''}</span>
                 <span class="ui-td ui-td-end"><small class="ui-sec-unit">Records </small>${escapeHtml(String(report.record_count))}</span>
                 <span class="ui-td">${day(report.begin_date)} - ${day(report.end_date)}</span>
                 ${allowDelete ? `<span class="ui-td ui-td-end ui-row-actions"><button onclick="deleteReport('${escapeJsArg(report.type)}', ${Number(report.id)}, '${escapeJsArg(report.domain)}')" class="ui-btn ui-btn-sm ui-btn-danger" title="Delete report">Delete</button></span>` : ''}

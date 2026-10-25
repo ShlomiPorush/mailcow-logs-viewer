@@ -14,7 +14,7 @@ import pathlib
 import uuid
 from contextlib import contextmanager
 from email.message import EmailMessage
-from unittest.mock import Mock
+from unittest.mock import MagicMock, Mock
 
 import httpx
 import pytest
@@ -24,6 +24,7 @@ from sqlalchemy import create_engine, text
 from app.config import settings
 from app.models import DMARCReport, TLSReport
 from app.routers import dmarc
+from app.services import report_store
 from app.services.dmarc_imap_service import DMARCImapService
 from app.services.dmarc_parser import parse_dmarc_file
 from app.services.safe_decompress import (
@@ -38,7 +39,7 @@ MIB = 1024 * 1024
 
 _RECORD = """  <record>
     <row>
-      <source_ip>192.0.2.{n}</source_ip>
+      <source_ip>{ip}</source_ip>
       <count>3</count>
       <policy_evaluated><disposition>none</disposition><dkim>pass</dkim><spf>pass</spf></policy_evaluated>
     </row>
@@ -49,7 +50,8 @@ _RECORD = """  <record>
 
 
 def dmarc_xml(records: int = 1, report_id: str = "raw-copy-dmarc") -> str:
-    body = "".join(_RECORD.format(n=(i % 250) + 1) for i in range(records))
+    # Distinct sources: identical records are merged into one
+    body = "".join(_RECORD.format(ip=f"2001:db8::{i + 1:x}") for i in range(records))
     return f"""<?xml version="1.0"?>
 <feedback>
   <report_metadata>
@@ -120,6 +122,8 @@ def test_large_realistic_report_still_parses():
 def _recording_db():
     db = Mock()
     db.query.return_value.filter.return_value.first.return_value = None
+    db.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = []
+    db.begin_nested.return_value = MagicMock()
     added = []
 
     def add(row):
@@ -145,7 +149,7 @@ def test_upload_stores_no_raw_copy(monkeypatch):
         yield db
 
     monkeypatch.setattr(dmarc, "SessionLocal", session)
-    monkeypatch.setattr(dmarc, "enrich_dmarc_record", lambda row: row)
+    monkeypatch.setattr(report_store, "enrich_dmarc_record", lambda row: row)
     monkeypatch.setattr(dmarc, "clear_dmarc_cache", Mock())
     app = FastAPI()
     app.include_router(dmarc.router)
@@ -177,19 +181,18 @@ def _result():
 
 
 def test_imap_sync_stores_no_raw_copy(monkeypatch):
-    import app.services.dmarc_imap_service as imap_module
-    monkeypatch.setattr(imap_module, "enrich_dmarc_record", lambda row: row)
+    monkeypatch.setattr(report_store, "enrich_dmarc_record", lambda row: row)
     service = DMARCImapService()
 
     db, added = _recording_db()
     msg = _report_mail("report.xml.gz", gzip.compress(dmarc_xml().encode()), "gzip")
-    result = service._process_dmarc_email(msg, db, _result())
+    result = service._process_reports(msg, db, _result())
     assert result["reports_created"] == 1, result
     assert _stored(added, DMARCReport).raw_xml is None
 
     db, added = _recording_db()
     msg = _report_mail("report.json.gz", gzip.compress(tls_json().encode()), "tlsrpt+gzip")
-    result = service._process_tls_rpt_email(msg, db, _result())
+    result = service._process_reports(msg, db, _result())
     assert result["reports_created"] == 1, result
     assert _stored(added, TLSReport).raw_json is None
 

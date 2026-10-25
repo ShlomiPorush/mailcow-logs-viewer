@@ -11,6 +11,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 import app.services.dmarc_imap_service as imap_module
+from app.services import report_store
 from app.services.dmarc_imap_service import DMARCImapService
 from tests.test_dmarc_imap_bounces import TLS_REPORT, _SyncRecord
 from tests.test_report_raw_copy import _recording_db
@@ -58,7 +59,7 @@ class SizedImap:
 
 
 def _process(imap, monkeypatch):
-    monkeypatch.setattr(imap_module, "enrich_dmarc_record", lambda row: row)
+    monkeypatch.setattr(report_store, "enrich_dmarc_record", lambda row: row)
     service = DMARCImapService()
     service.connection = imap
     db, _added = _recording_db()
@@ -98,7 +99,7 @@ def test_sync_reports_an_oversized_email_as_failed_and_moves_on(monkeypatch):
     monkeypatch.setattr(service, "connect", lambda: True)
     monkeypatch.setattr(service, "select_folder", lambda: True)
     monkeypatch.setattr(service, "disconnect", lambda: None)
-    monkeypatch.setattr(imap_module, "enrich_dmarc_record", lambda row: row)
+    monkeypatch.setattr(report_store, "enrich_dmarc_record", lambda row: row)
     monkeypatch.setattr(imap_module, "SessionLocal", Mock)
     monkeypatch.setattr(imap_module, "DMARCSync", _SyncRecord)
     monkeypatch.setattr(imap_module, "settings",
