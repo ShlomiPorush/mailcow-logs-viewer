@@ -73,6 +73,18 @@ test('the check for a second reference catches every way to write the id', () =>
     assert.ok(!SECOND_REFERENCE_ID.test('<div id="api-reference-x">'));
 });
 
+test('the sidebar tools and the phone\'s More sheet link to the reference and the documentation site', () => {
+    const html = fs.readFileSync(path.join(FRONTEND, 'index.html'), 'utf8');
+    const docsSite = fs.readFileSync(path.join(FRONTEND, 'app.js'), 'utf8').match(/const DOCS_SITE_URL = '([^']+)'/)[1];
+    for (const [id, href] of [['api-docs-link', '/docs'], ['mobile-api-docs-link', '/docs'],
+        ['docs-site-link', docsSite], ['mobile-docs-site-link', docsSite]]) {
+        const tag = html.match(new RegExp(`<a [^>]*id="${id}"[^>]*>`));
+        assert.ok(tag, `${id} is missing`);
+        assert.ok(tag[0].includes(`href="${href}"`), `${id} goes to ${href}`);
+        assert.ok(tag[0].includes('target="_blank"') && tag[0].includes('rel="noopener'), `${id} opens a new tab without access to the app`);
+    }
+});
+
 test('the Scalar bundle ships with its licence and without a source map reference', () => {
     const bundle = fs.readFileSync(path.join(LIBS, 'scalar-api-reference.min.js'), 'utf8');
     assert.match(bundle.slice(0, 200), /@scalar\/api-reference \d+\.\d+\.\d+/);

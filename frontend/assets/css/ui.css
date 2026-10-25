@@ -1205,7 +1205,7 @@ body { font-family: var(--ui-font); background: var(--ui-bg); color: var(--ui-in
 .ui-nav-group-label { padding: 10px 12px 4px; color: var(--ui-side-muted); font-size: 12px; font-weight: 600; }
 .ui-nav-item, .mobile-menu-item { position: relative; display: flex; align-items: center; gap: 10px; width: 100%; min-height: 32px; padding: 5px 10px;
     border: 0; border-radius: var(--ui-radius-sm); background: none; color: var(--ui-side-ink); font: inherit; font-weight: 500;
-    text-align: start; cursor: pointer; }
+    text-align: start; cursor: pointer; text-decoration: none; }
 .ui-nav-item svg, .mobile-menu-item svg { width: 18px; height: 18px; flex: none; color: var(--ui-side-muted); }
 /* Hover only where there is a pointer, so a tapped item does not stay grey */
 @media (hover: hover) { .ui-nav-item:hover, .mobile-menu-item:hover { background: color-mix(in srgb, var(--ui-side-ink) 8%, transparent); } }
