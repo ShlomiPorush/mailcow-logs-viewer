@@ -190,6 +190,23 @@ def test_a_refused_rspamd_entry_is_skipped_without_its_page(env):
     assert new == 3
 
 
+def test_a_postfix_line_too_long_for_its_index_is_skipped_without_its_page(env):
+    import secrets
+    from app.models import PostfixLog
+    # The duplicate key indexes the whole line: PostgreSQL refuses an index
+    # entry over about 2.7 kB, and random text does not compress below it
+    logs = [{'time': str(BASE + i), 'program': 'postfix/cleanup', 'priority': 'info',
+             'message': f'ABC{i}{MARK[:4].upper()}: message-id=<{i}-{MARK}@example.com>'} for i in range(2)]
+    logs.insert(1, {'time': str(BASE + 8), 'program': 'postfix/smtpd', 'priority': 'info',
+                    'message': f'ABC8{MARK[:4].upper()}: {MARK} ' + secrets.token_urlsafe(6000)})
+
+    new, _, _ = scheduler._store_postfix_page(logs)
+
+    rows = _rows(PostfixLog, PostfixLog.message)
+    assert sorted(r.message[:4] for r in rows) == ['ABC0', 'ABC1']
+    assert new == 3
+
+
 def test_a_refused_entry_does_not_stop_paging_before_the_lines_behind_it(env, monkeypatch):
     from app.models import RspamdLog
     stored_before = [_rspamd_entry(0), _rspamd_entry(1)]

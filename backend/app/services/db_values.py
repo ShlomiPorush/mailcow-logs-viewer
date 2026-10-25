@@ -32,6 +32,9 @@ def strip_nul(value: Any) -> Any:
 # id sequence, which fails every row alike
 _SPENT_SEQUENCE = '2200H'
 _UNIQUE_VIOLATION = '23505'
+# A value too large for an index entry, such as a very long log line under
+# the Postfix duplicate key
+_INDEX_ROW_TOO_LARGE = '54000'
 
 
 def _pgcode(error: Exception) -> str:
@@ -52,7 +55,7 @@ def is_row_error(error: Exception) -> bool:
 def _is_refused_row(error: Exception) -> bool:
     # For a plain insert a duplicate key is the row's own problem too: it is
     # already stored
-    return is_row_error(error) or (
+    return is_row_error(error) or _pgcode(error) == _INDEX_ROW_TOO_LARGE or (
         isinstance(error, IntegrityError) and _pgcode(error) == _UNIQUE_VIOLATION)
 
 

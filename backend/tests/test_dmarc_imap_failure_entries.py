@@ -53,6 +53,16 @@ NUL_NAME = _mail(b"TLS Report Domain: example.com", b"filename*=utf-8''r%00.json
 EIGHT_BIT = _mail(b"DMARC \xff report", b'filename="a.xml"', b"application/xml", b"not xml", b"8bit")
 
 
+class ServerImap(FakeImap):
+    """Also marks an email as read when its body is fetched without PEEK,
+    as an IMAP server does (RFC 3501, 6.4.5)."""
+
+    def uid(self, command, *args):
+        if command == 'FETCH' and 'PEEK' not in args[1] and 'SIZE' not in args[1]:
+            self.seen.add(args[0].encode())
+        return super().uid(command, *args)
+
+
 @pytest.fixture()
 def run(monkeypatch):
     if not _postgres_available():
@@ -66,11 +76,14 @@ def run(monkeypatch):
                         lambda failed, sync_id: notified.append((failed, sync_id)) or True)
     sync_ids = []
 
-    def sync(mails, fail_after_first_batch=False):
+    def sync(mails, fail_after_first_batch=False, commit_fails_once_when=None):
         service = imap_module.DMARCImapService()
         service.delete_after = False
         service.scan_all_unseen = False
-        imap = FakeImap(mails)
+        imap = ServerImap(mails)
+        if commit_fails_once_when:
+            monkeypatch.setattr(imap_module, "SessionLocal",
+                                lambda: _failing_once(SessionLocal(), commit_fails_once_when))
         service.connection = imap
         monkeypatch.setattr(service, "connect", lambda: True)
         monkeypatch.setattr(service, "select_folder", lambda: True)
@@ -96,6 +109,22 @@ def run(monkeypatch):
     with SessionLocal() as db:
         db.query(DMARCSync).filter(DMARCSync.id.in_(sync_ids)).delete(synchronize_session=False)
         db.commit()
+
+
+def _failing_once(db, when):
+    """The session, with one commit failing like a lost connection when
+    `when(db)` first holds."""
+    from sqlalchemy.exc import OperationalError
+    real_commit = db.commit
+    failed = []
+
+    def commit():
+        if not failed and when(db):
+            failed.append(1)
+            raise OperationalError('COMMIT', {}, Exception('server closed the connection'))
+        return real_commit()
+    db.commit = commit
+    return db
 
 
 @pytest.mark.parametrize("poison", [NUL_NAME, EIGHT_BIT], ids=["nul-attachment-name", "8-bit-subject"])
@@ -147,6 +176,25 @@ def test_a_failed_import_records_and_reports_what_failed(run):
     assert [e['email_id'] for e in done.row.failed_emails] == ['1', '2']
     assert done.row.emails_processed == 2
     assert [[e['email_id'] for e in failed] for failed, _ in run.notified] == [['1', '2']]
+
+
+def test_a_lost_connection_keeps_the_stored_failures_and_the_email_unread(run):
+    from tests.test_dmarc_imap_bounces import DSN
+
+    def second_email_saved(db):
+        return any(isinstance(o, DMARCSync) and o.emails_processed == 2 for o in db.dirty)
+
+    # Email 1 fails and is stored; saving after email 2 (a bounce) fails once
+    done = run({1: ORDINARY, 2: DSN}, commit_fails_once_when=second_email_saved)
+
+    assert done.result['status'] == 'error'
+    first = done.row.failed_emails
+    assert [e['email_id'] for e in first] == ['1']
+    assert first[0]['message_id'] == '<r1@reporter.example.com>'
+    assert first[0]['error'] != 'The details of this email could not be stored'
+    assert [failed for failed, _ in run.notified] == [first]
+    # Email 2 was not stored as processed, so it stays unread for the next run
+    assert done.seen == [b'1']
 
 
 def test_failures_reported_before_a_late_error_are_reported_once(run, monkeypatch):

@@ -26,7 +26,7 @@ from ..services.report_identity import (
 from ..services.report_store import ReportNotStored, prepare_report_file, store_report
 from ..services.dmarc_notifications import send_dmarc_error_notification
 from ..services.dmarc_cache import clear_dmarc_cache
-from ..services.db_values import strip_nul
+from ..services.db_values import is_row_error, strip_nul
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +79,12 @@ def _plain_text(value, limit: int = _FAILURE_TEXT_CHARS) -> Optional[str]:
     # 'replace' drops lone surrogates, which JSONB refuses like NUL
     text = str(value).encode('utf-8', 'replace').decode('utf-8')
     return strip_nul(text)[:limit]
+
+
+def _is_value_error(error: Exception) -> bool:
+    """Whether a commit failed for the values it held: the database refused
+    one, or one could not be written as JSON."""
+    return is_row_error(error) or isinstance(getattr(error, 'orig', None), (TypeError, ValueError))
 
 
 def _record_counts(sync_record: DMARCSync, counts: Dict):
@@ -349,7 +355,7 @@ class DMARCImapService:
                 return result
 
             # Fetch email (email_id is already a string)
-            status, msg_data = self.connection.uid('FETCH', email_id, '(RFC822)')
+            status, msg_data = self.connection.uid('FETCH', email_id, '(BODY.PEEK[])')
             
             if status != 'OK':
                 result['error'] = f"Failed to fetch email {email_id}"
@@ -579,7 +585,7 @@ class DMARCImapService:
                             'subject': _plain_text(result['subject']),
                             'error': _plain_text(error_msg)
                         })
-                        self._save_progress(db, sync_record, counts, failed_emails)
+                        self._save_progress(db, sync_record, counts, failed_emails, new_failure=True)
                         # Kept in the mailbox, marked so it is not processed again
                         self.mark_as_processed(email_id)
 
@@ -641,18 +647,20 @@ class DMARCImapService:
             self.disconnect()
             db.close()
 
-    def _save_progress(self, db, sync_record: DMARCSync, counts: Dict, failed_emails: List[Dict]):
-        """Commit the counts and failure entries so far. When the newest
-        failure entry still cannot be stored, it is replaced with one that
-        keeps only the email number, so the email can be marked and the
-        import does not stop on it in every run."""
+    def _save_progress(self, db, sync_record: DMARCSync, counts: Dict, failed_emails: List[Dict],
+                       new_failure: bool = False):
+        """Commit the counts and failure entries so far. When the failure
+        entry just added cannot be stored for its own values, it is replaced
+        with one that keeps only the email number, so the email can be marked
+        and the import does not stop on it in every run. Any other failure,
+        such as a lost connection, is raised with the entries kept."""
         _record_counts(sync_record, counts)
         # A new list: the session does not see a change inside a JSON value
         sync_record.failed_emails = list(failed_emails) or None
         try:
             db.commit()
         except Exception as error:
-            if not failed_emails:
+            if not (new_failure and _is_value_error(error)):
                 raise
             logger.warning(f"Could not store the failure entry of email "
                            f"{failed_emails[-1]['email_id']} ({type(error).__name__})")
@@ -665,7 +673,8 @@ class DMARCImapService:
 
     def _notify_failures(self, failed_emails: List[Dict], sync_id) -> bool:
         """Report the failures; the notification goes to the channels even
-        without SMTP. True when there were failures to report."""
+        without SMTP. True when there were failures to report, also when a
+        destination failed: sending again would repeat what did arrive."""
         if not failed_emails:
             return False
         logger.info(f"Sending error notification for {len(failed_emails)} failed emails")
