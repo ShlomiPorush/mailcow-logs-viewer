@@ -73,6 +73,7 @@ def test_an_ipv6_line_is_attributed_to_the_ipv6_client_not_to_an_ipv4_in_its_tex
     ('Removed host/network 198.51.100.7/32 from denylist', '198.51.100.7'),
     ('Add host/network 198.51.100.7/32 to blacklist', '198.51.100.7'),
     ('Remove host/network 2001:db8::1/128 from blacklist', '2001:db8::1'),
+    ('::ffff:192.0.2.9 matched rule id 3 (x)', '192.0.2.9'),
 ])
 def test_mailcow_own_fields_still_give_the_address(message, ip):
     from app.scheduler import parse_netfilter_message
@@ -257,10 +258,10 @@ def _migration():
     return module
 
 
-def _repair():
+def _repair(module=None):
     from app.database import engine
     with engine.begin() as connection:
-        _migration().repair(connection)
+        (module or _migration()).repair(connection)
 
 
 def _hit(session, ip, rule, status, rows, mode='watch'):
@@ -283,7 +284,11 @@ def test_the_upgrade_closes_open_catches_its_log_lines_do_not_confirm(db):
     trap_genuine = _stored_before_the_fix(db, GENUINE, sasl(GENUINE, 'admin'), username='admin')
     purged = _stored_before_the_fix(db, CLIENT6, sasl(CLIENT6, 'admin'), username='admin')
 
+    many = [_stored_before_the_fix(db, GENUINE, sasl(GENUINE, f'u{n}@example.com')) for n in range(200)]
+
     pending = _hit(db, VICTIM, 'unknown_accounts', 'pending', forged, mode='enforce')
+    empty = _hit(db, GENUINE, 'country', 'watching', [])
+    capped = _hit(db, GENUINE, 'unknown_accounts', 'watching', many)
     mixed = _hit(db, VICTIM, 'trap', 'watching', forged[:1] + [genuine])
     mixed_net = _hit(db, NET, 'subnet', 'watching', [net_forged] + net_genuine)
     clean_net = _hit(db, NET, 'subnet', 'pending', net_genuine, mode='enforce')
@@ -298,7 +303,7 @@ def test_the_upgrade_closes_open_catches_its_log_lines_do_not_confirm(db):
 
     db.expire_all()
     status = {h.id: (h.status, h.mode) for h in db.query(ProtectionHit).filter(ProtectionHit.ip.in_(TARGETS))}
-    for closed in (pending, mixed, mixed_net, gone):
+    for closed in (pending, mixed, mixed_net, gone, empty, capped):
         assert status[closed] == ('expired', 'watch'), closed
     assert status[clean_net] == ('pending', 'enforce')
     assert status[clean] == ('watching', 'watch')
@@ -321,11 +326,14 @@ def test_the_upgrade_clears_addresses_taken_from_client_text(db):
     genuine = _stored_before_the_fix(db, GENUINE, sasl(GENUINE, 'root'), username='root')
     genuine.rule_id = 3
     ban = _stored_before_the_fix(db, GENUINE, f'Banning {GENUINE}/32 for 30 minutes')
+    later = _stored_before_the_fix(db, VICTIM, dovecot(CLIENT6, f'a@{VICTIM}'))
     db.commit()
     before = {s['ip'] for s in security_addresses.attempt_sources(db, 24)}
     assert VICTIM in before
 
-    _repair()
+    migration = _migration()
+    migration.BATCH = 1  # every line in its own batch
+    _repair(migration)
 
     db.expire_all()
     rows = {r.id: r for r in db.query(NetfilterLog).filter(NetfilterLog.priority == MARKER)}
@@ -333,6 +341,7 @@ def test_the_upgrade_clears_addresses_taken_from_client_text(db):
     assert rows[forged.id].message == sasl(CLIENT6, f'u0@{VICTIM}')
     assert (rows[genuine.id].ip, rows[genuine.id].country_code) == (GENUINE, 'XX')
     assert rows[ban.id].ip == GENUINE
+    assert rows[later.id].ip is None
     after = {s['ip'] for s in security_addresses.attempt_sources(db, 24)}
     assert VICTIM not in after and GENUINE in after
 
