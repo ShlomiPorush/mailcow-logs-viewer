@@ -89,8 +89,17 @@ _INTERNAL_NETWORKS = [ipaddress.ip_network(n) for n in (
 _NAME_RE = re.compile(r"^[a-z0-9._%+\-]+(@[a-z0-9.\-]+)?$")
 _COUNTRY_RE = re.compile(r"^[A-Z]{2}$")
 _SUCCESS_LOGIN_WINDOW = timedelta(hours=24)
-_POSTFIX_LOGIN_RE = re.compile(r"client=[^\[]*\[(?:IPv6:)?([0-9a-fA-F:.]+)\].*?sasl_username=(\S+)")
-_DOVECOT_LOGIN_RE = re.compile(r"Login: user=<([^>]+)>.*?rip=([0-9a-fA-F:.]+)")
+# A successful login only in the shape the server writes it, from the start of
+# the line: elsewhere in a line these words can be text a client sent (a
+# rejected command, a failed login's user name). smtpd writes
+# "QID: client=name[ip](:port), sasl_method=M, sasl_username=U"; Dovecot's
+# login processes write "imap-login: Login: user=<U>, method=M, rip=IP, ...".
+_POSTFIX_LOGIN_RE = re.compile(
+    r"[0-9A-Za-z]+: client=[^\s\[\],]*\[(?:IPv6:)?([0-9a-fA-F:.]+)\](?::\d+)?, "
+    r"sasl_method=[^\s,]+, sasl_username=([^\s,]+)(?:,|$)")
+_DOVECOT_LOGIN_RE = re.compile(
+    r"(?:dovecot:\s*)?[a-z0-9]+-login: Login: user=<([^<>]*)>, (?:[^,<>]*, )*?rip=([0-9a-fA-F:.]+)(?:,|$)")
+_SMTPD_PROGRAM = "%/smtpd"  # postfix/smtpd, postfix/submission/smtpd, postfix/smtps/smtpd
 
 
 @dataclass
@@ -271,24 +280,68 @@ def _network_is_protected(net, allow_networks, protected_ips: Set[str]) -> bool:
     return False
 
 
+def _postfix_login(program: Optional[str], message: Optional[str]) -> Optional[Tuple[str, str]]:
+    """(address, user) of a successful SMTP login line, or None."""
+    if not (program or "").endswith("/smtpd"):
+        return None
+    match = _POSTFIX_LOGIN_RE.match(message or "")
+    return (match.group(1), match.group(2).lower()) if match else None
+
+
+def _dovecot_login(message: Optional[str]) -> Optional[Tuple[str, str]]:
+    """(address, user) of a successful IMAP or POP3 login line, or None."""
+    match = _DOVECOT_LOGIN_RE.match(message or "")
+    return (match.group(2), match.group(1).lower()) if match else None
+
+
+def _same_ip(a: str, b: str) -> bool:
+    try:
+        return ipaddress.ip_address(a) == ipaddress.ip_address(b)
+    except ValueError:
+        return False
+
+
+def _in_pages(query, id_column, size: int = 1000):
+    """Every row of query (its first column is id_column), read page by page."""
+    last = None
+    while True:
+        page = (query if last is None else query.filter(id_column > last)).order_by(id_column).limit(size).all()
+        yield from page
+        if len(page) < size:
+            return
+        last = page[-1][0]
+
+
 def _logged_in_recently(db: Session, ip: str, now: datetime) -> bool:
-    """A successful SMTP or IMAP login from this address in the last day."""
+    """A successful SMTP or IMAP login from this address in the last day.
+
+    The LIKE filters only narrow the rows: each one counts only when it reads
+    as a login line, and every candidate is read, so lines a client wrote to
+    look like logins never hide a real one behind them."""
     since = now - _SUCCESS_LOGIN_WINDOW
-    smtp = db.query(PostfixLog.id).filter(
+    smtp = db.query(PostfixLog.id, PostfixLog.program, PostfixLog.message).filter(
         PostfixLog.time >= since,
+        PostfixLog.program.like(_SMTPD_PROGRAM),
         PostfixLog.message.like("%sasl_username=%"),
         # Postfix writes an IPv6 client as [IPv6:2001:db8::1]
         or_(PostfixLog.message.like(f"%[{ip}]%"), PostfixLog.message.like(f"%[IPv6:{ip}]%")),
-    ).first()
-    if smtp:
-        return True
-    imap = db.query(RawServiceLog.id).filter(
+    )
+    for _, program, message in _in_pages(smtp, PostfixLog.id):
+        login = _postfix_login(program, message)
+        if login and _same_ip(login[0], ip):
+            return True
+    message = RawServiceLog.raw_data["message"].astext
+    imap = db.query(RawServiceLog.id, message).filter(
         RawServiceLog.service == "dovecot",
         RawServiceLog.time >= since,
-        RawServiceLog.raw_data["message"].astext.like("%Login: user=<%"),
-        RawServiceLog.raw_data["message"].astext.like(f"%rip={ip},%"),
-    ).first()
-    return imap is not None
+        message.like("%Login: user=<%"),
+        message.like(f"%rip={ip}%"),
+    )
+    for _, text in _in_pages(imap, RawServiceLog.id):
+        login = _dovecot_login(text)
+        if login and _same_ip(login[0], ip):
+            return True
+    return False
 
 
 # ---------------------------------------------------------------- recording
@@ -567,12 +620,14 @@ def _successful_logins(db: Session, context: ProtectionContext) -> List[_Login]:
     logins: List[_Login] = []
     mark = _read_watermark(db, BREACH_POSTFIX_KEY, PostfixLog)
     if mark is not None:
-        rows = db.query(PostfixLog).filter(PostfixLog.id > mark, PostfixLog.message.like("%sasl_username=%")).order_by(PostfixLog.id).limit(BATCH_SIZE).all()
+        rows = db.query(PostfixLog).filter(
+            PostfixLog.id > mark, PostfixLog.program.like(_SMTPD_PROGRAM), PostfixLog.message.like("%sasl_username=%"),
+        ).order_by(PostfixLog.id).limit(BATCH_SIZE).all()
         last = db.query(func.max(PostfixLog.id)).scalar() or mark
         for row in rows:
-            match = _POSTFIX_LOGIN_RE.search(row.message or "")
-            if match:
-                logins.append(_Login(row.id, row.time, match.group(2).lower(), match.group(1)))
+            login = _postfix_login(row.program, row.message)
+            if login:
+                logins.append(_Login(row.id, row.time, login[1], login[0]))
         _store(db, BREACH_POSTFIX_KEY, str(rows[-1].id if len(rows) == BATCH_SIZE else last))
     if context.raw_logs:
         mark = _read_watermark(db, BREACH_DOVECOT_KEY, RawServiceLog)
@@ -583,9 +638,9 @@ def _successful_logins(db: Session, context: ProtectionContext) -> List[_Login]:
             ).order_by(RawServiceLog.id).limit(BATCH_SIZE).all()
             last = db.query(func.max(RawServiceLog.id)).scalar() or mark
             for row in rows:
-                match = _DOVECOT_LOGIN_RE.search((row.raw_data or {}).get("message") or "")
-                if match:
-                    logins.append(_Login(-row.id, row.time, match.group(1).lower(), match.group(2)))
+                login = _dovecot_login((row.raw_data or {}).get("message"))
+                if login:
+                    logins.append(_Login(-row.id, row.time, login[1], login[0]))
             _store(db, BREACH_DOVECOT_KEY, str(rows[-1].id if len(rows) == BATCH_SIZE else last))
     return logins
 
@@ -620,14 +675,17 @@ def _evaluate_breach(db: Session, context: ProtectionContext, rules: dict, now: 
         elif br["new_country"] and context.geoip:
             current = _countries_of([login.ip])
             earlier_ips = set()
-            for (message,) in db.query(PostfixLog.message).filter(
+            for _, program, message in _in_pages(db.query(PostfixLog.id, PostfixLog.program, PostfixLog.message).filter(
                 PostfixLog.time >= login.time - timedelta(days=30), PostfixLog.time < login.time,
+                PostfixLog.program.like(_SMTPD_PROGRAM),
                 PostfixLog.message.like(f"%sasl_username={login.username}%"),
-            ).limit(500).all():
-                match = _POSTFIX_LOGIN_RE.search(message or "")
-                if match and match.group(1) != login.ip:
-                    earlier_ips.add(match.group(1))
-            earlier = _countries_of(sorted(earlier_ips)[:50])
+            ), PostfixLog.id, 500):
+                earlier = _postfix_login(program, message)
+                if earlier and earlier[1] == login.username and not _same_ip(earlier[0], login.ip):
+                    earlier_ips.add(earlier[0])
+                    if len(earlier_ips) >= 50:
+                        break
+            earlier = _countries_of(sorted(earlier_ips))
             if current and earlier and not (current & earlier):
                 reason = f"{login.username} logged in from {', '.join(sorted(current))}, a country it did not use in 30 days"
         if not reason:

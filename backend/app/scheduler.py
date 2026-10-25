@@ -19,10 +19,10 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 
 from .app_time import UTC, app_tz, format_clock
-from .config import settings, set_cached_active_domains
+from .config import settings, set_cached_active_domains, local_domains_complete, is_hosted_domain
 from .database import get_db_context, SessionLocal
 from .mailcow_api import mailcow_api, mailcow_handled_items
-from .services.suppression_events import record_bounces, record_stuck
+from .services.suppression_events import disabled_by_hand, record_bounces, record_stuck
 from .services.suppression_rows_lock import lock_suppression_rows
 from .services.bounce_policy import cleanup_blocks, handling_on, hard_action, soft_action, rspamd_sync_on
 from .services.rspamd_map_lock import map_write_lock_async
@@ -43,7 +43,7 @@ from .services.dovecot_parser import (
     resolve_session_verdicts,
 )
 from .routers.domains import check_domain_dns, store_dns_check_worker
-from .routers.suppressions import auto_suppression_address, RSPAMD_SOURCE
+from .routers.suppressions import auto_suppression_address, AUTOMATIC_SOURCES, RSPAMD_SOURCE
 from .services.dmarc_imap_service import sync_dmarc_reports_from_imap
 from .services.dmarc_notifications import send_dmarc_error_notification
 from .services import geoip_service, correlation_jobs
@@ -2753,13 +2753,21 @@ async def sync_local_domains():
     update_job_status('sync_local_domains', 'running')
     
     try:
-        active_domains = await mailcow_api.get_active_domains()
+        # Both lists come from one mailcow: one that changed in Settings
+        # meanwhile leaves the list incomplete until the next sync
+        source = mailcow_api.base_url
+        domains = await mailcow_api.get_domains()
+        active_domains = [d['domain_name'] for d in domains if d.get('active') == 1 and d.get('domain_name')]
         alias_map = await mailcow_api.get_alias_domain_map()
         alias_domains = sorted(alias_map.keys())
         # Merge: primary domains + alias domains (no duplicates)
         all_domains = list(dict.fromkeys((active_domains or []) + (alias_domains or [])))
         if all_domains:
-            set_cached_active_domains(all_domains)
+            # A domain turned off in mailcow is still hosted here for the mail
+            # it accepted before, which can wait in the queue
+            hosted = list(dict.fromkeys(all_domains + [d['domain_name'] for d in domains if d.get('domain_name')]))
+            set_cached_active_domains(all_domains, complete_for=source if mailcow_api.base_url == source else None,
+                                      hosted=hosted)
             # Persist which primary domain each alias points at, so mailbox
             # statistics and the Domains page can use the mapping (issue #92)
             try:
@@ -3427,6 +3435,28 @@ def _blocks_now(suppression) -> bool:
     return bool(suppression.active) and (suppression.expires_at is None or suppression.expires_at > datetime.utcnow())
 
 
+def _kept_as_set(suppression, off_by_hand: set) -> bool:
+    """Whether a bounce only counts toward this block, leaving whether and how
+    long it blocks, and why, as they are: someone turned it off (its last
+    change by hand was Disable), or it is in force and a person owns it (an
+    administrator's entry, or an automatic one made permanent by hand, since
+    the automatic paths always set an expiry). An administrator's block that
+    ran out is blocked again as before."""
+    if suppression.id in off_by_hand:
+        return True
+    return _blocks_now(suppression) and (
+        suppression.source not in AUTOMATIC_SOURCES or suppression.expires_at is None)
+
+
+def _automatic_expiry(suppression) -> datetime:
+    """Progressive expiry: base days x bounce count, capped at max days. A
+    bounce never brings an expiry closer."""
+    days = min(settings.suppression_base_expiry_days * suppression.bounce_count,
+               settings.suppression_max_expiry_days)
+    expiry = datetime.utcnow() + timedelta(days=days)
+    return max(expiry, suppression.expires_at) if suppression.expires_at else expiry
+
+
 def _list_writable(db) -> bool:
     """Whether a job may add to the list now: it is kept (Suppressions and Sync
     with Rspamd on) and no load of this app's blocks from Rspamd is owed.
@@ -3449,7 +3479,9 @@ def _store_deferred_suppressions_worker(recipients_to_suppress, uncovered: Optio
 
     A block loaded from Rspamd is not changed. When it does not block the
     address now (disabled by hand), the address is added to uncovered: its
-    messages stay in the queue, since no block was stored for them.
+    messages stay in the queue, since no block was stored for them. A block
+    a person set or turned off only counts the message (see _kept_as_set),
+    and an address at an excluded or hosted domain gets no block.
     """
     items = [r if isinstance(r, dict) else {'email': r} for r in recipients_to_suppress]
     by_email = {}
@@ -3473,8 +3505,11 @@ def _store_deferred_suppressions_worker(recipients_to_suppress, uncovered: Optio
             # still owed since this run started: no block is stored, so its
             # messages stay in the queue for the next run to decide
             return 0
+        # Asked again under the lock: the domain list may have changed since the run picked them
+        by_email = {email: group for email, group in by_email.items() if not _left_alone([email])}
         existing_by_email = {s.email: s for s in db.query(SpamSuppression).filter(
             SpamSuppression.email.in_(list(by_email))).all()}
+        off_by_hand = disabled_by_hand(db, [s.id for s in existing_by_email.values() if not s.active])
         kept = set()
         queue_ids = {item['queue_id'] for group in by_email.values() for item in group if item.get('queue_id')}
         if existing_by_email and queue_ids:
@@ -3499,22 +3534,19 @@ def _store_deferred_suppressions_worker(recipients_to_suppress, uncovered: Optio
             if existing:
                 existing.bounce_count = (existing.bounce_count or 0) + 1
                 existing.soft_bounce_count = (existing.soft_bounce_count or 0) + 1
-                existing.reason = 'deferred_stuck'
                 existing.last_bounce_message = note
                 existing.updated_at = datetime.utcnow()
 
-                outcome = 'extended'
-                if not existing.active or (existing.expires_at and existing.expires_at < datetime.utcnow()):
-                    outcome = 'activated'
-                    existing.active = True
-                    existing.synced_to_rspamd = False
-
-                # Extend expiry
-                expiry_days = min(
-                    settings.suppression_base_expiry_days * existing.bounce_count,
-                    settings.suppression_max_expiry_days
-                )
-                existing.expires_at = datetime.utcnow() + timedelta(days=expiry_days)
+                if _kept_as_set(existing, off_by_hand):
+                    outcome = 'kept'
+                else:
+                    existing.reason = 'deferred_stuck'
+                    outcome = 'extended'
+                    if not existing.active or (existing.expires_at and existing.expires_at < datetime.utcnow()):
+                        outcome = 'activated'
+                        existing.active = True
+                        existing.synced_to_rspamd = False
+                    existing.expires_at = _automatic_expiry(existing)
                 entry = existing
             else:
                 new_entry = SpamSuppression(
@@ -3558,17 +3590,24 @@ _protect_warned = set()
 
 def _protected_now(emails) -> set:
     """The addresses among emails whose mail no automatic path deletes: a block
-    From Rspamd that does not block now (disabled by hand), for the address
-    itself or a pattern or domain that matches it, read the way Rspamd reads
-    the line."""
+    From Rspamd that does not block now, or any other block whose last change
+    by hand was Disable, for the address itself or a pattern or domain that
+    matches it, read the way Rspamd reads the line."""
     if not emails:
         return set()
     from .routers.suppressions import suppression_map_line
     with get_db_context() as db:
+        off = db.query(SpamSuppression).filter(
+            or_(SpamSuppression.source.is_(None), SpamSuppression.source != RSPAMD_SOURCE),
+            SpamSuppression.active == False,  # noqa: E712
+            SpamSuppression.id.in_(db.query(SuppressionEvent.suppression_id).filter(
+                SuppressionEvent.kind == 'disabled'))).all()
+        off_by_hand = disabled_by_hand(db, [r.id for r in off])
         # (value, line) read while the session is open
         rows = [(r.email, suppression_map_line(r))
                 for r in db.query(SpamSuppression).filter(SpamSuppression.source == RSPAMD_SOURCE).all()
                 if not _blocks_now(r)]
+        rows += [(r.email, suppression_map_line(r)) for r in off if r.id in off_by_hand]
     import regex
     protected = set()
     for value, map_line in rows:
@@ -3619,9 +3658,38 @@ def _queue_delete_confirmed(reply) -> None:
         raise RuntimeError(f"mailcow did not confirm the deletion: {refused or reply}")
 
 
-def _whitelisted(addresses) -> bool:
+def _left_alone(addresses) -> bool:
+    """Whether a recipient is at a domain the automatic paths never block or
+    delete mail for: one the operator excluded, or one hosted on this mailcow
+    (its mail is inbound, and a failure to deliver it is not a bad address)."""
     whitelist = settings.suppression_whitelist_domains_list
-    return any(a.split('@')[-1] in whitelist for a in addresses)
+    return any(a.split('@')[-1] in whitelist or is_hosted_domain(a.split('@')[-1]) for a in addresses)
+
+
+# Delivery agents that hand mail to mailboxes on this server: their failures
+# are about inbound mail, never an outbound recipient to block
+_LOCAL_DELIVERY_AGENTS = ('lmtp', 'local', 'virtual')
+_BOUNCE_AGENTS = tuple(a for a in POSTFIX_DELIVERY_AGENTS if a not in _LOCAL_DELIVERY_AGENTS)
+_DOMAINS_WAIT = "Waiting for the list of this mailcow's domains, so mail to them is never blocked or deleted"
+
+
+async def _local_domains_known(job: str) -> Optional[str]:
+    """The mailcow the app talks to now, when every domain of it is known,
+    reading them first when not (at startup, or after mailcow changed in
+    Settings). None until then: the job does nothing, and Status says why."""
+    if not local_domains_complete(mailcow_api.base_url):
+        await sync_local_domains()
+    if local_domains_complete(mailcow_api.base_url):
+        return mailcow_api.base_url
+    update_job_status(job, 'failed', _DOMAINS_WAIT)
+    return None
+
+
+def _still_on(source: str) -> bool:
+    """Whether a run still talks to the mailcow it started on, with its
+    domains known: one changed in Settings meanwhile ends the run before it
+    blocks or deletes anything."""
+    return mailcow_api.base_url == source and local_domains_complete(source)
 
 
 def _cleanup_deletable(items: Dict[str, List[str]], blocking: bool) -> List[str]:
@@ -3635,7 +3703,7 @@ def _cleanup_deletable(items: Dict[str, List[str]], blocking: bool) -> List[str]
     protected = _protected_now(every)
     blocked = _blocked_now(every) if blocking else set()
     return [queue_id for queue_id, addresses in items.items()
-            if not _whitelisted(addresses) and not (set(addresses) & protected)
+            if not _left_alone(addresses) and not (set(addresses) & protected)
             and (not blocking or all(a in blocked for a in addresses))]
 
 
@@ -3654,7 +3722,7 @@ def _hard_deletable(items: Dict[str, List[str]], block: set, delete: set) -> Lis
     blocked = _blocked_now(every & block)
     return [queue_id for queue_id, addresses in items.items()
             if all(a in block or a in delete for a in addresses)
-            and not _whitelisted(addresses) and not (set(addresses) & protected)
+            and not _left_alone(addresses) and not (set(addresses) & protected)
             and all(a in blocked for a in addresses if a in block)]
 
 
@@ -3705,12 +3773,16 @@ async def cleanup_deferred_queue_job():
     a message is never deleted without its block. When the deletion fails,
     the next run finds the message again and deletes it without counting it
     twice. A message with a recipient that cannot be read, that also goes to
-    an excluded domain, or to a block From Rspamd disabled by hand, stays.
+    an excluded domain or one hosted on this mailcow, or to a block disabled
+    by hand, stays.
     Completely stateless - only looks at arrival_time vs now.
     """
     if not handling_on() or not settings.queue_cleanup_enabled:
         return
     if not mailcow_api.has_rw_key:
+        return
+    source = await _local_domains_known('cleanup_deferred_queue')
+    if not source:
         return
     # Decided once per run: a message picked to be blocked is deleted only with its block
     blocking = cleanup_blocks()
@@ -3721,6 +3793,9 @@ async def cleanup_deferred_queue_job():
 
     try:
         queue = await mailcow_api.get_queue()
+        if not _still_on(source):
+            update_job_status('cleanup_deferred_queue', 'failed', _DOMAINS_WAIT)
+            return
         if not queue:
             update_job_status('cleanup_deferred_queue', 'success')
             return
@@ -3753,7 +3828,7 @@ async def cleanup_deferred_queue_job():
                 logger.info(f"[QUEUE CLEANUP] Deferred item {queue_id} has a recipient that cannot be read - left in the queue")
                 continue
             # Mail to an excluded domain stays in the queue for Postfix to retry
-            if _whitelisted(addresses):
+            if _left_alone(addresses):
                 continue
             items[queue_id] = addresses
 
@@ -3797,7 +3872,8 @@ async def cleanup_deferred_queue_job():
             async with map_write_lock_async():
                 deletable = await asyncio.get_running_loop().run_in_executor(
                     get_thread_pool_executor(), _cleanup_deletable, items, blocking)
-                if deletable:
+                # The same mailcow the queue was read from, asked with no wait before the deletion
+                if deletable and _still_on(source):
                     _queue_delete_confirmed(await mailcow_api.delete_queue(deletable))
                     logger.info(f"[QUEUE CLEANUP] Deleted {len(deletable)} stuck deferred item(s) from queue")
         except Exception as e:
@@ -4519,7 +4595,7 @@ def _detect_suppressions_worker():
             PostfixLog.recipient.isnot(None),
             PostfixLog.dsn.isnot(None),
             PostfixLog.queue_id.isnot(None),
-            or_(*[PostfixLog.program.like(f'%/{agent}') for agent in POSTFIX_DELIVERY_AGENTS]),
+            or_(*[PostfixLog.program.like(f'%/{agent}') for agent in _BOUNCE_AGENTS]),
         ).all()
 
         if not bounce_logs:
@@ -4529,7 +4605,8 @@ def _detect_suppressions_worker():
         # Sync with Rspamd is off)
         hard, soft = hard_action(sync_on), soft_action(sync_on)
 
-        whitelist = settings.suppression_whitelist_domains_list
+        # Blocks whose last change by hand was Disable, asked once per block
+        off_by_hand, checked_off = set(), set()
         new_count = 0
         updated_count = 0
         emails_for_queue_cleanup = []  # Only hard bounces - deferred/soft should be retried by Postfix
@@ -4555,9 +4632,8 @@ def _detect_suppressions_worker():
             if not recipient:
                 continue
 
-            # Skip whitelisted domains
-            domain = recipient.split('@')[-1] if '@' in recipient else ''
-            if domain in whitelist:
+            # Skip excluded and hosted domains
+            if _left_alone([recipient]):
                 continue
 
             dsn = log.dsn or ''
@@ -4595,11 +4671,16 @@ def _detect_suppressions_worker():
                 continue
 
             if existing:
+                if existing.id is not None and not existing.active and existing.id not in checked_off:
+                    checked_off.add(existing.id)
+                    off_by_hand |= disabled_by_hand(db, [existing.id])
+                kept_as_set = _kept_as_set(existing, off_by_hand)
                 # Update bounce counts
                 existing.bounce_count = (existing.bounce_count or 0) + 1
                 if is_hard:
                     existing.hard_bounce_count = (existing.hard_bounce_count or 0) + 1
-                    existing.reason = 'hard_bounce'
+                    if not kept_as_set:
+                        existing.reason = 'hard_bounce'
                 elif is_soft:
                     existing.soft_bounce_count = (existing.soft_bounce_count or 0) + 1
 
@@ -4607,22 +4688,19 @@ def _detect_suppressions_worker():
                 existing.last_bounce_message = log.message[:500] if log.message else None
                 existing.updated_at = datetime.utcnow()
 
-                # Re-activate if expired; Count then suppress waits for the threshold
-                below_threshold = (is_soft and soft == 'count'
-                                   and existing.soft_bounce_count < settings.suppression_soft_bounce_threshold)
-                outcome = 'extended' if existing.active else 'counted'
-                if (not existing.active or (existing.expires_at and existing.expires_at < datetime.utcnow())) \
-                        and not below_threshold:
-                    outcome = 'activated'
-                    existing.active = True
-                    existing.synced_to_rspamd = False
-
-                # Progressive expiry: base_days × bounce_count, capped at max_days
-                expiry_days = min(
-                    settings.suppression_base_expiry_days * existing.bounce_count,
-                    settings.suppression_max_expiry_days
-                )
-                existing.expires_at = datetime.utcnow() + timedelta(days=expiry_days)
+                if kept_as_set:
+                    outcome = 'kept'
+                else:
+                    # Re-activate if expired; Count then suppress waits for the threshold
+                    below_threshold = (is_soft and soft == 'count'
+                                       and existing.soft_bounce_count < settings.suppression_soft_bounce_threshold)
+                    outcome = 'extended' if existing.active else 'counted'
+                    if (not existing.active or (existing.expires_at and existing.expires_at < datetime.utcnow())) \
+                            and not below_threshold:
+                        outcome = 'activated'
+                        existing.active = True
+                        existing.synced_to_rspamd = False
+                    existing.expires_at = _automatic_expiry(existing)
 
                 updated_count += 1
                 captured.append((existing, log, outcome, existing.expires_at))
@@ -4671,7 +4749,13 @@ async def detect_suppressions_job():
     """
     if not handling_on() or not settings.suppression_auto_detect:
         return
+    source = await _local_domains_known('detect_suppressions')
+    if not source:
+        return
     if not await _spam_blocks_loaded('detect_suppressions'):
+        return
+    if not _still_on(source):
+        update_job_status('detect_suppressions', 'failed', _DOMAINS_WAIT)
         return
 
     update_job_status('detect_suppressions', 'running')
@@ -4711,7 +4795,7 @@ async def detect_suppressions_job():
                     async with map_write_lock_async():
                         deletable = await asyncio.get_running_loop().run_in_executor(
                             get_thread_pool_executor(), _hard_deletable, items, to_block, to_delete)
-                        if deletable:
+                        if deletable and _still_on(source):
                             _queue_delete_confirmed(await mailcow_api.delete_queue(deletable))
                             logger.info(
                                 f"[SUPPRESSION] Cleaned up {len(deletable)} queue item(s) "

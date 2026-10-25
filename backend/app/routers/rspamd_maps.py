@@ -7,6 +7,7 @@ including regex validation before saving.
 Read: Rspamd API (GET /rspamd/maps, GET /rspamd/getmap) via Password header
 Write: mailcow API (POST /api/v1/edit/rspamd-map) via X-API-Key RW header
 """
+import hashlib
 import re
 import logging
 from fastapi import APIRouter, HTTPException
@@ -124,6 +125,22 @@ _MAP_METADATA = {m["filename"]: m for m in RSPAMD_MAPS}
 
 class MapContentRequest(BaseModel):
     content: str
+    # content_hash of the map as the editor read it: the save is refused when
+    # the map changed since (the suppression sync writes the recipient denylist)
+    base_hash: Optional[str] = None
+
+
+MAP_CHANGED_TEXT = "The map changed since you opened it. Your edits were not saved."
+
+
+def content_hash(content: str) -> str:
+    return hashlib.sha256((content or "").encode("utf-8")).hexdigest()
+
+
+async def _read_map(filename: str) -> str:
+    """The map as Rspamd has it now ("" when Rspamd has not loaded it)."""
+    map_id = await mailcow_api.find_rspamd_map_id(filename)
+    return "" if map_id is None else await mailcow_api.get_rspamd_map_content(map_id)
 
 
 class MapValidationRequest(BaseModel):
@@ -285,18 +302,20 @@ async def get_map_content(filename: str):
             return {
                 "filename": filename,
                 "content": "",
+                "content_hash": content_hash(""),
                 "entry_count": 0,
                 "message": "Map file not found in Rspamd. It may not be loaded yet.",
             }
-        
+
         content = await mailcow_api.get_rspamd_map_content(map_id)
-        
+
         # Count non-empty, non-comment lines
         lines = [l.strip() for l in content.split('\n') if l.strip() and not l.strip().startswith('#')]
-        
+
         return {
             "filename": filename,
             "content": content,
+            "content_hash": content_hash(content),
             "entry_count": len(lines),
             "metadata": _MAP_METADATA[filename],
         }
@@ -346,23 +365,43 @@ async def update_map_content(filename: str, body: MapContentRequest):
         )
 
     try:
-        # The suppression sync writes the recipient denylist too; one writer at a time
+        # The suppression sync writes the recipient denylist too; one writer at
+        # a time, from the check that the map is still the one the editor read
+        # to the read of what was saved
+        saved, saved_hash = content_to_save, None
         async with map_write_lock_async():
+            readable = settings.is_rspamd_configured
+            if body.base_hash is not None and readable \
+                    and content_hash(await _read_map(filename)) != body.base_hash:
+                raise HTTPException(status_code=409, detail={"code": "map_changed", "message": MAP_CHANGED_TEXT})
             result = await mailcow_api.edit_rspamd_map(filename, content_to_save)
+            if readable:
+                # What the next save is checked against: the map as saved
+                # (mailcow trims it and ends it with a new line)
+                try:
+                    saved = await _read_map(filename)
+                    saved_hash = content_hash(saved)
+                except MailcowAPIError as e:
+                    logger.warning(f"Saved map {filename} could not be read back: {e}")
+                    saved = content_to_save
 
         # Count entries for response
-        lines = [l.strip() for l in content_to_save.split('\n') if l.strip() and not l.strip().startswith('#')]
+        lines = [l.strip() for l in saved.split('\n') if l.strip() and not l.strip().startswith('#')]
 
         return {
             "success": True,
             "filename": filename,
             "entry_count": len(lines),
             "normalized_entries": normalized_count,
-            "content": content_to_save,
+            "content": saved,
+            # None when the saved map could not be read back: open it again before the next save
+            "content_hash": saved_hash,
             "warnings": warnings,
             "api_response": result,
         }
-        
+
+    except HTTPException:
+        raise
     except MapBusyError as e:
         raise HTTPException(status_code=409, detail=str(e))
     except MailcowAPIError as e:

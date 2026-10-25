@@ -232,6 +232,7 @@
 .ui-banner-ok { color: var(--ui-ok); background: color-mix(in srgb, var(--ui-ok) 13%, transparent); }
 .ui-banner-warn { color: var(--ui-warn); background: color-mix(in srgb, var(--ui-warn) 14%, transparent); }
 .ui-banner-fail { color: var(--ui-fail); background: color-mix(in srgb, var(--ui-fail) 13%, transparent); }
+.ui-banner > .ui-btn { flex: none; margin-inline-start: auto; }
 /* No sign-in configured: a warn banner at the top of the Dashboard. The action
    sits on the right, as in .ui-locked, with the dismiss button last; on phones
    the action moves under the text and the dismiss button stays top right. */

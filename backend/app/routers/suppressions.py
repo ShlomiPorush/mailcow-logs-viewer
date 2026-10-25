@@ -24,7 +24,7 @@ from ..config import settings
 from ..models import MessageCorrelation, SpamSuppression, SuppressionEvent
 from ..mailcow_api import mailcow_api, MailcowAPIError, MailcowRwKeyError
 from ..services.rspamd_map_lock import MapBusyError, map_write_lock
-from ..services.suppression_events import add_event, postfix_lines
+from ..services.suppression_events import add_event, disabled_by_hand, postfix_lines
 from ..services.suppression_rows_lock import lock_suppression_rows
 from ..utils import internal_error, format_datetime_for_api
 from ..app_time import to_local, utc_naive
@@ -1202,17 +1202,7 @@ async def _pull_from_rspamd(db: Session, snapshot: dict) -> dict:
         marker = db.query(SystemSetting.key).filter(SystemSetting.key == SPAM_IMPORT_PENDING_KEY).first() is not None
         added_kind = 'loaded_from_rspamd' if marker else 'added_in_rspamd'
         # Rows whose last change by hand was Disable: what the user asked stays
-        disabled_by_user = set()
-        if marker:
-            inactive_ids = [r.id for r in rows if not r.active]
-            if inactive_ids:
-                last = {}
-                for sid, kind in db.query(SuppressionEvent.suppression_id, SuppressionEvent.kind).filter(
-                        SuppressionEvent.suppression_id.in_(inactive_ids),
-                        SuppressionEvent.kind.in_(['enabled', 'disabled'])).order_by(
-                        SuppressionEvent.recorded_at, SuppressionEvent.id):
-                    last[sid] = kind
-                disabled_by_user = {sid for sid, kind in last.items() if kind == 'disabled'}
+        disabled_by_user = disabled_by_hand(db, [r.id for r in rows if not r.active]) if marker else set()
         added, removed = [], [r.email for r in gone]
         gone_ids = {r.id for r in gone}
         for r in rows:

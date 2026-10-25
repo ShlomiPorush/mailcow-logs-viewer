@@ -232,7 +232,7 @@ def test_lines_stored_before_the_fix_are_not_failed_tries_for_the_breach_alert(d
     for n in range(3):
         _stored_before_the_fix(db, GENUINE, sasl(CLIENT6, f'u{n}@{GENUINE}'), username=f'u{n}@{GENUINE}')
     db.add(PostfixLog(time=datetime.utcnow(), queue_id=MARKER[:20], program='postfix/submission/smtpd',
-                      message=f'{MARKER[:10]}: client=unknown[{GENUINE}], sasl_method=LOGIN, sasl_username=info@example.com'))
+                      message=f'4Fq2Lk7Xz: client=unknown[{GENUINE}], sasl_method=LOGIN, sasl_username=info@example.com'))
     db.commit()
 
     protection_rules.evaluate(db, _context())

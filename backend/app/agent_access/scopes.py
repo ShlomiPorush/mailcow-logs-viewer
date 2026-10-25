@@ -149,7 +149,9 @@ POLICY: Dict[Tuple[str, str], Rule] = {
          "GET /api/smtp-abuse/whitelist", "GET /api/smtp-abuse/history",
          area="security", kind=READ),
     **_r("POST /api/fail2ban", area="security", kind=WRITE,
-         body='{"attr": {<mailcow Fail2ban attributes>}} - the same object GET /api/fail2ban returns'),
+         body='{"attr": {<mailcow Fail2ban attributes>}} - the object GET /api/fail2ban returns. Changes the '
+              'settings only: "blacklist" and "whitelist" may be left out, and when sent must be the current lists '
+              '(409 otherwise). Change the lists with /api/fail2ban/ban, /allow and /remove'),
     **_r("POST /api/fail2ban/policy", area="security", kind=WRITE,
          body='{"ban_time", "max_ban_time", "max_attempts", "retry_window", "netban_ipv4", "netban_ipv6": <int>, '
               '"ban_time_increment": <bool>}'),
@@ -171,7 +173,9 @@ POLICY: Dict[Tuple[str, str], Rule] = {
     **_r("GET /api/rspamd/config", "GET /api/rspamd/maps", "GET /api/rspamd/maps/{filename}",
          "POST /api/rspamd/validate",
          area="rspamd", kind=READ),
-    **_r("PUT /api/rspamd/maps/{filename}", area="rspamd", kind=WRITE),
+    **_r("PUT /api/rspamd/maps/{filename}", area="rspamd", kind=WRITE,
+         body='{"content": "<the whole map>", "base_hash": "<content_hash from GET>"} - 409 when the map '
+              'changed since it was read; the answer has the saved map and its new content_hash'),
 
     # DMARC & TLS
     **_r("GET /api/dmarc/insights", "GET /api/dmarc/reports/config", "GET /api/dmarc/reports/all",

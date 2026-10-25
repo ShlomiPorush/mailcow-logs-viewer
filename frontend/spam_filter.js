@@ -176,6 +176,7 @@ function rspamdMapCrumbs(name) {
 }
 
 async function openMapEditor(filename) {
+    mapEditorOpened += 1;
     const container = document.getElementById('rspamd-maps-list');
 
     container.innerHTML = '<div class="ui-loading" role="status"><div class="loading"></div><p>Loading map content...</p></div>';
@@ -188,6 +189,7 @@ async function openMapEditor(filename) {
         const meta = data.metadata || {};
         const canSave = rspamdMapsCanSave;
         mapEditorSaved = data.content || '';
+        mapEditorHash = data.content_hash || null;
 
         container.innerHTML = `
             ${rspamdMapCrumbs(meta.name || filename)}
@@ -241,6 +243,7 @@ async function openMapEditor(filename) {
                         placeholder="${canSave ? 'Enter entries, one per line...' : 'This map is empty.'}"
                         oninput="onMapContentChange('${escapeJsArg(filename)}')">${escapeHtml(data.content || '')}</textarea>
                     <div id="map-validation-errors" class="hidden ui-map-errors"></div>
+                    <div id="map-conflict" class="hidden"></div>
                     <div class="ui-map-foot">
                         <p class="ui-muted">Lines starting with # are comments. Empty lines are ignored.</p>
                         ${canSave ? `
@@ -264,6 +267,11 @@ async function openMapEditor(filename) {
 }
 
 let mapEditorSaved = null;  // the map text as stored, to tell whether there is anything to save
+// The map as it was read: a save is refused when the map changed since
+// (the suppression sync writes the recipient denylist)
+let mapEditorHash = null;
+let mapEditorOpened = 0;     // counts the times the editor was opened
+let mapEditorSaving = false;
 
 // An edited map is lost by going back to the list, leaving the page or the app
 uiUnsavedRegister('rspamd-map', {
@@ -331,9 +339,35 @@ async function validateMapContent(filename) {
     }
 }
 
+// Shows or hides the note that the map changed under the editor
+function showMapConflict(filename, show) {
+    const el = document.getElementById('map-conflict');
+    if (!el) return;
+    el.classList.toggle('hidden', !show);
+    el.innerHTML = show ? `<div class="ui-banner ui-banner-warn" role="alert">
+            <div><b>The map changed since you opened it</b>
+                <p>Your edits were not saved. Reload shows the map as it is now and drops your edits, so copy them first if you need them.</p></div>
+            <button type="button" class="ui-btn ui-btn-sm" onclick="openMapEditor('${escapeJsArg(filename)}')">Reload</button>
+        </div>` : '';
+}
+
 async function saveMapContent(filename) {
+    if (mapEditorSaving) return;  // one save at a time
+    mapEditorSaving = true;
+    try {
+        await saveMapContentOnce(filename);
+    } finally {
+        mapEditorSaving = false;
+    }
+}
+
+async function saveMapContentOnce(filename) {
+    // What is saved and the map it was edited from, taken together before
+    // anything waits; a save from an editor opened again since is dropped
+    const opened = mapEditorOpened;
     const content = document.getElementById('map-editor-content').value;
-    
+    const baseHash = mapEditorHash;
+
     // Validate first
     try {
         const valRes = await authenticatedFetch('/api/rspamd/validate', {
@@ -352,37 +386,65 @@ async function saveMapContent(filename) {
         showToast('Validation failed: ' + e.message, 'error');
         return;
     }
-    
+    if (opened !== mapEditorOpened) return;
+
     // Save
     uiSaveBarBusy('map-savebar', true);
-    
+
     try {
         const response = await authenticatedFetch(`/api/rspamd/maps/${encodeURIComponent(filename)}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ content })
+            body: JSON.stringify({ content, base_hash: baseHash })
         });
-        
-        if (!response.ok) {
-            const err = await response.json();
-            throw new Error(err.detail?.message || err.detail || 'Save failed');
-        }
-        
-        const result = await response.json();
-        if (result.normalized_entries > 0) {
-            // Bare addresses were anchored server side - reflect the saved form
-            const textarea = document.getElementById('map-editor-content');
-            if (textarea && typeof result.content === 'string') textarea.value = result.content;
-            mapEditorSaved = typeof result.content === 'string' ? result.content : content;
-            showToast(`Map saved (${uiCountLabel(result.entry_count, 'entry', 'entries')}). ${result.normalized_entries} bare address entr${result.normalized_entries === 1 ? 'y was' : 'ies were'} anchored automatically.`, 'success');
-        } else {
-            showToast(`Map saved successfully (${uiCountLabel(result.entry_count, 'entry', 'entries')})`, 'success');
+        if (opened !== mapEditorOpened) {
+            // The editor was opened again meanwhile: it holds its own copy and hash
+            if (response.ok) showToast('Map saved', 'success');
+            return;
         }
 
-        if (!(result.normalized_entries > 0)) mapEditorSaved = content;
+        if (!response.ok) {
+            const err = await response.json();
+            if (response.status === 409 && err.detail?.code === 'map_changed') {
+                // The edits stay in the editor; Reload shows the map as it is now
+                showMapConflict(filename, true);
+                return;
+            }
+            throw new Error(err.detail?.message || err.detail || 'Save failed');
+        }
+
+        const result = await response.json();
+        showMapConflict(filename, false);
+        const textarea = document.getElementById('map-editor-content');
+        // Edits typed while the save ran were not sent: they stay in the editor
+        const typedMeanwhile = !!textarea && textarea.value !== content;
+        const saved = typeof result.content === 'string' ? result.content : content;
+        const entries = uiCountLabel(result.entry_count, 'entry', 'entries');
+        if (!result.content_hash && !typedMeanwhile) {
+            // Saved, but not read back: open it again so the next save checks the map as it is
+            showToast(`Map saved (${entries}). It is opened again to show it as saved.`, 'success');
+            mapEditorSaved = null;
+            openMapEditor(filename);
+            return;
+        }
+        mapEditorSaved = saved;
+        if (typedMeanwhile) {
+            // The editor no longer shows the map the hash is of: the next save
+            // asks for a Reload instead of writing over what was read back
+            mapEditorHash = '';
+        } else {
+            // The map as saved, with the hash of that same read
+            mapEditorHash = result.content_hash;
+            if (textarea) textarea.value = saved;
+        }
+        if (result.normalized_entries > 0) {
+            showToast(`Map saved (${entries}). ${result.normalized_entries} bare address entr${result.normalized_entries === 1 ? 'y was' : 'ies were'} anchored automatically.`, 'success');
+        } else {
+            showToast(`Map saved successfully (${entries})`, 'success');
+        }
         const statusEl = document.getElementById('map-validation-status');
         if (statusEl) statusEl.innerHTML = uiTag('Saved', 'ok');
-        uiSaveBarUpdate('map-savebar', 0);
+        uiSaveBarUpdate('map-savebar', typedMeanwhile ? 1 : 0);
         document.getElementById('map-entry-count').textContent = uiCountLabel(result.entry_count, 'entry', 'entries');
         
     } catch (error) {
@@ -741,7 +803,7 @@ function suppressionSourceTag(source, tones) {
     return tip ? tag.replace('<span class="ui-tag', `<span title="${escapeHtml(tip)}" class="ui-tag`) : tag;
 }
 const BLOCK_OUTCOMES = { created: ['Blocked', 'fail'], activated: ['Blocked again', 'fail'], extended: ['Block extended', 'warn'],
-    counted: ['Counted, not blocked yet', ''] };
+    counted: ['Counted, not blocked yet', ''], kept: ['Counted, block unchanged', ''] };
 let blockDetailsState = null;
 
 function blockEventHtml(e) {

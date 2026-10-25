@@ -879,6 +879,9 @@ class MailcowAPI:
         """
         logger.info("Fetching alias domain map")
         data = await self._make_request("/api/v1/get/alias-domain/all")
+        if isinstance(data, dict) and data:
+            # mailcow answers {} when there are none; anything else is not a list of them
+            raise MailcowAPIError(f"Unexpected alias domain answer: {str(data)[:200]}")
         if not isinstance(data, list):
             return {}
         return {
