@@ -399,7 +399,8 @@ function uiInitMenus() {
     document.addEventListener('toggle', event => {
         const menu = event.target;
         if (!(menu instanceof HTMLElement) || !menu.classList.contains('ui-menu') || event.newState !== 'open') return;
-        const button = document.querySelector(`[popovertarget="${menu.id}"]`);
+        // Its button opens it natively (popovertarget) or through a handler of its own (aria-controls)
+        const button = document.querySelector(`[popovertarget="${menu.id}"], [aria-controls="${menu.id}"]`);
         if (!button) return;
         const r = button.getBoundingClientRect();
         const rtl = getComputedStyle(button).direction === 'rtl';
@@ -760,7 +761,7 @@ function showToast(message, type = 'info', options = {}) {
         <span class="ui-toast-icon" aria-hidden="true">${icons[kind]}</span>
         <p>${escapeHtml(message)}</p>
         ${options.action ? `<button type="button" class="ui-btn ui-btn-sm ui-toast-action"${options.action.ariaLabel ? ` aria-label="${escapeHtml(options.action.ariaLabel)}"` : ''}>${escapeHtml(options.action.label)}</button>` : ''}
-        <button type="button" onclick="this.parentElement.remove()" class="ui-icon-btn" title="Close" aria-label="Close">×</button>
+        <button type="button" onclick="this.parentElement.remove()" class="ui-icon-btn" title="Close" aria-label="Close">${UI_CLOSE_ICON}</button>
     `;
     // An action still running holds the toast like the pointer or the keyboard does
     let busy = false;
@@ -841,6 +842,55 @@ function showToast(message, type = 'info', options = {}) {
 // Shared UI helpers used across pages (confirm dialog, status/job cards)
 // =============================================================================
 
+// The X of every dialog, sheet, toast and window
+const UI_CLOSE_ICON = '<svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>';
+
+const UI_DIALOG_SIZES = { sm: 'ui-dialog-sm', md: 'ui-dialog-md', wide: '' };
+
+// Every dialog built in JavaScript comes from here, so they all share one frame:
+// a head with the title and an X, a body that scrolls, the actions in a foot, and
+// on a phone a bottom sheet (uiDialogSheet). A question (role alertdialog) has no
+// X; Cancel closes it, and so does a pull down on a phone. Ids, classes and data
+// the callers rely on are passed in, so nothing is wrapped twice.
+// .github/tests/popups.test.cjs fails on dialogs built any other way.
+//   size: 'sm' (460px), 'md' (680px) or 'wide' (1100px), always content-high
+//   close: a function, called with no arguments (X, a pull down)
+//   backdropClose: a function, only for windows without typed input (DS-9)
+//   form: { id, onsubmit } makes the body a form; foot buttons use form="<id>";
+//     onsubmit is inline JavaScript in a template string, like every other handler
+//   dataset: data attributes for the backdrop, such as { noHistory: '' }
+function uiDialog({ id, title, size, body = '', foot = '', close = null, role = 'dialog', label = '', titleId = '', describedBy = '',
+    bodyId = '', bodyClass = '', footId = '', footClass = '', footHidden = false, dialogClass = '', backdropClass = '',
+    form = null, dataset = null, backdropClose = null } = {}) {
+    if (!(size in UI_DIALOG_SIZES)) throw new Error(`uiDialog: size must be one of ${Object.keys(UI_DIALOG_SIZES).join(', ')}`);
+    if (role !== 'alertdialog' && typeof close !== 'function') throw new Error('uiDialog: a dialog needs a close function for its X');
+    const backdrop = document.createElement('div');
+    if (id) backdrop.id = id;
+    backdrop.className = `ui-dialog-backdrop${backdropClass ? ` ${backdropClass}` : ''}`;
+    backdrop.setAttribute('role', role);
+    if (titleId) backdrop.setAttribute('aria-labelledby', titleId);
+    else backdrop.setAttribute('aria-label', label || title);
+    if (describedBy) backdrop.setAttribute('aria-describedby', describedBy);
+    if (dataset) Object.entries(dataset).forEach(([key, value]) => { backdrop.dataset[key] = value; });
+    const bodyTag = form ? 'form' : 'div';
+    const bodyAttrs = `${form ? ` id="${escapeHtml(form.id)}"` : bodyId ? ` id="${escapeHtml(bodyId)}"` : ''}${form && form.onsubmit ? ` onsubmit="${escapeHtml(form.onsubmit)}"` : ''} class="ui-dialog-body${bodyClass ? ` ${bodyClass}` : ''}"`;
+    const x = typeof close === 'function'
+        ? `<button type="button" class="ui-icon-btn" data-dialog-x title="Close" aria-label="Close">${UI_CLOSE_ICON}</button>` : '';
+    backdrop.innerHTML = `
+        <div class="ui-dialog ui-dialog-fit${UI_DIALOG_SIZES[size] ? ` ${UI_DIALOG_SIZES[size]}` : ''}${dialogClass ? ` ${dialogClass}` : ''}">
+            <div class="ui-dialog-head"><h3${titleId ? ` id="${escapeHtml(titleId)}"` : ''}>${escapeHtml(title)}</h3>${x}</div>
+            <${bodyTag}${bodyAttrs}>${body}</${bodyTag}>
+            ${foot || footId ? `<div${footId ? ` id="${escapeHtml(footId)}"` : ''} class="${footHidden ? 'hidden' : `ui-dialog-foot${footClass ? ` ${footClass}` : ''}`}">${foot}</div>` : ''}
+        </div>`;
+    const dialog = backdrop.firstElementChild;
+    const bodyEl = dialog.querySelector(':scope > .ui-dialog-body');
+    // No argument: some close functions read their first one as "saved"
+    if (x) dialog.querySelector('[data-dialog-x]').addEventListener('click', () => close());
+    if (backdropClose) backdrop.addEventListener('click', event => { if (uiBackdropClick(event)) backdropClose(); });
+    document.body.appendChild(backdrop);
+    return { backdrop, dialog, body: bodyEl, foot: footId ? document.getElementById(footId) : dialog.querySelector(':scope > .ui-dialog-foot') };
+}
+
 /**
  * Show a styled confirmation modal (replaces native confirm()).
  * Returns a Promise<boolean>: true if confirmed, false if cancelled.
@@ -850,31 +900,21 @@ function showConfirmModal({ title = 'Confirm', message = 'Are you sure?', confir
         const existing = document.getElementById('app-confirm-modal');
         if (existing) existing.remove();
 
-        const overlay = document.createElement('div');
-        overlay.id = 'app-confirm-modal';
-        overlay.className = 'ui-dialog-backdrop ui-confirm';
-        overlay.setAttribute('role', 'alertdialog');
-        overlay.setAttribute('aria-label', title);
-        // A question asked during Back or Forward writes no history entry of its own
-        if (noHistory) overlay.dataset.noHistory = '';
-
         // Callers pass plain text (channel names, emails, domains, ...) - escape
         // it before it goes into innerHTML, then turn newlines into breaks.
         const escapedMessage = escapeHtml(message).replace(/\n/g, '<br>');
 
-        overlay.innerHTML = `
-            <div class="ui-dialog ui-dialog-fit ui-dialog-sm">
-                <div class="ui-dialog-head"><h3>${escapeHtml(title)}</h3></div>
-                <div class="ui-dialog-body"><p class="ui-confirm-text">${escapedMessage}</p></div>
-                <div class="ui-dialog-foot">
-                    <button type="button" id="app-confirm-cancel" class="ui-btn">${escapeHtml(cancelText)}</button>
-                    <button type="button" id="app-confirm-ok" class="ui-btn ${isDangerous ? 'ui-btn-danger-solid' : 'ui-btn-primary'}"
-                        ${confirmColor ? `style="background: ${escapeHtml(confirmColor)}"` : ''}>${escapeHtml(confirmText)}</button>
-                </div>
-            </div>
-        `;
-
-        document.body.appendChild(overlay);
+        const { backdrop: overlay } = uiDialog({
+            id: 'app-confirm-modal', title, size: 'sm', role: 'alertdialog', backdropClass: 'ui-confirm',
+            // A question asked during Back or Forward writes no history entry of its own
+            dataset: noHistory ? { noHistory: '' } : null,
+            body: `<p class="ui-confirm-text">${escapedMessage}</p>`,
+            foot: `<button type="button" id="app-confirm-cancel" class="ui-btn">${escapeHtml(cancelText)}</button>
+                <button type="button" id="app-confirm-ok" class="ui-btn ${isDangerous ? 'ui-btn-danger-solid' : 'ui-btn-primary'}"
+                    ${confirmColor ? `style="background: ${escapeHtml(confirmColor)}"` : ''}>${escapeHtml(confirmText)}</button>`,
+        });
+        // Locked while it asks; a dialog under it that locked the page keeps it locked
+        const overflowBefore = document.body.style.overflow;
         document.body.style.overflow = 'hidden';
 
         const cancelBtn = document.getElementById('app-confirm-cancel');
@@ -882,7 +922,7 @@ function showConfirmModal({ title = 'Confirm', message = 'Are you sure?', confir
 
         function cleanup(result) {
             overlay.remove();
-            document.body.style.overflow = '';
+            document.body.style.overflow = overflowBefore;
             resolve(result);
         }
         // Escape (through the layers in router.js) and a click outside cancel
@@ -902,28 +942,21 @@ let choiceModalClose = null;
 function showChoiceModal({ title, message, choices, cancelText = 'Cancel' }) {
     if (choiceModalClose) choiceModalClose(null);
     return new Promise((resolve) => {
-        const overlay = document.createElement('div');
-        overlay.id = 'app-choice-modal';
-        overlay.className = 'ui-dialog-backdrop ui-confirm';
-        overlay.setAttribute('role', 'alertdialog');
-        overlay.setAttribute('aria-modal', 'true');
-        overlay.setAttribute('aria-label', title);
-        overlay.setAttribute('aria-describedby', 'app-choice-text');
         const buttons = choices.map((c, i) => `<button type="button" class="ui-btn${c.kind === 'danger' ? ' ui-btn-danger-solid' : c.kind === 'primary' ? ' ui-btn-primary' : ''}" data-choice="${i}">${escapeHtml(c.label)}</button>`).join('');
-        overlay.innerHTML = `
-            <div class="ui-dialog ui-dialog-fit ui-dialog-sm">
-                <div class="ui-dialog-head"><h3>${escapeHtml(title)}</h3></div>
-                <div class="ui-dialog-body"><p class="ui-confirm-text" id="app-choice-text">${escapeHtml(message).replace(/\n/g, '<br>')}</p></div>
-                <div class="ui-dialog-foot"><button type="button" class="ui-btn" data-cancel>${escapeHtml(cancelText)}</button>${buttons}</div>
-            </div>`;
-        document.body.appendChild(overlay);
+        const { backdrop: overlay } = uiDialog({
+            id: 'app-choice-modal', title, size: 'sm', role: 'alertdialog', backdropClass: 'ui-confirm', describedBy: 'app-choice-text',
+            body: `<p class="ui-confirm-text" id="app-choice-text">${escapeHtml(message).replace(/\n/g, '<br>')}</p>`,
+            foot: `<button type="button" class="ui-btn" data-cancel>${escapeHtml(cancelText)}</button>${buttons}`,
+        });
+        overlay.setAttribute('aria-modal', 'true');
+        const overflowBefore = document.body.style.overflow;
         document.body.style.overflow = 'hidden';
         // Escape cancels and the page behind is inert, both through the layers
         // (router.js), which also give the focus back to the opener
         function done(result) {
             if (choiceModalClose === done) choiceModalClose = null;
             overlay.remove();
-            document.body.style.overflow = '';
+            document.body.style.overflow = overflowBefore;
             resolve(result);
         }
         choiceModalClose = done;
@@ -1793,7 +1826,7 @@ function uiSheetShow(id, { label = '', head = '', body = '', expand = false, pro
         <div class="ui-sheet-back" onclick="uiSheetDismiss('${id}')"></div>
         <section class="ui-sheet-panel" role="dialog" aria-modal="true" aria-label="${escapeHtml(label)}">
             <span class="ui-sheet-grip" aria-hidden="true"></span>
-            <div class="ui-sheet-head">${head}<button type="button" class="ui-icon-btn ui-sheet-x" onclick="uiSheetDismiss('${id}')" aria-label="Close" title="Close">&times;</button></div>
+            <div class="ui-sheet-head">${head}<button type="button" class="ui-icon-btn ui-sheet-x" onclick="uiSheetDismiss('${id}')" aria-label="Close" title="Close">${UI_CLOSE_ICON}</button></div>
             <div class="ui-sheet-body">${body}</div>
         </section>`;
     const bodyEl = sheet.querySelector('.ui-sheet-body');
@@ -2528,7 +2561,13 @@ function uiDialogSheet(backdrop) {
     // finger, is no pull: it neither moves nor closes the sheet, until every
     // finger is lifted
     let ignore = false;
-    const closeButton = () => dialog.querySelector('.ui-dialog-head [aria-label="Close"], .ui-dialog-head .ui-icon-btn');
+    // What a pull down presses: the X, or for a question (no X) its Cancel; never
+    // a button that is off (GeoIP setup while it runs), so the sheet stays put
+    const closeButton = () => {
+        const button = dialog.querySelector('.ui-dialog-head [aria-label="Close"], .ui-dialog-head .ui-icon-btn')
+            || dialog.querySelector(':scope > .ui-dialog-foot :is([data-cancel], [id$="-cancel"])');
+        return button && !button.disabled ? button : null;
+    };
     const cancelPull = () => {
         startY = null;
         pulled = 0;

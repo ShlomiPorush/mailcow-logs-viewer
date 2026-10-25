@@ -47,6 +47,12 @@ function loadApp() {
     });
     for (const file of ['utils.js', 'app.js']) vm.runInContext(fs.readFileSync(path.join(frontend, file), 'utf8'), context);
     context.showToast = () => {};
+    // Dialogs come from the shared builder (utils.js, uiDialog): keep what each one shows
+    context.uiDialog = options => {
+        inserted.push(options.body);
+        const shown = element();
+        return { backdrop: shown, dialog: shown, body: shown, foot: shown };
+    };
     return { context, elements, inserted };
 }
 

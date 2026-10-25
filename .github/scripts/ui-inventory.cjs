@@ -198,9 +198,13 @@ function collect(dir = FRONTEND) {
 
     for (const f of files) {
         // Inline handlers, and the handlers of picker options (utils.js, uiPicker),
-        // which are passed as an onclick property and written out by the picker
+        // which are passed as an onclick property and written out by the picker; a
+        // dialog's form submit (utils.js, uiDialog) is passed the same way. A dialog's
+        // close functions are passed by name (uiDialog close and backdropClose)
         const exprs = [...f.text.matchAll(HANDLER_ATTR)].map(m => m[3])
-            .concat([...f.text.matchAll(/\bonclick:\s*`([^`]*)`/g)].map(m => m[1]));
+            .concat([...f.text.matchAll(/\bon(?:click|submit):\s*`([^`]*)`/g)].map(m => m[1]))
+            .concat([...f.text.matchAll(/\b(?:close|backdropClose):\s*([A-Za-z_$][\w$]*)\s*[,}\n]/g)]
+                .filter(m => !['null', 'undefined', 'true', 'false'].includes(m[1])).map(m => `${m[1]}()`));
         // A picker opens through the shared controller, not a handler: each one is an action
         for (const m of f.text.matchAll(/data-picker="([a-z0-9-]+)"|\buiPicker\(\{\s*id:\s*'([a-z0-9-]+)'/g)) {
             const key = `picker:${m[1] || m[2]}`;

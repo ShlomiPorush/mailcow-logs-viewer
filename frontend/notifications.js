@@ -140,20 +140,11 @@ function renderNotificationChannelModal() {
         `<option value="${escapeHtml(t.id)}" ${t.id === notificationEditing.channel_type ? 'selected' : ''}>${escapeHtml(t.label)}</option>`
     ).join('');
 
-    const modal = document.createElement('div');
-    modal.id = 'notification-channel-modal';
-    modal.className = 'ui-dialog-backdrop';
-    modal.setAttribute('role', 'dialog');
-    modal.setAttribute('aria-label', isNew ? 'Add destination' : 'Edit destination');
-    modal.innerHTML = `
-        <div class="ui-dialog ui-dialog-fit ui-dialog-sm">
-            <div class="ui-dialog-head">
-                <h3>${isNew ? 'Add destination' : 'Edit destination'}</h3>
-                <button type="button" onclick="closeNotificationChannelModal()" class="ui-icon-btn" title="Close" aria-label="Close">
-                    <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
-                </button>
-            </div>
-            <form id="nc-form" onsubmit="saveNotificationChannel(event)" class="ui-dialog-body ui-form">
+    const { backdrop: modal } = uiDialog({
+        id: 'notification-channel-modal', title: isNew ? 'Add destination' : 'Edit destination', size: 'sm',
+        close: closeNotificationChannelModal, bodyClass: 'ui-form',
+        form: { id: 'nc-form', onsubmit: `saveNotificationChannel(event)` },
+        body: `
                 <label for="nc-name"><span class="ui-label">Name <span class="ui-text-fail">*</span></span>
                     <input type="text" id="nc-name" required value="${escapeHtml(notificationEditing.name || '')}" placeholder="e.g. Ops Slack" class="ui-input">
                     <small class="ui-muted">Only used to identify this destination in the list.</small>
@@ -171,16 +162,13 @@ function renderNotificationChannelModal() {
                 <label class="ui-check-label">
                     <input type="checkbox" id="nc-enabled" ${notificationEditing.enabled !== false ? 'checked' : ''} class="ui-check">
                     Enabled
-                </label>
-                <div class="ui-form-actions">
-                    <button type="button" onclick="testNotificationChannelDraft()" class="ui-btn">Send test</button>
-                    <span class="ui-toolbar-gap"></span>
-                    <button type="button" onclick="closeNotificationChannelModal()" class="ui-btn">Cancel</button>
-                    <button type="submit" class="ui-btn ui-btn-primary">Save</button>
-                </div>
-            </form>
-        </div>`;
-    document.body.appendChild(modal);
+                </label>`,
+        // The actions stay in sight below the form while it scrolls
+        foot: `<button type="button" onclick="testNotificationChannelDraft()" class="ui-btn">Send test</button>
+            <span class="ui-toolbar-gap"></span>
+            <button type="button" onclick="closeNotificationChannelModal()" class="ui-btn">Cancel</button>
+            <button type="submit" form="nc-form" class="ui-btn ui-btn-primary">Save</button>`,
+    });
     uiGuardDialog(modal);
     document.getElementById('nc-name')?.focus();
 }

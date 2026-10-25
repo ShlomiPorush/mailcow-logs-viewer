@@ -52,32 +52,22 @@ function showBasicAuthVerifyModal() {
         const existing = document.getElementById('basic-auth-verify-modal');
         if (existing) existing.remove();
 
-        const overlay = document.createElement('div');
-        overlay.id = 'basic-auth-verify-modal';
-        overlay.className = 'ui-dialog-backdrop ui-confirm';
-        overlay.setAttribute('role', 'dialog');
-        overlay.setAttribute('aria-label', 'Verify Credentials');
-
-        overlay.innerHTML = `
-            <div class="ui-dialog ui-dialog-fit ui-dialog-sm">
-                <div class="ui-dialog-head"><h3>Verify Credentials</h3></div>
-                <div class="ui-dialog-body ui-form-stack">
+        // X, Cancel, Escape and Back cancel; a click outside does nothing, since
+        // the fields hold what was typed
+        const { backdrop: overlay } = uiDialog({
+            id: 'basic-auth-verify-modal', title: 'Verify Credentials', size: 'sm', backdropClass: 'ui-confirm',
+            close: doCancel, bodyClass: 'ui-form-stack',
+            body: `
                     <div class="ui-banner ui-banner-warn"><div><b>Confirm before enabling Basic Auth</b>
                         <p>Type the credentials you configured to verify you can log in after enabling authentication.</p></div></div>
                     <label class="ui-label" for="verify-auth-username">Username
                         <input type="text" id="verify-auth-username" class="ui-input" autocomplete="off" placeholder="Enter username"></label>
                     <label class="ui-label" for="verify-auth-password">Password
                         <input type="password" id="verify-auth-password" class="ui-input" autocomplete="off" placeholder="Enter password"></label>
-                    <p id="verify-auth-error" class="ui-banner ui-banner-fail" style="display:none"></p>
-                </div>
-                <div class="ui-dialog-foot">
-                    <button type="button" id="verify-auth-cancel" class="ui-btn">Cancel</button>
-                    <button type="button" id="verify-auth-confirm" class="ui-btn ui-btn-primary">Verify & Enable</button>
-                </div>
-            </div>
-        `;
-
-        document.body.appendChild(overlay);
+                    <p id="verify-auth-error" class="ui-banner ui-banner-fail" style="display:none"></p>`,
+            foot: `<button type="button" id="verify-auth-cancel" class="ui-btn">Cancel</button>
+                <button type="button" id="verify-auth-confirm" class="ui-btn ui-btn-primary">Verify & Enable</button>`,
+        });
 
         const usernameInput = document.getElementById('verify-auth-username');
         const passwordInput = document.getElementById('verify-auth-password');
@@ -119,10 +109,11 @@ function showBasicAuthVerifyModal() {
         cancelBtn.addEventListener('click', doCancel);
         confirmBtn.addEventListener('click', doConfirm);
 
-        // Enter confirms. Escape cancels through the layers (router.js); a click
-        // outside does nothing, since the fields hold what was typed
+        // Enter in a field confirms; on a button (X, Cancel) it presses that button.
+        // Escape cancels through the layers (router.js); a click outside does
+        // nothing, since the fields hold what was typed
         overlay.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter') {
+            if (e.key === 'Enter' && !e.target.closest('button')) {
                 e.preventDefault();
                 doConfirm();
             }
@@ -148,28 +139,17 @@ function showFeatureDisableConfirmModal(featureIds) {
         }).join('');
         const many = featureIds.length !== 1;
 
-        const overlay = document.createElement('div');
-        overlay.id = 'feature-disable-confirm-modal';
-        overlay.className = 'ui-dialog-backdrop ui-confirm';
-        overlay.setAttribute('role', 'alertdialog');
-        overlay.setAttribute('aria-label', 'Disable features');
-
-        overlay.innerHTML = `
-            <div class="ui-dialog ui-dialog-fit ui-dialog-sm">
-                <div class="ui-dialog-head"><h3>Disable ${many ? featureIds.length + ' Features' : 'Feature'}?</h3></div>
-                <div class="ui-dialog-body ui-form-stack">
+        // A question: no X; Cancel, Escape, Back, a click outside and a pull down cancel
+        const { backdrop: overlay } = uiDialog({
+            id: 'feature-disable-confirm-modal', title: `Disable ${many ? featureIds.length + ' Features' : 'Feature'}?`,
+            label: 'Disable features', size: 'sm', role: 'alertdialog', backdropClass: 'ui-confirm', bodyClass: 'ui-form-stack',
+            body: `
                     <div class="ui-banner ui-banner-fail"><div><b>Stored data will be deleted</b>
                         <p>All database records for ${many ? 'these features' : 'this feature'} will be permanently deleted. This cannot be undone.</p></div></div>
-                    <div><p class="ui-label">Features being disabled</p><ul class="ui-disable-list">${featureListHtml}</ul></div>
-                </div>
-                <div class="ui-dialog-foot">
-                    <button type="button" id="feature-disable-cancel" class="ui-btn">Cancel</button>
-                    <button type="button" id="feature-disable-confirm" class="ui-btn ui-btn-danger-solid">Disable & Delete Data</button>
-                </div>
-            </div>
-        `;
-
-        document.body.appendChild(overlay);
+                    <div><p class="ui-label">Features being disabled</p><ul class="ui-disable-list">${featureListHtml}</ul></div>`,
+            foot: `<button type="button" id="feature-disable-cancel" class="ui-btn">Cancel</button>
+                <button type="button" id="feature-disable-confirm" class="ui-btn ui-btn-danger-solid">Disable & Delete Data</button>`,
+        });
 
         const cancelBtn = document.getElementById('feature-disable-cancel');
         const confirmBtn = document.getElementById('feature-disable-confirm');
@@ -179,9 +159,10 @@ function showFeatureDisableConfirmModal(featureIds) {
         cancelBtn.addEventListener('click', () => { cleanup(); resolve(false); });
         confirmBtn.addEventListener('click', () => { cleanup(); resolve(true); });
 
-        // Enter confirms; Escape cancels through the layers (router.js)
+        // Enter confirms, but on Cancel it presses Cancel; Escape cancels through
+        // the layers (router.js)
         overlay.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter') { e.preventDefault(); cleanup(); resolve(true); }
+            if (e.key === 'Enter' && !e.target.closest('button')) { e.preventDefault(); cleanup(); resolve(true); }
         });
 
         overlay.addEventListener('click', (e) => {
@@ -2339,25 +2320,17 @@ function renderSettings(content, data) {
 
 // reloadPage: reload the whole page on close instead of only Settings
 async function showGeoIPSetupModal(reloadPage = false) {
-    // Create modal overlay
-    const overlay = document.createElement('div');
-    overlay.id = 'geoip-setup-overlay';
-    overlay.className = 'ui-dialog-backdrop';
-    overlay.setAttribute('role', 'dialog');
-    overlay.setAttribute('aria-label', 'GeoIP Database Setup');
-    overlay.style.animation = 'fadeIn 0.2s ease-out';
-    
-    overlay.innerHTML = `
-        <div class="ui-dialog ui-dialog-fit ui-dialog-sm">
-            <div class="ui-dialog-head">
-                <h3>
-                    <svg class="w-5 h-5 ui-text-info" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                    </svg>
-                    GeoIP Database Setup
-                </h3>
-            </div>
-            <div class="ui-dialog-body ui-geo-steps" id="geoip-setup-steps">
+    // X, Close, Escape, Back and a click outside close it once the setup is done;
+    // while it runs both buttons are off, so nothing stops it halfway
+    const closeWhenDone = () => {
+        const button = document.getElementById('geoip-setup-close-btn');
+        if (button && !button.disabled) button.click();
+    };
+    const { backdrop: overlay, dialog } = uiDialog({
+        id: 'geoip-setup-overlay', title: 'GeoIP Database Setup', size: 'sm',
+        close: closeWhenDone, backdropClose: closeWhenDone,
+        bodyId: 'geoip-setup-steps', bodyClass: 'ui-geo-steps',
+        body: `
                 <div id="geoip-step-1" class="ui-geo-step">
                     <div id="geoip-step-1-icon" class="ui-geo-icon">
                         <svg class="w-5 h-5 ui-text-info animate-spin" fill="none" viewBox="0 0 24 24">
@@ -2390,19 +2363,17 @@ async function showGeoIPSetupModal(reloadPage = false) {
                         <p class="ui-geo-title">Validate database integrity</p>
                         <p id="geoip-step-3-detail" class="ui-set-desc">Waiting...</p>
                     </div>
-                </div>
-            </div>
-            <div class="ui-dialog-foot">
-                <button id="geoip-setup-close-btn" class="ui-btn" disabled>
+                </div>`,
+        foot: `<button id="geoip-setup-close-btn" class="ui-btn" disabled>
                     Close
-                </button>
-            </div>
-        </div>
-    `;
-    
-    document.body.appendChild(overlay);
-    
+                </button>`,
+    });
+
     const closeBtn = document.getElementById('geoip-setup-close-btn');
+    const closeX = dialog.querySelector('[data-dialog-x]');
+    closeX.disabled = true;
+    // The setup is over (done or failed): the window can close
+    const setupOver = () => { closeBtn.disabled = false; closeX.disabled = false; };
     closeBtn.addEventListener('click', async () => {
         overlay.remove();
         if (reloadPage) {
@@ -2448,14 +2419,14 @@ async function showGeoIPSetupModal(reloadPage = false) {
             } else if (valLicData && valLicData.error) {
                 _cachedMaxMindStatus = valLicData;
                 setStepStatus(1, 'error', 'License validation failed: ' + valLicData.error);
-                closeBtn.disabled = false;
+                setupOver();
                 return;
             } else {
                 setStepStatus(1, 'success', 'Credentials configured');
             }
         } else {
             setStepStatus(1, 'error', 'MaxMind Account ID or License Key is missing');
-            closeBtn.disabled = false;
+            setupOver();
             return;
         }
         
@@ -2523,7 +2494,7 @@ async function showGeoIPSetupModal(reloadPage = false) {
                     setStepStatus(1, 'error', 'Invalid credentials - download rejected by MaxMind');
                 }
                 setStepStatus(2, 'error', errMsg);
-                closeBtn.disabled = false;
+                setupOver();
                 return;
             }
         }
@@ -2544,7 +2515,7 @@ async function showGeoIPSetupModal(reloadPage = false) {
         console.error('GeoIP setup error:', err);
     }
     
-    closeBtn.disabled = false;
+    setupOver();
 }
 
 // Cache last MaxMind validation result so re-renders don't lose it
@@ -2883,38 +2854,14 @@ let connectionTestRun = 0;
 function showConnectionTestModal(title, message) {
     document.getElementById('connection-test-modal')?.remove();
     connectionTestRun += 1;
-    const modal = document.createElement('div');
-    modal.id = 'connection-test-modal';
-    modal.className = 'ui-dialog-backdrop';
-    modal.setAttribute('role', 'dialog');
-    modal.setAttribute('aria-label', title);
-    modal.innerHTML = `
-        <div class="ui-dialog ui-dialog-fit ui-dialog-md">
-            <div class="ui-dialog-head">
-                <h3>${escapeHtml(title)}</h3>
-                <button onclick="closeConnectionTestModal()" class="ui-icon-btn" title="Close" aria-label="Close">
-                    <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
-                </button>
-            </div>
-            <div class="ui-dialog-body">
-                <div id="connection-test-content">
+    // Results only, nothing typed: a click outside closes it
+    uiDialog({
+        id: 'connection-test-modal', title, size: 'md', close: closeConnectionTestModal, backdropClose: closeConnectionTestModal,
+        body: `<div id="connection-test-content">
                     <div class="ui-loading" role="status"><div class="loading"></div><p>${escapeHtml(message)}</p></div>
-                </div>
-            </div>
-            <div class="ui-dialog-foot">
-                <button onclick="closeConnectionTestModal()" class="ui-btn">Close</button>
-            </div>
-        </div>
-    `;
-
-    // Close on backdrop click
-    modal.addEventListener('click', (e) => {
-        if (uiBackdropClick(e)) {
-            closeConnectionTestModal();
-        }
+                </div>`,
+        foot: '<button onclick="closeConnectionTestModal()" class="ui-btn">Close</button>',
     });
-
-    document.body.appendChild(modal);
     return connectionTestRun;
 }
 

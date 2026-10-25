@@ -309,7 +309,7 @@ function navigateTo(route, params = {}, updateHistory = true, confirmed = false)
 
 // The docked message pane on the desktop Messages page is part of the page, not a dialog.
 // The search over a phone's screen (search.js) is one too
-const OVERLAY_SELECTOR = '.ui-dialog-backdrop:not(.hidden):not(.ui-docked), #container-logs-modal:not(.hidden), #mobile-menu.active, .ui-gs.is-sheet, .ui-sheet';
+const OVERLAY_SELECTOR = '.ui-dialog-backdrop:not(.hidden):not(.ui-docked), #mobile-menu.active, .ui-gs.is-sheet, .ui-sheet';
 let overlayHistoryEntry = false;
 let overlayIgnorePop = false;
 let overlaySyncQueued = false;
