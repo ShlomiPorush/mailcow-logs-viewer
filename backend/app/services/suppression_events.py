@@ -117,6 +117,20 @@ def postfix_lines(db: Session, wanted: List[tuple]) -> List[Tuple[list, bool]]:
     return found
 
 
+def disabled_by_hand(db: Session, ids: Iterable[int]) -> set:
+    """Of the given blocks, those whose last change by hand was Disable."""
+    ids = list(ids)
+    if not ids:
+        return set()
+    last = {}
+    for sid, kind in db.query(SuppressionEvent.suppression_id, SuppressionEvent.kind).filter(
+            SuppressionEvent.suppression_id.in_(ids),
+            SuppressionEvent.kind.in_(['enabled', 'disabled'])).order_by(
+            SuppressionEvent.recorded_at, SuppressionEvent.id):
+        last[sid] = kind
+    return {sid for sid, kind in last.items() if kind == 'disabled'}
+
+
 def add_event(db: Session, suppression, **fields) -> SuppressionEvent:
     """Keep one event with a block. The block must have an id (flush a new one first)."""
     shortened = bool(fields.pop('logs_shortened', False))

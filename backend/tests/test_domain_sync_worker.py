@@ -59,7 +59,7 @@ def test_database_work_keeps_loop_responsive(monkeypatch, state):
         assert result is True
         assert api_threads == [loop_thread]
         assert len(threads) == 3 and len(set(threads)) == 1 and threads[0] != loop_thread
-        state[0].assert_called_once_with(["primary.test", "alias.test"])
+        state[0].assert_called_once_with(["primary.test", "alias.test"], complete=True)
         state[1].assert_called_once_with({"alias.test": "primary.test"})
         db.add.assert_called_once()
         assert db.add.call_args.args[0].value == '{"alias.test": "primary.test"}'
@@ -78,7 +78,7 @@ def test_failed_commit_keeps_previous_alias_cache(monkeypatch, state):
 
     monkeypatch.setattr(scheduler, "get_db_context", session)
     assert asyncio.run(scheduler.sync_local_domains()) is True
-    state[0].assert_called_once_with(["primary.test", "alias.test"])
+    state[0].assert_called_once_with(["primary.test", "alias.test"], complete=True)
     state[1].assert_not_called()
 
 

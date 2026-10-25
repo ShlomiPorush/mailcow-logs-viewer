@@ -65,3 +65,11 @@ def module_clock(monkeypatch):
         clock._overrides.update(overrides)
 
     return apply
+
+
+@pytest.fixture(autouse=True)
+def local_domains_loaded(monkeypatch):
+    """The automatic suppression jobs wait until every domain of this mailcow is
+    known; a test runs with that list loaded unless it says otherwise."""
+    from app import config
+    monkeypatch.setattr(config, "_cached_domains_complete", True)

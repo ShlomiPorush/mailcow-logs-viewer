@@ -15,6 +15,9 @@ import threading
 logger = logging.getLogger(__name__)
 
 _cached_active_domains: Optional[List[str]] = None
+# Whether the cache holds every domain of this mailcow, alias domains
+# included: the startup load reads the primary domains only
+_cached_domains_complete = False
 
 _DEFAULT_PORTS = {"http": 80, "https": 443}
 
@@ -1361,11 +1364,18 @@ def setup_logging():
 setup_logging()
 
 
-def set_cached_active_domains(domains: List[str]) -> None:
-    """Set the cached active domains list"""
-    global _cached_active_domains
+def set_cached_active_domains(domains: List[str], complete: bool = False) -> None:
+    """Set the cached active domains list; complete when it holds the alias
+    domains too."""
+    global _cached_active_domains, _cached_domains_complete
     _cached_active_domains = domains
+    _cached_domains_complete = complete
     logger.info(f"Cached {len(domains)} active domains from mailcow API")
+
+
+def local_domains_complete() -> bool:
+    """Whether every domain of this mailcow is known, alias domains included."""
+    return _cached_domains_complete
 
 
 def get_cached_active_domains() -> Optional[List[str]]:

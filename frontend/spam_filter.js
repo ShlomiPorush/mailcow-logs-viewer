@@ -741,7 +741,7 @@ function suppressionSourceTag(source, tones) {
     return tip ? tag.replace('<span class="ui-tag', `<span title="${escapeHtml(tip)}" class="ui-tag`) : tag;
 }
 const BLOCK_OUTCOMES = { created: ['Blocked', 'fail'], activated: ['Blocked again', 'fail'], extended: ['Block extended', 'warn'],
-    counted: ['Counted, not blocked yet', ''] };
+    counted: ['Counted, not blocked yet', ''], kept: ['Counted, block unchanged', ''] };
 let blockDetailsState = null;
 
 function blockEventHtml(e) {

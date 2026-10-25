@@ -704,7 +704,7 @@ class SuppressionEvent(Base):
     # hard_bounce, soft_bounce, rejected, deferred_stuck, added, imported,
     # enabled, disabled, expiry_changed, notes_changed, before_upgrade
     kind = Column(String(30), nullable=False)
-    # What the event did to the block: created, activated, extended, counted, changed
+    # What the event did to the block: created, activated, extended, counted, kept, changed
     outcome = Column(String(20))
     recorded_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     message_time = Column(DateTime)
