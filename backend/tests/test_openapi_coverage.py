@@ -6,9 +6,7 @@ from the routes the app registers (not from the document, which leaves out a
 route that forgot to declare itself), plus the two agent calls the auth
 middleware answers. HEAD and WebSocket routes are not API operations here.
 """
-import inspect
 import json
-import re
 
 import starlette.staticfiles as sf
 _orig_init = sf.StaticFiles.__init__
@@ -18,7 +16,7 @@ from jsonschema import Draft202012Validator  # noqa: E402
 
 from app.main import app  # noqa: E402
 from conftest import registered_routes  # noqa: E402
-from contract import (MIDDLEWARE_OPERATIONS, Contract, is_documented, says_something,  # noqa: E402
+from contract import (MIDDLEWARE_OPERATIONS, Contract, is_documented, says_something, statuses_in_source,  # noqa: E402
                       unresolved_refs)
 from openapi_pending import HIDDEN, PENDING  # noqa: E402
 
@@ -83,18 +81,6 @@ def test_every_documented_answer_has_a_real_schema():
     assert empty == [], "Documented operations with an empty answer schema:\n  " + "\n  ".join(empty)
 
 
-def _statuses_in_source(endpoint) -> set:
-    """The error statuses a handler gives itself, read from its code: HTTPException and
-    JSONResponse with a literal status, and internal_error (500). A status raised in a
-    helper it calls is not seen here; the contract check still catches it when a test
-    reaches it."""
-    source = inspect.getsource(endpoint)
-    found = {int(s) for s in re.findall(r"(?:HTTPException|JSONResponse)\([^)]*?status_code\s*=\s*(\d{3})", source, re.S)}
-    if "internal_error(" in source:
-        found.add(500)
-    return {s for s in found if s >= 300}
-
-
 def test_every_status_a_documented_handler_gives_is_documented():
     document = _document()
     missing = []
@@ -106,7 +92,7 @@ def test_every_status_a_documented_handler_gives_is_documented():
             operation = (document["paths"].get(route.path) or {}).get(method.lower())
             if not is_documented(operation):
                 continue
-            for status in sorted(_statuses_in_source(endpoint) - {int(c) for c in operation["responses"]}):
+            for status in sorted(statuses_in_source(endpoint) - {int(c) for c in operation["responses"]}):
                 missing.append(f"{method} {route.path} gives {status}")
     assert missing == [], "Statuses these handlers give but do not document:\n  " + "\n  ".join(missing)
 

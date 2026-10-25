@@ -16,7 +16,8 @@ from app.config import settings  # noqa: E402
 
 MARK = uuid.uuid4().hex[:8]
 MSGID = f'answers-{MARK}@example.com'
-IP = '192.0.2.77'
+# A documentation address of its own per run, so no other row shares it
+IP = f'198.51.100.{int(MARK, 16) % 254 + 1}'
 
 
 def _postgres_available() -> bool:
@@ -52,8 +53,9 @@ def env(monkeypatch):
         db.add(PostfixLog(time=now + timedelta(seconds=1), program='postfix/lmtp', priority='info', queue_id=queue,
                           recipient=f'b@{MARK}.example', status='sent', relay='dovecot', delay=0.4, dsn='2.0.0',
                           message=f'{queue}: to=<b@{MARK}.example>, status=sent'))
-        db.add(NetfilterLog(time=now - timedelta(minutes=5), ip=IP, username=f'b@{MARK}.example',
-                            auth_method='SASL', action='warning', attempts_left=9, message='failed login'))
+        netfilter = NetfilterLog(time=now - timedelta(minutes=5), ip=IP, username=f'b@{MARK}.example',
+                                 auth_method='SASL', action='warning', attempts_left=9, message='failed login')
+        db.add(netfilter)
         db.add(RawServiceLog(service='dovecot', time=now + timedelta(seconds=2), message_hash=uuid.uuid4().hex,
                              raw_data={'message': f'lmtp(b@{MARK}.example): msgid=<{MSGID}>: saved mail to INBOX',
                                        'priority': 'info'}))
@@ -69,6 +71,7 @@ def env(monkeypatch):
         db.add_all([first, forward])
         db.commit()
         keys = (first.correlation_key, forward.correlation_key)
+        netfilter_id = netfilter.id
     from fastapi.testclient import TestClient
     from app.main import app
     yield TestClient(app), keys
@@ -76,7 +79,7 @@ def env(monkeypatch):
         db.query(MessageCorrelation).filter(MessageCorrelation.message_id == MSGID).delete(synchronize_session=False)
         db.query(RspamdLog).filter(RspamdLog.message_id == MSGID).delete(synchronize_session=False)
         db.query(PostfixLog).filter(PostfixLog.queue_id == f'Q{MARK.upper()}').delete(synchronize_session=False)
-        db.query(NetfilterLog).filter(NetfilterLog.ip == IP).delete(synchronize_session=False)
+        db.query(NetfilterLog).filter(NetfilterLog.id == netfilter_id).delete(synchronize_session=False)
         db.query(RawServiceLog).filter(RawServiceLog.raw_data['message'].astext.like(f'%{MSGID}%')).delete(
             synchronize_session=False)
         db.commit()
@@ -87,7 +90,7 @@ def test_a_message_with_every_log(env):
     payload = client.get(f'/api/message/{key}/details').json()
     assert payload['rspamd']['symbols']['DMARC_POLICY_ALLOW']['score'] == -0.5
     assert payload['dovecot']['logs'][0]['verdict'] == 'stored'
-    assert payload['netfilter'][0]['attempts_left'] == 9
+    assert any(e['username'] == f'b@{MARK}.example' and e['attempts_left'] == 9 for e in payload['netfilter'])
     assert payload['related_deliveries'][0]['final_status'] == 'deferred'
     assert payload['postfix'][-1]['recipient'] == f'b@{MARK}.example'
     assert set(payload['postfix_by_recipient']) == {'_system', f'b@{MARK}.example'}

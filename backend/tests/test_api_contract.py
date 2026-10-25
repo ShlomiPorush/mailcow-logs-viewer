@@ -8,10 +8,12 @@ middleware gives any call, are not checked.
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import JSONResponse
 from fastapi.testclient import TestClient
 
 from app.api_models import Fixed, Invalid, documented
-from contract import Contract
+from app.utils import internal_error
+from contract import Contract, statuses_in_source
 
 
 class Thing(Fixed):
@@ -75,3 +77,21 @@ def test_the_statuses_the_middleware_gives_any_call_are_not_checked():
 
 def test_an_operation_that_documents_nothing_yet_is_not_checked():
     assert _problem({}, "/api/pending") is None
+
+
+def _handler(ok, missing, cursor):
+    # "status_code=418" in a comment or a string is not code
+    if not ok:
+        raise HTTPException(404, "gone")
+    if missing:
+        raise HTTPException(status_code=409, detail="status_code=418")
+    if cursor:
+        return JSONResponse(content=dict(a=1), status_code=200 if ok else 503)
+    try:
+        return {}
+    except Exception as e:
+        raise internal_error(e)
+
+
+def test_the_status_reader_sees_every_way_a_handler_writes_one():
+    assert statuses_in_source(_handler) == {404, 409, 200, 503, 500}

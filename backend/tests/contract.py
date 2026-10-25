@@ -9,9 +9,12 @@ An operation is checked once it documents a successful answer. Operations
 still waiting for their models are listed in openapi_pending.py and skipped;
 test_openapi_coverage.py keeps that list honest.
 """
+import ast
 import copy
+import inspect
 import json
 import re
+import textwrap
 from typing import Any, Dict, Optional, Tuple
 
 from jsonschema import Draft202012Validator
@@ -128,6 +131,40 @@ def check_response(contract: Contract, response) -> None:
                                response.headers.get("content-type", ""), response.content)
     if problem:
         raise AssertionError("The API answer does not match /openapi.json (app/api_models): " + problem)
+
+
+def _literal_statuses(node) -> set:
+    """Status codes a status argument can take: a number, or either side of `a if c else b`."""
+    if isinstance(node, ast.Constant) and isinstance(node.value, int):
+        return {node.value}
+    if isinstance(node, ast.IfExp):
+        return _literal_statuses(node.body) | _literal_statuses(node.orelse)
+    return set()
+
+
+def statuses_in_source(function) -> set:
+    """The statuses a handler gives in its own code: HTTPException(...) and
+    JSONResponse(...) with a literal status (keyword or, for HTTPException, the
+    first argument; both sides of a conditional), and internal_error() (500).
+    Comments and strings are not code, so they are not read. A status given in
+    a helper the handler calls is not seen; the contract check still catches it
+    when a test reaches it."""
+    tree = ast.parse(textwrap.dedent(inspect.getsource(function)))
+    found = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        name = getattr(node.func, "id", None) or getattr(node.func, "attr", None)
+        if name == "internal_error":
+            found.add(500)
+        if name not in ("HTTPException", "JSONResponse"):
+            continue
+        for keyword in node.keywords:
+            if keyword.arg == "status_code":
+                found |= _literal_statuses(keyword.value)
+        if name == "HTTPException" and node.args:
+            found |= _literal_statuses(node.args[0])
+    return found
 
 
 def schema_names(document: Dict[str, Any]) -> set:
