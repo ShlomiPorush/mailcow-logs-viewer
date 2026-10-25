@@ -191,8 +191,9 @@ async def authorize(request: Request):
     """Check the request, then hand it to the consent page.
 
     The middleware has already sent a signed-out browser to the login page.
-    Until the client and its redirect address are known good, problems are
-    shown here and never sent anywhere.
+    Every problem is shown here and never sent anywhere: anyone can register
+    a redirect address, so the browser goes to it only with the person's
+    answer on the consent page (RFC 9700 section 4.11.2).
     """
     require_live()
     q = request.query_params
@@ -217,16 +218,13 @@ async def authorize(request: Request):
 
     state = q.get("state")
     if q.get("response_type") != "code":
-        return client_redirect(redirect_uri, state, error="unsupported_response_type",
-                               error_description="Only response_type=code is supported.")
+        return error_page("This agent cannot connect", "The agent asked for an answer type this app does not offer.")
     challenge = q.get("code_challenge") or ""
     if q.get("code_challenge_method") != "S256" or not (43 <= len(challenge) <= 128):
-        return client_redirect(redirect_uri, state, error="invalid_request",
-                               error_description="PKCE with S256 is required.")
+        return error_page("This agent cannot connect", "The agent did not send the PKCE S256 check this app requires.")
     resource = q.get("resource")
     if resource is not None and not live.same_resource(resource, live.resource()):
-        return client_redirect(redirect_uri, state, error="invalid_target",
-                               error_description="The resource is not this server.")
+        return error_page("This agent cannot connect", "The agent asked for access to another server.")
     entry = pending.add(
         session_key=session_key, client_id=client_id, client_kind=kind, declared_name=declared,
         publisher=publisher, redirect_uri=redirect_uri, state=state, code_challenge=challenge,

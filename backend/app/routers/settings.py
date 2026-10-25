@@ -20,17 +20,19 @@ from ..models import PostfixLog, RspamdLog, NetfilterLog, MessageCorrelation
 from ..services.bounce_policy import cleanup_blocks
 from ..config import settings, EDITABLE_SETTING_KEYS, FEATURE_IDS, reload_settings, Settings
 from ..config import normalize_disabled_features
-from ..config import _get_field_annotations, build_settings, get_env_locked_keys
+from ..config import _get_field_annotations, build_settings, get_env_locked_keys, settings_reload_lock
 from ..app_time import app_tz, configured_zone_name, is_valid_zone, DATE_FORMATS, TIME_FORMATS
 from ..scheduler import last_fetch_run_time, get_job_status, update_job_status, JOB_SKIPPED, JOB_STATUS_SET, reschedule_interval_jobs, clock_schedule, clock_parts, CLOCK_JOBS, dovecot_correlation_available, cleanup_disabled_feature_data, run_feature_data_sweep_soon, _mailbox_sync_needed
 from ..services.settings_store import get_config_overrides_from_db, save_config_overrides_to_db, has_config_overrides_in_db, get_maxmind_validation_status, save_maxmind_validation_status, clear_maxmind_validation_status
 from ..services.settings_store import credential_fingerprint, get_credential_check_status, save_credential_check_status
+from ..services.settings_store import parse_bool
 from ..services.connection_test import test_smtp_connection, test_imap_connection
 from ..services.geoip_downloader import is_license_configured, get_geoip_status
 from .domains import get_cached_server_ip
 from ..mailcow_api import mailcow_api, MailcowAPIError
 from ..services.oauth2_client import oauth2_client
 from ..session import get_session_from_request, create_session, set_session_cookie, revoke_all_sessions
+from ..session import SessionCapacityError, SessionRevokedError
 
 from ..utils import format_datetime_for_api as format_datetime_utc
 
@@ -155,16 +157,32 @@ def _comparable_setting(key: str, value: Any) -> Any:
 
     The Settings page posts '' for an unset field and numbers may arrive as
     strings, so None == '', 587 == '587', and a trailing slash or surrounding
-    blanks do not count as a change. Booleans compare as booleans.
+    blanks do not count as a change. Booleans compare as the stored settings
+    read them back (settings_store.parse_bool).
     """
     from ..services.settings_store import _get_effective_type
     if _get_effective_type(_get_field_annotations().get(key, str)) is bool:
-        if isinstance(value, str):
-            return value.strip().lower() in ("true", "1", "yes", "on")
-        return bool(value)
+        return parse_bool(value) is True
     if value is None:
         return ""
     return str(value).strip().rstrip("/")
+
+
+def _normalize_booleans(allowed: Dict[str, Any]) -> None:
+    """Turn every posted on/off setting into True or False, as the stored
+    settings will read it back, so a check made on the posted value and the
+    setting that takes effect never disagree ("on" once passed the secret
+    check as on and loaded as off). Empty means off, as it loads; a value that
+    is neither is refused."""
+    from ..services.settings_store import _get_effective_type
+    annotations = _get_field_annotations()
+    for key, value in list(allowed.items()):
+        if key not in annotations or _get_effective_type(annotations[key]) is not bool:
+            continue
+        parsed = False if value is None else parse_bool(value)
+        if parsed is None:
+            raise HTTPException(status_code=400, detail=f"Invalid settings for: {key}")
+        allowed[key] = parsed
 
 
 def _reject_moved_secrets(allowed: Dict[str, Any]) -> None:
@@ -248,11 +266,9 @@ def _validate_agent_access(allowed: Dict[str, Any], current: Optional[Settings] 
     state before the save; the shared settings when not given."""
     current = settings if current is None else current
     locked = get_env_locked_keys()
-    # Saved as the stored settings read them back (settings_store._deserialize_value),
-    # so the check and the setting that takes effect never disagree
-    for key in ("agent_access_enabled", "basic_auth_enabled", "oauth2_enabled"):
-        if key in allowed and not isinstance(allowed[key], bool):
-            allowed[key] = str(allowed[key]).strip().lower() in ("true", "1", "yes")
+    # Saved as the stored settings read them back, so the check and the
+    # setting that takes effect never disagree
+    _normalize_booleans(allowed)
 
     def on(key: str, after: bool) -> bool:
         value = allowed[key] if after and key in allowed and key not in locked else getattr(current, key)
@@ -317,8 +333,13 @@ _SESSION_BOUND_SETTING_KEYS = (
 )
 
 
-def _session_bound_values() -> tuple:
-    return tuple(getattr(settings, key, None) for key in _SESSION_BOUND_SETTING_KEYS)
+def _session_bound_values(source: Settings) -> tuple:
+    """The sign-in values of the settings given: built from the database for
+    the save, never the shared settings, which a reload elsewhere may have
+    replaced with older values."""
+    if source is None:
+        raise ValueError("The sign-in values need the settings they come from")
+    return tuple(getattr(source, key, None) for key in _SESSION_BOUND_SETTING_KEYS)
 
 
 def _effective_config_for_editable(settings_obj: Settings) -> Dict[str, Any]:
@@ -858,6 +879,7 @@ def update_settings(body: Dict[str, Any], request: Request = None, response: Res
         if any(f not in FEATURE_IDS for f in features):
             raise HTTPException(status_code=400, detail="disabled_features accepts only known feature names.")
         allowed["disabled_features"] = ",".join(features)
+    _normalize_booleans(allowed)
     _reject_moved_secrets(allowed)
     _normalize_address_lists(allowed)
     _validate_time_zone(allowed, db)
@@ -966,7 +988,6 @@ def update_settings(body: Dict[str, Any], request: Request = None, response: Res
         raise HTTPException(status_code=400, detail="Invalid settings. Check the submitted values.") from e
     prev_sync_sources = (settings.blacklist_source_transports, settings.blacklist_source_relayhosts)
     prev_credentials = {name: check["fingerprint"]() for name, check in _CREDENTIAL_CHECKS.items()}
-    prev_sign_in = _session_bound_values()
     operator_session = get_session_from_request(request) if request is not None else None
     from ..services.feature_data import spam_list_kept
     # One save at a time from the state it starts from to its transition token:
@@ -979,21 +1000,25 @@ def update_settings(body: Dict[str, Any], request: Request = None, response: Res
     except SamplesBusy:
         raise HTTPException(status_code=503, detail="The settings could not be saved right now. Nothing was changed. Try again in a moment.")
     try:
-        with _LIST_TRANSITION_LOCK:
+        # No reload elsewhere between reading the settings before this save
+        # and putting the saved ones in force (config.settings_reload_lock)
+        with _LIST_TRANSITION_LOCK, settings_reload_lock:
             # Again against the settings as saved now, read here and not from the
             # shared settings, which a request elsewhere may reload with older values
-            _validate_agent_access(allowed, build_settings(db))
+            before = build_settings(db)
+            _validate_agent_access(allowed, before)
+            prev_sign_in = _session_bound_values(before)
             list_was_kept, switches_before = spam_list_kept(), _spam_list_switches()
             save_config_overrides_to_db(db, allowed)
-            reload_settings(db)
+            saved = reload_settings(db)
             # A feature with a trend switched by this save: samples read before it are dropped
             note_trend_switches()
             rspamd_off_transition = _record_list_transition(
                 db, list_was_kept, spam_list_kept(), switched=_spam_list_switches() != switches_before)
     finally:
         guard.__exit__(None, None, None)
-    if _session_bound_values() != prev_sign_in:
-        revoke_all_sessions()
+    if _session_bound_values(saved) != prev_sign_in:
+        revoked = revoke_all_sessions()
         # Connected agents end with the sessions, for good (agent_access/store.py).
         # Should this fail, every agent request repeats the check before it runs.
         try:
@@ -1001,9 +1026,16 @@ def update_settings(body: Dict[str, Any], request: Request = None, response: Res
             check_sign_in_unchanged(db)
         except Exception as e:
             logger.error(f"Could not disconnect agents after the sign-in change: {e}")
-        # Keep the operator who saved signed in, with a session issued under the new settings
-        if operator_session and settings.is_authentication_enabled and response is not None:
-            set_session_cookie(response, create_session(operator_session["user_info"]), request)
+        # Keep the operator who saved signed in, with a session issued under the new settings.
+        # Only when this save's revocation is the one change since the request was
+        # let in, and no later one ran meanwhile: otherwise that change ends it too.
+        admitted = getattr(getattr(request, "state", None), "auth_generation", None)
+        if (operator_session and saved.is_authentication_enabled and response is not None
+                and isinstance(admitted, int) and admitted + 1 == revoked):
+            try:
+                set_session_cookie(response, create_session(operator_session["user_info"], generation=revoked), request)
+            except (SessionRevokedError, SessionCapacityError) as e:
+                logger.info(f"The operator who saved signs in again: {e}")
     # A feature switched off here should drop its data now, not at the next restart;
     # the sweep then takes Security's temporary bans out, or loads the Suppressions feature's blocks back
     feature_data_errors = cleanup_disabled_feature_data(db)
@@ -1152,14 +1184,14 @@ def import_settings_from_env(db: Session = Depends(get_db)):
     """
     if not settings.edit_settings_via_ui_enabled:
         raise HTTPException(status_code=403, detail="Editing settings from UI is disabled. Set SETTINGS_EDIT_VIA_UI_ENABLED=true to enable.")
-    # Current effective config is in `settings` (includes DB overrides if any); export only editable keys
-    overrides = {}
-    for key in EDITABLE_SETTING_KEYS:
-        if hasattr(settings, key):
-            val = getattr(settings, key)
-            overrides[key] = val
-    save_config_overrides_to_db(db, overrides)
-    reload_settings(db)
+    # The effective config (defaults + ENV + DB) read, saved and reloaded with no
+    # reload or save elsewhere in between: values read before another save and
+    # written after it would put its old password back
+    with _LIST_TRANSITION_LOCK, settings_reload_lock:
+        current = build_settings(db)
+        overrides = {key: getattr(current, key) for key in EDITABLE_SETTING_KEYS if hasattr(current, key)}
+        save_config_overrides_to_db(db, overrides)
+        reload_settings(db)
     mailcow_api.reload_config()
     oauth2_client.reload_config()
     reschedule_interval_jobs()

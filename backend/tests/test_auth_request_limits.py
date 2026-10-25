@@ -120,7 +120,7 @@ def test_existing_sessions_and_public_login_info_survive_lockout(monkeypatch, oa
     if oauth_only:
         monkeypatch.setattr(settings._inner, "basic_auth_enabled", False)
         monkeypatch.setattr(settings._inner, "oauth2_enabled", True)
-    cookie = session.create_session({"username": "admin"})
+    cookie = session.create_session({"username": "admin"}, generation=session.auth_generation())
     client.cookies.set(session.SESSION_COOKIE_NAME, cookie)
     assert client.get("/api/auth/status").json()["authenticated"] is True
     assert "version" in client.get("/api/info").json()

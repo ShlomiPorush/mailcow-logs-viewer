@@ -6,7 +6,7 @@ import functools
 import hashlib
 import json
 import logging
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 from sqlalchemy.orm import Session
 
@@ -27,6 +27,30 @@ def _serialize_value(value: Any) -> str:
     if isinstance(value, (int, float)):
         return str(value)
     return str(value)
+
+
+_TRUE = frozenset({"true", "1", "yes", "on", "t", "y"})
+_FALSE = frozenset({"false", "0", "no", "off", "f", "n"})
+
+
+def parse_bool(value: Any) -> Optional[bool]:
+    """A boolean setting as saved, loaded and compared: the one parser for all three.
+
+    Takes the spellings the Settings model accepts for a bool (true/false,
+    1/0, yes/no, on/off, t/f, y/n in any case, blanks around ignored).
+    Returns None for anything else.
+    """
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int) and value in (0, 1):
+        return bool(value)
+    if isinstance(value, str):
+        text = value.strip().lower()
+        if text in _TRUE:
+            return True
+        if text in _FALSE:
+            return False
+    return None
 
 
 def _get_effective_type(annotation: type) -> type:
@@ -51,7 +75,7 @@ def _deserialize_value(value_str: str, field_name: str, annotation: type) -> Any
             return 0
         return ""
     if effective == bool:
-        return value_str.lower() in ("true", "1", "yes")
+        return parse_bool(value_str) is True
     if effective == int:
         try:
             return int(value_str)

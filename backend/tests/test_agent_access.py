@@ -214,7 +214,7 @@ def _sign_in_state(monkeypatch, *, agents=False, basic=False, oauth=False, legac
     ({"agents": True, "basic": True}, {"basic_auth_enabled": False}),
     ({"agents": True, "oauth": True}, {"oauth2_enabled": False, "agent_access_enabled": True}),
     # Read back as off once saved, so it is not sign-in here either
-    ({}, {"agent_access_enabled": True, "oauth2_enabled": "on"}),
+    ({}, {"agent_access_enabled": True, "oauth2_enabled": "off"}),
 ])
 def test_agent_access_cannot_be_on_without_sign_in(monkeypatch, state, payload):
     from fastapi import HTTPException
@@ -233,6 +233,8 @@ def test_agent_access_cannot_be_on_without_sign_in(monkeypatch, state, payload):
     ({"agents": True, "basic": True}, {"basic_auth_enabled": False, "oauth2_enabled": True}),
     # Already like this (from .env): saving the other settings still works
     ({"agents": True}, {"agent_access_enabled": True, "app_title": "Logs"}),
+    # Read back as on once saved, so it is sign-in here too
+    ({}, {"agent_access_enabled": "yes", "oauth2_enabled": "on"}),
     # A key set in .env is not changed by the form
     ({"locked": ("agent_access_enabled",)}, {"agent_access_enabled": True}),
 ])
@@ -324,15 +326,26 @@ def test_bad_client_or_redirect_is_shown_never_redirected(live_agents):
     assert r.status_code == 400
 
 
-def test_errors_after_the_redirect_check_go_back_with_state_and_iss(live_agents):
-    client = _signed_in()
-    client_id = _register(client)
-    r = _authorize(client, client_id, "short", state="keep-me")
-    q = parse_qs(urlsplit(r.headers["location"]).query)
-    assert q["error"] == ["invalid_request"] and q["state"] == ["keep-me"] and q["iss"] == [APP_URL]
+@pytest.mark.parametrize("error", [
+    {"response_type": "token"},
+    {"code_challenge": "short"},
+    {"code_challenge_method": "plain"},
+    {"resource": "https://other.example.test/mcp"},
+])
+def test_request_errors_before_consent_are_shown_never_redirected(live_agents, error):
+    """Anyone can register a redirect address, so nothing goes to it before the
+    person answers the consent page, not even an error: a link to this app
+    would otherwise send a signed-in person to any site."""
+    target = "https://agent.example.test/landing"
+    client_id = _register(_client(), uris=(target,))  # registered without signing in
     _, challenge = _pkce()
-    r = _authorize(client, client_id, challenge, resource="https://other.example/mcp")
-    assert parse_qs(urlsplit(r.headers["location"]).query)["error"] == ["invalid_target"]
+    client = _signed_in()
+    r = _authorize(client, client_id, challenge, redirect=target, state="keep-me", **error)
+    assert r.status_code == 400 and "location" not in r.headers
+    assert "agent.example.test" not in r.text
+    assert not pending._pending
+    # The same request without the error opens the consent page
+    assert _request_id(_authorize(client, client_id, challenge, redirect=target))
 
 
 def test_loopback_redirect_may_change_only_the_port(live_agents):

@@ -134,3 +134,22 @@ def test_callback_with_the_cookie_of_another_flow_is_rejected(provider):
     client.cookies.set(auth.OAUTH_COOKIE_PREFIX + second["state"], first_cookie)
     assert finish(client, second["state"]).headers["location"] == "/login?error=invalid_state"
     assert provider == []
+
+
+def test_a_sign_in_change_during_the_callback_issues_no_session(provider, monkeypatch):
+    """The provider answers while the operator changes sign-in: a session issued
+    after that change would outlive it."""
+    client = TestClient(app)
+    query = start(client)
+    user_info = auth.oauth2_client.get_user_info
+
+    async def answer_then_change(access_token):
+        info = await user_info(access_token)
+        session.revoke_all_sessions()
+        return info
+
+    monkeypatch.setattr(auth.oauth2_client, "get_user_info", answer_then_change)
+    response = finish(client, query["state"])
+    assert response.headers["location"] == "/login?error=sign_in_changed"
+    assert "session_id" not in client.cookies
+    assert not session._session_store

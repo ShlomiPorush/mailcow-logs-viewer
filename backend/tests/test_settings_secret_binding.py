@@ -212,3 +212,72 @@ def test_every_bound_key_is_editable():
         assert secret in rs._SENSITIVE_SETTING_KEYS
         assert secret in EDITABLE_SETTING_KEYS
         assert set(endpoints) <= EDITABLE_SETTING_KEYS
+
+
+# On/off settings bound to a secret. A value posted as text is checked, saved
+# and loaded as the same True or False: "on" once passed the check as on and
+# loaded as off, which turned STARTTLS off with the stored password kept.
+BOUND_FLAGS = [
+    ("smtp_password", "smtp_use_tls"),
+    ("smtp_password", "smtp_use_ssl"),
+    ("dmarc_imap_password", "dmarc_imap_use_ssl"),
+    ("oauth2_client_secret", "oauth2_use_oidc_discovery"),
+]
+SPELLINGS = {True: ["on", "ON", " yes ", "1", "true", "t"], False: ["off", "OFF", "no", "0", "false", " n "]}
+
+
+def _seed_flag(store, flag, value):
+    store[flag] = value
+    cfg.reload_settings(object())
+
+
+@pytest.mark.parametrize("secret_value", [MASK, None], ids=["masked", "absent"])
+@pytest.mark.parametrize("stored", [True, False])
+@pytest.mark.parametrize("secret,flag", BOUND_FLAGS)
+def test_a_flag_posted_as_text_takes_effect_as_it_was_checked(store, secret, flag, stored, secret_value):
+    _seed_flag(store, flag, stored)
+    for spelling in SPELLINGS[stored]:
+        body = {flag: spelling}
+        if secret_value is not None:
+            body[secret] = secret_value
+        _put(body)
+        assert store[flag] is stored
+        cfg.reload_settings(object())
+        assert getattr(cfg.settings, flag) is stored, spelling
+        assert store[secret] == SEED[secret]
+
+
+@pytest.mark.parametrize("secret_value", [MASK, None], ids=["masked", "absent"])
+@pytest.mark.parametrize("stored", [True, False])
+@pytest.mark.parametrize("secret,flag", BOUND_FLAGS)
+def test_a_flag_turned_in_text_form_needs_the_secret(store, secret, flag, stored, secret_value):
+    _seed_flag(store, flag, stored)
+    before = dict(store)
+    for spelling in SPELLINGS[not stored]:
+        body = {flag: spelling}
+        if secret_value is not None:
+            body[secret] = secret_value
+        with pytest.raises(HTTPException) as exc:
+            _put(body)
+        assert exc.value.status_code == 400 and "again" in exc.value.detail, spelling
+        assert store == before
+        assert getattr(cfg.settings, flag) is stored
+
+
+def test_a_flag_that_is_neither_on_nor_off_is_refused(store):
+    before = dict(store)
+    for value in ("maybe", "", 2, "enabled"):
+        with pytest.raises(HTTPException) as exc:
+            _put({"smtp_use_tls": value, "smtp_password": MASK})
+        assert exc.value.status_code == 400
+        assert exc.value.detail == "Invalid settings for: smtp_use_tls"
+    assert store == before
+
+
+def test_a_flag_stored_as_on_loads_as_on(store):
+    # Saved by an earlier version as the text it was posted as
+    store.update({"smtp_use_tls": "on", "dmarc_imap_use_ssl": "On", "oauth2_use_oidc_discovery": " yes "})
+    cfg.reload_settings(object())
+    assert cfg.settings.smtp_use_tls is True
+    assert cfg.settings.dmarc_imap_use_ssl is True
+    assert cfg.settings.oauth2_use_oidc_discovery is True

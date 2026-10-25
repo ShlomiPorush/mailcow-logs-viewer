@@ -30,6 +30,11 @@ class SessionCapacityError(Exception):
     """No new sessions can be admitted without removing a live session."""
 
 
+class SessionRevokedError(Exception):
+    """Every session was revoked after the request was admitted, for example by
+    a password change: a session issued now would outlive that change."""
+
+
 # Session cookie name
 SESSION_COOKIE_NAME = "session_id"
 
@@ -61,18 +66,22 @@ def get_serializer() -> URLSafeTimedSerializer:
     return URLSafeTimedSerializer(get_session_secret_key())
 
 
-def create_session(user_info: Dict[str, Any]) -> str:
+def create_session(user_info: Dict[str, Any], *, generation: int) -> str:
     """
     Create a new session and return session ID
 
     Args:
         user_info: User information from OAuth2 provider
+        generation: auth_generation() when the request was admitted. A
+            revocation since then refuses the session (SessionRevokedError).
 
     Returns:
         Session ID (signed)
     """
     with _session_lock:
         global _next_capacity_cleanup
+        if generation != _auth_generation:
+            raise SessionRevokedError("Sign-in settings changed after the request was admitted")
         if len(_session_store) >= settings.session_max_entries:
             now = time.monotonic()
             if now >= _next_capacity_cleanup:
@@ -163,15 +172,17 @@ def delete_session(session_id: str) -> bool:
 def revoke_all_sessions() -> int:
     """End every session, for example after the sign-in credentials changed.
 
-    Returns the number of sessions that were ended.
+    Returns the generation this revocation started. A session issued with it
+    is refused once any later revocation has run.
     """
     global _auth_generation
     with _session_lock:
         count = len(_session_store)
         _session_store.clear()
         _auth_generation += 1
+        generation = _auth_generation
     logger.info(f"Revoked {count} session(s) after an authentication settings change")
-    return count
+    return generation
 
 
 def auth_generation() -> int:

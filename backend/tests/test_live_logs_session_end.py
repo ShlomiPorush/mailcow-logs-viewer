@@ -55,7 +55,7 @@ def clean_sessions():
 
 
 def _open_session():
-    signed = session.create_session({"email": "operator@example.test"})
+    signed = session.create_session({"email": "operator@example.test"}, generation=session.auth_generation())
     return signed, session.get_serializer().loads(signed)
 
 

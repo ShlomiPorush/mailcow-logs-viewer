@@ -19,7 +19,7 @@ import secrets
 import base64
 
 from .config import settings
-from .session import get_session_from_request
+from .session import auth_generation, get_session_from_request
 from .agent_access import live as agent_live
 from .agent_access.context import agent_call
 
@@ -276,6 +276,10 @@ class BasicAuthMiddleware(BaseHTTPMiddleware):
     """
     
     async def dispatch(self, request: Request, call_next):
+        # The sign-in state that admits this request, read before any check
+        # (also while sign-in is off): a login that ends after a sign-in
+        # change gets no session (routers/auth.py)
+        request.state.auth_generation = auth_generation()
         path = request.url.path
 
         # Agent access answers 404 while it is not live, before any sign-in

@@ -20,6 +20,7 @@ from ..config import settings
 from ..session import (
     create_session,
     SessionCapacityError,
+    SessionRevokedError,
     get_session_from_request,
     delete_session,
     set_session_cookie,
@@ -33,6 +34,19 @@ from ..services.oauth2_client import oauth2_client, OAuth2ClientError
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+def _admitted_generation(request: Request) -> int:
+    """auth_generation() when the middleware admitted this request (auth.py).
+
+    A request the middleware did not see gets no session at all, rather than
+    one that skips the check.
+    """
+    generation = getattr(request.state, "auth_generation", None)
+    if not isinstance(generation, int):
+        raise SessionRevokedError("The request was not admitted by the sign-in middleware")
+    return generation
+
 
 # A login must be completed within ten minutes.
 OAUTH_STATE_TTL = 600
@@ -184,7 +198,15 @@ def create_basic_auth_session(request: Request):
             pass
 
     try:
-        session_id = create_session({"username": username, "auth_method": "basic"})
+        session_id = create_session({"username": username, "auth_method": "basic"},
+                                    generation=_admitted_generation(request))
+    except SessionRevokedError:
+        # Sign-in changed after this login was let in, e.g. a new password:
+        # a session now would outlive the change
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Sign-in settings changed while you were signing in. Sign in again.",
+        )
     except SessionCapacityError:
         raise HTTPException(
             status_code=503, detail="Login capacity reached. Try again later.",
@@ -308,8 +330,8 @@ async def oauth2_callback(
         # Get user information
         user_info = await oauth2_client.get_user_info(access_token)
         
-        # Create session
-        session_id = create_session(user_info)
+        # Create session, unless sign-in changed since the callback was let in
+        session_id = create_session(user_info, generation=_admitted_generation(request))
         
         # Create response with redirect
         response = _oauth_redirect(return_to, state, request)
@@ -322,6 +344,9 @@ async def oauth2_callback(
         
     except SessionCapacityError:
         return _oauth_redirect("/login?error=session_capacity", state, request)
+    except SessionRevokedError:
+        logger.warning("Sign-in settings changed during an OAuth2 login; no session was issued")
+        return _oauth_redirect("/login?error=sign_in_changed", state, request)
     except OAuth2ClientError as e:
         logger.error(f"OAuth2 callback error: {e}")
         return _oauth_redirect("/login?error=oauth2_error", state, request)
