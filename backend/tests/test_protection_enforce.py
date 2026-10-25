@@ -248,7 +248,8 @@ def test_a_banned_network_is_written_as_a_network(db):
 def _country_fail(session, ip, code, name):
     from app.models import NetfilterLog
     session.add(NetfilterLog(time=datetime.utcnow(), priority=MARKER, ip=ip, username='root', action='warning',
-                             country_code=code, country_name=name, message='failed'))
+                             country_code=code, country_name=name,
+                             message=f'{ip} matched rule id 3 (warning: unknown[{ip}]: SASL LOGIN authentication failed)'))
     session.commit()
 
 

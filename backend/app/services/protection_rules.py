@@ -50,6 +50,7 @@ from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from .alias_domains import aliases_of_domain, expand_addresses, get_alias_domain_map
+from .netfilter_address import netfilter_address
 from ..models import AliasStatistics, MailboxStatistics, NetfilterLog, PostfixLog, ProtectionHit, RawServiceLog, SystemSetting
 from ..utils import format_datetime_for_api
 
@@ -434,6 +435,13 @@ def _close_quiet(db: Session, now: datetime) -> int:
     ).update({"status": "expired", "ended_at": now}, synchronize_session=False)
 
 
+def _attributed(row) -> bool:
+    """The line's address is the one netfilter named. Lines an earlier version
+    stored with an address from the client's text stay in the table until they
+    age out, and never count for a rule."""
+    return bool(row.ip) and netfilter_address(row.message) == row.ip
+
+
 def _evaluate_netfilter(db: Session, context: ProtectionContext, rules: dict, now: datetime) -> List[ProtectionHit]:
     watermark = _read_watermark(db, WATERMARK_KEY, NetfilterLog)
     if watermark is None:
@@ -446,7 +454,7 @@ def _evaluate_netfilter(db: Session, context: ProtectionContext, rules: dict, no
 
     if any(rules[n]["enabled"] for n in BAN_RULES):
         allow = _networks(context.allowlist)
-        candidates = [r for r in rows if r.ip and not never_ban(r.ip, allow, context.protected_ips)]
+        candidates = [r for r in rows if _attributed(r) and not never_ban(r.ip, allow, context.protected_ips)]
         tried = [r for r in candidates if r.username]
 
         if rules["trap"]["enabled"] and rules["trap"]["names"]:
@@ -475,7 +483,7 @@ def _evaluate_netfilter(db: Session, context: ProtectionContext, rules: dict, no
                 window = db.query(NetfilterLog).filter(
                     NetfilterLog.ip == ip, NetfilterLog.time >= since, NetfilterLog.username.isnot(None)
                 ).all()
-                unknown = [l for l in window if _is_unknown(l.username, known, catch_all)]
+                unknown = [l for l in window if _attributed(l) and _is_unknown(l.username, known, catch_all)]
                 accounts = {l.username.lower() for l in unknown}
                 if len(accounts) < ua["threshold"] or _logged_in_recently(db, ip, now):
                     continue
@@ -493,6 +501,7 @@ def _evaluate_netfilter(db: Session, context: ProtectionContext, rules: dict, no
                     NetfilterLog.ip == ip, NetfilterLog.action == "ban", NetfilterLog.message.like("Banning %"),
                     NetfilterLog.time >= since,
                 ).all()
+                bans = [b for b in bans if _attributed(b)]
                 if len(bans) >= ro["threshold"]:
                     _record(found, ip, "repeat_offender",
                             f"Banned by Fail2ban {len(bans)} times in {ro['window_days']} days", bans)
@@ -516,6 +525,7 @@ def _evaluate_netfilter(db: Session, context: ProtectionContext, rules: dict, no
                     continue
                 prefix = str(net.network_address).rsplit(".", 1)[0] + "."
                 lines = db.query(NetfilterLog).filter(NetfilterLog.ip.like(f"{prefix}%"), NetfilterLog.time >= since).all()
+                lines = [l for l in lines if _attributed(l)]
                 addresses = {l.ip for l in lines}
                 if len(addresses) >= sn["threshold"]:
                     _record(found, str(net), "subnet",
@@ -601,10 +611,10 @@ def _evaluate_breach(db: Session, context: ProtectionContext, rules: dict, now: 
         if never_ban(login.ip, allow, context.protected_ips):
             continue
         reason = None
-        failures = db.query(func.count(NetfilterLog.id)).filter(
+        failures = sum(1 for line in db.query(NetfilterLog.ip, NetfilterLog.message).filter(
             NetfilterLog.ip == login.ip, NetfilterLog.time >= login.time - timedelta(minutes=br["window_minutes"]),
             NetfilterLog.time <= login.time,
-        ).scalar() or 0
+        ) if _attributed(line))
         if failures >= br["failures"]:
             reason = f"{login.username} logged in after {failures} failed tries from the same address"
         elif br["new_country"] and context.geoip:

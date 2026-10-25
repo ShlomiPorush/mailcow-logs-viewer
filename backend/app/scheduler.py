@@ -26,6 +26,7 @@ from .services.suppression_events import record_bounces, record_stuck
 from .services.suppression_rows_lock import lock_suppression_rows
 from .services.bounce_policy import cleanup_blocks, handling_on, hard_action, soft_action, rspamd_sync_on
 from .services.rspamd_map_lock import map_write_lock_async
+from .services.netfilter_address import netfilter_address
 from .models import EasDevice, PostfixLog, RspamdLog, NetfilterLog, MessageCorrelation, DMARCSync, DomainDNSCheck, MailboxStatistics, AliasStatistics, MonitoredHost, BlacklistCheck, DMARCReport, DMARCRecord, TLSReport, TLSReportPolicy, SpamSuppression, SuppressionEvent, RawServiceLog, SystemSetting
 from .correlation import (
     detect_direction,
@@ -1192,39 +1193,12 @@ def parse_netfilter_message(message: str, priority: Optional[str] = None) -> Dic
 
     result = {}
     message_lower = message.lower()
-    
-    ip_match = re.match(r'^(\d+\.\d+\.\d+\.\d+)', message)
-    if ip_match:
-        result['ip'] = ip_match.group(1)
-    
-    if not result.get('ip'):
-        ban_match = re.search(r'until\s+(\d+\.\d+\.\d+\.\d+)', message)
-        if ban_match:
-            result['ip'] = ban_match.group(1)
-    
-    if not result.get('ip'):
-        bracket_match = re.search(r'\[(\d+\.\d+\.\d+\.\d+)\]', message)
-        if bracket_match:
-            result['ip'] = bracket_match.group(1)
-    
-    if not result.get('ip'):
-        banned_match = re.search(r'Ban(?:ned|ning)\s+(\d+\.\d+\.\d+\.\d+)', message, re.IGNORECASE)
-        if banned_match:
-            result['ip'] = banned_match.group(1)
-    
-    if not result.get('ip'):
-        cidr_match = re.search(r'Ban(?:ned|ning)\s+(\d+\.\d+\.\d+\.\d+/\d+)', message, re.IGNORECASE)
-        if cidr_match:
-            ip_part = cidr_match.group(1).split('/')[0]
-            result['ip'] = ip_part
-    
-    # Fallback: extract any IP address (with optional CIDR) from the message
-    # Catches denylist messages like "Added host/network 175.157.10.170/32 to denylist"
-    if not result.get('ip'):
-        generic_ip = re.search(r'(\d+\.\d+\.\d+\.\d+)(?:/\d+)?', message)
-        if generic_ip:
-            result['ip'] = generic_ip.group(1)
-    
+
+    # Only netfilter's own fields name the offender: the rest of a rule match is the client's text
+    ip = netfilter_address(message)
+    if ip:
+        result['ip'] = ip
+
     username_match = re.search(r'sasl_username=([^\s,\)]+)', message)
     if username_match:
         result['username'] = username_match.group(1)
