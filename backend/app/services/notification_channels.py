@@ -317,9 +317,24 @@ def _run(coro):
         return loop.run_until_complete(coro)
     finally:
         try:
-            loop.run_until_complete(loop.shutdown_asyncgens())
+            loop.run_until_complete(_settle())
         finally:
             loop.close()
+
+
+async def _settle() -> None:
+    """Let the clean-up a send leaves behind finish before its loop closes.
+    An httpx answer that is not read to the end leaves inner generators that
+    the loop closes in tasks of their own; a closed loop would log each one
+    as destroyed while pending. Whatever still runs after a second is stopped."""
+    await asyncio.get_running_loop().shutdown_asyncgens()
+    await asyncio.sleep(0)
+    others = asyncio.all_tasks() - {asyncio.current_task()}
+    if others:
+        _done, pending = await asyncio.wait(others, timeout=1)
+        for task in pending:
+            task.cancel()
+        await asyncio.gather(*pending, return_exceptions=True)
 
 
 def send_to_config(channel_type: str, config: Dict, subject: str, message: str) -> Tuple[bool, str]:

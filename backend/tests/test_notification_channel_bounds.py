@@ -7,6 +7,8 @@ of it, including the name lookup, reads at most a small piece of an error
 answer and none of a success or redirect answer, and refuses to decompress.
 """
 import contextlib
+import gc
+import logging
 import socket
 import socketserver
 import threading
@@ -229,6 +231,17 @@ def test_an_endless_error_answer_is_read_only_to_the_cap(transport):
     assert error == "HTTP 500: " + "z" * 200
     assert stream.pulled == nc._MAX_ERROR_BYTES // 512
     assert stream.closed
+
+
+def test_a_cut_answer_leaves_nothing_pending(transport, caplog):
+    """Stopping early leaves httpx's inner stream generators to be closed by
+    tasks of their own; the send's loop must run them, not log them as
+    destroyed while pending."""
+    transport["response"] = lambda: httpx.Response(500, stream=CountingStream())
+    with caplog.at_level(logging.ERROR, logger="asyncio"):
+        nc.send_to_config("slack", {"webhook_url": "https://hooks.example.com/x"}, "S", "M")
+        gc.collect()
+    assert [r.getMessage() for r in caplog.records if r.name == "asyncio"] == []
 
 
 def test_a_compressed_error_answer_is_not_decoded(transport):
