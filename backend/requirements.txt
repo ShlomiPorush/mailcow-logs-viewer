@@ -15,27 +15,18 @@ apscheduler==3.10.4
 
 # HTTP Client
 httpx==0.28.1
-aiohttp>=3.13.3
-
-# Data Processing
-python-dateutil==2.8.2
-pytz==2023.3
 
 # Configuration
 python-dotenv>=1.2.2
 pydantic==2.13.5
 pydantic-settings==2.1.0
 
-# CSV Export
-pandas==2.1.4
-
 # Utilities
-python-json-logger==2.0.7
 tenacity==8.2.3
 
 # DNS Queries - Required for domains management
 dnspython[doh]==2.6.1
-# TLSA matching for DANE checks (already installed through authlib)
+# TLSA matching for DANE checks
 cryptography>=42.0.0
 
 # Secure XML parsing (DMARC reports are untrusted input)
@@ -49,6 +40,5 @@ geoip2>=4.7.0
 maxminddb>=2.4.0
 requests>=2.31.0
 
-# OAuth2/OIDC Support
-authlib>=1.2.0
+# Signed session cookies
 itsdangerous>=2.1.0

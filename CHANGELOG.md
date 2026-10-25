@@ -63,6 +63,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Pinned build actions** - The GitHub Actions that build and publish the image are pinned to exact versions, and updates to them arrive as reviewed pull requests.
 - **Quarantine rule patterns cannot stall the app** - A regex quarantine rule with nested repetition such as `(a+)+` is refused when saved, but other slow patterns, such as overlapping alternatives like `(a|a)*`, passed that check. On a sender or subject written to trigger it, such a rule could keep the app busy for a very long time. Every rule match now has a time limit of 0.1 seconds: a rule that runs out of time does not match that message, and the log names the rule to simplify.
 - **Blacklist checks only start from the app** - Opening a page on another website could start a blacklist check of all hosts in a browser that can reach the app, and with it the blacklist alert to every configured recipient, because the check was started by a plain link (`GET`). It now needs a `POST` from the app's own pages, like every other action. A script that calls `GET /api/blacklist/check` must send `POST` instead.
+- **Stricter script policy and updated HTML sanitizer** - The Content Security Policy now blocks `eval` in the browser, help pages and changelogs are cleaned with DOMPurify 3.4.17, and the image drops unused Python packages.
 
 ### Fixed
 

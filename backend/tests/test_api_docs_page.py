@@ -101,8 +101,8 @@ def test_the_reference_is_the_scalar_page(auth_mode, client, mode):
     assert response.headers["cache-control"] == "no-cache"
     assert "/static/assets/libs/scalar-api-reference.min.js" in response.text
     assert "/static/api-docs.js" in response.text
-    # The CSP that blocked the old pages still applies, unchanged
-    assert "script-src 'self' 'unsafe-inline' 'unsafe-eval';" in response.headers["content-security-policy"]
+    # The CSP that blocked the old pages still applies, without 'unsafe-eval'
+    assert "script-src 'self' 'unsafe-inline';" in response.headers["content-security-policy"]
 
 
 @pytest.mark.parametrize("mode", SIGN_IN_MODES)
