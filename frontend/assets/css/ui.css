@@ -1227,7 +1227,7 @@ body { font-family: var(--ui-font); background: var(--ui-bg); color: var(--ui-in
     .ui-mtop .ui-bell-n { top: -2px; inset-inline-end: -3px; box-shadow: 0 0 0 2px var(--ui-bg); }
     .ui-mtop-actions { display: flex; }
     .ui-mtop-actions .ui-utilities { flex-direction: row; margin: 0; flex-wrap: nowrap; }
-    .ui-mtop-actions .ui-utilities > :not(#theme-toggle):not([onclick="refreshAllData()"]):not(#logout-btn) { display: none; }
+    .ui-mtop-actions .ui-utilities > :not(#theme-toggle):not(#logout-btn) { display: none; }
     .ui-mtop-actions .ui-utilities > #logout-btn.hidden { display: none; }
     .ui-mtop-home { display: flex; flex: none; border-radius: var(--ui-radius-sm); }
     .ui-mtop-home:focus-visible { outline: 2px solid var(--ui-focus); outline-offset: 2px; }

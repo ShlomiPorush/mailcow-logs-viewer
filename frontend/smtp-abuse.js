@@ -117,7 +117,6 @@ function renderSmtpAbusePanel() {
                             : 'A stopped mailbox still receives mail, and IMAP keeps working.'}`
                         : 'Automatic protection is off. Outbound activity of the last window:'}
                 </p>
-                <button type="button" onclick="loadSmtpAbusePanel()" class="ui-btn ui-btn-sm ui-head-actions">Refresh</button>
             </div>
 
             ${blockedRows.length ? `
