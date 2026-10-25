@@ -189,6 +189,7 @@ def _fetch_certificate_sync(host: str, deadline: float) -> bytes:
     # which certificate is correct. So the handshake must accept any
     # certificate, and the comparison with the TLSA record is the check.
     context = ssl.create_default_context()
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
     context.check_hostname = False
     context.verify_mode = ssl.CERT_NONE
     smtp = None
