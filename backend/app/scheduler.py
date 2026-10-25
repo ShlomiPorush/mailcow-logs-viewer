@@ -27,6 +27,7 @@ from .services.suppression_rows_lock import lock_suppression_rows
 from .services.bounce_policy import cleanup_blocks, handling_on, hard_action, soft_action, rspamd_sync_on
 from .services.rspamd_map_lock import map_write_lock_async
 from .services.netfilter_address import netfilter_address
+from .services.db_values import add_rows, strip_nul
 from .models import EasDevice, PostfixLog, RspamdLog, NetfilterLog, MessageCorrelation, DMARCSync, DomainDNSCheck, MailboxStatistics, AliasStatistics, MonitoredHost, BlacklistCheck, DMARCReport, DMARCRecord, TLSReport, TLSReportPolicy, SpamSuppression, SuppressionEvent, RawServiceLog, SystemSetting
 from .correlation import (
     detect_direction,
@@ -619,17 +620,21 @@ def _column_length(model, name: str) -> Optional[int]:
 
 def _fit_columns(model, values: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Cut every string value to the length of its column.
+    Cut every string value to the length of its column, and drop NUL from
+    every string, also inside JSON values.
 
     Addresses, Message-IDs and user names in mail logs are chosen by whoever
     sends the mail or tries to log in. PostgreSQL rejects a value longer than
-    its VARCHAR column, and one such row used to roll back the whole page.
+    its VARCHAR column, and NUL in any text or JSON column, and one such row
+    used to roll back the whole page.
     """
     for name, value in values.items():
+        value = strip_nul(value)
         if isinstance(value, str):
             length = _column_length(model, name)
             if length and len(value) > length:
-                values[name] = value[:length]
+                value = value[:length]
+        values[name] = value
     return values
 
 
@@ -784,8 +789,32 @@ async def fetch_and_store_postfix():
         logger.error(f"[ERROR] Postfix fetch error: {e}")
 
 
+def _geo_values(ip) -> Dict[str, Any]:
+    """The GeoIP columns for an address, empty without GeoIP or an address."""
+    if not ip or not geoip_service.is_geoip_available():
+        return {}
+    geo_info = geoip_service.lookup_ip(ip)
+    return {key: geo_info.get(key) for key in ('country_code', 'country_name', 'city', 'asn', 'asn_org')}
+
+
+def _text_or_none(value) -> Optional[str]:
+    return None if value is None else str(value)
+
+
+def _clean_entries(logs):
+    """The page with NUL dropped from every entry, before anything reads it:
+    the duplicate keys, the blacklist checks and the stored row then all see
+    the same value. PostgreSQL cannot store NUL in text or JSON."""
+    return [strip_nul(entry) if isinstance(entry, dict) else entry for entry in logs]
+
+
 def _store_postfix_page(logs):
-    """Process one page with a session and duplicate cache owned by the worker."""
+    """Process one page with a session and duplicate cache owned by the worker.
+
+    Returns (new, skipped, blacklisted). A new line the database refused is
+    logged and skipped but still counts as new: the caller stops paging on a
+    page without new lines, and the lines behind it are not stored yet."""
+    logs = _clean_entries(logs)
     with _postfix_ingest_lock:
         page_new = 0
         # Queue ids whose outcome changed on this page - see refresh below
@@ -846,6 +875,8 @@ def _store_postfix_page(logs):
                     db_key = f"{time_val}|{row.program or ''}|{row.queue_id or ''}|{row.message or ''}"
                     existing_in_db.add(db_key)
 
+            # (values, queue id whose outcome changed or None) per new line
+            new_rows = []
             for log_entry in logs:
                 try:
                     time_str = str(log_entry.get('time', ''))
@@ -881,7 +912,7 @@ def _store_postfix_page(logs):
                     sender = parsed.get('sender')
                     recipient = parsed.get('recipient')
 
-                    postfix_log = PostfixLog(**_fit_columns(PostfixLog, dict(
+                    values = _fit_columns(PostfixLog, dict(
                         time=timestamp,
                         program=log_entry.get('program'),
                         priority=log_entry.get('priority'),
@@ -895,18 +926,20 @@ def _store_postfix_page(logs):
                         delay=parsed.get('delay'),
                         dsn=parsed.get('dsn'),
                         raw_data=log_entry
-                    )))
+                    ))
 
-                    db.add(postfix_log)
+                    status_queue_id = queue_id if queue_id and parsed.get('status') in PUSH_TRIGGER_STATUSES else None
+                    new_rows.append((values, status_queue_id))
                     page_seen.add(unique_id)
                     page_new += 1
-
-                    if queue_id and parsed.get('status') in PUSH_TRIGGER_STATUSES:
-                        page_status_queue_ids.add(queue_id)
 
                 except Exception as e:
                     logger.error(f"Error processing Postfix log: {e}")
                     continue
+
+            stored = add_rows(db, PostfixLog, [values for values, _ in new_rows], 'Postfix log line')
+            page_status_queue_ids.update(
+                status_queue_id for (_, status_queue_id), ok in zip(new_rows, stored) if ok and status_queue_id)
 
             db.commit()
             seen_postfix.update(page_seen)
@@ -1026,7 +1059,11 @@ async def fetch_and_store_rspamd():
 
 
 def _store_rspamd_page(logs):
-    """Process one page with a session and duplicate cache owned by the worker."""
+    """Process one page with a session and duplicate cache owned by the worker.
+
+    Returns (new, skipped, blacklisted); a refused line counts as new, as in
+    _store_postfix_page."""
+    logs = _clean_entries(logs)
     with _rspamd_ingest_lock:
         page_new = 0
         page_skipped = 0
@@ -1056,6 +1093,7 @@ def _store_rspamd_page(logs):
                     db_key = f"{time_val}:{row.message_id if row.message_id else 'no-id'}"
                     existing_in_db.add(db_key)
 
+            new_rows = []
             for log_entry in logs:
                 try:
                     unix_time = log_entry.get('unix_time', 0)
@@ -1093,7 +1131,7 @@ def _store_rspamd_page(logs):
                     timestamp = datetime.fromtimestamp(unix_time, tz=timezone.utc)
                     direction = detect_direction(log_entry)
 
-                    rspamd_log = RspamdLog(**_fit_columns(RspamdLog, dict(
+                    values = _fit_columns(RspamdLog, dict(
                         time=timestamp,
                         message_id=message_id,
                         sender_smtp=sender,
@@ -1115,23 +1153,18 @@ def _store_rspamd_page(logs):
                         user=log_entry.get('user'),
                         size=log_entry.get('size'),
                         raw_data=log_entry
-                    )))
+                    ))
+                    values.update(_geo_values(values.get('ip')))
 
-                    if geoip_service.is_geoip_available() and rspamd_log.ip:
-                        geo_info = geoip_service.lookup_ip(rspamd_log.ip)
-                        rspamd_log.country_code = geo_info.get('country_code')
-                        rspamd_log.country_name = geo_info.get('country_name')
-                        rspamd_log.city = geo_info.get('city')
-                        rspamd_log.asn = geo_info.get('asn')
-                        rspamd_log.asn_org = geo_info.get('asn_org')
-
-                    db.add(rspamd_log)
+                    new_rows.append(values)
                     page_seen.add(unique_id)
                     page_new += 1
 
                 except Exception as e:
                     logger.error(f"Error processing Rspamd log: {e}")
                     continue
+
+            add_rows(db, RspamdLog, new_rows, 'Rspamd log entry')
 
             if blacklisted_message_ids:
                 # The Message-ID only finds candidates: senders choose it, so
@@ -1268,12 +1301,14 @@ async def fetch_and_store_netfilter():
 
 def _store_netfilter_logs(logs):
     """Serialize batch processing and own the database session in the worker."""
+    logs = _clean_entries(logs)
     with _netfilter_ingest_lock:
         with get_db_context() as db:
             new_count = 0
             skipped_count = 0
             # Entries join the duplicate cache only after the batch is committed
             batch_seen: Set[str] = set()
+            new_rows = []
             
             for log_entry in logs:
                 try:
@@ -1300,7 +1335,7 @@ def _store_netfilter_logs(logs):
                     
                     parsed = parse_netfilter_message(message, priority=priority)
                     
-                    netfilter_log = NetfilterLog(**_fit_columns(NetfilterLog, dict(
+                    values = _fit_columns(NetfilterLog, dict(
                         time=timestamp,
                         priority=priority,
                         message=message,
@@ -1311,25 +1346,18 @@ def _store_netfilter_logs(logs):
                         rule_id=parsed.get('rule_id'),
                         attempts_left=parsed.get('attempts_left'),
                         raw_data=log_entry
-                    )))
-                    
+                    ))
                     # Enrich with GeoIP data at import time
-                    if geoip_service.is_geoip_available() and netfilter_log.ip:
-                        geo_info = geoip_service.lookup_ip(netfilter_log.ip)
-                        netfilter_log.country_code = geo_info.get('country_code')
-                        netfilter_log.country_name = geo_info.get('country_name')
-                        netfilter_log.city = geo_info.get('city')
-                        netfilter_log.asn = geo_info.get('asn')
-                        netfilter_log.asn_org = geo_info.get('asn_org')
+                    values.update(_geo_values(values.get('ip')))
                     
-                    db.add(netfilter_log)
+                    new_rows.append(values)
                     batch_seen.add(unique_id)
-                    new_count += 1
                     
                 except Exception as e:
                     logger.error(f"[NETFILTER] Error processing log entry: {e}")
                     continue
             
+            new_count = sum(add_rows(db, NetfilterLog, new_rows, 'Netfilter log line'))
             db.commit()
             seen_netfilter.update(batch_seen)
             
@@ -2390,8 +2418,9 @@ async def dmarc_imap_sync_job():
             update_job_status('dmarc_imap_sync', 'failed', error_msg)
             
             # Report the failures; the notification goes to the channels even without SMTP
+            # unless the import already reported them itself
             failed_emails = result.get('failed_emails')
-            if failed_emails:
+            if failed_emails and not result.get('notified'):
                 try:
                     await asyncio.get_running_loop().run_in_executor(
                         _thread_pool_executor,
@@ -4896,25 +4925,29 @@ async def _process_quarantine_rules_in_worker():
             deleted_count = len(done['delete'])
 
             # Log actions and update hit counts (an item mailcow did not
-            # confirm is retried next run)
+            # confirm is retried next run). The action is done and cannot be
+            # undone, so one item's values must not cost the others their
+            # history: they are cut and cleaned, and a row the database still
+            # refuses is skipped alone.
             rule_hit_counts = {}  # rule_id -> count
+            log_rows = []
             for item, rule in actions_to_take:
                 if str(item.get('id', '')) not in done.get(rule.action, ()):
                     continue
-                log_entry = QuarantineRuleLog(
+                log_rows.append(_fit_columns(QuarantineRuleLog, dict(
                     rule_id=rule.id,
                     rule_name=rule.name,
                     action=rule.action,
                     quarantine_id=str(item.get('id', '')),
-                    sender=item.get('sender'),
-                    recipient=item.get('rcpt'),
-                    subject=(item.get('subject') or '')[:500],
+                    sender=_text_or_none(item.get('sender')),
+                    recipient=_text_or_none(item.get('rcpt')),
+                    subject=strip_nul(str(item.get('subject') or ''))[:500],
                     matched_field=rule.match_type,
                     matched_value=rule.match_value,
-                )
-                db.add(log_entry)
+                )))
                 rule_hit_counts[rule.id] = rule_hit_counts.get(rule.id, 0) + 1
-            
+            add_rows(db, QuarantineRuleLog, log_rows, 'quarantine rule history entry')
+
             # Update hit counts
             now = datetime.utcnow()
             for rule_id, count in rule_hit_counts.items():

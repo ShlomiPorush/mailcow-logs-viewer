@@ -3,7 +3,7 @@ import asyncio
 import threading
 from contextlib import contextmanager
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, MagicMock, Mock
 
 import pytest
 
@@ -29,7 +29,7 @@ async def assert_responsive(operation, started, release, finished):
 def test_raw_database_lifetime_is_owned_by_worker(monkeypatch, job, stage):
     started, release, finished = threading.Event(), threading.Event(), threading.Event()
     threads, lifetimes = [], []
-    db = Mock()
+    db = MagicMock()
     query = db.query.return_value
     query.filter.return_value.all.return_value = []
     query.filter.return_value.first.return_value = None

@@ -12,6 +12,7 @@ receives everything.
 Synchronous (requests) - call from a worker thread, never on the event loop.
 """
 import logging
+import re
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple
 from urllib.parse import urlparse
@@ -156,16 +157,41 @@ def validate_config(channel_type: str, config: Dict) -> Tuple[bool, str]:
     return True, ""
 
 
+def _slack_text(text: str) -> str:
+    """Text Slack shows as written: &, < and > are its control characters
+    (<!channel> pings everyone, <url|label> hides where a link goes)."""
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+_DISCORD_MASS_MENTION = re.compile(r"@(everyone|here)", re.IGNORECASE)
+_ZERO_WIDTH_SPACE = "\u200b"
+
+
+def _discord_text(text: str) -> str:
+    """Text Discord shows as written: a zero-width space breaks @everyone,
+    @here and the [label](url) link that hides where it goes. The payload
+    also allows no mentions at all."""
+    text = _DISCORD_MASS_MENTION.sub(rf"@{_ZERO_WIDTH_SPACE}\1", text)
+    return text.replace("](", f"]{_ZERO_WIDTH_SPACE}(")
+
+
 def build_request(channel_type: str, config: Dict, subject: str, message: str) -> Tuple[str, Dict]:
     """Assemble (url, requests-kwargs) for a channel. URLs are built here so
-    the user only supplies the service-specific pieces."""
+    the user only supplies the service-specific pieces.
+
+    Alerts quote text that whoever sends the mail chooses, such as a report
+    email's subject, so Slack and Discord get it escaped for their markup."""
     text = _truncate(message)
 
     if channel_type == "slack":
-        return config["webhook_url"], {"json": {"text": f"*{subject}*\n{text}"}}
+        return config["webhook_url"], {"json": {
+            "text": _truncate(f"*{_slack_text(subject)}*\n{_slack_text(message)}")}}
 
     if channel_type == "discord":
-        return config["webhook_url"], {"json": {"content": _truncate(f"**{subject}**\n{text}")}}
+        return config["webhook_url"], {"json": {
+            "content": _truncate(f"**{_discord_text(subject)}**\n{_discord_text(message)}"),
+            "allowed_mentions": {"parse": []},
+        }}
 
     if channel_type == "telegram":
         url = f"https://api.telegram.org/bot{config['bot_token']}/sendMessage"

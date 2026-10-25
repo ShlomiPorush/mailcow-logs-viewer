@@ -23,10 +23,10 @@ from urllib.parse import parse_qs
 
 from sqlalchemy import case, func
 from sqlalchemy.dialects.postgresql import insert
-from sqlalchemy.exc import DataError
 from sqlalchemy.orm import Session
 
 from ..models import EasDevice
+from .db_values import is_row_error as _is_row_error
 
 logger = logging.getLogger(__name__)
 
@@ -178,22 +178,6 @@ def store_devices(db: Session, devices: List[Dict[str, Any]]) -> int:
         written = sum(_store_one(db, device) for device in devices)
     db.commit()
     return written
-
-
-# SQLSTATE class 22 is a value the column cannot hold, except 2200H, a spent
-# id sequence, which fails every row alike
-_SPENT_SEQUENCE = '2200H'
-
-
-def _is_row_error(error: Exception) -> bool:
-    """Whether the database refused a row for the row's own values. psycopg2
-    refuses NUL with a bare ValueError before the statement is sent."""
-    if isinstance(error, ValueError):
-        return True
-    if isinstance(error, DataError):
-        code = getattr(error.orig, 'pgcode', None) or ''
-        return code.startswith('22') and code != _SPENT_SEQUENCE
-    return False
 
 
 def _store_one(db: Session, device: Dict[str, Any]) -> int:

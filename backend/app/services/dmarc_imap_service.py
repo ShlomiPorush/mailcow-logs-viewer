@@ -26,6 +26,7 @@ from ..services.report_identity import (
 from ..services.report_store import ReportNotStored, prepare_report_file, store_report
 from ..services.dmarc_notifications import send_dmarc_error_notification
 from ..services.dmarc_cache import clear_dmarc_cache
+from ..services.db_values import strip_nul
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +59,40 @@ def _decode_subject(raw_subject: str) -> str:
         return ' '.join(decoded_parts)
     except Exception:
         return raw_subject
+
+
+# What one failure entry keeps of a header or an error text
+_FAILURE_TEXT_CHARS = 1000
+_DETAILS_NOT_STORED = "The details of this email could not be stored"
+
+
+def _plain_text(value, limit: int = _FAILURE_TEXT_CHARS) -> Optional[str]:
+    """A header or error text as plain text a JSON column can store.
+
+    The sender chooses the headers and file names of a report email. A header
+    with raw 8-bit bytes comes back as a Header object, a file name can
+    decode to NUL, and either one used to fail the commit that stores the
+    import's failure entries. None stays None."""
+    if value is None:
+        return None
+    # str() of a Header shows bytes it cannot decode as U+FFFD; encoding with
+    # 'replace' drops lone surrogates, which JSONB refuses like NUL
+    text = str(value).encode('utf-8', 'replace').decode('utf-8')
+    return strip_nul(text)[:limit]
+
+
+def _record_counts(sync_record: DMARCSync, counts: Dict):
+    for name, value in counts.items():
+        setattr(sync_record, name, value)
+
+
+def _header_text(msg, name: str) -> str:
+    """A header of the email as bounded plain text, the subject decoded."""
+    value = msg.get(name)
+    if value is None:
+        return 'unknown'
+    text = _plain_text(value)
+    return _plain_text(_decode_subject(text)) if name == 'subject' else text
 
 
 class DMARCImapService:
@@ -306,8 +341,8 @@ class DMARCImapService:
             size = self._fetch_size(email_id)
             if size is not None and size > MAX_REPORT_EMAIL_BYTES:
                 headers = self._fetch_headers(email_id)
-                result['message_id'] = headers.get('message-id', 'unknown')
-                result['subject'] = headers.get('subject', 'unknown')
+                result['message_id'] = _header_text(headers, 'message-id')
+                result['subject'] = _header_text(headers, 'subject')
                 result['error'] = (f"The email is {size / _MB:.0f} MB, larger than the "
                                    f"{MAX_REPORT_EMAIL_BYTES // _MB} MB a report email may have, "
                                    f"so it was not downloaded")
@@ -322,8 +357,8 @@ class DMARCImapService:
             
             # Parse email
             msg = email.message_from_bytes(msg_data[0][1])
-            result['message_id'] = msg.get('message-id', 'unknown')
-            result['subject'] = msg.get('subject', 'unknown')
+            result['message_id'] = _header_text(msg, 'message-id')
+            result['subject'] = _header_text(msg, 'subject')
 
             if self.is_bounce(msg):
                 result['skipped'] = 'bounce'
@@ -443,11 +478,16 @@ class DMARCImapService:
     def sync_reports(self, sync_type: str = 'auto') -> Dict:
         """
         Main sync function with batch processing
-        
+
         Processes emails in batches to prevent memory issues with large mailboxes.
         After each batch, emails are deleted/marked and the search is re-run
         to get the next batch of unprocessed emails.
-        
+
+        Each email's counts and failure entry are committed before the email
+        is marked or deleted, so a failure is stored before its email leaves
+        the import. The failures are reported once, also when the import
+        itself fails; the result then says 'notified'.
+
         Returns statistics about the sync operation
         """
         sync_record = DMARCSync(
@@ -455,140 +495,186 @@ class DMARCImapService:
             started_at=datetime.now(timezone.utc),
             status='running'
         )
-        
+
         db = SessionLocal()
         batch_size = settings.dmarc_imap_batch_size
-        
+        # Kept here, not only on the record: a rollback resets the record
+        counts = {'emails_processed': 0, 'reports_created': 0,
+                  'reports_duplicate': 0, 'reports_failed': 0}
+        failed_emails = []
+        notified = False
+
         try:
             db.add(sync_record)
             db.commit()
             db.refresh(sync_record)
-            
+
             # Connect to IMAP
             self.connect()
-            
+
             # Select folder
             if not self.select_folder():
                 raise Exception(f"Failed to select folder {self.folder}")
-            
+
             # Initial search to count total emails
             all_email_ids = self.search_dmarc_emails()
             total_emails = len(all_email_ids)
             sync_record.emails_found = total_emails
             db.commit()
-            
+
             if not all_email_ids:
                 logger.info("No DMARC emails found")
                 sync_record.status = 'success'
                 sync_record.completed_at = datetime.now(timezone.utc)
                 db.commit()
                 return self._build_result(sync_record)
-            
+
             logger.info(f"Found {total_emails} DMARC emails, processing in batches of {batch_size}")
-            
+
             # Process in batches
-            failed_emails = []
             batch_number = 0
-            
+
             while True:
                 batch_number += 1
-                
+
                 # Re-search to get current unprocessed emails (since we delete/mark after each batch)
                 email_ids = self.search_dmarc_emails()
-                
+
                 if not email_ids:
                     logger.info(f"Batch {batch_number}: No more emails to process")
                     break
-                
+
                 # Take only batch_size emails
                 batch_emails = email_ids[:batch_size]
                 logger.info(f"Batch {batch_number}: Processing {len(batch_emails)} emails (remaining: {len(email_ids)})")
-                
+
                 for email_id in batch_emails:
                     email_id = email_id.decode() if isinstance(email_id, bytes) else email_id
                     result = self.process_email(email_id, db)
-                    sync_record.emails_processed += 1
+                    counts['emails_processed'] += 1
                     # Committed reports count even when another report of the email failed
-                    sync_record.reports_created += result['reports_created']
-                    sync_record.reports_duplicate += result['reports_duplicate']
+                    counts['reports_created'] += result['reports_created']
+                    counts['reports_duplicate'] += result['reports_duplicate']
 
                     if result['skipped']:
                         # Not a report (e.g. a bounce): not a failure, and never deleted
-                        logger.info(f"Skipped email {email_id} ({result['skipped']}): {_decode_subject(result['subject'])}")
+                        logger.info(f"Skipped email {email_id} ({result['skipped']}): {result['subject']}")
+                        self._save_progress(db, sync_record, counts, failed_emails)
                         self.mark_as_processed(email_id)
                     elif result['success']:
                         # Every report of the email is stored: delete or mark as processed
+                        self._save_progress(db, sync_record, counts, failed_emails)
                         if self.delete_after and not result.get('keep'):
                             self.delete_email(email_id)
                         else:
                             self.mark_as_processed(email_id)
                     else:
-                        sync_record.reports_failed += 1
-                        error_msg = result.get('error', 'Unknown error')
+                        counts['reports_failed'] += 1
+                        error_msg = result.get('error') or 'Unknown error'
                         logger.warning(f"Failed to process email {email_id}: {error_msg}")
-                        
+
                         failed_emails.append({
-                            'email_id': email_id,
-                            'message_id': result['message_id'],
-                            'subject': result['subject'],
-                            'error': error_msg
+                            'email_id': _plain_text(email_id),
+                            'message_id': _plain_text(result['message_id']),
+                            'subject': _plain_text(result['subject']),
+                            'error': _plain_text(error_msg)
                         })
+                        self._save_progress(db, sync_record, counts, failed_emails)
                         # Kept in the mailbox, marked so it is not processed again
                         self.mark_as_processed(email_id)
-                    
-                    db.commit()
-                
+
                 # Log batch progress
                 logger.info(f"Batch {batch_number} complete: "
-                           f"{sync_record.emails_processed}/{total_emails} processed, "
-                           f"{sync_record.reports_created} created, "
-                           f"{sync_record.reports_failed} failed")
-            
+                           f"{counts['emails_processed']}/{total_emails} processed, "
+                           f"{counts['reports_created']} created, "
+                           f"{counts['reports_failed']} failed")
+
             # Update sync record
+            _record_counts(sync_record, counts)
             sync_record.status = 'success'
             sync_record.completed_at = datetime.now(timezone.utc)
-            sync_record.failed_emails = failed_emails if failed_emails else None
-            
+            sync_record.failed_emails = list(failed_emails) or None
+
             if failed_emails:
                 sync_record.error_message = f"{len(failed_emails)} emails failed to process"
-            
+
             db.commit()
-            
-            logger.info(f"DMARC sync completed: {sync_record.reports_created} created, "
-                       f"{sync_record.reports_duplicate} duplicates, "
-                       f"{sync_record.reports_failed} failed")
-            
+
+            logger.info(f"DMARC sync completed: {counts['reports_created']} created, "
+                       f"{counts['reports_duplicate']} duplicates, "
+                       f"{counts['reports_failed']} failed")
+
             # Clear cache if any reports were created
-            if sync_record.reports_created > 0:
+            if counts['reports_created'] > 0:
                 clear_dmarc_cache(db)
-            
-            # Report the failures; the notification goes to the channels even without SMTP
-            if failed_emails:
-                logger.info(f"Sending error notification for {len(failed_emails)} failed emails")
-                try:
-                    if send_dmarc_error_notification(failed_emails, sync_record.id):
-                        logger.info("Error notification sent successfully")
-                except Exception as email_error:
-                    logger.error(f"Failed to send error notification: {email_error}")
-            
+
+            notified = self._notify_failures(failed_emails, sync_record.id)
             return self._build_result(sync_record)
-            
+
         except Exception as e:
             logger.error(f"DMARC sync failed: {e}")
-            
-            sync_record.status = 'error'
-            sync_record.completed_at = datetime.now(timezone.utc)
-            sync_record.error_message = str(e)
-            db.commit()
-            
+            # A failed statement leaves the session unusable until rolled back
+            db.rollback()
+            try:
+                _record_counts(sync_record, counts)
+                sync_record.status = 'error'
+                sync_record.completed_at = datetime.now(timezone.utc)
+                sync_record.error_message = _plain_text(e)
+                sync_record.failed_emails = list(failed_emails) or None
+                db.commit()
+                result = self._build_result(sync_record)
+            except Exception as record_error:
+                logger.error(f"Could not record the failed DMARC sync: {record_error}")
+                db.rollback()
+                result = {'sync_id': None, 'sync_type': sync_type, 'status': 'error',
+                          'error_message': _plain_text(e), 'failed_emails': list(failed_emails) or None,
+                          **counts}
+
             # Return error result instead of raising exception
             # This allows the scheduler to handle it gracefully
-            return self._build_result(sync_record)
-            
+            if not notified:
+                result['notified'] = self._notify_failures(failed_emails, result.get('sync_id'))
+            return result
+
         finally:
             self.disconnect()
             db.close()
-    
+
+    def _save_progress(self, db, sync_record: DMARCSync, counts: Dict, failed_emails: List[Dict]):
+        """Commit the counts and failure entries so far. When the newest
+        failure entry still cannot be stored, it is replaced with one that
+        keeps only the email number, so the email can be marked and the
+        import does not stop on it in every run."""
+        _record_counts(sync_record, counts)
+        # A new list: the session does not see a change inside a JSON value
+        sync_record.failed_emails = list(failed_emails) or None
+        try:
+            db.commit()
+        except Exception as error:
+            if not failed_emails:
+                raise
+            logger.warning(f"Could not store the failure entry of email "
+                           f"{failed_emails[-1]['email_id']} ({type(error).__name__})")
+            db.rollback()
+            failed_emails[-1] = {'email_id': failed_emails[-1]['email_id'], 'message_id': None,
+                                 'subject': None, 'error': _DETAILS_NOT_STORED}
+            _record_counts(sync_record, counts)
+            sync_record.failed_emails = list(failed_emails)
+            db.commit()
+
+    def _notify_failures(self, failed_emails: List[Dict], sync_id) -> bool:
+        """Report the failures; the notification goes to the channels even
+        without SMTP. True when there were failures to report."""
+        if not failed_emails:
+            return False
+        logger.info(f"Sending error notification for {len(failed_emails)} failed emails")
+        try:
+            if send_dmarc_error_notification(failed_emails, sync_id):
+                logger.info("Error notification sent successfully")
+        except Exception as email_error:
+            logger.error(f"Failed to send error notification: {email_error}")
+        return True
+
     def _build_result(self, sync_record: DMARCSync) -> Dict:
         """Build result dictionary from sync record"""
         return {

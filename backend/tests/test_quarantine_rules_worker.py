@@ -3,7 +3,7 @@ import asyncio
 import threading
 from contextlib import contextmanager
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, MagicMock, Mock
 
 import pytest
 from app import scheduler
@@ -24,7 +24,7 @@ def state(monkeypatch):
         SimpleNamespace(id=2, name="Deny", match_type="subject", match_value="blocked",
                         is_regex=False, action="delete", hit_count=0),
     ]
-    db = Mock()
+    db = MagicMock()
     db.query.return_value.filter.return_value.all.return_value = rules
     db.query.return_value.filter.return_value.first.side_effect = rules
     items = [

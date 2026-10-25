@@ -11,7 +11,7 @@ learns entries after the commit succeeded.
 import uuid
 from contextlib import contextmanager
 from datetime import datetime
-from unittest.mock import Mock
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -119,7 +119,7 @@ def test_netfilter_batch_with_one_300_char_value_stores_every_entry(env):
 # ---- the duplicate cache only learns committed entries ----
 
 def _failing_session():
-    db = Mock()
+    db = MagicMock()
     db.query.return_value.filter.return_value.all.return_value = []
     db.query.return_value.filter.return_value.first.return_value = None
     db.commit.side_effect = RuntimeError('commit failed')
