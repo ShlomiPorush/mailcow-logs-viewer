@@ -17,6 +17,9 @@ const DNS_TAG = {
     error: ['Error', 'fail'],
 };
 
+// The answer the list shows, to tell whether a refresh brings anything new
+let domainsShownJson = null;
+
 async function loadDomains() {
     const loading = document.getElementById('domains-loading');
     const content = document.getElementById('domains-content');
@@ -38,6 +41,7 @@ async function loadDomains() {
 
         const data = await response.json();
 
+        domainsShownJson = JSON.stringify(data);
         renderDomains(content, data);
 
         loading.classList.add('hidden');
@@ -49,6 +53,7 @@ async function loadDomains() {
             <div class="ui-empty ui-panel">
                 <p class="ui-text-fail">Failed to load domains</p>
                 <p>${escapeHtml(error.message)}</p>
+                <p><button type="button" class="ui-btn ui-btn-sm" onclick="loadDomains()">Try again</button></p>
             </div>
         `;
     }
@@ -64,9 +69,34 @@ function domainRowId(domainName) {
     return `domain-${String(domainName).replace(/[^A-Za-z0-9_-]/g, '-')}`;
 }
 
-function renderDomains(container, data) {
+// The refresh, every five minutes: only what changed is drawn again. The search,
+// the issues filter, the open domains and the row in view stay as they are. A
+// first load that failed is tried again
+async function refreshDomains() {
+    const content = document.getElementById('domains-content');
+    if (!content || dnsCheckInProgress) return;
+    if (domainsShownJson === null || content.classList.contains('hidden')) return loadDomains();
+    const response = await authenticatedFetch('/api/domains/all', { timeout: PAGE_REFRESH_TIMEOUT });
+    if (!response.ok) return;
+    const data = await response.json();
+    const json = JSON.stringify(data);
+    const list = document.getElementById('domains-list');
+    // A DNS check redraws its row by itself; text selected in the list waits for the next refresh
+    if (json === domainsShownJson || dnsCheckInProgress || (list && uiTextHeld(list))) return;
+    domainsShownJson = json;
     const domains = data.domains || [];
+    if (!list || !domains.length) {
+        renderDomains(content, data);
+        return;
+    }
+    renderDomainsHead(data);
+    window.domainsData = domains;
+    filterDomains();
+}
 
+// The line under the title and the summary
+function renderDomainsHead(data) {
+    const domains = data.domains || [];
     const dnsCheckInfo = document.getElementById('dns-check-info');
     if (dnsCheckInfo) {
         const lastCheck = data.last_dns_check ? formatTime(data.last_dns_check) : 'Never';
@@ -85,6 +115,11 @@ function renderDomains(container, data) {
         const issues = domains.filter(domainHasIssues).length;
         summary.textContent = `${total} ${total === 1 ? 'domain' : 'domains'}${inactive > 0 ? `, ${inactive} inactive` : ''}. ${issues ? `${issues} ${issues === 1 ? 'needs' : 'need'} a DNS change.` : 'DNS looks right.'}`;
     }
+}
+
+function renderDomains(container, data) {
+    const domains = data.domains || [];
+    renderDomainsHead(data);
 
     if (domains.length === 0) {
         container.innerHTML = '<p class="ui-empty ui-panel">No domains found</p>';
@@ -125,10 +160,28 @@ function clearDomainFilters() {
     filterDomains();
 }
 
-function renderDomainRows(domains) {
+function renderDomainRows(domains, open = new Set()) {
     return `
         <div class="ui-tr ui-tr-head"><span data-sort-kind="text">Domain</span>${DNS_CHECKS.map(([label]) => `<span data-sort-kind="text">${label}</span>`).join('')}<span class="ui-td-end" data-sort-kind="number">Storage</span></div>
-        ${domains.map(domain => renderDomainAccordionRow(domain)).join('')}`;
+        ${domains.map(domain => renderDomainAccordionRow(domain, open.has(domainRowId(domain.domain_name)))).join('')}`;
+}
+
+// What the user opened in the rows: domains, alias domains and the DNS
+// details, to open again when the rows are drawn again
+function domainsOpened(list) {
+    const detailsKey = el => {
+        const row = el.closest('[data-domain-row]');
+        return row ? `${row.dataset.domainRow}|${[...row.querySelectorAll('details.ui-dns-more')].indexOf(el)}` : '';
+    };
+    return {
+        rows: new Set([...list.querySelectorAll('.ui-domain-details:not(.hidden)')].map(el => el.id.replace(/-details$/, ''))),
+        aliases: new Set([...list.querySelectorAll('[id^="alias-domain-"]:not(.hidden)')].map(el => el.id)),
+        details: new Set([...list.querySelectorAll('details.ui-dns-more[open]')].map(detailsKey)),
+        reopen() {
+            this.aliases.forEach(id => document.getElementById(id)?.classList.remove('hidden'));
+            list.querySelectorAll('details.ui-dns-more').forEach(el => { if (this.details.has(detailsKey(el))) el.open = true; });
+        },
+    };
 }
 
 // Filter domains based on search input and issues checkbox
@@ -157,7 +210,12 @@ function filterDomains() {
             : `No domains found matching "${escapeHtml(searchTerm)}"`;
         domainsList.innerHTML = `<p class="ui-empty">${noResultsMessage}</p>`;
     } else {
-        domainsList.innerHTML = renderDomainRows(filteredDomains);
+        // Open rows stay open, the row in view stays where it was, and the focus on its row
+        const opened = domainsOpened(domainsList);
+        uiKeepRowInView(domainsList, '[data-domain-row]', 'data-domain-row', () => uiKeepFocus(domainsList, 'data-domain-row', () => {
+            domainsList.innerHTML = renderDomainRows(filteredDomains, opened.rows);
+            opened.reopen();
+        }));
     }
 }
 

@@ -1722,6 +1722,31 @@ async function uiLineCopy(line, button) {
     button.querySelector('svg').innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>';
 }
 
+// The element el scrolls in: the nearest one that scrolls, else the page
+function uiScrollParent(el) {
+    for (let node = el; node && node !== document.body; node = node.parentElement) {
+        const overflow = getComputedStyle(node).overflowY;
+        if ((overflow === 'auto' || overflow === 'scroll') && node.scrollHeight > node.clientHeight + 1) return node;
+    }
+    return document.scrollingElement || document.documentElement;
+}
+
+// Redraws the rows of list (draw) and keeps the row the user was looking at
+// where it was on the screen: the first row in view, found again by its key
+// attribute, so rows added or removed above it do not move the view
+function uiKeepRowInView(list, rowSelector, keyAttr, draw) {
+    const scroller = uiScrollParent(list);
+    const top = scroller === document.scrollingElement || scroller === document.documentElement ? 0 : scroller.getBoundingClientRect().top;
+    const anchor = [...list.querySelectorAll(rowSelector)].find(row => row.getBoundingClientRect().bottom > top);
+    const key = anchor ? anchor.getAttribute(keyAttr) : null;
+    const before = anchor ? anchor.getBoundingClientRect().top : 0;
+    draw();
+    if (key === null) return;
+    const again = [...list.querySelectorAll(rowSelector)].find(row => row.getAttribute(keyAttr) === key);
+    const moved = again ? again.getBoundingClientRect().top - before : 0;
+    if (Math.abs(moved) >= 1) scroller.scrollTop += moved;
+}
+
 // True while the user selects or has selected text in box, so live updates
 // leave that text where it is
 function uiTextHeld(box) {
