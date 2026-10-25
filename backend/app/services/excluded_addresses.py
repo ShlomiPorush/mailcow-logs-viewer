@@ -12,6 +12,7 @@ to the same message and is left out with it. The window keeps a queue id that
 Postfix reused days later, for another message, out of it.
 """
 import logging
+import threading
 from datetime import datetime, timedelta
 from typing import Dict, Iterable, List, Optional, Tuple
 
@@ -57,12 +58,20 @@ def any_listed(*addresses) -> bool:
     return any(is_listed(a) for a in addresses)
 
 
+# A delivery line's own fields come before "status="; what follows is the
+# receiving server's reply, which can say anything
+_STATUS = ' status='
+
+
 def postfix_line_listed(sender, recipient, message, orig_to=None) -> bool:
-    """A Postfix line (as stored or as parsed) that names a listed address."""
+    """A Postfix line (as stored or as parsed) that names a listed address.
+
+    orig_to has no column of its own: in a stored line it is read from the
+    line's fields, never from the reply."""
     if any_listed(sender, recipient, orig_to):
         return True
-    text = (message or '').lower()
-    return any(f'orig_to=<{a}>' in text for a in listed())
+    fields = (message or '').lower().split(_STATUS, 1)[0]
+    return any(f'orig_to=<{a}>' in fields for a in listed())
 
 
 # ── SQL ────────────────────────────────────────────────────────────────────
@@ -84,9 +93,9 @@ def correlation_visible(model=MessageCorrelation):
 
 
 def _postfix_listed(model, hidden):
-    message = func.lower(func.coalesce(model.message, ''))
+    fields = func.split_part(func.lower(func.coalesce(model.message, '')), _STATUS, 1)
     return or_(_column_listed(model.sender, hidden), _column_listed(model.recipient, hidden),
-               *[message.contains(f'orig_to=<{a}>', autoescape=True) for a in hidden])
+               *[fields.contains(f'orig_to=<{a}>', autoescape=True) for a in hidden])
 
 
 def postfix_line_visible(model=PostfixLog):
@@ -145,25 +154,38 @@ def visible_recipients(recipients) -> list:
 # ── Ingest: queue ids seen with a listed address ───────────────────────────
 # A queue's lines can come in different pages: the line naming the address
 # may be dropped in one page while "message-id=" or "removed" come in another.
-# The queue ids are remembered for QUEUE_WINDOW (in this process).
+# Each occurrence (queue id, time of its listed line) is remembered, in this
+# process, for QUEUE_WINDOW from when it was seen, whatever its log time: a
+# catch-up of old lines needs it as much as the newest page. The ingest and
+# the cleanup both add to it, from different threads.
 
-_listed_queues: Dict[str, datetime] = {}
+_listed_queues: Dict[str, List[Tuple[datetime, datetime]]] = {}
+_listed_queues_lock = threading.Lock()
 
 
 def remember_listed_queue(queue_id: str, when: datetime) -> None:
-    seen = _listed_queues.get(queue_id)
-    if seen is None or when > seen:
-        _listed_queues[queue_id] = when
+    now = datetime.utcnow()
+    with _listed_queues_lock:
+        seen = [(t, at) for t, at in _listed_queues.get(queue_id, []) if t != when]
+        _listed_queues[queue_id] = seen + [(when, now)]
 
 
 def queue_was_listed(queue_id: Optional[str], when: datetime) -> bool:
-    seen = _listed_queues.get(queue_id) if queue_id else None
-    return seen is not None and abs(when - seen) <= QUEUE_WINDOW
+    """Whether a line of this queue id at this log time belongs to a listed occurrence."""
+    if not queue_id:
+        return False
+    with _listed_queues_lock:
+        return any(abs(when - t) <= QUEUE_WINDOW for t, _ in _listed_queues.get(queue_id, []))
 
 
 def forget_old_queues(now: datetime) -> None:
-    for queue_id in [q for q, t in _listed_queues.items() if now - t > QUEUE_WINDOW]:
-        _listed_queues.pop(queue_id, None)
+    with _listed_queues_lock:
+        for queue_id in list(_listed_queues):
+            kept = [(t, at) for t, at in _listed_queues[queue_id] if now - at <= QUEUE_WINDOW]
+            if kept:
+                _listed_queues[queue_id] = kept
+            else:
+                del _listed_queues[queue_id]
 
 
 def delete_queue_occurrences(db, occurrences: Iterable[Tuple[str, datetime]]) -> Tuple[int, int]:
@@ -174,6 +196,10 @@ def delete_queue_occurrences(db, occurrences: Iterable[Tuple[str, datetime]]) ->
     Returns (Postfix lines, deliveries) deleted.
     """
     occurrences = sorted({(q, t) for q, t in occurrences if q and t is not None})
+    # The evidence goes with them: a later line of the same message (such as
+    # "removed") is recognised by the ingest from this
+    for q, t in occurrences:
+        remember_listed_queue(q, t)
     lines = deliveries = 0
     for i in range(0, len(occurrences), 200):
         part = occurrences[i:i + 200]
@@ -262,15 +288,26 @@ def cleanup(db, since: Optional[datetime] = None) -> Optional[Dict[str, int]]:
 # A full pass is due at startup and after a settings change adds an address
 # (listed() notices it). The correlation job runs it (one at a time). A
 # request that comes while a pass runs is not answered by that pass: it
-# started with the older list
+# started with the older list. Each request gets a second full pass
+# SECOND_PASS_AFTER the first: a page the ingest checked against the older
+# list may commit after the first pass, with log times the light pass does
+# not look at
+SECOND_PASS_AFTER = timedelta(minutes=2)
+SECOND = 'second'
+
 _requested = 1
 _done = 0
+_second_pass_at: Optional[datetime] = None
 _last_listed: frozenset = frozenset()
 
 
-def full_pass_due() -> Optional[int]:
-    """The request a full pass now answers, or None when none is due."""
-    return _requested if _requested != _done else None
+def full_pass_due():
+    """What a full pass now answers (a request number, or SECOND), or None."""
+    if _requested != _done:
+        return _requested
+    if _second_pass_at is not None and datetime.utcnow() >= _second_pass_at:
+        return SECOND
+    return None
 
 
 def request_full_pass() -> None:
@@ -278,6 +315,10 @@ def request_full_pass() -> None:
     _requested += 1
 
 
-def full_pass_done(request: int) -> None:
-    global _done
-    _done = request
+def full_pass_done(request) -> None:
+    global _done, _second_pass_at
+    if request == SECOND:
+        _second_pass_at = None
+    else:
+        _done = request
+        _second_pass_at = datetime.utcnow() + SECOND_PASS_AFTER

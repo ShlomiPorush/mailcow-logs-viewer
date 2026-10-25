@@ -652,18 +652,28 @@ def get_suppression_events(suppression_id: int, page: int = Query(1, ge=1), db: 
                .filter(MessageCorrelation.correlation_key.in_(keys),
                        excluded_addresses.correlation_visible()).all()} if keys else set()
     when = lambda value: format_datetime_for_api(value) if value else None  # noqa: E731
-    return {
-        "suppression": {"id": suppression.id, "email": suppression.email, "type": suppression.type,
-                        "active": suppression.active},
-        "total": total, "page": page, "page_size": EVENTS_PAGE,
-        "events": [{
+
+    def event(e):
+        row = {
             "id": e.id, "kind": e.kind, "outcome": e.outcome, "recorded_at": when(e.recorded_at),
             "message_time": when(e.message_time), "reason": e.reason, "server_reply": e.server_reply,
             "dsn": e.dsn, "sender": e.sender, "recipient": e.recipient, "subject": e.subject,
             "queue_id": e.queue_id, "message_id": e.message_id, "notes": e.notes,
             "expires_at": when(e.expires_at), "log_lines": e.log_lines or [], "logs_shortened": bool(e.logs_shortened),
             "correlation_key": e.correlation_key, "message_available": e.correlation_key in present,
-        } for e in events],
+        }
+        # Evidence copied before an address was excluded: the event still says
+        # what happened to the block, not what the message was
+        if excluded_addresses.any_listed(e.sender, e.recipient):
+            row.update(sender=None, subject=None, queue_id=None, message_id=None, log_lines=[],
+                       correlation_key=None, message_available=False)
+        return row
+
+    return {
+        "suppression": {"id": suppression.id, "email": suppression.email, "type": suppression.type,
+                        "active": suppression.active},
+        "total": total, "page": page, "page_size": EVENTS_PAGE,
+        "events": [event(e) for e in events],
     }
 
 

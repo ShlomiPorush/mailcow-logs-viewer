@@ -828,11 +828,10 @@ def _store_postfix_page(logs):
                     continue
                 queue_id = parsed.get('queue_id')
                 if queue_id:
-                    when = _postfix_entry_time(log_entry)
-                    listed_occurrences.append((queue_id, when))
-                    excluded_addresses.remember_listed_queue(queue_id, when)
+                    listed_occurrences.append((queue_id, _postfix_entry_time(log_entry)))
 
             if listed_occurrences:
+                # Also remembers them for the lines of later pages
                 deleted_count, _ = excluded_addresses.delete_queue_occurrences(db, listed_occurrences)
 
                 if deleted_count > 0:
@@ -1173,14 +1172,16 @@ def _store_rspamd_page(logs):
                         if excluded_addresses.postfix_line_listed(p_sender, p_recipient, p_message)
                     ]
 
-                def queue_listed(c) -> bool:
+                def listed_near(c) -> list:
+                    """The listed lines of the delivery's own queue occurrence."""
                     at = seen_at.get(c.id)
-                    return bool(c.queue_id) and at is not None and any(
-                        q == c.queue_id and abs(t - at) <= window for q, t in listed_lines)
+                    if not c.queue_id or at is None:
+                        return []
+                    return [(q, t) for q, t in listed_lines if q == c.queue_id and abs(t - at) <= window]
 
                 correlations_to_delete = [
                     c for c in candidates
-                    if is_blacklisted(c.sender) or is_blacklisted(c.recipient) or queue_listed(c)
+                    if is_blacklisted(c.sender) or is_blacklisted(c.recipient) or listed_near(c)
                 ]
 
                 deleted_corr = 0
@@ -1189,8 +1190,16 @@ def _store_rspamd_page(logs):
                         MessageCorrelation.id.in_([c.id for c in correlations_to_delete])
                     ).delete(synchronize_session=False)
 
-                occurrences = [(c.queue_id, seen_at[c.id]) for c in correlations_to_delete
-                               if c.queue_id and seen_at.get(c.id) is not None]
+                # Around the listed line that proves it (or the delivery's own
+                # time when its own address is listed), so the window cannot
+                # reach another message under the same queue id
+                occurrences = []
+                for c in correlations_to_delete:
+                    near = listed_near(c)
+                    if near:
+                        occurrences.extend(near)
+                    elif c.queue_id and seen_at.get(c.id) is not None:
+                        occurrences.append((c.queue_id, seen_at[c.id]))
                 if occurrences:
                     deleted_postfix, _ = excluded_addresses.delete_queue_occurrences(db, occurrences)
 

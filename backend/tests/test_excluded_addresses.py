@@ -269,3 +269,121 @@ def test_postfix_ingest_stores_no_line_of_a_listed_message(stored, monkeypatch):
         stored_lines = [l.message for l in db.query(PostfixLog).filter(
             PostfixLog.message.like(f'%{MARK}%'), PostfixLog.time >= datetime.utcfromtimestamp(now))]
     assert stored_lines == []
+
+
+# ── Edges of the queue rule ────────────────────────────────────────────────
+
+def _ingest(scheduler, monkeypatch, *pages):
+    monkeypatch.setattr(scheduler, 'seen_postfix', set())
+    for page in pages:
+        scheduler._store_postfix_page([
+            {'time': str(int(when.replace(tzinfo=__import__('datetime').timezone.utc).timestamp())),
+             'program': 'postfix/smtp', 'priority': 'info', 'message': f'{message} [{MARK}]'}
+            for when, message in page])
+
+
+def _stored_lines(queue_id):
+    from app.database import get_db_context
+    from app.models import PostfixLog
+    with get_db_context() as db:
+        return sorted(l.message.split(' [')[0] for l in db.query(PostfixLog).filter(PostfixLog.queue_id == queue_id))
+
+
+def test_a_reply_that_quotes_orig_to_does_not_make_a_message_listed(stored, monkeypatch):
+    from app import scheduler
+    queue = f'C{MARK.upper()}1'
+    line = (f'{queue}: to=<{NORMAL}>, relay=mx.example.test[192.0.2.9]:25, delay=1, delays=0/0/0/1, dsn=2.0.0, '
+            f'status=sent (250 ok orig_to=<{LISTED}>)')
+    _ingest(scheduler, monkeypatch, [(datetime.utcnow(), line)])
+    assert _stored_lines(queue) == [line]
+    scheduler.cleanup_blacklisted_data()
+    assert _stored_lines(queue) == [line]
+
+
+def test_the_rspamd_path_deletes_around_the_listed_line_only(stored):
+    """A delivery at t, the line naming the address at t+23h, and another
+    message under the same queue id at t-12h: 35 hours from the evidence."""
+    from app import scheduler
+    from app.database import get_db_context
+    from app.models import MessageCorrelation
+    queue = f'D{MARK.upper()}1'
+    t = datetime.utcnow().replace(microsecond=0) - timedelta(days=2)
+    with get_db_context() as db:
+        db.add(MessageCorrelation(correlation_key=f'late-{MARK}', message_id=f'late-{MSGID}', queue_id=queue,
+                                  sender=SENDER, recipient=NORMAL, first_seen=t, last_seen=t, created_at=t))
+        _line(db, t + timedelta(hours=23), queue, f'{queue}: to=<{LISTED}>, relay=local, status=sent',
+              recipient=LISTED)
+        _line(db, t - timedelta(hours=12), queue, f'{queue}: to=<{NORMAL}>, relay=local, status=sent earlier',
+              recipient=NORMAL)
+        db.commit()
+    scheduler._store_rspamd_page([{
+        'unix_time': int(datetime.utcnow().timestamp()), 'message-id': f'late-{MSGID}', 'sender_smtp': LISTED,
+        'rcpt_smtp': [NORMAL], 'action': 'no action', 'score': 0.0, 'required_score': 15.0, 'symbols': {}}])
+    assert 'late' not in _state()['deliveries']
+    assert _stored_lines(queue) == [f'{queue}: to=<{NORMAL}>, relay=local, status=sent earlier']
+
+
+def test_lines_of_an_old_listed_message_in_a_later_page_are_dropped(stored, monkeypatch):
+    """A catch-up of lines two days old: the queue is remembered from when it
+    was seen, not from the log time."""
+    from app import scheduler
+    queue = f'E{MARK.upper()}1'
+    old = datetime.utcnow().replace(microsecond=0) - timedelta(days=2)
+    _ingest(scheduler, monkeypatch,
+            [(old, f'{queue}: to=<{LISTED}>, relay=local, delay=1, delays=0/0/0/1, dsn=2.0.0, status=sent (250 ok)')],
+            [(old + timedelta(seconds=1), f'{queue}: removed')])
+    assert _stored_lines(queue) == []
+
+
+def test_lines_after_the_cleanup_removed_the_evidence_are_dropped(stored, monkeypatch):
+    from app import scheduler
+    scheduler.cleanup_blacklisted_data()
+    assert _stored_lines(Q_LISTED) == [f'{Q_LISTED}: to=<{NORMAL}>, relay=local, status=sent old-message']
+    seeded = datetime.utcnow().replace(microsecond=0) - timedelta(minutes=5)
+    _ingest(scheduler, monkeypatch, [(seeded + timedelta(seconds=30), f'{Q_LISTED}: removed again')])
+    assert _stored_lines(Q_LISTED) == [f'{Q_LISTED}: to=<{NORMAL}>, relay=local, status=sent old-message']
+
+
+def test_a_second_full_pass_catches_a_page_stored_with_the_older_list(stored, monkeypatch):
+    from app import scheduler
+    from app.database import get_db_context
+    from app.services import excluded_addresses
+    scheduler.cleanup_blacklisted_data()
+    assert excluded_addresses.full_pass_due() is None
+    # A page checked before the change commits now, with old log times
+    queue = f'F{MARK.upper()}1'
+    with get_db_context() as db:
+        _line(db, datetime.utcnow() - timedelta(hours=6), queue, f'{queue}: to=<{LISTED}>, relay=local, status=sent',
+              recipient=LISTED)
+        db.commit()
+    scheduler._cleanup_blacklisted_queues_sync()  # light: an hour back only
+    assert _stored_lines(queue) != []
+    monkeypatch.setattr(excluded_addresses, '_second_pass_at', datetime.utcnow() - timedelta(seconds=1))
+    assert excluded_addresses.full_pass_due() == excluded_addresses.SECOND
+    scheduler._cleanup_blacklisted_queues_sync()
+    assert _stored_lines(queue) == []
+    assert excluded_addresses.full_pass_due() is None
+
+
+def test_block_details_do_not_show_an_excluded_address_message(client):
+    from app.database import get_db_context
+    from app.models import SpamSuppression, SuppressionEvent
+    with get_db_context() as db:
+        block = SpamSuppression(email=f'bounced-{MARK}@example.test', reason='hard_bounce', source='auto')
+        db.add(block)
+        db.flush()
+        db.add(SuppressionEvent(suppression_id=block.id, kind='hard_bounce', outcome='blocked', dsn='5.1.1',
+                                sender=LISTED, recipient=block.email, subject=f'secret {MARK}', queue_id=Q_LISTED,
+                                message_id=MSGID, correlation_key=f'normal-{MARK}',
+                                log_lines=[{'message': f'to=<{block.email}> from {LISTED}'}]))
+        db.commit()
+        block_id = block.id
+    try:
+        r = client.get(f'/api/suppressions/{block_id}/events')
+        event = _no_listed(r).json()['events'][0]
+        assert event['dsn'] == '5.1.1' and event['recipient'] == f'bounced-{MARK}@example.test'
+        assert event['log_lines'] == [] and event['subject'] is None and event['message_available'] is False
+    finally:
+        with get_db_context() as db:
+            db.query(SpamSuppression).filter(SpamSuppression.id == block_id).delete(synchronize_session=False)
+            db.commit()
