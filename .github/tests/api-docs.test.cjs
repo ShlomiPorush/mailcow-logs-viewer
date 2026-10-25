@@ -12,6 +12,8 @@ const { test } = require('node:test');
 
 const FRONTEND = path.join(__dirname, '..', '..', 'frontend');
 const LIBS = path.join(FRONTEND, 'assets', 'libs');
+// An element the bundle starts a reference of its own on, however the id is written
+const SECOND_REFERENCE_ID = /\bid\s*=\s*["']?api-reference(?=["'\s>/])/i;
 
 // Runs api-docs.js and returns what it passed to Scalar
 function scalarCall(dark) {
@@ -60,8 +62,15 @@ test('the page loads its files with a version stamp, so an update is never serve
     // own, with Scalar's defaults (its fonts, its hosted client, its proxy), on
     // an element with id="api-reference" or a data-spec/data-spec-url attribute
     const markup = html.replace(/<!--[\s\S]*?-->/g, '');
-    assert.ok(!/id\s*=\s*["']api-reference["']/.test(markup), 'no element may have id="api-reference"');
-    assert.ok(!/data-(?:spec|spec-url|url|configuration|proxy-url)\b/.test(markup));
+    assert.ok(!SECOND_REFERENCE_ID.test(markup), 'no element may have id="api-reference"');
+    assert.ok(!/\bdata-(?:spec|spec-url|url|configuration|proxy-url)\b/i.test(markup));
+});
+
+test('the check for a second reference catches every way to write the id', () => {
+    for (const html of ['<div id="api-reference">', "<div id='api-reference'>", '<div ID=api-reference>', '<div id = api-reference >']) {
+        assert.ok(SECOND_REFERENCE_ID.test(html), html);
+    }
+    assert.ok(!SECOND_REFERENCE_ID.test('<div id="api-reference-x">'));
 });
 
 test('the Scalar bundle ships with its licence and without a source map reference', () => {

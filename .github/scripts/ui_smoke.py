@@ -148,6 +148,52 @@ def expected(method, path, status):
     return any(m == method and re.search(rx, path) and s == status for m, rx, s, _ in EXPECTED_ERRORS)
 
 
+# The API reference (/docs) runs the vendored Scalar bundle, which can talk to
+# scalar.com in several ways that frontend/api-docs.js turns off. Only a real
+# browser shows whether a new bundle still honours that, so run this pass
+# after every Scalar update.
+SCALAR_FEATURES = ['Open API Client', 'Ask AI', 'Generate MCP', 'Connect MCP', 'Generate SDK',
+                   'Developer Tools', 'Share', 'Register', 'Deploy']
+# "Powered by Scalar": plain links that carry nothing about this server
+SCALAR_CREDITS = {'https://scalar.com/?utm_source=powered-by&utm_medium=api-reference', 'https://www.scalar.com/'}
+
+
+def check_api_docs(browser):
+    problems, outside = [], set()
+    context = browser.new_context(viewport={'width': 1440, 'height': 900})
+    context.on('request', lambda r: urlparse(r.url).scheme in ('http', 'https')
+               and not r.url.startswith(BASE + '/') and outside.add(r.url))
+    page = context.new_page()
+
+    def check_page(step):
+        for href in page.eval_on_selector_all('a[href]', 'as => as.map(a => a.href)'):
+            if 'scalar.com' in href and href not in SCALAR_CREDITS:
+                problems.append(f'{step}: link to {href}')
+        text = page.evaluate('document.body.innerText')
+        problems.extend(f"{step}: Scalar's '{t}' is shown" for t in SCALAR_FEATURES if t in text)
+
+    page.goto(f'{BASE}/docs', wait_until='networkidle', timeout=60000)
+    page.wait_for_selector("a[href*='GET/api/health']", state='attached', timeout=30000)
+    # A second reference means the bundle started one of its own, with Scalar's defaults
+    if page.locator('.darklight-reference').count() != 1:
+        problems.append('more than one reference on the page')
+    check_page('reference')
+
+    page.goto(f'{BASE}/docs#GET/api/health', wait_until='networkidle')
+    page.locator("section[id$='GET/api/health']").get_by_role('button', name='Test Request').first.click()
+    page.get_by_role('button', name='Send').first.click()
+    page.wait_for_load_state('networkidle')
+    page.wait_for_timeout(500)
+    check_page('Test Request')
+    if '200 OK' not in page.locator('[role=dialog]').first.inner_text():
+        problems.append('Test Request on GET /api/health did not show 200 OK')
+
+    problems.extend(f'request outside the app: {u}' for u in sorted(outside))
+    context.close()
+    print(f'  docs: {"problems found" if problems else "Scalar stays on this server, Test Request works"}')
+    return problems
+
+
 def main():
     routes = route_matchers()
     pages = spa_routes()
@@ -204,6 +250,9 @@ def main():
             print(f'  {route}: loaded, {len(clicked)} controls clicked'
                   + (f", opened: {', '.join(opened)}" if opened else ''))
 
+        where['page'] = 'docs'
+        for problem in check_api_docs(browser):
+            fail(problem)
         browser.close()
 
     for w in dict.fromkeys(warnings):

@@ -7,6 +7,9 @@
 // tools, telemetry, the request proxy, its web fonts), and so is the button
 // that opens the document in Scalar's hosted client. "Test Request" stays: it
 // sends the request from this page, with the session cookie, to this server.
+// After updating the bundle, run the browser pass (UI_SMOKE=1, see
+// .github/scripts/ui_smoke.py check_api_docs): only a browser shows whether
+// the new version still keeps to these options.
 // =============================================================================
 
 const API_DOCS_OPTIONS = Object.freeze({

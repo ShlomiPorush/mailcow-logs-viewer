@@ -32,10 +32,10 @@ PASSWORD = "correct horse battery staple"
 def auth_mode(monkeypatch):
     inner = settings._inner
 
-    def set_mode(basic: bool):
-        monkeypatch.setattr(inner, "basic_auth_enabled", basic)
+    def set_mode(mode: str):
+        monkeypatch.setattr(inner, "basic_auth_enabled", mode == "basic")
         monkeypatch.setattr(inner, "auth_enabled", False)
-        monkeypatch.setattr(inner, "oauth2_enabled", False)
+        monkeypatch.setattr(inner, "oauth2_enabled", mode == "oauth2")
         monkeypatch.setattr(inner, "auth_username", USERNAME)
         monkeypatch.setattr(inner, "auth_password", PASSWORD)
 
@@ -55,36 +55,47 @@ def client(monkeypatch):
     return TestClient(app, follow_redirects=False, raise_server_exceptions=False)
 
 
-def _sign_in(client):
-    raw = base64.b64encode(f"{USERNAME}:{PASSWORD}".encode()).decode()
-    client.post("/api/auth/session", headers={"Authorization": "Basic " + raw})
+def _sign_in(client, mode):
+    """A session as each sign-in method leaves it; nothing to do with sign-in off"""
+    if mode == "basic":
+        raw = base64.b64encode(f"{USERNAME}:{PASSWORD}".encode()).decode()
+        client.post("/api/auth/session", headers={"Authorization": "Basic " + raw})
+    elif mode == "oauth2":
+        # What the OAuth2 callback stores, without a provider
+        cookie = session_module.create_session({"email": "admin@example.com", "auth_method": "oauth2"})
+        client.cookies.set(session_module.SESSION_COOKIE_NAME, cookie)
 
 
+SIGN_IN_MODES = ["basic", "oauth2", "off"]
+
+
+@pytest.mark.parametrize("mode", ["basic", "oauth2"])
 @pytest.mark.parametrize("path,location", [
     ("/docs", "/login?next=%2Fdocs"),
     ("/redoc", "/login?next=%2Fredoc"),
     ("/openapi.json", "/login?next=%2Fopenapi.json"),
 ])
-def test_signed_out_the_reference_and_its_document_go_to_login(auth_mode, client, path, location):
-    auth_mode(basic=True)
+def test_signed_out_the_reference_and_its_document_go_to_login(auth_mode, client, mode, path, location):
+    auth_mode(mode)
     response = client.get(path)
     assert response.status_code == 302
     assert response.headers["location"] == location
 
 
-def test_a_session_that_is_gone_goes_to_login(auth_mode, client):
-    auth_mode(basic=True)
-    _sign_in(client)
+@pytest.mark.parametrize("mode", ["basic", "oauth2"])
+def test_a_session_that_is_gone_goes_to_login(auth_mode, client, mode):
+    auth_mode(mode)
+    _sign_in(client, mode)
+    assert client.get("/docs").status_code == 200
     session_module._session_store.clear()
     assert client.get("/docs").status_code == 302
     assert client.get("/openapi.json").status_code == 302
 
 
-@pytest.mark.parametrize("basic", [True, False])
-def test_the_reference_is_the_scalar_page(auth_mode, client, basic):
-    auth_mode(basic=basic)
-    if basic:
-        _sign_in(client)
+@pytest.mark.parametrize("mode", SIGN_IN_MODES)
+def test_the_reference_is_the_scalar_page(auth_mode, client, mode):
+    auth_mode(mode)
+    _sign_in(client, mode)
     response = client.get("/docs")
     assert response.status_code == 200
     assert response.headers["cache-control"] == "no-cache"
@@ -94,21 +105,19 @@ def test_the_reference_is_the_scalar_page(auth_mode, client, basic):
     assert "script-src 'self' 'unsafe-inline' 'unsafe-eval';" in response.headers["content-security-policy"]
 
 
-@pytest.mark.parametrize("basic", [True, False])
-def test_redoc_moved_to_the_reference(auth_mode, client, basic):
-    auth_mode(basic=basic)
-    if basic:
-        _sign_in(client)
+@pytest.mark.parametrize("mode", SIGN_IN_MODES)
+def test_redoc_moved_to_the_reference(auth_mode, client, mode):
+    auth_mode(mode)
+    _sign_in(client, mode)
     response = client.get("/redoc")
     assert response.status_code == 301
     assert response.headers["location"] == "/docs"
 
 
-@pytest.mark.parametrize("basic", [True, False])
-def test_the_document_is_still_served(auth_mode, client, basic):
-    auth_mode(basic=basic)
-    if basic:
-        _sign_in(client)
+@pytest.mark.parametrize("mode", SIGN_IN_MODES)
+def test_the_document_is_still_served(auth_mode, client, mode):
+    auth_mode(mode)
+    _sign_in(client, mode)
     response = client.get("/openapi.json")
     assert response.status_code == 200
     paths = response.json()["paths"]
