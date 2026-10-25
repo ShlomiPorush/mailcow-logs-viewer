@@ -221,14 +221,14 @@ def test_a_read_in_an_allowed_area_runs_and_is_logged(live_agents):
     assert activity["activity"][0]["tool"] == "rest" and activity["activity"][0]["path"] == "/api/security-alerts"
 
 
-def test_the_route_kind_decides_not_the_method(live_agents):
+def test_a_view_grant_does_not_allow_actions(live_agents):
     agent, _, tokens = _connect_with_code(views=("security", "domains"))
     token = tokens["access_token"]
     # A write without Take action
     r = _api(agent, token, "POST", "/api/security-alerts/acknowledge-all")
     assert r.status_code == 403 and r.json()["error"] == "forbidden"
-    # A GET that starts probes is an action
-    r = _api(agent, token, "GET", "/api/domains/example.com/dns-check")
+    # A DNS check starts probes, so it is an action, not part of View
+    r = _api(agent, token, "POST", "/api/domains/example.com/check-dns")
     assert r.status_code == 403 and "Take action" in r.json()["message"]
     # An area that was not allowed at all
     r = _api(agent, token, "GET", "/api/messages")

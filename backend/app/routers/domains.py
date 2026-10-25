@@ -2045,26 +2045,6 @@ def _require_domain_name(domain: str) -> None:
         raise HTTPException(status_code=400, detail="Invalid domain name")
 
 
-@router.get("/domains/{domain}/dns-check")
-async def check_single_domain_dns(domain: str):
-    """
-    Check DNS records for a specific domain
-    
-    Args:
-        domain: Domain name to check
-        
-    Returns:
-        DNS check results for the domain
-    """
-    _require_domain_name(domain)
-    try:
-        dns_data = await check_domain_dns(domain)
-        return dns_data
-    except Exception as e:
-        logger.error(f"Error checking DNS for {domain}: {e}")
-        raise internal_error(e)
-
-
 def _record_value(check: Optional[Dict[str, Any]]) -> Optional[str]:
     """The published DNS value from a check result, or None."""
     if not isinstance(check, dict):

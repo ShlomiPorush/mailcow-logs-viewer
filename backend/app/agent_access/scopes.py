@@ -190,8 +190,7 @@ POLICY: Dict[Tuple[str, str], Rule] = {
     # Domains: a check runs DNS, HTTPS (MTA-STS) and SMTP (DANE) probes, so it
     # is an action, and only for the app's own domains
     **_r("GET /api/domains/all", area="domains", kind=READ),
-    **_r("GET /api/domains/{domain}/dns-check", "POST /api/domains/{domain}/check-dns",
-         area="domains", kind=WRITE, guard="own_domain"),
+    **_r("POST /api/domains/{domain}/check-dns", area="domains", kind=WRITE, guard="own_domain"),
     **_r("POST /api/domains/check-all-dns", area="domains", kind=WRITE),
 
     # Mailboxes
