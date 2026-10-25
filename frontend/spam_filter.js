@@ -176,6 +176,7 @@ function rspamdMapCrumbs(name) {
 }
 
 async function openMapEditor(filename) {
+    mapEditorOpened += 1;
     const container = document.getElementById('rspamd-maps-list');
 
     container.innerHTML = '<div class="ui-loading" role="status"><div class="loading"></div><p>Loading map content...</p></div>';
@@ -269,6 +270,8 @@ let mapEditorSaved = null;  // the map text as stored, to tell whether there is 
 // The map as it was read: a save is refused when the map changed since
 // (the suppression sync writes the recipient denylist)
 let mapEditorHash = null;
+let mapEditorOpened = 0;     // counts the times the editor was opened
+let mapEditorSaving = false;
 
 // An edited map is lost by going back to the list, leaving the page or the app
 uiUnsavedRegister('rspamd-map', {
@@ -349,8 +352,22 @@ function showMapConflict(filename, show) {
 }
 
 async function saveMapContent(filename) {
+    if (mapEditorSaving) return;  // one save at a time
+    mapEditorSaving = true;
+    try {
+        await saveMapContentOnce(filename);
+    } finally {
+        mapEditorSaving = false;
+    }
+}
+
+async function saveMapContentOnce(filename) {
+    // What is saved and the map it was edited from, taken together before
+    // anything waits; a save from an editor opened again since is dropped
+    const opened = mapEditorOpened;
     const content = document.getElementById('map-editor-content').value;
-    
+    const baseHash = mapEditorHash;
+
     // Validate first
     try {
         const valRes = await authenticatedFetch('/api/rspamd/validate', {
@@ -369,16 +386,22 @@ async function saveMapContent(filename) {
         showToast('Validation failed: ' + e.message, 'error');
         return;
     }
-    
+    if (opened !== mapEditorOpened) return;
+
     // Save
     uiSaveBarBusy('map-savebar', true);
-    
+
     try {
         const response = await authenticatedFetch(`/api/rspamd/maps/${encodeURIComponent(filename)}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ content, base_hash: mapEditorHash })
+            body: JSON.stringify({ content, base_hash: baseHash })
         });
+        if (opened !== mapEditorOpened) {
+            // The editor was opened again meanwhile: it holds its own copy and hash
+            if (response.ok) showToast('Map saved', 'success');
+            return;
+        }
 
         if (!response.ok) {
             const err = await response.json();

@@ -209,6 +209,14 @@ def test_the_stuck_queue_block_asks_again_for_hosted_domains(env):
     assert env.row(f'inbound@{HOSTED}') is None
 
 
+def _no_alias_side_effects(monkeypatch):
+    """A domain sync here changes nothing other tests read."""
+    from app import config, scheduler
+    monkeypatch.setattr(config, '_cached_hosted_domains', set())
+    monkeypatch.setattr(scheduler, '_persist_local_domain_aliases', lambda alias_map: None)
+    monkeypatch.setattr('app.services.alias_domains.set_cached_alias_domain_map', lambda alias_map: None)
+
+
 def test_detection_waits_until_every_domain_is_known(env, monkeypatch):
     from app import config
     email = f'later@{REMOTE}'
@@ -227,12 +235,13 @@ def test_detection_waits_until_every_domain_is_known(env, monkeypatch):
 
 def test_only_a_full_domain_sync_counts_as_every_domain_known(monkeypatch):
     from app import config, scheduler
+    _no_alias_side_effects(monkeypatch)
     url = scheduler.mailcow_api.base_url
     monkeypatch.setattr(config, '_cached_active_domains', None)
     config.set_cached_active_domains([HOSTED])   # the startup load: primary domains only
     assert not config.local_domains_complete(url)
 
-    monkeypatch.setattr(scheduler.mailcow_api, 'get_active_domains', AsyncMock(return_value=[HOSTED]))
+    monkeypatch.setattr(scheduler.mailcow_api, 'get_domains', AsyncMock(return_value=[{'domain_name': HOSTED, 'active': 1}]))
     monkeypatch.setattr(scheduler.mailcow_api, 'get_alias_domain_map', AsyncMock(side_effect=RuntimeError('down')))
     monkeypatch.setattr(scheduler, 'update_job_status', Mock())
     asyncio.run(scheduler.sync_local_domains())
@@ -246,14 +255,15 @@ def test_only_a_full_domain_sync_counts_as_every_domain_known(monkeypatch):
 
 def test_a_mailcow_changed_during_the_sync_leaves_the_list_incomplete(monkeypatch):
     from app import config, scheduler
+    _no_alias_side_effects(monkeypatch)
     monkeypatch.setattr(config, '_cached_active_domains', None)
     monkeypatch.setattr(config, '_cached_domains_complete', None)
     monkeypatch.setattr(scheduler, 'update_job_status', Mock())
 
     async def domains():
         monkeypatch.setattr(scheduler.mailcow_api, 'base_url', 'https://other-mailcow.example.com')
-        return [HOSTED]
-    monkeypatch.setattr(scheduler.mailcow_api, 'get_active_domains', domains)
+        return [{'domain_name': HOSTED, 'active': 1}]
+    monkeypatch.setattr(scheduler.mailcow_api, 'get_domains', domains)
     monkeypatch.setattr(scheduler.mailcow_api, 'get_alias_domain_map', AsyncMock(return_value={}))
     asyncio.run(scheduler.sync_local_domains())
     assert not config.local_domains_complete('https://other-mailcow.example.com')
@@ -327,3 +337,46 @@ def test_the_cleanup_waits_until_every_domain_is_known(queue, monkeypatch):
     assert stored == []
     sch.mailcow_api.delete_queue.assert_not_awaited()
     sch.update_job_status.assert_called_with('cleanup_deferred_queue', 'failed', sch._DOMAINS_WAIT)
+
+
+def test_mail_to_a_domain_turned_off_in_mailcow_stays_in_the_queue(queue, monkeypatch):
+    """Mail it accepted while it was on can still wait in the queue."""
+    from app import config
+    sch, stored = queue
+    _no_alias_side_effects(monkeypatch)
+    paused = f'paused-{MARK}.test'
+    monkeypatch.setattr(sch.mailcow_api, 'get_domains', AsyncMock(return_value=[
+        {'domain_name': HOSTED, 'active': 1}, {'domain_name': paused, 'active': 0}]))
+    monkeypatch.setattr(sch.mailcow_api, 'get_alias_domain_map', AsyncMock(return_value={}))
+    asyncio.run(sch.sync_local_domains())
+    assert config.get_cached_active_domains() == [HOSTED], 'direction classification is unchanged'
+
+    monkeypatch.setattr(sch.mailcow_api, 'get_queue', AsyncMock(return_value=[
+        _stuck_item('PAUSED', f'user@{paused}'), _stuck_item('OUTBOUND', f'user@{REMOTE}')]))
+    asyncio.run(sch.cleanup_deferred_queue_job())
+    assert stored == [f'user@{REMOTE}']
+    sch.mailcow_api.delete_queue.assert_awaited_once_with(['OUTBOUND'])
+
+
+def test_a_mailcow_changed_before_the_queue_is_read_blocks_and_deletes_nothing(queue, monkeypatch):
+    sch, stored = queue
+    items = sch.mailcow_api.get_queue.return_value
+
+    async def from_another_mailcow():
+        monkeypatch.setattr(sch.mailcow_api, 'base_url', 'https://other-mailcow.example.com')
+        return items
+    monkeypatch.setattr(sch.mailcow_api, 'get_queue', from_another_mailcow)
+    asyncio.run(sch.cleanup_deferred_queue_job())
+    assert stored == []
+    sch.mailcow_api.delete_queue.assert_not_awaited()
+
+
+def test_a_mailcow_changed_before_the_deletion_deletes_nothing(queue, monkeypatch):
+    sch, stored = queue
+
+    def changed_meanwhile(items, blocking):
+        monkeypatch.setattr(sch.mailcow_api, 'base_url', 'https://other-mailcow.example.com')
+        return list(items)
+    monkeypatch.setattr(sch, '_cleanup_deletable', changed_meanwhile)
+    asyncio.run(sch.cleanup_deferred_queue_job())
+    sch.mailcow_api.delete_queue.assert_not_awaited()

@@ -19,6 +19,10 @@ _cached_active_domains: Optional[List[str]] = None
 # holds; None while it holds less (the startup load reads the primary
 # domains only)
 _cached_domains_complete: Optional[str] = None
+# Every domain mail is delivered to on this mailcow, for the automatic paths
+# that must never block or delete it: the cache above plus the domains
+# turned off in mailcow
+_cached_hosted_domains: set = set()
 
 _DEFAULT_PORTS = {"http": 80, "https": 443}
 
@@ -1365,13 +1369,26 @@ def setup_logging():
 setup_logging()
 
 
-def set_cached_active_domains(domains: List[str], complete_for: Optional[str] = None) -> None:
+def set_cached_active_domains(domains: List[str], complete_for: Optional[str] = None,
+                              hosted: Optional[List[str]] = None) -> None:
     """Set the cached active domains list; complete_for names the mailcow it
-    was read from when it holds the alias domains too."""
-    global _cached_active_domains, _cached_domains_complete
+    was read from when it holds the alias domains too, and hosted adds the
+    domains turned off in mailcow."""
+    global _cached_active_domains, _cached_domains_complete, _cached_hosted_domains
     _cached_active_domains = domains
     _cached_domains_complete = complete_for
+    _cached_hosted_domains = {d.lower() for d in (hosted if hosted is not None else domains)}
     logger.info(f"Cached {len(domains)} active domains from mailcow API")
+
+
+def is_hosted_domain(domain: Optional[str]) -> bool:
+    """Whether mail to the domain is delivered on this mailcow: an active
+    domain or alias domain, or a domain turned off in mailcow, whose mail
+    accepted before can still wait in the queue."""
+    if not domain:
+        return False
+    name = domain.lower()
+    return name in _cached_hosted_domains or name in {d.lower() for d in (_cached_active_domains or [])}
 
 
 def local_domains_complete(mailcow_url: Optional[str]) -> bool:

@@ -19,7 +19,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 
 from .app_time import UTC, app_tz, format_clock
-from .config import settings, set_cached_active_domains, local_domains_complete
+from .config import settings, set_cached_active_domains, local_domains_complete, is_hosted_domain
 from .database import get_db_context, SessionLocal
 from .mailcow_api import mailcow_api, mailcow_handled_items
 from .services.suppression_events import disabled_by_hand, record_bounces, record_stuck
@@ -33,7 +33,6 @@ from .correlation import (
     detect_direction,
     ensure_leg,
     find_legs,
-    is_local_domain,
     parse_postfix_message,
     POSTFIX_DELIVERY_AGENTS,
 )
@@ -2757,13 +2756,18 @@ async def sync_local_domains():
         # Both lists come from one mailcow: one that changed in Settings
         # meanwhile leaves the list incomplete until the next sync
         source = mailcow_api.base_url
-        active_domains = await mailcow_api.get_active_domains()
+        domains = await mailcow_api.get_domains()
+        active_domains = [d['domain_name'] for d in domains if d.get('active') == 1 and d.get('domain_name')]
         alias_map = await mailcow_api.get_alias_domain_map()
         alias_domains = sorted(alias_map.keys())
         # Merge: primary domains + alias domains (no duplicates)
         all_domains = list(dict.fromkeys((active_domains or []) + (alias_domains or [])))
         if all_domains:
-            set_cached_active_domains(all_domains, complete_for=source if mailcow_api.base_url == source else None)
+            # A domain turned off in mailcow is still hosted here for the mail
+            # it accepted before, which can wait in the queue
+            hosted = list(dict.fromkeys(all_domains + [d['domain_name'] for d in domains if d.get('domain_name')]))
+            set_cached_active_domains(all_domains, complete_for=source if mailcow_api.base_url == source else None,
+                                      hosted=hosted)
             # Persist which primary domain each alias points at, so mailbox
             # statistics and the Domains page can use the mapping (issue #92)
             try:
@@ -3659,7 +3663,7 @@ def _left_alone(addresses) -> bool:
     delete mail for: one the operator excluded, or one hosted on this mailcow
     (its mail is inbound, and a failure to deliver it is not a bad address)."""
     whitelist = settings.suppression_whitelist_domains_list
-    return any(a.split('@')[-1] in whitelist or is_local_domain(a.split('@')[-1]) for a in addresses)
+    return any(a.split('@')[-1] in whitelist or is_hosted_domain(a.split('@')[-1]) for a in addresses)
 
 
 # Delivery agents that hand mail to mailboxes on this server: their failures
@@ -3669,16 +3673,23 @@ _BOUNCE_AGENTS = tuple(a for a in POSTFIX_DELIVERY_AGENTS if a not in _LOCAL_DEL
 _DOMAINS_WAIT = "Waiting for the list of this mailcow's domains, so mail to them is never blocked or deleted"
 
 
-async def _local_domains_known(job: str) -> bool:
-    """Whether every domain of the mailcow the app talks to now is known,
+async def _local_domains_known(job: str) -> Optional[str]:
+    """The mailcow the app talks to now, when every domain of it is known,
     reading them first when not (at startup, or after mailcow changed in
-    Settings). Until then the job does nothing, and Status says why."""
+    Settings). None until then: the job does nothing, and Status says why."""
     if not local_domains_complete(mailcow_api.base_url):
         await sync_local_domains()
     if local_domains_complete(mailcow_api.base_url):
-        return True
+        return mailcow_api.base_url
     update_job_status(job, 'failed', _DOMAINS_WAIT)
-    return False
+    return None
+
+
+def _still_on(source: str) -> bool:
+    """Whether a run still talks to the mailcow it started on, with its
+    domains known: one changed in Settings meanwhile ends the run before it
+    blocks or deletes anything."""
+    return mailcow_api.base_url == source and local_domains_complete(source)
 
 
 def _cleanup_deletable(items: Dict[str, List[str]], blocking: bool) -> List[str]:
@@ -3770,7 +3781,8 @@ async def cleanup_deferred_queue_job():
         return
     if not mailcow_api.has_rw_key:
         return
-    if not await _local_domains_known('cleanup_deferred_queue'):
+    source = await _local_domains_known('cleanup_deferred_queue')
+    if not source:
         return
     # Decided once per run: a message picked to be blocked is deleted only with its block
     blocking = cleanup_blocks()
@@ -3781,6 +3793,9 @@ async def cleanup_deferred_queue_job():
 
     try:
         queue = await mailcow_api.get_queue()
+        if not _still_on(source):
+            update_job_status('cleanup_deferred_queue', 'failed', _DOMAINS_WAIT)
+            return
         if not queue:
             update_job_status('cleanup_deferred_queue', 'success')
             return
@@ -3857,7 +3872,8 @@ async def cleanup_deferred_queue_job():
             async with map_write_lock_async():
                 deletable = await asyncio.get_running_loop().run_in_executor(
                     get_thread_pool_executor(), _cleanup_deletable, items, blocking)
-                if deletable:
+                # The same mailcow the queue was read from, asked with no wait before the deletion
+                if deletable and _still_on(source):
                     _queue_delete_confirmed(await mailcow_api.delete_queue(deletable))
                     logger.info(f"[QUEUE CLEANUP] Deleted {len(deletable)} stuck deferred item(s) from queue")
         except Exception as e:
@@ -4733,9 +4749,13 @@ async def detect_suppressions_job():
     """
     if not handling_on() or not settings.suppression_auto_detect:
         return
-    if not await _local_domains_known('detect_suppressions'):
+    source = await _local_domains_known('detect_suppressions')
+    if not source:
         return
     if not await _spam_blocks_loaded('detect_suppressions'):
+        return
+    if not _still_on(source):
+        update_job_status('detect_suppressions', 'failed', _DOMAINS_WAIT)
         return
 
     update_job_status('detect_suppressions', 'running')
@@ -4775,7 +4795,7 @@ async def detect_suppressions_job():
                     async with map_write_lock_async():
                         deletable = await asyncio.get_running_loop().run_in_executor(
                             get_thread_pool_executor(), _hard_deletable, items, to_block, to_delete)
-                        if deletable:
+                        if deletable and _still_on(source):
                             _queue_delete_confirmed(await mailcow_api.delete_queue(deletable))
                             logger.info(
                                 f"[SUPPRESSION] Cleaned up {len(deletable)} queue item(s) "
