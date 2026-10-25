@@ -23,6 +23,7 @@ from urllib.parse import parse_qs
 
 from sqlalchemy import case, func
 from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.exc import DataError
 from sqlalchemy.orm import Session
 
 from ..models import EasDevice
@@ -36,6 +37,11 @@ EAS_PATH = '/microsoft-server-activesync'
 _LINE_RE = re.compile(
     r'^(?:\[\d+\]:\s*)?(?P<remote>[^"]*?)\s+"(?P<method>[A-Z]+)\s+(?P<target>\S+)\s+HTTP/[\d.]+"\s+(?P<status>\d{3})\b'
 )
+
+# The query is the client's choice and percent-decoding can put any character
+# in a value. No real user, device id, type or command holds a control
+# character, and PostgreSQL text cannot hold NUL at all
+_CONTROL_RE = re.compile(r'[\x00-\x1f\x7f-\x9f]')
 
 
 def _param(query: Dict[str, List[str]], name: str) -> Optional[str]:
@@ -58,7 +64,7 @@ def _ip_or_none(remote: str) -> Optional[str]:
 def parse_eas_line(message: str) -> Optional[Dict[str, Any]]:
     """The device fields of one SOGo access line, or None for any line that is
     not a plain-query ActiveSync request with a user and a device id."""
-    if not message or 'activesync' not in message.lower():
+    if not isinstance(message, str) or 'activesync' not in message.lower():
         return None
     match = _LINE_RE.match(message.strip())
     if not match:
@@ -73,6 +79,8 @@ def parse_eas_line(message: str) -> Optional[Dict[str, Any]]:
         return None
     device_type = _param(query, 'devicetype')
     command = _param(query, 'cmd')
+    if any(_CONTROL_RE.search(value) for value in (user, device_id, device_type, command) if value):
+        return None
     return {
         'username': user.lower()[:255],
         'device_id': device_id[:255],
@@ -119,7 +127,11 @@ def _entry_time(entry: Dict[str, Any]) -> Optional[datetime]:
         return None
     if epoch <= 0:
         return None
-    return datetime.fromtimestamp(epoch, tz=timezone.utc).replace(tzinfo=None)
+    try:
+        return datetime.fromtimestamp(epoch, tz=timezone.utc).replace(tzinfo=None)
+    except (OverflowError, OSError, ValueError):
+        # nan, inf or a year no datetime can hold
+        return None
 
 
 def collect_devices(entries: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -148,9 +160,62 @@ def collect_devices(entries: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
 def store_devices(db: Session, devices: List[Dict[str, Any]]) -> int:
     """Upsert the devices. The same line read again in a later cycle changes
     nothing: first_seen only moves back, last_seen only forward, and the
-    request fields follow the newest line. Commits; returns the rows written."""
+    request fields follow the newest line.
+
+    A device the database refuses for its own values is logged and skipped,
+    so one line cannot hold back the others behind it. Any other failure,
+    such as a lost connection, is raised with nothing committed, and the job
+    reads the same lines again. Commits; returns the rows written."""
     if not devices:
         return 0
+    try:
+        with db.begin_nested():
+            db.execute(_upsert(devices))
+        written = len(devices)
+    except Exception as error:
+        if not _is_row_error(error):
+            raise
+        written = sum(_store_one(db, device) for device in devices)
+    db.commit()
+    return written
+
+
+# SQLSTATE class 22 is a value the column cannot hold, except 2200H, a spent
+# id sequence, which fails every row alike
+_SPENT_SEQUENCE = '2200H'
+
+
+def _is_row_error(error: Exception) -> bool:
+    """Whether the database refused a row for the row's own values. psycopg2
+    refuses NUL with a bare ValueError before the statement is sent."""
+    if isinstance(error, ValueError):
+        return True
+    if isinstance(error, DataError):
+        code = getattr(error.orig, 'pgcode', None) or ''
+        return code.startswith('22') and code != _SPENT_SEQUENCE
+    return False
+
+
+def _store_one(db: Session, device: Dict[str, Any]) -> int:
+    try:
+        with db.begin_nested():
+            db.execute(_upsert([device]))
+        return 1
+    except Exception as error:
+        if not _is_row_error(error):
+            raise
+        # The fields that name the device, escaped and cut short, and the kind
+        # of error: database messages can quote the statement or the values
+        code = getattr(getattr(error, 'orig', None), 'pgcode', None)
+        logger.warning(
+            "[DEVICES] Skipped an ActiveSync device the database refused - user %r, device %r (%s%s)",
+            str(device.get('username'))[:64], str(device.get('device_id'))[:64],
+            type(error).__name__, f" {code}" if code else '',
+        )
+        return 0
+
+
+def _upsert(devices: List[Dict[str, Any]]):
     table = EasDevice.__table__
     stmt = insert(table).values(devices)
     new = stmt.excluded
@@ -164,7 +229,7 @@ def store_devices(db: Session, devices: List[Dict[str, Any]]) -> int:
             value = new[column]
         return case((newer, value), else_=table.c[column])
 
-    stmt = stmt.on_conflict_do_update(
+    return stmt.on_conflict_do_update(
         constraint='uq_eas_device',
         set_={
             'first_seen': func.least(table.c.first_seen, new.first_seen),
@@ -172,9 +237,6 @@ def store_devices(db: Session, devices: List[Dict[str, Any]]) -> int:
             **{c: follow_newest(c) for c in ('device_type', 'last_ip', 'last_command', 'last_status')},
         },
     )
-    db.execute(stmt)
-    db.commit()
-    return len(devices)
 
 
 def delete_stale_devices(db: Session, retention_days: int) -> int:
