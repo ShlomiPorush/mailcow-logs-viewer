@@ -50,9 +50,9 @@ class SizedImap:
                               if line.lower().startswith((b'message-id:', b'subject:'))) + b'\r\n'
             return 'OK', [(f'1 (UID {uid} BODY[HEADER.FIELDS (MESSAGE-ID SUBJECT)] {{{len(header)}}}'.encode(),
                            header), b')']
-        assert spec == '(RFC822)', spec
+        assert spec == '(BODY.PEEK[])', spec
         self.downloaded.append(uid)
-        return 'OK', [(f'1 (UID {uid} RFC822 {{{len(raw)}}}'.encode(), raw), b')']
+        return 'OK', [(f'1 (UID {uid} BODY[] {{{len(raw)}}}'.encode(), raw), b')']
 
     def expunge(self):
         return 'OK', [b'']

@@ -6,7 +6,7 @@ mailcow answers HTTP 200 also when it refuses an item, with an entry of type
 import asyncio
 from contextlib import contextmanager
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, MagicMock, Mock
 
 import pytest
 
@@ -27,7 +27,7 @@ def state(monkeypatch):
     deny = SimpleNamespace(id=2, name="Deny", match_type="subject", match_value="blocked",
                            is_regex=False, action="delete", hit_count=0, last_hit_at=None)
     by_id = {1: allow, 2: deny}
-    db = Mock()
+    db = MagicMock()
 
     def where(*criteria):
         # QuarantineRule.id == rule_id: answer with that rule

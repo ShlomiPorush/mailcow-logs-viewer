@@ -30,6 +30,7 @@ from .config import settings
 from .database import get_db_context
 from .mailcow_api import mailcow_api, MailcowAPIError
 from .models import RawServiceLog, SystemSetting
+from .services.db_values import add_rows, strip_nul
 
 logger = logging.getLogger(__name__)
 
@@ -162,10 +163,13 @@ def compute_message_hash(service: str, time_val: Any, raw_data: dict) -> str:
 
 def _prepare_candidates(service: str, logs: List[Dict[str, Any]]) -> List[tuple]:
     """Turn raw API entries into (timestamp, message_hash, entry) tuples,
-    skipping anything without a usable time."""
+    skipping anything without a usable time. NUL is dropped first, so the
+    hash, the stored line and the live broadcast all use the same entry:
+    PostgreSQL cannot store NUL in JSON."""
     candidates = []
     for log_entry in logs:
         try:
+            log_entry = strip_nul(log_entry)
             time_val = log_entry.get('time') or log_entry.get('unix_time', 0)
             # mailcow API often returns time as a string - cast to number
             try:
@@ -205,24 +209,21 @@ def _load_stored(db, service: str, hashes: List[str]) -> Dict[str, datetime]:
 
 def _store_page(db, service: str, candidates: List[tuple], known: Set[str]) -> List[Dict[str, Any]]:
     """Add the candidates that are not yet stored. Returns their raw entries.
-    Mutates `known` so a hash repeated within one cycle is stored once."""
-    new_entries = []
+    Mutates `known` so a hash repeated within one cycle is stored once.
+
+    A line the database refuses is logged and skipped, without the others on
+    the page. Its hash stays in `known`, so this cycle does not try it again,
+    but it is not reported as stored."""
+    rows = []
+    entries = []
     for timestamp, msg_hash, log_entry in candidates:
         if msg_hash in known:
             continue
-        try:
-            db.add(RawServiceLog(
-                service=service,
-                time=timestamp,
-                message_hash=msg_hash,
-                raw_data=log_entry,
-            ))
-            new_entries.append(log_entry)
-            known.add(msg_hash)
-        except Exception as e:
-            logger.error(f"[RAW LOGS] Error inserting {service} entry: {e}")
-            continue
-    return new_entries
+        known.add(msg_hash)
+        rows.append(dict(service=service, time=timestamp, message_hash=msg_hash, raw_data=log_entry))
+        entries.append(log_entry)
+    stored = add_rows(db, RawServiceLog, rows, f'{service} log line')
+    return [entry for entry, ok in zip(entries, stored) if ok]
 
 
 def _page_is_history(candidates: List[tuple], stored: Dict[str, datetime],
