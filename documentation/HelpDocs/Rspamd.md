@@ -16,7 +16,7 @@ Header-From and envelope-sender denylists add 2050 to the spam score; their allo
 
 Lines starting with `#` are comments; blank lines do not count as entries. Validation checks slash-delimited regular expressions and warns about bare addresses. Other lines, including words, domains, header patterns and language codes, are accepted as entered.
 
-Saving refuses invalid patterns, anchors bare addresses and writes the whole map through mailcow. Rspamd reloads it. **Discard** reloads from Rspamd. The editor does not refresh automatically while you edit.
+Saving refuses invalid patterns, anchors bare addresses and writes the whole map through mailcow. Rspamd reloads it. **Discard** reloads from Rspamd. The editor does not refresh automatically while you edit. When the map changed since you opened it, for example by the suppression sync, the save is refused and your edits stay in the editor; **Reload** shows the current map.
 
 > [!NOTE]
 > In **Recipient Denylist**, the lines between `# === MANAGED BY MAILCOW LOGS VIEWER - DO NOT EDIT BELOW ===` and `# === END MANAGED SECTION ===` are the suppression list. An entry you add or delete there is added to or deleted from the list on the next read. Keep each marker line once.
