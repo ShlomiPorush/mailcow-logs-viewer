@@ -2,6 +2,8 @@
 
 **Base URL:** `https://logs.example.com/api`. A heading path without `/api`, such as `GET /health`, is relative to the base URL; `/login` and `/ws/raw-logs` are at the application root.
 
+The app also serves an interactive reference at `/docs`, drawn from `/openapi.json`, where a request can be tried against the server. Both need a session like any page.
+
 What applies to every endpoint:
 
 - **Authentication:** with Basic authentication or OAuth2/OIDC on, every endpoint except the [public ones](#sign-in-methods) needs a session cookie or Basic credentials.

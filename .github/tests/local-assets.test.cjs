@@ -19,7 +19,7 @@ function cssFiles(dir) {
 
 test('HTML pages load scripts, styles, icons and images only from the app', () => {
     const external = [];
-    for (const page of ['index.html', 'login.html']) {
+    for (const page of ['index.html', 'login.html', 'api-docs.html']) {
         const html = fs.readFileSync(path.join(FRONTEND, page), 'utf8');
         for (const m of html.matchAll(/<(script|link|img|iframe|source|video|audio)\b[^>]*?\b(?:src|href)\s*=\s*["']([^"']+)["']/gi)) {
             if (EXTERNAL.test(m[2])) external.push(`${page}: <${m[1]}> ${m[2]}`);

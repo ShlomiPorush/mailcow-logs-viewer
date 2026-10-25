@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>API reference - mailcow Logs Viewer</title>
+    <link rel="icon" href="/static/assets/icons/favicon.ico" sizes="any">
+    <link rel="icon" type="image/svg+xml" href="/static/assets/icons/app-icon.svg">
+    <!-- The app's fonts and color tokens; api-docs.js maps Scalar's colors onto them -->
+    <link rel="stylesheet" href="/static/assets/css/ui.css?v=1">
+    <script>
+        // The theme the app uses, before anything is drawn
+        (function () {
+            const theme = localStorage.getItem('theme');
+            if (theme === 'dark' || (!theme && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+                document.documentElement.classList.add('dark');
+            }
+        })();
+    </script>
+</head>
+<body>
+    <!-- Never id="api-reference": the bundle starts a second reference on an
+         element with that id, with Scalar's defaults instead of api-docs.js -->
+    <div id="api-docs"></div>
+    <script src="/static/assets/libs/scalar-api-reference.min.js?v=1"></script>
+    <script src="/static/api-docs.js?v=1"></script>
+</body>
+</html>
