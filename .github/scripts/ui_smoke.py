@@ -47,11 +47,13 @@ SAFE_SELECTORS = '.settings-edit-tab'
 
 # API errors that are the correct answer in the smoke environment, where
 # mailcow is an unreachable placeholder. Each entry: (method, path regex, status, reason).
+# A read from mailcow that fails answers 502 (Bad Gateway); Fail2ban answers 503.
 MAILCOW_DOWN = 'reads from mailcow, which is an unreachable placeholder in the smoke test'
 EXPECTED_ERRORS = [
-    ('GET', r'^/api/status/(version|containers|mailcow-info|storage)$', 500, MAILCOW_DOWN),
-    ('GET', r'^/api/(fail2ban|queue|quarantine)$', 500, MAILCOW_DOWN),
-    ('GET', r'^/api/domains/all$', 500, MAILCOW_DOWN),
+    ('GET', r'^/api/status/(version|containers|mailcow-info|storage)$', 502, MAILCOW_DOWN),
+    ('GET', r'^/api/(queue|quarantine)$', 502, MAILCOW_DOWN),
+    ('GET', r'^/api/fail2ban$', 503, MAILCOW_DOWN),
+    ('GET', r'^/api/domains/all$', 502, MAILCOW_DOWN),
 ]
 
 MAX_CLICKS_PER_PAGE = 60
