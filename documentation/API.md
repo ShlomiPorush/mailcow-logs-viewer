@@ -1621,7 +1621,7 @@ Clears the in-memory cache of `GET /api/dmarc/domains` (5 minutes) in every app 
 | `sort_by` | string | `created_at` | Orders a paged request by `created_at` (import date), `type`, `domain`, `reporter`, `records` (record or policy count) or `period` (start of the report period). Domain and reporter compare in lower case. Any other value returns `422`. |
 | `sort_dir` | string | `desc` | `asc` or `desc`; any other value returns `422`. |
 
-DMARC and TLS report summaries together, newest import first. Each report has `id`, `type` (`dmarc` or `tls`), `domain`, `org_name`, `begin_date`, `end_date`, `record_count`, `created_at` and `report_id`.
+DMARC and TLS report summaries together, newest import first. Each report has `id`, `type` (`dmarc` or `tls`), `domain`, `org_name`, `begin_date`, `end_date`, `record_count`, `created_at`, `report_id` and `shared_report_id` (true when another report of the same type has the same `report_id` and other content).
 
 With `page`, the response has `reports`, `total`, `allow_delete`, `page`, `limit`, `total_pages`, `sort_by` and `sort_dir`. The sort covers both types and is applied before paging; empty values sort last, and ties fall back to the newest import, then type, then the highest ID. An empty result is page 1 of 1, and a page past the end is clamped to the last page. Imports or deletions between requests can shift reports; reload from page 1. Without `page`, the response has only `reports`, `total` and `allow_delete`, newest first, and ignores the sort. `total` counts the reports that match `search`.
 
@@ -1750,7 +1750,7 @@ curl -b cookies.txt -F "file=@report.xml.gz" https://logs.example.com/api/dmarc/
 - **TLS-RPT** (RFC 8460 JSON): a name ending in `.json`, `.json.gz` or `.json.zip` (any case), or a ZIP of any name that holds a `.json` member and no `.xml` member; the first `.json` member is read. A report needs `report-id`, a valid `date-range` and at least one policy with a valid `policy-domain`.
 - **DMARC**: anything else. Plain XML, gzip-compressed XML or ZIP (the first `.xml` member); the content decides the format, not the name.
 
-Success returns `status: "success"`, `report_type` (`dmarc` or `tls-rpt`), `message`, the database `report_id`, and `records_count` (DMARC) or `policies_count` (TLS). A report ID already stored returns HTTP 200 with `status: "duplicate"`.
+Success returns `status: "success"`, `report_type` (`dmarc` or `tls-rpt`), `message`, the database `report_id`, and `records_count` (DMARC) or `policies_count` (TLS). A report whose content is already stored returns HTTP 200 with `status: "duplicate"`. A file over the import limits, or a ZIP with more than one report, returns 400 with the reason.
 
 An upload over 10 MB returns 413; a report that decompresses to more than 10 MB, or an invalid report, 400. With `DMARC_MANUAL_UPLOAD_ENABLED=false`, 403.
 

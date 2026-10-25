@@ -92,11 +92,12 @@ DMARC and TLS reports arrive by email at the addresses in the `rua=` tags of you
 How the import works:
 
 - It reads unread messages in **IMAP Folder** (`INBOX` by default) whose subject contains `Report Domain:`, `DMARC`, `Report-ID:`, `TLS-RPT` or `TLS Report`. With **IMAP Scan All Unseen** on, it reads every unread message, for reports with subjects in other languages.
-- An XML attachment is read as a DMARC report, a JSON attachment as a TLS report; a ZIP is opened to see which one it holds. Each report must expand to 10 MB or less.
-- A report that is already stored counts as a duplicate and is not imported twice.
-- An imported message is deleted with **IMAP Delete After** on (the default) or marked as read with it off.
+- An XML attachment is read as a DMARC report, a JSON attachment as a TLS report; a ZIP is opened to see which one it holds, and must hold only one. Each report must expand to 10 MB or less.
+- A message may hold at most 10 reports, with at most 20,000 records together (for TLS, policies and failure details) and 10 MB of report data. Identical records in a report are stored once, with their counts added up. A message over a limit is not imported at all.
+- A report counts as a duplicate, and is not imported twice, only when the same report with the same content is already stored. The sender writes the report ID, so a report with the ID of a stored report but other content is stored as well, and both are marked **Shared report ID** under **Manage Reports**. Its message stays in the mailbox, marked as read.
+- A message is deleted with **IMAP Delete After** on (the default), or marked as read with it off, once every report in it is imported or already stored.
 - Bounces and messages without a report are marked as read and skipped. They are not counted as failures and never deleted. mailcow sends its own DMARC reports from an address that often receives reports, so bounces of those reports land here.
-- A message that cannot be imported is marked as read, left in the mailbox and counted as failed. Messages larger than 20 MB are not downloaded at all and count as failed.
+- A message with a report that cannot be imported is marked as read, left in the mailbox and counted as failed; its other reports are imported. Messages larger than 20 MB are not downloaded at all and count as failed.
 - Messages are handled in batches of **IMAP Batch Size** (10 by default).
 
 Reading a report in a mail client before import makes it ineligible until you mark it unread again.
@@ -115,7 +116,7 @@ Reading a report in a mail client before import makes it ineligible until you ma
 - DMARC: a plain `.xml` file, a gzip file (`.xml.gz`) or a ZIP that holds the XML.
 - TLS: `.json`, `.json.gz`, or a ZIP that holds the JSON, whatever its name.
 
-The file may be at most 10 MB and must expand to 10 MB or less. The app tells XML, gzip and ZIP apart by their content, not by the file name. A report already stored is reported as a duplicate.
+The file may be at most 10 MB and must expand to 10 MB or less. The app tells XML, gzip and ZIP apart by their content, not by the file name. The limits and the duplicate rule of the import apply.
 
 Upload is allowed by default. Turn it off with **Manual Upload Enabled** under **Settings** > **DMARC & TLS**; the button then disappears.
 

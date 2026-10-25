@@ -5,8 +5,6 @@ import asyncio
 import logging
 import hashlib
 import json
-import zipfile
-from io import BytesIO
 from typing import Annotated, List, Optional
 from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, BackgroundTasks, Query
@@ -15,7 +13,8 @@ from sqlalchemy import func, and_, or_, case, literal, cast, Float
 
 from ..database import SessionLocal, get_db
 from ..models import DMARCReport, DMARCRecord, DMARCSync, DomainDNSCheck, TLSReport, TLSReportPolicy
-from ..services.dmarc_parser import parse_dmarc_file
+from ..services.report_identity import ReportBudget, ReportRejectedError, report_kind
+from ..services.report_store import conflicting_report_ids, prepare_report_file, report_sender, store_report
 from ..services.geoip_service import enrich_dmarc_record
 from ..services.dmarc_imap_service import sync_dmarc_reports_from_imap, is_sync_running
 from ..services.dmarc_cache import (
@@ -255,7 +254,15 @@ def get_all_reports(
                 "created_at": format_datetime_for_api(report.created_at),
                 "report_id": report.report_id
             })
-        
+
+        # Reports that share their report ID with another report of other
+        # content: the sender picks the ID, so one of them may be forged
+        for kind, type_name in (("dmarc", "dmarc"), ("tls-rpt", "tls")):
+            rows = [row for row in reports if row["type"] == type_name]
+            shared = conflicting_report_ids(db, kind, (row["report_id"] for row in rows))
+            for row in rows:
+                row["shared_report_id"] = row["report_id"] in shared
+
         if selected is not None:
             positions = {(row.type, row.id): index for index, row in enumerate(selected)}
             reports.sort(key=lambda row: positions[row["type"], row["id"]])
@@ -1875,18 +1882,7 @@ async def upload_report(
 
 
 def _is_tls_rpt_upload(file_content: bytes, filename: str) -> bool:
-    """TLS-RPT by its name (.json, .json.gz, RFC 8460), or a ZIP by any name
-    that holds JSON and no XML: senders name their ZIPs freely."""
-    if filename.lower().endswith(('.json', '.json.gz', '.json.zip')):
-        return True
-    if file_content[:4] != b'PK\x03\x04':
-        return False
-    try:
-        with zipfile.ZipFile(BytesIO(file_content)) as z:
-            names = [n.lower() for n in z.namelist()]
-    except zipfile.BadZipFile:
-        return False
-    return any(n.endswith('.json') for n in names) and not any(n.endswith('.xml') for n in names)
+    return report_kind(filename, file_content) == 'tls-rpt'
 
 
 def _upload_report_worker(file_content: bytes, filename: str):
@@ -1901,110 +1897,48 @@ def _upload_report_worker(file_content: bytes, filename: str):
             raise
 
 
-def _upload_dmarc_report(file_content: bytes, filename: str, db: Session):
-    """Handle DMARC report upload"""
-    parsed_data = parse_dmarc_file(file_content, filename)
-    
-    if not parsed_data:
-        raise HTTPException(status_code=400, detail="Failed to parse DMARC report")
-    
-    records_data = parsed_data.pop('records', [])
-    report_data = parsed_data
-    
-    existing = db.query(DMARCReport).filter(
-        DMARCReport.report_id == report_data['report_id']
-    ).first()
-    
-    if existing:
+def _upload_report(kind: str, file_content: bytes, filename: str, db: Session):
+    """Store an uploaded report with the rules of the IMAP import: the same
+    limits, and a duplicate only when the same content is already stored."""
+    label = 'DMARC' if kind == 'dmarc' else 'TLS-RPT'
+    try:
+        prepared = prepare_report_file(kind, file_content, filename)
+        if prepared is not None:
+            ReportBudget().add(prepared.items, prepared.size)
+    except ReportRejectedError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if prepared is None:
+        raise HTTPException(status_code=400, detail=f"Failed to parse {label} report")
+
+    status, report = store_report(db, prepared)
+    # Also keeps the hashes computed for reports an older version stored
+    db.commit()
+    if status == 'duplicate':
         return {
             'status': 'duplicate',
-            'report_type': 'dmarc',
-            'message': f'Report {report_data["report_id"]} already exists'
+            'report_type': kind,
+            'message': f'{label} report {prepared.report_id} from {report_sender(report)} is already stored'
         }
-    
-    report = DMARCReport(**report_data)
-    db.add(report)
-    db.flush()
-    
-    for record_data in records_data:
-        record_data['dmarc_report_id'] = report.id
-        enriched = enrich_dmarc_record(record_data)
-        record = DMARCRecord(**enriched)
-        db.add(record)
-    
-    db.commit()
-    
-    # Clear cache
     clear_dmarc_cache(db)
-    
-    return {
+
+    domain = report.domain if kind == 'dmarc' else report.policy_domain
+    response = {
         'status': 'success',
-        'report_type': 'dmarc',
-        'message': f'Uploaded DMARC report for {report.domain} from {report.org_name}',
+        'report_type': kind,
+        'message': f'Uploaded {label} report for {domain} from {report_sender(report)}',
         'report_id': report.id,
-        'records_count': len(records_data)
     }
+    if status == 'conflict':
+        response['message'] += '. Another report has the same report ID and different content'
+    response['records_count' if kind == 'dmarc' else 'policies_count'] = len(prepared.children)
+    return response
+
+
+def _upload_dmarc_report(file_content: bytes, filename: str, db: Session):
+    """Handle DMARC report upload"""
+    return _upload_report('dmarc', file_content, filename, db)
 
 
 def _upload_tls_rpt_report(file_content: bytes, filename: str, db: Session):
     """Handle TLS-RPT report upload"""
-    from ..services.tls_rpt_parser import parse_tls_rpt_file
-    
-    parsed_data = parse_tls_rpt_file(file_content, filename)
-    
-    if not parsed_data:
-        raise HTTPException(status_code=400, detail="Failed to parse TLS-RPT report")
-    
-    # Extract policies
-    policies_data = parsed_data.pop('policies', [])
-    
-    # Check for duplicate
-    existing = db.query(TLSReport).filter(
-        TLSReport.report_id == parsed_data['report_id']
-    ).first()
-    
-    if existing:
-        return {
-            'status': 'duplicate',
-            'report_type': 'tls-rpt',
-            'message': f'TLS-RPT report {parsed_data["report_id"]} already exists'
-        }
-    
-    # Create TLS report
-    tls_report = TLSReport(
-        report_id=parsed_data['report_id'],
-        organization_name=parsed_data.get('organization_name', 'Unknown'),
-        contact_info=parsed_data.get('contact_info', ''),
-        policy_domain=parsed_data['policy_domain'],
-        start_datetime=parsed_data['start_datetime'],
-        end_datetime=parsed_data['end_datetime']
-    )
-    db.add(tls_report)
-    db.flush()
-    
-    # Create policy records
-    for policy_data in policies_data:
-        policy = TLSReportPolicy(
-            tls_report_id=tls_report.id,
-            policy_type=policy_data.get('policy_type', 'unknown'),
-            policy_domain=policy_data.get('policy_domain', ''),
-            policy_string=policy_data.get('policy_string', []),
-            mx_host=policy_data.get('mx_host', []),
-            successful_session_count=policy_data.get('successful_session_count', 0),
-            failed_session_count=policy_data.get('failed_session_count', 0),
-            failure_details=policy_data.get('failure_details', [])
-        )
-        db.add(policy)
-    
-    db.commit()
-    
-    # Clear cache
-    clear_dmarc_cache(db)
-    
-    return {
-        'status': 'success',
-        'report_type': 'tls-rpt',
-        'message': f'Uploaded TLS-RPT report for {tls_report.policy_domain} from {tls_report.organization_name}',
-        'report_id': tls_report.id,
-        'policies_count': len(policies_data)
-    }
+    return _upload_report('tls-rpt', file_content, filename, db)

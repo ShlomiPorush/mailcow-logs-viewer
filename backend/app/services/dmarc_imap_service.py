@@ -5,10 +5,6 @@ Automatically fetches and processes DMARC and TLS-RPT reports from email inbox
 import logging
 import imaplib
 import email
-import gzip
-import zipfile
-import io
-import json
 import re
 import threading
 from datetime import datetime, timezone
@@ -19,10 +15,15 @@ from email.header import decode_header as decode_rfc2047
 from ..config import settings
 from .mail_tls import mail_tls_context, certificate_error_hint
 from ..database import SessionLocal
-from ..models import DMARCSync, DMARCReport, DMARCRecord, TLSReport, TLSReportPolicy
-from ..services.dmarc_parser import parse_dmarc_file
-from ..services.tls_rpt_parser import parse_tls_rpt_file, is_tls_rpt_json
-from ..services.geoip_service import enrich_dmarc_record
+from ..models import DMARCSync
+from ..services.report_identity import (
+    MAX_REPORT_ATTACHMENTS_PER_EMAIL,
+    ReportBudget,
+    ReportLimitError,
+    ReportRejectedError,
+    report_kind,
+)
+from ..services.report_store import ReportNotStored, prepare_report_file, store_report
 from ..services.dmarc_notifications import send_dmarc_error_notification
 from ..services.dmarc_cache import clear_dmarc_cache
 
@@ -174,106 +175,6 @@ class DMARCImapService:
         """Alias for backward compatibility"""
         return self.search_report_emails()
     
-    def is_valid_dmarc_email(self, msg: EmailMessage) -> bool:
-        """
-        Validate that this is a genuine DMARC report email
-        
-        Accepts multiple DMARC email formats:
-        - Standard: "Report Domain: X Submitter: Y Report-ID: Z"
-        - Yahoo format: "Report Domain: X Submitter: Y" (no Report-ID)
-        - Alternative: Contains "DMARC" in subject
-        - Microsoft Outlook: DMARC-like attachment filename pattern
-        
-        Primary validation is the attachment (.xml.gz or .zip with DMARC content)
-        """
-        try:
-            subject = _decode_subject(msg.get('subject', '')).lower()
-            
-            # Check for compressed DMARC attachments FIRST (most reliable indicator)
-            has_dmarc_attachment = False
-            has_dmarc_filename = False
-            
-            for part in msg.walk():
-                filename = part.get_filename()
-                if filename:
-                    filename_lower = filename.lower()
-                    # DMARC reports come as .xml.gz, .xml, or .zip files
-                    if filename_lower.endswith('.xml.gz') or filename_lower.endswith('.zip') or filename_lower.endswith('.xml'):
-                        has_dmarc_attachment = True
-                        # Check if filename looks like a DMARC report
-                        # Microsoft format: enterprise.protection.outlook.com!domain!timestamp!timestamp.xml.gz
-                        # Standard format: domain!report-domain!timestamp!timestamp.xml.gz
-                        if '!' in filename and (filename_lower.endswith('.xml.gz') or filename_lower.endswith('.xml') or filename_lower.endswith('.zip')):
-                            has_dmarc_filename = True
-                        break
-            
-            if not has_dmarc_attachment:
-                logger.debug(f"Email has no compressed DMARC attachment: {subject}")
-                return False
-            
-            # Check subject format - be flexible to support different providers
-            has_report_domain = 'report domain:' in subject
-            has_submitter = 'submitter:' in subject
-            has_report_id = 'report-id:' in subject
-            has_dmarc_keyword = 'dmarc' in subject
-            
-            # Accept if:
-            # 1. Has "Report Domain:" and ("Submitter:" or "Report-ID:") - standard format
-            # 2. Has "Report Domain:" only (Yahoo and others) - we have verified attachment
-            # 3. Has "DMARC" keyword in subject with valid attachment
-            # 4. Has DMARC-like filename pattern (Microsoft Outlook and others) - attachment name contains '!'
-            is_valid_subject = (
-                (has_report_domain and (has_submitter or has_report_id)) or  # Standard format
-                (has_report_domain) or  # Yahoo/minimal format (attachment already verified)
-                (has_dmarc_keyword) or  # DMARC keyword with attachment
-                (has_dmarc_filename)  # Microsoft Outlook format - DMARC filename pattern
-            )
-            
-            if not is_valid_subject:
-                logger.debug(f"Email does not match DMARC subject/filename pattern: {subject}")
-                return False
-            
-            return True
-            
-        except Exception as e:
-            logger.error(f"Error validating DMARC email: {e}")
-            return False
-    
-    def is_valid_tls_rpt_email(self, msg: EmailMessage) -> bool:
-        """
-        Validate that this is a TLS-RPT report email
-        
-        TLS-RPT emails typically have:
-        - Subject containing "TLS-RPT" or "TLS Report"
-        - JSON or JSON.GZ attachment
-        - Some providers send with generic subjects like "Report Domain: ..."
-        """
-        try:
-            subject = _decode_subject(msg.get('subject', '')).lower()
-            
-            # Check for JSON/ZIP attachments
-            has_json_attachment = False
-            
-            for part in msg.walk():
-                filename = part.get_filename()
-                if filename:
-                    filename_lower = filename.lower()
-                    if filename_lower.endswith('.json') or filename_lower.endswith('.json.gz') or filename_lower.endswith('.zip'):
-                        has_json_attachment = True
-                        break
-            
-            if not has_json_attachment:
-                return False
-            
-            # Trust the attachment if it looks like a TLS report
-            # If it has a json/gz/zip attachment, we should try to process it as potential TLS-RPT
-            # The parser will validate the content anyway
-            return True
-            
-        except Exception as e:
-            logger.error(f"Error validating TLS-RPT email: {e}")
-            return False
-
     def is_bounce(self, msg: EmailMessage) -> bool:
         """
         Detect a delivery status notification (RFC 3464).
@@ -291,60 +192,6 @@ class DMARCImapService:
             for part in msg.walk()
         )
 
-    def detect_email_type(self, msg: EmailMessage) -> str:
-        """
-        Detect if email is DMARC or TLS-RPT by inspecting attachments
-        
-        Returns: 'dmarc', 'tls-rpt', or 'unknown'
-        """
-        try:
-            # Check attachments FIRST - content is king
-            for part in msg.walk():
-                filename = part.get_filename()
-                if not filename:
-                    continue
-                    
-                filename_lower = filename.lower()
-                content = None
-                
-                # Check explicit extensions
-                if filename_lower.endswith('.xml.gz') or filename_lower.endswith('.xml'):
-                    return 'dmarc'
-                
-                if filename_lower.endswith('.json.gz') or filename_lower.endswith('.json'):
-                    return 'tls-rpt'
-                
-                # Check ZIP content
-                if filename_lower.endswith('.zip'):
-                    try:
-                        content = part.get_payload(decode=True)
-                        if content:
-                            with zipfile.ZipFile(io.BytesIO(content)) as zf:
-                                for name in zf.namelist():
-                                    name_lower = name.lower()
-                                    if name_lower.endswith('.xml'):
-                                        logger.info(f"Found XML in ZIP {filename}, identifying as DMARC")
-                                        return 'dmarc'
-                                    if name_lower.endswith('.json'):
-                                        logger.info(f"Found JSON in ZIP {filename}, identifying as TLS-RPT")
-                                        return 'tls-rpt'
-                    except Exception as e:
-                        logger.warning(f"Failed to inspect ZIP {filename}: {e}")
-                        
-            # Fallback to subject/header heuristics if no clear attachment type found
-            # but reject ambiguous ZIPs that we couldn't inspect or were empty of relevant files
-            
-            if self.is_valid_tls_rpt_email(msg):
-                return 'tls-rpt'
-            elif self.is_valid_dmarc_email(msg):
-                return 'dmarc'
-                
-            return 'unknown'
-            
-        except Exception as e:
-            logger.error(f"Error detecting email type: {e}")
-            return 'unknown'
-    
     def extract_attachments(self, msg: EmailMessage, include_json: bool = False) -> List[Tuple[str, bytes]]:
         """
         Extract compressed attachments from email
@@ -438,8 +285,10 @@ class DMARCImapService:
         - reports_created: int
         - reports_duplicate: int
         - error: str or None
-        - report_type: 'dmarc' or 'tls-rpt'
+        - report_type: 'dmarc', 'tls-rpt' or 'mixed'
         - skipped: why the email is not a report (bounce or no report attached), or None
+        - keep: True when a report in it shares its report ID with another stored
+          report: the email stays in the mailbox even when it was imported
         """
         result = {
             'success': False,
@@ -449,7 +298,8 @@ class DMARCImapService:
             'message_id': None,
             'subject': None,
             'report_type': None,
-            'skipped': None
+            'skipped': None,
+            'keep': False
         }
         
         try:
@@ -479,175 +329,95 @@ class DMARCImapService:
                 result['skipped'] = 'bounce'
                 return result
 
-            # Detect email type
-            email_type = self.detect_email_type(msg)
-            result['report_type'] = email_type
-            
-            if email_type == 'tls-rpt':
-                return self._process_tls_rpt_email(msg, db, result)
-            elif email_type == 'dmarc':
-                return self._process_dmarc_email(msg, db, result)
-            else:
-                result['skipped'] = 'no report attached'
-                return result
-            
+            return self._process_reports(msg, db, result)
+
         except Exception as e:
             logger.error(f"Error processing email {email_id}: {e}")
+            db.rollback()
             result['error'] = str(e)
             return result
-    
-    def _process_dmarc_email(self, msg: EmailMessage, db: SessionLocal, result: Dict) -> Dict:
-        """Process a DMARC email"""
-        # Extract attachments (DMARC: XML files)
-        attachments = self.extract_attachments(msg, include_json=False)
-        
+
+    def report_attachments(self, msg: EmailMessage) -> List[Tuple[str, bytes, str]]:
+        """Every report file of the email as (filename, content, 'dmarc' or 'tls-rpt').
+
+        Each file is classified on its own, so an email that carries a DMARC and
+        a TLS-RPT report has both read before it can count as imported.
+        """
+        return [(filename, content, report_kind(filename, content))
+                for filename, content in self.extract_attachments(msg, include_json=True)]
+
+    def _process_reports(self, msg: EmailMessage, db: SessionLocal, result: Dict) -> Dict:
+        """Import the reports of one email, all or nothing for the limits.
+
+        The email counts as imported (and may be deleted) only when every report
+        in it was stored or was already stored with the same content. Reports
+        are committed here, before the caller marks or deletes the email.
+        """
+        attachments = self.report_attachments(msg)
         if not attachments:
-            result['error'] = "No DMARC attachments found"
+            result['skipped'] = 'no report attached'
             return result
-        
-        # Process each attachment
-        attachment_errors = []
-        for filename, content in attachments:
-            try:
-                # Parse DMARC report
-                parsed_data = parse_dmarc_file(content, filename)
-                
-                if not parsed_data:
-                    attachment_errors.append(f"Failed to parse: {filename}")
-                    logger.warning(f"Failed to parse attachment: {filename}")
-                    continue
-                
-                # Extract records
-                records_data = parsed_data.pop('records', [])
-                report_data = parsed_data
-                
-                # Check for duplicate
-                existing = db.query(DMARCReport).filter(
-                    DMARCReport.report_id == report_data['report_id']
-                ).first()
-                
-                if existing:
-                    result['reports_duplicate'] += 1
-                    logger.info(f"Duplicate report: {report_data['report_id']}")
-                    continue
-                
-                # Create report
-                report = DMARCReport(**report_data)
-                db.add(report)
-                db.flush()
-                
-                # Create records with GeoIP enrichment
-                for record_data in records_data:
-                    record_data['dmarc_report_id'] = report.id
-                    enriched = enrich_dmarc_record(record_data)
-                    record = DMARCRecord(**enriched)
-                    db.add(record)
-                
-                db.commit()
-                result['reports_created'] += 1
-                logger.info(f"Created DMARC report: {report_data['report_id']}")
-                
-            except Exception as e:
-                db.rollback()
-                error_msg = f"Error processing {filename}: {str(e)}"
-                attachment_errors.append(error_msg)
-                logger.error(error_msg)
-        
-        # Determine success
-        return self._finalize_result(result, attachment_errors, "DMARC")
-    
-    def _process_tls_rpt_email(self, msg: EmailMessage, db: SessionLocal, result: Dict) -> Dict:
-        """Process a TLS-RPT email"""
-        # Extract attachments (TLS-RPT: JSON files)
-        attachments = self.extract_attachments(msg, include_json=True)
-        
-        # Filter to only JSON files (and ZIPs containing JSON)
-        json_attachments = [(f, c) for f, c in attachments if f.lower().endswith('.json') or f.lower().endswith('.json.gz') or f.lower().endswith('.zip')]
-        
-        if not json_attachments:
-            result['error'] = "No TLS-RPT JSON attachments found"
+        kinds = {kind for _, _, kind in attachments}
+        result['report_type'] = kinds.pop() if len(kinds) == 1 else 'mixed'
+
+        if len(attachments) > MAX_REPORT_ATTACHMENTS_PER_EMAIL:
+            result['error'] = (f"The email has {len(attachments)} report files, more than the "
+                               f"{MAX_REPORT_ATTACHMENTS_PER_EMAIL} allowed, so nothing from it was imported.")
             return result
-        
-        # Process each attachment
+
+        # Read every report before storing any, so an email over a limit stores nothing
+        budget = ReportBudget()
+        prepared = []
         attachment_errors = []
-        for filename, content in json_attachments:
+        for filename, content, kind in attachments:
             try:
-                # Parse TLS-RPT report
-                parsed_data = parse_tls_rpt_file(content, filename)
-                
-                if not parsed_data:
-                    attachment_errors.append(f"Failed to parse: {filename}")
-                    logger.warning(f"Failed to parse TLS-RPT attachment: {filename}")
+                report = prepare_report_file(kind, content, filename)
+                if report is not None:
+                    budget.add(report.items, report.size)
+            except ReportLimitError as e:
+                result['error'] = f"{filename}: {e} Nothing from this email was imported."
+                return result
+            except ReportRejectedError as e:
+                attachment_errors.append(f"{filename}: {e}")
+                continue
+            if report is None:
+                attachment_errors.append(f"Failed to parse: {filename}")
+                logger.warning(f"Failed to parse attachment: {filename}")
+                continue
+            prepared.append((filename, report))
+
+        created = duplicate = 0
+        keep = False
+        try:
+            # One order for the report ID locks, whatever the order of the files
+            for filename, report in sorted(prepared, key=lambda item: (item[1].kind, item[1].report_id)):
+                try:
+                    status, _ = store_report(db, report)
+                except ReportNotStored as e:
+                    # The report's own savepoint is rolled back; the others stay
+                    attachment_errors.append(f"Error processing {filename}: {e}")
+                    logger.error(f"Error processing {filename}: {e}")
                     continue
-                
-                # Extract policies
-                policies_data = parsed_data.pop('policies', [])
-                
-                # Check for duplicate
-                existing = db.query(TLSReport).filter(
-                    TLSReport.report_id == parsed_data['report_id']
-                ).first()
-                
-                if existing:
-                    result['reports_duplicate'] += 1
-                    logger.info(f"Duplicate TLS-RPT report: {parsed_data['report_id']}")
-                    continue
-                
-                # Create TLS report
-                tls_report = TLSReport(
-                    report_id=parsed_data['report_id'],
-                    organization_name=parsed_data.get('organization_name', 'Unknown'),
-                    contact_info=parsed_data.get('contact_info', ''),
-                    policy_domain=parsed_data['policy_domain'],
-                    start_datetime=parsed_data['start_datetime'],
-                    end_datetime=parsed_data['end_datetime']
-                )
-                db.add(tls_report)
-                db.flush()
-                
-                # Create policy records
-                for policy_data in policies_data:
-                    policy = TLSReportPolicy(
-                        tls_report_id=tls_report.id,
-                        policy_type=policy_data.get('policy_type', 'unknown'),
-                        policy_domain=policy_data.get('policy_domain', ''),
-                        policy_string=policy_data.get('policy_string', []),
-                        mx_host=policy_data.get('mx_host', []),
-                        successful_session_count=policy_data.get('successful_session_count', 0),
-                        failed_session_count=policy_data.get('failed_session_count', 0),
-                        failure_details=policy_data.get('failure_details', [])
-                    )
-                    db.add(policy)
-                
-                db.commit()
-                result['reports_created'] += 1
-                logger.info(f"Created TLS-RPT report: {parsed_data['report_id']}")
-                
-            except Exception as e:
-                db.rollback()
-                error_msg = f"Error processing TLS-RPT {filename}: {str(e)}"
-                attachment_errors.append(error_msg)
-                logger.error(error_msg)
-        
-        # Determine success
-        return self._finalize_result(result, attachment_errors, "TLS-RPT")
-    
-    def _finalize_result(self, result: Dict, attachment_errors: List[str], report_type: str) -> Dict:
-        """Finalize the result based on processing outcome"""
-        if result['reports_created'] > 0:
-            result['success'] = True
-        elif result['reports_duplicate'] > 0 and result['reports_created'] == 0:
-            # All reports were duplicates - this is actually OK, mark as success
-            result['success'] = True
-            result['error'] = None  # No error - duplicates are expected
+                if status == 'duplicate':
+                    duplicate += 1
+                else:
+                    created += 1
+                    # Another report has its report ID: keep the email for a look
+                    keep = keep or status == 'conflict'
+            db.commit()
+        except Exception as e:
+            db.rollback()
+            logger.error(f"Could not save the reports of the email: {e}")
+            result['error'] = f"The reports could not be saved: {e}"
+            return result
+
+        result['reports_created'] = created
+        result['reports_duplicate'] = duplicate
+        result['keep'] = keep
+        if attachment_errors:
+            result['error'] = "; ".join(attachment_errors)
         else:
-            # No reports created and no duplicates - something went wrong
-            result['success'] = False
-            if attachment_errors:
-                result['error'] = "; ".join(attachment_errors)
-            else:
-                result['error'] = f"No valid {report_type} reports found in attachments"
-        
+            result['success'] = True
         return result
     
     def mark_as_processed(self, email_id: str):
@@ -738,17 +508,17 @@ class DMARCImapService:
                     email_id = email_id.decode() if isinstance(email_id, bytes) else email_id
                     result = self.process_email(email_id, db)
                     sync_record.emails_processed += 1
+                    # Committed reports count even when another report of the email failed
+                    sync_record.reports_created += result['reports_created']
+                    sync_record.reports_duplicate += result['reports_duplicate']
 
                     if result['skipped']:
                         # Not a report (e.g. a bounce): not a failure, and never deleted
                         logger.info(f"Skipped email {email_id} ({result['skipped']}): {_decode_subject(result['subject'])}")
                         self.mark_as_processed(email_id)
                     elif result['success']:
-                        sync_record.reports_created += result['reports_created']
-                        sync_record.reports_duplicate += result['reports_duplicate']
-                        
-                        # Delete or mark as processed
-                        if self.delete_after:
+                        # Every report of the email is stored: delete or mark as processed
+                        if self.delete_after and not result.get('keep'):
                             self.delete_email(email_id)
                         else:
                             self.mark_as_processed(email_id)
@@ -763,7 +533,7 @@ class DMARCImapService:
                             'subject': result['subject'],
                             'error': error_msg
                         })
-                        # Also mark failed emails as processed to avoid re-processing
+                        # Kept in the mailbox, marked so it is not processed again
                         self.mark_as_processed(email_id)
                     
                     db.commit()

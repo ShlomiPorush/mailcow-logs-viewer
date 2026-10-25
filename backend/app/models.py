@@ -230,8 +230,12 @@ class DMARCReport(Base):
     
     id = Column(Integer, primary_key=True, index=True)
     
-    report_id = Column(String(255), unique=True, index=True, nullable=False)
-    
+    # Chosen by the sender, so not unique: a report is the same report only
+    # when its content is the same (services/report_identity.py). NULL only on
+    # rows written by an older version; the app computes them on demand.
+    report_id = Column(String(255), nullable=False)
+    content_hash = Column(String(64))
+
     domain = Column(String(255), index=True, nullable=False)
     
     org_name = Column(String(255), index=True, nullable=False)
@@ -252,6 +256,7 @@ class DMARCReport(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
     __table_args__ = (
+        UniqueConstraint('report_id', 'content_hash', name='uq_dmarc_reports_report_id_hash'),
         Index('idx_dmarc_report_domain_date', 'domain', 'begin_date'),
         Index('idx_dmarc_report_org', 'org_name'),
     )
@@ -420,8 +425,9 @@ class TLSReport(Base):
     
     id = Column(Integer, primary_key=True, index=True)
     
-    # Report identification
-    report_id = Column(String(255), unique=True, index=True, nullable=False)
+    # Report identification: not unique, see DMARCReport.report_id
+    report_id = Column(String(255), nullable=False)
+    content_hash = Column(String(64))
     
     # Organization that sent the report
     organization_name = Column(String(255), index=True)
@@ -441,6 +447,7 @@ class TLSReport(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
     __table_args__ = (
+        UniqueConstraint('report_id', 'content_hash', name='uq_tls_reports_report_id_hash'),
         Index('idx_tls_report_domain_date', 'policy_domain', 'start_datetime'),
         Index('idx_tls_report_org', 'organization_name'),
     )

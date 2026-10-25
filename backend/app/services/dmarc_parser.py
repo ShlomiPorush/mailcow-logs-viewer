@@ -17,6 +17,15 @@ from .safe_decompress import (
     gzip_decompress_limited,
     zip_read_limited,
 )
+from .report_identity import (
+    MAX_REPORT_ITEMS,
+    MAX_STORED_COUNT,
+    REPORT_TOO_LARGE,
+    ReportLimitError,
+    ReportRejectedError,
+    dmarc_record_key,
+    zip_report_member,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +64,7 @@ def parse_dmarc_file(file_content: bytes, filename: str) -> Optional[Dict[str, A
     try:
         if len(file_content) > MAX_COMPRESSED_BYTES:
             logger.error(f"DMARC file {filename} exceeds compressed size limit, rejecting")
-            return None
+            raise ReportLimitError(REPORT_TOO_LARGE)
 
         # Determine file type and extract XML
         xml_content = None
@@ -67,10 +76,10 @@ def parse_dmarc_file(file_content: bytes, filename: str) -> Optional[Dict[str, A
         elif file_content[:4] == b'PK\x03\x04':
             # ZIP compressed (Google uses this)
             with zipfile.ZipFile(BytesIO(file_content)) as z:
-                # Get first XML file in zip
-                xml_files = [name for name in z.namelist() if name.lower().endswith('.xml')]
-                if xml_files:
-                    xml_content = zip_read_limited(z, xml_files[0], source=filename)
+                # The one XML report in the ZIP
+                xml_file = zip_report_member(z, '.xml')
+                if xml_file:
+                    xml_content = zip_read_limited(z, xml_file, source=filename)
                 else:
                     logger.error(f"No XML file found in ZIP: {filename}")
                     return None
@@ -89,8 +98,12 @@ def parse_dmarc_file(file_content: bytes, filename: str) -> Optional[Dict[str, A
         return parse_dmarc_xml(xml_content.decode('utf-8-sig'))
 
     except DecompressionLimitError as e:
+        # A limit: nothing from the email or upload is imported
         logger.error(f"Rejected oversized DMARC file {filename}: {e}")
-        return None
+        raise ReportLimitError(REPORT_TOO_LARGE) from e
+    except ReportRejectedError:
+        # The caller says why; a limit rejects the whole email or upload
+        raise
     except Exception as e:
         logger.error(f"Error parsing DMARC file {filename}: {e}")
         return None
@@ -205,13 +218,25 @@ def parse_dmarc_xml(xml_string: str) -> Dict[str, Any]:
         # Remove None values
         policy_published = {k: v for k, v in policy_published.items() if v is not None}
         
-        # Parse records
-        records = []
+        # Parse records. Identical records are one record with their counts
+        # added up, as aggregate reports mean them, so repeating a record
+        # cannot multiply the rows one small report stores.
+        merged = {}
         for record_elem in find_all_elements(root, 'record', DMARC_NAMESPACES):
             record_data = parse_dmarc_record(record_elem)
-            if record_data:
-                records.append(record_data)
-        
+            if not record_data:
+                continue
+            key = dmarc_record_key(record_data)
+            if key in merged:
+                merged[key]['count'] += record_data['count']
+            elif len(merged) >= MAX_REPORT_ITEMS:
+                raise ReportLimitError(f"The report has more than {MAX_REPORT_ITEMS:,} records.")
+            else:
+                merged[key] = record_data
+            if not 0 <= merged[key]['count'] <= MAX_STORED_COUNT:
+                raise ValueError("A record count is out of range")
+        records = list(merged.values())
+
         return {
             'report_id': report_id,
             'org_name': org_name,

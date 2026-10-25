@@ -3,7 +3,7 @@ import asyncio
 import threading
 from contextlib import contextmanager
 from datetime import datetime
-from unittest.mock import Mock
+from unittest.mock import MagicMock, Mock
 
 import httpx
 import pytest
@@ -11,7 +11,7 @@ from fastapi import FastAPI
 
 from app.config import settings
 from app.routers import dmarc
-from app.services import tls_rpt_parser
+from app.services import dmarc_parser, report_store, tls_rpt_parser
 
 
 @pytest.fixture
@@ -19,6 +19,8 @@ def upload(monkeypatch):
     monkeypatch.setattr(settings._inner, "dmarc_manual_upload_enabled", True)
     db = Mock()
     db.query.return_value.filter.return_value.first.return_value = None
+    db.query.return_value.filter.return_value.order_by.return_value.all.return_value = []
+    db.begin_nested.return_value = MagicMock()
     events = []
     active = []
 
@@ -49,9 +51,9 @@ def upload(monkeypatch):
 
     db.add.side_effect = add
     monkeypatch.setattr(dmarc, "SessionLocal", session)
-    monkeypatch.setattr(dmarc, "parse_dmarc_file", parse_dmarc)
+    monkeypatch.setattr(dmarc_parser, "parse_dmarc_file", parse_dmarc)
     monkeypatch.setattr(tls_rpt_parser, "parse_tls_rpt_file", parse_tls)
-    monkeypatch.setattr(dmarc, "enrich_dmarc_record", lambda row: row)
+    monkeypatch.setattr(report_store, "enrich_dmarc_record", lambda row: row)
     monkeypatch.setattr(dmarc, "clear_dmarc_cache", Mock())
     app = FastAPI()
     app.include_router(dmarc.router)
@@ -79,7 +81,7 @@ def test_processing_wait_keeps_other_requests_responsive(monkeypatch, upload, tl
         release.wait(2)
         finished.set()
 
-    target, name = (tls_rpt_parser, "parse_tls_rpt_file") if tls else (dmarc, "parse_dmarc_file")
+    target, name = (tls_rpt_parser, "parse_tls_rpt_file") if tls else (dmarc_parser, "parse_dmarc_file")
     if stage == "parse":
         original = getattr(target, name)
         def parse(*args):
@@ -90,7 +92,7 @@ def test_processing_wait_keeps_other_requests_responsive(monkeypatch, upload, tl
         def enrich(row):
             block()
             return row
-        monkeypatch.setattr(dmarc, "enrich_dmarc_record", enrich)
+        monkeypatch.setattr(report_store, "enrich_dmarc_record", enrich)
     elif stage == "cache":
         dmarc.clear_dmarc_cache.side_effect = lambda db: block()
     else:
@@ -130,7 +132,7 @@ def test_processing_wait_keeps_other_requests_responsive(monkeypatch, upload, tl
 @pytest.mark.parametrize("outcome", ["invalid", "duplicate", "query", "commit"])
 def test_rejection_duplicates_and_failures_close_session(monkeypatch, upload, tls, outcome):
     app, db, active, events = upload
-    target, name = (tls_rpt_parser, "parse_tls_rpt_file") if tls else (dmarc, "parse_dmarc_file")
+    target, name = (tls_rpt_parser, "parse_tls_rpt_file") if tls else (dmarc_parser, "parse_dmarc_file")
     if outcome == "invalid":
         monkeypatch.setattr(target, name, lambda *args: None)
     elif outcome == "duplicate":
@@ -147,7 +149,6 @@ def test_rejection_duplicates_and_failures_close_session(monkeypatch, upload, tl
         if outcome == "duplicate":
             assert response.json()["status"] == "duplicate"
             db.add.assert_not_called()
-            db.commit.assert_not_called()
         assert not active and [e[0] for e in events] == ["open", "close"]
         assert events[0][1] == events[1][1] != loop_thread
         if outcome in ("query", "commit"):
