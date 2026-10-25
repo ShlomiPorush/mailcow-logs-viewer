@@ -166,32 +166,36 @@ def is_documented(operation):
     return False
 
 
-def answer_problem(spec, operation, status, content_type, body):
-    """What is wrong with an answer against the operation's documentation (as tests/contract.py),
-    or None. Returns 'skip' when the operation documents nothing yet."""
+def check_answer(spec, operation, status, content_type, body):
+    """An answer against its operation's documentation, as tests/contract.py checks it.
+    Returns (outcome, reason): 'checked', 'skipped' (with why) or 'mismatch' (with what).
+    body is None when the browser could not read it."""
     if not is_documented(operation):
-        return 'skip'
-    responses = operation.get('responses') or {}
-    response = responses.get(str(status))
+        return 'skipped', 'documents nothing yet'
+    response = (operation.get('responses') or {}).get(str(status))
     if response is None:
-        return None if status in APP_WIDE_STATUSES else f'HTTP {status}, a status its documentation does not list'
+        if status in APP_WIDE_STATUSES:
+            return 'skipped', f'HTTP {status} from sign-in or the origin guard'
+        return 'mismatch', f'HTTP {status}, a status its documentation does not list'
     content = response.get('content') or {}
+    if not content:
+        return ('checked', None) if not body else ('mismatch', f'HTTP {status} with a body, documented without one')
+    if body is None:
+        return 'skipped', 'the browser could not read the body'
     media = (content_type or '').split(';')[0].strip()
-    if not content or not body:
-        return None
     if media not in content:
-        return f'HTTP {status} as {media}, documented as {", ".join(content)}'
+        return 'mismatch', f'HTTP {status} as {media or "no type"}, documented as {", ".join(content)}'
     schema = content[media].get('schema') or {}
-    if media != 'application/json' or not schema:
-        return None
+    if media != 'application/json':
+        return 'checked', None
     try:
         data = json.loads(body)
     except ValueError:
-        return f'HTTP {status} with a body that is not JSON'
+        return 'mismatch', f'HTTP {status} with a body that is not JSON'
     errors = list(Draft202012Validator({**schema, 'components': spec.get('components', {})}).iter_errors(data))
     if not errors:
-        return None
-    return f'HTTP {status} does not match its documentation: ' + '; '.join(
+        return 'checked', None
+    return 'mismatch', f'HTTP {status} does not match its documentation: ' + '; '.join(
         f"{'/'.join(str(p) for p in e.absolute_path) or '(top)'}: {e.message[:200]}" for e in errors[:3])
 
 
@@ -259,7 +263,7 @@ def main():
     routes = route_matchers(spec)
     pages = spa_routes()
     failures, warnings = [], []
-    checked, skipped = set(), set()
+    checked, skipped = set(), {}
 
     with sync_playwright() as pw:
         browser = pw.chromium.launch()
@@ -290,15 +294,17 @@ def main():
                 return
             try:
                 body = resp.body()
-            except Exception:   # a redirect or an aborted request has none
-                body = b''
-            problem = answer_problem(spec, operation, resp.status, resp.headers.get('content-type', ''), body)
-            if problem == 'skip':
-                skipped.add(f'{method} {template}')
+            except Exception:   # a redirect or an aborted request: nothing to read
+                body = None if resp.status < 300 or resp.status >= 400 else b''
+            outcome, reason = check_answer(spec, operation, resp.status, resp.headers.get('content-type', ''), body)
+            name = f'{method} {template}'
+            if outcome == 'checked':
+                checked.add(name)
+            elif outcome == 'skipped':
+                skipped.setdefault(name, reason)
             else:
-                checked.add(f'{method} {template}')
-                if problem:
-                    fail(f'{method} {u.path}: {problem}')
+                checked.add(name)
+                fail(f'{method} {u.path}: {reason}')
         page.on('response', on_response)
 
         def check_handlers():
@@ -333,8 +339,10 @@ def main():
             fail(problem)
         browser.close()
 
-    print(f'\n  answers checked against /openapi.json: {len(checked)} operations; '
-          f'not documented yet, so not checked: {len(skipped)}')
+    unchecked = {name: why for name, why in skipped.items() if name not in checked}
+    print(f'\n  answers checked against /openapi.json: {len(checked)} operations; not checked: {len(unchecked)}')
+    for name, why in sorted(unchecked.items()):
+        print(f'    not checked: {name} ({why})')
     for w in dict.fromkeys(warnings):
         print(f'  warning {w}')
     if failures:

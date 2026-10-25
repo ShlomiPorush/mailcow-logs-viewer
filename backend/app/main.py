@@ -57,7 +57,7 @@ from .origin_guard import SameOriginGuardMiddleware
 from .session import get_session_from_request
 from .services.auth_cleanup import auth_store_maintenance
 from .version import __version__
-from .api_models import documented
+from .api_models import documented, errors_as_json
 from .api_models.agents import agent_paths
 from .api_models.system import HealthResponse, InfoResponse
 from .app_time import app_tz, tz_status, display_formats
@@ -302,9 +302,11 @@ _generate_openapi = app.openapi
 
 
 def _openapi_with_agent_calls():
-    """The generated document plus the two agent calls the middleware answers (api_models/agents.py)"""
+    """The generated document, with errors as JSON and the two agent calls the middleware answers (api_models/)"""
     if app.openapi_schema is None:
-        agent_paths(_generate_openapi())
+        document = _generate_openapi()
+        errors_as_json(document)
+        agent_paths(document)
     return app.openapi_schema
 
 

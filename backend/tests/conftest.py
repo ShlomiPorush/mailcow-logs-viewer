@@ -99,7 +99,9 @@ def api_contract(monkeypatch):
             contract = _contracts.get(id(main.app))
             if contract is None or contract.app is not main.app:
                 contract = _contracts[id(main.app)] = Contract(main.app)
-            check_response(contract, response)
+            # A followed redirect is an answer too
+            for answer in (*response.history, response):
+                check_response(contract, answer)
         return response
 
     monkeypatch.setattr(TestClient, "request", request)

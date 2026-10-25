@@ -62,13 +62,28 @@ _ERROR_TEXT = {
 }
 
 
+def errors_as_json(document: Dict[str, Any]) -> None:
+    """Errors are JSON on every route (FastAPI's HTTPException and validation
+    handlers), but FastAPI documents an error model under the route's own
+    response class, such as text/plain. Move those to application/json."""
+    for operations in document.get("paths", {}).values():
+        for operation in operations.values():
+            for code, response in (operation.get("responses") or {}).items():
+                content = response.get("content") or {}
+                if code[:1] in ("4", "5") and len(content) == 1 and "application/json" not in content:
+                    response["content"] = {"application/json": next(iter(content.values()))}
+
+
 def documented(ok: Any, *, status: int = 200, description: str = "Success",
                errors: Optional[Dict[int, Any]] = None) -> Dict[int, Dict[str, Any]]:
     """The ``responses=`` value for a route: its answer and the errors it gives.
 
-    ``errors`` maps a status to its model, or to None for ErrorDetail.
+    ``errors`` maps a status to its model, or to None for ErrorDetail. With
+    ``ok`` None the answer keeps the route's response class (text, a file).
     """
-    out: Dict[int, Dict[str, Any]] = {status: {"model": ok, "description": description}}
+    out: Dict[int, Dict[str, Any]] = {status: {"description": description}}
+    if ok is not None:
+        out[status]["model"] = ok
     for code, model in (errors or {}).items():
         out[code] = {"model": model or ErrorDetail, "description": _ERROR_TEXT.get(code, "Error")}
     return out
