@@ -17,9 +17,10 @@ from app.correlation import correlate_rspamd_log
 LOCAL_A = 'origin-a.example'
 LOCAL_B = 'origin-b.example'
 MARK = uuid.uuid4().hex[:8]
-# An address from outside the server. Not a documentation range (RFC 5737,
-# RFC 3849): Python's is_private covers those, so the origin check reads them as
-# local. 100.64.0.0/10 (RFC 6598) is neither private nor anyone's real client.
+# An address from outside the server, so only a sign-in can make a message
+# internal. Not a documentation range (RFC 5737, RFC 3849): Python's is_private
+# covers those, so the origin check reads them as local. 100.64.0.0/10
+# (RFC 6598) is neither private nor anyone's real client.
 OUTSIDE_IP = '100.64.7.20'
 
 
@@ -96,7 +97,7 @@ def test_external_origin_is_not_internal(env):
 def test_authenticated_submission_is_internal(env):
     from app.database import get_db_context
     with get_db_context() as db:
-        c = _seed_and_correlate(db, 'auth', ip='203.0.113.20', has_auth=True,
+        c = _seed_and_correlate(db, 'auth', ip=OUTSIDE_IP, has_auth=True,
                                 user=f'user@{LOCAL_A}')
         assert c.direction == 'internal'
 
