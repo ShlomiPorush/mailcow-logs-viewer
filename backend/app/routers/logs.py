@@ -678,7 +678,7 @@ async def _security_addresses(db: Session, hours: int):
     return found
 
 
-@router.get("/security/addresses", responses=documented(m.SecurityAddressesResponse, errors={422: Invalid, 500: None, 502: None}))
+@router.get("/security/addresses", responses=documented(m.SecurityAddressesResponse, errors={422: Invalid, 500: None}))
 async def get_security_addresses(
     list_name: str = Query("review", alias="list", pattern="^(review|banned)$"),
     country: Optional[str] = Query(None, max_length=100),
@@ -712,7 +712,7 @@ async def get_security_addresses(
         raise internal_error(e)
 
 
-@router.get("/fail2ban", responses=documented(m.Fail2banResponse, errors={500: None, 502: None, 503: None}))
+@router.get("/fail2ban", responses=documented(m.Fail2banResponse, errors={500: None, 503: None}))
 async def get_fail2ban():
     """
     Get Fail2Ban configuration from mailcow (real-time)

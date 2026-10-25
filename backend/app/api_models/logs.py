@@ -304,9 +304,14 @@ class ActionResult(Fixed):
     raw: Any = Field(None, description="mailcow's answer, when it was not the usual list")
 
 
+class ListsChangedDetail(Fixed):
+    code: str = Field(description="lists_changed")
+    message: str = Field(description="What to do instead")
+
+
 class ListsChanged(Fixed):
     """The allowlist or denylist sent is not the current one."""
-    detail: Dict[str, str] = Field(description="code (lists_changed) and message")
+    detail: ListsChangedDetail
 
 
 class RwStatusResponse(Fixed):

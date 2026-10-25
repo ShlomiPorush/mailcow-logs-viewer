@@ -30,7 +30,7 @@ BAD_PARAMS = ['/api/logs/postfix?page=0', '/api/logs/rspamd?limit=0', '/api/logs
               '/api/stats/trends?names=nope', '/api/stats/flow', '/api/stats/flow?period=1y']
 ITEM_ACTIONS = ['/api/queue/action', '/api/queue/delete', '/api/quarantine/release', '/api/quarantine/delete',
                 '/api/quarantine/learnham', '/api/quarantine/learnspam']
-LIST_CHANGES = [('/api/fail2ban/ban', {'ip': '198.51.100.9'}), ('/api/fail2ban/allow', {'ip': '198.51.100.9'}),
+LIST_CHANGES = [('/api/fail2ban/ban', {'ip': '203.0.113.5'}), ('/api/fail2ban/allow', {'ip': '198.51.100.9'}),
                 ('/api/fail2ban/remove', {'ip': '198.51.100.9', 'list': 'blacklist'}),
                 ('/api/fail2ban/repair', {'entry': '2001:db8::9/32', 'list': 'whitelist'}),
                 ('/api/fail2ban/unban', {'ip': '198.51.100.9'}),
@@ -38,7 +38,8 @@ LIST_CHANGES = [('/api/fail2ban/ban', {'ip': '198.51.100.9'}), ('/api/fail2ban/a
                                           'retry_window': 600, 'netban_ipv4': 32, 'netban_ipv6': 128}),
                 ('/api/fail2ban', {'ban_time': '600'})]
 F2B = {'ban_time': 600, 'max_ban_time': 3600, 'max_attempts': 5, 'retry_window': 600, 'netban_ipv4': 32,
-       'netban_ipv6': 128, 'ban_time_increment': 1, 'manage_external': 0, 'active_bans': [], 'perm_bans': [],
+       'netban_ipv6': 128, 'ban_time_increment': 1, 'manage_external': 0, 'perm_bans': [],
+       'active_bans': [{'network': '198.51.100.9/32', 'ip': '198.51.100.9', 'queued_for_unban': 0}],
        'blacklist': '198.51.100.9', 'whitelist': '2001:db8::9/32'}
 
 
@@ -111,7 +112,16 @@ def _postgres_available() -> bool:
 def test_reads_with_the_database(client, path):
     if not _postgres_available():
         pytest.skip('PostgreSQL not available')
-    assert client.get(path).status_code == 200
+    response = client.get(path)
+    assert response.status_code == 200
+    # Not the answer statistics give when the database fails
+    assert not isinstance(response.json(), dict) or 'error' not in response.json()
+
+
+def test_flow_when_the_database_fails(client):
+    app.dependency_overrides[get_db] = _broken_database
+    response = client.get('/api/stats/flow?period=24h')
+    assert response.status_code == 500 and set(response.json()) == {'error', 'detail'}
 
 
 @pytest.mark.parametrize('path', STATS)
@@ -140,8 +150,10 @@ def test_bad_parameters(client, path):
 def test_security_addresses_when_mailcow_fails(client, mailcow):
     if not _postgres_available():
         pytest.skip('PostgreSQL not available')
-    mailcow['f2b'] = MailcowAPIError('down')
-    assert client.get('/api/security/addresses').status_code == 502
+    # mailcow not answering: the lists still load, without Fail2ban's
+    mailcow['f2b'] = None
+    response = client.get('/api/security/addresses')
+    assert response.status_code == 200 and response.json()['fail2ban_known'] is False
     security_addresses.forget()
     app.dependency_overrides[get_db] = _broken_database
     mailcow['f2b'] = dict(F2B)
@@ -162,10 +174,17 @@ def test_simple_reads(client, mailcow, monkeypatch):
     assert client.get('/api/quarantine/7/details').json()['score'] == 12.5
 
 
-@pytest.mark.parametrize('error, status', [(MailcowAPIError('down'), 502), (RuntimeError('broken'), 500)])
-def test_mailcow_reads_that_fail(client, mailcow, error, status):
-    mailcow['f2b'] = error
-    assert client.get('/api/fail2ban').status_code == status
+def test_fail2ban_settings_when_mailcow_fails(client, monkeypatch):
+    # The real client: mailcow failing is no settings (503), anything else a 500
+    async def failing(*args, **kwargs):
+        raise MailcowAPIError('down')
+    monkeypatch.setattr(mailcow_api, '_make_request', failing)
+    assert client.get('/api/fail2ban').status_code == 503
+
+    async def broken(*args, **kwargs):
+        raise RuntimeError('broken')
+    monkeypatch.setattr(mailcow_api, '_make_request', broken)
+    assert client.get('/api/fail2ban').status_code == 500
 
 
 @pytest.mark.parametrize('path', ['/api/queue', '/api/quarantine', '/api/quarantine/7/details'])
@@ -198,10 +217,13 @@ def test_fail2ban_changes(client, mailcow, path, body):
     assert client.post(path, json=body).status_code == 200
     # A body the call cannot use: no address, or for the settings not an object
     assert client.post(path, json=['x'] if path == '/api/fail2ban' else {'list': 'nope'}).status_code == 400
+    # mailcow refusing the change (its Read-Write call fails): 502
+    mailcow['answer'] = MailcowAPIError('down')
+    assert client.post(path, json=body).status_code == 502
+    mailcow['answer'] = [{'type': 'success', 'msg': 'ok'}]
+    # No Fail2ban settings from mailcow (get_fail2ban answers None when mailcow fails): 503
     mailcow['f2b'] = None
     assert client.post(path, json=body).status_code == 503
-    mailcow['f2b'] = MailcowAPIError('down')
-    assert client.post(path, json=body).status_code == 502
     mailcow['f2b'] = RuntimeError('broken')
     # Unban answers every other failure 502, the rest 500
     assert client.post(path, json=body).status_code == (502 if path.endswith('unban') else 500)

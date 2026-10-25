@@ -32,6 +32,8 @@ def agent(monkeypatch):
     monkeypatch.setattr(live, 'issuer', lambda: 'https://logs.example.com')
     monkeypatch.setattr(live, 'api_resource', lambda: 'https://logs.example.com/api')
     monkeypatch.setattr(rest, 'db_call', check_token)
+    # A bad token here counts against no other test
+    monkeypatch.setattr(rest.failed_tokens, '_events', type(rest.failed_tokens._events)())
     return state
 
 

@@ -166,7 +166,7 @@ def flow(db: Session, start: datetime, end: datetime, bucket: str, edges: List[d
     }
 
 
-@router.get("/stats/flow", responses=documented(m.FlowResponse, errors={422: Invalid}))
+@router.get("/stats/flow", responses=documented(m.FlowResponse, errors={422: Invalid, 500: None}))
 def get_flow(
     period: Optional[str] = Query(None, pattern="^(24h|7d|30d)$", description="A dashboard period: its bars up to now"),
     previous: bool = Query(False, description="With period: the same number of bars right before it"),
