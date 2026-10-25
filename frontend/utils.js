@@ -2925,3 +2925,29 @@ if (typeof document !== 'undefined' && document.addEventListener) {
         if (panel) uiPickerPlace(panel);
     });
 }
+
+// Draws again what container shows (draw) and gives the focus back: to the same
+// control in the same row (its key attribute), or to the row itself
+function uiKeepFocus(container, keyAttr, draw) {
+    const active = document.activeElement;
+    if (!container || !active || active === document.body || !container.contains(active)) {
+        draw();
+        return;
+    }
+    const row = active.closest(`[${keyAttr}]`);
+    const key = row ? row.getAttribute(keyAttr) : null;
+    const name = el => el.getAttribute('aria-label') || el.textContent.trim();
+    const controls = el => [...el.querySelectorAll('button, a, input, select, [tabindex]')];
+    const label = name(active);
+    // Its place among the row's controls: a count on a button may change with the refresh
+    const index = row && active !== row ? controls(row).indexOf(active) : -1;
+    draw();
+    if (key === null) return;
+    const again = [...container.querySelectorAll(`[${keyAttr}]`)].find(el => el.getAttribute(keyAttr) === key);
+    if (!again) return;
+    const list = controls(again);
+    const same = index >= 0 && list[index] && list[index].tagName === active.tagName ? list[index] : null;
+    const target = active === row ? again
+        : list.find(el => el.tagName === active.tagName && name(el) === label) || same || (again.tabIndex >= 0 ? again : list[0]);
+    if (target && typeof target.focus === 'function') target.focus({ preventScroll: true });
+}

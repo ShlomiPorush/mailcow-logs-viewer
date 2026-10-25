@@ -1227,39 +1227,171 @@ function hasDataChanged(newData, cacheKey) {
     return newJson !== oldJson;
 }
 
-// Smart refresh for Messages - only update if new messages arrived
-// Only refreshes if there are no active filters/search (to avoid disrupting user's view),
-// while nothing else loads the list, and only the first page: it would take away more
+// The Messages refresh, with every filter. At the edge where new mail lands (the
+// top, newest first; the end of a whole list, oldest first) the list takes it in
+// by itself. Anywhere else it stays as it is, and the new mail is counted on the
+// server against the list's watermark and offered as "N new messages" at that
+// edge, as the Logs page offers new lines. Nothing happens while the list loads.
 async function smartRefreshMessages() {
     const filters = currentFilters.messages || {};
+    const busy = () => messagesFullLoad || messagesPaging.loading;
+    if (messagesRefreshing || busy()) return;
+    // No list is shown (its load failed): load it again
+    if (!lastDataCache.messages) return loadMessages();
 
-    // Don't refresh if user has active search or filters
-    const hasActiveFilters = filters.search || filters.sender || filters.recipient ||
-        filters.direction || filters.status || filters.user || filters.ip;
-    const busy = () => messagesFullLoad || messagesPaging.loading || currentPage.messages > 1;
-    if (hasActiveFilters || messagesRefreshing || busy()) return;
-
-    // The same query as the list, so a time range stays applied
+    // The list takes new mail in where it lands, not while text in it is selected
+    const free = () => messagesAtNewEdge() && !uiTextHeld(document.getElementById('messages-logs'));
     const gen = messagesGen;
     messagesRefreshing = true;
     try {
-        const response = await messagesFetch(`/api/messages?${messagesQueryParams()}`);
+        if (messagesOrder === 'desc' && free()) {
+            const response = await messagesFetch(`/api/messages?${messagesQueryParams()}`, PAGE_REFRESH_TIMEOUT);
+            if (!response.ok) return;
+            const data = await response.json();
+            // Meanwhile the list was loaded again or more of it is loading
+            if (gen !== messagesGen || busy()) return;
+            // Still free when the answer comes (the user may have scrolled or started selecting)
+            if (free()) {
+                if (!messagesSameAsShown(data)) {
+                    // A list drawn again is a new one, and its counts with it; the focus stays on its row
+                    const now = messagesNewGeneration();
+                    uiKeepFocus(document.getElementById('messages-logs'), 'data-key', () => renderMessagesData(data));
+                    loadMessageFacets(filters, now);
+                } else {
+                    // Nothing new matches: the counts may still have moved with other mail
+                    if (data.watermark != null) messagesNew.watermark = data.watermark;
+                    loadMessageFacets(filters, gen);
+                }
+                return;
+            }
+        }
+        // Oldest first, a list not loaded to its end gets the new mail by paging to it
+        if (messagesOrder === 'asc' && messagesPaging.cursor) {
+            loadMessageFacets(filters, gen);
+            return;
+        }
+        if (messagesNew.watermark === null) return;
+        const params = messagesFilterParams(filters);
+        params.set('after_id', messagesNew.watermark);
+        const response = await messagesFetch(`/api/messages/new?${params}`, PAGE_REFRESH_TIMEOUT);
         if (!response.ok) return;
         const data = await response.json();
-        // Meanwhile the list was loaded again, or more of it is shown
         if (gen !== messagesGen || busy()) return;
-        if (hasDataChanged(data, 'messages')) {
-            console.log('[REFRESH] Messages data changed, updating UI');
-            // A list drawn again is a new one, and its counts with it
-            const now = messagesNewGeneration();
-            renderMessagesData(data);
-            loadMessageFacets(filters, now);
+        messagesNew.count = data.count || 0;
+        // At the end of the whole list, oldest first, the list is read again (new mail,
+        // and messages whose status changed) and drawn again when anything changed
+        if (messagesOrder === 'asc' && free()) {
+            messagesRefreshing = false;
+            await messagesShowNew({ quiet: true });
+            return;
         }
+        renderMessagesNew();
+        loadMessageFacets(filters, gen);
     } catch (error) {
         if (error.name !== 'AbortError') console.error('Messages refresh failed:', error);
     } finally {
         messagesRefreshing = false;
     }
+}
+
+// New mail since the list was read: the watermark the list came with (the
+// newest message stored then) and how many messages came after it
+const messagesNew = { watermark: null, count: 0 };
+
+// Whether an answer brings nothing new over the rows shown, row for row as far
+// as it goes (a first page against the top of a longer list)
+function messagesSameAsShown(data) {
+    const shown = lastDataCache.messages;
+    if (!shown) return false;
+    const rows = data.data || [];
+    const had = shown.data || [];
+    return data.total === shown.total && rows.length <= had.length && JSON.stringify(rows) === JSON.stringify(had.slice(0, rows.length));
+}
+
+// The element the list scrolls in: its own column on wide screens, the page
+// below 1000 px (whichever element of it scrolls)
+function messagesScroller(container) {
+    for (let el = container; el && el !== document.body; el = el.parentElement) {
+        const overflow = getComputedStyle(el).overflowY;
+        if ((overflow === 'auto' || overflow === 'scroll') && el.scrollHeight > el.clientHeight + 1) return el;
+    }
+    return document.scrollingElement || document.documentElement;
+}
+
+// The part of the screen the scroller shows
+function messagesInView(scroller) {
+    if (scroller === document.scrollingElement || scroller === document.documentElement) return { top: 0, bottom: window.innerHeight };
+    const box = scroller.getBoundingClientRect();
+    return { top: box.top, bottom: box.bottom };
+}
+
+// Whether the list shows the edge where new mail lands: its first row, newest
+// first; the last row of the whole list, oldest first. An empty list is all edge
+function messagesAtNewEdge() {
+    const container = document.getElementById('messages-logs');
+    if (!container || !container.getClientRects().length) return false;
+    const rows = container.querySelectorAll('.ui-msg-item');
+    if (!rows.length) return true;
+    const view = messagesInView(messagesScroller(container));
+    if (messagesOrder === 'asc') {
+        return !messagesPaging.cursor && rows[rows.length - 1].getBoundingClientRect().bottom <= view.bottom + 8;
+    }
+    return rows[0].getBoundingClientRect().top >= view.top - 8;
+}
+
+// "N new messages" at the edge where new mail lands, sticky so it stays in view
+function renderMessagesNew() {
+    const list = document.querySelector('#messages-logs .ui-msg-list');
+    let wrap = document.getElementById('messages-new-wrap');
+    const count = messagesNew.count;
+    if (!list || !count) {
+        if (wrap) wrap.hidden = true;
+        return;
+    }
+    if (!wrap) {
+        wrap = document.createElement('div');
+        wrap.id = 'messages-new-wrap';
+        wrap.className = 'ui-msg-new-wrap';
+        wrap.innerHTML = `<button type="button" class="ui-msg-new" onclick="messagesShowNew()">
+            <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d=""></path></svg>
+            <span></span></button>`;
+    }
+    const top = messagesOrder !== 'asc';
+    wrap.classList.toggle('is-top', top);
+    // Where the page scrolls, the search bar stays on top: the button goes under it
+    const bar = document.querySelector('#content-messages .ui-msg-searchbar');
+    const sticky = bar && getComputedStyle(bar).position === 'sticky';
+    wrap.style.setProperty('--ui-msg-new-top', sticky ? `${bar.offsetHeight}px` : '0px');
+    if (top ? list.previousElementSibling !== wrap : list.nextElementSibling !== wrap) {
+        if (top) list.before(wrap); else list.after(wrap);
+    }
+    wrap.querySelector('path').setAttribute('d', top ? 'M5 15l7-7 7 7' : 'M19 9l-7 7-7-7');
+    wrap.querySelector('span').textContent = `${count.toLocaleString()} new ${count === 1 ? 'message' : 'messages'}`;
+    wrap.hidden = false;
+}
+
+// Show the new mail: newest first, the list from its top; oldest first, the list
+// read again as long as it is plus the new messages, at its end
+async function messagesShowNew({ quiet = false } = {}) {
+    const container = document.getElementById('messages-logs');
+    if (!container) return;
+    if (messagesOrder === 'asc') {
+        // As many rows as are shown and the new ones, page by page; taken in quietly
+        // only if the user is still at the end when they have all come
+        const shown = container.querySelectorAll('.ui-msg-item').length;
+        const stillFree = () => messagesAtNewEdge() && !uiTextHeld(container);
+        await loadMessages({ quiet, rows: Math.max(50, shown + messagesNew.count), toEnd: true, applyIf: quiet ? stillFree : null });
+        return;
+    }
+    // Where the page scrolls, back to the start of the list (its own column starts at the top on loading)
+    const scroller = messagesScroller(container);
+    await loadMessages();
+    if (scroller !== container) scroller.scrollTop = 0;
+}
+
+function messagesScrollToEnd(container) {
+    const scroller = messagesScroller(container);
+    scroller.scrollTop = scroller.scrollHeight;
 }
 
 // Render messages without loading spinner
@@ -1304,7 +1436,10 @@ function renderMessagesData(data) {
 // "No messages found"), the count, where the next page starts, and the answer
 // the refresh compares the next one with
 function showMessagesFirstPage(container, data) {
-    lastDataCache.messages = data;
+    // The watermark moves with any new mail, also mail the filters leave out: not part of the comparison
+    lastDataCache.messages = { ...data, watermark: null };
+    messagesNew.watermark = data.watermark ?? null;
+    messagesNew.count = 0;
     const rows = data.data || [];
     messagesPaging.page = 1;
     messagesPaging.total = data.total || rows.length;
@@ -1346,11 +1481,11 @@ function messagesNewGeneration() {
 
 // A request of the list's and its answer, read in full while it can still be
 // aborted (a new generation aborts it, also while its body is coming in)
-async function messagesFetch(url) {
+async function messagesFetch(url, timeout = 0) {
     const control = typeof AbortController === 'function' ? new AbortController() : null;
     if (control) messagesRequests.add(control);
     try {
-        const response = await authenticatedFetch(url, control ? { signal: control.signal } : {});
+        const response = await authenticatedFetch(url, { ...(control ? { signal: control.signal } : {}), ...(timeout ? { timeout } : {}) });
         const data = response.ok ? await response.json() : null;
         return { ok: response.ok, status: response.status, statusText: response.statusText, json: async () => data };
     } finally {
@@ -1358,15 +1493,17 @@ async function messagesFetch(url) {
     }
 }
 
-// The list's query; with a cursor, the page that starts after it
-function messagesQueryParams(cursor = null) {
-    const filters = currentFilters.messages || {};
-    const params = new URLSearchParams({ page: 1, limit: 50 });
+// The list's query; with a cursor, the page that starts after it, holding only
+// what the first page's watermark (upto) held
+function messagesQueryParams(cursor = null, limit = 50, upto = null) {
+    const filters = messagesRangeFilters(currentFilters.messages || {});
+    const params = new URLSearchParams({ page: 1, limit });
     for (const key of ['search', 'sender', 'recipient', 'direction', 'user', 'status', 'ip', 'start_date', 'end_date']) {
         if (filters[key]) params.append(key, filters[key]);
     }
     if (messagesOrder === 'asc') params.append('order', 'asc');
     if (cursor) params.append('cursor', cursor);
+    if (cursor && upto !== null && upto !== undefined) params.append('upto_id', upto);
     return params;
 }
 
@@ -1436,7 +1573,7 @@ async function loadMoreMessages(retry = false) {
     messagesPaging.loading = true;
     const gen = messagesGen;
     try {
-        const response = await messagesFetch(`/api/messages?${messagesQueryParams(messagesPaging.cursor)}`);
+        const response = await messagesFetch(`/api/messages?${messagesQueryParams(messagesPaging.cursor, 50, messagesNew.watermark)}`);
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const data = await response.json();
         // The list was loaded again meanwhile: this page is not part of it
@@ -1445,7 +1582,10 @@ async function loadMoreMessages(retry = false) {
         // its deliveries may stand for it now, when the first one was cleaned up)
         const seen = new Set([...list.querySelectorAll('.ui-msg-item[data-key]')].map(row => row.dataset.key));
         const ids = new Set([...list.querySelectorAll('.ui-msg-item[data-mid]')].map(row => row.dataset.mid));
-        list.insertAdjacentHTML('beforeend', (data.data || []).filter(msg => !seen.has(msg.correlation_key || '') && !(msg.message_id && ids.has(encodeURIComponent(msg.message_id)))).map(renderMessageRow).join(''));
+        const added = (data.data || []).filter(msg => !seen.has(msg.correlation_key || '') && !(msg.message_id && ids.has(encodeURIComponent(msg.message_id))));
+        list.insertAdjacentHTML('beforeend', added.map(renderMessageRow).join(''));
+        // What the refresh compares with is the whole list shown
+        if (lastDataCache.messages) lastDataCache.messages = { ...lastDataCache.messages, data: (lastDataCache.messages.data || []).concat(added), total: data.total ?? lastDataCache.messages.total, next_cursor: data.next_cursor || null };
         messagesPaging.page += 1;
         currentPage.messages = messagesPaging.page;
         messagesPaging.cursor = data.next_cursor || null;
@@ -1967,7 +2107,7 @@ function switchTab(tab, params = {}) {
             loadDashboard();
             break;
         case 'messages':
-            loadMessages(1);
+            loadMessages();
             break;
         case 'netfilter':
             loadSecurityOverview();
@@ -4671,6 +4811,16 @@ function messagesPresetStart(preset, now = new Date()) {
     return new Date(new Date(now).getTime() - days * 86400000).toISOString();
 }
 
+// The filters as a request sends them: a time preset covers its period up to
+// now, so its start is worked out at every request (Today moves to the next day
+// at midnight) and it has no end; a custom range, or one opened from the chart,
+// stays as it was chosen
+const MESSAGES_ROLLING_PRESETS = ['today', '7days', '30days', '90days'];
+function messagesRangeFilters(filters, now = new Date()) {
+    if (!MESSAGES_ROLLING_PRESETS.includes(filters.date_range)) return filters;
+    return { ...filters, start_date: messagesPresetStart(filters.date_range, now), end_date: '' };
+}
+
 function selectMessagesDatePreset(preset, now = new Date()) {
     const labels = { '': 'All Time', 'today': 'Today', '7days': 'Last 7 Days', '30days': 'Last 30 Days', '90days': 'Last 90 Days' };
     document.getElementById('messages-date-range-label').textContent = labels[preset] || 'All Time';
@@ -4748,6 +4898,7 @@ const MESSAGE_STATUS_FACETS = [['', 'All messages'], ['delivered', 'Delivered'],
 const MESSAGE_DIRECTION_FACETS = [['', 'Any direction'], ['inbound', 'Inbound'], ['outbound', 'Outbound'], ['internal', 'Internal']];
 
 function messagesFilterParams(filters) {
+    filters = messagesRangeFilters(filters);
     const params = new URLSearchParams();
     for (const key of ['search', 'sender', 'recipient', 'direction', 'user', 'status', 'ip', 'start_date', 'end_date']) {
         if (filters[key]) params.append(key, filters[key]);
@@ -4829,32 +4980,61 @@ function afterMessagesRendered(data) {
     }
 }
 
-async function loadMessages() {
+// A new list. quiet keeps the one shown until the answer replaces it; rows reads
+// that many at once (500 a request, from the first page's watermark); applyIf,
+// asked when everything has come, may still keep the list shown; toEnd scrolls
+// to its end (oldest first, where new mail is)
+async function loadMessages({ quiet = false, rows = 50, toEnd = false, applyIf = null } = {}) {
     const container = document.getElementById('messages-logs');
     renderMessagesSort();
     // A new list: whatever the older one still has on its way is aborted
     const gen = messagesNewGeneration();
     messagesFullLoad = true;
-    container.innerHTML = '<div class="ui-loading" role="status"><div class="loading"></div><p>Loading...</p></div>';
+    if (!quiet) container.innerHTML = '<div class="ui-loading" role="status"><div class="loading"></div><p>Loading...</p></div>';
     const filters = currentFilters.messages || {};
     loadMessageFacets(filters, gen);
     updateMessagesFilterState();
     // The list grows as it scrolls, so a new load always starts at the top
-    container.scrollTop = 0;
+    if (!quiet) container.scrollTop = 0;
     try {
-        const response = await messagesFetch(`/api/messages?${messagesQueryParams()}`);
+        const timeout = quiet ? PAGE_REFRESH_TIMEOUT : 0;
+        const response = await messagesFetch(`/api/messages?${messagesQueryParams(null, Math.min(500, rows))}`, timeout);
         if (!response.ok) {
             throw new Error(`HTTP ${response.status}: ${response.statusText}`);
         }
         const data = await response.json();
+        while (data.next_cursor && (data.data || []).length < rows && gen === messagesGen) {
+            const next = await messagesFetch(`/api/messages?${messagesQueryParams(data.next_cursor, Math.min(500, rows - data.data.length), data.watermark)}`, timeout);
+            if (!next.ok) throw new Error(`HTTP ${next.status}: ${next.statusText}`);
+            const page = await next.json();
+            data.data = data.data.concat(page.data || []);
+            data.next_cursor = page.next_cursor;
+            data.total = page.total ?? data.total;
+        }
         if (gen !== messagesGen) return;
-        showMessagesFirstPage(container, data);
+        // The user moved on meanwhile: the list stays, and the new mail is offered
+        if (applyIf && !applyIf()) {
+            renderMessagesNew();
+            return;
+        }
+        // A quiet read that brings nothing new leaves the list as it is
+        if (quiet && messagesSameAsShown(data) && (data.data || []).length === (lastDataCache.messages.data || []).length) {
+            if (data.watermark != null) messagesNew.watermark = data.watermark;
+            messagesNew.count = 0;
+            renderMessagesNew();
+            return;
+        }
+        if (quiet) uiKeepFocus(container, 'data-key', () => showMessagesFirstPage(container, data));
+        else showMessagesFirstPage(container, data);
         afterMessagesRendered(data);
+        if (toEnd) messagesScrollToEnd(container);
     } catch (error) {
         // A newer load is on its way or shown (this one may have been aborted for it)
         if (gen !== messagesGen) return;
+        // A quiet load that failed leaves the list as it was
+        if (quiet) return;
         console.error('Failed to load messages:', error);
-        container.innerHTML = `<p class="ui-empty ui-text-fail">Failed to load messages: ${escapeHtml(error.message)}</p>`;
+        container.innerHTML = `<p class="ui-empty ui-text-fail">Failed to load messages: ${escapeHtml(error.message)}. <button type="button" class="ui-link-row ui-link" onclick="loadMessages()">Try again</button></p>`;
         setMessagesCount(null);
         // Nothing is shown: no next page, and the next refresh draws what it gets
         messagesPaging.page = 1;
@@ -5951,7 +6131,7 @@ function loadLogs(type, page) {
     currentPage[type] = page;
     switch (type) {
         case 'messages':
-            loadMessages(page);
+            loadMessages();
             break;
         case 'netfilter':
             loadNetfilterLogs(page);
