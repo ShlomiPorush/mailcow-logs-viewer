@@ -304,16 +304,16 @@ Native `title` tooltips. Dynamic ones show the expression that builds the text.
 | Dashboard | "Reset zoom" | `frontend/app.js:2966` (mailFlowFoot) |
 | Dashboard | dynamic: `${escapeHtml(mailFlowSpan(b.s, b.e))}: ${Number(b.messages).toLocaleString()}...` | `frontend/app.js:3011` (renderMailFlowChart) |
 | Dashboard | "Logs older than the retention days are cleaned up" | `frontend/app.js:3015` (renderMailFlowChart) |
-| Dashboard | "Dismiss" | `frontend/index.html:579` |
-| Dashboard | "Help - Dashboard" | `frontend/index.html:585` |
-| Dashboard | "Clear" | `frontend/index.html:610` |
-| Dashboard | "Opens these messages. Each message counts once, as on the Messages page; a message to three recipients is o..." | `frontend/index.html:613` |
+| Dashboard | "Dismiss" | `frontend/index.html:581` |
+| Dashboard | "Help - Dashboard" | `frontend/index.html:587` |
+| Dashboard | "Clear" | `frontend/index.html:612` |
+| Dashboard | "Opens these messages. Each message counts once, as on the Messages page; a message to three recipients is o..." | `frontend/index.html:615` |
 | Dashboard | set in JS: dynamic: `text` | `frontend/app.js:3068` (renderMailFlowStats) |
 | Dashboard | set in JS: dynamic: `lines.filter(Boolean).join(', ')` | `frontend/app.js:3088` (renderMailFlowStats) |
 | Messages | dynamic: `${escapeHtml(msg.subject \|\| 'No subject')}` | `frontend/app.js:1434` (renderMessageRow) |
 | Messages | dynamic: `${escapeHtml(msg.recipient \|\| '')}` | `frontend/app.js:1439` (renderMessageRow) |
-| Messages | "Help - Messages" | `frontend/index.html:656` |
-| Messages | "Filter by sender, recipient, user or IP" | `frontend/index.html:698` |
+| Messages | "Help - Messages" | `frontend/index.html:658` |
+| Messages | "Filter by sender, recipient, user or IP" | `frontend/index.html:700` |
 | Messages | set in JS: dynamic: `asc ? 'Oldest first. Click for newest first' : 'Newest first. Click for oldes...` | `frontend/app.js:1555` (renderMessagesSort) |
 | Message details | "Show every recipient" | `frontend/message-details.js:354` (renderLogTimeline) |
 | Message details | "This delivery attempt never reached a final outcome" | `frontend/message-details.js:424` (renderRelatedDeliveries) |
@@ -327,9 +327,9 @@ Native `title` tooltips. Dynamic ones show the expression that builds the text.
 | Security | dynamic: `Unban ${escapeHtml(log.ip)}` | `frontend/app.js:1733` (renderNetfilterData) |
 | Security | dynamic: `Put ${escapeHtml(fail2banEntry(log.ip))} on the denylist; it stays until removed` | `frontend/app.js:1734` (renderNetfilterData) |
 | Security | "Show the log line" | `frontend/app.js:1735` (renderNetfilterData) |
-| Security | "Help - Security" | `frontend/index.html:783` |
-| Security | "Addresses that are not banned" | `frontend/index.html:792` |
-| Security | "Filters" | `frontend/index.html:820` |
+| Security | "Help - Security" | `frontend/index.html:785` |
+| Security | "Addresses that are not banned" | `frontend/index.html:794` |
+| Security | "Filters" | `frontend/index.html:822` |
 | Security | dynamic: `${escapeHtml(`${name}: ${label}${note ? `, ${note}` : ''}`)}` | `frontend/security.js:285` (securityProtectionButton) |
 | Security | "Lift the ban; the rule leaves it alone for a week" | `frontend/security.js:329` (securityDescribe) |
 | Security | "Not an attack: the rule leaves it alone for a week" | `frontend/security.js:330` (securityDescribe) |
@@ -372,9 +372,9 @@ Native `title` tooltips. Dynamic ones show the expression that builds the text.
 | Outbound | "Release from hold" | `frontend/app.js:3692` (drawQueueRows) |
 | Outbound | "Hold message" | `frontend/app.js:3693` (drawQueueRows) |
 | Outbound | "Delete from queue" | `frontend/app.js:3694` (drawQueueRows) |
-| Outbound | "Help - Outbound" | `frontend/index.html:863` |
-| Outbound | "Filters" | `frontend/index.html:884` |
-| Outbound | "More" | `frontend/index.html:913` |
+| Outbound | "Help - Outbound" | `frontend/index.html:865` |
+| Outbound | "Filters" | `frontend/index.html:886` |
+| Outbound | "More" | `frontend/index.html:915` |
 | Outbound | "Synced to Rspamd" | `frontend/spam_filter.js:656` (renderSuppressionItem) |
 | Outbound | dynamic: `${suppressionSyncLocked() ? 'Not synced: syncing to Rspamd needs the Read-Wri...` | `frontend/spam_filter.js:657` (renderSuppressionItem) |
 | Outbound | "Waiting to be removed from Rspamd" | `frontend/spam_filter.js:660` (renderSuppressionItem) |
@@ -403,8 +403,8 @@ Native `title` tooltips. Dynamic ones show the expression that builds the text.
 | Quarantine | "Delete" | `frontend/app.js:4366` (loadQuarantineRules) |
 | Quarantine | dynamic: `${escapeHtml(m.subject \|\| '')}` | `frontend/app.js:4651` (testQuarantineRules) |
 | Quarantine | dynamic: `${escapeHtml(log.sender \|\| '')} → ${escapeHtml(log.recipient \|\| '')}` | `frontend/app.js:4722` (loadQuarantineRuleHistory) |
-| Quarantine | "Help - Quarantine" | `frontend/index.html:958` |
-| Rspamd | "Help - Rspamd" | `frontend/index.html:1028` |
+| Quarantine | "Help - Quarantine" | `frontend/index.html:960` |
+| Rspamd | "Help - Rspamd" | `frontend/index.html:1030` |
 | Rspamd | dynamic: `${escapeHtml(displayDesc)}` | `frontend/spam_filter.js:146` (renderRspamdMapsList) |
 | Rspamd | "Close" | `frontend/spam_filter.js:214` (openMapEditor) |
 | Status | "Click to view changelog" | `frontend/about.js:134` (aboutVersionPanel) |
@@ -417,24 +417,24 @@ Native `title` tooltips. Dynamic ones show the expression that builds the text.
 | Status | "Run Check for this Host" | `frontend/app.js:5727` (renderBlacklistStatus) |
 | Status | dynamic: `${escapeHtml(detail(r))}` | `frontend/app.js:5742` (renderBlacklistStatus) |
 | Status | dynamic: `${escapeHtml(formatTime(correlation.last_update))}` | `frontend/app.js:5808` (renderStatusCorrelation) |
-| Status | "Help - Status" | `frontend/index.html:1047` |
-| Status | "Help - IP Blacklist Monitor" | `frontend/index.html:1092` |
+| Status | "Help - Status" | `frontend/index.html:1049` |
+| Status | "Help - IP Blacklist Monitor" | `frontend/index.html:1094` |
 | Domains | dynamic: `${escapeHtml(`${label}: ${check.message \|\| 'Not checked'}`)}` | `frontend/domains.js:236` (dnsStatusTag) |
 | Domains | dynamic: `${dns.checked_at ? escapeHtml(formatTime(dns.checked_at)) : ''}` | `frontend/domains.js:245` (renderDomainDnsSection) |
 | Domains | "Check DNS for this domain" | `frontend/domains.js:248` (renderDomainDnsSection) |
 | Domains | dynamic: `${escapeHtml(text)}` | `frontend/domains.js:376` (getAliasStatusIcon) |
-| Domains | "Help - Domains Information" | `frontend/index.html:1122` |
+| Domains | "Help - Domains Information" | `frontend/index.html:1124` |
 | DMARC | "This domain is not on this server." | `frontend/dmarc.js:45` (dmarcNotOnServer) |
 | DMARC | dynamic: `${escapeHtml(words + maybe)}` | `frontend/dmarc.js:399` (dmarcCalendarCard) |
 | DMARC | dynamic: `${escapeHtml(formatTime(sync.started_at))}` | `frontend/dmarc.js:1171` (updateDmarcControls) |
 | DMARC | "Delete all reports of this domain" | `frontend/dmarc.js:1373` (renderReportsDomains) |
 | DMARC | "Delete report" | `frontend/dmarc.js:1512` (renderReportsManagementTable) |
-| DMARC | "Help - DMARC Information" | `frontend/index.html:1146` |
-| DMARC | "Upload Report" | `frontend/index.html:1156` |
+| DMARC | "Help - DMARC Information" | `frontend/index.html:1148` |
+| DMARC | "Upload Report" | `frontend/index.html:1158` |
 | DMARC | set in JS: "Fetching reports needs IMAP set up in Settings" | `frontend/dmarc.js:1155` (updateDmarcControls) |
 | DMARC | set in JS: "" | `frontend/dmarc.js:1163` (updateDmarcControls) |
-| Mailbox stats | "Help - Mailbox Statistics" | `frontend/index.html:1186` |
-| Mailbox stats | "Filters" | `frontend/index.html:1217` |
+| Mailbox stats | "Help - Mailbox Statistics" | `frontend/index.html:1188` |
+| Mailbox stats | "Filters" | `frontend/index.html:1219` |
 | Mailbox stats | "Open these messages" | `frontend/mailbox-stats.js:408` (mailboxStatLink) |
 | Mailbox stats | dynamic: `${escapeHtml(tip)}` | `frontend/mailbox-stats.js:450` (mailboxServices) |
 | Mailbox stats | dynamic: `${escapeHtml(label)}` | `frontend/mailbox-stats.js:463` (mailboxSparkline) |
@@ -444,21 +444,21 @@ Native `title` tooltips. Dynamic ones show the expression that builds the text.
 | Mailbox stats | "Address on a mailcow alias domain that points at this mailbox" | `frontend/mailbox-stats.js:593` (renderMailboxStatsAccordion) |
 | Mailbox stats | "Resetting a counter needs the Read-Write API key (MAILCOW_API_KEY_RW)" | `frontend/rate-limits.js:203` |
 | Mailbox stats | set in JS: dynamic: `isRateLimits ? 'Help - Rate Limits' : 'Help - Mailbox Statistics'` | `frontend/mailbox-stats.js:96` (mailboxStatsSwitchView) |
-| Logs | "Help - Logs" | `frontend/index.html:1320` |
-| Logs | "Pause/Resume live updates" | `frontend/index.html:1344` |
-| Logs | "Live mode - show latest logs" | `frontend/index.html:1348` |
-| Logs | "Auto-scroll to new entries" | `frontend/index.html:1351` |
-| Logs | "Toggle sort order (newest at bottom / newest at top)" | `frontend/index.html:1354` |
-| Logs | "Toggle word wrap" | `frontend/index.html:1365` |
-| Logs | "Clear display" | `frontend/index.html:1368` |
-| Logs | "Search" | `frontend/index.html:1375` |
-| Logs | "Clear search" | `frontend/index.html:1376` |
-| Logs | "From date" | `frontend/index.html:1392` |
-| Logs | "To date" | `frontend/index.html:1394` |
-| Logs | "Go to the newest line and turn auto-scroll on" | `frontend/index.html:1416` |
+| Logs | "Help - Logs" | `frontend/index.html:1322` |
+| Logs | "Pause/Resume live updates" | `frontend/index.html:1346` |
+| Logs | "Live mode - show latest logs" | `frontend/index.html:1350` |
+| Logs | "Auto-scroll to new entries" | `frontend/index.html:1353` |
+| Logs | "Toggle sort order (newest at bottom / newest at top)" | `frontend/index.html:1356` |
+| Logs | "Toggle word wrap" | `frontend/index.html:1367` |
+| Logs | "Clear display" | `frontend/index.html:1370` |
+| Logs | "Search" | `frontend/index.html:1377` |
+| Logs | "Clear search" | `frontend/index.html:1378` |
+| Logs | "From date" | `frontend/index.html:1394` |
+| Logs | "To date" | `frontend/index.html:1396` |
+| Logs | "Go to the newest line and turn auto-scroll on" | `frontend/index.html:1418` |
 | Logs | dynamic: `${escapeHtml(f.description \|\| '')}` | `frontend/logs-viewer.js:212` (loadSmartFilters) |
 | Logs | "Clear all filters" | `frontend/logs-viewer.js:1268` (updateFilterBadge) |
-| Settings | "Help - Settings" | `frontend/index.html:1457` |
+| Settings | "Help - Settings" | `frontend/index.html:1459` |
 | Settings | "Last delivery succeeded" | `frontend/notifications.js:67` (renderNotificationChannels) |
 | Settings | "Last delivery failed" | `frontend/notifications.js:69` (renderNotificationChannels) |
 | Settings | "Not used yet" | `frontend/notifications.js:70` (renderNotificationChannels) |
@@ -503,23 +503,23 @@ Native `title` tooltips. Dynamic ones show the expression that builds the text.
 | app.js (mixed) | set in JS: dynamic: `label` | `frontend/app.js:407` (setNavTabLabel) |
 | app.js (mixed) | set in JS: dynamic: `title \|\| ''` | `frontend/app.js:843` (setNavCount) |
 | app.js (mixed) | set in JS: dynamic: ``Connect an agent - ${data.app_title \|\| 'mailcow Logs Viewer'}`` | `frontend/authorize.js:156` (consentRender) |
-| about | "Help - About" | `frontend/index.html:1443` |
+| about | "Help - About" | `frontend/index.html:1445` |
 | Devices | dynamic: `SOGo answered HTTP ${Number(status)}` | `frontend/devices.js:133` (deviceStatusTag) |
 | Devices | dynamic: `${escapeHtml(network)}` | `frontend/devices.js:142` (deviceLocation) |
 | Devices | dynamic: `${escapeHtml(`Device ID ${d.device_id}${d.model ? ` (reported as ${d.device_t...` | `frontend/devices.js:160` (renderDeviceRow) |
 | Devices | dynamic: `${escapeHtml(DEVICE_CLIENT_NOTE[client] \|\| 'Recognised from how the app nam...` | `frontend/devices.js:160` (renderDeviceRow) |
-| Devices | "Help - Devices" | `frontend/index.html:1280` |
+| Devices | "Help - Devices" | `frontend/index.html:1282` |
 | Devices | set in JS: dynamic: `data.last_run ? formatTime(data.last_run) : ''` | `frontend/devices.js:79` (renderDevicesSummary) |
 | Modal: alert-activity-modal | dynamic: `${escapeHtml(s.name)}` | `frontend/alert-activity.js:340` (renderAlertActivity) |
-| Modal: alert-activity-modal | "Close" | `frontend/index.html:1583` |
-| Modal: alert-activity-modal | "Dismiss the alert" | `frontend/index.html:1588` |
-| Modal: changelog-modal | "Close" | `frontend/index.html:1511` |
-| Modal: container-logs-modal | "Close" | `frontend/index.html:1532` |
-| Modal: dmarc-record-modal | "Close" | `frontend/index.html:1633` |
-| Modal: dmarc-reports-management-modal | "Close" | `frontend/index.html:1608` |
-| Modal: dmarc-sync-history-modal | "Close" | `frontend/index.html:1569` |
-| Modal: mailbox-activity-modal | "Close" | `frontend/index.html:1598` |
-| Modal: message-modal | "Close" | `frontend/index.html:1480` |
+| Modal: alert-activity-modal | "Close" | `frontend/index.html:1585` |
+| Modal: alert-activity-modal | "Dismiss the alert" | `frontend/index.html:1590` |
+| Modal: changelog-modal | "Close" | `frontend/index.html:1513` |
+| Modal: container-logs-modal | "Close" | `frontend/index.html:1534` |
+| Modal: dmarc-record-modal | "Close" | `frontend/index.html:1635` |
+| Modal: dmarc-reports-management-modal | "Close" | `frontend/index.html:1610` |
+| Modal: dmarc-sync-history-modal | "Close" | `frontend/index.html:1571` |
+| Modal: mailbox-activity-modal | "Close" | `frontend/index.html:1600` |
+| Modal: message-modal | "Close" | `frontend/index.html:1482` |
 
 ### Toasts
 
@@ -840,16 +840,16 @@ Drop-down lists in the page markup with their options. The option wording and or
 
 | Page | What | Code |
 |---|---|---|
-| Messages | `messages-filter-direction`: All Directions / Inbound / Outbound / Internal | `frontend/index.html:706` |
-| Messages | `messages-filter-status`: All Statuses / Delivered / Deferred / Bounced / Rejected / Spam / Discarded (Sieve) | `frontend/index.html:712` |
-| Security | `netfilter-filter-action`: All Actions / BAN / UNBAN / Warning / Info | `frontend/index.html:810` |
-| Security | `netfilter-filter-country`: All Countries | `frontend/index.html:817` |
-| Outbound | `suppression-filter-reason`: All Reasons / Hard Bounce / Soft Bounce / Deferred Stuck / Rejected / Manual | `frontend/index.html:925` |
-| Outbound | `suppression-filter-active`: Active Only / All / Inactive / Expired | `frontend/index.html:934` |
-| Mailbox stats | `mailbox-stats-domain-filter`: All Domains | `frontend/index.html:1242` |
-| Logs | `logs-fontsize`: 10px / 11px / 12px / 13px / 14px / 16px | `frontend/index.html:1357` |
-| Devices | `devices-type-filter`: All device types | `frontend/index.html:1299` |
-| Devices | `devices-seen-filter`: Any time / Seen in 24 hours / New this week / Not seen for 30 days | `frontend/index.html:1302` |
+| Messages | `messages-filter-direction`: All Directions / Inbound / Outbound / Internal | `frontend/index.html:708` |
+| Messages | `messages-filter-status`: All Statuses / Delivered / Deferred / Bounced / Rejected / Spam / Discarded (Sieve) | `frontend/index.html:714` |
+| Security | `netfilter-filter-action`: All Actions / BAN / UNBAN / Warning / Info | `frontend/index.html:812` |
+| Security | `netfilter-filter-country`: All Countries | `frontend/index.html:819` |
+| Outbound | `suppression-filter-reason`: All Reasons / Hard Bounce / Soft Bounce / Deferred Stuck / Rejected / Manual | `frontend/index.html:927` |
+| Outbound | `suppression-filter-active`: Active Only / All / Inactive / Expired | `frontend/index.html:936` |
+| Mailbox stats | `mailbox-stats-domain-filter`: All Domains | `frontend/index.html:1244` |
+| Logs | `logs-fontsize`: 10px / 11px / 12px / 13px / 14px / 16px | `frontend/index.html:1359` |
+| Devices | `devices-type-filter`: All device types | `frontend/index.html:1301` |
+| Devices | `devices-seen-filter`: Any time / Seen in 24 hours / New this week / Not seen for 30 days | `frontend/index.html:1304` |
 
 ### Charts
 
@@ -872,23 +872,23 @@ In-app help buttons; the topic is the Markdown file name under documentation/Hel
 
 | Page | What | Code |
 |---|---|---|
-| Dashboard | topic "Dashboard" | `frontend/index.html:585` |
-| Messages | topic "Messages" | `frontend/index.html:656` |
-| Security | topic "Security" | `frontend/index.html:783` |
+| Dashboard | topic "Dashboard" | `frontend/index.html:587` |
+| Messages | topic "Messages" | `frontend/index.html:658` |
+| Security | topic "Security" | `frontend/index.html:785` |
 | Security | topic "Abuse_Protection" | `frontend/security.js:1320` (securityCardHtml) |
-| Outbound | topic "Outbound" | `frontend/index.html:863` |
-| Quarantine | topic "Quarantine" | `frontend/index.html:958` |
-| Rspamd | topic "Rspamd" | `frontend/index.html:1028` |
-| Status | topic "Status" | `frontend/index.html:1047` |
-| Status | topic "IP_Blacklist_Monitor" | `frontend/index.html:1091` |
-| Domains | topic "Domains" | `frontend/index.html:1121` |
-| DMARC | topic "DMARC" | `frontend/index.html:1145` |
-| Mailbox stats | topic "Mailbox_Stats" | `frontend/index.html:1184` |
+| Outbound | topic "Outbound" | `frontend/index.html:865` |
+| Quarantine | topic "Quarantine" | `frontend/index.html:960` |
+| Rspamd | topic "Rspamd" | `frontend/index.html:1030` |
+| Status | topic "Status" | `frontend/index.html:1049` |
+| Status | topic "IP_Blacklist_Monitor" | `frontend/index.html:1093` |
+| Domains | topic "Domains" | `frontend/index.html:1123` |
+| DMARC | topic "DMARC" | `frontend/index.html:1147` |
+| Mailbox stats | topic "Mailbox_Stats" | `frontend/index.html:1186` |
 | Mailbox stats | topic dynamic: `'${isRateLimits ? 'Rate_Limits' : 'Mailbox_Stats'}'` | `frontend/mailbox-stats.js:95` (mailboxStatsSwitchView) |
-| Logs | topic "Logs" | `frontend/index.html:1320` |
-| Settings | topic "Settings" | `frontend/index.html:1457` |
-| about | topic "About" | `frontend/index.html:1443` |
-| Devices | topic "Devices" | `frontend/index.html:1280` |
+| Logs | topic "Logs" | `frontend/index.html:1322` |
+| Settings | topic "Settings" | `frontend/index.html:1459` |
+| about | topic "About" | `frontend/index.html:1445` |
+| Devices | topic "Devices" | `frontend/index.html:1282` |
 
 ### Empty states
 

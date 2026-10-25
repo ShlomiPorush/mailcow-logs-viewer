@@ -342,6 +342,30 @@ test('the container log: the shared frame, a terminal inside, the whole screen o
     }
 });
 
+// The phone hides the sidebar tools, so the More sheet is its way to the log
+test('the container log on a phone: More opens it, in place of the More sheet, with one history step', async () => {
+    const w = page({ phone: true, answer: url => (/container-logs/.test(url) ? { logs: ['line\n'] } : undefined) });
+    await settle(w);
+    const more = $(w, '#mobile-menu');
+    const log = $(w, '#container-logs-modal');
+    const start = w.history.length;
+    $(w, '#hamburger-btn').click();
+    await settle(w);
+    assert.ok(more.classList.contains('active'));
+    assert.equal(w.history.length, start + 1, 'the More sheet has its history step');
+    const item = $(w, '#mobile-container-logs');
+    assert.ok(item && item.closest('#mobile-menu'), 'More has a Container log item');
+    item.click();
+    await settle(w);
+    assert.ok(!more.classList.contains('active'), 'More closes');
+    assert.ok(log.matches('.ui-dialog-backdrop:not(.hidden)'), 'the log opens');
+    assert.equal(w.history.length, start + 1, 'the log takes over the step, it adds none');
+    assert.ok(!log.inert && !log.closest('[inert]'), 'the log is the top layer');
+    escape(w);
+    await settle(w);
+    assert.ok(log.classList.contains('hidden') && !more.classList.contains('active'), 'Escape closes the log, More stays closed');
+});
+
 test('the Suppressions More menu is a popover menu of buttons with an icon button', () => {
     const html = read('index.html');
     const w = new JSDOM(html.replace(/<script\b[\s\S]*?<\/script>/g, '')).window;
