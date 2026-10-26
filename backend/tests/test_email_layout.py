@@ -247,6 +247,113 @@ def test_anomaly_alert_email():
     _inert(html)
     assert 'Unusual sending from a@example.com' in html
     assert 'Review the mailbox.' in html
+    # Without its counts the email has no chart
+    assert 'Last 24 hours' not in html and 'm-bar' not in html.split('</style>', 1)[1]
+
+
+def _bar_columns(html):
+    """Per bar column: the heights of its cells (spacer, bar) and the bar's class and colour."""
+    import re
+    columns = re.findall(r'<td width="\d+%" valign="bottom".*?</table></td>', html)
+    return [([int(h) for h in re.findall(r'height="(\d+)"', column)],
+             re.search(r'class="(m-bar(?:-hi)?)" bgcolor="(#[0-9A-F]{6})"', column).groups())
+            for column in columns]
+
+
+def test_bar_chart_scales_the_bars_to_the_largest_count():
+    columns = _bar_columns(e.bar_chart([0, 1, 20, 40, 3]))
+    # The bar is the last cell: zero is a 1px line, a small count stays visible
+    assert [heights[-1] for heights, _ in columns] == [1, 2, 40, 80, 6]
+    # Every column is as tall as the tallest bar, so the bars stand on one line
+    assert {sum(heights) for heights, _ in columns} == {e.BAR_MAX_HEIGHT}
+
+
+def test_bar_chart_with_nothing_counted():
+    columns = _bar_columns(e.bar_chart([0] * 24, highlight=[23]))
+    assert len(columns) == 24
+    assert all(heights[-1] == 1 and style == ('m-bar', e.BAR) for heights, style in columns)
+    assert 'm-bar' not in e.bar_chart([])
+
+
+def test_bar_chart_highlights_the_marked_bars():
+    columns = _bar_columns(e.bar_chart([3, 5, 39, 12], highlight=[2, 3]))
+    assert [style for _, style in columns] == [
+        ('m-bar', '#C4C4C4'), ('m-bar', '#C4C4C4'), ('m-bar-hi', '#C42B1C'), ('m-bar-hi', '#C42B1C')]
+    # A neutral grey (no tint), which the Outlook apps keep as it is
+    assert e.BAR[1:3] == e.BAR[3:5] == e.BAR[5:7]
+
+
+def test_bar_chart_escapes_its_text():
+    html = e.render(title='T', topic='Security', blocks=[e.panel('P', e.bar_chart(
+        [1, 2], [1], start=f'S{PAYLOAD}', end=f'E{PAYLOAD}', caption=f'C{PAYLOAD}'))])
+    _inert(html)
+    for prefix in ('S', 'E', 'C'):
+        assert f'{prefix}{ESCAPED}' in html, prefix
+    # The counts become heights: anything but a number is refused
+    import pytest
+    with pytest.raises(ValueError):
+        e.bar_chart([f'1{PAYLOAD}'])
+
+
+def test_bar_chart_in_dark_mode():
+    html = e.render(title='T', topic='Security')
+    dark = html.split('@media (prefers-color-scheme: dark)', 1)[1].split('\n}\n', 1)[0]
+    assert '.m-bar { background-color: #4A4A4A !important; }' in dark
+    assert '.m-bar-hi { background-color: #FF6B61 !important; }' in dark
+    # Outlook for Android turns tinted colours into a flat grey: the bars get
+    # a neutral grey, and the highlighted ones their red back
+    assert '[data-ogsb] .m-bar { background-color: #555555 !important; }' in html
+    assert '[data-ogsb] .m-bar-hi { background-color: #FF6B61 !important; }' in html
+
+
+def test_anomaly_alert_email_shows_the_last_24_hours(monkeypatch):
+    from app.config import settings
+    from app.services.anomaly_service import AlertChart, _alert_email_html
+    monkeypatch.setattr(settings._inner, 'tz', 'Europe/Berlin')
+    counts = [0] * 24
+    counts[5], counts[23] = 2, 39
+    chart = AlertChart(counts, [23], datetime(2026, 1, 15, 12, 0), usual_rate=0.6)
+    html = _alert_email_html(
+        'Outbound volume spike: a@example.com',
+        'Mailbox a@example.com sent 39 messages.\n\nReview the mailbox.',
+        'critical', 'volume_spike', 'a@example.com', chart)
+    assert 'Messages sent per hour. 39 in the last hour, usually 0.6 an hour.' in html
+    # After the details, before what to do
+    assert html.index('>Details<') < html.index('>Last 24 hours<') < html.index('What to do')
+    # The axis: the start a day earlier, with its date; the end with its zone
+    assert '>14/01/2026 13:00<' in html and '>13:00 CET<' in html
+    assert [style[0] for _, style in _bar_columns(html)].count('m-bar-hi') == 1
+
+
+def test_the_chart_axis_names_both_zones_across_a_clock_change(monkeypatch):
+    from app.config import settings
+    from app.services.anomaly_service import AlertChart, _alert_email_html
+    monkeypatch.setattr(settings._inner, 'tz', 'Europe/Berlin')
+    # Summer time ended at 01:00 UTC on 25/10/2026
+    chart = AlertChart([1] * 24, [23], datetime(2026, 10, 25, 12, 0))
+    html = _alert_email_html('T', 'What.\n\nDo.', 'warning', 'auth_failure_burst', 'a@example.com', chart)
+    assert '>24/10/2026 14:00 CEST<' in html and '>13:00 CET<' in html
+
+
+def test_anomaly_alert_email_for_failed_sign_ins():
+    from app.services.anomaly_service import AlertChart, _alert_email_html
+    counts = [0] * 22 + [4, 8]
+    chart = AlertChart(counts, [22, 23], datetime(2026, 1, 15, 12, 0))
+    html = _alert_email_html(
+        'Authentication failure burst: a@example.com', '12 authentication failures.\n\nSecure it.',
+        'warning', 'auth_failure_burst', 'a@example.com', chart)
+    assert 'Failed sign-ins per hour. 12 in the last 2 hours.' in html
+    assert 'usually' not in html
+    assert [style[0] for _, style in _bar_columns(html)][-3:] == ['m-bar', 'm-bar-hi', 'm-bar-hi']
+
+
+def test_the_usual_rate_in_words():
+    from app.services.anomaly_service import _usual_rate
+    assert _usual_rate(0) == 'none'
+    assert _usual_rate(0.04) == 'under 0.1 an hour'
+    assert _usual_rate(0.6) == '0.6 an hour'
+    assert _usual_rate(2.0) == '2 an hour'
+    assert _usual_rate(12.4) == '12 an hour'
 
 
 def test_dmarc_error_email():

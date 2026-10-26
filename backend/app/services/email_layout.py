@@ -96,6 +96,14 @@ def format_date(when: datetime, time: bool = False, zone: bool = True) -> str:
     return f"{text} {app_time.zone_label(local)}" if zone else text
 
 
+def format_time(when: datetime, zone: bool = True) -> str:
+    """The time of day in the app's time zone, as format_date writes it
+    (13:00 CET), without the date."""
+    local = app_time.to_local(when)
+    text = app_time.format_clock(local.hour, local.minute)
+    return f"{text} {app_time.zone_label(local)}" if zone else text
+
+
 def _lines(value, cls: str = 'm-ink') -> str:
     """Escape, then keep line breaks."""
     if isinstance(value, Safe):
@@ -125,6 +133,11 @@ TONES = {
 
 _CLASS_COLORS = {'m-ink': INK, 'm-muted': MUTED, **{f'm-{t}': c for t, (c, _) in TONES.items()}}
 
+# Bars of a chart: a neutral grey (no tint, so the Outlook apps keep it), and
+# the fail colour for the bars that hold what the email is about
+BAR = '#C4C4C4'
+BAR_HI = TONES['fail'][0]
+
 # Outlook for Android in dark mode (measured 2026-10-26) applies the dark
 # theme, then recolours it again: the tinted backgrounds, dark or light, all
 # came out as mid greys close to each other, so the email turned flat grey.
@@ -132,7 +145,9 @@ _CLASS_COLORS = {'m-ink': INK, 'm-muted': MUTED, **{f'm-{t}': c for t, (c, _) in
 # white became the app's own background). Outlook marks recoloured elements
 # with data-ogsb, so under that mark the email gets white and neutral greys.
 # A rule on the marked element itself loses to the colour Outlook writes
-# inline, so the rules match descendants only.
+# inline, so the rules match descendants only. The bars of a chart are a
+# neutral grey for the same reason; its highlighted bars get their red there
+# too, so Outlook cannot turn them into one more grey bar.
 #
 # Outlook and Gmail also turn dates into links of their own; a link in the
 # email takes the colour of its text instead (link() keeps its underline).
@@ -152,12 +167,16 @@ _DARK_CSS = """
   .m-fail { color: #FF6B61 !important; } .m-fail-bg { background-color: #3D2220 !important; }
   .m-info { color: #7DB3FF !important; } .m-info-bg { background-color: #1E2C40 !important; }
   .m-muted-bg { background-color: #232826 !important; }
+  .m-bar { background-color: #4A4A4A !important; }
+  .m-bar-hi { background-color: #FF6B61 !important; }
 }
 [data-ogsb] .m-bg { background-color: #FFFFFF !important; }
 [data-ogsb] .m-panel { background-color: #202020 !important; }
 [data-ogsb] .m-line { border-color: #333333 !important; }
 [data-ogsb] .m-rule { background-color: #333333 !important; }
 [data-ogsb] .m-muted-bg { background-color: #333333 !important; }
+[data-ogsb] .m-bar { background-color: #555555 !important; }
+[data-ogsb] .m-bar-hi { background-color: #FF6B61 !important; }
 .m-bg a { color: inherit !important; text-decoration: none !important; }
 @media (max-width: 620px) {
   .m-wrap { padding: 24px 16px !important; }
@@ -377,6 +396,63 @@ def panel_text(text) -> Safe:
     """Free text inside a panel, with the panel padding."""
     return Safe(f'<table {_TABLE}>{_rule()}<tr><td class="m-ink m-cell" style="padding:10px 16px 12px;color:{INK};'
                 f'font-size:14px;line-height:1.55;">{_lines(text)}</td></tr></table>')
+
+
+BAR_MAX_HEIGHT = 80
+
+
+def _bar_heights(counts: Sequence[int], max_height: int = BAR_MAX_HEIGHT) -> list:
+    """Bar heights in px, scaled to the largest count. A count above zero
+    stays visible (2px at least); zero is a 1px line, so the axis reads."""
+    top = max(counts, default=0)
+    return [max(2, round(c * max_height / top)) if c > 0 else 1 for c in counts]
+
+
+def bar_chart(counts: Sequence[int], highlight: Iterable[int] = (), start=None, end=None, caption=None) -> Safe:
+    """A row of bars inside a panel, for counts over time: the bars at the
+    highlight indexes in the fail colour, the others grey (a highlighted
+    count of zero stays a grey line). start and end label the two ends of
+    the axis; the caption says in words what the bars show, so the email
+    reads without them.
+
+    Email clients draw no SVG or canvas, so every bar is a table cell of a
+    fixed height (an attribute too, for Word) under a spacer cell. The bar
+    cells are percentage widths with a 1px gap on each side, so the chart
+    fits a phone and keeps a 600px email."""
+    counts = [max(int(c), 0) for c in counts]
+    marked = set(highlight)
+    heights = _bar_heights(counts)
+    share = 100 / len(counts) if counts else 100
+    # Word reads whole percentages only; the style keeps the exact share
+    width_attr, width = f"{int(share)}%", f"{share:.2f}%"
+    cell = 'font-size:1px;line-height:1px;mso-line-height-rule:exactly;'
+    columns = []
+    for i, (count, height) in enumerate(zip(counts, heights)):
+        hi = i in marked and count > 0
+        cls, color = ('m-bar-hi', BAR_HI) if hi else ('m-bar', BAR)
+        gap = BAR_MAX_HEIGHT - height
+        spacer = (f'<tr><td height="{gap}" style="height:{gap}px;{cell}">&nbsp;</td></tr>' if gap else '')
+        columns.append(
+            f'<td width="{width_attr}" valign="bottom" style="width:{width};padding:0 1px;">'
+            f'<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">{spacer}'
+            f'<tr><td class="{cls}" bgcolor="{color}" height="{height}" style="height:{height}px;'
+            f'background-color:{color};{cell}">&nbsp;</td></tr></table></td>')
+    bars = (f'<table role="presentation" aria-hidden="true" width="100%" cellpadding="0" cellspacing="0" border="0" '
+            f'style="table-layout:fixed;"><tr>{"".join(columns)}</tr></table>')
+    small = f'color:{MUTED};font-size:12px;line-height:1.4;'
+    axis = (f'<table {_TABLE}><tr>'
+            f'<td class="m-muted" align="left" style="{small}text-align:left;">{_e(start, "m-muted")}</td>'
+            f'<td class="m-muted" align="right" style="{small}text-align:right;">{_e(end, "m-muted")}</td>'
+            f'</tr></table>') if start or end else ''
+    rows = [_rule(), f'<tr><td class="m-cell" style="padding:14px 16px 0;">{bars}</td></tr>']
+    if axis:
+        rows.append(f'<tr><td class="m-cell" style="padding:6px 16px 0;">{axis}</td></tr>')
+    if caption:
+        rows.append(f'<tr><td class="m-ink m-cell" style="padding:10px 16px 12px;color:{INK};font-size:14px;'
+                    f'line-height:1.55;">{_lines(caption)}</td></tr>')
+    else:
+        rows.append('<tr><td height="12" style="height:12px;font-size:1px;line-height:1px;">&nbsp;</td></tr>')
+    return Safe(f'<table {_TABLE}>' + ''.join(rows) + '</table>')
 
 
 APP_ICON_CID = 'app-icon'
