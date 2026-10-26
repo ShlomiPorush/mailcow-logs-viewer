@@ -133,3 +133,15 @@ def test_a_bearer_call_may_get_the_route_answer_or_the_gateway_envelope():
     with pytest.raises(AssertionError):
         check_response(contract, _bearer_answer(404, {"detail": 5})[1])
     assert not agent_envelope(contract, *_bearer_answer(413, {"error": 1, "message": "x"}))
+
+
+def test_only_a_checked_answer_that_matches_counts_as_reached():
+    from contract import check_response
+    contract = Contract(_app({}))
+    # The gateway's envelope and the sign-in middleware's plain 500 are not the route's answers
+    check_response(contract, _bearer_answer(404, {"error": "gone", "message": "Not found."})[1])
+    assert contract.problem("GET", "/api/thing", 500, "text/plain",
+                            b"Authentication is enabled but password is not configured") is None
+    assert contract.seen == set()
+    check_response(contract, _bearer_answer(404, {"detail": "gone"})[1])
+    assert contract.seen == {("GET", "/api/thing", 404)}
