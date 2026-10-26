@@ -123,7 +123,7 @@ INK = '#111814'
 MUTED = '#5E6863'
 LINE = '#E0E0E0'
 
-# Tone colour and its tag/banner tint (the colour at 13-15% over white, as
+# Tone colour and its banner tint (the colour at 13-15% over white, as
 # color-mix() gives in the app; email clients cannot mix colours)
 TONES = {
     'ok': ('#12803F', '#E0F0E6'),
