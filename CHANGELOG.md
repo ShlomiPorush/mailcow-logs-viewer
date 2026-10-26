@@ -91,6 +91,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Map lines too large to check** - A map line with a huge repeat count or very deep nesting gave an internal server error. It is now marked as a bad line.
 - **Suppression import of a file that is not UTF-8** - The import gave an internal server error. It now asks to save the file as CSV UTF-8.
 - **Quarantine with an impossible time** - One quarantine item with a time mailcow cannot mean made the Quarantine page fail. The page now loads, and that item is shown last, without a time.
+- **Released quarantine messages sent twice** - When mailcow answered slowly, the app sent a release again while mailcow was still sending, so a message could reach its recipient twice. A change mailcow received is no longer sent again, and the page says to check the result before trying again.
 
 
 ## [2.9.0] - 2026-10-04

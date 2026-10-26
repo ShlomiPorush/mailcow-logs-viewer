@@ -27,7 +27,7 @@ from sqlalchemy.orm import Session
 
 from ..config import get_cached_active_domains, settings
 from ..database import SessionLocal, get_db
-from ..mailcow_api import MailcowAPIError, MailcowRwKeyError, mailcow_api
+from ..mailcow_api import MailcowAPIError, MailcowShownError, mailcow_api
 from ..models import MailboxStatistics, RawServiceLog
 from ..utils import format_datetime_for_api, internal_error
 from ..api_models import Invalid, documented
@@ -38,8 +38,8 @@ logger = logging.getLogger(__name__)
 
 
 def _write_failed(e: MailcowAPIError, detail: str) -> HTTPException:
-    """A refused Read-Write key says what to fix; any other failure points to the logs."""
-    return HTTPException(status_code=502, detail=str(e) if isinstance(e, MailcowRwKeyError) else detail)
+    """A refused Read-Write key or a write mailcow did not confirm says what to do; any other failure points to the logs."""
+    return HTTPException(status_code=502, detail=str(e) if isinstance(e, MailcowShownError) else detail)
 
 router = APIRouter(prefix="/rate-limits")
 

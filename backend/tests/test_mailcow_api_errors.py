@@ -13,7 +13,7 @@ import httpx
 import pytest
 
 from app import mailcow_api as mod
-from app.mailcow_api import MailcowAPIError
+from app.mailcow_api import MailcowAPIError, MailcowWriteUnknownError
 from tests.test_mailcow_api_recovery import server  # noqa: F401  (the fake mailcow)
 
 READS = [
@@ -54,7 +54,7 @@ WRITES = [
 @pytest.fixture()
 def failing(server, monkeypatch):  # noqa: F811
     server["answer"] = lambda request: httpx.Response(500, text="mailcow is down")
-    monkeypatch.setattr(mod.MailcowAPI._make_rw_request.retry, "wait", lambda *a, **k: 0)
+    monkeypatch.setattr(mod.MailcowAPI._rw_attempt.retry, "wait", lambda *a, **k: 0)
     return server
 
 
@@ -69,12 +69,21 @@ def _call(name, args, kwargs):
     return asyncio.run(go())
 
 
-@pytest.mark.parametrize("name,args,kwargs", READS + WRITES, ids=[r[0] for r in READS + WRITES])
-def test_a_call_raises_mailcow_api_error_after_the_tries(failing, name, args, kwargs):
+@pytest.mark.parametrize("name,args,kwargs", READS, ids=[r[0] for r in READS])
+def test_a_read_raises_mailcow_api_error_after_the_tries(failing, name, args, kwargs):
     with pytest.raises(MailcowAPIError) as exc:
         _call(name, args, kwargs)
     assert "500" in str(exc.value)
     assert len(failing["requests"]) == 3
+
+
+@pytest.mark.parametrize("name,args,kwargs", WRITES, ids=[r[0] for r in WRITES])
+def test_a_write_mailcow_answered_500_is_sent_once(failing, name, args, kwargs):
+    """mailcow received it and may have made the change: it is not sent again
+    (tests/test_mailcow_write_retry.py)."""
+    with pytest.raises(MailcowWriteUnknownError):
+        _call(name, args, kwargs)
+    assert len(failing["requests"]) == 1
 
 
 @pytest.mark.parametrize("name,expected", [

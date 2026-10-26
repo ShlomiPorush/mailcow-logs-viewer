@@ -94,6 +94,14 @@ NOT_GIVEN = {
                                           "which it answers 502",
     ("GET", "/api/rspamd/maps/{filename}", 500): "internal_error() answers MailcowAPIError 502, and the Rspamd "
                                                  "client turns a map list it cannot read into one",
+    ("PUT", "/api/rspamd/maps/{filename}", 500): "internal_error() answers MailcowAPIError 502; a write mailcow "
+                                                 "did not confirm is one too (MailcowWriteUnknownError)",
+    ("GET", "/api/queue", 500): "the mailcow client turns every failure, NaN and Infinity included, into "
+                                "MailcowAPIError (502), leaves out entries that are not objects, and the sort "
+                                "takes any arrival_time",
+    ("GET", "/api/quarantine", 500): "the mailcow client turns every failure, NaN and Infinity included, into "
+                                     "MailcowAPIError (502) and leaves out entries that are not objects; an "
+                                     "unreadable created is shown as none",
 }
 
 

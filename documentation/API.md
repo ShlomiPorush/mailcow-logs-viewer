@@ -126,7 +126,7 @@ Requests with neither header (curl, scripts) pass, and so do origins listed exac
 
 ### 502 Bad Gateway
 
-A failed mailcow API call, usually `{ "detail": "mailcow did not answer. Try again in a moment." }`. When mailcow refuses the read-write key, `detail` says so. Some status reads return 503 or fallback data instead.
+A failed mailcow API call, usually `{ "detail": "mailcow did not answer. Try again in a moment." }`. When mailcow refuses the read-write key, `detail` says so. When mailcow received a change but did not confirm it (no answer in time, a dropped or unreadable answer, or a 5xx), `detail` is "mailcow did not confirm the change. It may still be running. Check the result before trying again." A change is sent again only when the connection to mailcow could not be made. Some status reads return 503 or fallback data instead.
 
 ---
 

@@ -195,17 +195,28 @@ def test_mailcow_lists_mailcow_does_not_give(client, monkeypatch, path):
     assert client.get(path).status_code == 502
 
 
-@pytest.mark.parametrize('path, answer', [
-    # Arrival times of two kinds cannot be sorted
-    ('/api/queue', [{'queue_id': 'A', 'arrival_time': 'soon'}, {'queue_id': 'B', 'arrival_time': 5}]),
-    # An entry that is not an object
-    ('/api/quarantine', [{'id': 1, 'created': 5}, 'not an item']),
-])
-def test_mailcow_lists_the_route_cannot_read(client, monkeypatch, path, answer):
+def test_a_queue_with_odd_entries_still_loads(client, monkeypatch):
+    """Times of several kinds are sorted newest first, one that is not a time
+    goes last without a value, and an entry that is not an object is left out."""
     async def odd(*args, **kwargs):
-        return answer
+        return [{'queue_id': 'A', 'arrival_time': 'soon'}, {'queue_id': 'B', 'arrival_time': 5},
+                {'queue_id': 'C', 'arrival_time': '1700000000'}, {'queue_id': 'D', 'arrival_time': float('nan')},
+                'not an item']
     monkeypatch.setattr(mailcow_api, '_make_request', odd)
-    assert client.get(path).status_code == 500
+    r = client.get('/api/queue')
+    assert r.status_code == 200
+    assert [(item['queue_id'], item['arrival_time']) for item in r.json()['data']] == \
+        [('C', '1700000000'), ('B', 5), ('A', 'soon'), ('D', None)]
+    assert r.json()['total'] == 4
+
+
+def test_a_quarantine_entry_that_is_not_an_object_is_left_out(client, monkeypatch):
+    async def odd(*args, **kwargs):
+        return [{'id': 1, 'created': 5}, 'not an item', None]
+    monkeypatch.setattr(mailcow_api, '_make_request', odd)
+    r = client.get('/api/quarantine')
+    assert r.status_code == 200
+    assert [item['id'] for item in r.json()['data']] == [1]
 
 
 @pytest.mark.parametrize('created', [10 ** 20, -10 ** 20, 1e20, float('nan'), float('inf'), float('-inf')])

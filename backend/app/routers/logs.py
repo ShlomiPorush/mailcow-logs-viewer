@@ -2,6 +2,7 @@
 API endpoints for log retrieval and search
 """
 import ipaddress
+import math
 import logging
 from fastapi import APIRouter, Depends, Query, HTTPException, Request
 from starlette.concurrency import run_in_threadpool
@@ -12,7 +13,7 @@ from typing import List, Optional
 
 from ..database import get_db
 from ..models import PostfixLog, RspamdLog, NetfilterLog, MessageCorrelation
-from ..mailcow_api import MailcowRwKeyError, mailcow_api
+from ..mailcow_api import MailcowShownError, mailcow_api
 from ..config import settings
 from ..services import excluded_addresses, geoip_service, protection_rules, security_addresses
 from ..services.security_addresses import netfilter_service  # noqa: F401  (tests import it from here)
@@ -882,7 +883,7 @@ async def unban_fail2ban(request: Request):
         raise
     except Exception as e:
         logger.error(f"Error unbanning IP from Fail2Ban: {e}")
-        if isinstance(e, MailcowRwKeyError):
+        if isinstance(e, MailcowShownError):
             raise internal_error(e)
         raise HTTPException(status_code=502, detail="mailcow did not accept the unban. Check the Read-Write API key and try again.")
 
@@ -1099,7 +1100,20 @@ def lookup_geoip(ip: str):
     return {"available": True, "ip": ip, **geo}
 
 
-@router.get("/queue", responses=documented(m.QueueResponse, errors={500: None, 502: None}))
+def _queue_time_key(item: dict):
+    """Sort key: (has a time, the time). A number or a numeric string is a time;
+    anything else, such as text or a missing value, sorts after every time."""
+    value = item.get('arrival_time')
+    if isinstance(value, bool):
+        return (False, 0.0)
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return (False, 0.0)
+    return (True, number) if math.isfinite(number) else (False, 0.0)
+
+
+@router.get("/queue", responses=documented(m.QueueResponse, errors={502: None}))
 async def get_queue():
     """
     Get current mail queue from mailcow (real-time)
@@ -1107,14 +1121,13 @@ async def get_queue():
     """
     try:
         queue = await mailcow_api.get_queue()
-        
+
         # Sort by arrival_time - newest first (descending order)
-        # arrival_time is a Unix timestamp (integer)
-        queue_sorted = sorted(
-            queue,
-            key=lambda x: x.get('arrival_time', 0),
-            reverse=True  # Newest first
-        )
+        # arrival_time is a Unix timestamp; an item without a readable one goes last
+        for item in queue:
+            if isinstance(item.get('arrival_time'), float) and not math.isfinite(item['arrival_time']):
+                item['arrival_time'] = None  # NaN and infinity are not JSON
+        queue_sorted = sorted(queue, key=_queue_time_key, reverse=True)  # Newest first
         
         return {
             "total": len(queue_sorted),
@@ -1194,7 +1207,7 @@ async def delete_queue(request: Request):
         raise internal_error(e)
 
 
-@router.get("/quarantine", responses=documented(m.QuarantineResponse, errors={500: None, 502: None}))
+@router.get("/quarantine", responses=documented(m.QuarantineResponse, errors={502: None}))
 async def get_quarantine():
     """
     Get quarantined messages from mailcow (real-time)
