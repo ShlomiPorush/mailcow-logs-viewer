@@ -145,10 +145,11 @@ BAR_HI = TONES['fail'][0]
 # tinted backgrounds, dark or light, all came out as mid greys close to each
 # other, so the email turned flat grey. Neutral greys kept their place (dark
 # ones as they are, light ones inverted, white became the client's own
-# background). So the background, panels, lines, muted tags and chart bars
-# are neutral greys, in the light colours and in the dark theme; the tone
-# tints (ok, warn, fail, info) keep their colour, which Outlook remapped to a
-# readable shade. Outlook on the web writes its colour inline on every
+# background). So the background, panels, lines, the muted tint and chart
+# bars are neutral greys, in the light colours and in the dark theme. The
+# banners keep their tone tints (ok, warn, fail, info), which Outlook
+# remapped to a readable shade; tags are outlined instead of filled (see
+# _tag). Outlook on the web writes its colour inline on every
 # coloured element, so only the colours themselves reach it.
 #
 # Outlook marks recoloured elements with data-ogsb; under that mark the
@@ -176,6 +177,9 @@ _DARK_CSS = """
   .m-fail { color: #FF6B61 !important; } .m-fail-bg { background-color: #3D2220 !important; }
   .m-info { color: #7DB3FF !important; } .m-info-bg { background-color: #1E2C40 !important; }
   .m-muted-bg { background-color: #2A2A2A !important; }
+  .m-ok-bd { border-color: #3FCF7F !important; } .m-warn-bd { border-color: #F0B03F !important; }
+  .m-fail-bd { border-color: #FF6B61 !important; } .m-info-bd { border-color: #7DB3FF !important; }
+  .m-muted-bd { border-color: #97A29C !important; }
   .m-bar { background-color: #4A4A4A !important; }
   .m-bar-hi { background-color: #FF6B61 !important; }
 }
@@ -231,16 +235,20 @@ def tag(text, tone: str = 'muted') -> Safe:
 def _tag(text, tone: str, rounded_in_outlook: bool) -> str:
     """rounded_in_outlook draws a fixed-size VML shape for Outlook. Only for
     the topic tag: VML inside a table, followed by more VML, can make Word
-    report the table as corrupt and show nothing."""
-    color, tint = _tone(tone)
+    report the table as corrupt and show nothing.
+
+    A tag is outlined, not filled: Outlook on the web turned every tinted
+    fill into a muddy grey-brown in dark mode, while a border and text in
+    the tone colour stay clear there (measured 2026-10-26)."""
+    color = _tone(tone)[0]
     cell = (f'<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="display:inline-table;vertical-align:middle;">'
-            f'<tr><td class="m-{tone} m-{tone}-bg m-b" bgcolor="{tint}" style="padding:2px 8px;border-radius:6px;'
-            f'background-color:{tint};color:{color};font-size:12px;font-weight:700;line-height:1.4;white-space:nowrap;">'
+            f'<tr><td class="m-{tone} m-{tone}-bd m-b" style="padding:1px 7px;border:1px solid {color};border-radius:6px;'
+            f'color:{color};font-size:12px;font-weight:700;line-height:1.4;white-space:nowrap;">'
             f'{_e(text, "m-" + tone)}</td></tr></table>')
     if not rounded_in_outlook:
         return cell
     width = len(str(text)) * 7 + 18
-    return (f'<!--[if mso]><v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" arcsize="30%" fillcolor="{tint}" stroked="f" '
+    return (f'<!--[if mso]><v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" arcsize="30%" filled="f" strokecolor="{color}" strokeweight="1px" '
             f'style="width:{width * 3 / 4:g}pt;height:15pt;v-text-anchor:middle;"><v:textbox inset="0,0,0,0">'
             f'<center style="color:{color};font-family:\'Segoe UI\',Arial,sans-serif;font-size:12px;font-weight:bold;">'
             f'{_attr(text)}</center></v:textbox></v:roundrect><![endif]-->'

@@ -92,6 +92,20 @@ def test_every_surface_is_a_neutral_grey():
     assert [c for c in surfaces if not _neutral(c)] == []
 
 
+def test_tags_are_outlined_not_filled():
+    # Outlook on the web turned every tinted tag fill into a muddy grey-brown
+    # in dark mode; a border and text in the tone colour stayed clear
+    for tone, (color, tint) in e.TONES.items():
+        html = e.tag('Label', tone)
+        assert f'border:1px solid {color};' in html and f'color:{color};' in html
+        assert 'background' not in html and 'bgcolor' not in html and tint not in html
+        assert f'm-{tone}-bd' in html and f'm-{tone}-bg' not in html
+    topic = e.render(title='T', topic='Security', tone='fail')
+    assert 'filled="f" strokecolor="#C42B1C" strokeweight="1px"' in topic and 'fillcolor=' not in topic
+    for tone, dark in {'ok': '#3FCF7F', 'warn': '#F0B03F', 'fail': '#FF6B61', 'info': '#7DB3FF', 'muted': '#97A29C'}.items():
+        assert f'.m-{tone}-bd {{ border-color: {dark} !important; }}' in topic
+
+
 def test_the_email_is_left_to_right():
     # A client in a right-to-left language (Outlook on the web in Hebrew)
     # otherwise mirrors the email
