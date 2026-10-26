@@ -89,7 +89,15 @@ class Contract:
         return (template, operation) if operation else None
 
     def problem(self, method: str, path: str, status: int, content_type: str, body: bytes) -> Optional[str]:
-        """What is wrong with this answer, or None when it matches (or is not checked yet)."""
+        """What is wrong with this answer, or None when it matches (or is not checked yet).
+        Only an answer that matches its route's documentation counts as reaching its status."""
+        found = self.operation_for(method, path) if path.startswith("/api/") else None
+        problem = self._problem(method, path, status, content_type, body)
+        if problem is None and found and is_documented(found[1]):
+            self.seen.add((method, found[0], status))
+        return problem
+
+    def _problem(self, method: str, path: str, status: int, content_type: str, body: bytes) -> Optional[str]:
         if not path.startswith("/api/"):
             return None
         found = self.operation_for(method, path)
@@ -99,7 +107,6 @@ class Contract:
         if not is_documented(operation):
             return None
         where = f"{method} {template} answered {status}"
-        self.seen.add((method, template, status))
         responses = operation.get("responses") or {}
         response = responses.get(str(status))
         media = (content_type or "").split(";")[0].strip()

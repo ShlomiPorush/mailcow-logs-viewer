@@ -1326,7 +1326,7 @@ def _persist_maxmind_validation_worker(result: Dict[str, Any]) -> None:
 
 
 
-@router.get("/settings/geoip/status", responses=documented(m.GeoipStatus))
+@router.get("/settings/geoip/status", responses=documented(m.GeoipStatus, errors={500: None}))
 def get_geoip_detailed_status():
     """
     Get detailed GeoIP status for frontend polling.
@@ -1460,7 +1460,7 @@ async def validate_rspamd_password_endpoint():
     return await _validate_credential("rspamd_password")
 
 
-@router.post("/settings/geoip/validate", responses=documented(m.GeoipValidationResponse, description="The result; valid false with error when the City file is missing"))
+@router.post("/settings/geoip/validate", responses=documented(m.GeoipValidationResponse, description="The result; valid false with error when the City file is missing", errors={500: None}))
 def validate_geoip_db():
     """
     Validate GeoIP database integrity by running test IP lookups.

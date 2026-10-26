@@ -6,6 +6,7 @@ data with Rspamd refusing (409, 502), the checks of credentials and connections,
 GeoIP and the manual job runs (404, 409). mailcow, Rspamd, MaxMind, SMTP and IMAP
 are faked or left unconfigured; nothing leaves the test. Every setting and stored
 row a call changes is put back."""
+import pathlib
 import types
 import uuid
 from contextlib import contextmanager
@@ -21,7 +22,7 @@ sf.StaticFiles.__init__ = lambda s, *a, **k: _orig_init(s, *a, **{**k, 'check_di
 
 from fastapi.testclient import TestClient  # noqa: E402
 
-from app import config, database, scheduler  # noqa: E402
+from app import database, scheduler  # noqa: E402
 from app.config import settings  # noqa: E402
 from app.database import get_db  # noqa: E402
 from app.mailcow_api import MailcowAPIError, mailcow_api  # noqa: E402
@@ -29,6 +30,7 @@ from app.main import app  # noqa: E402
 from app.routers import settings as settings_router  # noqa: E402
 from app.routers.suppressions import MANAGED_MARKER_END, MANAGED_MARKER_START, OFF_TRANSITION_KEY  # noqa: E402
 from app.services import figures  # noqa: E402
+from app.services.oauth2_client import oauth2_client  # noqa: E402
 
 MARK = uuid.uuid4().hex[:8]
 # Stored rows these calls write: settings, check results, the Suppressions switch token
@@ -126,9 +128,14 @@ def editing(client, rows, monkeypatch):
     monkeypatch.setattr(settings_router, 'cleanup_disabled_feature_data', lambda db: {})
     monkeypatch.setattr(settings_router, 'run_feature_data_sweep_soon', lambda: None)
     monkeypatch.setattr(settings_router, 'reschedule_interval_jobs', lambda: None)
+    # A save puts new settings in force and reloads the OAuth2 client from them
+    inner = settings._inner
+    oauth2_state = dict(vars(oauth2_client))
     yield client
     monkeypatch.undo()
-    config.reload_settings()
+    settings._inner = inner
+    vars(oauth2_client).clear()
+    vars(oauth2_client).update(oauth2_state)
     mailcow_api.reload_config()
 
 
@@ -364,7 +371,12 @@ def test_geoip(client, monkeypatch):
 
 
 def test_geoip_validation(client, monkeypatch):
+    from app.services import geoip_service
     from app.services.geoip_downloader import get_geoip_status
+    # Validating closes the readers and sets the GeoIP state: the test works on its own,
+    # and the readers and state as they were come back untouched after it
+    for name in ('_city_reader', '_asn_reader', '_geoip_available', '_geoip_db_valid'):
+        monkeypatch.setattr(geoip_service, name, None)
     files = get_geoip_status()
     missing = {**files, 'City': {**files['City'], 'available': False}}
     monkeypatch.setattr(settings_router, 'get_geoip_status', lambda: missing)
@@ -373,6 +385,26 @@ def test_geoip_validation(client, monkeypatch):
     there = {**files, 'City': {**files['City'], 'available': True}}
     monkeypatch.setattr(settings_router, 'get_geoip_status', lambda: there)
     assert 'db_valid' in client.post('/api/settings/geoip/validate').json()
+
+
+def test_geoip_files_that_cannot_be_read(client, monkeypatch):
+    """A database file that goes away between the check that it is there and the
+    reading of its size and date (500)."""
+    from app.services import geoip_downloader
+
+    class Vanishing(type(pathlib.Path())):
+        def exists(self, *args, **kwargs):
+            return True
+
+        def stat(self, *args, **kwargs):
+            raise FileNotFoundError(str(self))
+
+    monkeypatch.setattr(geoip_downloader, 'Path', Vanishing)
+    monkeypatch.setattr(geoip_downloader, 'get_db_age_days', lambda path: 1)
+    _set(monkeypatch, 'maxmind_license_key', 'placeholder')
+    _set(monkeypatch, 'maxmind_account_id', '1')
+    assert client.get('/api/settings/geoip/status').status_code == 500
+    assert client.post('/api/settings/geoip/validate').status_code == 500
 
 
 # ---------------------------------------------------------------- manual job runs

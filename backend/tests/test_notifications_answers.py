@@ -147,6 +147,10 @@ def test_unsaved_destination(client):
     assert len(sent['calls']) == 1
     assert c.post('/api/notifications/test', json={'channel_type': 'pager'}).status_code == 422
     assert c.post('/api/notifications/test', json={}).status_code == 422
+    # A failed send to a URL urlparse cannot read fails while its secret is cut from the error (500)
+    sent['status'] = 500
+    broken = c.post('/api/notifications/test', json={'channel_type': 'slack', 'config': {'webhook_url': 'http://['}})
+    assert broken.status_code == 500
 
 
 def test_destinations_when_the_database_fails(client, monkeypatch):
