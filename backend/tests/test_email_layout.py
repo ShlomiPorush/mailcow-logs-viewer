@@ -59,6 +59,28 @@ def test_dark_mode_and_header():
     assert 'My Logs' in html and '11/10/2026 09:05' in html
 
 
+def test_outlook_dark_mode_gets_neutral_greys():
+    # Outlook for Android turned the tinted backgrounds into similar mid
+    # greys, but kept white (as its own background) and neutral dark greys.
+    # Measured 2026-10-26.
+    html = e.render(title='T', topic='Weekly')
+    assert '[data-ogsb] .m-bg { background-color: #FFFFFF !important; }' in html
+    assert '[data-ogsb] .m-panel { background-color: #202020 !important; }' in html
+    assert '[data-ogsb] .m-line { border-color: #333333 !important; }' in html
+    assert '[data-ogsb] .m-rule { background-color: #333333 !important; }' in html
+    assert '[data-ogsb] .m-muted-bg { background-color: #333333 !important; }' in html
+    # A rule on the marked element itself loses to Outlook's inline colour,
+    # and Outlook drops an attribute joined to a class
+    assert '[data-ogsb].' not in html and '[data-ogsc].' not in html
+
+
+def test_links_the_client_adds_look_like_text_but_ours_stay_links():
+    # Outlook and Gmail turn dates such as 26.10.2026 into links of their own
+    html = e.render(title='T', topic='Weekly', blocks=[e.panel('P', e.panel_text(e.link('Open', 'https://example.com')))])
+    assert '.m-bg a { color: inherit !important; text-decoration: none !important; }' in html
+    assert 'text-decoration:underline !important;">Open</a>' in html
+
+
 def test_the_date_is_in_the_app_timezone(monkeypatch):
     from app.config import settings
     monkeypatch.setattr(settings._inner, 'tz', 'Asia/Jerusalem')
