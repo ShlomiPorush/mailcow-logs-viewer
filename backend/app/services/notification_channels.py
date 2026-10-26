@@ -263,11 +263,12 @@ def _sanitize_error(channel_type: str, config: Dict, error_text: str) -> str:
 
     Never raises: a secret URL that urlparse cannot read gives a fixed text,
     since which part of it the error quotes is not known."""
+    secrets = []
     for key in SECRET_FIELDS.get(channel_type, set()):
         value = str(config.get(key, "") or "").strip()
         if not value:
             continue
-        error_text = _mask(error_text, value, MASK)
+        secrets.append(value)
         if value.lower().startswith("http"):
             # ConnectionError messages quote only the path part of the URL, and
             # a server can quote the path with its query, or the query alone
@@ -276,23 +277,43 @@ def _sanitize_error(channel_type: str, config: Dict, error_text: str) -> str:
             except ValueError:
                 return _UNREADABLE_SECRET
             path, query = parsed.path, parsed.query
-            if query:
-                error_text = _mask(error_text, f"{path}?{query}", "/" + MASK)
             if path and len(path) > 1:
-                error_text = _mask(error_text, path, "/" + MASK)
+                secrets.append(path)
             if query:
-                error_text = _mask(error_text, query, MASK)
-    return error_text
+                secrets += [f"{path}?{query}", query]
+    return _mask(error_text, secrets)
 
 
-def _mask(text: str, secret: str, mask: str) -> str:
-    """text with every copy of secret replaced, and with the start of one where
-    the text was cut off (an error answer is read only so far)."""
-    text = text.replace(secret, mask)
-    for length in range(len(secret) - 1, _MIN_CUT_SECRET - 1, -1):
-        if text.endswith(secret[:length]):
-            return text[:-length] + mask
-    return text
+def _mask(text: str, secrets: List[str]) -> str:
+    """text with every copy of each secret masked, and the start of one where
+    the text was cut off (an error answer is read only so far).
+
+    Every copy is found in the text as given, before anything is replaced:
+    masking one secret first could break up the copy of another that holds it."""
+    spans = []
+    for secret in filter(None, secrets):
+        start = text.find(secret)
+        while start != -1:
+            spans.append((start, start + len(secret)))
+            start = text.find(secret, start + 1)
+        for length in range(len(secret) - 1, _MIN_CUT_SECRET - 1, -1):
+            if text.endswith(secret[:length]):
+                spans.append((len(text) - length, len(text)))
+                break
+    if not spans:
+        return text
+    merged = []
+    for start, end in sorted(spans):
+        if merged and start <= merged[-1][1]:
+            merged[-1][1] = max(merged[-1][1], end)
+        else:
+            merged.append([start, end])
+    out, last = [], 0
+    for start, end in merged:
+        # A masked path keeps its leading slash, so the error still reads as a path
+        out += [text[last:start], ("/" if text[start] == "/" else "") + MASK]
+        last = end
+    return "".join(out + [text[last:]])
 
 
 def _verify():

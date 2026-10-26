@@ -223,3 +223,11 @@ def test_a_secret_in_the_query_is_masked_too(quoted):
     error = nc._sanitize_error("discord", {"webhook_url": "https://hooks.example/hook?token=TOPSECRET"},
                                f"no such hook {quoted} here")
     assert "TOPSECRET" not in error and "/hook" not in error
+
+
+def test_a_query_that_holds_the_path_is_masked_whole():
+    """Each copy is found before any is masked: masking the path first would
+    break up the copy of the query and leave its token."""
+    url = "https://hooks.example/hook?next=/hook&token=TOPSECRET"
+    error = nc._sanitize_error("slack", {"webhook_url": url}, "bad query next=/hook&token=TOPSECRET here")
+    assert error == "bad query " + nc.MASK + " here"
