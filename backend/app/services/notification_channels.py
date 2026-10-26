@@ -33,7 +33,7 @@ _TIMEOUT_SECONDS = 10      # one step: connect, TLS handshake, one read
 _TOTAL_SECONDS = 20        # the whole send, however slowly the server answers
 _MAX_ERROR_BYTES = 1024    # read of an error answer; its first 200 characters are shown
 _TOO_SLOW = "The server took too long to answer."
-_UNREADABLE_SECRET = "The send failed. Its error is not shown, as it could quote the channel's secret URL."
+_UNREADABLE_URL = "The send failed. Its error is not shown, as it could quote the channel's secret URL."
 _UNEXPECTED = "The send failed with an unexpected error. Check the application logs."
 # The shortest start of a secret masked where an error answer was cut off
 _MIN_CUT_SECRET = 4
@@ -275,7 +275,7 @@ def _sanitize_error(channel_type: str, config: Dict, error_text: str) -> str:
             try:
                 parsed = urlparse(value)
             except ValueError:
-                return _UNREADABLE_SECRET
+                return _UNREADABLE_URL
             path, query = parsed.path, parsed.query
             if path and len(path) > 1:
                 secrets.append(path)
