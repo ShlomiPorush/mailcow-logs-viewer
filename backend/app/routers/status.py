@@ -17,6 +17,9 @@ from ..database import SessionLocal
 from ..models import KnownContainer
 from ..services.ignore_lists import load_ignored, set_ignored, IGNORED_CONTAINERS_KEY
 from ..utils import internal_error, format_datetime_for_api
+from ..api_models import Invalid, documented
+from ..api_models import status as m
+from ..api_models.mailboxes import MailcowInfo, StorageStatus
 
 logger = logging.getLogger(__name__)
 
@@ -165,7 +168,7 @@ def _store_container_status_worker(containers_data):
             raise
 
 
-@router.get("/status/containers")
+@router.get("/status/containers", responses=documented(m.ContainersResponse, errors={500: None, 502: None}))
 async def get_containers_status():
     """
     Get status of all mailcow containers
@@ -183,7 +186,7 @@ class ContainerIgnoreRequest(BaseModel):
     ignored: bool
 
 
-@router.put("/status/containers/{container}/ignore")
+@router.put("/status/containers/{container}/ignore", responses=documented(m.ContainerIgnored, errors={404: None, 422: Invalid, 500: None}))
 def ignore_container(container: str, body: ContainerIgnoreRequest):
     """Ignore or stop ignoring one mailcow container (by its full name, e.g. ipv6nat-mailcow)."""
     with SessionLocal() as db:
@@ -193,7 +196,7 @@ def ignore_container(container: str, body: ContainerIgnoreRequest):
     return {"container": container, "ignored": body.ignored}
 
 
-@router.get("/status/storage")
+@router.get("/status/storage", responses=documented(StorageStatus, description="mailcow's mail storage, as mailcow reports it; unknown and zeros when it reports nothing", errors={500: None, 502: None}))
 async def get_storage_status():
     """
     Get storage/disk usage information
@@ -220,7 +223,7 @@ async def get_storage_status():
         logger.error(f"Error fetching storage status: {e}", exc_info=True)
         raise internal_error(e)
 
-@router.get("/status/version")
+@router.get("/status/version", responses=documented(m.MailcowVersion, errors={422: Invalid, 502: None}))
 async def get_version_status(force: bool = Query(False, description="Force a fresh version check")):
     """
     Get current mailcow version and check for updates
@@ -293,7 +296,7 @@ async def get_version_status(force: bool = Query(False, description="Force a fre
         raise internal_error(e)
 
 
-@router.get("/status/app-version")
+@router.get("/status/app-version", responses=documented(m.AppVersion, errors={422: Invalid}))
 async def get_app_version_status(force: bool = Query(False, description="Force a fresh version check")):
     """
     Get current app version and check for updates from GitHub
@@ -337,7 +340,7 @@ async def get_app_version_status(force: bool = Query(False, description="Force a
         }
 
 
-@router.get("/status/mailcow-info")
+@router.get("/status/mailcow-info", responses=documented(MailcowInfo, errors={500: None, 502: None}))
 async def get_mailcow_info():
     """
     Get mailcow system information (domains, mailboxes, aliases)
@@ -375,7 +378,7 @@ async def get_mailcow_info():
         raise internal_error(e)
 
 
-@router.get("/status/mailcow-connection")
+@router.get("/status/mailcow-connection", responses=documented(m.MailcowConnection))
 async def get_mailcow_connection_status():
     """
     Check mailcow API connection status
@@ -395,7 +398,7 @@ async def get_mailcow_connection_status():
         }
 
 
-@router.get("/status/app-version/changelog/{version}")
+@router.get("/status/app-version/changelog/{version}", responses=documented(m.Changelog, description="The notes; a sentence in changelog when they could not be read"))
 async def get_app_version_changelog(version: str):
     """
     Get changelog for a specific app version from GitHub
@@ -432,7 +435,7 @@ async def get_app_version_changelog(version: str):
         }
 
 
-@router.get("/status/summary")
+@router.get("/status/summary", responses=documented(m.StatusSummary))
 async def get_status_summary():
     """
     Get combined status summary for dashboard
@@ -483,7 +486,7 @@ async def get_status_summary():
         raise internal_error(e)
 
 
-@router.get("/status/container-logs")
+@router.get("/status/container-logs", responses=documented(m.ContainerLogs, errors={422: Invalid}))
 def get_container_logs(lines: int = Query(100, ge=10, le=1000, description="Number of lines to fetch")):
     """
     Get the application container logs from the log file

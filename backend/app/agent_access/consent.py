@@ -5,7 +5,7 @@ excluded in scopes.py, and operator() refuses an agent call as well). The
 consent routes also need the browser session that opened the request.
 """
 import logging
-from typing import List, Optional
+from typing import List, Optional, Union
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -15,6 +15,8 @@ from ..config import settings
 from ..database import get_db
 from ..session import get_session_from_request, session_key_from_request
 from ..utils import format_datetime_for_api
+from ..api_models import Invalid, documented
+from ..api_models import agent_grants as m
 from . import live, pending, store
 from .context import agent_call
 from .oauth import client_redirect
@@ -71,7 +73,7 @@ def _who(request: Request) -> Optional[str]:
 
 # ── Consent ────────────────────────────────────────────────────────────────
 
-@router.get("/consent/{request_id}", dependencies=[Depends(operator)])
+@router.get("/consent/{request_id}", dependencies=[Depends(operator)], responses=documented(m.ConsentRequest, errors={404: None}))
 def get_consent(request_id: str, request: Request):
     if not live.is_live():
         raise HTTPException(status_code=404, detail="Agent access is not available. Check Settings → Agents.")
@@ -105,7 +107,7 @@ class ConsentAnswer(BaseModel):
     days: float = DEFAULT_PERIOD_DAYS
 
 
-@router.post("/consent/{request_id}", dependencies=[Depends(operator)])
+@router.post("/consent/{request_id}", dependencies=[Depends(operator)], responses=documented(Union[m.ConsentRedirect, m.ConsentDone], description="Where to send the browser back to the agent; done for an agent that connects with a code", errors={400: None, 404: None, 422: Invalid, 500: None}))
 def answer_consent(request_id: str, answer: ConsentAnswer, request: Request, db: Session = Depends(get_db)):
     """Allow or deny; the answer is the address to send the browser back to the agent."""
     if not live.is_live():
@@ -186,7 +188,7 @@ def _grant_row(grant) -> dict:
     }
 
 
-@router.get("", dependencies=[Depends(operator)])
+@router.get("", dependencies=[Depends(operator)], responses=documented(m.AgentsOverview, errors={500: None}))
 def list_agents(db: Session = Depends(get_db)):
     problem = live.problem()
     if problem is None:
@@ -214,7 +216,7 @@ class AgentChange(BaseModel):
     version: Optional[str] = Field(default=None, max_length=64)   # the copy the edit was made on
 
 
-@router.put("/{grant_id}", dependencies=[Depends(operator)])
+@router.put("/{grant_id}", dependencies=[Depends(operator)], responses=documented(m.AgentChanged, errors={400: None, 404: None, 409: None, 422: Invalid, 500: None}))
 def change_agent(grant_id: int, change: AgentChange, request: Request, db: Session = Depends(get_db)):
     """Change what a connected agent may do, and optionally when its access ends."""
     scopes = grant_scopes(change.views, change.acts)
@@ -232,19 +234,19 @@ def change_agent(grant_id: int, change: AgentChange, request: Request, db: Sessi
     return {"changed": 1}
 
 
-@router.delete("/{grant_id}", dependencies=[Depends(operator)])
+@router.delete("/{grant_id}", dependencies=[Depends(operator)], responses=documented(m.AgentsDisconnected, errors={404: None, 422: Invalid, 500: None}))
 def disconnect_agent(grant_id: int, db: Session = Depends(get_db)):
     if not store.revoke_grant(db, grant_id):
         raise HTTPException(status_code=404, detail="This agent is not connected.")
     return {"disconnected": 1}
 
 
-@router.delete("", dependencies=[Depends(operator)])
+@router.delete("", dependencies=[Depends(operator)], responses=documented(m.AgentsDisconnected, errors={500: None}))
 def disconnect_all_agents(db: Session = Depends(get_db)):
     return {"disconnected": store.revoke_all(db)}
 
 
-@router.get("/{grant_id}/activity", dependencies=[Depends(operator)])
+@router.get("/{grant_id}/activity", dependencies=[Depends(operator)], responses=documented(m.AgentActivity, errors={422: Invalid, 500: None}))
 def agent_activity(grant_id: int, db: Session = Depends(get_db)):
     return {"activity": [{
         "at": format_datetime_for_api(row.at),

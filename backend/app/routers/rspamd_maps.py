@@ -12,12 +12,14 @@ import re
 import logging
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Union
 
 from ..config import settings
 from ..mailcow_api import mailcow_api, MailcowAPIError
 from ..services.rspamd_map_lock import MapBusyError, map_write_lock_async
 from ..utils import internal_error
+from ..api_models import ErrorDetail, Invalid, documented
+from ..api_models import rspamd as m
 
 logger = logging.getLogger(__name__)
 
@@ -208,7 +210,7 @@ def validate_map_content(content: str) -> List[Dict[str, Any]]:
     return errors
 
 
-@router.get("/rspamd/config")
+@router.get("/rspamd/config", responses=documented(m.RspamdConfig))
 def get_rspamd_config():
     """
     Check Rspamd integration configuration status.
@@ -222,7 +224,7 @@ def get_rspamd_config():
     }
 
 
-@router.get("/rspamd/maps")
+@router.get("/rspamd/maps", responses=documented(Union[m.RspamdMapsNotConfigured, m.RspamdMapsLive, m.RspamdMapsUnreadable], description="The known maps; with the Rspamd password set, also their state in Rspamd, or an error when Rspamd could not be read", errors={500: None}))
 async def list_rspamd_maps():
     """
     List all 13 Rspamd map files with metadata.
@@ -283,7 +285,7 @@ async def list_rspamd_maps():
         }
 
 
-@router.get("/rspamd/maps/{filename}")
+@router.get("/rspamd/maps/{filename}", responses=documented(Union[m.RspamdMapContent, m.RspamdMapNotLoaded], description="The map's content, or an empty map when Rspamd does not list it", errors={400: None, 404: None, 500: None, 502: None}))
 async def get_map_content(filename: str):
     """
     Get the content of a specific Rspamd map file.
@@ -325,7 +327,7 @@ async def get_map_content(filename: str):
         raise internal_error(e, status_code=502)
 
 
-@router.put("/rspamd/maps/{filename}")
+@router.put("/rspamd/maps/{filename}", responses=documented(m.RspamdMapSaved, errors={400: m.MapInvalid, 403: None, 404: None, 409: Union[m.MapChanged, ErrorDetail], 422: Invalid, 500: None, 502: None}))
 async def update_map_content(filename: str, body: MapContentRequest):
     """
     Update the content of a specific Rspamd map file.
@@ -409,7 +411,7 @@ async def update_map_content(filename: str, body: MapContentRequest):
         raise internal_error(e, status_code=502)
 
 
-@router.post("/rspamd/validate")
+@router.post("/rspamd/validate", responses=documented(m.MapValidation, errors={422: Invalid, 500: None}))
 def validate_map(body: MapValidationRequest):
     """
     Validate map content without saving.

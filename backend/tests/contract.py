@@ -73,6 +73,10 @@ class Contract:
             self._document = copy.deepcopy(self.app.openapi())
         return self._document
 
+    def _reached(self, method: str, template: str, status: int) -> None:
+        """Count a matching answer for the CONTRACT_SEEN report (conftest.py)."""
+        self.seen.add((method, template, status))
+
     def operation_for(self, method: str, path: str) -> Optional[Tuple[str, Dict[str, Any]]]:
         """The route template a request reached and its operation in the document."""
         if (method, path) in MIDDLEWARE_OPERATIONS:
@@ -89,7 +93,9 @@ class Contract:
         return (template, operation) if operation else None
 
     def problem(self, method: str, path: str, status: int, content_type: str, body: bytes) -> Optional[str]:
-        """What is wrong with this answer, or None when it matches (or is not checked yet)."""
+        """What is wrong with this answer, or None when it matches (or is not checked).
+        Only an answer checked against its route's documentation and matching it counts
+        as reaching its status: not one the check passes over, nor a gateway envelope."""
         if not path.startswith("/api/"):
             return None
         found = self.operation_for(method, path)
@@ -99,7 +105,6 @@ class Contract:
         if not is_documented(operation):
             return None
         where = f"{method} {template} answered {status}"
-        self.seen.add((method, template, status))
         responses = operation.get("responses") or {}
         response = responses.get(str(status))
         media = (content_type or "").split(";")[0].strip()
@@ -113,12 +118,14 @@ class Contract:
             return f"{where}, a status its documentation does not list: {body[:300]!r}"
         content = response.get("content") or {}
         if not content:
-            return None if not body else f"{where} with a body, but its documentation says it has none"
+            if body:
+                return f"{where} with a body, but its documentation says it has none"
+            return self._reached(method, template, status)
         if media not in content:
             return f"{where} as {media or 'no type'}, documented as {', '.join(content)}"
         schema = content[media].get("schema") or {}
         if media != "application/json" or not schema:
-            return None
+            return self._reached(method, template, status)
         try:
             data = json.loads(body)
         except ValueError:
@@ -126,20 +133,18 @@ class Contract:
         validator = Draft202012Validator({**schema, "components": self.document.get("components", {})})
         errors = sorted(validator.iter_errors(data), key=lambda e: list(e.absolute_path))
         if not errors:
-            return None
+            return self._reached(method, template, status)
         lines = [f"  at {'/'.join(str(p) for p in e.absolute_path) or '(top)'}: {e.message[:300]}" for e in errors[:5]]
         return f"{where} with an answer that does not match its documentation:\n" + "\n".join(lines)
 
 
 def agent_envelope(contract: "Contract", request, response) -> bool:
     """An answer agent_access/rest.py gives an agent's bearer call itself (a refusal,
-    a body or answer too large, an outcome it cannot know), at a status the route does
-    not document: {error, message} with two strings, which the document's description
-    lists for every call. A status the route documents is held to the route."""
+    a body or answer too large, an outcome it cannot know): {error, message} with two
+    strings, which the document's description lists for every call. The gateway can
+    answer so at any status, also one the route documents for its own answer, so a
+    bearer call's error is held to the route's answer or to this envelope."""
     if not request.headers.get("authorization", "").lower().startswith("bearer ") or response.status_code < 400:
-        return False
-    found = contract.operation_for(request.method.upper(), request.url.path)
-    if found and str(response.status_code) in (found[1].get("responses") or {}):
         return False
     try:
         body = response.json()
@@ -152,11 +157,9 @@ def agent_envelope(contract: "Contract", request, response) -> bool:
 def check_response(contract: Contract, response) -> None:
     """Fail the calling test when a response does not match the document."""
     request = response.request
-    if agent_envelope(contract, request, response):
-        return
     problem = contract.problem(request.method.upper(), request.url.path, response.status_code,
                                response.headers.get("content-type", ""), response.content)
-    if problem:
+    if problem and not agent_envelope(contract, request, response):
         raise AssertionError("The API answer does not match /openapi.json (app/api_models): " + problem)
 
 

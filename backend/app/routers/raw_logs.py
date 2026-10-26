@@ -33,6 +33,8 @@ from ..raw_logs_worker import (
 )
 from ..app_time import range_bound
 from ..utils import internal_error, format_datetime_for_api
+from ..api_models import Invalid, documented
+from ..api_models import raw_logs as m
 
 logger = logging.getLogger(__name__)
 
@@ -191,7 +193,7 @@ set_ws_broadcast_fn(log_stream_manager.broadcast)
 set_ws_broadcast_all_fn(log_stream_manager.broadcast_to_all)
 
 
-@router.get("/raw-logs/ws-token")
+@router.get("/raw-logs/ws-token", responses=documented(m.WsToken))
 async def get_ws_token(request: Request):
     """
     Issue a one-time short-lived token for WebSocket authentication.
@@ -310,7 +312,7 @@ async def websocket_raw_logs(
 # REST API ENDPOINTS
 # =============================================================================
 
-@router.get("/raw-logs/services")
+@router.get("/raw-logs/services", responses=documented(m.RawLogServices))
 def get_services():
     """
     List available log services with metadata.
@@ -352,7 +354,7 @@ def get_services():
     }
 
 
-@router.get("/raw-logs/worker-status")
+@router.get("/raw-logs/worker-status", responses=documented(m.RawLogsWorkerStatus))
 def get_worker_status():
     """Worker health check - last fetch time, stats, errors"""
     # A copy with the run times as UTC with Z; the worker's own record stays as it is
@@ -382,7 +384,7 @@ def _range_bound(value: Optional[str], end: bool) -> Optional[datetime]:
         return None
 
 
-@router.get("/raw-logs/{service}")
+@router.get("/raw-logs/{service}", responses=documented(m.RawLogsPage, errors={404: None, 422: Invalid, 500: None}))
 def get_raw_logs(
     service: str = Path(..., description="Service name (e.g., postfix, dovecot)"),
     page: int = Query(default=1, ge=1, description="Page number"),
@@ -486,7 +488,7 @@ def get_raw_logs(
         raise internal_error(e)
 
 
-@router.get("/raw-logs/{service}/smart-filters")
+@router.get("/raw-logs/{service}/smart-filters", responses=documented(m.SmartFilters))
 def get_smart_filters(
     service: str = Path(..., description="Service name"),
 ):

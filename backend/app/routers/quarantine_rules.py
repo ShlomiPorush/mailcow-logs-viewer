@@ -16,6 +16,8 @@ from ..database import get_db_context
 from ..models import QuarantineRule, QuarantineRuleLog
 from ..mailcow_api import mailcow_api
 from ..utils import internal_error, format_datetime_for_api
+from ..api_models import Invalid, documented
+from ..api_models import quarantine_rules as m
 
 logger = logging.getLogger(__name__)
 
@@ -218,7 +220,7 @@ def _find_matching_rule(rules, sender: str, sender_domain: str, rcpt: str, subje
 # IMPORTANT: Static routes (/logs, /test) MUST be defined before
 # parameterized routes (/{rule_id}) to avoid FastAPI matching "logs" as a rule_id.
 
-@router.get("")
+@router.get("", responses=documented(m.QuarantineRuleList, errors={403: None, 500: None}))
 def list_rules():
     """List all quarantine rules."""
     _require_rw_key()
@@ -234,7 +236,7 @@ def list_rules():
         }
 
 
-@router.post("")
+@router.post("", responses=documented(m.QuarantineRule, errors={400: None, 403: None, 422: Invalid, 500: None}))
 def create_rule(body: RuleCreate):
     """Create a new quarantine rule."""
     _require_rw_key()
@@ -265,7 +267,7 @@ def create_rule(body: RuleCreate):
 
 # ---- Action History (must be before /{rule_id}) ----
 
-@router.get("/logs")
+@router.get("/logs", responses=documented(m.QuarantineRuleLogs, errors={403: None, 422: Invalid, 500: None}))
 def get_rule_logs(
     limit: int = Query(default=50, le=200),
     offset: int = Query(default=0, ge=0),
@@ -321,7 +323,7 @@ def _load_preview_rules_worker():
     return rules
 
 
-@router.post("/test")
+@router.post("/test", responses=documented(m.QuarantineRuleTest, errors={403: None, 500: None, 502: None}))
 async def test_rules():
     """
     Test all rules against current quarantine items (dry-run).
@@ -374,7 +376,7 @@ async def test_rules():
 
 # ---- Parameterized routes (/{rule_id}) ----
 
-@router.put("/{rule_id}")
+@router.put("/{rule_id}", responses=documented(m.QuarantineRule, errors={400: None, 403: None, 404: None, 422: Invalid, 500: None}))
 def update_rule(rule_id: int, body: RuleUpdate):
     """Update an existing quarantine rule."""
     _require_rw_key()
@@ -420,7 +422,7 @@ def update_rule(rule_id: int, body: RuleUpdate):
         return _rule_to_dict(rule)
 
 
-@router.delete("/{rule_id}")
+@router.delete("/{rule_id}", responses=documented(m.QuarantineRuleDeleted, errors={403: None, 404: None, 422: Invalid, 500: None}))
 def delete_rule(rule_id: int):
     """Delete a quarantine rule."""
     _require_rw_key()
@@ -438,7 +440,7 @@ def delete_rule(rule_id: int):
         return {"success": True, "message": f"Rule '{rule_name}' deleted"}
 
 
-@router.post("/{rule_id}/toggle")
+@router.post("/{rule_id}/toggle", responses=documented(m.QuarantineRule, errors={403: None, 404: None, 422: Invalid, 500: None}))
 def toggle_rule(rule_id: int):
     """Toggle a rule's enabled/disabled state."""
     _require_rw_key()

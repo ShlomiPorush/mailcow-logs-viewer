@@ -30,6 +30,8 @@ from ..session import (
     get_session_secret_key,
 )
 from ..services.oauth2_client import oauth2_client, OAuth2ClientError
+from ..api_models import documented
+from ..api_models import auth as m
 
 logger = logging.getLogger(__name__)
 
@@ -161,7 +163,7 @@ def _oauth_redirect(url: str, state: str, request: Request) -> RedirectResponse:
     return response
 
 
-@router.get("/auth/verify")
+@router.get("/auth/verify", responses=documented(m.Verified))
 def verify_basic_auth():
     """
     Verify Basic Auth credentials.
@@ -171,7 +173,7 @@ def verify_basic_auth():
     return {"verified": True}
 
 
-@router.post("/auth/session")
+@router.post("/auth/session", responses=documented(m.BasicSession, errors={400: None, 409: None, 503: None}))
 def create_basic_auth_session(request: Request):
     """
     Exchange verified Basic Auth credentials for a session cookie.
@@ -218,7 +220,7 @@ def create_basic_auth_session(request: Request):
     return response
 
 
-@router.get("/auth/provider-info")
+@router.get("/auth/provider-info", responses=documented(m.ProviderInfo))
 def get_provider_info():
     """Get authentication provider information for frontend"""
     return {
@@ -228,7 +230,7 @@ def get_provider_info():
     }
 
 
-@router.get("/auth/login")
+@router.get("/auth/login", status_code=307, response_class=RedirectResponse, responses=documented(None, status=307, description="To the OAuth2 provider's sign-in page, with a short-lived cookie for this login", errors={400: None, 500: None}))
 async def oauth2_login(request: Request, next: Optional[str] = None):
     """
     Initiate OAuth2 login flow
@@ -284,7 +286,7 @@ async def oauth2_login(request: Request, next: Optional[str] = None):
         )
 
 
-@router.get("/auth/callback")
+@router.get("/auth/callback", status_code=302, response_class=RedirectResponse, responses=documented(None, status=302, description="Signed in: to the page the login started from, with the session cookie. Otherwise to /login?error=..., such as invalid_state, oauth2_error or session_capacity", errors={400: None}))
 async def oauth2_callback(
     request: Request,
     code: str = None,
@@ -355,7 +357,7 @@ async def oauth2_callback(
         return _oauth_redirect("/login?error=server_error", state, request)
 
 
-@router.post("/auth/logout")
+@router.post("/auth/logout", status_code=302, response_class=RedirectResponse, responses=documented(None, status=302, description="Signed out: to /login, with the session cookie cleared"))
 def oauth2_logout(request: Request):
     """
     Logout and clear session.
@@ -389,7 +391,7 @@ def oauth2_logout_get():
     )
 
 
-@router.get("/auth/status")
+@router.get("/auth/status", responses=documented(m.AuthStatus))
 def auth_status(request: Request):
     """
     Check authentication status
