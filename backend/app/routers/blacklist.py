@@ -5,7 +5,7 @@ import logging
 from fastapi import APIRouter, Query, HTTPException
 from pydantic import BaseModel
 from datetime import datetime, timezone, timedelta
-from typing import Dict, Any
+from typing import Any, Dict, Union
 from sqlalchemy import desc
 
 from app.services.blacklist_service import (
@@ -22,16 +22,21 @@ from app.routers.domains import get_cached_server_ip, init_server_ip
 from app.database import get_db_context
 from app.models import MonitoredHost, BlacklistCheck
 from app.utils import format_datetime_for_api
+from app.api_models import Invalid, documented
+from app.api_models import security as m
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+# The routes say `-> Dict[str, Any]`, from which FastAPI would infer a model that
+# describes nothing; response_model=None leaves the description to responses=
+
 def format_datetime(dt: datetime) -> str:
     """Format datetime as UTC ISO string with Z"""
     return format_datetime_for_api(dt) if dt else None
 
-@router.get("/monitored")
+@router.get("/monitored", response_model=None, responses=documented(m.MonitoredHostsResponse))
 def get_monitored_hosts() -> Dict[str, Any]:
     """
     Get list of all monitored hosts and their latest status.
@@ -84,7 +89,7 @@ def get_monitored_hosts() -> Dict[str, Any]:
         logger.error(f"Error getting monitored hosts: {e}")
         return {"hosts": []}
 
-@router.post("/check")
+@router.post("/check", response_model=None, responses=documented(Union[m.CheckStarted, m.BlocklistCheck], description="Without a host: the check of every monitored address started in the background. With one: its check, from the cache unless force; status error when it could not run", errors={422: Invalid}))
 async def check_blacklists(
     host: str = Query(None, description="Host/IP to check (default: system IP)"),
     force: bool = Query(False, description="Force new check ignoring cache")
@@ -135,7 +140,7 @@ async def check_blacklists(
             "results": []
         }
 
-@router.get("/progress")
+@router.get("/progress", response_model=None, responses=documented(m.CheckProgress))
 def get_progress() -> Dict[str, Any]:
     """
     Get current blacklist check progress (for UI progress bar)
@@ -149,7 +154,7 @@ def get_progress() -> Dict[str, Any]:
         "percent": int((progress["current"] / progress["total"]) * 100) if progress["total"] > 0 else 0
     }
 
-@router.get("/config")
+@router.get("/config", response_model=None, responses=documented(m.BlocklistConfig))
 def get_blacklist_config() -> Dict[str, Any]:
     """
     Get blacklist check configuration and status
@@ -167,7 +172,7 @@ def get_blacklist_config() -> Dict[str, Any]:
         "status": cached.get("status") if cached else None
     }
 
-@router.get("/summary")
+@router.get("/summary", response_model=None, responses=documented(m.BlocklistSummary))
 def get_blacklist_summary() -> Dict[str, Any]:
     """Compact blacklist status summary for the dashboard, with its figure (listed of
     all monitored addresses; valid with a fresh check) that the trend samples too."""
@@ -251,7 +256,7 @@ class IgnoreRequest(BaseModel):
     ignored: bool
 
 
-@router.get("/ignored")
+@router.get("/ignored", response_model=None, responses=documented(m.IgnoredListsResponse))
 def get_ignored_blocklists() -> Dict[str, Any]:
     """Blocklists the admin chose to ignore (still checked, never counted or alerted)."""
     with get_db_context() as db:
@@ -259,7 +264,7 @@ def get_ignored_blocklists() -> Dict[str, Any]:
     return {"lists": [{"name": bl["name"], "zone": bl["zone"]} for bl in BLACKLISTS if bl["zone"] in zones]}
 
 
-@router.put("/lists/{zone}/ignore")
+@router.put("/lists/{zone}/ignore", response_model=None, responses=documented(m.IgnoreChange, errors={404: None, 422: Invalid}))
 def ignore_blocklist(zone: str, body: IgnoreRequest) -> Dict[str, Any]:
     """Ignore or stop ignoring one blocklist for every monitored address."""
     known = {bl["zone"]: bl["name"] for bl in BLACKLISTS}

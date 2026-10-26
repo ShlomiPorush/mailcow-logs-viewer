@@ -18,6 +18,8 @@ from ..config import settings
 from ..mailcow_api import mailcow_api
 from ..services import smtp_abuse_service as svc
 from ..utils import internal_error
+from ..api_models import Invalid, documented
+from ..api_models import security as m
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +68,7 @@ def require_control_access() -> None:
         raise HTTPException(status_code=503, detail="MAILCOW_API_KEY_RW is required")
 
 
-@router.get("/status")
+@router.get("/status", responses=documented(m.AbuseStatusResponse, errors={422: Invalid, 500: None}))
 async def get_status(limit: int = Query(200, ge=1, le=1000)):
     """Current outbound activity, block states and whitelist."""
     try:
@@ -134,7 +136,7 @@ async def get_status(limit: int = Query(200, ge=1, le=1000)):
         raise internal_error(e)
 
 
-@router.get("/whitelist")
+@router.get("/whitelist", responses=documented(List[m.WhitelistEntry], errors={500: None}))
 def get_whitelist():
     """Active whitelist entries."""
     try:
@@ -144,7 +146,7 @@ def get_whitelist():
         raise internal_error(e)
 
 
-@router.post("/whitelist")
+@router.post("/whitelist", responses=documented(m.WhitelistChange, errors={403: None, 422: Invalid, 500: None, 503: None}))
 def add_whitelist(request: WhitelistRequest):
     """Add (or re-activate) a single whitelist entry."""
     require_control_access()
@@ -156,7 +158,7 @@ def add_whitelist(request: WhitelistRequest):
         raise internal_error(e)
 
 
-@router.put("/whitelist")
+@router.put("/whitelist", responses=documented(m.WhitelistReplaced, errors={403: None, 422: Invalid, 500: None, 503: None}))
 def replace_whitelist(request: WhitelistBulkRequest):
     """Replace the whole whitelist (one address per line in the UI)."""
     require_control_access()
@@ -181,7 +183,7 @@ def replace_whitelist(request: WhitelistBulkRequest):
         raise internal_error(e)
 
 
-@router.delete("/whitelist/{email}")
+@router.delete("/whitelist/{email}", responses=documented(m.WhitelistChange, errors={403: None, 404: None, 500: None, 503: None}))
 def remove_whitelist(email: str):
     """Deactivate a whitelist entry."""
     require_control_access()
@@ -196,7 +198,7 @@ def remove_whitelist(email: str):
         raise internal_error(e)
 
 
-@router.post("/mailboxes/{email}/block")
+@router.post("/mailboxes/{email}/block", responses=documented(m.BlockResult, errors={403: None, 500: None, 502: None, 503: None}))
 async def manual_block(email: str):
     """Disable SMTP for a mailbox now."""
     require_control_access()
@@ -211,7 +213,7 @@ async def manual_block(email: str):
         raise internal_error(e)
 
 
-@router.post("/mailboxes/{email}/unblock")
+@router.post("/mailboxes/{email}/unblock", responses=documented(m.BlockResult, errors={403: None, 500: None, 502: None, 503: None}))
 async def manual_unblock(email: str):
     """Re-enable SMTP for a mailbox (starts the auto-block grace period)."""
     require_control_access()
@@ -222,7 +224,7 @@ async def manual_unblock(email: str):
         raise internal_error(e)
 
 
-@router.get("/history")
+@router.get("/history", responses=documented(List[m.AbuseAction], errors={422: Invalid, 500: None}))
 def get_history(limit: int = Query(50, ge=1, le=500)):
     """Recent block/unblock actions (audit trail)."""
     from ..database import get_db_context

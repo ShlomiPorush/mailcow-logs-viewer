@@ -131,12 +131,26 @@ class Contract:
         return f"{where} with an answer that does not match its documentation:\n" + "\n".join(lines)
 
 
+def _agent_envelope(request, response) -> bool:
+    """An answer agent_access/rest.py gives an agent's bearer call itself (a refusal,
+    a body or answer too large, an outcome it cannot know): {error, message}, which
+    the document's description lists for every call, not a route's answer."""
+    if not request.headers.get("authorization", "").lower().startswith("bearer ") or response.status_code < 400:
+        return False
+    try:
+        body = response.json()
+    except ValueError:
+        return False
+    return isinstance(body, dict) and set(body) == {"error", "message"}
+
+
 def check_response(contract: Contract, response) -> None:
     """Fail the calling test when a response does not match the document."""
     request = response.request
     problem = contract.problem(request.method.upper(), request.url.path, response.status_code,
                                response.headers.get("content-type", ""), response.content)
-    if problem:
+    # Where the operation documents the status, the envelope is checked like any answer
+    if problem and not _agent_envelope(request, response):
         raise AssertionError("The API answer does not match /openapi.json (app/api_models): " + problem)
 
 

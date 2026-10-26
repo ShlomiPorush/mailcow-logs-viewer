@@ -30,6 +30,8 @@ from ..database import SessionLocal, get_db
 from ..mailcow_api import MailcowAPIError, MailcowRwKeyError, mailcow_api
 from ..models import MailboxStatistics, RawServiceLog
 from ..utils import format_datetime_for_api, internal_error
+from ..api_models import Invalid, documented
+from ..api_models import security as m
 from ..app_time import app_tz, day_key, to_local
 
 logger = logging.getLogger(__name__)
@@ -40,6 +42,9 @@ def _write_failed(e: MailcowAPIError, detail: str) -> HTTPException:
     return HTTPException(status_code=502, detail=str(e) if isinstance(e, MailcowRwKeyError) else detail)
 
 router = APIRouter(prefix="/rate-limits")
+
+# A limit sent to mailcow: no Read-Write key (503), a bad value or name (400), mailcow refusing (502)
+RL_WRITE = {400: None, 422: Invalid, 500: None, 502: None, 503: None}
 
 # rspamd's time frames: second, minute, hour, day
 VALID_FRAMES = ('s', 'm', 'h', 'd')
@@ -305,7 +310,7 @@ def _offered_windows() -> List[int]:
     return [hours for hours in _WINDOW_HOURS if hours <= kept] or [_WINDOW_HOURS[0]]
 
 
-@router.get("/events")
+@router.get("/events", responses=documented(m.RateLimitEventsResponse, errors={422: Invalid, 500: None}))
 def get_rate_limit_events(
     hours: int = Query(168, ge=1, le=8760),
     db: Session = Depends(get_db)
@@ -436,7 +441,7 @@ def get_rate_limit_events(
     }
 
 
-@router.get("/sender-events")
+@router.get("/sender-events", responses=documented(m.SenderEventsResponse, errors={400: None, 500: None}))
 def get_sender_events(
     user: str = Query('', description="The sender address to read the history of"),
     db: Session = Depends(get_db)
@@ -502,7 +507,7 @@ def _load_configured_mailboxes_worker() -> List[Dict[str, Any]]:
         } for row in rows]
 
 
-@router.get("/limits")
+@router.get("/limits", responses=documented(m.RateLimitsResponse, errors={500: None}))
 async def get_configured_limits():
     """List active mailboxes and domain limits without blocking other requests."""
     mailboxes = await asyncio.to_thread(_load_configured_mailboxes_worker)
@@ -552,7 +557,7 @@ def _record_reset_worker(user: str, rl_hash: str) -> None:
         _record_reset(db, user, rl_hash)
 
 
-@router.post("/mailbox")
+@router.post("/mailbox", responses=documented(m.MailboxLimitSet, errors=RL_WRITE))
 async def set_mailbox_limit(request: MailboxLimitRequest):
     """Set the rate limit of one mailbox. A value of 0 removes the limit."""
     _require_rw_key()
@@ -588,7 +593,7 @@ async def set_mailbox_limit(request: MailboxLimitRequest):
     }
 
 
-@router.post("/domain")
+@router.post("/domain", responses=documented(m.DomainLimitSet, errors=RL_WRITE))
 async def set_domain_limit(request: DomainLimitRequest):
     """Set the rate limit of one domain. A value of 0 removes the limit."""
     _require_rw_key()
@@ -614,7 +619,7 @@ async def set_domain_limit(request: DomainLimitRequest):
     }
 
 
-@router.post("/bulk")
+@router.post("/bulk", responses=documented(m.BulkLimitSet, errors=RL_WRITE))
 async def set_limits_in_bulk(request: BulkLimitRequest):
     """Set one rate limit on many mailboxes and domains at once. A value of 0
     removes the limit from all of them.
@@ -698,7 +703,7 @@ async def set_limits_in_bulk(request: BulkLimitRequest):
     }
 
 
-@router.post("/reset")
+@router.post("/reset", responses=documented(m.CounterReset, errors=RL_WRITE))
 async def reset_rate_limit_counter(request: ReleaseRequest):
     """Reset an active counter so a blocked sender can send again now."""
     _require_rw_key()

@@ -20,6 +20,8 @@ from ..config import settings
 from ..correlation import authenticated_submissions, submitting_mailbox
 from ..services import excluded_addresses
 from ..utils import internal_error, format_datetime_for_api as format_datetime_utc
+from ..api_models import Invalid, documented
+from ..api_models import security as m
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +46,7 @@ def _serialize(a: SecurityAlert) -> dict:
     }
 
 
-@router.get("/security-alerts")
+@router.get("/security-alerts", responses=documented(m.SecurityAlertsResponse, errors={422: Invalid, 500: None}))
 def list_security_alerts(
     acknowledged: Optional[bool] = Query(None, description="Filter by acknowledged state"),
     limit: int = Query(50, ge=1, le=500),
@@ -106,7 +108,7 @@ class AcknowledgeIds(BaseModel):
     ids: List[int] = Field(..., min_length=1, max_length=MAX_ACK_IDS)
 
 
-@router.post("/security-alerts/{alert_id}/acknowledge")
+@router.post("/security-alerts/{alert_id}/acknowledge", responses=documented(m.AcknowledgeResponse, errors={404: None, 422: Invalid, 500: None}))
 def acknowledge_alert(alert_id: int, db: Session = Depends(get_db)):
     """Mark a single alert as acknowledged. The answer's receipt undoes it; an
     alert that was already acknowledged (by another tab) gives no receipt."""
@@ -122,7 +124,7 @@ def acknowledge_alert(alert_id: int, db: Session = Depends(get_db)):
         raise internal_error(e)
 
 
-@router.post("/security-alerts/acknowledge-all")
+@router.post("/security-alerts/acknowledge-all", responses=documented(m.AcknowledgeResponse, errors={422: Invalid, 500: None}))
 def acknowledge_all_alerts(body: Optional[AcknowledgeIds] = Body(None), db: Session = Depends(get_db)):
     """Acknowledge the open alerts whose ids are given (the list's
     unacknowledged_ids), or, with no body, every open alert. The answer's
@@ -136,7 +138,7 @@ def acknowledge_all_alerts(body: Optional[AcknowledgeIds] = Body(None), db: Sess
         raise internal_error(e)
 
 
-@router.post("/security-alerts/acknowledgements/{receipt}/undo")
+@router.post("/security-alerts/acknowledgements/{receipt}/undo", responses=documented(m.UndoAcknowledgeResponse, errors={422: Invalid, 500: None}))
 def undo_acknowledgement(receipt: uuid.UUID, db: Session = Depends(get_db)):
     """Re-open the alerts a dismissal acknowledged, by its receipt: only those
     still acknowledged under it (a second undo changes nothing)."""
@@ -213,7 +215,7 @@ def _top(counter: Counter, limit: int = 6) -> list:
     return [{'name': name, 'count': count} for name, count in counter.most_common(limit)]
 
 
-@router.get("/security-alerts/{alert_id}/activity")
+@router.get("/security-alerts/{alert_id}/activity", responses=documented(m.AlertActivityResponse, errors={404: None, 422: Invalid, 500: None}))
 def alert_activity(alert_id: int, db: Session = Depends(get_db)):
     """
     The history behind an alert: counts per 15 minutes from the baseline period
