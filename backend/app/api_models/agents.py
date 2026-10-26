@@ -66,7 +66,7 @@ class AgentEndpointsResponse(Fixed):
     count: int
 
 
-_AGENT_ERRORS = {401: "No valid bearer token", 400: "Unknown area", 405: "Use GET",
+_AGENT_ERRORS = {401: "No valid bearer token", 400: "Unknown area",
                  429: "Too many requests with a bad token"}
 
 
@@ -96,7 +96,7 @@ def agent_paths(document: Dict[str, Any]) -> None:
     paths = document.setdefault("paths", {})
     paths["/api/agent/access"] = _operation(
         AgentAccessResponse, "Agent: what this connection may do",
-        "For an agent's bearer token only.", {401: _AGENT_ERRORS[401], 405: _AGENT_ERRORS[405],
+        "For an agent's bearer token only.", {401: _AGENT_ERRORS[401],
                                               429: _AGENT_ERRORS[429]}, schemas, [])
     paths["/api/agent/endpoints"] = _operation(
         AgentEndpointsResponse, "Agent: the API calls this connection may make",

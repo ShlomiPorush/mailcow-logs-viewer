@@ -95,3 +95,19 @@ def _handler(ok, missing, cursor):
 
 def test_the_status_reader_sees_every_way_a_handler_writes_one():
     assert statuses_in_source(_handler) == {404, 409, 200, 503, 500}
+
+
+def test_the_sign_in_set_up_without_a_password_is_not_a_route_answer(monkeypatch):
+    # The auth middleware answers any call that needs sign-in with a plain 500 then
+    import starlette.staticfiles as sf
+    orig = sf.StaticFiles.__init__
+    monkeypatch.setattr(sf.StaticFiles, "__init__", lambda s, *a, **k: orig(s, *a, **{**k, "check_dir": False}))
+    from app.config import settings
+    from app.main import app
+    monkeypatch.setattr(settings._inner, "basic_auth_enabled", True)
+    monkeypatch.setattr(settings._inner, "oauth2_enabled", False)
+    monkeypatch.setattr(settings._inner, "auth_password", "")
+    response = TestClient(app).get("/api/messages", headers={"Authorization": "Basic eDp5"})
+    assert response.status_code == 500 and "password is not configured" in response.text
+    assert Contract(app).problem("GET", "/api/messages", 500, response.headers.get("content-type", ""),
+                                 response.content) is None

@@ -6,42 +6,6 @@ Each layer of the work removes its entries; the list ends empty.
 """
 
 PENDING = {
-    ("GET", "/api/fail2ban"): "L2",  # logs
-    ("GET", "/api/geoip/{ip}"): "L2",  # logs
-    ("GET", "/api/logs/netfilter"): "L2",  # logs
-    ("GET", "/api/logs/netfilter/countries"): "L2",  # logs
-    ("GET", "/api/logs/netfilter/overview"): "L2",  # logs
-    ("GET", "/api/logs/netfilter/stats/by-country"): "L2",  # logs
-    ("GET", "/api/logs/netfilter/stats/by-network"): "L2",  # logs
-    ("GET", "/api/logs/postfix"): "L2",  # logs
-    ("GET", "/api/logs/postfix/by-queue/{queue_id}"): "L2",  # logs
-    ("GET", "/api/logs/rspamd"): "L2",  # logs
-    ("GET", "/api/message/{correlation_key}"): "L2",  # logs
-    ("GET", "/api/quarantine"): "L2",  # logs
-    ("GET", "/api/quarantine/{item_id}/details"): "L2",  # logs
-    ("GET", "/api/queue"): "L2",  # logs
-    ("GET", "/api/rw-status"): "L2",  # logs
-    ("GET", "/api/security/addresses"): "L2",  # logs
-    ("GET", "/api/stats/dashboard"): "L2",  # stats
-    ("GET", "/api/stats/flow"): "L2",  # stats_flow
-    ("GET", "/api/stats/recent-activity"): "L2",  # stats
-    ("GET", "/api/stats/timeline"): "L2",  # stats
-    ("GET", "/api/stats/top-blocked-ips"): "L2",  # stats
-    ("GET", "/api/stats/top-spam-triggers"): "L2",  # stats
-    ("GET", "/api/stats/trends"): "L2",  # stats_trends
-    ("POST", "/api/fail2ban"): "L2",  # logs
-    ("POST", "/api/fail2ban/allow"): "L2",  # logs
-    ("POST", "/api/fail2ban/ban"): "L2",  # logs
-    ("POST", "/api/fail2ban/policy"): "L2",  # logs
-    ("POST", "/api/fail2ban/remove"): "L2",  # logs
-    ("POST", "/api/fail2ban/repair"): "L2",  # logs
-    ("POST", "/api/fail2ban/unban"): "L2",  # logs
-    ("POST", "/api/quarantine/delete"): "L2",  # logs
-    ("POST", "/api/quarantine/learnham"): "L2",  # logs
-    ("POST", "/api/quarantine/learnspam"): "L2",  # logs
-    ("POST", "/api/quarantine/release"): "L2",  # logs
-    ("POST", "/api/queue/action"): "L2",  # logs
-    ("POST", "/api/queue/delete"): "L2",  # logs
     ("DELETE", "/api/smtp-abuse/whitelist/{email}"): "L3",  # smtp_abuse
     ("GET", "/api/blacklist/config"): "L3",  # blacklist
     ("GET", "/api/blacklist/ignored"): "L3",  # blacklist

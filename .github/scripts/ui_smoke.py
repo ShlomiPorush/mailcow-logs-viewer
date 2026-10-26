@@ -173,6 +173,8 @@ def check_answer(spec, operation, status, content_type, body):
     if not is_documented(operation):
         return 'skipped', 'documents nothing yet'
     response = (operation.get('responses') or {}).get(str(status))
+    if status == 500 and not (content_type or '').startswith('application/json'):
+        return 'skipped', 'HTTP 500 from sign-in set up without a password'
     if response is None:
         if status in APP_WIDE_STATUSES:
             return 'skipped', f'HTTP {status} from sign-in or the origin guard'

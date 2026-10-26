@@ -18,13 +18,19 @@ from ..services import excluded_addresses, geoip_service, protection_rules, secu
 from ..services.security_addresses import netfilter_service  # noqa: F401  (tests import it from here)
 from ..app_time import as_utc
 from ..utils import internal_error, format_datetime_for_api as format_datetime_utc, RangeStart, RangeEnd
+from ..api_models import Invalid, documented
+from ..api_models import logs as m
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+# A change sent to mailcow: a bad request, mailcow refusing or not answering
+MAILCOW_WRITE = {400: None, 500: None, 502: None, 503: None}
+MAILCOW_ITEMS = {400: None, 500: None, 502: None}
 
-@router.get("/logs/postfix/by-queue/{queue_id}")
+
+@router.get("/logs/postfix/by-queue/{queue_id}", responses=documented(m.PostfixByQueueResponse, errors={404: None, 500: None}))
 def get_postfix_logs_by_queue(
     queue_id: str,
     db: Session = Depends(get_db)
@@ -96,7 +102,7 @@ def get_postfix_logs_by_queue(
         raise internal_error(e)
 
 
-@router.get("/logs/postfix")
+@router.get("/logs/postfix", responses=documented(m.PostfixLogsResponse, errors={422: Invalid, 500: None}))
 def get_postfix_logs(
     page: int = Query(1, ge=1, description="Page number"),
     limit: int = Query(50, ge=1, le=500, description="Items per page"),
@@ -246,7 +252,7 @@ def get_postfix_logs(
         raise internal_error(e)
 
 
-@router.get("/logs/rspamd")
+@router.get("/logs/rspamd", responses=documented(m.RspamdLogsResponse, errors={422: Invalid, 500: None}))
 def get_rspamd_logs(
     page: int = Query(1, ge=1),
     limit: int = Query(50, ge=1, le=500),
@@ -343,7 +349,7 @@ def get_rspamd_logs(
         raise internal_error(e)
 
 
-@router.get("/logs/netfilter/countries")
+@router.get("/logs/netfilter/countries", responses=documented(List[m.NetfilterCountry], description="The countries in the Netfilter logs; empty when they cannot be read"))
 def get_netfilter_countries(db: Session = Depends(get_db)):
     """
     Get distinct country codes from netfilter logs for the filter dropdown
@@ -372,7 +378,7 @@ def _netfilter_since(db: Session, cutoff: datetime) -> Optional[str]:
     return format_datetime_utc(oldest) if oldest > cutoff else None
 
 
-@router.get("/logs/netfilter/stats/by-country")
+@router.get("/logs/netfilter/stats/by-country", responses=documented(m.ByCountryResponse, errors={422: Invalid, 500: None}))
 def get_netfilter_stats_by_country(
     days: int = Query(30, ge=1, le=365, description="Number of days to look back"),
     db: Session = Depends(get_db)
@@ -474,7 +480,7 @@ def get_netfilter_stats_by_country(
         raise internal_error(e)
 
 
-@router.get("/logs/netfilter/stats/by-network")
+@router.get("/logs/netfilter/stats/by-network", responses=documented(m.ByNetworkResponse, errors={422: Invalid, 500: None}))
 def get_netfilter_stats_by_network(
     days: int = Query(30, ge=1, le=365, description="Number of days to look back"),
     db: Session = Depends(get_db)
@@ -508,7 +514,7 @@ def get_netfilter_stats_by_network(
         raise internal_error(e)
 
 
-@router.get("/logs/netfilter")
+@router.get("/logs/netfilter", responses=documented(m.NetfilterLogsResponse, errors={422: Invalid, 500: None}))
 def get_netfilter_logs(
     page: int = Query(1, ge=1),
     limit: int = Query(50, ge=1, le=500),
@@ -606,7 +612,7 @@ def get_netfilter_logs(
         raise internal_error(e)
 
 
-@router.get("/logs/netfilter/overview")
+@router.get("/logs/netfilter/overview", responses=documented(m.NetfilterOverviewResponse, errors={422: Invalid, 500: None}))
 def get_netfilter_overview(
     hours: int = Query(24, ge=1, le=168),
     db: Session = Depends(get_db)
@@ -672,7 +678,7 @@ async def _security_addresses(db: Session, hours: int):
     return found
 
 
-@router.get("/security/addresses")
+@router.get("/security/addresses", responses=documented(m.SecurityAddressesResponse, errors={422: Invalid, 500: None}))
 async def get_security_addresses(
     list_name: str = Query("review", alias="list", pattern="^(review|banned)$"),
     country: Optional[str] = Query(None, max_length=100),
@@ -706,7 +712,7 @@ async def get_security_addresses(
         raise internal_error(e)
 
 
-@router.get("/fail2ban")
+@router.get("/fail2ban", responses=documented(m.Fail2banResponse, errors={500: None, 503: None}))
 async def get_fail2ban():
     """
     Get Fail2Ban configuration from mailcow (real-time)
@@ -726,7 +732,7 @@ async def get_fail2ban():
         raise internal_error(e)
 
 
-@router.get("/rw-status")
+@router.get("/rw-status", responses=documented(m.RwStatusResponse))
 def get_rw_status():
     """
     Check if the Read-Write API key is configured.
@@ -747,7 +753,7 @@ def _list_entries(value) -> set:
     return set(_split_ip_list(value if isinstance(value, str) else str(value)))
 
 
-@router.post("/fail2ban")
+@router.post("/fail2ban", responses=documented(m.ActionResult, errors={400: None, 409: m.ListsChanged, 500: None, 502: None, 503: None}))
 async def edit_fail2ban(request: Request):
     """
     Update Fail2Ban configuration on mailcow (requires Read-Write API key).
@@ -798,7 +804,7 @@ _FAIL2BAN_POLICY = {
 }
 
 
-@router.post("/fail2ban/policy")
+@router.post("/fail2ban/policy", responses=documented(m.ActionResult, errors=MAILCOW_WRITE))
 async def edit_fail2ban_policy(request: Request):
     """
     Change how Fail2ban bans (times, attempts, network size) without touching the
@@ -840,7 +846,7 @@ async def edit_fail2ban_policy(request: Request):
         logger.error(f"Error updating the Fail2Ban policy: {e}")
         raise internal_error(e)
 
-@router.post("/fail2ban/unban")
+@router.post("/fail2ban/unban", responses=documented(m.ActionResult, errors={400: None, 502: None, 503: None}))
 async def unban_fail2ban(request: Request):
     """
     Unban an IP address from Fail2Ban on mailcow (requires Read-Write API key)
@@ -982,7 +988,7 @@ async def _ip_from_body(request: Request) -> str:
     return ip
 
 
-@router.post("/fail2ban/ban")
+@router.post("/fail2ban/ban", responses=documented(m.ActionResult, errors=MAILCOW_WRITE))
 async def ban_fail2ban(request: Request):
     """
     Ban an IP address in Fail2Ban on mailcow by adding it to the blacklist.
@@ -997,7 +1003,7 @@ async def ban_fail2ban(request: Request):
         raise internal_error(e)
 
 
-@router.post("/fail2ban/allow")
+@router.post("/fail2ban/allow", responses=documented(m.ActionResult, errors=MAILCOW_WRITE))
 async def allow_fail2ban(request: Request):
     """
     Allow an IP address in Fail2Ban on mailcow by adding it to the whitelist,
@@ -1012,7 +1018,7 @@ async def allow_fail2ban(request: Request):
         raise internal_error(e)
 
 
-@router.post("/fail2ban/remove")
+@router.post("/fail2ban/remove", responses=documented(m.ActionResult, errors=MAILCOW_WRITE))
 async def remove_from_fail2ban_list(request: Request):
     """
     Take an address off the Fail2ban blacklist or whitelist. Body: {"ip", "list":
@@ -1033,7 +1039,7 @@ async def remove_from_fail2ban_list(request: Request):
         raise internal_error(e)
 
 
-@router.post("/fail2ban/repair")
+@router.post("/fail2ban/repair", responses=documented(m.ActionResult, errors=MAILCOW_WRITE))
 async def repair_fail2ban_entry(request: Request):
     """
     Replace an entry an earlier version wrote as a /32 network (2001:db8::1/32) with
@@ -1080,7 +1086,7 @@ async def repair_fail2ban_entry(request: Request):
         raise internal_error(e)
 
 
-@router.get("/geoip/{ip}")
+@router.get("/geoip/{ip}", responses=documented(m.GeoIpResponse))
 def lookup_geoip(ip: str):
     """
     Lookup GeoIP information for an IP address.
@@ -1093,7 +1099,7 @@ def lookup_geoip(ip: str):
     return {"available": True, "ip": ip, **geo}
 
 
-@router.get("/queue")
+@router.get("/queue", responses=documented(m.QueueResponse, errors={500: None, 502: None}))
 async def get_queue():
     """
     Get current mail queue from mailcow (real-time)
@@ -1119,7 +1125,7 @@ async def get_queue():
         raise internal_error(e)
 
 
-@router.post("/queue/action")
+@router.post("/queue/action", responses=documented(m.ActionResult, errors=MAILCOW_ITEMS))
 async def queue_action(request: Request):
     """
     Perform an action on mail queue items (requires Read-Write API key).
@@ -1156,7 +1162,7 @@ async def queue_action(request: Request):
         raise internal_error(e)
 
 
-@router.post("/queue/delete")
+@router.post("/queue/delete", responses=documented(m.ActionResult, errors=MAILCOW_ITEMS))
 async def delete_queue(request: Request):
     """
     Delete mail queue items (requires Read-Write API key).
@@ -1188,7 +1194,7 @@ async def delete_queue(request: Request):
         raise internal_error(e)
 
 
-@router.get("/quarantine")
+@router.get("/quarantine", responses=documented(m.QuarantineResponse, errors={500: None, 502: None}))
 async def get_quarantine():
     """
     Get quarantined messages from mailcow (real-time)
@@ -1240,7 +1246,7 @@ async def get_quarantine():
 
 
 
-@router.post("/quarantine/release")
+@router.post("/quarantine/release", responses=documented(m.ActionResult, errors=MAILCOW_ITEMS))
 async def release_quarantine(request: Request):
     """
     Release quarantined messages on mailcow (requires Read-Write API key).
@@ -1274,7 +1280,7 @@ async def release_quarantine(request: Request):
         raise internal_error(e)
 
 
-@router.post("/quarantine/delete")
+@router.post("/quarantine/delete", responses=documented(m.ActionResult, errors=MAILCOW_ITEMS))
 async def delete_quarantine(request: Request):
     """
     Delete quarantined messages on mailcow (requires Read-Write API key).
@@ -1308,7 +1314,7 @@ async def delete_quarantine(request: Request):
         raise internal_error(e)
 
 
-@router.post("/quarantine/learnham")
+@router.post("/quarantine/learnham", responses=documented(m.ActionResult, errors=MAILCOW_ITEMS))
 async def learnham_quarantine(request: Request):
     """
     Release quarantined messages and train Rspamd that they are NOT spam.
@@ -1340,7 +1346,7 @@ async def learnham_quarantine(request: Request):
         raise internal_error(e)
 
 
-@router.post("/quarantine/learnspam")
+@router.post("/quarantine/learnspam", responses=documented(m.ActionResult, errors=MAILCOW_ITEMS))
 async def learnspam_quarantine(request: Request):
     """
     Delete quarantined messages and train Rspamd that they ARE spam.
@@ -1372,7 +1378,7 @@ async def learnspam_quarantine(request: Request):
         raise internal_error(e)
 
 
-@router.get("/quarantine/{item_id}/details")
+@router.get("/quarantine/{item_id}/details", responses=documented(m.QuarantineDetailsResponse, errors={502: None}))
 async def get_quarantine_details(item_id: str):
     """
     Get detailed information for a quarantine item.
@@ -1387,7 +1393,7 @@ async def get_quarantine_details(item_id: str):
         raise internal_error(e)
 
 
-@router.get("/message/{correlation_key}")
+@router.get("/message/{correlation_key}", responses=documented(m.CompactMessageResponse, errors={404: None, 500: None}))
 def get_message_details(
     correlation_key: str,
     db: Session = Depends(get_db)

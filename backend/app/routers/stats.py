@@ -13,13 +13,15 @@ from ..models import PostfixLog, RspamdLog, NetfilterLog, MessageCorrelation
 from ..services import excluded_addresses
 
 from ..utils import format_datetime_for_api as format_datetime_utc
+from ..api_models import Invalid, documented
+from ..api_models import stats as m
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
 
-@router.get("/stats/dashboard")
+@router.get("/stats/dashboard", responses=documented(m.DashboardResponse))
 def get_dashboard_stats(db: Session = Depends(get_db)):
     """
     Get main dashboard statistics
@@ -155,7 +157,7 @@ def get_dashboard_stats(db: Session = Depends(get_db)):
         }
 
 
-@router.get("/stats/timeline")
+@router.get("/stats/timeline", responses=documented(m.TimelineResponse, errors={422: Invalid}))
 def get_timeline_stats(
     hours: int = 24,
     db: Session = Depends(get_db)
@@ -235,7 +237,7 @@ def get_timeline_stats(
         return {"timeline": [], "error": "Unable to load statistics. Check the application logs."}
 
 
-@router.get("/stats/top-spam-triggers")
+@router.get("/stats/top-spam-triggers", responses=documented(m.SpamTriggersResponse, errors={422: Invalid}))
 def get_top_spam_triggers(
     limit: int = Query(10, ge=1, le=500),
     db: Session = Depends(get_db)
@@ -279,7 +281,7 @@ def get_top_spam_triggers(
         return {"triggers": [], "error": "Unable to load statistics. Check the application logs."}
 
 
-@router.get("/stats/top-blocked-ips")
+@router.get("/stats/top-blocked-ips", responses=documented(m.BlockedIpsResponse, errors={422: Invalid}))
 def get_top_blocked_ips(
     limit: int = Query(10, ge=1, le=500),
     db: Session = Depends(get_db)
@@ -317,7 +319,7 @@ def get_top_blocked_ips(
         return {"blocked_ips": [], "error": "Unable to load statistics. Check the application logs."}
 
 
-@router.get("/stats/recent-activity")
+@router.get("/stats/recent-activity", responses=documented(m.RecentActivityResponse, errors={422: Invalid}))
 def get_recent_activity(
     limit: int = Query(20, ge=1, le=500),
     db: Session = Depends(get_db)

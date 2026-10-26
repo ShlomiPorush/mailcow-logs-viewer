@@ -285,7 +285,8 @@ app = FastAPI(
     description=(
         "Modern dashboard for viewing and analyzing mailcow mail server logs\n\n"
         "With sign-in on, every call except /api/health, /api/info and the sign-in calls needs a session or Basic "
-        "credentials, and answers 401 without them. A write sent from another site's page answers 403."
+        "credentials, and answers 401 without them. A write sent from another site's page answers 403. "
+        "With Basic auth on but no password set, those calls answer 500 with a sentence in plain text."
     ),
     version=__version__,
     lifespan=lifespan,

@@ -35,6 +35,12 @@ class ErrorDetail(Fixed):
     detail: str = Field(description="What went wrong")
 
 
+class ServerError(Fixed):
+    """An internal error. A failure the route did not catch also has `error` (main.py's handler)."""
+    detail: str = Field(description="What went wrong; the details are in the container log")
+    error: str = Field(None, description="Only for a failure the route did not catch")
+
+
 class ValidationErrorItem(BaseModel):
     """One problem with the request, as FastAPI reports it."""
     model_config = ConfigDict(extra="allow")
@@ -78,12 +84,13 @@ def documented(ok: Any, *, status: int = 200, description: str = "Success",
                errors: Optional[Dict[int, Any]] = None) -> Dict[int, Dict[str, Any]]:
     """The ``responses=`` value for a route: its answer and the errors it gives.
 
-    ``errors`` maps a status to its model, or to None for ErrorDetail. With
+    ``errors`` maps a status to its model, or to None for ErrorDetail (ServerError for 500). With
     ``ok`` None the answer keeps the route's response class (text, a file).
     """
     out: Dict[int, Dict[str, Any]] = {status: {"description": description}}
     if ok is not None:
         out[status]["model"] = ok
     for code, model in (errors or {}).items():
-        out[code] = {"model": model or ErrorDetail, "description": _ERROR_TEXT.get(code, "Error")}
+        default = ServerError if code == 500 else ErrorDetail
+        out[code] = {"model": model or default, "description": _ERROR_TEXT.get(code, "Error")}
     return out
