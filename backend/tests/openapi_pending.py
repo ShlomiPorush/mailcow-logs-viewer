@@ -6,39 +6,6 @@ Each layer of the work removes its entries; the list ends empty.
 """
 
 PENDING = {
-    ("DELETE", "/api/smtp-abuse/whitelist/{email}"): "L3",  # smtp_abuse
-    ("GET", "/api/blacklist/config"): "L3",  # blacklist
-    ("GET", "/api/blacklist/ignored"): "L3",  # blacklist
-    ("GET", "/api/blacklist/monitored"): "L3",  # blacklist
-    ("GET", "/api/blacklist/progress"): "L3",  # blacklist
-    ("GET", "/api/blacklist/summary"): "L3",  # blacklist
-    ("GET", "/api/protection/hits"): "L3",  # protection
-    ("GET", "/api/protection/rules"): "L3",  # protection
-    ("GET", "/api/rate-limits/events"): "L3",  # rate_limits
-    ("GET", "/api/rate-limits/limits"): "L3",  # rate_limits
-    ("GET", "/api/rate-limits/sender-events"): "L3",  # rate_limits
-    ("GET", "/api/security-alerts"): "L3",  # security_alerts
-    ("GET", "/api/security-alerts/{alert_id}/activity"): "L3",  # security_alerts
-    ("GET", "/api/smtp-abuse/history"): "L3",  # smtp_abuse
-    ("GET", "/api/smtp-abuse/status"): "L3",  # smtp_abuse
-    ("GET", "/api/smtp-abuse/whitelist"): "L3",  # smtp_abuse
-    ("POST", "/api/blacklist/check"): "L3",  # blacklist
-    ("POST", "/api/protection/hits/{hit_id}/ban"): "L3",  # protection
-    ("POST", "/api/protection/hits/{hit_id}/dismiss"): "L3",  # protection
-    ("POST", "/api/protection/hits/{hit_id}/undo"): "L3",  # protection
-    ("POST", "/api/rate-limits/bulk"): "L3",  # rate_limits
-    ("POST", "/api/rate-limits/domain"): "L3",  # rate_limits
-    ("POST", "/api/rate-limits/mailbox"): "L3",  # rate_limits
-    ("POST", "/api/rate-limits/reset"): "L3",  # rate_limits
-    ("POST", "/api/security-alerts/acknowledge-all"): "L3",  # security_alerts
-    ("POST", "/api/security-alerts/acknowledgements/{receipt}/undo"): "L3",  # security_alerts
-    ("POST", "/api/security-alerts/{alert_id}/acknowledge"): "L3",  # security_alerts
-    ("POST", "/api/smtp-abuse/mailboxes/{email}/block"): "L3",  # smtp_abuse
-    ("POST", "/api/smtp-abuse/mailboxes/{email}/unblock"): "L3",  # smtp_abuse
-    ("POST", "/api/smtp-abuse/whitelist"): "L3",  # smtp_abuse
-    ("PUT", "/api/blacklist/lists/{zone}/ignore"): "L3",  # blacklist
-    ("PUT", "/api/protection/rules"): "L3",  # protection
-    ("PUT", "/api/smtp-abuse/whitelist"): "L3",  # smtp_abuse
     ("DELETE", "/api/dmarc/reports/domains/{domain}"): "L4",  # dmarc
     ("DELETE", "/api/dmarc/reports/{report_type}/{report_id}"): "L4",  # dmarc
     ("GET", "/api/devices"): "L4",  # devices

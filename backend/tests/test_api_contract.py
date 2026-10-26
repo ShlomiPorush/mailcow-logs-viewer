@@ -13,7 +13,7 @@ from fastapi.testclient import TestClient
 
 from app.api_models import Fixed, Invalid, documented
 from app.utils import internal_error
-from contract import Contract, statuses_in_source
+from contract import Contract, agent_envelope, statuses_in_source
 
 
 class Thing(Fixed):
@@ -111,3 +111,22 @@ def test_the_sign_in_set_up_without_a_password_is_not_a_route_answer(monkeypatch
     assert response.status_code == 500 and "password is not configured" in response.text
     assert Contract(app).problem("GET", "/api/messages", 500, response.headers.get("content-type", ""),
                                  response.content) is None
+
+
+def _bearer_answer(status, body):
+    import httpx
+    request = httpx.Request("GET", "http://testserver/api/thing", headers={"Authorization": "Bearer t"})
+    return request, httpx.Response(status, json=body, request=request)
+
+
+def test_the_agent_gateway_answers_only_a_status_the_route_does_not_document():
+    contract = Contract(_app({}))
+    envelope = {"error": "too_large", "message": "The body is too large."}
+    # 413 is not the route's: the gateway's own answer
+    assert agent_envelope(contract, *_bearer_answer(413, envelope))
+    # 404 is the route's: it is held to the route's ErrorDetail
+    request, response = _bearer_answer(404, envelope)
+    assert not agent_envelope(contract, request, response)
+    assert "does not match" in contract.problem("GET", "/api/thing", 404, "application/json", response.content)
+    # Not the gateway's shape
+    assert not agent_envelope(contract, *_bearer_answer(413, {"error": 1, "message": "x"}))

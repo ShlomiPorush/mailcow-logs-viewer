@@ -17,6 +17,9 @@ from ..models import NetfilterLog, ProtectionHit
 from ..services import geoip_service
 from ..services import protection_rules as rules_service
 from ..services import security_addresses
+from ..api_models import Invalid, documented
+from ..api_models import security as m
+from ..api_models.logs import ProtectionCatch
 
 logger = logging.getLogger(__name__)
 
@@ -66,13 +69,13 @@ def _trap_suggestions(db: Session) -> list:
     return out
 
 
-@router.get("/rules")
+@router.get("/rules", responses=documented(m.ProtectionRulesResponse, errors={500: None}))
 def get_rules(db: Session = Depends(get_db)):
     return {"rules": rules_service.load_rules(db), "trap_suggestions": _trap_suggestions(db),
             "country_suggestions": _country_suggestions(db), "capabilities": _capabilities()}
 
 
-@router.put("/rules")
+@router.put("/rules", responses=documented(m.SavedRulesResponse, errors={400: None, 422: Invalid, 500: None}))
 def put_rules(payload: dict = Body(...), db: Session = Depends(get_db)):
     try:
         return {"rules": rules_service.save_rules(db, payload.get("rules") or {}, can_ban=bool(mailcow_api.has_rw_key))}
@@ -88,7 +91,7 @@ STATUS_GROUPS = {
 }
 
 
-@router.get("/hits")
+@router.get("/hits", responses=documented(m.ProtectionHitsResponse, errors={422: Invalid, 500: None}))
 def get_hits(status: str = Query("active", pattern="^(active|history|watching|dismissed|all)$"),
              limit: int = Query(200, ge=1, le=1000), db: Session = Depends(get_db)):
     query = db.query(ProtectionHit)
@@ -107,7 +110,7 @@ def _get_or_404(db: Session, hit_id: int) -> ProtectionHit:
     return hit
 
 
-@router.post("/hits/{hit_id}/dismiss")
+@router.post("/hits/{hit_id}/dismiss", responses=documented(ProtectionCatch, errors={404: None, 422: Invalid, 500: None}))
 def dismiss_hit(hit_id: int, db: Session = Depends(get_db)):
     hit = _get_or_404(db, hit_id)
     if hit.status in ("watching", "alert"):
@@ -119,7 +122,7 @@ def dismiss_hit(hit_id: int, db: Session = Depends(get_db)):
     return _hit(hit)
 
 
-@router.post("/hits/{hit_id}/ban")
+@router.post("/hits/{hit_id}/ban", responses=documented(ProtectionCatch, errors={400: None, 404: None, 409: None, 422: Invalid, 500: None, 502: None}))
 async def ban_hit(hit_id: int, db: Session = Depends(get_db)):
     """Ban an address a watching rule caught, now."""
     from ..scheduler import _protection_lock
@@ -142,7 +145,7 @@ async def ban_hit(hit_id: int, db: Session = Depends(get_db)):
     return _hit(hit)
 
 
-@router.post("/hits/{hit_id}/undo")
+@router.post("/hits/{hit_id}/undo", responses=documented(ProtectionCatch, errors={400: None, 404: None, 409: None, 422: Invalid, 500: None, 502: None}))
 async def undo_hit(hit_id: int, db: Session = Depends(get_db)):
     """Lift a ban (or cancel a pending one); the rule leaves the address alone for a week."""
     from ..scheduler import _protection_lock

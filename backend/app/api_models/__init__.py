@@ -7,7 +7,9 @@ They are passed to the route decorator through ``responses=`` (see
 ``documented``), which only adds them to /openapi.json: the answer is never
 filtered or validated by them. Never pass them as ``response_model`` and never
 annotate a route with ``-> SomeResponse``; FastAPI would then run every answer
-through the model and could drop fields or turn a mismatch into a 500.
+through the model and could drop fields or turn a mismatch into a 500. A route
+annotated `-> Dict[str, Any]` gets ``response_model=None`` beside ``responses=``,
+or the model FastAPI infers from it would replace the description.
 
 The tests check every answer the app gives against these models
 (tests/contract.py), so a model that drifts from its route fails CI.
