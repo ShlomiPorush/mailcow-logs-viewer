@@ -4,7 +4,8 @@ HTML layout for every email the app sends, in the v3 design language.
 Email clients ignore stylesheets, CSS variables and grid, so the blocks are
 tables with inline styles. The colours are the light theme of
 frontend/assets/css/ui.css; a <style> block switches to the dark theme in the
-clients that honour prefers-color-scheme (Apple Mail, iOS, Outlook for Mac).
+clients that honour prefers-color-scheme (Apple Mail, iOS, Outlook for Mac),
+and corrects it for the Outlook apps and Outlook.com (see _DARK_CSS).
 
 Outlook for Windows draws email with Word, which ignores padding and margins
 outside table cells, rounded corners, max-width and font fallbacks. So every
@@ -124,6 +125,17 @@ TONES = {
 
 _CLASS_COLORS = {'m-ink': INK, 'm-muted': MUTED, **{f'm-{t}': c for t, (c, _) in TONES.items()}}
 
+# Outlook for Android in dark mode (measured 2026-10-26) applies the dark
+# theme, then recolours it again: the tinted backgrounds, dark or light, all
+# came out as mid greys close to each other, so the email turned flat grey.
+# Neutral greys kept their place (dark ones as they are, light ones inverted,
+# white became the app's own background). Outlook marks recoloured elements
+# with data-ogsb, so under that mark the email gets white and neutral greys.
+# A rule on the marked element itself loses to the colour Outlook writes
+# inline, so the rules match descendants only.
+#
+# Outlook and Gmail also turn dates into links of their own; a link in the
+# email takes the colour of its text instead (link() keeps its underline).
 _DARK_CSS = """
 :root { color-scheme: light dark; supported-color-schemes: light dark; }
 @media (prefers-color-scheme: dark) {
@@ -141,6 +153,12 @@ _DARK_CSS = """
   .m-info { color: #7DB3FF !important; } .m-info-bg { background-color: #1E2C40 !important; }
   .m-muted-bg { background-color: #232826 !important; }
 }
+[data-ogsb] .m-bg { background-color: #FFFFFF !important; }
+[data-ogsb] .m-panel { background-color: #202020 !important; }
+[data-ogsb] .m-line { border-color: #333333 !important; }
+[data-ogsb] .m-rule { background-color: #333333 !important; }
+[data-ogsb] .m-muted-bg { background-color: #333333 !important; }
+.m-bg a { color: inherit !important; text-decoration: none !important; }
 @media (max-width: 620px) {
   .m-wrap { padding: 24px 16px !important; }
   .m-h1 { font-size: 26px !important; }
@@ -223,7 +241,7 @@ def link(text, url) -> Safe:
     url = '' if url is None else str(url)
     if not url.lower().startswith(('http://', 'https://')):
         return Safe(_e(text))
-    return Safe(f'<a href="{_attr(url)}" class="m-ink" style="color:{INK};text-decoration:underline;">{_e(text)}</a>')
+    return Safe(f'<a href="{_attr(url)}" class="m-ink" style="color:{INK};text-decoration:underline !important;">{_e(text)}</a>')
 
 
 def join(parts: Iterable, sep: str = ', ') -> Safe:
