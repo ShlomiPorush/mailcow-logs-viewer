@@ -2006,12 +2006,12 @@ The services selected for the Logs page, with the number of stored lines.
 ```json
 {
   "services": [ {"id": "postfix", "name": "Postfix", "icon": "mail", "description": "Mail transfer agent logs", "has_smart_filters": true, "log_count": 1523} ],
-  "ws_connections": 1,
+  "ws_connections": {"postfix": 1},
   "raw_logs_enabled": true
 }
 ```
 
-`ws_connections` is the number of open live streams; `raw_logs_enabled` mirrors `RAW_LOGS_ENABLED`.
+`ws_connections` is the number of open live streams per service; `raw_logs_enabled` mirrors `RAW_LOGS_ENABLED`.
 
 ---
 
@@ -2262,7 +2262,7 @@ Removes the app's blocks after the list stopped being kept (Suppressions or Sync
 
 #### POST /api/suppressions/rspamd/import
 
-Loads the app's blocks from the managed section into the list after the list was deleted (Suppressions or Sync with Rspamd turned on again). A read only; nothing is written to Rspamd. Returns `{ "imported": 12, "pending": false, "loaded": true }`; `loaded` is `true` only for the request that did the load, so `imported` is its count. With nothing to load, `{ "imported": 0, "pending": false, "loaded": false }`. Without the Rspamd password, when the app may have blocks there: `"pending": true, "reason": "no_password"`, and automatic blocking waits until they load. Map errors as for clear.
+Loads the app's blocks from the managed section into the list after the list was deleted (Suppressions or Sync with Rspamd turned on again). A read only; nothing is written to Rspamd. Returns `{ "imported": 12, "pending": false, "loaded": true }`; `loaded` is `true` only for the request that did the load, so `imported` is its count. With nothing to load, `{ "imported": 0, "pending": false, "loaded": false }`. Without the Rspamd password, when the app may have blocks there: `"pending": true, "reason": "no_password"`, and automatic blocking waits until they load. When it cannot read the map: 409 with `{ "detail": { "code": "read_failed", "message": "..." } }`; when a line of the app's section cannot be kept as a block: 409 `import_failed`. It writes nothing, so it never answers 502.
 
 #### POST /api/suppressions/start-fresh
 

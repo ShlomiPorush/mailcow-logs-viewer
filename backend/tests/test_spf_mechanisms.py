@@ -432,3 +432,42 @@ async def test_a_redirect_counts_the_lookups_of_its_target(monkeypatch):
     monkeypatch.setattr(domains, 'resolve_dns_with_fallback', fake_resolve)
     # mx, redirect, then a, mx, include and the included a
     assert await domains.count_spf_dns_lookups('example.com', records['example.com']) == 6
+
+
+async def _qualifier(monkeypatch, spf_text):
+    async def lookups(*args, **kwargs):
+        return 1
+    monkeypatch.setattr(domains, 'count_spf_dns_lookups', lookups)
+    return await _check(monkeypatch, spf_text)
+
+
+@pytest.mark.parametrize('record, strict, status', [
+    # "-all" inside an include's name is not the all term
+    ('v=spf1 include:spf-all.example.net ?all', False, 'warning'),
+    ('v=spf1 include:mail-all.example.net ~all', False, 'success'),
+    # The first all term decides (RFC 7208 section 5.1)
+    ('v=spf1 mx ?all -all', False, 'warning'),
+    ('v=spf1 mx -all +all', True, 'success'),
+    ('v=spf1 mx -ALL', True, 'success'),
+    ('v=spf1 mx all', False, 'error'),
+    # With an all term, redirect= is ignored wherever it stands
+    ('v=spf1 redirect=_spf.example.net -all', True, 'success'),
+])
+@pytest.mark.asyncio
+async def test_the_all_term_decides_the_policy(monkeypatch, record, strict, status):
+    result = await _qualifier(monkeypatch, record)
+    assert result['has_strict_all'] is strict
+    assert result['status'] == status, result['message']
+
+
+@pytest.mark.asyncio
+async def test_a_record_whose_only_all_is_in_a_name_has_no_all_term(monkeypatch):
+    result = await _qualifier(monkeypatch, 'v=spf1 include:mail-all.example.net')
+    assert result['status'] == 'error'
+    assert result['message'] == 'SPF record missing "all" mechanism'
+
+
+@pytest.mark.asyncio
+async def test_a_redirect_without_all_still_follows_the_redirect(monkeypatch):
+    result = await _qualifier(monkeypatch, 'v=spf1 redirect=_spf.example.net')
+    assert result['message'].startswith('SPF redirects to _spf.example.net')

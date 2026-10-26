@@ -1,7 +1,7 @@
 """Every answer the Rspamd map calls can give, so the contract check (conftest.py,
 contract.py) holds each one to /openapi.json: the maps with and without the Rspamd
-password, Rspamd refusing (502, or an error in the list) or answering something that
-is not JSON (500), a save refused for its content (400), a missing Read-Write key
+password, Rspamd refusing or answering something that is not its map list (502, or an
+error in the list), a save refused for its content (400), a missing Read-Write key
 (403), a map changed meanwhile or another save still running (409), and the requests
 the calls refuse (404, 400, 422). Rspamd and mailcow are faked at the HTTP client;
 nothing leaves the test."""
@@ -24,8 +24,9 @@ from app.services import rspamd_map_lock  # noqa: E402
 
 MAP = 'global_rcpt_blacklist.map'
 OTHER = 'global_mime_from_blacklist.map'
-# A line re.compile refuses with OverflowError, which the map check does not catch
+# Lines re.compile refuses with OverflowError and RecursionError, not re.error
 HUGE_REPEAT = '/a{99999999999}/'
+DEEP_NESTING = '/' + '(' * 5000 + 'a' + ')' * 5000 + '/'
 
 
 @pytest.fixture
@@ -65,6 +66,8 @@ def rspamd(monkeypatch):
         if path == '/api/v1/edit/rspamd-map':
             sent = json.loads(request.content)['attr']['rspamd_map_data']
             state['writes'].append(sent)
+            if isinstance(state['edit'], httpx.Response):
+                return state['edit']
             if all(entry.get('type') == 'success' for entry in state['edit']):
                 state['content'] = sent.strip() + '\n'
             return httpx.Response(200, json=state['edit'])
@@ -115,11 +118,15 @@ def test_list_when_rspamd_refuses(client, rspamd):
     assert r.json()['error'] and r.json()['configured'] is True
 
 
-def test_list_when_rspamd_answers_a_page(client, rspamd):
-    """A proxy's sign-in page instead of Rspamd's JSON is not a mailcow error: 500."""
-    rspamd['maps'] = NOT_JSON
+@pytest.mark.parametrize('maps', [NOT_JSON, {'maps': []}, [None], [{'map': 7, 'uri': None}], [{'map': 7}]],
+                         ids=['a-page', 'an-object', 'a-null-entry', 'a-null-uri', 'no-uri'])
+def test_list_when_rspamd_answers_something_else(client, rspamd, maps):
+    """A proxy's sign-in page, or JSON that is not Rspamd's map list, is reported as
+    an error in the list, not as maps that are not loaded."""
+    rspamd['maps'] = maps
     r = client.get('/api/rspamd/maps')
-    assert r.status_code == 500
+    assert r.status_code == 200
+    assert r.json()['error'] and r.json()['configured'] is True
 
 
 # ---------------------------------------------------------------- one map
@@ -142,8 +149,9 @@ def test_map_errors(client, rspamd, monkeypatch):
     assert client.get('/api/rspamd/maps/nope.map').status_code == 404
     rspamd['getmap'] = REFUSED
     assert client.get(f'/api/rspamd/maps/{MAP}').status_code == 502
-    rspamd['maps'] = NOT_JSON
-    assert client.get(f'/api/rspamd/maps/{MAP}').status_code == 500
+    for maps in (NOT_JSON, [None]):
+        rspamd['maps'] = maps
+        assert client.get(f'/api/rspamd/maps/{MAP}').status_code == 502
     monkeypatch.setattr(settings._inner, 'rspamd_password', None)
     assert client.get(f'/api/rspamd/maps/{MAP}').status_code == 400
 
@@ -167,6 +175,15 @@ def test_save_that_cannot_be_read_back(client, rspamd):
     assert r.json()['content_hash'] is None and r.json()['entry_count'] == 1
 
 
+def test_a_save_read_back_as_a_page_is_still_saved(client, rspamd):
+    """Without base_hash the map is written first; a page in place of the map list
+    when it is read back does not make the save look failed."""
+    rspamd['maps'] = NOT_JSON
+    r = client.put(f'/api/rspamd/maps/{MAP}', json={'content': '/^d@example\\.com$/i'})
+    assert r.status_code == 200, r.text
+    assert r.json()['content_hash'] is None and rspamd['writes'] == ['/^d@example\\.com$/i']
+
+
 def test_save_errors(client, rspamd, monkeypatch):
     assert client.put('/api/rspamd/maps/nope.map', json={'content': ''}).status_code == 404
     assert client.put(f'/api/rspamd/maps/{MAP}', json={}).status_code == 422
@@ -180,14 +197,22 @@ def test_save_errors(client, rspamd, monkeypatch):
 
     rspamd['edit'] = [{'type': 'danger', 'msg': ['map_content_empty']}]
     assert client.put(f'/api/rspamd/maps/{MAP}', json={'content': 'x'}).status_code == 502
+    # mailcow says its reply is JSON, and it is not: the mailcow client tries the write three times
+    # and does not catch it (500)
+    rspamd['edit'] = httpx.Response(200, text='<html>', headers={'content-type': 'application/json'})
+    assert client.put(f'/api/rspamd/maps/{MAP}', json={'content': 'x'}).status_code == 500
 
+    # The map it is checked against cannot be read: nothing is written
     rspamd['maps'] = NOT_JSON
-    assert client.put(f'/api/rspamd/maps/{MAP}', json={'content': 'x', 'base_hash': 'h'}).status_code == 500
-    assert client.put(f'/api/rspamd/maps/{MAP}', json={'content': HUGE_REPEAT}).status_code == 500
+    assert client.put(f'/api/rspamd/maps/{MAP}', json={'content': 'x', 'base_hash': 'h'}).status_code == 502
+    for line in (HUGE_REPEAT, DEEP_NESTING):
+        refused = client.put(f'/api/rspamd/maps/{MAP}', json={'content': f'# c\n{line}'})
+        assert refused.status_code == 400
+        assert refused.json()['detail']['validation_errors'][0]['line'] == 2
 
     monkeypatch.setattr(mailcow_api, 'headers_rw', None)
     assert client.put(f'/api/rspamd/maps/{MAP}', json={'content': 'x'}).status_code == 403
-    assert rspamd['writes'] == ['x']
+    assert rspamd['writes'] == ['x'] * 4
 
 
 def test_save_while_another_save_runs(client, rspamd, monkeypatch):
@@ -213,6 +238,14 @@ def test_validate(client):
     assert [f['severity'] for f in body['warnings']] == ['warning']
 
 
+@pytest.mark.parametrize('line', [HUGE_REPEAT, DEEP_NESTING], ids=['huge-repeat', 'deep-nesting'])
+def test_validate_a_pattern_that_cannot_be_checked(client, line):
+    r = client.post('/api/rspamd/validate', json={'content': f'# c\n{line}'})
+    assert r.status_code == 200
+    body = r.json()
+    assert body['valid'] is False and body['errors'][0]['line'] == 2
+    assert body['errors'][0]['error'].startswith('Pattern cannot be checked')
+
+
 def test_validate_errors(client):
     assert client.post('/api/rspamd/validate', json={'filename': MAP}).status_code == 422
-    assert client.post('/api/rspamd/validate', json={'content': HUGE_REPEAT}).status_code == 500

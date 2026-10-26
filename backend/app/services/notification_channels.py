@@ -33,6 +33,10 @@ _TIMEOUT_SECONDS = 10      # one step: connect, TLS handshake, one read
 _TOTAL_SECONDS = 20        # the whole send, however slowly the server answers
 _MAX_ERROR_BYTES = 1024    # read of an error answer; its first 200 characters are shown
 _TOO_SLOW = "The server took too long to answer."
+_UNREADABLE_SECRET = "The send failed. Its error is not shown, as it could quote the channel's secret URL."
+_UNEXPECTED = "The send failed with an unexpected error. Check the application logs."
+# The shortest start of a secret masked where an error answer was cut off
+_MIN_CUT_SECRET = 4
 # Discord's hard limit is 2000 characters; stay comfortably below it
 _MAX_MESSAGE_CHARS = 1900
 
@@ -154,14 +158,29 @@ def _truncate(text: str, limit: int = _MAX_MESSAGE_CHARS) -> str:
     return text if len(text) <= limit else text[:limit - 1] + "..."
 
 
+def _readable_url(value: str) -> bool:
+    """An http(s) address with a host, that urlparse reads to the end (port too)."""
+    try:
+        parsed = urlparse(value)
+        parsed.port
+    except ValueError:
+        return False
+    return parsed.scheme.lower() in ("http", "https") and bool(parsed.hostname)
+
+
 def validate_config(channel_type: str, config: Dict) -> Tuple[bool, str]:
-    """Check that all required fields for this type are present."""
+    """Check that all required fields for this type are present, and that the
+    URL fields hold an address. The message names the field, never its value:
+    a webhook URL is the channel's secret."""
     spec = CHANNEL_TYPES.get(channel_type)
     if not spec:
         return False, f"Unknown channel type: {channel_type}"
     for field in spec["fields"]:
         if field.get("required") and not str(config.get(field["key"], "")).strip():
             return False, f"{field['label']} is required"
+        value = str(config.get(field["key"]) or "").strip()
+        if field.get("type") == "url" and value and not _readable_url(value):
+            return False, f"{field['label']} is not a valid URL. Enter the full address, starting with https://"
     return True, ""
 
 
@@ -240,18 +259,61 @@ def _sanitize_error(channel_type: str, config: Dict, error_text: str) -> str:
     """Strip channel secrets from an error string before it is logged, stored
     in last_error, or returned by the API. HTTP client errors can quote the
     target URL, and for Telegram/Gotify/Slack/Discord the URL (or its path)
-    contains the token."""
+    contains the token.
+
+    Never raises: a secret URL that urlparse cannot read gives a fixed text,
+    since which part of it the error quotes is not known."""
+    secrets = []
     for key in SECRET_FIELDS.get(channel_type, set()):
         value = str(config.get(key, "") or "").strip()
         if not value:
             continue
-        error_text = error_text.replace(value, MASK)
-        if value.startswith("http"):
-            # ConnectionError messages quote only the path part of the URL
-            path = urlparse(value).path
+        secrets.append(value)
+        if value.lower().startswith("http"):
+            # ConnectionError messages quote only the path part of the URL, and
+            # a server can quote the path with its query, or the query alone
+            try:
+                parsed = urlparse(value)
+            except ValueError:
+                return _UNREADABLE_SECRET
+            path, query = parsed.path, parsed.query
             if path and len(path) > 1:
-                error_text = error_text.replace(path, "/" + MASK)
-    return error_text
+                secrets.append(path)
+            if query:
+                secrets += [f"{path}?{query}", query]
+    return _mask(error_text, secrets)
+
+
+def _mask(text: str, secrets: List[str]) -> str:
+    """text with every copy of each secret masked, and the start of one where
+    the text was cut off (an error answer is read only so far).
+
+    Every copy is found in the text as given, before anything is replaced:
+    masking one secret first could break up the copy of another that holds it."""
+    spans = []
+    for secret in filter(None, secrets):
+        start = text.find(secret)
+        while start != -1:
+            spans.append((start, start + len(secret)))
+            start = text.find(secret, start + 1)
+        for length in range(len(secret) - 1, _MIN_CUT_SECRET - 1, -1):
+            if text.endswith(secret[:length]):
+                spans.append((len(text) - length, len(text)))
+                break
+    if not spans:
+        return text
+    merged = []
+    for start, end in sorted(spans):
+        if merged and start <= merged[-1][1]:
+            merged[-1][1] = max(merged[-1][1], end)
+        else:
+            merged.append([start, end])
+    out, last = [], 0
+    for start, end in merged:
+        # A masked path keeps its leading slash, so the error still reads as a path
+        out += [text[last:start], ("/" if text[start] == "/" else "") + MASK]
+        last = end
+    return "".join(out + [text[last:]])
 
 
 def _verify():
@@ -360,7 +422,8 @@ def send_to_config(channel_type: str, config: Dict, subject: str, message: str) 
     if 300 <= status < 400:
         return False, (f"HTTP {status}: the server redirected the request, "
                        f"and redirects are not followed. Enter the final URL of the service.")
-    return False, _sanitize_error(channel_type, config, f"HTTP {status}: {text[:200]}")
+    # Masked before the cut, so the cut cannot split a secret the mask then misses
+    return False, f"HTTP {status}: {_sanitize_error(channel_type, config, text)[:200]}"
 
 
 def _record_result(channel_id: int, ok: bool, error: str) -> None:
@@ -399,7 +462,14 @@ def send_to_all(subject: str, message: str, alert_type: Optional[str] = None) ->
 
     sent = failed = 0
     for channel in channels:
-        ok, error = send_to_config(channel["type"], channel["config"], subject, message)
+        # One channel failing in an unforeseen way leaves the others their alert.
+        # Only the exception's type is logged: its text could quote a secret.
+        try:
+            ok, error = send_to_config(channel["type"], channel["config"], subject, message)
+        except Exception as e:
+            logger.error("Notification to '%s' (%s) failed unexpectedly: %s",
+                         channel["name"], channel["type"], type(e).__name__)
+            ok, error = False, _UNEXPECTED
         _record_result(channel["id"], ok, error)
         if ok:
             sent += 1

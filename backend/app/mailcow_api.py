@@ -342,9 +342,10 @@ class MailcowAPI:
         status = response.status_code
         if status == 200:
             try:
-                accepted = response.json().get("auth") == "ok"
+                data = response.json()
             except ValueError:
-                accepted = False
+                data = None
+            accepted = isinstance(data, dict) and data.get("auth") == "ok"
             if accepted:
                 return {"configured": True, "valid": True, "error": None}
         if status in (401, 403):
@@ -1619,10 +1620,17 @@ class MailcowAPI:
             List of map metadata dicts with keys: map (id), description, uri, type, editable, loaded, cached
         """
         response = await self._make_rspamd_request("/rspamd/maps")
-        data = response.json()
-        if not isinstance(data, list):
-            logger.warning(f"Unexpected Rspamd maps response format: {type(data)}")
-            return []
+        try:
+            data = response.json()
+        except ValueError:
+            raise MailcowAPIError(
+                "Rspamd answered with something other than its map list, often the sign-in page of a proxy. "
+                "Set RSPAMD_URL to reach the Rspamd controller directly, e.g. http://rspamd-mailcow:11334"
+            )
+        # A list in another form is not an empty one: every map would read as not loaded
+        if not isinstance(data, list) or not all(
+                isinstance(m, dict) and isinstance(m.get("uri"), str) for m in data):
+            raise MailcowAPIError(f"Rspamd answered with a map list this app cannot read ({type(data).__name__})")
         return data
 
     async def get_rspamd_map_content(self, map_id: int) -> str:

@@ -355,11 +355,14 @@ async def check_spf_record(domain: str, spf_source_ips: Optional[List[Dict[str, 
                 'includes': []
             }
         
-        spf_lower = spf_record.lower()
-        has_strict_all = '-all' in spf_lower
-        has_soft_fail = '~all' in spf_lower
-        has_neutral = '?all' in spf_lower
-        has_pass_all = '+all' in spf_lower or ' all' in spf_lower
+        # The first all term decides (RFC 7208 section 5.1), by its qualifier;
+        # a search of the record would also find "-all" in a name like spf-all.example
+        all_term = next((t for t in mechanisms if t.lstrip('+-~?').lower() == 'all'), None)
+        qualifier = (all_term[0] if all_term[0] in '+-~?' else '+') if all_term else None
+        has_strict_all = qualifier == '-'
+        has_soft_fail = qualifier == '~'
+        has_neutral = qualifier == '?'
+        has_pass_all = qualifier == '+'
         
         has_redirect = any(m.lower().startswith('redirect=') for m in mechanisms)
         
@@ -1125,12 +1128,12 @@ async def check_dmarc_record(domain: str) -> Dict[str, Any]:
                 'settings': {}
             }
         
-        # Extract policy
-        policy_match = re.search(r'p=(none|quarantine|reject)', dmarc_record)
-        policy = policy_match.group(1) if policy_match else 'unknown'
-        
-        # Parse all tags into settings
+        # Parse all tags into settings; the policy is the p tag (not sp=, which a
+        # search for "p=" in the record also finds)
         settings = parse_dmarc_record_tags(dmarc_record)
+        policy = settings.get('policy')
+        if policy not in ('none', 'quarantine', 'reject'):
+            policy = 'unknown'
         
         # Check if policy is strong enough
         is_strong = policy in ['quarantine', 'reject']

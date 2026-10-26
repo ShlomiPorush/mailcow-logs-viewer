@@ -92,6 +92,8 @@ NOT_GIVEN = {
     ("GET", "/api/status/summary", 500): "gather(return_exceptions=True) turns every failure into a value",
     ("POST", "/api/fail2ban/unban", 500): "internal_error() is called only for a refused Read-Write key, "
                                           "which it answers 502",
+    ("GET", "/api/rspamd/maps/{filename}", 500): "internal_error() answers MailcowAPIError 502, and the Rspamd "
+                                                 "client turns a map list it cannot read into one",
 }
 
 
