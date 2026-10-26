@@ -28,6 +28,8 @@ MARK = uuid.uuid4().hex[:8]
 DOMAIN = f'{MARK}.example'
 MAILBOX = f'u@{DOMAIN}'
 OK = [{'type': 'success', 'msg': ['object_modified', 'x']}]
+# The protection rules, the rate limit reset audit and the ignored blocklists
+SHARED_KEYS = (protection_rules.RULES_KEY, 'rate_limit_resets', 'ignore.blocklists')
 
 
 class _Broken:
@@ -77,6 +79,14 @@ def client(monkeypatch):
         monkeypatch.setattr(mailcow_api, name, answer)
     monkeypatch.setattr(mailcow_api, 'get_rl_domain', domain_limit)
     monkeypatch.setattr(mailcow_api, 'get_mailboxes', no_mailboxes)
+
+    async def not_sent(*args, **kwargs):
+        return None
+    # A block notifies the operator and the user; nothing is sent from a test
+    monkeypatch.setattr(smtp_abuse_service, '_notify_operator_blocked', not_sent)
+    monkeypatch.setattr(smtp_abuse_service, '_notify_user_blocked', not_sent)
+    # Reading the monitored hosts would also align them with the settings
+    monkeypatch.setattr(blacklist_service, 'reconcile_monitored_hosts', lambda db: False)
     rate_limits._bust_domain_limit_cache()
     yield TestClient(app, raise_server_exceptions=False), state
     app.dependency_overrides.pop(get_db, None)
@@ -88,10 +98,14 @@ def rows(client):
     """A mailbox, an alert and three catches of this test, removed after it."""
     if not _postgres_available():
         pytest.skip('PostgreSQL not available')
-    from app.models import MailboxStatistics, ProtectionHit, SecurityAlert, SMTPAbuseAction, SMTPAbuseWhitelist
+    from app.models import (MailboxStatistics, ProtectionHit, SecurityAlert, SMTPAbuseAction, SMTPAbuseWhitelist,
+                            SystemSetting)
     database.init_db()
     now = datetime.utcnow()
     with database.get_db_context() as db:
+        # What these calls change that other tests and the app share, put back after
+        settings_before = {row.key: row.value for row in db.query(SystemSetting).filter(SystemSetting.key.in_(SHARED_KEYS))}
+        whitelist_before = {row.email: (row.notes, row.active) for row in db.query(SMTPAbuseWhitelist)}
         db.add(MailboxStatistics(username=MAILBOX, domain=DOMAIN, active=True))
         alert = SecurityAlert(alert_type='auth_failure_burst', severity='warning', subject=MAILBOX,
                               title='Failed logins', detail='12 failures in the last 15 minutes', created_at=now)
@@ -110,8 +124,20 @@ def rows(client):
         db.query(SecurityAlert).filter(SecurityAlert.subject == MAILBOX).delete(synchronize_session=False)
         db.query(ProtectionHit).filter(ProtectionHit.usernames.contains([MARK])).delete(synchronize_session=False)
         db.query(SMTPAbuseAction).filter(SMTPAbuseAction.email == MAILBOX).delete(synchronize_session=False)
-        db.query(SMTPAbuseWhitelist).filter(SMTPAbuseWhitelist.email.like(f'%{DOMAIN}')).delete(
-            synchronize_session=False)
+        for row in db.query(SMTPAbuseWhitelist).all():
+            if row.email not in whitelist_before:
+                db.delete(row)
+            else:
+                row.notes, row.active = whitelist_before[row.email]
+        for key in SHARED_KEYS:
+            row = db.query(SystemSetting).filter(SystemSetting.key == key).first()
+            if key not in settings_before:
+                if row is not None:
+                    db.delete(row)
+            elif row is None:
+                db.add(SystemSetting(key=key, value=settings_before[key]))
+            else:
+                row.value = settings_before[key]
         db.commit()
 
 
@@ -161,41 +187,17 @@ def test_protection_rules_and_catches(client, rows, monkeypatch):
     assert c.post(f"/api/protection/hits/{rows['banned']}/undo").status_code == 400
     state['rw'] = True
 
+    # A ban and its undo that succeed run for real against a fake mailcow in the
+    # protection rules' own API tests; here, the ones mailcow does not take
     async def nothing_written(api, now=None):
         return {}
     monkeypatch.setattr(protection_rules, 'enforce', nothing_written)
     assert c.post(f"/api/protection/hits/{rows['watching']}/ban").status_code == 502
 
-    async def written(api, now=None):
-        from app.models import ProtectionHit
-        with database.get_db_context() as db:
-            db.query(ProtectionHit).filter(ProtectionHit.id == rows['watching']).update({'status': 'banned'})
-            db.commit()
-        return {}
-    with database.get_db_context() as db:
-        from app.models import ProtectionHit
-        db.query(ProtectionHit).filter(ProtectionHit.id == rows['watching']).update({'status': 'watching'})
-        db.commit()
-    monkeypatch.setattr(protection_rules, 'enforce', written)
-    assert c.post(f"/api/protection/hits/{rows['watching']}/ban").json()['status'] == 'banned'
-
     async def refused(api, hit_id):
         raise RuntimeError('mailcow refused the change')
     monkeypatch.setattr(protection_rules, 'undo', refused)
     assert c.post(f"/api/protection/hits/{rows['banned']}/undo").status_code == 502
-
-    async def lifted(api, hit_id):
-        from app.models import ProtectionHit
-        with database.get_db_context() as db:
-            hit = db.query(ProtectionHit).filter(ProtectionHit.id == hit_id).first()
-            hit.status = 'ended'
-            db.commit()
-            db.refresh(hit)
-            db.expunge(hit)
-            return hit
-    monkeypatch.setattr(protection_rules, 'undo', lifted)
-    assert c.post(f"/api/protection/hits/{rows['banned']}/undo").json()['status'] == 'ended'
-    assert c.post(f"/api/protection/hits/{rows['banned']}/undo").status_code == 409
 
 
 def test_protection_when_the_database_fails(client):
@@ -356,3 +358,11 @@ def test_blacklist(client, rows, monkeypatch):
         raise RuntimeError('no resolver')
     monkeypatch.setattr(blacklist, 'get_blacklist_check_results', failed)
     assert c.post('/api/blacklist/check?host=192.0.2.10').json()['status'] == 'error'
+
+
+def test_ignored_blocklists_when_the_database_fails(client, monkeypatch):
+    c, _ = client
+    monkeypatch.setattr(blacklist, 'get_db_context', _broken_context)
+    zone = blacklist_service.BLACKLISTS[0]['zone']
+    assert c.get('/api/blacklist/ignored').status_code == 500
+    assert c.put(f'/api/blacklist/lists/{zone}/ignore', json={'ignored': True}).status_code == 500

@@ -256,7 +256,7 @@ class IgnoreRequest(BaseModel):
     ignored: bool
 
 
-@router.get("/ignored", response_model=None, responses=documented(m.IgnoredListsResponse))
+@router.get("/ignored", response_model=None, responses=documented(m.IgnoredListsResponse, errors={500: None}))
 def get_ignored_blocklists() -> Dict[str, Any]:
     """Blocklists the admin chose to ignore (still checked, never counted or alerted)."""
     with get_db_context() as db:
@@ -264,7 +264,7 @@ def get_ignored_blocklists() -> Dict[str, Any]:
     return {"lists": [{"name": bl["name"], "zone": bl["zone"]} for bl in BLACKLISTS if bl["zone"] in zones]}
 
 
-@router.put("/lists/{zone}/ignore", response_model=None, responses=documented(m.IgnoreChange, errors={404: None, 422: Invalid}))
+@router.put("/lists/{zone}/ignore", response_model=None, responses=documented(m.IgnoreChange, errors={404: None, 422: Invalid, 500: None}))
 def ignore_blocklist(zone: str, body: IgnoreRequest) -> Dict[str, Any]:
     """Ignore or stop ignoring one blocklist for every monitored address."""
     known = {bl["zone"]: bl["name"] for bl in BLACKLISTS}

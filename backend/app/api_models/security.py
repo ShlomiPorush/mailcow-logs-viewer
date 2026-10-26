@@ -139,6 +139,8 @@ class BreachRule(_Rule):
 
 
 class ProtectionRules(Fixed):
+    """The rules as saving writes them: PUT checks and normalises every value. A
+    value written into the setting by hand is read back as it is."""
     trap: TrapRule
     unknown_accounts: UnknownAccountsRule
     repeat_offender: RepeatOffenderRule
