@@ -12,6 +12,8 @@ from ..app_time import as_utc, zone_label
 from ..config import settings
 from ..services.smtp_service import send_notification_email
 from ..utils import format_datetime_for_api
+from ..api_models import Invalid, documented
+from ..api_models import mailboxes as m
 
 # Import existing API functions
 from .mailbox_stats import get_mailbox_stats_summary, get_all_mailbox_stats
@@ -141,14 +143,14 @@ async def get_system_summary_data() -> Dict[str, Any]:
         "quarantine": {"count": quarantine_count}
     }
 
-@router.get("/system/summary")
+@router.get("/system/summary", responses=documented(m.SystemSummaryResponse, errors={500: None, 502: None}))
 async def get_summary_report():
     """
     Get the weekly summary report data
     """
     return await get_system_summary_data()
 
-@router.post("/system/summary/email")
+@router.post("/system/summary/email", responses=documented(m.SummaryEmailResponse, errors={422: Invalid}))
 def send_summary_report_email(
     background_tasks: BackgroundTasks, 
     force: bool = False

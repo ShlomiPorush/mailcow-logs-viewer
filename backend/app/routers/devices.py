@@ -18,6 +18,8 @@ from ..scheduler import get_job_status
 from ..services import geoip_service
 from ..services.eas_devices import describe_device
 from ..utils import format_datetime_for_api as format_datetime_utc
+from ..api_models import Invalid, documented
+from ..api_models import mailboxes as m
 
 logger = logging.getLogger(__name__)
 
@@ -67,7 +69,7 @@ def _device_json(d: EasDevice, geoip: bool) -> dict:
     }
 
 
-@router.get("/devices")
+@router.get("/devices", responses=documented(m.DevicesResponse, errors={422: Invalid, 500: None}))
 def list_devices(
     db: Session = Depends(get_db),
     page: int = Query(1, ge=1),

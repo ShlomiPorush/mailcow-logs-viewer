@@ -5,7 +5,7 @@ import asyncio
 import logging
 import hashlib
 import json
-from typing import Annotated, List, Optional
+from typing import Annotated, List, Optional, Union
 from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, BackgroundTasks, Query
 from sqlalchemy.orm import Session, load_only
@@ -28,6 +28,8 @@ from ..scheduler import update_job_status
 from .domains import get_cached_dns_check, check_dmarc_record, check_tls_rpt_record, parse_dmarc_record_tags, _public_cached_dns_result
 from ..utils import internal_error, format_datetime_for_api
 from ..app_time import app_tz, day_bounds, day_key, epoch, epoch_day_key, local_now, utc_naive
+from ..api_models import Invalid, documented
+from ..api_models import dmarc as m
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +44,7 @@ def _cutoff_epoch(days: int) -> int:
 # DOMAINS LIST
 # =============================================================================
 
-@router.post("/dmarc/cache/clear")
+@router.post("/dmarc/cache/clear", response_model=None, responses=documented(m.StatusMessage, errors={500: None}))
 def clear_cache(
     db: Session = Depends(get_db)
 ):
@@ -57,7 +59,7 @@ def clear_cache(
         raise internal_error(e)
 
 
-@router.get("/dmarc/insights")
+@router.get("/dmarc/insights", response_model=None, responses=documented(Union[m.DomainInsights, m.AllInsights], description="With domain: that domain's insights. Without: every domain with reports in the window", errors={500: None}))
 def get_dmarc_insights(
     domain: Optional[str] = None,
     db: Session = Depends(get_db)
@@ -80,7 +82,7 @@ def get_dmarc_insights(
 # REPORTS MANAGEMENT
 # =============================================================================
 
-@router.get("/dmarc/reports/config")
+@router.get("/dmarc/reports/config", response_model=None, responses=documented(m.ReportsConfig))
 def get_reports_management_config():
     """
     Get reports management configuration
@@ -147,7 +149,7 @@ def _report_union(db: Session, dmarc_match, tls_match, sort_by: str = "created_a
         branch(TLSReport, "tls", tls_match, TLSReportPolicy)).subquery()
 
 
-@router.get("/dmarc/reports/all")
+@router.get("/dmarc/reports/all", response_model=None, responses=documented(Union[m.AllReportsPage, m.AllReports], description="With page: one page. Without: every matching report", errors={422: Invalid, 500: None}))
 def get_all_reports(
     db: Session = Depends(get_db),
     page: Annotated[Optional[int], Query(ge=1)] = None,
@@ -299,7 +301,7 @@ def _normalize_report_domain(domain: str) -> str:
     return name
 
 
-@router.get("/dmarc/reports/domains")
+@router.get("/dmarc/reports/domains", response_model=None, responses=documented(m.ReportsByDomain, errors={500: None}))
 def get_reports_by_domain(db: Session = Depends(get_db)):
     """
     How many DMARC and TLS reports each domain has, and the end of its latest report period.
@@ -338,7 +340,7 @@ def get_reports_by_domain(db: Session = Depends(get_db)):
 
 
 # Registered before /dmarc/reports/{report_type}/{report_id}, which would otherwise take this path
-@router.delete("/dmarc/reports/domains/{domain}")
+@router.delete("/dmarc/reports/domains/{domain}", response_model=None, responses=documented(m.DomainReportsDeleted, errors={400: None, 403: None, 404: None, 500: None}))
 def delete_domain_reports(domain: str, db: Session = Depends(get_db)):
     """
     Delete every DMARC and TLS report of one domain, with their records and policies
@@ -395,7 +397,7 @@ def delete_domain_reports(domain: str, db: Session = Depends(get_db)):
         raise internal_error(e)
 
 
-@router.delete("/dmarc/reports/{report_type}/{report_id}")
+@router.delete("/dmarc/reports/{report_type}/{report_id}", response_model=None, responses=documented(m.StatusMessage, errors={400: None, 403: None, 404: None, 422: Invalid, 500: None}))
 def delete_report(
     report_type: str,
     report_id: int,
@@ -453,7 +455,7 @@ def delete_report(
         raise internal_error(e)
 
 
-@router.get("/dmarc/domains")
+@router.get("/dmarc/domains", response_model=None, responses=documented(m.DomainsList, errors={500: None}))
 async def get_domains_list():
     """
     Get list of all domains with DMARC and/or TLS-RPT reports and their statistics,
@@ -738,7 +740,7 @@ def _build_domains_list():
 # DOMAIN OVERVIEW
 # =============================================================================
 
-@router.get("/dmarc/domains/{domain}/overview")
+@router.get("/dmarc/domains/{domain}/overview", response_model=None, responses=documented(m.DomainOverview, errors={422: Invalid, 500: None}))
 async def get_domain_overview(domain: str, days: int = 30):
     """Get daily domain statistics and cached or live DMARC and TLS-RPT DNS status."""
     try:
@@ -755,7 +757,7 @@ async def get_domain_overview(domain: str, days: int = 30):
         raise internal_error(e)
 
 
-@router.get("/dmarc/domains/{domain}/tls-rpt-record")
+@router.get("/dmarc/domains/{domain}/tls-rpt-record", response_model=None, responses=documented(m.TlsRptRecordResponse, errors={500: None}))
 async def get_domain_tls_rpt_record(domain: str):
     """The domain's TLS-RPT record for the TLS tab: the cached check, or a live lookup when none is cached."""
     try:
@@ -891,7 +893,7 @@ def _load_domain_overview(domain: str, days: int, dmarc_record: dict, tls_rpt_re
 MAX_CALENDAR_DAYS = 400
 
 
-@router.get("/dmarc/domains/{domain}/calendar")
+@router.get("/dmarc/domains/{domain}/calendar", response_model=None, responses=documented(m.DomainCalendar, errors={422: Invalid, 500: None}))
 def get_domain_calendar(
     domain: str,
     days: Optional[int] = Query(None, ge=1, le=MAX_CALENDAR_DAYS, description="Whole days back from today; the DMARC retention by default"),
@@ -936,7 +938,7 @@ def get_domain_calendar(
 # DOMAIN REPORTS (by day)
 # =============================================================================
 
-@router.get("/dmarc/domains/{domain}/reports")
+@router.get("/dmarc/domains/{domain}/reports", response_model=None, responses=documented(m.DomainReports, errors={422: Invalid, 500: None}))
 def get_domain_reports(
     domain: str,
     days: int = 30,
@@ -1040,7 +1042,7 @@ def get_domain_reports(
 # REPORT DETAILS (specific date)
 # =============================================================================
 
-@router.get("/dmarc/domains/{domain}/reports/{report_date}/details")
+@router.get("/dmarc/domains/{domain}/reports/{report_date}/details", response_model=None, responses=documented(m.ReportDetails, errors={400: None, 404: None, 500: None}))
 def get_report_details(
     domain: str,
     report_date: str,
@@ -1163,7 +1165,7 @@ def get_report_details(
 # DOMAIN SOURCES
 # =============================================================================
 
-@router.get("/dmarc/domains/{domain}/sources")
+@router.get("/dmarc/domains/{domain}/sources", response_model=None, responses=documented(m.DomainSources, errors={422: Invalid, 500: None}))
 def get_domain_sources(
     domain: str,
     days: int = 30,
@@ -1271,7 +1273,7 @@ def get_domain_sources(
 # SOURCE DETAILS (specific IP aggregated across dates)
 # =============================================================================
 
-@router.get("/dmarc/domains/{domain}/sources/{source_ip}/details")
+@router.get("/dmarc/domains/{domain}/sources/{source_ip}/details", response_model=None, responses=documented(m.SourceDetails, errors={404: None, 422: Invalid, 500: None}))
 def get_source_details(
     domain: str,
     source_ip: str,
@@ -1380,7 +1382,7 @@ def get_source_details(
 # TLS-RPT REPORTS
 # =============================================================================
 
-@router.get("/dmarc/domains/{domain}/tls-reports")
+@router.get("/dmarc/domains/{domain}/tls-reports", response_model=None, responses=documented(m.TlsReports, errors={422: Invalid, 500: None}))
 def get_domain_tls_reports(
     domain: str,
     days: int = 30,
@@ -1469,7 +1471,7 @@ def get_domain_tls_reports(
         raise internal_error(e)
 
 
-@router.get("/dmarc/domains/{domain}/tls-reports/daily")
+@router.get("/dmarc/domains/{domain}/tls-reports/daily", response_model=None, responses=documented(m.TlsDaily, errors={422: Invalid, 500: None}))
 def get_domain_tls_daily_reports(
     domain: str,
     days: int = 30,
@@ -1577,7 +1579,7 @@ def get_domain_tls_daily_reports(
         raise internal_error(e)
 
 
-@router.get("/dmarc/domains/{domain}/tls-reports/{report_date}/details")
+@router.get("/dmarc/domains/{domain}/tls-reports/{report_date}/details", response_model=None, responses=documented(m.TlsDetails, errors={400: None, 404: None, 500: None}))
 def get_tls_report_details(
     domain: str,
     report_date: str,
@@ -1674,7 +1676,7 @@ def get_tls_report_details(
 # IMAP SYNC STATUS
 # =============================================================================
 
-@router.get("/dmarc/imap/status")
+@router.get("/dmarc/imap/status", response_model=None, responses=documented(m.ImapStatus, errors={500: None}))
 def get_imap_status(db: Session = Depends(get_db)):
     """
     Get IMAP sync configuration and status
@@ -1735,7 +1737,7 @@ def get_imap_status(db: Session = Depends(get_db)):
 # MANUAL IMAP SYNC
 # =============================================================================
 
-@router.post("/dmarc/imap/sync")
+@router.post("/dmarc/imap/sync", response_model=None, responses=documented(m.ImapSyncStarted, description="Queued, or already running", errors={400: None}))
 def trigger_manual_sync(background_tasks: BackgroundTasks):
     """
     Manually trigger IMAP sync and update global job status for UI visibility
@@ -1794,7 +1796,7 @@ def trigger_manual_sync(background_tasks: BackgroundTasks):
 # IMAP SYNC HISTORY
 # =============================================================================
 
-@router.get("/dmarc/imap/history")
+@router.get("/dmarc/imap/history", response_model=None, responses=documented(m.ImapHistory, errors={422: Invalid, 500: None}))
 def get_sync_history(
     limit: int = Query(20, ge=1, le=500),
     page: int = Query(1, ge=1),
@@ -1845,7 +1847,7 @@ def get_sync_history(
 # UPLOAD
 # =============================================================================
 
-@router.post("/dmarc/upload")
+@router.post("/dmarc/upload", response_model=None, responses=documented(Union[m.UploadStored, m.UploadDuplicate], description="Stored, or a duplicate of a stored report", errors={400: None, 403: None, 413: None, 422: Invalid, 500: None}))
 async def upload_report(
     file: UploadFile = File(...)
 ):

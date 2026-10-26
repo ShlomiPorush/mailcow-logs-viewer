@@ -63,6 +63,7 @@ def test_cross_site_post_does_not_start_a_check(checks):
     assert checks == ([], [])
 
 
+@pytest.mark.no_contract(reason="stubs check_domain_dns and compares the answer to the stub")
 def test_same_origin_post_checks_and_stores(checks):
     response = client().post("/api/domains/example.com/check-dns", headers={"Origin": APP})
     assert response.status_code == 200

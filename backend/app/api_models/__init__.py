@@ -25,6 +25,7 @@ Conventions:
 from typing import Any, Dict, List, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field
+from starlette.responses import Response
 
 
 class Fixed(BaseModel):
@@ -61,8 +62,10 @@ Invalid = Union[ValidationErrors, ErrorDetail]
 
 _ERROR_TEXT = {
     400: "Bad request",
+    403: "Not allowed: the feature is off or the call is refused",
     404: "Not found",
     409: "Conflict",
+    413: "The upload is too large",
     422: "Invalid request",
     500: "Internal error. The details are in the container log.",
     502: "mailcow did not answer, or refused the request",
@@ -82,16 +85,26 @@ def errors_as_json(document: Dict[str, Any]) -> None:
                     response["content"] = {"application/json": next(iter(content.values()))}
 
 
+class CsvFile(Response):
+    """For the documentation only: a route that returns a CSV download of its own
+    gets response_class=CsvFile, so its answer is documented as text/csv, not JSON.
+    The route's own response is sent unchanged."""
+    media_type = "text/csv"
+
+
 def documented(ok: Any, *, status: int = 200, description: str = "Success",
-               errors: Optional[Dict[int, Any]] = None) -> Dict[int, Dict[str, Any]]:
+               errors: Optional[Dict[int, Any]] = None, media_type: Optional[str] = None) -> Dict[int, Dict[str, Any]]:
     """The ``responses=`` value for a route: its answer and the errors it gives.
 
     ``errors`` maps a status to its model, or to None for ErrorDetail (ServerError for 500). With
-    ``ok`` None the answer keeps the route's response class (text, a file).
+    ``ok`` None the answer keeps the route's response class (text, a file); ``media_type``
+    then documents its body as text of that type.
     """
     out: Dict[int, Dict[str, Any]] = {status: {"description": description}}
     if ok is not None:
         out[status]["model"] = ok
+    elif media_type:
+        out[status]["content"] = {media_type: {"schema": {"type": "string"}}}
     for code, model in (errors or {}).items():
         default = ServerError if code == 500 else ErrorDetail
         out[code] = {"model": model or default, "description": _ERROR_TEXT.get(code, "Error")}
