@@ -3,6 +3,8 @@ Mailcow API client for fetching logs
 Handles authentication and API calls to mailcow instance
 """
 import asyncio
+import json
+import math
 import httpx
 import logging
 import weakref
@@ -10,7 +12,7 @@ from http.cookiejar import CookieJar, DefaultCookiePolicy
 from urllib.parse import quote
 from typing import List, Dict, Any, Optional
 from datetime import datetime
-from tenacity import retry, retry_if_not_exception_type, stop_after_attempt, wait_exponential
+from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 from .config import settings
 
@@ -46,12 +48,44 @@ def mailcow_handled_items(response, item_ids) -> set:
     return set()
 
 
+def _not_json(constant: str):
+    raise ValueError(f"{constant} is not JSON")
+
+
+def _finite_float(text: str) -> float:
+    number = float(text)
+    if not math.isfinite(number):
+        raise ValueError(f"{text} is too large for a number")
+    return number
+
+
+def _strict_json(response: httpx.Response) -> Any:
+    """The answer as JSON, refusing NaN and Infinity, and a number too large
+    to be one (1e400 reads as infinity): Python's parser takes them, mailcow
+    (PHP) cannot send them, and an answer that passes them on fails when it is
+    sent to the browser."""
+    return json.loads(response.content, parse_constant=_not_json, parse_float=_finite_float)
+
+
+def _objects_only(data: list, what: str) -> list:
+    """A mailcow list without the entries that are not objects: every reader
+    takes an entry for one, and a single other value failed the whole list."""
+    kept = [entry for entry in data if isinstance(entry, dict)]
+    if len(kept) < len(data):
+        logger.warning(f"Left out {len(data) - len(kept)} {what} entries that are not objects")
+    return kept
+
+
 class MailcowAPIError(Exception):
     """Custom exception for mailcow API errors"""
     pass
 
 
-class MailcowRwKeyError(MailcowAPIError):
+class MailcowShownError(MailcowAPIError):
+    """A mailcow failure whose text says what to do: the page is shown it as it is."""
+
+
+class MailcowRwKeyError(MailcowShownError):
     """mailcow refused the Read-Write key: 'rejected' (401) or 'read_only' (403).
 
     Final, so never retried; the API answers it with a message that says what to fix.
@@ -69,6 +103,22 @@ class MailcowRwKeyError(MailcowAPIError):
     def __init__(self, code: str):
         self.code = code
         super().__init__(self.MESSAGES[code])
+
+
+class MailcowWriteUnknownError(MailcowShownError):
+    """A write mailcow received but did not confirm: a timeout, a dropped or
+    unreadable answer, or a 5xx. mailcow may have made the change, or may still
+    be making it (it keeps working after the app stops waiting), so it is never
+    sent again. `cause` is what happened, for the log."""
+    MESSAGE = "mailcow did not confirm the change. It may still be running. Check the result before trying again."
+
+    def __init__(self, cause: str):
+        self.cause = cause
+        super().__init__(self.MESSAGE)
+
+
+# The request never reached mailcow: the only failures a write is sent again after
+_NOT_SENT = (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout)
 
 
 class MailcowAPI:
@@ -203,7 +253,7 @@ class MailcowAPI:
                 **kwargs
             )
             response.raise_for_status()
-            return response.json()
+            return _strict_json(response)
                 
         except httpx.HTTPStatusError as e:
             logger.error(f"HTTP error {e.response.status_code} for {url}: {e}")
@@ -218,37 +268,51 @@ class MailcowAPI:
             logger.error(f"Unexpected error for {url}: {e}")
             raise MailcowAPIError(f"Unexpected error: {e}")
     
-    @retry(
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=2, max=10),
-        # A refused key stays refused, and every try is a failed login for Fail2ban
-        retry=retry_if_not_exception_type(MailcowRwKeyError),
-        reraise=True,
-    )
     async def _make_rw_request(self, endpoint: str, method: str = "POST", **kwargs) -> Any:
         """
         Make HTTP request to mailcow API using the Read-Write API key.
         Used exclusively for edit/update operations.
-        
+
+        A write is sent again only when the connection was never made
+        (_NOT_SENT). After mailcow received it, a timeout, a dropped or
+        unreadable answer or a 5xx is MailcowWriteUnknownError: mailcow may
+        have made the change or still be making it, and a quarantine release
+        sent twice reaches the recipient twice.
+
         Args:
             endpoint: API endpoint (without base URL)
             method: HTTP method (POST, PUT, DELETE, etc.)
             **kwargs: Additional arguments for httpx
-        
+
         Returns:
             JSON response from API
-        
+
         Raises:
-            MailcowAPIError: If request fails or RW key is not configured
+            MailcowRwKeyError: mailcow refused the key (401, 403)
+            MailcowWriteUnknownError: mailcow received the write but did not confirm it
+            MailcowAPIError: the key is not set, mailcow could not be reached, or it refused the request (4xx)
         """
         if not self.headers_rw:
             raise MailcowAPIError(
                 "Read-Write API key (MAILCOW_API_KEY_RW) is not configured. "
                 "Edit operations require a separate API key with write permissions."
             )
-        
+        try:
+            return await self._rw_attempt(endpoint, method, **kwargs)
+        except _NOT_SENT as e:
+            raise MailcowAPIError(f"RW API request failed: {str(e)}")
+
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        # Only a connection never made: anything later may have changed mailcow
+        retry=retry_if_exception_type(_NOT_SENT),
+        reraise=True,
+    )
+    async def _rw_attempt(self, endpoint: str, method: str, **kwargs) -> Any:
+        """One try of _make_rw_request; the _NOT_SENT failures pass through as they are."""
         url = f"{self.base_url}{endpoint}"
-        
+
         client = self._get_client()
         try:
             response = await client.request(
@@ -257,30 +321,44 @@ class MailcowAPI:
                 headers=self.headers_rw,
                 **kwargs
             )
-                
-            if response.status_code == 401:
-                self._discard_client(client)
-                raise MailcowRwKeyError("rejected")
-                
-            if response.status_code == 403:
-                self._discard_client(client)
-                raise MailcowRwKeyError("read_only")
-                
-            response.raise_for_status()
-                
-            if response.headers.get('content-type', '').startswith('application/json'):
-                # Some mailcow delete endpoints (delete/rlhash) answer 200 with
-                # an empty body - that is a success, not something to parse
-                if not response.text.strip():
-                    return None
-                return response.json()
-            return response.text
-
-        except httpx.HTTPStatusError as e:
-            raise MailcowAPIError(f"RW API request failed with status {e.response.status_code}: {e.response.text}")
-        except httpx.RequestError as e:
+        except httpx.PoolTimeout:
+            raise   # every connection of this client busy here: the client itself is fine
+        except _NOT_SENT:
             self._discard_client(client)
-            raise MailcowAPIError(f"RW API request failed: {str(e)}")
+            raise
+        except httpx.RequestError as e:
+            # Sent, and then the answer timed out, broke off or could not be decoded
+            self._discard_client(client)
+            raise self._write_unknown(endpoint, f"{type(e).__name__}: {e}")
+
+        if response.status_code == 401:
+            self._discard_client(client)
+            raise MailcowRwKeyError("rejected")
+
+        if response.status_code == 403:
+            self._discard_client(client)
+            raise MailcowRwKeyError("read_only")
+
+        if response.status_code >= 500:
+            raise self._write_unknown(endpoint, f"status {response.status_code}: {response.text[:200]}")
+        if not response.is_success:
+            raise MailcowAPIError(f"RW API request failed with status {response.status_code}: {response.text}")
+
+        if response.headers.get('content-type', '').startswith('application/json'):
+            # Some mailcow delete endpoints (delete/rlhash) answer 200 with
+            # an empty body - that is a success, not something to parse
+            if not response.text.strip():
+                return None
+            try:
+                return _strict_json(response)
+            except (ValueError, RecursionError):  # not JSON, or nested too deep to read
+                raise self._write_unknown(endpoint, f"an answer marked JSON that is not: {response.text[:200]}")
+        return response.text
+
+    @staticmethod
+    def _write_unknown(endpoint: str, cause: str) -> MailcowWriteUnknownError:
+        logger.warning(f"mailcow did not confirm the write to {endpoint}: {cause}")
+        return MailcowWriteUnknownError(cause)
 
     async def check_rw_key(self) -> Dict[str, Any]:
         """Check that mailcow accepts the Read-Write key for writes, changing nothing.
@@ -629,6 +707,7 @@ class MailcowAPI:
                 logger.warning(f"Unexpected queue response format: {type(data)}")
                 return []
             
+            data = _objects_only(data, "queue")
             logger.info(f"Retrieved {len(data)} queue entries")
             return data
             
@@ -696,6 +775,7 @@ class MailcowAPI:
                 logger.warning(f"Unexpected quarantine response format: {type(data)}")
                 return []
             
+            data = _objects_only(data, "quarantine")
             logger.info(f"Retrieved {len(data)} quarantine entries")
             return data
             

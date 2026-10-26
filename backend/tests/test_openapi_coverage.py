@@ -90,10 +90,19 @@ NOT_GIVEN = {
     ("GET", "/api/status/version", 500): "every failure in its try is mailcow's (502) or caught in the GitHub "
                                          "check",
     ("GET", "/api/status/summary", 500): "gather(return_exceptions=True) turns every failure into a value",
-    ("POST", "/api/fail2ban/unban", 500): "internal_error() is called only for a refused Read-Write key, "
-                                          "which it answers 502",
+    ("POST", "/api/fail2ban/unban", 500): "internal_error() is called only for the mailcow failures that say what "
+                                          "to do (a refused key, a write mailcow did not confirm), both 502",
     ("GET", "/api/rspamd/maps/{filename}", 500): "internal_error() answers MailcowAPIError 502, and the Rspamd "
                                                  "client turns a map list it cannot read into one",
+    ("PUT", "/api/rspamd/maps/{filename}", 500): "internal_error() answers MailcowAPIError 502; a write mailcow "
+                                                 "did not confirm is one too (MailcowWriteUnknownError)",
+    ("GET", "/api/queue", 500): "the mailcow client turns every failure into MailcowAPIError (502), an answer "
+                                "with NaN, Infinity or a number too large for a float too, leaves out entries "
+                                "that are not objects, and the sort puts any arrival_time that is not a time last",
+    ("GET", "/api/quarantine", 500): "the mailcow client turns every failure into MailcowAPIError (502), an answer "
+                                     "with NaN, Infinity or a number too large for a float too, and leaves out "
+                                     "entries that are not objects; a numeric created no date can hold is shown as "
+                                     "none, and a text one that cannot be read is kept as it is",
 }
 
 

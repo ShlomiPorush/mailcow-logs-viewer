@@ -83,9 +83,9 @@ def internal_error(e: Exception, status_code: int = 500):
     """
     from fastapi import HTTPException
     from .config import settings
-    from .mailcow_api import MailcowAPIError, MailcowRwKeyError
-    # mailcow refused the Read-Write key: say so, it is the admin's to fix
-    if isinstance(e, MailcowRwKeyError):
+    from .mailcow_api import MailcowAPIError, MailcowShownError
+    # mailcow refused the Read-Write key, or did not confirm a write: say so, with what to do
+    if isinstance(e, MailcowShownError):
         return HTTPException(status_code=502, detail=str(e))
     if isinstance(e, MailcowAPIError):
         return HTTPException(status_code=502, detail=str(e) if settings.debug else MAILCOW_NO_ANSWER)

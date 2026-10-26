@@ -27,7 +27,7 @@ def mailcow(monkeypatch):
     client = httpx.AsyncClient(transport=httpx.MockTransport(handle))
     monkeypatch.setattr(mailcow_api, "_get_client", lambda: client)
     monkeypatch.setattr(mailcow_api, "headers_rw", {"X-API-Key": "rw-key", "Content-Type": "application/json"})
-    monkeypatch.setattr(MailcowAPI._make_rw_request.retry, "wait", wait_none())
+    monkeypatch.setattr(MailcowAPI._rw_attempt.retry, "wait", wait_none())
     return answer, requests
 
 
@@ -42,13 +42,14 @@ def test_a_refused_key_is_not_retried(mailcow, status, code):
     assert len(requests) == 1
 
 
-def test_other_failures_are_still_retried(mailcow):
-    from app.mailcow_api import mailcow_api
+def test_a_500_is_not_retried_either(mailcow):
+    """mailcow received the write and may have made it (tests/test_mailcow_write_retry.py)."""
+    from app.mailcow_api import MailcowWriteUnknownError, mailcow_api
     answer, requests = mailcow
     answer["status"] = 500
-    with pytest.raises(Exception):
+    with pytest.raises(MailcowWriteUnknownError):
         asyncio.run(mailcow_api.learnspam_quarantine(["1"]))
-    assert len(requests) == 3
+    assert len(requests) == 1
 
 
 class _Request:

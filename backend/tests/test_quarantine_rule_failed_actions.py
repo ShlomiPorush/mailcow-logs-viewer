@@ -135,3 +135,14 @@ def test_empty_or_unexpected_reply_is_not_recorded(state):
         asyncio.run(scheduler.process_quarantine_rules_job())
         assert ("REL1", "release") not in _logged(state.db), reply
     assert state.allow.hit_count == 0
+
+
+def test_a_release_mailcow_did_not_confirm_fails_the_run(state):
+    """mailcow may still be sending: the run says so instead of success, and the
+    delete that mailcow confirmed is still recorded."""
+    from app.mailcow_api import MailcowWriteUnknownError
+    scheduler.mailcow_api.release_quarantine.side_effect = MailcowWriteUnknownError("read timeout")
+    asyncio.run(scheduler.process_quarantine_rules_job())
+    assert _logged(state.db) == [("DEL1", "delete")]
+    scheduler.update_job_status.assert_called_with(
+        "process_quarantine_rules", "failed", str(MailcowWriteUnknownError("read timeout")))

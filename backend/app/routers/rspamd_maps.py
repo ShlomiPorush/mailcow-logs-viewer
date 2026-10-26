@@ -336,7 +336,7 @@ async def get_map_content(filename: str):
         raise internal_error(e, status_code=502)
 
 
-@router.put("/rspamd/maps/{filename}", responses=documented(m.RspamdMapSaved, errors={400: m.MapInvalid, 403: None, 404: None, 409: Union[m.MapChanged, ErrorDetail], 422: Invalid, 500: None, 502: None}))
+@router.put("/rspamd/maps/{filename}", responses=documented(m.RspamdMapSaved, errors={400: m.MapInvalid, 403: None, 404: None, 409: Union[m.MapChanged, ErrorDetail], 422: Invalid, 502: None}))
 async def update_map_content(filename: str, body: MapContentRequest):
     """
     Update the content of a specific Rspamd map file.

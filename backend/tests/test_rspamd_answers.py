@@ -197,10 +197,11 @@ def test_save_errors(client, rspamd, monkeypatch):
 
     rspamd['edit'] = [{'type': 'danger', 'msg': ['map_content_empty']}]
     assert client.put(f'/api/rspamd/maps/{MAP}', json={'content': 'x'}).status_code == 502
-    # mailcow says its reply is JSON, and it is not: the mailcow client tries the write three times
-    # and does not catch it (500)
+    # mailcow says its reply is JSON, and it is not: the write is sent once, and the page
+    # is told to check the map before saving again
     rspamd['edit'] = httpx.Response(200, text='<html>', headers={'content-type': 'application/json'})
-    assert client.put(f'/api/rspamd/maps/{MAP}', json={'content': 'x'}).status_code == 500
+    unconfirmed = client.put(f'/api/rspamd/maps/{MAP}', json={'content': 'x'})
+    assert unconfirmed.status_code == 502 and unconfirmed.json()['detail'].startswith('mailcow did not confirm')
 
     # The map it is checked against cannot be read: nothing is written
     rspamd['maps'] = NOT_JSON
@@ -212,7 +213,7 @@ def test_save_errors(client, rspamd, monkeypatch):
 
     monkeypatch.setattr(mailcow_api, 'headers_rw', None)
     assert client.put(f'/api/rspamd/maps/{MAP}', json={'content': 'x'}).status_code == 403
-    assert rspamd['writes'] == ['x'] * 4
+    assert rspamd['writes'] == ['x', 'x']
 
 
 def test_save_while_another_save_runs(client, rspamd, monkeypatch):

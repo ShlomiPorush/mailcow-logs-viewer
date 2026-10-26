@@ -21,7 +21,7 @@ from sqlalchemy.exc import IntegrityError
 from .app_time import UTC, app_tz, format_clock
 from .config import settings, set_cached_active_domains, local_domains_complete, is_hosted_domain
 from .database import get_db_context, SessionLocal
-from .mailcow_api import mailcow_api, mailcow_handled_items
+from .mailcow_api import MailcowWriteUnknownError, mailcow_api, mailcow_handled_items
 from .services.suppression_events import disabled_by_hand, record_bounces, record_stuck
 from .services.suppression_rows_lock import lock_suppression_rows
 from .services.bounce_policy import cleanup_blocks, handling_on, hard_action, soft_action, rspamd_sync_on
@@ -4820,7 +4820,9 @@ async def _process_quarantine_rules_in_worker():
         return
     
     update_job_status('process_quarantine_rules', 'running')
-    
+    # Set when mailcow received a release or delete but did not confirm it
+    unconfirmed = None
+
     try:
         # Fetch quarantine
         quarantine = await mailcow_api.get_quarantine()
@@ -4881,6 +4883,8 @@ async def _process_quarantine_rules_in_worker():
                         logger.warning(f"[QUARANTINE RULES] mailcow did not release "
                                        f"{len(release_ids) - len(done['release'])} item(s): {reply}")
                 except Exception as e:
+                    if isinstance(e, MailcowWriteUnknownError):
+                        unconfirmed = str(e)
                     logger.error(f"[QUARANTINE RULES] Release failed: {e}")
 
             # Execute deletes (not after Quarantine was turned off during the releases)
@@ -4893,6 +4897,8 @@ async def _process_quarantine_rules_in_worker():
                         logger.warning(f"[QUARANTINE RULES] mailcow did not delete "
                                        f"{len(delete_ids) - len(done['delete'])} item(s): {reply}")
                 except Exception as e:
+                    if isinstance(e, MailcowWriteUnknownError):
+                        unconfirmed = str(e)
                     logger.error(f"[QUARANTINE RULES] Delete failed: {e}")
             released_count = len(done['release'])
             deleted_count = len(done['delete'])
@@ -4944,8 +4950,12 @@ async def _process_quarantine_rules_in_worker():
                     f"[QUARANTINE RULES] Processed: {released_count} released, {deleted_count} deleted "
                     f"(from {len(quarantine)} quarantine items, {len(rules)} rules)"
                 )
-        
-        update_job_status('process_quarantine_rules', 'success')
+
+        if unconfirmed:
+            # mailcow may still be releasing: the run is not a success, and says what to do
+            update_job_status('process_quarantine_rules', 'failed', unconfirmed)
+        else:
+            update_job_status('process_quarantine_rules', 'success')
         
     except Exception as e:
         logger.error(f"[QUARANTINE RULES] Processing error: {e}", exc_info=True)
