@@ -74,6 +74,49 @@ def test_outlook_dark_mode_gets_neutral_greys():
     assert '[data-ogsb].' not in html and '[data-ogsc].' not in html
 
 
+def _neutral(hex_colour):
+    r, g, b = (hex_colour[i:i + 2] for i in (1, 3, 5))
+    return r == g == b
+
+
+def test_every_surface_is_a_neutral_grey():
+    # Outlook for Android and Outlook on the web turn any tinted surface, light
+    # or dark, into the same mid grey, and keep neutral greys. Measured
+    # 2026-10-26: the old tinted panels and dark theme came out flat grey.
+    import re
+    light = {'BG': e.BG, 'PANEL': e.PANEL, 'LINE': e.LINE, 'muted tint': e.TONES['muted'][1], 'BAR': e.BAR}
+    assert {name: c for name, c in light.items() if not _neutral(c)} == {}
+    dark = re.search(r'@media \(prefers-color-scheme: dark\) \{(.*?)\n\}', e._DARK_CSS, re.S).group(1)
+    surfaces = re.findall(r'\.m-(?:bg|panel|line|rule|muted-bg|bar|mark i) \{ [a-z-]+: (#[0-9A-F]{6})', dark)
+    assert len(surfaces) == 7
+    assert [c for c in surfaces if not _neutral(c)] == []
+
+
+def test_tags_are_outlined_not_filled():
+    # Outlook on the web turned every tinted tag fill into a muddy grey-brown
+    # in dark mode; a border and text in the tone colour stayed clear
+    for tone, (color, tint) in e.TONES.items():
+        html = e.tag('Label', tone)
+        assert f'border:1px solid {color};' in html and f'color:{color};' in html
+        assert 'background' not in html and 'bgcolor' not in html and tint not in html
+        assert f'm-{tone}-bd' in html and f'm-{tone}-bg' not in html
+    topic = e.render(title='T', topic='Security', tone='fail')
+    assert 'filled="f" strokecolor="#C42B1C" strokeweight="1px"' in topic and 'fillcolor=' not in topic
+    for tone, dark in {'ok': '#3FCF7F', 'warn': '#F0B03F', 'fail': '#FF6B61', 'info': '#7DB3FF', 'muted': '#97A29C'}.items():
+        assert f'.m-{tone}-bd {{ border-color: {dark} !important; }}' in topic
+
+
+def test_the_email_is_left_to_right():
+    # A client in a right-to-left language (Outlook on the web in Hebrew)
+    # otherwise mirrors the email
+    html = e.render(title='T', topic='Weekly')
+    assert '<html lang="en" dir="ltr"' in html
+    assert '<body class="m-bg" dir="ltr"' in html
+    assert '<table role="presentation" class="m-bg" dir="ltr"' in html
+    # Outlook on the web drops the html and body attributes; the tables keep theirs
+    assert 'dir="ltr" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;' in html
+
+
 def test_links_the_client_adds_look_like_text_but_ours_stay_links():
     # Outlook and Gmail turn dates such as 26.10.2026 into links of their own
     html = e.render(title='T', topic='Weekly', blocks=[e.panel('P', e.panel_text(e.link('Open', 'https://example.com')))])

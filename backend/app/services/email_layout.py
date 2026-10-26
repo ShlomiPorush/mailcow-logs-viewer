@@ -3,9 +3,11 @@ HTML layout for every email the app sends, in the v3 design language.
 
 Email clients ignore stylesheets, CSS variables and grid, so the blocks are
 tables with inline styles. The colours are the light theme of
-frontend/assets/css/ui.css; a <style> block switches to the dark theme in the
-clients that honour prefers-color-scheme (Apple Mail, iOS, Outlook for Mac),
-and corrects it for the Outlook apps and Outlook.com (see _DARK_CSS).
+frontend/assets/css/ui.css, with neutral greys for the surfaces (see
+_DARK_CSS); a <style> block switches to the dark theme in the clients that
+honour prefers-color-scheme (Apple Mail, iOS, Outlook for Mac), and corrects
+it for the Outlook apps and Outlook.com. The email says it is left to right,
+so a client in a right-to-left language does not mirror it.
 
 Outlook for Windows draws email with Word, which ignores padding and margins
 outside table cells, rounded corners, max-width and font fallbacks. So every
@@ -114,21 +116,21 @@ def _lines(value, cls: str = 'm-ink') -> str:
 FONT = "Onest, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif"
 MONO = "'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"
 
-# ui.css light theme
+# ui.css light theme; the surfaces are neutral greys (see _DARK_CSS)
 BG = '#FFFFFF'
-PANEL = '#F4F6F5'
+PANEL = '#EEEEEE'
 INK = '#111814'
 MUTED = '#5E6863'
-LINE = '#E3E7E5'
+LINE = '#E0E0E0'
 
-# Tone colour and its tag/banner tint (the colour at 13-15% over white, as
+# Tone colour and its banner tint (the colour at 13-15% over white, as
 # color-mix() gives in the app; email clients cannot mix colours)
 TONES = {
     'ok': ('#12803F', '#E0F0E6'),
     'warn': ('#9A6200', '#F2EAD9'),
     'fail': ('#C42B1C', '#F8E0DE'),
     'info': ('#1F5FBF', '#E0E9F6'),
-    'muted': ('#5E6863', '#ECEEED'),
+    'muted': ('#5E6863', '#E8E8E8'),
 }
 
 _CLASS_COLORS = {'m-ink': INK, 'm-muted': MUTED, **{f'm-{t}': c for t, (c, _) in TONES.items()}}
@@ -138,35 +140,46 @@ _CLASS_COLORS = {'m-ink': INK, 'm-muted': MUTED, **{f'm-{t}': c for t, (c, _) in
 BAR = '#C4C4C4'
 BAR_HI = TONES['fail'][0]
 
-# Outlook for Android in dark mode (measured 2026-10-26) applies the dark
-# theme, then recolours it again: the tinted backgrounds, dark or light, all
-# came out as mid greys close to each other, so the email turned flat grey.
-# Neutral greys kept their place (dark ones as they are, light ones inverted,
-# white became the app's own background). Outlook marks recoloured elements
-# with data-ogsb, so under that mark the email gets white and neutral greys.
-# A rule on the marked element itself loses to the colour Outlook writes
-# inline, so the rules match descendants only. The bars of a chart are a
-# neutral grey for the same reason; its highlighted bars get their red there
-# too, so Outlook cannot turn them into one more grey bar.
+# Outlook for Android and Outlook on the web in dark mode (measured
+# 2026-10-26) recolour the email again after any dark theme of its own: the
+# tinted backgrounds, dark or light, all came out as mid greys close to each
+# other, so the email turned flat grey. Neutral greys kept their place (dark
+# ones as they are, light ones inverted, white became the client's own
+# background). So the background, panels, lines, the muted tint and chart
+# bars are neutral greys, in the light colours and in the dark theme. The
+# banners keep their tone tints (ok, warn, fail, info), which Outlook
+# remapped to a readable shade; tags are outlined instead of filled (see
+# _tag). Outlook on the web writes its colour inline on every
+# coloured element, so only the colours themselves reach it.
+#
+# Outlook marks recoloured elements with data-ogsb; under that mark the
+# Android app gets white (its own background) and neutral greys. A rule on
+# the marked element itself loses to the colour Outlook writes inline, so the
+# rules match descendants only. The bars of a chart are a neutral grey too;
+# its highlighted bars get their red there, so Outlook cannot turn them into
+# one more grey bar.
 #
 # Outlook and Gmail also turn dates into links of their own; a link in the
 # email takes the colour of its text instead (link() keeps its underline).
 _DARK_CSS = """
 :root { color-scheme: light dark; supported-color-schemes: light dark; }
 @media (prefers-color-scheme: dark) {
-  .m-bg { background-color: #0E1110 !important; }
-  .m-panel { background-color: #171B19 !important; }
+  .m-bg { background-color: #141414 !important; }
+  .m-panel { background-color: #202020 !important; }
   .m-ink { color: #F2F5F3 !important; }
   .m-muted { color: #97A29C !important; }
-  .m-line { border-color: #262C29 !important; }
-  .m-rule { background-color: #262C29 !important; }
+  .m-line { border-color: #333333 !important; }
+  .m-rule { background-color: #333333 !important; }
   .m-mark { background-color: #F2F5F3 !important; }
-  .m-mark i { background-color: #0E1110 !important; }
+  .m-mark i { background-color: #141414 !important; }
   .m-ok { color: #3FCF7F !important; } .m-ok-bg { background-color: #1A3325 !important; }
   .m-warn { color: #F0B03F !important; } .m-warn-bg { background-color: #3A2F1A !important; }
   .m-fail { color: #FF6B61 !important; } .m-fail-bg { background-color: #3D2220 !important; }
   .m-info { color: #7DB3FF !important; } .m-info-bg { background-color: #1E2C40 !important; }
-  .m-muted-bg { background-color: #232826 !important; }
+  .m-muted-bg { background-color: #2A2A2A !important; }
+  .m-ok-bd { border-color: #3FCF7F !important; } .m-warn-bd { border-color: #F0B03F !important; }
+  .m-fail-bd { border-color: #FF6B61 !important; } .m-info-bd { border-color: #7DB3FF !important; }
+  .m-muted-bd { border-color: #97A29C !important; }
   .m-bar { background-color: #4A4A4A !important; }
   .m-bar-hi { background-color: #FF6B61 !important; }
 }
@@ -222,16 +235,20 @@ def tag(text, tone: str = 'muted') -> Safe:
 def _tag(text, tone: str, rounded_in_outlook: bool) -> str:
     """rounded_in_outlook draws a fixed-size VML shape for Outlook. Only for
     the topic tag: VML inside a table, followed by more VML, can make Word
-    report the table as corrupt and show nothing."""
-    color, tint = _tone(tone)
+    report the table as corrupt and show nothing.
+
+    A tag is outlined, not filled: Outlook on the web turned every tinted
+    fill into a muddy grey-brown in dark mode, while a border and text in
+    the tone colour stay clear there (measured 2026-10-26)."""
+    color = _tone(tone)[0]
     cell = (f'<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="display:inline-table;vertical-align:middle;">'
-            f'<tr><td class="m-{tone} m-{tone}-bg m-b" bgcolor="{tint}" style="padding:2px 8px;border-radius:6px;'
-            f'background-color:{tint};color:{color};font-size:12px;font-weight:700;line-height:1.4;white-space:nowrap;">'
+            f'<tr><td class="m-{tone} m-{tone}-bd m-b" style="padding:1px 7px;border:1px solid {color};border-radius:6px;'
+            f'color:{color};font-size:12px;font-weight:700;line-height:1.4;white-space:nowrap;">'
             f'{_e(text, "m-" + tone)}</td></tr></table>')
     if not rounded_in_outlook:
         return cell
     width = len(str(text)) * 7 + 18
-    return (f'<!--[if mso]><v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" arcsize="30%" fillcolor="{tint}" stroked="f" '
+    return (f'<!--[if mso]><v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" arcsize="30%" filled="f" strokecolor="{color}" strokeweight="1px" '
             f'style="width:{width * 3 / 4:g}pt;height:15pt;v-text-anchor:middle;"><v:textbox inset="0,0,0,0">'
             f'<center style="color:{color};font-family:\'Segoe UI\',Arial,sans-serif;font-size:12px;font-weight:bold;">'
             f'{_attr(text)}</center></v:textbox></v:roundrect><![endif]-->'
@@ -517,7 +534,7 @@ def render(*, title, topic, tone: str = 'muted', intro=None, blocks: Sequence = 
     blocks_html = ''.join(f'<tr><td style="padding:0 0 14px;">{_e(b)}</td></tr>' for b in blocks)
 
     return f"""<!DOCTYPE html>
-<html lang="en" xmlns="http://www.w3.org/1999/xhtml" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
+<html lang="en" dir="ltr" xmlns="http://www.w3.org/1999/xhtml" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -527,12 +544,12 @@ def render(*, title, topic, tone: str = 'muted', intro=None, blocks: Sequence = 
 <style>{_DARK_CSS}</style>
 {_MSO_CSS}
 </head>
-<body class="m-bg" style="margin:0;padding:0;background-color:{BG};-webkit-text-size-adjust:100%;">
+<body class="m-bg" dir="ltr" style="margin:0;padding:0;background-color:{BG};-webkit-text-size-adjust:100%;">
 {pre_html}
-<table role="presentation" class="m-bg" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:{BG};">
+<table role="presentation" class="m-bg" dir="ltr" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:{BG};">
 <tr><td align="center" class="m-wrap" style="padding:32px 24px;">
 <!--[if mso]><table role="presentation" width="600" align="center" cellpadding="0" cellspacing="0" border="0"><tr><td><![endif]-->
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;font-family:{FONT};">
+<table role="presentation" dir="ltr" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;font-family:{FONT};">
 <tr><td style="padding:0 0 28px;">
   <table {_TABLE}><tr>
     {_mark()}
