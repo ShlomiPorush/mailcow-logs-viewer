@@ -83,7 +83,7 @@ class DmarcCheck(Fixed):
                                               "them; null without a record")
     is_strong: bool = Field(description="The policy is quarantine or reject")
     warnings: List[str]
-    settings: DmarcSettings
+    settings: DmarcSettings = Field(None, description="The record's tags; not in a check stored before 2.3.0")
 
 
 # ---------------------------------------------------------------- DNSSEC

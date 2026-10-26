@@ -757,7 +757,7 @@ async def get_domain_overview(domain: str, days: int = 30):
         raise internal_error(e)
 
 
-@router.get("/dmarc/domains/{domain}/tls-rpt-record", response_model=None, responses=documented(m.TlsRptRecordResponse))
+@router.get("/dmarc/domains/{domain}/tls-rpt-record", response_model=None, responses=documented(m.TlsRptRecordResponse, errors={500: None}))
 async def get_domain_tls_rpt_record(domain: str):
     """The domain's TLS-RPT record for the TLS tab: the cached check, or a live lookup when none is cached."""
     try:

@@ -295,7 +295,7 @@ def export_netfilter_csv(
 
 @router.head("/export/messages/csv", include_in_schema=False)
 @router.get("/export/messages/csv", response_class=CsvFile,
-            responses=documented(None, media_type="text/csv", description="A CSV file, newest first, up to the export limit", errors=CSV_ERRORS))
+            responses=documented(None, media_type="text/csv", description="A CSV file in the order asked for (newest first unless order=asc), up to the export limit", errors=CSV_ERRORS))
 def export_messages_csv(
     request: Request,
     search: Optional[str] = Query(None),

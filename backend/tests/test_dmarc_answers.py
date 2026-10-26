@@ -442,3 +442,20 @@ def test_when_the_database_fails(client, monkeypatch):
     monkeypatch.setattr(settings._inner, 'dmarc_manual_upload_enabled', True)
     response = client.post('/api/dmarc/upload', files={'file': ('report.xml', _dmarc_xml(f'{MARK}-gone', 1))})
     assert response.status_code == 500
+
+
+def test_tls_rpt_record_when_the_session_cannot_close(client, monkeypatch):
+    """The cached check is read in a session the route opens and closes itself; a
+    database that drops while the session ends is a 500."""
+    class Session:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            raise RuntimeError('connection lost while closing')
+
+        def query(self, *args, **kwargs):
+            raise RuntimeError('no database')
+
+    monkeypatch.setattr(dmarc_router, 'SessionLocal', Session)
+    assert client.get('/api/dmarc/domains/example.com/tls-rpt-record').status_code == 500

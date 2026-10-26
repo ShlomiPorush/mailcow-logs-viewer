@@ -89,7 +89,10 @@ def api_contract(monkeypatch, request):
     A test marked no_contract (it stubs the code that builds an answer) is not
     checked.
     """
-    if request.node.get_closest_marker("no_contract"):
+    marker = request.node.get_closest_marker("no_contract")
+    if marker is not None:
+        if not marker.kwargs.get("reason"):
+            pytest.fail("no_contract needs reason=: say which code the test stubs")
         return
     from starlette.testclient import TestClient
 

@@ -21,7 +21,7 @@ from app.mailcow_api import MailcowAPIError, mailcow_api  # noqa: E402
 from app.main import app  # noqa: E402
 from app.routers import mailbox_stats, reporting  # noqa: E402
 from app.services.csv_export import get_csv_db  # noqa: E402
-from app.utils import internal_error  # noqa: E402
+
 
 MARK = uuid.uuid4().hex[:8]
 DOMAIN = f'{MARK}.example'
@@ -130,41 +130,51 @@ def test_devices_when_the_database_fails(client):
 # ---------------------------------------------------------------- weekly summary
 
 @pytest.fixture
-def summary_sources(monkeypatch):
-    """The summary's mailcow sources: the server info, the storage, the domains with DNS, the queue."""
-    state = {'info': {'version': '2026-09', 'domains': {'active': 1, 'total': 1}}}
+def summary_sources(monkeypatch, rows):
+    """mailcow as the summary reads it (domains, mailboxes, aliases, storage, queue,
+    quarantine), and a stored DNS check with an SPF problem; the summary's own code runs."""
+    from app.models import DomainDNSCheck
+    state = {'domains': [{'domain_name': DOMAIN, 'active': 1}], 'vmail': {'disk': '/dev/sda1', 'used': '1.2G',
+                                                                          'total': '20G', 'used_percent': '6%'}}
 
-    async def info():
-        if isinstance(state['info'], Exception):
-            raise internal_error(state['info'])
-        return state['info']
+    def answer(key):
+        async def call(*args, **kwargs):
+            if isinstance(state[key], Exception):
+                raise state[key]
+            return state[key]
+        return call
 
-    async def storage():
-        return {'used': '1 GB', 'total': '10 GB'}
-
-    async def domains():
-        return {'domains': [{'domain_name': DOMAIN, 'active': True,
-                             'dns_checks': {'spf': {'status': 'error', 'message': 'No SPF record'},
-                                            'dkim': {'status': 'ok'}, 'dmarc': {'status': 'ok'}}}]}
-
-    async def empty():
+    async def empty(*args, **kwargs):
         return []
 
-    monkeypatch.setattr(reporting, 'get_mailcow_info', info)
-    monkeypatch.setattr(reporting, 'get_storage_status', storage)
-    monkeypatch.setattr(reporting, 'get_all_domains_with_dns', domains)
-    monkeypatch.setattr(mailcow_api, 'get_queue', empty)
-    monkeypatch.setattr(mailcow_api, 'get_quarantine', empty)
-    return state
+    monkeypatch.setattr(mailcow_api, 'get_domains', answer('domains'))
+    monkeypatch.setattr(mailcow_api, 'get_status_vmail', answer('vmail'))
+    # Reading the monitored hosts would also align them with the settings
+    from app.services import blacklist_service
+    monkeypatch.setattr(blacklist_service, 'reconcile_monitored_hosts', lambda db: False)
+    for name in ('get_mailboxes', 'get_aliases', 'get_queue', 'get_quarantine'):
+        monkeypatch.setattr(mailcow_api, name, empty)
+    with database.get_db_context() as db:
+        db.add(DomainDNSCheck(domain_name=DOMAIN, checked_at=datetime.utcnow(),
+                              spf_check={'status': 'error', 'message': 'No SPF record', 'record': None,
+                                         'has_strict_all': False, 'includes_mx': False, 'includes': []}))
+        db.commit()
+    yield state
+    with database.get_db_context() as db:
+        db.query(DomainDNSCheck).filter(DomainDNSCheck.domain_name == DOMAIN).delete(synchronize_session=False)
+        db.commit()
 
 
-def test_the_weekly_summary(client, rows, summary_sources):
+def test_the_weekly_summary(client, summary_sources):
     summary = client.get('/api/system/summary').json()
     assert summary['dns_issues'] == [{'domain': DOMAIN, 'issues': ['SPF: No SPF record']}]
-    # mailcow failing while the summary is read (502), or another failure (500)
-    summary_sources['info'] = MailcowAPIError('down')
+    assert summary['system']['domains'] == {'total': 1, 'active': 1}
+    # mailcow failing while the summary is read (502)
+    summary_sources['domains'] = MailcowAPIError('down')
     assert client.get('/api/system/summary').status_code == 502
-    summary_sources['info'] = RuntimeError('broken')
+    # mailcow answering storage in a shape the summary cannot read (500)
+    summary_sources['domains'] = [{'domain_name': DOMAIN, 'active': 1}]
+    summary_sources['vmail'] = ['not', 'an', 'object']
     assert client.get('/api/system/summary').status_code == 500
 
 

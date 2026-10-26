@@ -408,6 +408,16 @@ def test_check_one_domain_in_every_branch(client, world, stored, n):
         assert data[check]['message'].startswith(message), (check, data[check]['message'])
 
 
+def test_check_one_domain_when_a_check_breaks(client, world, stored, monkeypatch):
+    # Each check handles its own failures; one that breaks anyway fails the set
+    async def broken(domain, *args):
+        raise RuntimeError('a check broke')
+    monkeypatch.setattr(domains, 'check_spf_record', broken)
+    build_world(world, 0)
+    data = client.post(f'/api/domains/{scenario_domain(0)}/check-dns').json()['data']
+    assert set(data) == {'domain', 'error', 'checked_at'}
+
+
 def test_check_one_domain_refuses_a_name_that_is_not_a_domain(client):
     response = client.post('/api/domains/not_a_domain!/check-dns')
     assert response.status_code == 400
@@ -433,7 +443,10 @@ def test_domain_list_with_stored_checks(client, world, stored, monkeypatch):
         db.add(DomainDNSCheck(
             domain_name=f'old.{ZONE}', checked_at=datetime.datetime.utcnow(),
             spf_check={'status': 'error', 'message': 'Failed to check SPF: timed out', 'record': None,
-                       'has_strict_all': False, 'includes_mx': False, 'includes': []}))
+                       'has_strict_all': False, 'includes_mx': False, 'includes': []},
+            # Stored before 2.3.0: no settings
+            dmarc_check={'status': 'success', 'message': 'DMARC configured with strong policy',
+                         'record': 'v=DMARC1; p=reject', 'policy': 'reject', 'is_strong': True, 'warnings': []}))
         db.commit()
     monkeypatch.setattr(alias_domains, '_cache', {alias: checked, alias_unchecked: checked})
     world['domains'] = [
@@ -453,6 +466,7 @@ def test_domain_list_with_stored_checks(client, world, stored, monkeypatch):
     assert first['alias_domains'][1]['dns_checks'] == {}
     assert old['dns_checks']['spf']['message'] == 'Failed to check SPF. Check the application logs.'
     assert old['dns_checks']['tlsa'] is None and old['created'] == 'not a date'
+    assert 'settings' not in old['dns_checks']['dmarc']
     assert new['dns_checks'] == {} and new['mboxes_in_domain'] == 0
 
 

@@ -194,6 +194,29 @@ class DevicesResponse(Fixed):
     last_status: Optional[str] = Field(description="Its outcome")
 
 
+# ---------------------------------------------------------------- mailcow's counts and storage
+# Also the answers of GET /api/status/mailcow-info and /api/status/storage
+
+class TotalActive(Fixed):
+    total: int
+    active: int
+
+
+class MailcowInfo(Fixed):
+    """How many domains, mailboxes and aliases mailcow has, and how many are active."""
+    domains: TotalActive
+    mailboxes: TotalActive
+    aliases: TotalActive
+
+
+class StorageStatus(Fixed):
+    """The mail storage, as mailcow reports it; unknown and 0 when it reports nothing."""
+    disk: Any = Field(description="The volume")
+    used: Any = Field(description="Such as 1.2G")
+    total: Any
+    used_percent: Any = Field(description="Such as 12%")
+
+
 # ---------------------------------------------------------------- weekly summary
 
 class SummaryBlocklists(Fixed):
@@ -216,8 +239,8 @@ class SystemSummaryResponse(Fixed):
     """The weekly summary's data: the last 7 days."""
     timestamp: str = Field(description=TIME)
     traffic: MailboxSummaryResponse
-    system: Dict[str, Any] = Field(description="As GET /api/status/mailcow-info answers")
-    storage: Dict[str, Any] = Field(description="As GET /api/status/storage answers")
+    system: MailcowInfo
+    storage: StorageStatus
     blacklist: SummaryBlocklists
     top_failures: List[MailboxStats] = Field(description="Up to 5 mailboxes with the most failed mail")
     dns_issues: List[DnsIssue] = Field(description="Active domains with an SPF, DKIM or DMARC problem")
