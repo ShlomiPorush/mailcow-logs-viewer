@@ -207,7 +207,7 @@ async def test_saved_channel(channel_id: int):
     }
 
 
-@router.post("/test", responses=documented(m.NotificationTest, description="Tried; success says whether the service accepted it", errors={422: Invalid, 500: None}))
+@router.post("/test", responses=documented(m.NotificationTest, description="Tried; success says whether the service accepted it", errors={422: Invalid}))
 async def test_unsaved_channel(request: ChannelTestRequest):
     """Test a channel configuration before saving it."""
     if request.channel_type not in nc.CHANNEL_TYPES:

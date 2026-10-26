@@ -10,11 +10,13 @@ mailcow, its queue and the Rspamd map are faked; nothing leaves the test. The ma
 calls work on the whole list, so the list, its events and its spam_filter.*
 settings are put back exactly as they were."""
 import threading
+import types
 import uuid
 from contextlib import contextmanager
 from datetime import datetime, timedelta
 from unittest.mock import AsyncMock
 
+import httpx
 import pytest
 from sqlalchemy import null
 
@@ -245,7 +247,7 @@ def test_changes_are_refused_while_the_list_is_not_kept(env, whole_list, monkeyp
     assert state['writes'] == 0
 
 
-def test_import_and_export(env, whole_list):
+def test_import_and_export(env, whole_list, monkeypatch):
     c, _ = env
     csv = f'email,type,reason,notes\nd-{MARK}@example.net,email,manual,Imported\n,email,manual,x\n' \
           f'd-{MARK}@example.net,email,manual,Twice\n'.encode()
@@ -253,8 +255,13 @@ def test_import_and_export(env, whole_list):
     assert (answer['imported'], answer['skipped'], len(answer['errors'])) == (1, 1, 1)
     assert c.post('/api/suppressions/import', files={'file': ('list.txt', csv)}).status_code == 400
     assert c.post('/api/suppressions/import').status_code == 422
-    # A file that is not UTF-8 is not caught by the import
-    assert c.post('/api/suppressions/import', files={'file': ('list.csv', b'\xff\xfe\xfa\n')}).status_code == 500
+    # A file that is not UTF-8 is refused before the list is locked
+    def no_lock(db):
+        raise AssertionError('the list is locked for a file that cannot be read')
+    with monkeypatch.context() as patched:
+        patched.setattr(suppressions, 'lock_suppression_rows', no_lock)
+        not_utf8 = c.post('/api/suppressions/import', files={'file': ('list.csv', b'email\nj\xf6rg@example.net\n')})
+    assert not_utf8.status_code == 400 and 'UTF-8' in not_utf8.json()['detail']
     export = c.get('/api/suppressions/export')
     assert export.status_code == 200 and export.headers['content-type'].startswith('text/csv')
     assert f'd-{MARK}@example.net' in export.text
@@ -374,6 +381,30 @@ def test_load_back_from_rspamd(env, whole_list, monkeypatch):
         holder.join(10)
 
 
+def test_rspamd_answers_a_page_in_place_of_its_map_list(env, whole_list, monkeypatch):
+    """Through mailcow's own lookup of the map: the page is a map that cannot be
+    read (409 read_failed), and nothing is written."""
+    c, state = env
+    monkeypatch.setattr(mailcow_api, 'find_rspamd_map_id',
+                        types.MethodType(type(mailcow_api).find_rspamd_map_id, mailcow_api))
+
+    async def page(endpoint, *args, **kwargs):
+        return httpx.Response(200, text='<html>Sign in</html>', headers={'content-type': 'text/html'})
+
+    monkeypatch.setattr(mailcow_api, '_make_rspamd_request', page)
+    seen = c.get('/api/suppressions/rspamd/state?check_map=true').json()
+    assert (seen['readable'], seen['reason']) == (False, 'read_failed')
+    _pending_load()
+    for path in ('/api/suppressions/sync', '/api/suppressions/rspamd/import'):
+        refused = c.post(path)
+        assert refused.status_code == 409 and refused.json()['detail']['code'] == 'read_failed', path
+    monkeypatch.setattr(settings._inner, 'suppression_rspamd_sync', False)
+    for path in ('/api/suppressions/rspamd/clear', '/api/suppressions/start-fresh'):
+        refused = c.post(path)
+        assert refused.status_code == 409 and refused.json()['detail']['code'] == 'read_failed', path
+    assert state['writes'] == 0
+
+
 # ---------------------------------------------------------------- a database that fails
 
 def test_suppressions_when_the_database_fails(env, monkeypatch):
@@ -396,3 +427,15 @@ def test_suppressions_when_the_database_fails(env, monkeypatch):
     monkeypatch.setattr(settings._inner, 'suppression_rspamd_sync', False)
     assert c.post('/api/suppressions/rspamd/clear').status_code == 500
     assert c.post('/api/suppressions/start-fresh').status_code == 500
+
+
+@pytest.mark.parametrize('arrived', [1e20, -1e20, float('inf'), 'yesterday'])
+@pytest.mark.asyncio
+async def test_a_queued_message_with_a_time_mailcow_cannot_mean_keeps_its_details(monkeypatch, arrived):
+    async def queue():
+        return [{'queue_id': QUEUE_ID, 'sender': f'sales@{MARK}.example', 'arrival_time': arrived,
+                 'recipients': [f'{RCPT} (host mx.example.net said: 550 5.1.1 no such user)']}]
+
+    monkeypatch.setattr(mailcow_api, 'get_queue', queue)
+    found = await suppressions._queued_message(QUEUE_ID, RCPT)
+    assert found['queue_id'] == QUEUE_ID and found['reason'] and found['arrived'] is None

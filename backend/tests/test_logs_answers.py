@@ -198,14 +198,25 @@ def test_mailcow_lists_mailcow_does_not_give(client, monkeypatch, path):
 @pytest.mark.parametrize('path, answer', [
     # Arrival times of two kinds cannot be sorted
     ('/api/queue', [{'queue_id': 'A', 'arrival_time': 'soon'}, {'queue_id': 'B', 'arrival_time': 5}]),
-    # A creation time past any date
-    ('/api/quarantine', [{'id': 1, 'created': 10 ** 20}]),
+    # An entry that is not an object
+    ('/api/quarantine', [{'id': 1, 'created': 5}, 'not an item']),
 ])
 def test_mailcow_lists_the_route_cannot_read(client, monkeypatch, path, answer):
     async def odd(*args, **kwargs):
         return answer
     monkeypatch.setattr(mailcow_api, '_make_request', odd)
     assert client.get(path).status_code == 500
+
+
+@pytest.mark.parametrize('created', [10 ** 20, -10 ** 20, 1e20, float('nan'), float('inf'), float('-inf')])
+def test_a_quarantine_time_mailcow_cannot_mean_leaves_the_list_readable(client, monkeypatch, created):
+    """The item is shown without a time, after every item with one, also one before 1970."""
+    async def quarantine(*args, **kwargs):
+        return [{'id': 1, 'created': created}, {'id': 2, 'created': -86400}, {'id': 3, 'created': 1730000000}]
+    monkeypatch.setattr(mailcow_api, '_make_request', quarantine)
+    r = client.get('/api/quarantine')
+    assert r.status_code == 200
+    assert [(item['id'], item['created'] is None) for item in r.json()['data']] == [(3, False), (2, False), (1, True)]
 
 
 class _QuarantineView:

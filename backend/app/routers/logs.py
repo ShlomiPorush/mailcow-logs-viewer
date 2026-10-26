@@ -1209,7 +1209,13 @@ async def get_quarantine():
                 # Handle Unix timestamp (number) or ISO string
                 if isinstance(item['created'], (int, float)):
                     # Convert Unix timestamp to ISO format with 'Z' suffix
-                    dt = datetime.fromtimestamp(item['created'], tz=timezone.utc)
+                    try:
+                        dt = datetime.fromtimestamp(item['created'], tz=timezone.utc)
+                    except (OverflowError, OSError, ValueError):
+                        # A time mailcow cannot have meant (or NaN, which the
+                        # answer cannot carry): the item is shown without one
+                        item['created'] = None
+                        continue
                     item['created'] = format_datetime_utc(dt)
                     # Sort on the number, like the ISO branch (not on the string)
                     item['_created_timestamp'] = dt.timestamp()
@@ -1224,10 +1230,10 @@ async def get_quarantine():
                         pass
         
         # Sort by created timestamp - newest first (descending order)
-        # Items without valid timestamp will be at the end
+        # Items without valid timestamp will be at the end, after times before 1970 too
         quarantine_sorted = sorted(
             quarantine,
-            key=lambda x: x.get('_created_timestamp', 0),
+            key=lambda x: ('_created_timestamp' in x, x.get('_created_timestamp', 0)),
             reverse=True  # Newest first
         )
         

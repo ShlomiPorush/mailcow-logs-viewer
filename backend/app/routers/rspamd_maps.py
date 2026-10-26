@@ -188,6 +188,15 @@ def validate_map_content(content: str) -> List[Dict[str, Any]]:
                     "severity": "error",
                     "error": f"Invalid regex: {str(e)}"
                 })
+            except (OverflowError, RecursionError) as e:
+                # Too large a repeat count or too deep a nesting for the check;
+                # Rspamd's own regex engine may differ, but the line is not saved unchecked
+                errors.append({
+                    "line": i,
+                    "content": stripped,
+                    "severity": "error",
+                    "error": f"Pattern cannot be checked: {str(e)}"
+                })
             continue
 
         # A bare address in a regexp map is compiled unanchored and matches
@@ -224,7 +233,7 @@ def get_rspamd_config():
     }
 
 
-@router.get("/rspamd/maps", responses=documented(Union[m.RspamdMapsNotConfigured, m.RspamdMapsLive, m.RspamdMapsUnreadable], description="The known maps; with the Rspamd password set, also their state in Rspamd, or an error when Rspamd could not be read", errors={500: None}))
+@router.get("/rspamd/maps", responses=documented(Union[m.RspamdMapsNotConfigured, m.RspamdMapsLive, m.RspamdMapsUnreadable], description="The known maps; with the Rspamd password set, also their state in Rspamd, or an error when Rspamd could not be read"))
 async def list_rspamd_maps():
     """
     List all 13 Rspamd map files with metadata.
@@ -285,7 +294,7 @@ async def list_rspamd_maps():
         }
 
 
-@router.get("/rspamd/maps/{filename}", responses=documented(Union[m.RspamdMapContent, m.RspamdMapNotLoaded], description="The map's content, or an empty map when Rspamd does not list it", errors={400: None, 404: None, 500: None, 502: None}))
+@router.get("/rspamd/maps/{filename}", responses=documented(Union[m.RspamdMapContent, m.RspamdMapNotLoaded], description="The map's content, or an empty map when Rspamd does not list it", errors={400: None, 404: None, 502: None}))
 async def get_map_content(filename: str):
     """
     Get the content of a specific Rspamd map file.
@@ -411,7 +420,7 @@ async def update_map_content(filename: str, body: MapContentRequest):
         raise internal_error(e, status_code=502)
 
 
-@router.post("/rspamd/validate", responses=documented(m.MapValidation, errors={422: Invalid, 500: None}))
+@router.post("/rspamd/validate", responses=documented(m.MapValidation, errors={422: Invalid}))
 def validate_map(body: MapValidationRequest):
     """
     Validate map content without saving.

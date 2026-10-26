@@ -512,8 +512,11 @@ async def _queued_message(queue_id: str, email: str) -> Optional[dict]:
         reason = next((raw.split(' ', 1)[1].strip().strip('()') for raw in (item.get('recipients') or [])
                        if ' ' in raw and raw.split(' ')[0].strip('<>').lower() == email), None)
         arrived = item.get('arrival_time')
-        return {'queue_id': queue_id, 'sender': item.get('sender'), 'reason': reason,
-                'arrived': datetime.fromtimestamp(arrived, tz=timezone.utc).replace(tzinfo=None) if arrived else None}
+        try:
+            arrived = datetime.fromtimestamp(arrived, tz=timezone.utc).replace(tzinfo=None) if arrived else None
+        except (OverflowError, OSError, TypeError, ValueError):
+            arrived = None  # a time mailcow cannot have meant: the block is made without it
+        return {'queue_id': queue_id, 'sender': item.get('sender'), 'reason': reason, 'arrived': arrived}
     return None
 
 
@@ -723,10 +726,14 @@ async def import_suppressions(file: UploadFile = File(...)):
 
 
 def _import_suppressions_worker(content: bytes):
+    try:
+        text = content.decode('utf-8-sig')  # handle BOM
+    except UnicodeDecodeError:
+        raise HTTPException(status_code=400,
+                            detail="The file is not UTF-8 text. Save it as CSV UTF-8 and import it again.")
     with SessionLocal() as db:
         lock_suppression_rows(db)
         refuse_unless_list_kept()
-        text = content.decode('utf-8-sig')  # handle BOM
         reader = csv.reader(io.StringIO(text))
 
         imported = 0

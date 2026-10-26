@@ -269,7 +269,7 @@ def create_rule(body: RuleCreate):
 
 @router.get("/logs", responses=documented(m.QuarantineRuleLogs, errors={403: None, 422: Invalid, 500: None}))
 def get_rule_logs(
-    limit: int = Query(default=50, le=200),
+    limit: int = Query(default=50, ge=0, le=200),
     offset: int = Query(default=0, ge=0),
     rule_id: Optional[int] = Query(default=None),
 ):

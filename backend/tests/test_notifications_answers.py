@@ -23,6 +23,8 @@ from app.services import notification_channels as nc  # noqa: E402
 MARK = uuid.uuid4().hex[:8]
 TELEGRAM = {'name': f'{MARK} Ops Telegram', 'channel_type': 'telegram',
             'config': {'bot_token': '123:ABC', 'chat_id': '456'}, 'alert_types': ['security', 'blacklist']}
+# A webhook URL urlparse cannot read; its path is the channel's secret
+BAD_HOOK = 'http://[hooks.example/T000/B000/SECRET'
 
 
 class _Broken:
@@ -147,10 +149,36 @@ def test_unsaved_destination(client):
     assert len(sent['calls']) == 1
     assert c.post('/api/notifications/test', json={'channel_type': 'pager'}).status_code == 422
     assert c.post('/api/notifications/test', json={}).status_code == 422
-    # A failed send to a URL urlparse cannot read fails while its secret is cut from the error (500)
-    sent['status'] = 500
-    broken = c.post('/api/notifications/test', json={'channel_type': 'slack', 'config': {'webhook_url': 'http://['}})
-    assert broken.status_code == 500
+    # A URL urlparse cannot read is not sent to, and the answer does not quote it
+    broken = c.post('/api/notifications/test', json={'channel_type': 'slack', 'config': {'webhook_url': BAD_HOOK}})
+    assert broken.status_code == 200 and broken.json()['success'] is False
+    assert 'SECRET' not in broken.text
+    assert len(sent['calls']) == 1
+
+
+def test_a_destination_with_a_url_that_cannot_be_read(client, channels):
+    c, sent = client
+    slack = {'name': f'{MARK} slack', 'channel_type': 'slack', 'config': {'webhook_url': BAD_HOOK}}
+    refused = c.post('/api/notifications/channels', json=slack)
+    assert refused.status_code == 422 and 'SECRET' not in refused.text
+    good = c.post('/api/notifications/channels', json={**slack, 'config': {'webhook_url': 'https://hooks.example/x'}})
+    channel_id = good.json()['id']
+    changed = c.put(f'/api/notifications/channels/{channel_id}', json=slack)
+    assert changed.status_code == 422 and 'SECRET' not in changed.text
+
+    # One saved before the check existed fails its test without quoting it, here or in its last error
+    from app.models import NotificationChannel
+    with database.get_db_context() as db:
+        db.query(NotificationChannel).filter(NotificationChannel.id == channel_id).update(
+            {'config': {'webhook_url': BAD_HOOK}}, synchronize_session=False)
+        db.commit()
+    tested = c.post(f'/api/notifications/channels/{channel_id}/test')
+    assert tested.status_code == 200 and tested.json()['success'] is False
+    assert 'SECRET' not in tested.text
+    listed = c.get('/api/notifications/channels').json()['channels']
+    saved = next(row for row in listed if row['id'] == channel_id)
+    assert saved['last_status'] == 'failed' and 'SECRET' not in saved['last_error']
+    assert sent['calls'] == []
 
 
 def test_destinations_when_the_database_fails(client, monkeypatch):

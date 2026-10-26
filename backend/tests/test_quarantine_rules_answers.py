@@ -110,6 +110,10 @@ def test_rules(client, rows):
     assert c.get(f'{BASE}/logs?limit=200&rule_id=0').json()['total'] >= 1
     assert c.get(f'{BASE}/logs?limit=201').status_code == 422
     assert c.get(f'{BASE}/logs?offset=-1').status_code == 422
+    # A negative limit is refused before it reaches the database; 0 gives the count alone
+    assert c.get(f'{BASE}/logs?limit=-1').status_code == 422
+    counted = c.get(f'{BASE}/logs?limit=0&rule_id=0').json()
+    assert counted['total'] >= 1 and counted['data'] == []
 
     assert c.delete(f'{BASE}/{rule_id}').json()['success'] is True
     assert c.delete(f'{BASE}/{rule_id}').status_code == 404

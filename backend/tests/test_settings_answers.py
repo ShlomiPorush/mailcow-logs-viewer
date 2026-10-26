@@ -346,6 +346,12 @@ def test_credential_checks(client, rows, monkeypatch):
     assert client.post('/api/settings/mailcow/rw-key/validate').json()['error'] == 'rejected'
     _answering(monkeypatch, 302)
     assert client.post('/api/settings/rspamd/password/validate').json()['error'] == 'redirected'
+    # JSON that is not an object is not Rspamd's answer to a login
+    for body in (b'[]', b'null', b'"ok"'):
+        transport = httpx.MockTransport(lambda request, body=body: httpx.Response(200, content=body))
+        monkeypatch.setattr(mailcow_api, '_get_client', lambda: httpx.AsyncClient(transport=transport))
+        odd = client.post('/api/settings/rspamd/password/validate').json()
+        assert (odd['valid'], odd['error']) == (False, 'unexpected'), body
     # The stored results, as the Status page reads them
     configuration = client.get('/api/settings/info').json()['configuration']
     assert configuration['mailcow_rw_key_status']['http_status'] == 401
