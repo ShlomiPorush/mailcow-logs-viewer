@@ -18,6 +18,8 @@ from ..database import get_db
 from ..models import NotificationChannel
 from ..services import notification_channels as nc
 from ..utils import internal_error, format_datetime_for_api
+from ..api_models import Invalid, documented
+from ..api_models import notifications as m
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +66,7 @@ def _serialize(c: NotificationChannel) -> Dict:
     }
 
 
-@router.get("/types")
+@router.get("/types", responses=documented(m.NotificationTypes))
 def get_channel_types():
     """Field specs per channel type - drives the settings UI."""
     return {
@@ -76,7 +78,7 @@ def get_channel_types():
     }
 
 
-@router.get("/channels")
+@router.get("/channels", responses=documented(m.NotificationChannels, errors={500: None}))
 def list_channels(db: Session = Depends(get_db)):
     """All configured channels (secrets masked)."""
     try:
@@ -87,7 +89,7 @@ def list_channels(db: Session = Depends(get_db)):
         raise internal_error(e)
 
 
-@router.post("/channels")
+@router.post("/channels", responses=documented(m.NotificationChannel, errors={422: Invalid, 500: None}))
 def create_channel(request: ChannelRequest, db: Session = Depends(get_db)):
     """Add a channel."""
     if request.channel_type not in nc.CHANNEL_TYPES:
@@ -118,7 +120,7 @@ def create_channel(request: ChannelRequest, db: Session = Depends(get_db)):
         raise internal_error(e)
 
 
-@router.put("/channels/{channel_id}")
+@router.put("/channels/{channel_id}", responses=documented(m.NotificationChannel, errors={404: None, 422: Invalid, 500: None}))
 def update_channel(channel_id: int, request: ChannelRequest, db: Session = Depends(get_db)):
     """Update a channel. Masked secrets left untouched keep their stored value."""
     if request.channel_type not in nc.CHANNEL_TYPES:
@@ -154,7 +156,7 @@ def update_channel(channel_id: int, request: ChannelRequest, db: Session = Depen
         raise internal_error(e)
 
 
-@router.delete("/channels/{channel_id}")
+@router.delete("/channels/{channel_id}", responses=documented(m.NotificationChannelDeleted, errors={404: None, 422: Invalid, 500: None}))
 def delete_channel(channel_id: int, db: Session = Depends(get_db)):
     """Remove a channel."""
     try:
@@ -172,7 +174,7 @@ def delete_channel(channel_id: int, db: Session = Depends(get_db)):
         raise internal_error(e)
 
 
-@router.post("/channels/{channel_id}/test")
+@router.post("/channels/{channel_id}/test", responses=documented(m.NotificationTest, description="Sent; success says whether the service accepted it", errors={404: None, 422: Invalid, 500: None}))
 async def test_saved_channel(channel_id: int):
     """Send a test notification to a saved channel."""
     from ..database import get_db_context
@@ -205,7 +207,7 @@ async def test_saved_channel(channel_id: int):
     }
 
 
-@router.post("/test")
+@router.post("/test", responses=documented(m.NotificationTest, description="Tried; success says whether the service accepted it", errors={422: Invalid}))
 async def test_unsaved_channel(request: ChannelTestRequest):
     """Test a channel configuration before saving it."""
     if request.channel_type not in nc.CHANNEL_TYPES:

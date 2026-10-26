@@ -14,7 +14,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, HTTPException, Depends, Query, UploadFile, File
 from pydantic import BaseModel, field_validator
-from typing import Optional, List
+from typing import Optional, List, Union
 from sqlalchemy.orm import Session, load_only
 from sqlalchemy import func, or_, desc
 
@@ -29,6 +29,8 @@ from ..services.suppression_events import add_event, disabled_by_hand, postfix_l
 from ..services.suppression_rows_lock import lock_suppression_rows
 from ..utils import internal_error, format_datetime_for_api
 from ..app_time import to_local, utc_naive
+from ..api_models import CsvFile, ErrorDetail, Invalid, documented
+from ..api_models import suppressions as m
 
 logger = logging.getLogger(__name__)
 
@@ -332,7 +334,7 @@ async def _cleanup_queue_for_email(email: str):
 # CRUD Endpoints
 # =========================================================================
 
-@router.get("/suppressions")
+@router.get("/suppressions", responses=documented(m.SuppressionList, errors={422: Invalid, 500: None}))
 def list_suppressions(
     db: Session = Depends(get_db),
     page: int = Query(1, ge=1),
@@ -408,7 +410,7 @@ def list_suppressions(
     }
 
 
-@router.get("/suppressions/stats")
+@router.get("/suppressions/stats", responses=documented(m.SuppressionStats, errors={500: None}))
 def get_suppression_stats(db: Session = Depends(get_db)):
     """Get suppression statistics."""
     now = datetime.utcnow()
@@ -458,7 +460,7 @@ def get_suppression_stats(db: Session = Depends(get_db)):
     }
 
 
-@router.get("/suppressions/config")
+@router.get("/suppressions/config", responses=documented(m.SuppressionConfig))
 def get_suppression_config():
     """Get suppression feature configuration."""
     return {
@@ -482,7 +484,7 @@ def get_suppression_config():
     }
 
 
-@router.post("/suppressions")
+@router.post("/suppressions", responses=documented(m.Suppression, description="The new entry, or the inactive one made active again", errors={400: None, 409: Union[m.SuppressionListNotKept, ErrorDetail], 422: Invalid, 500: None}))
 async def create_suppression(body: SuppressionCreateRequest):
     """Save a manual suppression before cleaning up matching queue items."""
     refuse_unless_list_kept()
@@ -589,7 +591,7 @@ def _create_suppression_worker(body: SuppressionCreateRequest, queued: Optional[
         return _serialize_suppression(suppression, datetime.utcnow())
 
 
-@router.put("/suppressions/{suppression_id}")
+@router.put("/suppressions/{suppression_id}", responses=documented(m.Suppression, errors={400: None, 404: None, 409: m.SuppressionListNotKept, 422: Invalid, 500: None}))
 def update_suppression(suppression_id: int, body: SuppressionUpdateRequest, db: Session = Depends(get_db)):
     """Update a suppression entry (toggle active, edit notes, change expiry)."""
     lock_suppression_rows(db)
@@ -636,7 +638,7 @@ def update_suppression(suppression_id: int, body: SuppressionUpdateRequest, db: 
 EVENTS_PAGE = 20
 
 
-@router.get("/suppressions/{suppression_id}/events")
+@router.get("/suppressions/{suppression_id}/events", responses=documented(m.SuppressionEvents, errors={404: None, 422: Invalid, 500: None}))
 def get_suppression_events(suppression_id: int, page: int = Query(1, ge=1), db: Session = Depends(get_db)):
     """Block details: what happened to this address, newest first, with the
     evidence copied at the time. message_available says whether the linked
@@ -679,7 +681,7 @@ def get_suppression_events(suppression_id: int, page: int = Query(1, ge=1), db: 
     }
 
 
-@router.delete("/suppressions/{suppression_id}")
+@router.delete("/suppressions/{suppression_id}", responses=documented(m.SuppressionDeleted, errors={404: None, 409: m.SuppressionListNotKept, 422: Invalid, 500: None}))
 def delete_suppression(suppression_id: int, db: Session = Depends(get_db)):
     """Permanently remove a suppression entry. While its block may still be in
     Rspamd, its lines wait there to be removed."""
@@ -707,7 +709,7 @@ def delete_suppression(suppression_id: int, db: Session = Depends(get_db)):
 # Import / Export
 # =========================================================================
 
-@router.post("/suppressions/import")
+@router.post("/suppressions/import", responses=documented(m.SuppressionImport, errors={400: None, 409: m.SuppressionListNotKept, 422: Invalid, 500: None}))
 async def import_suppressions(file: UploadFile = File(...)):
     """
     Bulk import suppressions from CSV file.
@@ -815,7 +817,7 @@ def _import_suppressions_worker(content: bytes):
         }
 
 
-@router.get("/suppressions/export")
+@router.get("/suppressions/export", response_class=CsvFile, responses=documented(None, media_type="text/csv", description="A CSV file of every entry, oldest first", errors={500: None}))
 def export_suppressions(db: Session = Depends(get_csv_db)):
     """Export all suppressions as CSV."""
     suppressions = csv_query_rows(db.query(SpamSuppression).options(load_only(
@@ -874,7 +876,7 @@ TARGET_KEY = 'spam_filter.rspamd_target'
 OFF_TRANSITION_KEY = 'spam_filter.off_transition'
 
 
-@router.post("/suppressions/sync")
+@router.post("/suppressions/sync", responses=documented(Union[m.SuppressionSyncDone, m.SuppressionSyncReadOnly, m.SuppressionSyncOff, m.SuppressionSyncTurnedOff], description="Read in and written; with after_change, read only (no Read-Write key) or nothing done (the sync is off)", errors={400: None, 403: None, 409: m.RspamdMapError, 422: Invalid, 500: None, 502: m.RspamdMapError}))
 async def manual_sync_to_rspamd(after_change: bool = False):
     """Bring the list and the app's section of the Rspamd map in step.
 
@@ -1596,7 +1598,7 @@ def import_managed_worker() -> dict:
         return _run_on_worker_loop(work)
 
 
-@router.post("/suppressions/rspamd/import")
+@router.post("/suppressions/rspamd/import", responses=documented(m.SuppressionRspamdImport, errors={409: m.RspamdMapError, 500: None}))
 async def import_rspamd_blocks():
     """Load the blocks this app wrote to Rspamd back into the list after Spam
     Filter was off. Nothing happens when that is not pending."""
@@ -1623,7 +1625,7 @@ def _map_error(e: Exception) -> HTTPException:
         "code": "not_confirmed", "message": "mailcow did not confirm the change. Check Rspamd before trying again.", **extra})
 
 
-@router.get("/suppressions/rspamd/state")
+@router.get("/suppressions/rspamd/state", responses=documented(m.SuppressionRspamdState, errors={422: Invalid, 500: None}))
 async def rspamd_state(check_map: bool = False):
     """What the app has in Rspamd now, read from the map itself, whether it
     can change it, and how many changes wait to be written. Counts are blocks
@@ -1660,7 +1662,7 @@ class ClearRequest(BaseModel):
     transition: Optional[str] = None
 
 
-@router.post("/suppressions/rspamd/clear")
+@router.post("/suppressions/rspamd/clear", responses=documented(m.SuppressionRspamdCleared, errors={409: m.RspamdMapError, 422: Invalid, 500: None, 502: m.RspamdMapError}))
 async def clear_rspamd_blocks(body: Optional[ClearRequest] = None):
     """Remove the app's blocks from Rspamd after the list stopped being kept.
     Lines outside its section stay. Refused while the list is kept, and, with
@@ -1672,7 +1674,7 @@ async def clear_rspamd_blocks(body: Optional[ClearRequest] = None):
     return {"removed_blocks": removed}
 
 
-@router.post("/suppressions/start-fresh")
+@router.post("/suppressions/start-fresh", responses=documented(m.SuppressionsStartedFresh, errors={409: m.RspamdMapError, 500: None, 502: m.RspamdMapError}))
 async def start_fresh():
     """Remove the app's blocks from Rspamd, then delete the whole list."""
     try:

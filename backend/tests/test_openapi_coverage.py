@@ -87,6 +87,9 @@ NOT_GIVEN = {
                                                       "MailcowAPIError, which internal_error() answers 502",
     ("POST", "/api/dmarc/imap/sync", 500): "its try holds only a status update and queuing the import, "
                                           "which cannot fail",
+    ("GET", "/api/status/version", 500): "every failure in its try is mailcow's (502) or caught in the GitHub "
+                                         "check",
+    ("GET", "/api/status/summary", 500): "gather(return_exceptions=True) turns every failure into a value",
     ("POST", "/api/fail2ban/unban", 500): "internal_error() is called only for a refused Read-Write key, "
                                           "which it answers 502",
 }

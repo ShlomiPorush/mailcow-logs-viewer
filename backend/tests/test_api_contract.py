@@ -119,14 +119,17 @@ def _bearer_answer(status, body):
     return request, httpx.Response(status, json=body, request=request)
 
 
-def test_the_agent_gateway_answers_only_a_status_the_route_does_not_document():
+def test_a_bearer_call_may_get_the_route_answer_or_the_gateway_envelope():
+    import pytest
+    from contract import check_response
     contract = Contract(_app({}))
-    envelope = {"error": "too_large", "message": "The body is too large."}
-    # 413 is not the route's: the gateway's own answer
+    envelope = {"error": "forbidden", "message": "Not available to agents."}
+    # The gateway's own answer, at a status the route does not document or does
     assert agent_envelope(contract, *_bearer_answer(413, envelope))
-    # 404 is the route's: it is held to the route's ErrorDetail
-    request, response = _bearer_answer(404, envelope)
-    assert not agent_envelope(contract, request, response)
-    assert "does not match" in contract.problem("GET", "/api/thing", 404, "application/json", response.content)
-    # Not the gateway's shape
+    check_response(contract, _bearer_answer(404, envelope)[1])
+    # The route's documented answer passes as always
+    check_response(contract, _bearer_answer(404, {"detail": "gone"})[1])
+    # Neither the route's answer nor the envelope fails
+    with pytest.raises(AssertionError):
+        check_response(contract, _bearer_answer(404, {"detail": 5})[1])
     assert not agent_envelope(contract, *_bearer_answer(413, {"error": 1, "message": "x"}))

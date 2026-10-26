@@ -38,6 +38,8 @@ from ..session import get_session_from_request, create_session, set_session_cook
 from ..session import SessionCapacityError, SessionRevokedError
 
 from ..utils import format_datetime_for_api as format_datetime_utc
+from ..api_models import Invalid, documented
+from ..api_models import settings as m
 
 logger = logging.getLogger(__name__)
 
@@ -386,7 +388,7 @@ def _may_read_messages(request: Request) -> bool:
     return call is None or read_scope("messages") in call.grant.scopes
 
 
-@router.get("/settings/info")
+@router.get("/settings/info", responses=documented(m.SettingsInfoResponse, description="The information; when it could not be read, error and empty parts"))
 def get_settings_info(request: Request = None, db: Session = Depends(get_db)):
     """
     Get system configuration and status information
@@ -851,7 +853,7 @@ def get_settings_info(request: Request = None, db: Session = Depends(get_db)):
         }
 
 
-@router.get("/settings")
+@router.get("/settings", responses=documented(m.EditableSettings, errors={500: None}))
 def get_editable_settings(db: Session = Depends(get_db)):
     """
     Get effective configuration for editing (editable keys only; secrets masked).
@@ -874,7 +876,7 @@ def get_editable_settings(db: Session = Depends(get_db)):
     }
 
 
-@router.put("/settings")
+@router.put("/settings", responses=documented(m.SettingsSaveResponse, description="Saved; a body without an editable change saves nothing", errors={400: None, 403: None, 422: Invalid, 500: None, 503: None}))
 def update_settings(body: Dict[str, Any], request: Request = None, response: Response = None,
                     db: Session = Depends(get_db)):
     """
@@ -1125,7 +1127,7 @@ def _record_list_transition(db: Session, was_kept: bool, now_kept: bool, switche
 from ..services.feature_data import FEATURE_TABLES as _FEATURE_TABLES  # noqa: E402
 
 
-@router.post("/settings/purge-feature-data")
+@router.post("/settings/purge-feature-data", responses=documented(m.FeatureDataPurged, errors={400: None, 403: None, 409: m.PurgeMapError, 422: Invalid, 500: None, 502: m.PurgeMapError}))
 def purge_feature_data(body: Dict[str, Any], db: Session = Depends(get_db)):
     """
     Delete all database data associated with a disabled feature.
@@ -1190,7 +1192,7 @@ def _purge_tables(feature: str, db: Session, still_off=None):
     return {"feature": feature, "tables_purged": tables, "total_rows_deleted": total}
 
 
-@router.post("/settings/import-from-env")
+@router.post("/settings/import-from-env", responses=documented(m.SettingsImported, errors={403: None, 500: None}))
 def import_settings_from_env(db: Session = Depends(get_db)):
     """
     Import current effective configuration (defaults + ENV + existing DB) into DB.
@@ -1223,19 +1225,19 @@ def import_settings_from_env(db: Session = Depends(get_db)):
 # NOTE: these are plain `def` on purpose - FastAPI runs sync endpoints in a
 # threadpool, so the blocking smtplib/imaplib connection tests (10-30s timeouts)
 # don't freeze the shared event loop.
-@router.post("/settings/test/smtp")
+@router.post("/settings/test/smtp", responses=documented(m.ConnectionTest, description="The test's outcome and its steps; a failed test is still 200"))
 def test_smtp():
     """Test SMTP connection with detailed logging"""
     result = test_smtp_connection()
     return result
 
-@router.post("/settings/test/imap")
+@router.post("/settings/test/imap", responses=documented(m.ConnectionTest, description="The test's outcome and its steps; a failed test is still 200"))
 def test_imap():
     """Test IMAP connection with detailed logging"""
     result = test_imap_connection()
     return result
 
-@router.get("/settings/health")
+@router.get("/settings/health", responses=documented(m.DetailedHealthResponse, description="healthy, or unhealthy when the database could not be read"))
 def get_health_detailed(db: Session = Depends(get_db)):
     """
     Detailed health check with timing information
@@ -1324,7 +1326,7 @@ def _persist_maxmind_validation_worker(result: Dict[str, Any]) -> None:
 
 
 
-@router.get("/settings/geoip/status")
+@router.get("/settings/geoip/status", responses=documented(m.GeoipStatus))
 def get_geoip_detailed_status():
     """
     Get detailed GeoIP status for frontend polling.
@@ -1352,7 +1354,7 @@ def get_geoip_detailed_status():
     }
 
 
-@router.post("/settings/geoip/download")
+@router.post("/settings/geoip/download", responses=documented(m.Started, description="The download started in the background; poll GET /api/settings/geoip/status", errors={400: None}))
 def trigger_geoip_download(background_tasks: BackgroundTasks):
     """
     Trigger GeoIP database download in background.
@@ -1369,7 +1371,7 @@ def trigger_geoip_download(background_tasks: BackgroundTasks):
     return {"status": "started", "message": "GeoIP download started in background"}
 
 
-@router.post("/settings/maxmind/validate")
+@router.post("/settings/maxmind/validate", responses=documented(m.LicenseCheck, errors={500: None}))
 async def validate_maxmind_license_endpoint():
     """
     Validate MaxMind license key on-demand.
@@ -1438,7 +1440,7 @@ def _persist_if_current(name: str, result: Dict[str, Any], fingerprint: str) -> 
         return True
 
 
-@router.post("/settings/mailcow/rw-key/validate")
+@router.post("/settings/mailcow/rw-key/validate", responses=documented(m.CredentialCheck, errors={500: None}))
 async def validate_mailcow_rw_key_endpoint():
     """
     Check that mailcow accepts the Read-Write API key for writes, changing nothing.
@@ -1448,7 +1450,7 @@ async def validate_mailcow_rw_key_endpoint():
     return await _validate_credential("mailcow_rw_key")
 
 
-@router.post("/settings/rspamd/password/validate")
+@router.post("/settings/rspamd/password/validate", responses=documented(m.CredentialCheck, errors={500: None}))
 async def validate_rspamd_password_endpoint():
     """
     Check that Rspamd accepts the password, the way its web UI logs in.
@@ -1458,7 +1460,7 @@ async def validate_rspamd_password_endpoint():
     return await _validate_credential("rspamd_password")
 
 
-@router.post("/settings/geoip/validate")
+@router.post("/settings/geoip/validate", responses=documented(m.GeoipValidationResponse, description="The result; valid false with error when the City file is missing"))
 def validate_geoip_db():
     """
     Validate GeoIP database integrity by running test IP lookups.
@@ -1493,7 +1495,7 @@ def validate_geoip_db():
 # MANUAL JOB TRIGGER
 # =============================================================================
 
-@router.post("/settings/jobs/{job_name}/run")
+@router.post("/settings/jobs/{job_name}/run", responses=documented(m.JobStarted, description="The job started in the background", errors={404: None, 409: None}))
 def trigger_job(job_name: str, background_tasks: BackgroundTasks):
     """
     Manually trigger a background job.
