@@ -136,7 +136,7 @@ def test_validate_keeps_the_addresses_that_work(channel_type, config):
 
 def test_an_unreadable_secret_url_gives_a_fixed_error():
     error = nc._sanitize_error("slack", {"webhook_url": SECRET_HOOK}, "cannot reach /T000/B000/SECRETPATH")
-    assert error == nc._UNREADABLE_SECRET
+    assert error == nc._UNREADABLE_URL
 
 
 def test_the_secret_path_is_masked_whatever_the_case_of_the_scheme():
