@@ -1107,8 +1107,8 @@ def _queue_time_key(item: dict):
     if isinstance(value, bool):
         return (False, 0.0)
     try:
-        number = float(value)
-    except (TypeError, ValueError):
+        number = float(value)  # a number too large for a float raises OverflowError
+    except (TypeError, ValueError, OverflowError):
         return (False, 0.0)
     return (True, number) if math.isfinite(number) else (False, 0.0)
 

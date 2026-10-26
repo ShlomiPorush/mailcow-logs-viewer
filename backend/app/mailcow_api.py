@@ -4,6 +4,7 @@ Handles authentication and API calls to mailcow instance
 """
 import asyncio
 import json
+import math
 import httpx
 import logging
 import weakref
@@ -51,11 +52,19 @@ def _not_json(constant: str):
     raise ValueError(f"{constant} is not JSON")
 
 
+def _finite_float(text: str) -> float:
+    number = float(text)
+    if not math.isfinite(number):
+        raise ValueError(f"{text} is too large for a number")
+    return number
+
+
 def _strict_json(response: httpx.Response) -> Any:
-    """The answer as JSON, refusing NaN and Infinity: Python's parser takes them,
-    but they are not JSON, mailcow (PHP) cannot send them, and an answer that
-    passes them on fails when it is sent to the browser."""
-    return json.loads(response.content, parse_constant=_not_json)
+    """The answer as JSON, refusing NaN and Infinity, and a number too large
+    to be one (1e400 reads as infinity): Python's parser takes them, mailcow
+    (PHP) cannot send them, and an answer that passes them on fails when it is
+    sent to the browser."""
+    return json.loads(response.content, parse_constant=_not_json, parse_float=_finite_float)
 
 
 def _objects_only(data: list, what: str) -> list:
@@ -342,7 +351,7 @@ class MailcowAPI:
                 return None
             try:
                 return _strict_json(response)
-            except ValueError:
+            except (ValueError, RecursionError):  # not JSON, or nested too deep to read
                 raise self._write_unknown(endpoint, f"an answer marked JSON that is not: {response.text[:200]}")
         return response.text
 

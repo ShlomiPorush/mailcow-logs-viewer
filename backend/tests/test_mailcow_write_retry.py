@@ -81,9 +81,10 @@ def test_a_connection_never_made_is_tried_again(mailcow):
     assert (mailcow["attempts"], len(mailcow["reached"])) == (3, 1)
 
 
-def test_a_connection_never_made_fails_as_mailcow_not_answering(mailcow):
+@pytest.mark.parametrize("error", [httpx.ConnectTimeout, httpx.PoolTimeout], ids=["connect-timeout", "pool-timeout"])
+def test_a_connection_never_made_fails_as_mailcow_not_answering(mailcow, error):
     def answer(request):
-        raise httpx.ConnectTimeout("no route", request=request)
+        raise error("no connection", request=request)
     mailcow["answer"] = answer
     with pytest.raises(MailcowAPIError) as raised:
         _release()
@@ -93,12 +94,17 @@ def test_a_connection_never_made_fails_as_mailcow_not_answering(mailcow):
 
 @pytest.mark.parametrize("then", [
     _raise(httpx.ReadTimeout),
+    _raise(httpx.WriteTimeout),
+    _raise(httpx.WriteError),
     _raise(httpx.RemoteProtocolError),
     _raise(httpx.ReadError),
     lambda request: httpx.Response(500, text="PHP fatal error"),
     lambda request: httpx.Response(504, text="gateway timeout"),
     lambda request: httpx.Response(200, text="<html>", headers={"content-type": "application/json"}),
-], ids=["read-timeout", "dropped-after-sending", "read-error", "500", "504", "not-json"])
+    lambda request: httpx.Response(200, content=b"[" * 5000 + b"]" * 5000,
+                                   headers={"content-type": "application/json"}),
+], ids=["read-timeout", "write-timeout", "write-error", "dropped-after-sending", "read-error", "500", "504",
+        "not-json", "nested-too-deep"])
 def test_a_write_mailcow_received_is_sent_once(mailcow, then):
     """A batch release slower than the timeout, or an answer that is lost or
     unreadable: mailcow may have sent the messages, so they are not sent again."""
@@ -181,3 +187,23 @@ def test_an_answer_with_nan_is_not_taken_as_json(mailcow, monkeypatch):
         200, content=b'[{"type": "success", "msg": NaN}]', headers={"content-type": "application/json"}))
     with pytest.raises(MailcowWriteUnknownError):
         _release()
+
+
+@pytest.mark.parametrize("path, body", [
+    ("/api/queue", b'[{"queue_id": "A", "arrival_time": 5, "message_size": 1e400}]'),
+    ("/api/quarantine", b'[{"id": 1, "created": 5, "size": 1e400}]'),
+], ids=["queue", "quarantine"])
+def test_a_number_too_large_for_a_float_is_mailcow_not_answering(mailcow, monkeypatch, path, body):
+    """1e400 reads as infinity, which the answer to the browser cannot carry."""
+    import starlette.staticfiles as sf
+    real_init = sf.StaticFiles.__init__
+    monkeypatch.setattr(sf.StaticFiles, "__init__", lambda s, *a, **k: real_init(s, *a, **{**k, "check_dir": False}))
+    from fastapi.testclient import TestClient
+    from app.config import settings
+    from app.main import app
+    for key in ("auth_enabled", "basic_auth_enabled", "oauth2_enabled"):
+        monkeypatch.setattr(settings._inner, key, False)
+    monkeypatch.setattr(mod.MailcowAPI._make_request.retry, "wait", lambda *a, **k: 0)
+    monkeypatch.setattr(mod.mailcow_api, "_clients", __import__("weakref").WeakKeyDictionary())
+    mailcow["answer"] = lambda request: httpx.Response(200, content=body, headers={"content-type": "application/json"})
+    assert TestClient(app, raise_server_exceptions=False).get(path).status_code == 502

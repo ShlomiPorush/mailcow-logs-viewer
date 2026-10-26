@@ -201,13 +201,14 @@ def test_a_queue_with_odd_entries_still_loads(client, monkeypatch):
     async def odd(*args, **kwargs):
         return [{'queue_id': 'A', 'arrival_time': 'soon'}, {'queue_id': 'B', 'arrival_time': 5},
                 {'queue_id': 'C', 'arrival_time': '1700000000'}, {'queue_id': 'D', 'arrival_time': float('nan')},
+                {'queue_id': 'E', 'arrival_time': 10 ** 400},
                 'not an item']
     monkeypatch.setattr(mailcow_api, '_make_request', odd)
     r = client.get('/api/queue')
     assert r.status_code == 200
     assert [(item['queue_id'], item['arrival_time']) for item in r.json()['data']] == \
-        [('C', '1700000000'), ('B', 5), ('A', 'soon'), ('D', None)]
-    assert r.json()['total'] == 4
+        [('C', '1700000000'), ('B', 5), ('A', 'soon'), ('D', None), ('E', 10 ** 400)]
+    assert r.json()['total'] == 5
 
 
 def test_a_quarantine_entry_that_is_not_an_object_is_left_out(client, monkeypatch):
