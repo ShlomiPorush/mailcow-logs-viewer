@@ -139,8 +139,7 @@ class BreachRule(_Rule):
 
 
 class ProtectionRules(Fixed):
-    """The rules as saving writes them: PUT checks and normalises every value. A
-    value written into the setting by hand is read back as it is."""
+    """The rules as saving writes them: PUT checks and normalises every value."""
     trap: TrapRule
     unknown_accounts: UnknownAccountsRule
     repeat_offender: RepeatOffenderRule
@@ -167,8 +166,22 @@ class ProtectionCapabilities(Fixed):
     raw_logs: bool = Field(description="Dovecot's raw logs are collected")
 
 
+_STORED = ("The same keys as the rule in PUT's answer; each value as it is stored, so normally of that type, "
+           "but a value written into the setting by hand is read back as it is")
+
+
+class StoredRules(Fixed):
+    """The rules as they are stored: the defaults, with what was saved over them."""
+    trap: Dict[str, Any] = Field(description=_STORED)
+    unknown_accounts: Dict[str, Any] = Field(description=_STORED)
+    repeat_offender: Dict[str, Any] = Field(description=_STORED)
+    subnet: Dict[str, Any] = Field(description=_STORED)
+    country: Dict[str, Any] = Field(description=_STORED)
+    breach: Dict[str, Any] = Field(description=_STORED)
+
+
 class ProtectionRulesResponse(Fixed):
-    rules: ProtectionRules
+    rules: StoredRules
     trap_suggestions: List[TrapSuggestion]
     country_suggestions: List[CountrySuggestion]
     capabilities: ProtectionCapabilities

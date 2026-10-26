@@ -104,8 +104,11 @@ def rows(client):
     now = datetime.utcnow()
     with database.get_db_context() as db:
         # What these calls change that other tests and the app share, put back after
-        settings_before = {row.key: row.value for row in db.query(SystemSetting).filter(SystemSetting.key.in_(SHARED_KEYS))}
-        whitelist_before = {row.email: (row.notes, row.active) for row in db.query(SMTPAbuseWhitelist)}
+        settings_before = {row.key: (row.value, row.updated_at)
+                           for row in db.query(SystemSetting).filter(SystemSetting.key.in_(SHARED_KEYS))}
+        whitelist_before = {row.email: (row.notes, row.active, row.updated_at) for row in db.query(SMTPAbuseWhitelist)}
+        # Saving the rules can move other catches back to watching
+        catches_before = {row.id: (row.status, row.mode) for row in db.query(ProtectionHit)}
         db.add(MailboxStatistics(username=MAILBOX, domain=DOMAIN, active=True))
         alert = SecurityAlert(alert_type='auth_failure_burst', severity='warning', subject=MAILBOX,
                               title='Failed logins', detail='12 failures in the last 15 minutes', created_at=now)
@@ -128,16 +131,18 @@ def rows(client):
             if row.email not in whitelist_before:
                 db.delete(row)
             else:
-                row.notes, row.active = whitelist_before[row.email]
+                row.notes, row.active, row.updated_at = whitelist_before[row.email]
         for key in SHARED_KEYS:
             row = db.query(SystemSetting).filter(SystemSetting.key == key).first()
             if key not in settings_before:
                 if row is not None:
                     db.delete(row)
             elif row is None:
-                db.add(SystemSetting(key=key, value=settings_before[key]))
+                db.add(SystemSetting(key=key, value=settings_before[key][0], updated_at=settings_before[key][1]))
             else:
-                row.value = settings_before[key]
+                row.value, row.updated_at = settings_before[key]
+        for row in db.query(ProtectionHit).filter(ProtectionHit.id.in_(list(catches_before))):
+            row.status, row.mode = catches_before[row.id]
         db.commit()
 
 
