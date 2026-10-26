@@ -1629,7 +1629,7 @@ class MailcowAPI:
             )
         # A list in another form is not an empty one: every map would read as not loaded
         if not isinstance(data, list) or not all(
-                isinstance(m, dict) and isinstance(m.get("uri", ""), str) for m in data):
+                isinstance(m, dict) and isinstance(m.get("uri"), str) for m in data):
             raise MailcowAPIError(f"Rspamd answered with a map list this app cannot read ({type(data).__name__})")
         return data
 

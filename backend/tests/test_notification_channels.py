@@ -216,3 +216,10 @@ def test_one_channel_failing_unexpectedly_leaves_the_others_their_alert(monkeypa
     assert sent == ["https://hooks.example/other"]
     assert recorded[0] == (1, False, nc._UNEXPECTED)
     assert "SECRET" not in caplog.text
+
+
+@pytest.mark.parametrize("quoted", ["/hook?token=TOPSECRET", "token=TOPSECRET", "/hook"])
+def test_a_secret_in_the_query_is_masked_too(quoted):
+    error = nc._sanitize_error("discord", {"webhook_url": "https://hooks.example/hook?token=TOPSECRET"},
+                               f"no such hook {quoted} here")
+    assert "TOPSECRET" not in error and "/hook" not in error

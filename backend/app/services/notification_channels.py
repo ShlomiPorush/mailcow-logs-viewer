@@ -269,13 +269,19 @@ def _sanitize_error(channel_type: str, config: Dict, error_text: str) -> str:
             continue
         error_text = _mask(error_text, value, MASK)
         if value.lower().startswith("http"):
-            # ConnectionError messages quote only the path part of the URL
+            # ConnectionError messages quote only the path part of the URL, and
+            # a server can quote the path with its query, or the query alone
             try:
-                path = urlparse(value).path
+                parsed = urlparse(value)
             except ValueError:
                 return _UNREADABLE_SECRET
+            path, query = parsed.path, parsed.query
+            if query:
+                error_text = _mask(error_text, f"{path}?{query}", "/" + MASK)
             if path and len(path) > 1:
                 error_text = _mask(error_text, path, "/" + MASK)
+            if query:
+                error_text = _mask(error_text, query, MASK)
     return error_text
 
 

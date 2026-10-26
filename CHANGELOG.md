@@ -87,7 +87,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Wrong DMARC policy on the Domains page** - A record with the subdomain policy first, such as `sp=reject; p=none`, showed the subdomain policy as the domain's. The Domains page now shows the `p` policy.
 - **SPF policy read from a domain name** - An SPF record that includes a domain with `-all` or `~all` in its name showed that policy instead of its own `all` term.
 - **One notification destination stopping the others** - A Slack or Discord webhook URL that is not a valid address could be saved; its test failed with an internal server error, and every alert stopped at it. Such a URL is now refused when saved, and a saved one fails without holding up the others.
-- **Internal server errors for unusual input** - A proxy page in place of Rspamd's answer, a map line with a huge repeat count, a suppression CSV file that is not UTF-8 or a quarantine item with an impossible time showed an internal server error. Each now says what is wrong, and a map saved before such a page arrived is shown as saved.
+- **A proxy page in place of Rspamd's answer** - The Rspamd maps and the Suppressions sync showed an internal server error, and a map that was saved was reported as failed. They now say that Rspamd could not be read, and a saved map is shown as saved.
+- **Map lines too large to check** - A map line with a huge repeat count or very deep nesting gave an internal server error. It is now marked as a bad line.
+- **Suppression import of a file that is not UTF-8** - The import gave an internal server error. It now asks to save the file as CSV UTF-8.
+- **Quarantine with an impossible time** - One quarantine item with a time mailcow cannot mean made the Quarantine page fail. The page now loads, and that item is shown last, without a time.
 
 
 ## [2.9.0] - 2026-10-04

@@ -118,8 +118,8 @@ def test_list_when_rspamd_refuses(client, rspamd):
     assert r.json()['error'] and r.json()['configured'] is True
 
 
-@pytest.mark.parametrize('maps', [NOT_JSON, {'maps': []}, [None], [{'map': 7, 'uri': None}]],
-                         ids=['a-page', 'an-object', 'a-null-entry', 'a-null-uri'])
+@pytest.mark.parametrize('maps', [NOT_JSON, {'maps': []}, [None], [{'map': 7, 'uri': None}], [{'map': 7}]],
+                         ids=['a-page', 'an-object', 'a-null-entry', 'a-null-uri', 'no-uri'])
 def test_list_when_rspamd_answers_something_else(client, rspamd, maps):
     """A proxy's sign-in page, or JSON that is not Rspamd's map list, is reported as
     an error in the list, not as maps that are not loaded."""
