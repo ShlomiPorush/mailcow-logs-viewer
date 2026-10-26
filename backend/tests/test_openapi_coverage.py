@@ -85,6 +85,10 @@ def test_every_documented_answer_has_a_real_schema():
 NOT_GIVEN = {
     ("GET", "/api/quarantine/{item_id}/details", 500): "the mailcow client turns every failure into "
                                                       "MailcowAPIError, which internal_error() answers 502",
+    ("POST", "/api/dmarc/imap/sync", 500): "its try holds only a status update and queuing the import, "
+                                          "which cannot fail",
+    ("GET", "/api/dmarc/domains/{domain}/tls-rpt-record", 500): "the stored check and the lookup both "
+                                                                 "catch every error",
     ("POST", "/api/fail2ban/unban", 500): "internal_error() is called only for a refused Read-Write key, "
                                           "which it answers 502",
 }

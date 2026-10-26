@@ -81,17 +81,21 @@ _contracts = {}
 
 
 @pytest.fixture(autouse=True)
-def api_contract(monkeypatch):
+def api_contract(monkeypatch, request):
     """Check every answer the real app gives a test against /openapi.json (contract.py).
 
     Only TestClient calls to app.main.app are checked; tests that build an app
     of their own are left alone. A mismatch fails the test that made the call.
+    A test marked no_contract (it stubs the code that builds an answer) is not
+    checked.
     """
+    if request.node.get_closest_marker("no_contract"):
+        return
     from starlette.testclient import TestClient
 
     original = TestClient.request
 
-    def request(self, *args, **kwargs):
+    def checked_request(self, *args, **kwargs):
         response = original(self, *args, **kwargs)
         main = sys.modules.get("app.main")
         if main is not None and self.app is main.app:
@@ -104,7 +108,7 @@ def api_contract(monkeypatch):
                 check_response(contract, answer)
         return response
 
-    monkeypatch.setattr(TestClient, "request", request)
+    monkeypatch.setattr(TestClient, "request", checked_request)
 
 
 def pytest_sessionfinish(session, exitstatus):

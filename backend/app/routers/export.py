@@ -15,6 +15,10 @@ from ..utils import internal_error, RangeStart, RangeEnd
 from .messages import message_sort_time
 from ..services import excluded_addresses
 from ..services.csv_export import csv_download, csv_query_rows, get_csv_db
+from ..api_models import CsvFile, Invalid, documented
+
+# No rows to export (404), a bad filter (422), a database failure (500)
+CSV_ERRORS = {404: None, 422: Invalid, 500: None}
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +32,8 @@ def _csv_time(value: Optional[datetime]) -> str:
 
 
 @router.head("/export/postfix/csv", include_in_schema=False)
-@router.get("/export/postfix/csv")
+@router.get("/export/postfix/csv", response_class=CsvFile,
+            responses=documented(None, media_type="text/csv", description="A CSV file, newest first, up to the export limit", errors=CSV_ERRORS))
 def export_postfix_csv(
     request: Request,
     search: Optional[str] = Query(None),
@@ -110,7 +115,8 @@ def export_postfix_csv(
 
 
 @router.head("/export/rspamd/csv", include_in_schema=False)
-@router.get("/export/rspamd/csv")
+@router.get("/export/rspamd/csv", response_class=CsvFile,
+            responses=documented(None, media_type="text/csv", description="A CSV file, newest first, up to the export limit", errors=CSV_ERRORS))
 def export_rspamd_csv(
     request: Request,
     search: Optional[str] = Query(None),
@@ -202,7 +208,8 @@ def export_rspamd_csv(
 
 
 @router.head("/export/netfilter/csv", include_in_schema=False)
-@router.get("/export/netfilter/csv")
+@router.get("/export/netfilter/csv", response_class=CsvFile,
+            responses=documented(None, media_type="text/csv", description="A CSV file, newest first, up to the export limit", errors=CSV_ERRORS))
 def export_netfilter_csv(
     request: Request,
     search: Optional[str] = Query(None),
@@ -287,7 +294,8 @@ def export_netfilter_csv(
 
 
 @router.head("/export/messages/csv", include_in_schema=False)
-@router.get("/export/messages/csv")
+@router.get("/export/messages/csv", response_class=CsvFile,
+            responses=documented(None, media_type="text/csv", description="A CSV file, newest first, up to the export limit", errors=CSV_ERRORS))
 def export_messages_csv(
     request: Request,
     search: Optional[str] = Query(None),

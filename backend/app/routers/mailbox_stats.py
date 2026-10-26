@@ -17,6 +17,8 @@ from ..database import get_db
 from ..models import MailboxStatistics, AliasStatistics, MessageCorrelation
 
 from ..utils import format_datetime_for_api as format_datetime_utc
+from ..api_models import Invalid, documented
+from ..api_models import mailboxes as m
 
 logger = logging.getLogger(__name__)
 
@@ -381,7 +383,7 @@ def get_message_counts_for_email(db: Session, email: str, start_date: datetime, 
     return bulk.get(email.lower(), _empty_counts())
 
 
-@router.get("/mailbox-stats/summary")
+@router.get("/mailbox-stats/summary", responses=documented(m.MailboxSummaryResponse))
 def get_mailbox_stats_summary(
     date_range: str = Query("30days", description="Date range: today, 7days, 30days, 90days, custom"),
     start_date: Optional[str] = Query(None, description="Custom start date (YYYY-MM-DD) - required when date_range is 'custom'"),
@@ -463,7 +465,7 @@ def get_mailbox_stats_summary(
         return {"error": "Unable to load mailbox statistics. Check the application logs.", "total_mailboxes": 0}
 
 
-@router.get("/mailbox-stats/all")
+@router.get("/mailbox-stats/all", responses=documented(m.MailboxStatsResponse, errors={422: Invalid}))
 def get_all_mailbox_stats(
     domain: Optional[str] = None,
     active_only: bool = True,  # Changed default to True
@@ -720,7 +722,7 @@ def get_all_mailbox_stats(
         return {"error": "Unable to load mailbox statistics. Check the application logs.", "total": 0, "mailboxes": []}
 
 
-@router.get("/mailbox-stats/domains")
+@router.get("/mailbox-stats/domains", responses=documented(m.MailboxDomainsResponse))
 def get_mailbox_domains(db: Session = Depends(get_db)):
     """
     Get list of all domains for filtering
@@ -755,7 +757,7 @@ def get_mailbox_domains(db: Session = Depends(get_db)):
         return {"error": "Unable to load mailbox statistics. Check the application logs.", "domains": []}
 
 
-@router.get("/mailbox-stats/refresh")
+@router.get("/mailbox-stats/refresh", responses=documented(m.MailboxRefreshResponse))
 def refresh_mailbox_stats(db: Session = Depends(get_db)):
     """
     Get last update time for mailbox statistics

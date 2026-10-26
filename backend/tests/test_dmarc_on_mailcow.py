@@ -17,6 +17,9 @@ from fastapi.testclient import TestClient
 from app import config
 from app.routers import dmarc as dmarc_router
 
+# The routes' own builders are stubbed with partial answers: not checked against /openapi.json
+pytestmark = pytest.mark.no_contract(reason="stubs the DMARC domain list and overview builders")
+
 HOSTED, ALIAS, GONE = 'hosted.example.com', 'alias.example.com', 'removed.example.com'
 
 

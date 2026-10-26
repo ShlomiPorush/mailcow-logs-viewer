@@ -24,6 +24,8 @@ from app.config import settings
 from app.mailcow_api import mailcow_api
 from app.services.dmarc_parser import is_valid_domain_name
 from ..utils import internal_error
+from app.api_models import documented
+from app.api_models import domains as m
 
 logger = logging.getLogger(__name__)
 
@@ -2025,7 +2027,7 @@ def _build_domain_list_worker(domains):
         }
 
 
-@router.get("/domains/all")
+@router.get("/domains/all", response_model=None, responses=documented(m.DomainsResponse, errors={500: None, 502: None}))
 async def get_all_domains_with_dns():
     """Get all domains with cached DNS checks"""
     try:
@@ -2282,7 +2284,7 @@ def get_cached_dns_check(db: Session, domain_name: str) -> Dict[str, Any]:
         return None
 
 
-@router.post("/domains/check-all-dns")
+@router.post("/domains/check-all-dns", response_model=None, responses=documented(m.CheckAllResponse, description="Waits for every check to finish", errors={500: None, 502: None}))
 async def check_all_domains_dns_manual():
     """Manually trigger DNS check for all active domains"""
     try:
@@ -2333,7 +2335,7 @@ async def check_all_domains_dns_manual():
         raise internal_error(e)
 
 
-@router.post("/domains/{domain}/check-dns")
+@router.post("/domains/{domain}/check-dns", response_model=None, responses=documented(m.CheckOneResponse, errors={400: None, 500: None}))
 async def check_single_domain_dns_manual(domain: str):
     """Manually trigger DNS check for a single domain"""
     _require_domain_name(domain)

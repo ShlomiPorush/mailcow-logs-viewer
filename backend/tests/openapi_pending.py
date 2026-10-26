@@ -6,42 +6,6 @@ Each layer of the work removes its entries; the list ends empty.
 """
 
 PENDING = {
-    ("DELETE", "/api/dmarc/reports/domains/{domain}"): "L4",  # dmarc
-    ("DELETE", "/api/dmarc/reports/{report_type}/{report_id}"): "L4",  # dmarc
-    ("GET", "/api/devices"): "L4",  # devices
-    ("GET", "/api/dmarc/domains"): "L4",  # dmarc
-    ("GET", "/api/dmarc/domains/{domain}/calendar"): "L4",  # dmarc
-    ("GET", "/api/dmarc/domains/{domain}/overview"): "L4",  # dmarc
-    ("GET", "/api/dmarc/domains/{domain}/reports"): "L4",  # dmarc
-    ("GET", "/api/dmarc/domains/{domain}/reports/{report_date}/details"): "L4",  # dmarc
-    ("GET", "/api/dmarc/domains/{domain}/sources"): "L4",  # dmarc
-    ("GET", "/api/dmarc/domains/{domain}/sources/{source_ip}/details"): "L4",  # dmarc
-    ("GET", "/api/dmarc/domains/{domain}/tls-reports"): "L4",  # dmarc
-    ("GET", "/api/dmarc/domains/{domain}/tls-reports/daily"): "L4",  # dmarc
-    ("GET", "/api/dmarc/domains/{domain}/tls-reports/{report_date}/details"): "L4",  # dmarc
-    ("GET", "/api/dmarc/domains/{domain}/tls-rpt-record"): "L4",  # dmarc
-    ("GET", "/api/dmarc/imap/history"): "L4",  # dmarc
-    ("GET", "/api/dmarc/imap/status"): "L4",  # dmarc
-    ("GET", "/api/dmarc/insights"): "L4",  # dmarc
-    ("GET", "/api/dmarc/reports/all"): "L4",  # dmarc
-    ("GET", "/api/dmarc/reports/config"): "L4",  # dmarc
-    ("GET", "/api/dmarc/reports/domains"): "L4",  # dmarc
-    ("GET", "/api/domains/all"): "L4",  # domains
-    ("GET", "/api/export/messages/csv"): "L4",  # export
-    ("GET", "/api/export/netfilter/csv"): "L4",  # export
-    ("GET", "/api/export/postfix/csv"): "L4",  # export
-    ("GET", "/api/export/rspamd/csv"): "L4",  # export
-    ("GET", "/api/mailbox-stats/all"): "L4",  # mailbox_stats
-    ("GET", "/api/mailbox-stats/domains"): "L4",  # mailbox_stats
-    ("GET", "/api/mailbox-stats/refresh"): "L4",  # mailbox_stats
-    ("GET", "/api/mailbox-stats/summary"): "L4",  # mailbox_stats
-    ("GET", "/api/system/summary"): "L4",  # reporting
-    ("POST", "/api/dmarc/cache/clear"): "L4",  # dmarc
-    ("POST", "/api/dmarc/imap/sync"): "L4",  # dmarc
-    ("POST", "/api/dmarc/upload"): "L4",  # dmarc
-    ("POST", "/api/domains/check-all-dns"): "L4",  # domains
-    ("POST", "/api/domains/{domain}/check-dns"): "L4",  # domains
-    ("POST", "/api/system/summary/email"): "L4",  # reporting
     ("DELETE", "/api/agents"): "L5",  # consent
     ("DELETE", "/api/agents/{grant_id}"): "L5",  # consent
     ("DELETE", "/api/notifications/channels/{channel_id}"): "L5",  # notifications
