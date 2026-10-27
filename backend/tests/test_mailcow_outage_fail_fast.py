@@ -620,7 +620,8 @@ def test_the_transport_sync_fails_without_touching_hosts_when_the_ip_cannot_be_a
     _host_ip_answer(monkeypatch, error)
     run(scheduler.sync_transports_job())
     transports.assert_not_called()
-    scheduler.update_job_status.assert_called_with("sync_transports", "failed", str(error))
+    # Transient: run again within minutes once mailcow answers (retry_failed_jobs)
+    scheduler.update_job_status.assert_called_with("sync_transports", "failed", str(error), retryable=True)
     assert domains.get_cached_server_ip() is None
 
 
