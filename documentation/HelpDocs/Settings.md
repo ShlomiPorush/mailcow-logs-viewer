@@ -64,6 +64,8 @@ For port 587, turn on **SMTP Use TLS** (STARTTLS); port 465 always uses implicit
 
 Basic authentication and OAuth2/OIDC can be on together. Turning on **Basic Auth Enabled** asks you to type the username and password again before it saves, so a typo cannot lock you out. See [Sign-in configuration](../OAuth2_Configuration.md).
 
+**Sign-in Security** limits how long a browser stays signed in, for both sign-in methods. **Longest session (hours)** counts from sign-in whatever the activity. **Sign out after inactivity**, off by default, ends a session after **Inactivity limit (minutes)** without typing, clicking, scrolling with the wheel or touching; pages that refresh by themselves do not count. A minute before, the page asks whether you are still there. Changing these limits does not sign anyone out by itself, and AI agents are not affected. See [Sessions and signing out](../OAuth2_Configuration.md#sessions-and-signing-out).
+
 ## Agents
 
 Lets AI agents such as Claude Code and Codex connect, and lists the allowed ones with **Activity** and **Disconnect**. The list works even while editing settings is off. See [AI agents](../AI_Agents.md).

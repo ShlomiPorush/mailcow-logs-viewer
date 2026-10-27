@@ -225,7 +225,7 @@ EXCLUDED: Dict[Tuple[str, str], str] = {
     **{(m, p): _SIGN_IN for m, p in (
         ("GET", "/api/auth/verify"), ("POST", "/api/auth/session"), ("GET", "/api/auth/provider-info"),
         ("GET", "/api/auth/login"), ("GET", "/api/auth/callback"), ("POST", "/api/auth/logout"),
-        ("GET", "/api/auth/logout"), ("GET", "/api/auth/status"))},
+        ("GET", "/api/auth/logout"), ("GET", "/api/auth/status"), ("POST", "/api/auth/activity"))},
     ("GET", "/api/raw-logs/ws-token"): "issues a credential for the live log stream",
     ("PUT", "/api/settings"): _SETTINGS,
     ("POST", "/api/settings/purge-feature-data"): _SETTINGS,

@@ -57,7 +57,7 @@ What applies to every endpoint:
 
 Basic authentication (`BASIC_AUTH_ENABLED`), OAuth2/OIDC (`OAUTH2_ENABLED`), or both. With both off (the default), no endpoint needs credentials.
 
-Public endpoints: `GET /api/health`, `GET /api/info`, `GET /api/auth/provider-info`, `GET /login`, `GET /api/auth/login` and `GET /api/auth/callback`. Every other `/api/*` endpoint is protected, including `GET /api/auth/verify` and `POST /api/auth/session`.
+Public endpoints: `GET /api/health`, `GET /api/info`, `GET /api/auth/provider-info`, `GET /login`, `GET /api/auth/login` and `GET /api/auth/callback`. `POST /api/auth/session` and `POST /api/auth/activity` check credentials themselves. Every other `/api/*` endpoint is protected, including `GET /api/auth/verify`.
 
 ### Authentication Methods
 
@@ -82,9 +82,11 @@ curl -b cookies.txt https://logs.example.com/api/info
 
 Sessions live in the application's memory, so restarting the container signs everyone out. One process holds at most `SESSION_MAX_ENTRIES` sessions (default 50); when it is full, a new sign-in gets 503 with `Retry-After: 60`. API clients can also send `Authorization: Basic` on every request instead of using a session.
 
+**Session limits** apply to every session, from either sign-in method. A session ends `SESSION_EXPIRY_HOURS` after sign-in (default 24) whatever the activity; a shorter value applies to open sessions at once, a longer one from the next sign-in. With `SESSION_IDLE_ENABLED=true` it also ends `SESSION_IDLE_TIMEOUT_MINUTES` (default 60) after the last activity the page reported through [`POST /api/auth/activity`](#post-apiauthactivity). Other requests, including the pages' own refreshes, do not count as activity. A request with a session a limit ended gets the [session-ended 401](#401-unauthorized). Basic headers on every request and agent tokens have no session and are not affected.
+
 #### OAuth2/OIDC Authentication
 
-On when `OAUTH2_ENABLED=true`; see the [OAuth2 Configuration Guide](OAuth2_Configuration.md). `GET /api/auth/login` sends the browser to the provider, which returns it to `GET /api/auth/callback`; the app exchanges the code for tokens with PKCE (S256), creates a server-side session that lasts `SESSION_EXPIRY_HOURS` (default 24) and sets the HttpOnly cookie.
+On when `OAUTH2_ENABLED=true`; see the [OAuth2 Configuration Guide](OAuth2_Configuration.md). `GET /api/auth/login` sends the browser to the provider, which returns it to `GET /api/auth/callback`; the app exchanges the code for tokens with PKCE (S256), creates a server-side session with the [session limits](#basic-authentication) and sets the HttpOnly cookie.
 
 ### Login Endpoint
 
@@ -92,7 +94,7 @@ On when `OAUTH2_ENABLED=true`; see the [OAuth2 Configuration Guide](OAuth2_Confi
 
 Always public. Serves the login page with the Basic form, the OAuth2 button, or both.
 
-**Query parameter:** `next`, the local page to open after sign-in. Only a path on this site is accepted; anything else, and any path under `/login`, `/api/` or `/static/`, becomes `/`.
+**Query parameters:** `next`, the local page to open after sign-in. Only a path on this site is accepted; anything else, and any path under `/login`, `/api/` or `/static/`, becomes `/`. `reason`, set when a limit ended the session (`session_idle` or `session_expired`), makes the page say why; other values are ignored.
 
 With authentication off, or a valid session already present, it redirects (302) to `next`.
 
@@ -105,6 +107,14 @@ Most errors, including 400 and 404, are JSON with a `detail` field, such as `{ "
 ### 401 Unauthorized
 
 Authentication is on and the request has no valid session or Basic credentials. The body is plain text, not JSON: `Authentication required`, or `Incorrect username or password` for wrong Basic credentials. There is no `WWW-Authenticate` header.
+
+A request with a session that a [session limit](#basic-authentication) ended gets JSON instead, with the reason in the body and in the `X-Session-End` header, for 10 minutes after it ended:
+
+```json
+{ "detail": "Your session ended. Sign in again.", "reason": "session_idle" }
+```
+
+`reason` is `session_idle` or `session_expired`. A page request in that case redirects to `/login?reason=<reason>&next=<page>`.
 
 ### 403 Forbidden
 
@@ -206,6 +216,8 @@ Deletes the server-side session (OAuth2 or Basic) and redirects (302) to `/login
 
 Returns `authenticated`, `auth_type` and `user`. Protected, so a request without valid credentials gets 401, not a signed-out status. A session from either method returns its stored user object (a Basic session has `username` and `auth_method: "basic"`); direct Basic headers return `user: null`. With authentication off and no session: `{ "authenticated": false, "auth_type": null, "user": null }`.
 
+It also returns `session`, the time left on a session's limits, without counting as activity: `{ "longest_seconds_left": 3600, "idle_enabled": true, "idle_timeout_seconds": 3600, "idle_seconds_left": 1200 }`. `idle_timeout_seconds` and `idle_seconds_left` are null while sign-out after inactivity is off. `session` is null without a session cookie, for example with a direct Basic header or with authentication off.
+
 ---
 
 ### GET /api/auth/verify
@@ -214,11 +226,17 @@ Returns `{ "verified": true }` once the authentication middleware accepts the re
 
 ---
 
+### POST /api/auth/activity
+
+The page reports that the person used it (typing, clicking, scrolling with the wheel, touching), which restarts the inactivity time of the request's own session cookie. No body. Returns `{ "session": { ... } }` with the same fields as `session` in [`GET /api/auth/status`](#get-apiauthstatus). Without a session cookie it returns 401; with a session a limit ended, the [session-ended 401](#401-unauthorized). It never brings an ended session back. People only: agents cannot call it.
+
+---
+
 ### POST /api/auth/session
 
-Exchanges valid Basic credentials in the `Authorization` header for the `session_id` cookie. No body. Returns `{ "authenticated": true, "auth_type": "basic" }`.
+Exchanges valid Basic credentials in the `Authorization` header for the `session_id` cookie. No body. Returns `{ "authenticated": true, "auth_type": "basic" }`. The credentials are needed every time: a session cookie alone never gets a new session.
 
-With Basic authentication off, the handler returns 400; when only OAuth2 is on, a request without a valid session is rejected first with 401. Invalid Basic credentials return 401; a locked-out client gets 429; a full session store 503 with `Retry-After: 60`. When sign-in settings changed after the request was accepted (for example a new password was saved), it returns 409 and issues no session; sign in again.
+With Basic authentication off, it returns 400. Missing or invalid Basic credentials return 401; a locked-out client gets 429; a full session store 503 with `Retry-After: 60`. When sign-in settings changed after the request was accepted (for example a new password was saved), it returns 409 and issues no session; sign in again.
 
 ---
 

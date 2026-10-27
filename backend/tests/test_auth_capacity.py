@@ -1,6 +1,5 @@
 """Authentication capacity limits preserve live sessions and failure budgets."""
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timedelta
 from threading import Barrier
 from unittest.mock import AsyncMock
 
@@ -76,7 +75,7 @@ def test_expired_sessions_are_reclaimed_on_admission():
     active = session.create_session({"username": "admin"}, generation=session.auth_generation())
     expired = session.create_session({"username": "admin"}, generation=session.auth_generation())
     key = session.get_serializer().loads(expired)
-    session._session_store[key]["expires_at"] = (datetime.utcnow() - timedelta(seconds=1)).isoformat()
+    session._session_store[key]["login_at"] -= session._session_store[key]["issued_hours"] * 3600 + 1
     new = session.create_session({"username": "admin"}, generation=session.auth_generation())
     assert len(session._session_store) == 2
     assert session.get_session(active)

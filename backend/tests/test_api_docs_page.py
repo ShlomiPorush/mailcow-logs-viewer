@@ -136,5 +136,5 @@ def test_every_file_of_the_page_gets_a_content_stamp():
     html = (FRONTEND / "api-docs.html").read_text()
     stamped = stamp_asset_versions(html, str(FRONTEND))
     refs = re.findall(r'/static/[^"]+\.(?:css|js)\?v=([^"]+)"', stamped)
-    assert len(refs) == 3
+    assert len(refs) == 4
     assert all(re.fullmatch(r"[0-9a-f]{12}", ref) for ref in refs), refs

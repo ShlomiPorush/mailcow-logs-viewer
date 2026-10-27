@@ -32,7 +32,10 @@ const SETTINGS_LABEL_OVERRIDES = {
     suppression_whitelist_domains: 'Exclude these domains',
     agent_access_enabled: 'Enable agent access',
     agent_access_url: 'App URL',
-    agent_access_max_days: 'Maximum access duration (days)'
+    agent_access_max_days: 'Maximum access duration (days)',
+    session_idle_enabled: 'Sign out after inactivity',
+    session_idle_timeout_minutes: 'Inactivity limit (minutes)',
+    session_expiry_hours: 'Longest session (hours)'
 };
 
 const SETTINGS_LOCK_ICON = '<svg width="12" height="12" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true"><path fill-rule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clip-rule="evenodd"></path></svg>';
@@ -259,7 +262,9 @@ var SETTINGS_FIELD_DESCRIPTIONS = {
     oauth2_scopes: 'OAuth2 scopes to request. Default: openid profile email.',
     oauth2_use_oidc_discovery: 'Enable OIDC discovery (uses .well-known/openid-configuration). Default: true.',
     session_secret_key: 'Secret key for signing session cookies. REQUIRED if OAuth2 enabled. Generate: openssl rand -hex 32. Use a strong secret in production.',
-    session_expiry_hours: 'Session expiration in hours. Default: 24.',
+    session_expiry_hours: 'Longest session in hours, counted from sign-in whatever the activity. Five minutes before, the page says so. A shorter value applies to open sessions at once; a longer one from the next sign-in. Default: 24.',
+    session_idle_enabled: 'Sign out after a period without activity. Typing, clicking, scrolling with the wheel and touching count as activity; pages that refresh by themselves do not. A minute before, the page asks whether you are still there. Default: off.',
+    session_idle_timeout_minutes: 'Minutes without activity before sign-out, from 5 to 1440. Default: 60.',
     session_max_entries: 'Maximum active login sessions per process. At capacity, new logins wait until a session expires or a user signs out. Existing sessions stay signed in. Default: 50.',
     agent_access_enabled: 'Default: off.',
     agent_access_url: 'The address agents use to reach this app, such as https://logs.example.com. Changing it disconnects every agent until you change it back. Default: empty.',
@@ -362,7 +367,9 @@ const SETTINGS_LOG_CHOICES = { hard: ['suppress', 'delete'], soft: ['count', 'su
 const SETTINGS_SYNC_TWINS = { hard: { suppress: 'delete' }, soft: { queue: 'queue_delete', count: 'ignore', suppress: 'ignore' } };
 // Settings that do nothing while another switch is off: shown greyed out and
 // unclickable until it is on. Groups say it with needs:, single fields here.
-const SETTINGS_FIELD_NEEDS = {};
+const SETTINGS_FIELD_NEEDS = {
+    session_idle_timeout_minutes: 'session_idle_enabled'
+};
 
 function settingsShowNeeds(root) {
     Object.entries(SETTINGS_FIELD_NEEDS).forEach(([key, parent]) => {
@@ -1023,7 +1030,8 @@ var SETTINGS_EDIT_TABS = [
             { label: 'OAuth2 - Discovery (automatic)', keys: ['oauth2_issuer_url', 'oauth2_use_oidc_discovery'] },
             { label: 'OAuth2 - Endpoints (only without discovery)', keys: ['oauth2_authorization_url', 'oauth2_token_url', 'oauth2_userinfo_url'] },
             { label: 'OAuth2 - Credentials', keys: ['oauth2_client_id', 'oauth2_client_secret', 'oauth2_redirect_uri', 'oauth2_scopes'] },
-            { label: 'Sessions', keys: ['session_secret_key', 'session_expiry_hours', 'session_max_entries'] }
+            { label: 'Sign-in Security', intro: 'For people signed in to this app in a browser, with Basic Auth or OAuth2/OIDC. AI agents and API tokens are not affected.', keys: ['session_idle_enabled', 'session_idle_timeout_minutes', 'session_expiry_hours'] },
+            { label: 'Sessions', keys: ['session_secret_key', 'session_max_entries'] }
         ]
     },
     {

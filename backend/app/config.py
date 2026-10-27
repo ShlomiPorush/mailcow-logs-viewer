@@ -8,7 +8,7 @@ from functools import lru_cache
 from urllib.parse import urlsplit
 from pydantic_settings import BaseSettings
 from pydantic import TypeAdapter, Field, validator, field_validator, model_validator
-from typing import List, Optional, Any, Dict
+from typing import Callable, List, Optional, Any, Dict
 import logging
 import threading
 
@@ -330,7 +330,15 @@ class Settings(BaseSettings):
     )
     session_expiry_hours: int = Field(
         default=24,
-        description="Session expiration time in hours"
+        description="Longest session in hours, counted from sign-in whatever the activity"
+    )
+    session_idle_enabled: bool = Field(
+        default=False,
+        description="Sign out a browser session after a period without activity"
+    )
+    session_idle_timeout_minutes: int = Field(
+        default=60, ge=5, le=1440,
+        description="Minutes without activity before a browser session is signed out (5 to 1440)"
     )
 
     session_max_entries: int = Field(
@@ -1181,6 +1189,32 @@ class SettingsLoadError(RuntimeError):
     """The settings stored in the database could not be read."""
 
 
+def _validate_session_limit_overrides(allowed: Dict[str, Any]) -> None:
+    """model_copy skips validators: an invalid stored session limit is ignored
+    (the default or ENV value stays), never put in force. The longest session
+    has no upper bound, so a long one saved by an earlier version still loads."""
+    bounds = {"session_idle_timeout_minutes": (5, 1440), "session_expiry_hours": (1, None)}
+    for key, (low, high) in bounds.items():
+        if key not in allowed:
+            continue
+        try:
+            if isinstance(allowed[key], bool):
+                raise ValueError("Not a number")
+            value = TypeAdapter(int).validate_python(allowed[key])
+            if value < low or (high is not None and value > high):
+                raise ValueError("Out of range")
+            allowed[key] = value
+        except (ValueError, TypeError):
+            logger.warning("Ignoring invalid session limit override for %s", key)
+            allowed.pop(key)
+    if "session_idle_enabled" in allowed:
+        try:
+            allowed["session_idle_enabled"] = TypeAdapter(bool).validate_python(allowed["session_idle_enabled"])
+        except (ValueError, TypeError):
+            logger.warning("Ignoring invalid session limit override for session_idle_enabled")
+            allowed.pop("session_idle_enabled")
+
+
 def build_settings(db: Optional[Any] = None) -> Settings:
     """
     Build effective Settings: defaults -> DB -> ENV overrides.
@@ -1226,6 +1260,7 @@ def build_settings(db: Optional[Any] = None) -> Settings:
             except (ValueError, TypeError):
                 logger.warning("Ignoring invalid authentication capacity override for %s", key)
                 allowed.pop(key)
+    _validate_session_limit_overrides(allowed)
     merged = base.model_copy(update=allowed)
     # model_copy skips validators. Apply them manually on affected fields.
     # (We can't use Settings.model_validate() because BaseSettings re-reads ENV on init)
@@ -1270,6 +1305,26 @@ settings = _settings_wrapper
 # force after it (that brought an old password back).
 settings_reload_lock = threading.RLock()
 
+# session.py puts new settings in force under its own lock, so a session check
+# never sees a policy change halfway (session._publish_settings). Called with
+# the new settings and a function that puts them in force.
+_settings_publisher: Optional[Callable[[Settings, Callable[[], None]], None]] = None
+
+
+def set_settings_publisher(publisher: Optional[Callable[[Settings, Callable[[], None]], None]]) -> None:
+    global _settings_publisher
+    _settings_publisher = publisher
+
+
+def _publish(new_inner: Settings) -> None:
+    def assign() -> None:
+        _settings_wrapper._inner = new_inner
+
+    if _settings_publisher is None:
+        assign()
+    else:
+        _settings_publisher(new_inner, assign)
+
 
 def reload_settings(db: Optional[Any] = None) -> Settings:
     """Reload effective settings (e.g. after saving from UI). Updates the global settings wrapper.
@@ -1286,7 +1341,7 @@ def reload_settings(db: Optional[Any] = None) -> Settings:
         except Exception as e:
             logger.error("Settings reload failed, keeping the current settings: %s", e)
             raise
-        _settings_wrapper._inner = new_inner
+        _publish(new_inner)
         # Re-apply log level to root logger (setup_logging ran at import time with the old level)
         root = logging.getLogger()
         root.setLevel(getattr(logging, new_inner.log_level, logging.WARNING))

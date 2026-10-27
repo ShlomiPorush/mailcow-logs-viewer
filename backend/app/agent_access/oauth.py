@@ -307,7 +307,7 @@ def code_page(message: Optional[str] = None, status_code: int = 200, value: str 
 <input id="user-code" name="user_code" class="ui-input ui-consent-code-input" autocomplete="off" autocapitalize="characters"
  spellcheck="false" placeholder="XXXX-XXXX" maxlength="16" required value="{html.escape(value)}" autofocus>
 <div class="ui-consent-actions"><button type="submit" class="ui-btn ui-btn-primary">Continue</button></div>
-</form></main></body></html>"""
+</form></main><script src="/static/session-guard.js?v=1"></script></body></html>"""
     return HTMLResponse(page, status_code=status_code, headers=_NO_STORE)
 
 

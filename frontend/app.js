@@ -78,11 +78,19 @@ let dmarcImapStatus = null;
 let dmarcConfiguration = null;
 
 // Send the browser to the login page, dropping any client-side state; signing
-// in again returns to the page that was open
-function redirectToLogin() {
+// in again returns to the page that was open. reason: why the server ended the
+// session (session_idle, session_expired), which the login page explains; the
+// address is built by session-guard.js (sessionGuardLoginPath)
+function redirectToLogin(reason) {
     if (typeof uiUnsavedClear === 'function') uiUnsavedClear();
     const here = window.location.pathname + window.location.search;
-    window.location.replace(here === '/' ? '/login' : `/login?next=${encodeURIComponent(here)}`);
+    window.location.replace(typeof sessionGuardLoginPath === 'function' ? sessionGuardLoginPath(reason, here)
+        : here === '/' ? '/login' : `/login?next=${encodeURIComponent(here)}`);
+}
+
+// Why the server ended the session, from a 401 (session-guard.js); '' when it gave no reason
+async function loginReasonOf(response) {
+    return typeof sessionGuardReasonOf === 'function' ? sessionGuardReasonOf(response) : '';
 }
 
 // Enhanced fetch with authentication.
@@ -116,9 +124,10 @@ async function authenticatedFetch(url, options = {}) {
             credentials: 'include' // Send the session cookie
         });
 
-        // Handle 401 Unauthorized - the session expired or the server restarted
+        // Handle 401 Unauthorized - the session ended (a limit, which the login
+        // page explains) or the server restarted
         if (response.status === 401) {
-            redirectToLogin();
+            redirectToLogin(await loginReasonOf(response));
             throw new Error('Authentication required');
         }
 
@@ -183,6 +192,8 @@ async function checkAuthentication() {
         console.warn('Could not check auth status, assuming enabled');
     }
 
+    // A session a limit ended says so, in the header or the body, whatever the status
+    let reason = '';
     try {
         const statusResponse = await fetch('/api/auth/status', { credentials: 'include' });
         if (statusResponse.ok) {
@@ -192,12 +203,15 @@ async function checkAuthentication() {
                 if (logoutBtn) logoutBtn.classList.remove('hidden');
                 return true;
             }
+            reason = statusData.reason;
+        } else if (statusResponse.status === 401) {
+            reason = await loginReasonOf(statusResponse);
         }
     } catch (e) {
         // Could not reach the status endpoint - treat as not authenticated
     }
 
-    redirectToLogin();
+    redirectToLogin(reason);
     return false;
 }
 

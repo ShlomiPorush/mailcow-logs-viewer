@@ -112,6 +112,10 @@ class Contract:
             # Not a route's answer: the auth middleware's plain sentence when Basic auth
             # is on without a password, for any call (the document's description says so)
             return None
+        if status == 401 and media != "application/json":
+            # Not a route's answer either: the auth middleware's plain sentence for a
+            # call without credentials, for any call (the document's description says so)
+            return None
         if response is None:
             if status in APP_WIDE_STATUSES:
                 return None

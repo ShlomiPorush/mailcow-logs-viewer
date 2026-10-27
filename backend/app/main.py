@@ -285,7 +285,9 @@ app = FastAPI(
     description=(
         "Modern dashboard for viewing and analyzing mailcow mail server logs\n\n"
         "With sign-in on, every call except /api/health, /api/info and the sign-in calls needs a session or Basic "
-        "credentials, and answers 401 without them. A write sent from another site's page answers 403. "
+        "credentials, and answers 401 without them. A call with a session that a limit ended answers 401 with "
+        "{detail, reason} and the reason in the X-Session-End header: session_expired (the longest session) or "
+        "session_idle (inactivity). A write sent from another site's page answers 403. "
         "With Basic auth on but no password set, those calls answer 500 with a sentence in plain text. "
         "An agent's call with a bearer token may also be refused or cut short by the agent gateway, which answers "
         "{error, message}."

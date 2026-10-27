@@ -23,7 +23,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from ..database import get_db_context
 from ..config import settings
 from ..models import RawServiceLog
-from ..session import auth_generation, is_session_active, session_key_from_request
+from ..session import auth_generation, is_session_active
 from ..raw_logs_worker import (
     SERVICE_METADATA,
     ALL_SERVICES,
@@ -193,12 +193,31 @@ set_ws_broadcast_fn(log_stream_manager.broadcast)
 set_ws_broadcast_all_fn(log_stream_manager.broadcast_to_all)
 
 
-@router.get("/raw-logs/ws-token", responses=documented(m.WsToken))
+def _admitted_authority(request: Request) -> Optional[Authority]:
+    """The authority the middleware let this request in with (auth.py), or
+    None when it is no longer current: the admitted session and the admitted
+    generation, never the state at the time the handler runs. A session that
+    ended, or a sign-in change, after the admission gets no stream."""
+    admission = getattr(request.state, "auth_admission", None)
+    generation = getattr(request.state, "auth_generation", None)
+    if not isinstance(generation, int) or generation != auth_generation():
+        return None
+    if admission == ("open", None) or admission == ("basic", None):
+        return (None, generation)
+    if isinstance(admission, tuple) and len(admission) == 2 and admission[0] == "session":
+        key = admission[1]
+        if isinstance(key, str) and is_session_active(key):
+            return (key, generation)
+    return None
+
+
+@router.get("/raw-logs/ws-token", responses=documented(m.WsToken, errors={401: None}))
 async def get_ws_token(request: Request):
     """
     Issue a one-time short-lived token for WebSocket authentication.
     This endpoint is protected by the existing HTTP auth middleware,
-    so only authenticated users can obtain a token.
+    so only authenticated users can obtain a token. The token carries how
+    the request was let in, and is refused when that is no longer current.
 
     MUST stay ``async`` (run on the event loop): it mutates the in-memory
     ``_ws_tokens`` store that the async WebSocket endpoint also reads/pops.
@@ -206,8 +225,10 @@ async def get_ws_token(request: Request):
     event loop and intermittently drops WebSocket connections under load.
     """
     _cleanup_expired_tokens()
+    authority = _admitted_authority(request)
+    if authority is None:
+        raise HTTPException(status_code=401, detail="Sign in again to open Live Logs")
     token = secrets.token_urlsafe(32)
-    authority = (session_key_from_request(request), auth_generation())
     _ws_tokens[token] = (time.time() + _WS_TOKEN_TTL, authority)
     return {"token": token, "ttl": _WS_TOKEN_TTL}
 

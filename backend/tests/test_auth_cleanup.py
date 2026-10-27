@@ -1,7 +1,6 @@
 """Expired authentication records are reclaimed without touching live records."""
 import asyncio
 from collections import deque
-from datetime import datetime, timedelta
 from app import auth, session
 
 
@@ -19,14 +18,17 @@ def test_cleanup_removes_idle_clients_and_keeps_recent_failures(monkeypatch, mod
 
 
 def test_cleanup_removes_expired_sessions_without_a_cookie_lookup(monkeypatch):
-    now = datetime.utcnow()
-    active = {"expires_at": (now + timedelta(hours=1)).isoformat()}
+    now = 1_000_000.0
+    monkeypatch.setattr(session, "_now", lambda: now)
+    monkeypatch.setattr(session, "_tombstones", session.OrderedDict())
+    active = {"login_at": now - 3600, "active_at": now, "issued_hours": 24}
     monkeypatch.setattr(session, "_session_store", {
-        "expired": {"expires_at": (now - timedelta(hours=1)).isoformat()},
+        "expired": {"login_at": now - 25 * 3600, "active_at": now, "issued_hours": 24},
         "active": active,
     })
     assert session.cleanup_expired_sessions() == 1
     assert session._session_store == {"active": active}
+    assert session._tombstones["expired"][0] == session.SESSION_EXPIRED
 
 
 def test_maintenance_runs_repeatedly_and_stops_on_context_exit(monkeypatch):

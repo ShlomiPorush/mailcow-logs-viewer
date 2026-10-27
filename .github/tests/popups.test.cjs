@@ -31,6 +31,12 @@ const BUILDERS = {
         attnWindowOpen: 'Needs attention: a window anchored under the bell on a wide screen, a sheet on a phone (NL-19)',
         showNavFlyout: "the sidebar's flyout of a page's tabs on hover (NL-8)",
     },
+    // It also runs on pages without utils.js (agent consent, API reference, device
+    // code), so it copies the frame of uiDialog and showToast instead of calling them
+    'session-guard.js': {
+        sessionGuardAsk: '"Are you still there?" before sign-out for inactivity, the frame of uiDialog',
+        sessionGuardNotice: 'the longest-session notice, the frame of showToast',
+    },
 };
 
 // Elements in index.html that float without being a shared dialog

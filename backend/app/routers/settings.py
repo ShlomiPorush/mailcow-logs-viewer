@@ -288,6 +288,21 @@ def _validate_agent_access(allowed: Dict[str, Any], current: Optional[Settings] 
             "Agent access needs Basic Auth or OAuth2 sign-in. Turn on sign-in, or turn off agent access."))
 
 
+def _validate_session_expiry(allowed: Dict[str, Any]) -> None:
+    """Refuse a longest session under one hour. It has no upper bound, and the
+    value in effect sent back as it is always saves (the page posts every key)."""
+    if "session_expiry_hours" not in allowed:
+        return
+    value = allowed["session_expiry_hours"]
+    if value == getattr(settings, "session_expiry_hours", None):
+        return
+    try:
+        if isinstance(value, bool) or int(str(value).strip()) < 1:
+            raise ValueError("Under one hour")
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="Invalid settings for: session_expiry_hours")
+
+
 def _validate_display_formats(allowed: Dict[str, Any]) -> None:
     """Refuse a date or time format nobody knows. The value in effect sent back
     as it is never blocks saving the other settings (the page posts every key)."""
@@ -902,6 +917,7 @@ def update_settings(body: Dict[str, Any], request: Request = None, response: Res
     _validate_display_formats(allowed)
     _validate_bounce_actions(allowed)
     _validate_agent_access(allowed)
+    _validate_session_expiry(allowed)
     # For sensitive keys, mask placeholder means "do not change" - omit from payload
     # Empty string means "clear this value" and should be kept
     for sk in _SENSITIVE_SETTING_KEYS:
@@ -1052,7 +1068,10 @@ def update_settings(body: Dict[str, Any], request: Request = None, response: Res
         if (operator_session and saved.is_authentication_enabled and response is not None
                 and isinstance(admitted, int) and admitted + 1 == revoked):
             try:
-                set_session_cookie(response, create_session(operator_session["user_info"], generation=revoked), request)
+                # The same session under a new key: its sign-in time, last
+                # activity and length carry over, so saving never extends it
+                set_session_cookie(response, create_session(operator_session["user_info"], generation=revoked,
+                                                            clocks=operator_session), request)
             except (SessionRevokedError, SessionCapacityError) as e:
                 logger.info(f"The operator who saved signs in again: {e}")
     # A feature switched off here should drop its data now, not at the next restart;

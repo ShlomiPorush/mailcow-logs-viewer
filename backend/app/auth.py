@@ -13,13 +13,13 @@ from typing import Dict, Deque, Optional
 from urllib.parse import quote, urlsplit, urlunsplit
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
-from starlette.responses import RedirectResponse, Response
+from starlette.responses import JSONResponse, RedirectResponse, Response
 from fastapi import HTTPException, status
 import secrets
 import base64
 
 from .config import settings
-from .session import auth_generation, get_session_from_request
+from .session import auth_generation, get_session_from_request, session_state
 from .agent_access import live as agent_live
 from .agent_access.context import agent_call
 
@@ -251,20 +251,37 @@ def safe_return_path(value: Optional[str]) -> str:
     return urlunsplit(("", "", parts.path, parts.query, parts.fragment))
 
 
-def _login_redirect(request: Request) -> Response:
+def _login_redirect(request: Request, reason: Optional[str] = None) -> Response:
     """Send a signed-out page request to the login page, keeping the page asked for.
 
     Done here rather than by the page's own script, so the browser never draws
-    the app before finding out there is no session.
+    the app before finding out there is no session. `reason` says why the
+    session ended (session.SESSION_EXPIRED or SESSION_IDLE).
     """
     target = request.url.path + (f"?{request.url.query}" if request.url.query else "")
-    url = "/login"
+    query = []
+    if reason:
+        query.append("reason=" + quote(reason, safe=""))
     if safe_return_path(target) != "/":
-        url += "?next=" + quote(target, safe="")
+        query.append("next=" + quote(target, safe=""))
+    url = "/login" + ("?" + "&".join(query) if query else "")
     return RedirectResponse(
         url=url,
         status_code=status.HTTP_302_FOUND,
         headers={"Cache-Control": "no-store"},
+    )
+
+
+SESSION_ENDED_DETAIL = "Your session ended. Sign in again."
+
+
+def session_ended_response(reason: str) -> JSONResponse:
+    """A call made with a session that a limit ended: 401 with the reason, in
+    the body and in X-Session-End, so the page can say why."""
+    return JSONResponse(
+        {"detail": SESSION_ENDED_DETAIL, "reason": reason},
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        headers={"X-Session-End": reason, "Cache-Control": "no-store"},
     )
 
 
@@ -280,6 +297,10 @@ class BasicAuthMiddleware(BaseHTTPMiddleware):
         # (also while sign-in is off): a login that ends after a sign-in
         # change gets no session (routers/auth.py)
         request.state.auth_generation = auth_generation()
+        # How the request was let in, for access that outlives it (the Live
+        # Logs token): ("session", key), ("basic", None) or ("open", None).
+        # Not set for an agent's call.
+        request.state.auth_admission = None
         path = request.url.path
 
         # Agent access answers 404 while it is not live, before any sign-in
@@ -302,21 +323,27 @@ class BasicAuthMiddleware(BaseHTTPMiddleware):
 
         # Skip authentication check if disabled
         if not settings.is_authentication_enabled:
+            request.state.auth_admission = ("open", None)
             return await call_next(request)
 
         # Agent endpoints that check their own credentials (a bearer token at
         # /mcp, PKCE or a device code at /oauth/token), publish discovery
         # documents, or serve the skill's files
         if path in AGENT_PUBLIC_PATHS or (request.method, path) in AGENT_PUBLIC_REQUESTS:
+            request.state.auth_admission = ("open", None)
             return await call_next(request)
         if request.method in ("GET", "HEAD") and (path == SKILL_PREFIX or path.startswith(SKILL_PREFIX + "/")
                                                   or path in MCP_NOTE_PATHS):
+            request.state.auth_admission = ("open", None)
             return await call_next(request)
 
         # Allow access to login page, static files, health check, info endpoint, and auth endpoints without authentication
         # Health check endpoint must be accessible for Docker health monitoring
         # Info endpoint is used to check if authentication is enabled
-        # Auth endpoints handle their own authentication
+        # Auth endpoints handle their own authentication: POST /api/auth/session
+        # checks the password itself every time, so a session cookie alone never
+        # gets a new session, and POST /api/auth/activity accepts only the
+        # request's own valid session
         # Exact paths only; /static/ is the one prefix (the frontend files).
         public_paths = {
             "/login",
@@ -325,9 +352,12 @@ class BasicAuthMiddleware(BaseHTTPMiddleware):
             "/api/auth/login",
             "/api/auth/callback",
             "/api/auth/provider-info",
+            "/api/auth/session",
+            "/api/auth/activity",
         }
 
         if path in public_paths or path.startswith("/static/"):
+            request.state.auth_admission = ("open", None)
             return await call_next(request)
         
         # A valid session cookie is accepted for both authentication methods:
@@ -335,9 +365,18 @@ class BasicAuthMiddleware(BaseHTTPMiddleware):
         # POST /api/auth/session. The cookie is HttpOnly, so no script in the
         # page can read it - which is why the password is never stored client
         # side any more.
-        session_data = get_session_from_request(request)
-        if session_data:
+        state = session_state(request)
+        if state.data is not None:
+            request.state.auth_admission = ("session", state.key)
             return await call_next(request)
+
+        # A session that a limit ended says why. A call that also carries
+        # Basic credentials is decided by them below.
+        if state.ended:
+            if not path.startswith("/api/"):
+                return _login_redirect(request, state.ended)
+            if not request.headers.get("Authorization", "").startswith("Basic "):
+                return session_ended_response(state.ended)
         
         # If OAuth2 is enabled but Basic Auth is not, require OAuth2
         if settings.is_oauth2_enabled and not settings.is_basic_auth_enabled:
@@ -400,4 +439,5 @@ class BasicAuthMiddleware(BaseHTTPMiddleware):
             )
         
         # Credentials are valid, proceed with request
+        request.state.auth_admission = ("basic", None)
         return await call_next(request)

@@ -125,7 +125,9 @@ The names are `netfilter` (Security), `queue`, `quarantine`, `suppressions`, `rs
 | `OAUTH2_REDIRECT_URI` | Unset | Callback address, exactly as registered with the provider, such as `https://logs.example.com/api/auth/callback`. |
 | `OAUTH2_SCOPES` | `openid profile email` | Scopes, separated by spaces. |
 | `SESSION_SECRET_KEY` | Empty | Signs the session cookie. Empty uses a temporary key for each run. Set a long random value, for example from `openssl rand -hex 32`. Sessions live in memory, so a restart signs everyone out either way. |
-| `SESSION_EXPIRY_HOURS` | `24` | |
+| `SESSION_EXPIRY_HOURS` | `24` | Longest session in hours, counted from sign-in whatever the activity. A shorter value applies to open sessions at once; a longer one from the next sign-in. |
+| `SESSION_IDLE_ENABLED` | `false` | Sign out a browser session after a period without activity. Only typing, clicking, scrolling with the wheel and touching count; pages that refresh by themselves do not. |
+| `SESSION_IDLE_TIMEOUT_MINUTES` | `60` | Minutes without activity before sign-out, from 5 to 1440. Used only when `SESSION_IDLE_ENABLED` is on. |
 | `SESSION_MAX_ENTRIES` | `50` | Most signed-in sessions at once, at least 1. When full, new sign-ins wait; existing sessions stay. |
 | `AGENT_ACCESS_ENABLED` | `false` | Lets AI agents connect over MCP after a signed-in person approves them. It needs sign-in and `AGENT_ACCESS_URL`. |
 | `AGENT_ACCESS_URL` | Empty | The address agents reach the app at, such as `https://logs.example.com`. It must be `https` without a path. `http` works only on `localhost` or `127.0.0.1`. |
