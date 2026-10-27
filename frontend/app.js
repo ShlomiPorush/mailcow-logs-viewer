@@ -662,18 +662,19 @@ async function loadAppInfo() {
         // With editing off the Settings page has no fields for the search to open
         window.settingsEditable = data.settings_edit_via_ui_enabled !== false;
 
-        // Load app version status for update check
-        await loadAppVersionStatus();
-
-        // Load mailcow connection status
-        await loadMailcowConnectionStatus();
+        // The update check asks GitHub and the connection check asks mailcow, which
+        // takes its whole timeout when it cannot be reached: the page the address
+        // names opens without waiting for either
+        loadAppVersionStatus();
+        const connectionChecked = loadMailcowConnectionStatus();
 
         // Sidebar counters and server card
         placeShellUtilities();
         window.matchMedia('(max-width: 760px)').addEventListener('change', placeShellUtilities);
         window.matchMedia('(max-width: 760px)').addEventListener('change', () => placeTopbar());
         watchTopbarCrumbs();
-        startNavCounters();
+        // The Status counter counts a mailcow that is not connected
+        connectionChecked.then(startNavCounters);
         // Needs attention, for the Dashboard and the bell on every page
         startAttention();
     } catch (error) {
