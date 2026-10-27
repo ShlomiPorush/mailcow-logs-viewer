@@ -139,11 +139,8 @@ def _end_reason(record: Dict[str, Any], now: float) -> Optional[str]:
 
 
 def _end(key: str, reason: str, now: float) -> None:
-    """Remove a session that a limit ended and remember why. The record is
-    marked too, so a copy of its clocks can never start it again (create_session)."""
-    record = _session_store.pop(key, None)
-    if record is not None:
-        record["ended"] = reason
+    """Remove a session that a limit ended and remember why."""
+    _session_store.pop(key, None)
     _tombstones.pop(key, None)
     _tombstones[key] = (reason, now + _TOMBSTONE_SECONDS)
     cap = max(0, int(settings.session_max_entries))
@@ -213,8 +210,7 @@ _config.set_settings_publisher(_publish_settings)
 
 # ── Sessions ───────────────────────────────────────────────────────────────
 
-def create_session(user_info: Dict[str, Any], *, generation: int,
-                   clocks: Optional[Dict[str, Any]] = None) -> str:
+def create_session(user_info: Dict[str, Any], *, generation: int) -> str:
     """
     Create a new session and return session ID
 
@@ -222,10 +218,6 @@ def create_session(user_info: Dict[str, Any], *, generation: int,
         user_info: User information from OAuth2 provider
         generation: auth_generation() when the request was admitted. A
             revocation since then refuses the session (SessionRevokedError).
-        clocks: Only for re-issuing the operator's session after a sign-in
-            settings change (routers/settings.py): the new session keeps the
-            old one's sign-in time, last activity and length. Every real
-            sign-in starts new clocks.
 
     Returns:
         Session ID (signed)
@@ -243,20 +235,11 @@ def create_session(user_info: Dict[str, Any], *, generation: int,
                 raise SessionCapacityError("Login capacity reached. Try again later.")
         session_id = secrets.token_urlsafe(32)
         now = _now()
-        if clocks is not None:
-            # A session that ended meanwhile, or that the settings in force end,
-            # is not re-issued: the operator signs in again
-            if clocks.get("ended") or _end_reason(clocks, now):
-                raise SessionRevokedError("The session ended before it could be re-issued")
-            login_at, active_at, issued_hours = clocks["login_at"], clocks["active_at"], clocks["issued_hours"]
-        else:
-            login_at, active_at, issued_hours = now, now, _longest_hours()
-
         _session_store[session_id] = {
             "user_info": user_info,
-            "login_at": login_at,
-            "active_at": active_at,
-            "issued_hours": issued_hours,
+            "login_at": now,
+            "active_at": now,
+            "issued_hours": _longest_hours(),
         }
 
         # Sign the session ID
@@ -311,14 +294,36 @@ def revoke_all_sessions() -> int:
     Returns the generation this revocation started. A session issued with it
     is refused once any later revocation has run.
     """
+    return revoke_all_sessions_keeping(None, None)[0]
+
+
+def revoke_all_sessions_keeping(keep: Optional[Dict[str, Any]], admitted: Optional[int]) -> Tuple[int, Optional[str]]:
+    """revoke_all_sessions, keeping one session under a new key: the operator
+    who saved a sign-in change stays signed in (routers/settings.py).
+
+    Done in the same step as the revocation, so the kept session is never out
+    of the store where a limit can end it. It is kept only while it is still
+    there and valid, and only when no other revocation ran since its request
+    was let in (`admitted`). It keeps its sign-in time, last activity and
+    length, so saving never extends it. Returns the generation this revocation
+    started and the kept session's signed ID, or None.
+    """
     global _auth_generation
     with _session_lock:
+        key = next((k for k, record in _session_store.items() if record is keep), None) if keep is not None else None
+        if key is not None and (admitted != _auth_generation or _check(key).data is None):
+            key = None
         count = len(_session_store)
         _session_store.clear()
         _auth_generation += 1
         generation = _auth_generation
+        signed = None
+        if key is not None:
+            new_key = secrets.token_urlsafe(32)
+            _session_store[new_key] = keep
+            signed = get_serializer().dumps(new_key)
     logger.info(f"Revoked {count} session(s) after an authentication settings change")
-    return generation
+    return generation, signed
 
 
 def auth_generation() -> int:

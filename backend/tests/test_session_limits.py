@@ -413,16 +413,45 @@ def test_time_left_is_rounded_up_so_zero_means_ended(clock):
     assert client.get("/api/auth/status").json()["session"]["longest_seconds_left"] == 1
 
 
-def test_a_session_a_shorter_setting_ended_is_not_re_issued_after_a_longer_one(clock, store):
+def test_a_session_a_shorter_setting_ended_is_not_kept_after_a_longer_one(clock, store):
     operator = signed_in()
-    record = session._session_store[_key(operator)]
+    record, admitted = session._session_store[_key(operator)], session.auth_generation()
     clock["t"] += 2 * HOUR
-    # One save shortens the limit (and revokes, as a password change does) ...
+    # One save shortens the limit, another lengthens it again before the first
+    # revokes and keeps the operator's session
     store.update({"session_expiry_hours": 1})
     cfg.reload_settings(object())
-    session.revoke_all_sessions()
-    # ... another lengthens it again before the first re-issues the operator's session
     store.update({"session_expiry_hours": 24})
     cfg.reload_settings(object())
-    with pytest.raises(session.SessionRevokedError):
-        session.create_session(record["user_info"], generation=session.auth_generation(), clocks=record)
+    assert session.revoke_all_sessions_keeping(record, admitted)[1] is None
+    assert not session._session_store
+
+
+def test_the_kept_session_is_never_out_of_the_store(clock):
+    operator = signed_in()
+    record, admitted = session._session_store[_key(operator)], session.auth_generation()
+    generation, kept = session.revoke_all_sessions_keeping(record, admitted)
+    assert generation == admitted + 1 and kept
+    assert list(session._session_store.values()) == [record]
+    # A revocation since the request was let in ends it too
+    other = signed_in()
+    late = session._session_store[_key(other)]
+    assert session.revoke_all_sessions_keeping(late, admitted)[1] is None
+    assert not session._session_store
+
+
+def test_a_session_that_reaches_a_shorter_limit_while_the_save_finishes_is_not_kept(clock, store, monkeypatch):
+    from app.agent_access import store as agent_store
+    operator = signed_in()
+    clock["t"] += HOUR - 1
+
+    def later_change(db):
+        # After this save's revocation the hour passes, and another save lengthens the limit
+        clock["t"] += 2
+        store.update({"session_expiry_hours": 24})
+        cfg.reload_settings(object())
+
+    monkeypatch.setattr(agent_store, "check_sign_in_unchanged", later_change)
+    response = _save(operator, {"auth_password": "new-test-password", "session_expiry_hours": 1})
+    assert session.SESSION_COOKIE_NAME + "=" not in response.headers.get("set-cookie", "")
+    assert not session._session_store

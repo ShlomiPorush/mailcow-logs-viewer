@@ -34,8 +34,7 @@ from ..services.geoip_downloader import is_license_configured, get_geoip_status
 from .domains import get_cached_server_ip
 from ..mailcow_api import mailcow_api, MailcowAPIError
 from ..services.oauth2_client import oauth2_client
-from ..session import get_session_from_request, create_session, set_session_cookie, revoke_all_sessions
-from ..session import SessionCapacityError, SessionRevokedError
+from ..session import get_session, get_session_from_request, set_session_cookie, revoke_all_sessions_keeping
 
 from ..utils import format_datetime_for_api as format_datetime_utc
 from ..api_models import Invalid, documented
@@ -1069,7 +1068,14 @@ def update_settings(body: Dict[str, Any], request: Request = None, response: Res
     # login let in after the revocation below must not finish with the old one
     oauth2_client.reload_config()
     if _session_bound_values(saved) != prev_sign_in:
-        revoked = revoke_all_sessions()
+        # Keep the operator who saved signed in: the same session under a new key,
+        # in the same step as the revocation (session.py). Only when this save's
+        # revocation is the one change since the request was let in, and only while
+        # the session is still valid; a later revocation ends it too.
+        admitted = getattr(getattr(request, "state", None), "auth_generation", None)
+        keep = operator_session if (operator_session and saved.is_authentication_enabled
+                                    and response is not None and isinstance(admitted, int)) else None
+        kept = revoke_all_sessions_keeping(keep, admitted)[1]
         # Connected agents end with the sessions, for good (agent_access/store.py).
         # Should this fail, every agent request repeats the check before it runs.
         try:
@@ -1077,19 +1083,11 @@ def update_settings(body: Dict[str, Any], request: Request = None, response: Res
             check_sign_in_unchanged(db)
         except Exception as e:
             logger.error(f"Could not disconnect agents after the sign-in change: {e}")
-        # Keep the operator who saved signed in, with a session issued under the new settings.
-        # Only when this save's revocation is the one change since the request was
-        # let in, and no later one ran meanwhile: otherwise that change ends it too.
-        admitted = getattr(getattr(request, "state", None), "auth_generation", None)
-        if (operator_session and saved.is_authentication_enabled and response is not None
-                and isinstance(admitted, int) and admitted + 1 == revoked):
-            try:
-                # The same session under a new key: its sign-in time, last
-                # activity and length carry over, so saving never extends it
-                set_session_cookie(response, create_session(operator_session["user_info"], generation=revoked,
-                                                            clocks=operator_session), request)
-            except (SessionRevokedError, SessionCapacityError) as e:
-                logger.info(f"The operator who saved signs in again: {e}")
+        # The cookie only for a kept session still alive (another change may have ended it meanwhile)
+        if kept and get_session(kept) is not None:
+            set_session_cookie(response, kept, request)
+        elif keep is not None:
+            logger.info("The operator who saved signs in again")
     # A feature switched off here should drop its data now, not at the next restart;
     # the sweep then takes Security's temporary bans out, or loads the Suppressions feature's blocks back
     feature_data_errors = cleanup_disabled_feature_data(db)

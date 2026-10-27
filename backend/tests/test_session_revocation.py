@@ -279,13 +279,13 @@ def test_the_oauth2_client_takes_the_new_provider_before_new_sessions_begin(monk
         monkeypatch.setattr(client, name, getattr(client, name, None), raising=False)
     monkeypatch.setattr(client, "reload_config", type(client).reload_config.__get__(client))
     token_url_at_revocation = []
-    revoke = settings_router.revoke_all_sessions
+    revoke = settings_router.revoke_all_sessions_keeping
 
-    def note_then_revoke():
+    def note_then_revoke(*args):
         token_url_at_revocation.append(client.token_url)
-        return revoke()
+        return revoke(*args)
 
-    monkeypatch.setattr(settings_router, "revoke_all_sessions", note_then_revoke)
+    monkeypatch.setattr(settings_router, "revoke_all_sessions_keeping", note_then_revoke)
     operator = signed_in()
     response = operator.put("/api/settings", json={"oauth2_token_url": "https://id.example.test/new-token"})
     assert response.status_code == 200
