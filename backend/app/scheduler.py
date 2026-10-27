@@ -19,7 +19,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 
 from .app_time import UTC, app_tz, format_clock
-from .config import settings, set_cached_active_domains, local_domains_complete, is_hosted_domain
+from .config import settings, set_cached_active_domains, get_cached_active_domains, local_domains_complete, is_hosted_domain
 from .database import get_db_context, SessionLocal
 from .mailcow_api import MailcowWriteUnknownError, mailcow_api, mailcow_handled_items
 from .services.suppression_events import disabled_by_hand, record_bounces, record_stuck
@@ -42,7 +42,7 @@ from .services.dovecot_parser import (
     pick_worst_verdict,
     resolve_session_verdicts,
 )
-from .routers.domains import check_domain_dns, store_dns_check_worker
+from .routers.domains import check_domain_dns, store_dns_check_worker, init_server_ip
 from .routers.suppressions import auto_suppression_address, AUTOMATIC_SOURCES, RSPAMD_SOURCE
 from .services.dmarc_imap_service import sync_dmarc_reports_from_imap
 from .services.dmarc_notifications import send_dmarc_error_notification
@@ -2686,8 +2686,11 @@ async def sync_local_domains():
             return True
         else:
             # mailcow answered that it has none: the list is read (the jobs
-            # waiting for it go on), and Status still shows the sync failed
-            set_cached_active_domains([], complete_for=complete_for, hosted=hosted)
+            # waiting for it go on), and Status still shows the sync failed.
+            # A list this mailcow gave before is kept: an empty answer for a
+            # moment (while mailcow starts) would store every direction wrong.
+            if not (local_domains_complete(source) and get_cached_active_domains()):
+                set_cached_active_domains([], complete_for=complete_for, hosted=hosted)
             logger.warning("⚠ No active domains retrieved")
             update_job_status('sync_local_domains', 'failed', "No domains")
             return False
@@ -4179,6 +4182,17 @@ def start_scheduler():
             replace_existing=True,
             max_instances=1,
             next_run_time=datetime.now(timezone.utc)
+        )
+
+        # The server IP for the pages that show it (Settings, the blacklist
+        # summary), read once soon after startup instead of during it; the
+        # jobs that need it read it themselves
+        scheduler.add_job(
+            init_server_ip,
+            'date',
+            run_date=datetime.now(timezone.utc) + timedelta(seconds=5),
+            id='server_ip_startup',
+            name='Server IP (Startup)'
         )
 
         # Job 11: Update GeoIP database (weekly, Sunday at 3 AM)

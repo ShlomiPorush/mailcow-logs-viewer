@@ -131,7 +131,7 @@ class MailcowWriteUnknownError(MailcowShownError):
 class MailcowUnreachableError(MailcowShownError):
     """mailcow could not be connected to a moment ago, so this request was not
     sent: the page fails at once instead of waiting for the same failure."""
-    MESSAGE = "mailcow cannot be reached"
+    MESSAGE = "mailcow cannot be reached. It is tried again within 30 seconds."
 
     def __init__(self):
         super().__init__(self.MESSAGE, transient=True)

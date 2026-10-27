@@ -25,7 +25,7 @@ from app.mailcow_api import MailcowAPIError, MailcowUnreachableError, MailcowWri
 from app.routers import domains
 
 URL = "https://mail.example.com"
-UNREACHABLE = "mailcow cannot be reached"
+UNREACHABLE = "mailcow cannot be reached. It is tried again within 30 seconds."
 
 
 @pytest.fixture()
@@ -509,6 +509,10 @@ def test_a_refused_write_key_cannot_pass():
 # ---------- startup ----------
 
 def test_startup_does_not_ask_mailcow(mailcow, monkeypatch):
+    # app.main mounts the frontend folder of the image, which a test run does not have
+    import starlette.staticfiles as sf
+    real_init = sf.StaticFiles.__init__
+    monkeypatch.setattr(sf.StaticFiles, "__init__", lambda s, *a, **k: real_init(s, *a, **{**k, "check_dir": False}))
     from app import main, migrations
     mailcow["answer"] = _raise(httpx.ConnectError)
     monkeypatch.setattr(settings._inner, "edit_settings_via_ui_enabled", False)
@@ -646,6 +650,26 @@ def test_a_mailcow_without_domains_lets_the_rspamd_import_run(domain_cache, monk
     domain_cache.assert_awaited_once_with("rspamd-history")
     # Still a failed sync on the Status page, as before
     scheduler.update_job_status.assert_any_call("sync_local_domains", "failed", "No domains")
+
+
+def test_an_empty_answer_keeps_the_domains_this_mailcow_gave_before(domain_cache, monkeypatch):
+    """mailcow may answer {} for a moment while it starts: the list it gave
+    before stays, or every direction would be stored wrong until the next sync."""
+    url = scheduler.mailcow_api.base_url
+    config.set_cached_active_domains(["example.com"], complete_for=url)
+    _domain_answers(monkeypatch, {}, {})
+    run(scheduler.sync_local_domains())
+    assert config.get_cached_active_domains() == ["example.com"]
+    assert config.local_domains_complete(url)
+    scheduler.update_job_status.assert_any_call("sync_local_domains", "failed", "No domains")
+
+
+def test_an_empty_answer_replaces_a_list_of_another_mailcow(domain_cache, monkeypatch):
+    config.set_cached_active_domains(["example.org"], complete_for="https://old.example.net")
+    _domain_answers(monkeypatch, {}, {})
+    run(scheduler.sync_local_domains())
+    assert config.get_cached_active_domains() == []
+    assert config.local_domains_complete(scheduler.mailcow_api.base_url)
 
 
 def test_domains_read_once_are_not_read_again(domain_cache, monkeypatch):
