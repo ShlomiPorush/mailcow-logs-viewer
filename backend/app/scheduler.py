@@ -2691,7 +2691,8 @@ async def sync_local_domains():
             # hosts too: an empty answer for a moment (while mailcow starts)
             # would store every direction wrong and let the queue cleanup
             # delete mail waiting for a hosted domain.
-            if not (local_domains_complete(source) and cached_domains_known()):
+            # An answer that lists only domains turned off is used as it is.
+            if hosted or not (local_domains_complete(source) and cached_domains_known()):
                 set_cached_active_domains([], complete_for=complete_for, hosted=hosted)
             logger.warning("⚠ No active domains retrieved")
             update_job_status('sync_local_domains', 'failed', "No domains")

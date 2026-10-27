@@ -192,7 +192,10 @@ class _Reachability:
             state = self._down.get(origin)
             if state is None:
                 return origin, generation, None
-            if state["probe"] is not None or time.monotonic() < state["until"]:
+            # Only a client of the current settings may be the probe: the
+            # outcome of an older one is ignored, so it would never free it
+            if (state["probe"] is not None or time.monotonic() < state["until"]
+                    or generation != self._generation):
                 raise MailcowUnreachableError()
             token = object()
             state["probe"] = token

@@ -391,6 +391,30 @@ def test_a_client_made_before_a_settings_change_does_not_refuse_the_new_settings
     run(scenario())
 
 
+def test_a_client_of_old_settings_never_holds_the_probe(mailcow, monkeypatch, clock):
+    """A client made before a settings change reaches its first request only
+    after the new settings failed and their cooldown ended: it must not take
+    the probe, whose outcome would then be ignored and never free it."""
+    api = _api()
+
+    async def scenario():
+        old = api._get_client()
+        monkeypatch.setattr(settings._inner, "mailcow_api_verify_ssl", not api.verify_ssl)
+        api.reload_config()
+        mailcow["answer"] = _raise(httpx.ConnectError)
+        with pytest.raises(MailcowAPIError):
+            await _read(api)
+        clock["t"] += 31
+        with pytest.raises(MailcowUnreachableError):
+            with api._attempt(old, URL + "/api/v1/get/logs/postfix/1"):
+                pass
+        mailcow["answer"] = lambda request: httpx.Response(200, json=[])
+        assert await _read(api) == [], "the probe of the current settings goes out"
+        await api.aclose()
+
+    run(scenario())
+
+
 def test_an_unrelated_settings_save_keeps_mailcow_refused(mailcow, monkeypatch):
     mailcow["answer"] = _raise(httpx.ConnectError)
     api = _api()
@@ -698,6 +722,16 @@ def test_an_empty_answer_keeps_the_domains_this_mailcow_only_hosts(domain_cache,
     run(scheduler.sync_local_domains())
     assert scheduler._left_alone(["user@retired.test"])
     assert config.local_domains_complete(scheduler.mailcow_api.base_url)
+
+
+def test_an_answer_with_only_domains_turned_off_is_used_as_it_is(domain_cache, monkeypatch):
+    _domain_answers(monkeypatch, [{"domain_name": "retired.test", "active": 0}], {})
+    run(scheduler.sync_local_domains())
+    _domain_answers(monkeypatch, [{"domain_name": "retired.test", "active": 0},
+                                  {"domain_name": "newly-disabled.test", "active": 0}], {})
+    run(scheduler.sync_local_domains())
+    assert scheduler._left_alone(["user@newly-disabled.test"])
+    assert scheduler._left_alone(["user@retired.test"])
 
 
 def test_an_empty_answer_replaces_a_list_of_another_mailcow(domain_cache, monkeypatch):
