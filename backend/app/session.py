@@ -186,9 +186,10 @@ def _publish_settings(new: Any, assign: Callable[[], None]) -> None:
     """Put new settings in force (config.reload_settings) under the session lock.
 
     Sessions that ended under the settings in force stay ended, whatever the
-    new ones say. When sign-out after inactivity is switched on, every session
-    still valid starts its idle time now, not from its last activity under a
-    policy that did not count it.
+    new ones say, and so do sessions the new settings end: a shorter limit
+    ends them now, so a later longer one cannot bring them back. When sign-out
+    after inactivity is switched on, every session still valid starts its idle
+    time now, not from its last activity under a policy that did not count it.
     """
     with _session_lock:
         now = _now()
@@ -201,6 +202,10 @@ def _publish_settings(new: Any, assign: Callable[[], None]) -> None:
         if not idle_was_on and bool(getattr(new, "session_idle_enabled", False)):
             for record in _session_store.values():
                 record["active_at"] = now
+        for key in list(_session_store):
+            reason = _end_reason(_session_store[key], now)
+            if reason:
+                _end(key, reason, now)
 
 
 _config.set_settings_publisher(_publish_settings)

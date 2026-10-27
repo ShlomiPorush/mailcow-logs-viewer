@@ -411,3 +411,18 @@ def test_time_left_is_rounded_up_so_zero_means_ended(clock):
     client = signed_in()
     clock["t"] += 24 * HOUR - 0.5
     assert client.get("/api/auth/status").json()["session"]["longest_seconds_left"] == 1
+
+
+def test_a_session_a_shorter_setting_ended_is_not_re_issued_after_a_longer_one(clock, store):
+    operator = signed_in()
+    record = session._session_store[_key(operator)]
+    clock["t"] += 2 * HOUR
+    # One save shortens the limit (and revokes, as a password change does) ...
+    store.update({"session_expiry_hours": 1})
+    cfg.reload_settings(object())
+    session.revoke_all_sessions()
+    # ... another lengthens it again before the first re-issues the operator's session
+    store.update({"session_expiry_hours": 24})
+    cfg.reload_settings(object())
+    with pytest.raises(session.SessionRevokedError):
+        session.create_session(record["user_info"], generation=session.auth_generation(), clocks=record)

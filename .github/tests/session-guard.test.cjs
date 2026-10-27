@@ -73,9 +73,10 @@ test('which limit ended, from the server or from the local clock', () => {
     assert.equal(g.sessionGuardEndedBy(session({ idle_seconds_left: 0 })), 'session_idle');
     assert.equal(g.sessionGuardEndedBy(session({ longest_seconds_left: 0 })), 'session_expired');
     assert.equal(g.sessionGuardEndedBy(session({ idle_enabled: false, idle_seconds_left: null, longest_seconds_left: 10 })), '');
-    assert.equal(g.sessionGuardGuessReason(state({ idleEnabled: true, idleAt: 500, longestAt: 9000 }), 1000), 'session_idle');
     assert.equal(g.sessionGuardGuessReason(state({ longestAt: 500 }), 1000), 'session_expired');
-    // Signed out elsewhere, or the server restarted: no reason to give
+    // Signed out elsewhere, or the server restarted: no reason to give, even
+    // when the idle time has passed here (an idle end comes with its reason)
+    assert.equal(g.sessionGuardGuessReason(state({ idleEnabled: true, idleAt: 500, longestAt: 9000 }), 1000), '');
     assert.equal(g.sessionGuardGuessReason(state({ idleEnabled: true, idleAt: 5000, longestAt: 9000 }), 1000), '');
 });
 
@@ -184,4 +185,21 @@ test('a 401 without a reason after the longest session ended here says so', asyn
     assert.equal(await ctx.sessionGuardReasonOf(bare), 'session_expired');
     st.longestAt = Date.now() + 60000;
     assert.equal(await ctx.sessionGuardReasonOf(bare), '');
+});
+
+test('a late confirmation never undoes a newer answer', async () => {
+    const left = [];
+    const { ctx, st } = guardWith([], left);
+    let release;
+    ctx.fetch = () => new Promise(resolve => { release = resolve; });
+    // An ended answer: the confirmation goes out and waits
+    ctx.sessionGuardHandle({ seq: ++st.seq, kind: 'ended', reason: '' });
+    // A newer check sees the session alive (the cookie was replaced meanwhile)
+    st.seq += 1;
+    ctx.sessionGuardHandle({ seq: st.seq, kind: 'ok', session: session({ idle_enabled: false, idle_seconds_left: null, idle_timeout_seconds: null }) });
+    // Then the confirmation, sent with the old cookie, answers 401
+    release({ status: 401, ok: false, headers: { get: () => 'session_idle' }, json: async () => ({ reason: 'session_idle' }), clone() { return this; } });
+    await settle();
+    assert.deepEqual(left, []);
+    assert.equal(st.leaving, false);
 });

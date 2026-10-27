@@ -97,12 +97,12 @@ function sessionGuardEndedBy(session) {
     return '';
 }
 
-// A session that ended without a reason from the server: the limit whose time
-// has passed here, if one has ('' otherwise: signed out elsewhere, a restart)
+// A session that ended without a reason from the server: the longest session,
+// when its time has passed here. The browser drops the cookie then, so the
+// server cannot say it. An idle end always comes with its reason, so a passed
+// idle time here proves nothing (signed out elsewhere, a restart): ''
 function sessionGuardGuessReason(state, now) {
-    if (state.idleEnabled && state.idleAt !== null && state.idleAt <= now) return 'session_idle';
-    if (state.longestAt !== null && state.longestAt <= now) return 'session_expired';
-    return '';
+    return state.longestAt !== null && state.longestAt <= now ? 'session_expired' : '';
 }
 
 // When to report activity: null nothing to report, 0 now, else in so many ms.
@@ -229,7 +229,7 @@ function sessionGuardHandle(answer) {
 async function sessionGuardConfirmEnd(reason) {
     const state = sessionGuardState;
     const again = await sessionGuardSend('/api/auth/status', 'GET');
-    if (!state.active || state.leaving) return;
+    if (!state.active || state.leaving || again.seq <= state.applied) return;
     if (again.kind === 'ended') {
         sessionGuardLeave(again.reason || reason || sessionGuardGuessReason(state, Date.now()));
     } else if (again.kind === 'retry') {
