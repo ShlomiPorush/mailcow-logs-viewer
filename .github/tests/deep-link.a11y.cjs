@@ -26,7 +26,9 @@ const INFO = { app_title: 'mailcow Logs Viewer', version: '3.0.0', auth_enabled:
 const answer = body => ({ ok: true, status: 200, headers: { get: () => null }, json: async () => body, clone() { return this; } });
 
 // Sign-in and /api/info answer at once. The mailcow connection and app version
-// checks answer only when the test releases them; every other request never does.
+// checks answer only when the test releases them (every request to one of them
+// at once); every other request never does. jsdom fires DOMContentLoaded itself
+// once the scripts below have run.
 function boot(address) {
     const dom = new JSDOM(markup, { runScripts: 'dangerously', pretendToBeVisual: true,
         url: `http://localhost${address}`, virtualConsole: new VirtualConsole() });
@@ -40,7 +42,14 @@ function boot(address) {
         if (u.startsWith('/api/info')) return Promise.resolve(answer(INFO));
         if (u.startsWith('/api/auth/status')) return Promise.resolve(answer({ authenticated: true, auth_type: 'basic' }));
         const slow = u.match(/^\/api\/status\/(mailcow-connection|app-version)$/);
-        if (slow) return new Promise(resolve => { held[slow[1]] = body => resolve(answer(body)); });
+        if (slow) {
+            if (!held[slow[1]]) {
+                let release;
+                const answered = new Promise(resolve => { release = body => resolve(answer(body)); });
+                held[slow[1]] = Object.assign(release, { answered });
+            }
+            return held[slow[1]].answered;
+        }
         return new Promise(() => {});
     };
     for (const name of scripts) {
@@ -48,7 +57,6 @@ function boot(address) {
         script.textContent = read(name);
         w.document.body.appendChild(script);
     }
-    w.document.dispatchEvent(new w.Event('DOMContentLoaded'));
     return { w, asked, held, close: () => w.close() };
 }
 
