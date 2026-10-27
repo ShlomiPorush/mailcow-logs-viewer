@@ -176,18 +176,27 @@ class _Reachability:
             self._down.clear()
             self._generation += 1
 
-    def admit(self, url: str) -> tuple:
-        """Let one network attempt to `url` go, or raise MailcowUnreachableError."""
+    @property
+    def generation(self) -> int:
+        with self._lock:
+            return self._generation
+
+    def admit(self, url: str, generation: Optional[int] = None) -> tuple:
+        """Let one network attempt to `url` go, or raise MailcowUnreachableError.
+        generation: that of the client making it, when it was made before a
+        reset (its outcome then counts for nothing)."""
         origin = _origin(url)
         with self._lock:
+            if generation is None:
+                generation = self._generation
             state = self._down.get(origin)
             if state is None:
-                return origin, self._generation, None
+                return origin, generation, None
             if state["probe"] is not None or time.monotonic() < state["until"]:
                 raise MailcowUnreachableError()
             token = object()
             state["probe"] = token
-            return origin, self._generation, token
+            return origin, generation, token
 
     def record(self, ticket: tuple, outcome: Optional[str]) -> None:
         """outcome: "unreachable", "reachable", or None when the attempt tells neither."""
@@ -208,9 +217,9 @@ class _Reachability:
                 state["probe"] = None
 
     @contextmanager
-    def attempt(self, url: str):
+    def attempt(self, url: str, generation: Optional[int] = None):
         """Around one network attempt: admission first, its outcome always recorded."""
-        ticket = self.admit(url)
+        ticket = self.admit(url, generation)
         outcome = None
         try:
             yield
@@ -250,7 +259,13 @@ class MailcowAPI:
     def _get_client(self) -> httpx.AsyncClient:
         """Return the persistent client for the running event loop."""
         loop = asyncio.get_running_loop()
+        # Read before the connection settings: a client made while Settings
+        # change them is replaced, and its outcomes count for nothing
+        generation = self._reachability.generation
         client = self._clients.get(loop)
+        if client is not None and not client.is_closed and getattr(client, "_mlv_generation", None) != generation:
+            loop.call_later(30, lambda c=client: loop.create_task(c.aclose()))
+            client = None
         if client is None or client.is_closed:
             client = httpx.AsyncClient(
                 # A connection that is not made within seconds will not be
@@ -269,8 +284,13 @@ class MailcowAPI:
                                     max_keepalive_connections=10,
                                     keepalive_expiry=300),
             )
+            client._mlv_generation = generation
             self._clients[loop] = client
         return client
+
+    def _attempt(self, client: httpx.AsyncClient, url: str):
+        """One network attempt of `client` to `url`, through the reachability check."""
+        return self._reachability.attempt(url, getattr(client, "_mlv_generation", None))
 
     def _discard_client(self, client: httpx.AsyncClient) -> None:
         """Stop using a client mailcow refused (401, 403) or dropped, so the next
@@ -328,10 +348,10 @@ class MailcowAPI:
         old_conn = (self.timeout, self.verify_ssl)
         self._update_config()
         if old_conn != (self.timeout, self.verify_ssl) or old_url != self.base_url:
-            self._drop_clients()
             # A new address or connection setting is tried at once; requests
             # still running on the old ones change nothing
             self._reachability.reset()
+            self._drop_clients()
         if old_url != self.base_url:
             logger.info(f"mailcow API client configuration reloaded: {old_url} -> {self.base_url}")
     
@@ -365,7 +385,7 @@ class MailcowAPI:
         
         client = self._get_client()
         try:
-            with self._reachability.attempt(url):
+            with self._attempt(client, url):
                 response = await client.request(
                     method=method,
                     url=url,
@@ -443,7 +463,7 @@ class MailcowAPI:
 
         client = self._get_client()
         try:
-            with self._reachability.attempt(url):
+            with self._attempt(client, url):
                 response = await client.request(
                     method,
                     url,
@@ -505,7 +525,7 @@ class MailcowAPI:
         client = self._get_client()
         url = f"{self.base_url}/api/v1/edit/mlv-key-check"
         try:
-            with self._reachability.attempt(url):
+            with self._attempt(client, url):
                 response = await client.post(url, headers=self.headers_rw, json={"items": [], "attr": {}})
         except MailcowUnreachableError:
             logger.warning("Read-Write API key check not sent: mailcow could not be connected to a moment ago")
@@ -547,7 +567,7 @@ class MailcowAPI:
         client = self._get_client()
         url = self._rspamd_url("/rspamd/auth")
         try:
-            with self._reachability.attempt(url):
+            with self._attempt(client, url):
                 response = await client.get(url, headers={"Password": settings.rspamd_password})
         except MailcowUnreachableError:
             logger.warning("Rspamd password check not sent: Rspamd could not be connected to a moment ago")
@@ -1769,7 +1789,7 @@ class MailcowAPI:
         
         client = self._get_client()
         try:
-            with self._reachability.attempt(url):
+            with self._attempt(client, url):
                 response = await client.get(
                     url,
                     params={"id": item_id},
@@ -1830,7 +1850,7 @@ class MailcowAPI:
         
         client = self._get_client()
         try:
-            with self._reachability.attempt(url):
+            with self._attempt(client, url):
                 response = await client.request(method, url, headers=headers, **kwargs)
 
             if response.status_code == 401 or response.status_code == 403:

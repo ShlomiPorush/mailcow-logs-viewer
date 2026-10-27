@@ -368,6 +368,29 @@ def test_a_changed_timeout_tries_at_once(mailcow, monkeypatch):
     run(scenario())
 
 
+def test_a_client_made_before_a_settings_change_does_not_refuse_the_new_settings(mailcow, monkeypatch):
+    """The client was made with the old SSL setting, then Settings corrected
+    it (from a worker thread) before the client's request was admitted: its
+    failure must not refuse the corrected setting, and it is not used again."""
+    api = _api()
+
+    async def scenario():
+        old = api._get_client()
+        changed = threading.Thread(target=lambda: (
+            monkeypatch.setattr(settings._inner, "mailcow_api_verify_ssl", not api.verify_ssl),
+            api.reload_config()))
+        changed.start()
+        changed.join()
+        with pytest.raises(httpx.ConnectError):
+            with api._attempt(old, URL + "/api/v1/get/logs/postfix/1"):
+                raise httpx.ConnectError("certificate verify failed")
+        assert api._get_client() is not old, "a client of the old settings is replaced"
+        assert await _read(api) == [{"ok": True}]
+        await api.aclose()
+
+    run(scenario())
+
+
 def test_an_unrelated_settings_save_keeps_mailcow_refused(mailcow, monkeypatch):
     mailcow["answer"] = _raise(httpx.ConnectError)
     api = _api()
@@ -662,6 +685,19 @@ def test_an_empty_answer_keeps_the_domains_this_mailcow_gave_before(domain_cache
     assert config.get_cached_active_domains() == ["example.com"]
     assert config.local_domains_complete(url)
     scheduler.update_job_status.assert_any_call("sync_local_domains", "failed", "No domains")
+
+
+def test_an_empty_answer_keeps_the_domains_this_mailcow_only_hosts(domain_cache, monkeypatch):
+    """A mailcow whose only domain is turned off still hosts it: mail for it
+    waiting in the queue must stay out of the automatic cleanup after an
+    empty answer."""
+    _domain_answers(monkeypatch, [{"domain_name": "retired.test", "active": 0}], {})
+    run(scheduler.sync_local_domains())
+    assert scheduler._left_alone(["user@retired.test"])
+    _domain_answers(monkeypatch, {}, {})
+    run(scheduler.sync_local_domains())
+    assert scheduler._left_alone(["user@retired.test"])
+    assert config.local_domains_complete(scheduler.mailcow_api.base_url)
 
 
 def test_an_empty_answer_replaces_a_list_of_another_mailcow(domain_cache, monkeypatch):

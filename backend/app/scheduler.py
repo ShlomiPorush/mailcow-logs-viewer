@@ -19,7 +19,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 
 from .app_time import UTC, app_tz, format_clock
-from .config import settings, set_cached_active_domains, get_cached_active_domains, local_domains_complete, is_hosted_domain
+from .config import settings, set_cached_active_domains, cached_domains_known, local_domains_complete, is_hosted_domain
 from .database import get_db_context, SessionLocal
 from .mailcow_api import MailcowWriteUnknownError, mailcow_api, mailcow_handled_items
 from .services.suppression_events import disabled_by_hand, record_bounces, record_stuck
@@ -2687,9 +2687,11 @@ async def sync_local_domains():
         else:
             # mailcow answered that it has none: the list is read (the jobs
             # waiting for it go on), and Status still shows the sync failed.
-            # A list this mailcow gave before is kept: an empty answer for a
-            # moment (while mailcow starts) would store every direction wrong.
-            if not (local_domains_complete(source) and get_cached_active_domains()):
+            # A list this mailcow gave before is kept, the domains it only
+            # hosts too: an empty answer for a moment (while mailcow starts)
+            # would store every direction wrong and let the queue cleanup
+            # delete mail waiting for a hosted domain.
+            if not (local_domains_complete(source) and cached_domains_known()):
                 set_cached_active_domains([], complete_for=complete_for, hosted=hosted)
             logger.warning("⚠ No active domains retrieved")
             update_job_status('sync_local_domains', 'failed', "No domains")
