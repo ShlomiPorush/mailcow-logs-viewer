@@ -251,10 +251,14 @@ def test_the_dns_check_says_whether_its_failure_can_pass(features, monkeypatch, 
 
 
 def _credentials(monkeypatch, answers):
-    """answers: name -> a list of check answers, one per run (None: not set)."""
+    """answers: name -> a list of check answers, one per run (None: not set);
+    an exception in the list is raised by that run."""
     def check(name):
         async def answer():
-            return answers[name].pop(0)
+            result = answers[name].pop(0)
+            if isinstance(result, Exception):
+                raise result
+            return result
         return answer
     monkeypatch.setattr(settings_router, '_CREDENTIAL_CHECKS', {
         name: {'configured': (lambda n=name: answers[n] is not None), 'fingerprint': lambda n=name: f'fp-{n}',
@@ -292,6 +296,17 @@ def test_the_credential_check_runs_again_only_when_the_server_could_not_answer(m
     run(scheduler.check_credentials_job())
     state = scheduler.job_status['check_credentials']
     assert (state['status'], state['retryable']) == ('failed', retryable)
+
+
+def test_a_check_that_broke_off_is_never_retried_early(monkeypatch):
+    """The Read-Write key check may have been answered with a refusal before it
+    broke off (saving its result failed, say): retried every five minutes it
+    would be one more failed login each time."""
+    _credentials(monkeypatch, {'mailcow_rw_key': [RuntimeError("could not save the result")],
+                               'rspamd_password': [_refused('connection')]})
+    run(scheduler.check_credentials_job())
+    state = scheduler.job_status['check_credentials']
+    assert (state['status'], state['retryable']) == ('failed', False)
 
 
 def test_credentials_unreached_then_502_then_accepted(jobs, monkeypatch):
@@ -354,6 +369,22 @@ def test_a_manual_domain_sync_that_works_is_a_success(features, monkeypatch):
     monkeypatch.setattr(scheduler, "_persist_local_domain_aliases", lambda alias_map: None)
     monkeypatch.setattr("app.services.alias_domains.set_cached_alias_domain_map", lambda alias_map: None)
     assert _manual_run('sync_local_domains')['status'] == 'success'
+
+
+@pytest.mark.parametrize("error, retryable", TRANSIENT_ERRORS, ids=TRANSIENT_IDS)
+def test_a_dns_check_without_the_alias_domains_says_whether_that_can_pass(features, monkeypatch, error, retryable):
+    """The primary domains are checked; alias domains that could not be read
+    for a passing reason leave the run failed, so it runs again soon."""
+    monkeypatch.setattr(scheduler.mailcow_api, "get_domains", AsyncMock(return_value=[{"domain_name": "example.com", "active": 1}]))
+    monkeypatch.setattr(scheduler.mailcow_api, "get_alias_domain_map", AsyncMock(side_effect=error))
+    monkeypatch.setattr(domains, "get_spf_source_ips", AsyncMock(return_value=[]))
+    checked = AsyncMock(return_value={})
+    monkeypatch.setattr(scheduler, "check_domain_dns", checked)
+    monkeypatch.setattr(scheduler, "store_dns_check_worker", lambda *a: None)
+    assert run(scheduler.check_all_domains_dns_background()) == scheduler.JOB_STATUS_SET
+    assert checked.await_args.args[0] == "example.com"
+    state = scheduler.job_status["dns_check"]
+    assert (state["status"], state["retryable"]) == (("failed", True) if retryable else ("success", False))
 
 
 def test_a_dns_check_with_no_domains_does_not_stay_running(features, monkeypatch):

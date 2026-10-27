@@ -1998,7 +1998,8 @@ async def check_credentials_job():
     update_job_status('check_credentials', 'running')
     failed = []
     # Run again soon only when the server could not answer; never after a
-    # refusal, which mailcow's Fail2ban counts as a failed login
+    # refusal, which mailcow's Fail2ban counts as a failed login, nor after a
+    # check that broke off, whose answer may have been one
     unanswered = refused = False
     for name in names:
         try:
@@ -2006,6 +2007,7 @@ async def check_credentials_job():
         except Exception as e:
             logger.warning(f"[CREDENTIALS] Could not check the {_CREDENTIAL_LABELS[name]}: {e}")
             failed.append(f"the {_CREDENTIAL_LABELS[name]} could not be checked")
+            refused = True
             continue
         if result.get("stale"):
             continue  # changed meanwhile: the check of the new value says it
@@ -2629,11 +2631,15 @@ async def check_all_domains_dns_background():
         # (issue #92): check them too, right after their targets
         names = [d.get('domain_name') for d in domains
                  if d.get('domain_name') and d.get('active', 0) == 1]
+        # The primary domains are still checked when the alias domains cannot
+        # be read; a passing failure then leaves the run failed, to be retried
+        alias_error = None
         try:
             alias_map = await mailcow_api.get_alias_domain_map()
             names.extend(a for a in sorted(alias_map.keys()) if a not in names)
         except Exception as e:
             logger.warning(f"[DNS] Could not fetch alias domains for the check: {e}")
+            alias_error = e
 
         for domain_name in names:
             try:
@@ -2653,7 +2659,10 @@ async def check_all_domains_dns_background():
                 logger.error(f"Failed DNS check for {domain_name}: {e}")
         
         logger.info(f"DNS check completed: {checked_count} domains")
-        update_job_status('dns_check', 'success')
+        if alias_error is not None and _transient(alias_error):
+            update_job_status('dns_check', 'failed', f"Alias domains could not be read: {alias_error}", retryable=True)
+        else:
+            update_job_status('dns_check', 'success')
         return JOB_STATUS_SET
         
     except asyncio.CancelledError:

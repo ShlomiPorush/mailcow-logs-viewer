@@ -870,13 +870,15 @@ function setNavCount(page, count, isFail, title) {
 const NAV_COUNTERS_EVERY = 5 * 60 * 1000;
 let navCountersAt = 0;
 
+let navCountersPending = false;
 function navCountersTick() {
-    if (document.hidden || Date.now() - navCountersAt < NAV_COUNTERS_EVERY - 2000) return;
+    if (navCountersPending || document.hidden || Date.now() - navCountersAt < NAV_COUNTERS_EVERY - 2000) return;
     // The connection is read again first, as at load: an open page shows mailcow
-    // back without a reload, and the Status counter counts it. Marked now, so a
-    // tick while mailcow is slow to answer does not ask again
+    // back without a reload, and the Status counter counts it. One read at a
+    // time, however long it takes, so an older answer never lands after a newer one
     navCountersAt = Date.now();
-    loadMailcowConnectionStatus().then(loadNavCounters);
+    navCountersPending = true;
+    loadMailcowConnectionStatus().finally(() => { navCountersPending = false; }).then(loadNavCounters);
 }
 
 function startNavCounters() {

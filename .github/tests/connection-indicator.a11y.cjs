@@ -132,3 +132,27 @@ test('a browser tab shown again reads the connection again once the counters are
         p.close();
     }
 });
+
+test('a check still pending after five minutes is not asked again until it answers', async () => {
+    const p = boot('/messages');
+    try {
+        await loaded(p, true);
+        p.later();
+        p.w.navCountersTick();
+        assert.ok(await until(() => p.connection.length === 2));
+        // Five more minutes and the check has not answered (a stalled connection)
+        p.later();
+        p.w.navCountersTick();
+        await settle();
+        assert.equal(p.count(CONNECTION), 2, 'a second check while the first is pending');
+
+        p.connection[1]({ connected: false });
+        assert.ok(await until(() => p.count('/api/queue') === 2), `asked: ${p.asked.join(', ')}`);
+        await settle();
+        p.later();
+        p.w.navCountersTick();
+        assert.ok(await until(() => p.connection.length === 3), 'the next tick after the answer checks again');
+    } finally {
+        p.close();
+    }
+});
