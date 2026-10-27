@@ -56,7 +56,8 @@ def test_database_work_keeps_loop_responsive(monkeypatch, state):
         finally:
             release.set()
             result = await task
-        assert result is True
+        assert result == scheduler.JOB_STATUS_SET
+        scheduler.update_job_status.assert_called_with('sync_local_domains', 'success')
         assert api_threads == [loop_thread]
         assert len(threads) == 3 and len(set(threads)) == 1 and threads[0] != loop_thread
         state[0].assert_called_once_with(
@@ -78,7 +79,8 @@ def test_failed_commit_keeps_previous_alias_cache(monkeypatch, state):
         yield db
 
     monkeypatch.setattr(scheduler, "get_db_context", session)
-    assert asyncio.run(scheduler.sync_local_domains()) is True
+    assert asyncio.run(scheduler.sync_local_domains()) == scheduler.JOB_STATUS_SET
+    scheduler.update_job_status.assert_called_with('sync_local_domains', 'success')
     state[0].assert_called_once_with(
         ["primary.test", "alias.test"], complete_for=scheduler.mailcow_api.base_url, hosted=["primary.test", "alias.test"])
     state[1].assert_not_called()
@@ -89,7 +91,8 @@ def test_no_domains_does_not_replace_persisted_mapping(monkeypatch, state):
     monkeypatch.setattr(scheduler.mailcow_api, "get_alias_domain_map", AsyncMock(return_value={}))
     session = Mock()
     monkeypatch.setattr(scheduler, "get_db_context", session)
-    assert asyncio.run(scheduler.sync_local_domains()) is False
+    assert asyncio.run(scheduler.sync_local_domains()) == scheduler.JOB_STATUS_SET
+    scheduler.update_job_status.assert_called_with('sync_local_domains', 'failed', 'No domains')
     session.assert_not_called()
     # mailcow answered that it has none: the list is read, empty
     state[0].assert_called_once_with([], complete_for=scheduler.mailcow_api.base_url, hosted=[])

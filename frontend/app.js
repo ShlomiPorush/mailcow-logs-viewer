@@ -870,8 +870,15 @@ function setNavCount(page, count, isFail, title) {
 const NAV_COUNTERS_EVERY = 5 * 60 * 1000;
 let navCountersAt = 0;
 
+let navCountersPending = false;
 function navCountersTick() {
-    if (!document.hidden && Date.now() - navCountersAt >= NAV_COUNTERS_EVERY - 2000) loadNavCounters();
+    if (navCountersPending || document.hidden || Date.now() - navCountersAt < NAV_COUNTERS_EVERY - 2000) return;
+    // The connection is read again first, as at load: an open page shows mailcow
+    // back without a reload, and the Status counter counts it. One read at a
+    // time, however long it takes, so an older answer never lands after a newer one
+    navCountersAt = Date.now();
+    navCountersPending = true;
+    loadMailcowConnectionStatus().finally(() => { navCountersPending = false; }).then(loadNavCounters);
 }
 
 function startNavCounters() {
@@ -949,7 +956,8 @@ async function loadMailcowConnectionStatus() {
         if (indicator) {
             indicator.classList.remove('hidden');
             if (data.connected) {
-                indicator.classList.remove('text-red-500');
+                // Read again every few minutes: no tone of an earlier answer stays
+                indicator.classList.remove('text-red-500', 'text-gray-400');
                 indicator.classList.add('text-green-500');
                 indicator.title = 'Connected to mailcow';
                 // Update SVG to checkmark
@@ -958,7 +966,7 @@ async function loadMailcowConnectionStatus() {
                     svg.innerHTML = '<path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path>';
                 }
             } else {
-                indicator.classList.remove('text-green-500');
+                indicator.classList.remove('text-green-500', 'text-gray-400');
                 indicator.classList.add('text-red-500');
                 indicator.title = 'Not connected to mailcow';
                 // Update SVG to X
@@ -973,7 +981,7 @@ async function loadMailcowConnectionStatus() {
         const indicator = document.getElementById('mailcow-connection-indicator');
         if (indicator) {
             indicator.classList.remove('hidden');
-            indicator.classList.remove('text-green-500');
+            indicator.classList.remove('text-green-500', 'text-red-500');
             indicator.classList.add('text-gray-400');
             indicator.title = 'Connection status unknown';
         }

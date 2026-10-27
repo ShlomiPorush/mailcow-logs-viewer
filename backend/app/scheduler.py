@@ -378,13 +378,26 @@ JOB_SKIPPED = "skipped"
 # manual run must not overwrite it
 JOB_STATUS_SET = "status_set"
 
-def update_job_status(job_name: str, status: str, error: str = None):
-    """Update job execution status"""
+def update_job_status(job_name: str, status: str, error: str = None, retryable: bool = False):
+    """Update job execution status.
+
+    retryable: the failure may pass by itself (mailcow could not be reached,
+    timed out or failed itself), so retry_failed_jobs runs the job again
+    soon. Kept here only, never in an API answer.
+    """
     job_status[job_name] = {
         'last_run': datetime.now(timezone.utc),
         'status': status,
-        'error': error
+        'error': error,
+        'retryable': retryable,
     }
+
+
+def _transient(error: BaseException) -> bool:
+    """Whether a job that failed on this error can succeed when run again soon."""
+    if isinstance(error, httpx.TransportError):
+        return True
+    return bool(getattr(error, 'transient', False))
 
 def get_job_status():
     """Get all job statuses"""
@@ -1984,25 +1997,37 @@ async def check_credentials_job():
     run = _credential_check_runs
     update_job_status('check_credentials', 'running')
     failed = []
+    # Run again soon only when the server could not answer; never after a
+    # refusal, which mailcow's Fail2ban counts as a failed login, nor after a
+    # check that broke off, whose answer may have been one
+    unanswered = refused = False
     for name in names:
         try:
             result = await _validate_credential(name)
         except Exception as e:
             logger.warning(f"[CREDENTIALS] Could not check the {_CREDENTIAL_LABELS[name]}: {e}")
             failed.append(f"the {_CREDENTIAL_LABELS[name]} could not be checked")
+            refused = True
             continue
         if result.get("stale"):
             continue  # changed meanwhile: the check of the new value says it
         if result.get("configured") and not result.get("valid"):
+            error = result.get("error")
             reason = {'connection': 'could not be reached', 'rejected': 'was rejected',
-                      'read_only': 'has no write access'}.get(result.get("error"), 'was not accepted')
+                      'read_only': 'has no write access'}.get(error, 'was not accepted')
             failed.append(f"the {_CREDENTIAL_LABELS[name]} {reason}")
+            http_status = result.get("http_status")
+            if error in ('rejected', 'read_only'):
+                refused = True
+            elif error == 'connection' or (error == 'unexpected' and isinstance(http_status, int) and http_status >= 500):
+                unanswered = True
     if run != _credential_check_runs:
         # A newer run (a manual one, say) started meanwhile: its result is the one to show
         return JOB_STATUS_SET
     if failed:
         message = '; '.join(failed)
-        update_job_status('check_credentials', 'failed', message[0].upper() + message[1:] + '. See Settings > Mailcow.')
+        update_job_status('check_credentials', 'failed', message[0].upper() + message[1:] + '. See Settings > Mailcow.',
+                          retryable=unanswered and not refused)
     else:
         update_job_status('check_credentials', 'success')
     # A manual run keeps this status (a rejected key stays failed)
@@ -2578,7 +2603,11 @@ def _cleanup_old_dmarc_reports_sync():
 
 
 async def check_all_domains_dns_background():
-    """Background job to check DNS for all domains"""
+    """Background job to check DNS for all domains.
+
+    Returns JOB_STATUS_SET once it recorded its outcome, so a manual run does
+    not write success over a failure.
+    """
     if not settings.is_feature_enabled('domains'):
         logger.debug("[DNS] Domains feature disabled, skipping DNS check")
         return
@@ -2588,7 +2617,9 @@ async def check_all_domains_dns_background():
         domains = await mailcow_api.get_domains()
         
         if not domains:
-            return
+            # Nothing to check; a status left on running would refuse a manual Run
+            update_job_status('dns_check', 'success')
+            return JOB_STATUS_SET
 
         checked_count = 0
 
@@ -2600,11 +2631,15 @@ async def check_all_domains_dns_background():
         # (issue #92): check them too, right after their targets
         names = [d.get('domain_name') for d in domains
                  if d.get('domain_name') and d.get('active', 0) == 1]
+        # The primary domains are still checked when the alias domains cannot
+        # be read; a passing failure then leaves the run failed, to be retried
+        alias_error = None
         try:
             alias_map = await mailcow_api.get_alias_domain_map()
             names.extend(a for a in sorted(alias_map.keys()) if a not in names)
         except Exception as e:
             logger.warning(f"[DNS] Could not fetch alias domains for the check: {e}")
+            alias_error = e
 
         for domain_name in names:
             try:
@@ -2624,14 +2659,19 @@ async def check_all_domains_dns_background():
                 logger.error(f"Failed DNS check for {domain_name}: {e}")
         
         logger.info(f"DNS check completed: {checked_count} domains")
-        update_job_status('dns_check', 'success')
+        if alias_error is not None and _transient(alias_error):
+            update_job_status('dns_check', 'failed', f"Alias domains could not be read: {alias_error}", retryable=True)
+        else:
+            update_job_status('dns_check', 'success')
+        return JOB_STATUS_SET
         
     except asyncio.CancelledError:
         logger.info("Background DNS check cancelled by shutdown")
         return
     except Exception as e:
         logger.error(f"Background DNS check failed: {e}")
-        update_job_status('dns_check', 'failed', str(e))
+        update_job_status('dns_check', 'failed', str(e), retryable=_transient(e))
+        return JOB_STATUS_SET
 
 
 def _persist_local_domain_aliases(alias_map):
@@ -2649,6 +2689,10 @@ async def sync_local_domains():
     Alias domains are included so
     mail from them is correctly classified as outbound/local.
     Runs every 6 hours.
+
+    Returns JOB_STATUS_SET: it records its own outcome, so a manual run does
+    not write success over a failure. Callers that need the list read
+    local_domains_complete().
     """
     logger.info("Starting background local domains sync...")
     update_job_status('sync_local_domains', 'running')
@@ -2683,7 +2727,7 @@ async def sync_local_domains():
                 logger.warning(f"Could not persist the alias domain map: {e}")
             logger.info(f"✓ Local domains synced: {len(active_domains or [])} primary, {len(alias_domains or [])} alias → {len(all_domains)} total")
             update_job_status('sync_local_domains', 'success')
-            return True
+            return JOB_STATUS_SET
         else:
             # mailcow answered that it has none: the list is read (the jobs
             # waiting for it go on), and Status still shows the sync failed.
@@ -2695,12 +2739,13 @@ async def sync_local_domains():
             if hosted or not (local_domains_complete(source) and cached_domains_known()):
                 set_cached_active_domains([], complete_for=complete_for, hosted=hosted)
             logger.warning("⚠ No active domains retrieved")
+            # Not retried early: mailcow answered, and would answer the same
             update_job_status('sync_local_domains', 'failed', "No domains")
-            return False
+            return JOB_STATUS_SET
     except Exception as e:
         logger.error(f"✗ Failed to sync local domains: {e}")
-        update_job_status('sync_local_domains', 'failed', str(e))
-        return False
+        update_job_status('sync_local_domains', 'failed', str(e), retryable=_transient(e))
+        return JOB_STATUS_SET
 
 # =============================================================================
 # MAILBOX STATISTICS
@@ -3160,6 +3205,9 @@ async def sync_transports_job():
     Stores the original FQDN in the source field as 'transport:fqdn',
     'relayhost:fqdn' or 'config:fqdn'.
     Runs every 6 hours.
+
+    Returns JOB_STATUS_SET once it recorded its outcome, so a manual run does
+    not write success over a failure.
     """
     # Gated on the blacklist feature, not domains: this sync only feeds
     # blacklist monitoring, so disabling the Domains page must not stop it
@@ -3171,7 +3219,7 @@ async def sync_transports_job():
         if not settings.mailcow_api_key or not settings.mailcow_url:
             logger.warning("mailcow API not configured, skipping transport sync")
             update_job_status('sync_transports', 'failed', 'API not configured')
-            return
+            return JOB_STATUS_SET
 
         # The WAN IP is read here when not known yet (the app no longer reads
         # it at startup). When mailcow cannot be asked the run fails before
@@ -3283,7 +3331,8 @@ async def sync_transports_job():
 
     except Exception as e:
         logger.error(f"Sync transports failed: {e}")
-        update_job_status('sync_transports', 'failed', str(e))
+        update_job_status('sync_transports', 'failed', str(e), retryable=_transient(e))
+    return JOB_STATUS_SET
 
 
 async def smtp_abuse_job():
@@ -3977,6 +4026,50 @@ def run_feature_data_sweep_soon() -> None:
         logger.warning(f"[FEATURES] Could not start the sweep now: {e}")
 
 
+# Jobs that read mailcow every few hours. One that failed because mailcow
+# could not answer runs again within minutes once it can, not hours later.
+# status key -> (scheduler job id, feature it belongs to or None, function)
+RETRY_FAILED_MINUTES = 5
+_RETRY_TARGETS = {
+    'sync_local_domains': ('sync_local_domains', None, sync_local_domains),
+    'sync_transports': ('sync_transports', 'blacklist', sync_transports_job),
+    'dns_check': ('dns_check_background', 'domains', check_all_domains_dns_background),
+    'check_credentials': ('check_credentials', None, check_credentials_job),
+}
+
+
+async def retry_failed_jobs():
+    """Run again the jobs above that failed on a transient error (their status
+    says so), and read the server IP while it is not known. Not a job of its
+    own on Status: it only logs."""
+    from .routers.domains import get_cached_server_ip
+    if get_cached_server_ip() is None:
+        try:
+            await init_server_ip()
+        except Exception as e:
+            logger.warning(f"[RETRY] Could not read the server IP: {e}")
+
+    for key, (job_id, feature, func) in _RETRY_TARGETS.items():
+        try:
+            state = job_status.get(key) or {}
+            if state.get('status') != 'failed' or not state.get('retryable'):
+                continue
+            # Read now: a feature can be turned off after startup
+            if feature and not settings.is_feature_enabled(feature):
+                continue
+            now = datetime.now(timezone.utc)
+            if scheduler.get_job(job_id) is not None:
+                # Through the scheduler, so a run still going is not doubled
+                scheduler.modify_job(job_id, next_run_time=now)
+            else:
+                # Its feature was turned on after startup: no periodic job yet
+                scheduler.add_job(func, 'date', run_date=now, id=f'{key}_retry',
+                                  name=f'{key} (retry)', replace_existing=True)
+            logger.info(f"[RETRY] Running {key} again: {state.get('error')}")
+        except Exception as e:
+            logger.warning(f"[RETRY] Could not run {key} again: {e}")
+
+
 def start_scheduler():
     """Start the background scheduler"""
     try:
@@ -4196,6 +4289,17 @@ def start_scheduler():
             run_date=datetime.now(timezone.utc) + timedelta(seconds=5),
             id='server_ip_startup',
             name='Server IP (Startup)'
+        )
+
+        # After mailcow comes back, the jobs that failed meanwhile and the
+        # server IP are read again within minutes (not shown on Status)
+        scheduler.add_job(
+            retry_failed_jobs,
+            trigger=every(minutes=RETRY_FAILED_MINUTES),
+            id='retry_failed_jobs',
+            name='Retry Failed Jobs',
+            replace_existing=True,
+            max_instances=1
         )
 
         # Job 11: Update GeoIP database (weekly, Sunday at 3 AM)

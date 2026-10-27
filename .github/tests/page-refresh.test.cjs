@@ -133,16 +133,22 @@ test('a page without a refresher, or one that is off, asks for nothing', () => {
     assert.equal(p.run('refreshRuns'), 0);
 });
 
-test('the sidebar counters wait for a shown tab and their five minutes', () => {
+test('the sidebar counters wait for a shown tab and their five minutes', async () => {
     const p = load();
-    let reads = 0;
+    let reads = 0, checks = 0;
     p.context.loadNavCounters = () => { reads++; p.run('navCountersAt = Date.now()'); };
+    // The connection indicator is read first, so the Status counter counts it
+    p.context.loadMailcowConnectionStatus = async () => { checks++; };
     p.run('navCountersAt = Date.now() - 6 * 60 * 1000');
     p.own.hidden = true;
     p.run('navCountersTick()');
-    assert.equal(reads, 0);
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(checks + reads, 0);
     p.own.hidden = false;
     p.run('navCountersTick()');
     p.run('navCountersTick()');
+    assert.equal(reads, 0, 'the counters wait for the connection check');
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(checks, 1);
     assert.equal(reads, 1);
 });
