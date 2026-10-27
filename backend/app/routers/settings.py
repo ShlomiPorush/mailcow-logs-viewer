@@ -288,19 +288,35 @@ def _validate_agent_access(allowed: Dict[str, Any], current: Optional[Settings] 
             "Agent access needs Basic Auth or OAuth2 sign-in. Turn on sign-in, or turn off agent access."))
 
 
-def _validate_session_expiry(allowed: Dict[str, Any]) -> None:
-    """Refuse a longest session under one hour. It has no upper bound, and the
-    value in effect sent back as it is always saves (the page posts every key)."""
-    if "session_expiry_hours" not in allowed:
-        return
-    value = allowed["session_expiry_hours"]
-    if value == getattr(settings, "session_expiry_hours", None):
-        return
-    try:
-        if isinstance(value, bool) or int(str(value).strip()) < 1:
-            raise ValueError("Under one hour")
-    except (TypeError, ValueError):
-        raise HTTPException(status_code=400, detail="Invalid settings for: session_expiry_hours")
+def _whole_number(value: Any) -> int:
+    """A whole number sent as a number or as its digits; anything else raises ValueError."""
+    if isinstance(value, bool):
+        raise ValueError("Not a number")
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    return int(str(value).strip())
+
+
+def _validate_session_limits(allowed: Dict[str, Any]) -> None:
+    """Save the session limits as whole numbers, as the stored settings are
+    read back (5.0 would be read as nothing and fall back to the default).
+    The longest session is at least an hour, without an upper bound; sign-out
+    after inactivity takes 5 to 1440 minutes. The value in effect sent back
+    as it is always saves (the page posts every key)."""
+    for key, low, high in (("session_expiry_hours", 1, None), ("session_idle_timeout_minutes", 5, 1440)):
+        if key not in allowed:
+            continue
+        try:
+            value = _whole_number(allowed[key])
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail=f"Invalid settings for: {key}")
+        allowed[key] = value
+        if value == getattr(settings, key, None):
+            continue
+        if value < low or (high is not None and value > high):
+            raise HTTPException(status_code=400, detail=f"Invalid settings for: {key}")
 
 
 def _validate_display_formats(allowed: Dict[str, Any]) -> None:
@@ -917,7 +933,7 @@ def update_settings(body: Dict[str, Any], request: Request = None, response: Res
     _validate_display_formats(allowed)
     _validate_bounce_actions(allowed)
     _validate_agent_access(allowed)
-    _validate_session_expiry(allowed)
+    _validate_session_limits(allowed)
     # For sensitive keys, mask placeholder means "do not change" - omit from payload
     # Empty string means "clear this value" and should be kept
     for sk in _SENSITIVE_SETTING_KEYS:

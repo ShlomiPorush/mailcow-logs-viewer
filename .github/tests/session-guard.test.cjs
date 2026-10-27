@@ -125,3 +125,63 @@ test('every page behind the sign-in loads the guard', () => {
         assert.match(html, /<script src="\/static\/session-guard\.js\?v=\d+"><\/script>/, page);
     }
 });
+
+// The guard talking to a server that answers from a list, with timers that never fire
+function guardWith(answers, left) {
+    const response = ({ status, body, header = null }) => ({
+        status,
+        ok: status >= 200 && status < 300,
+        headers: { get: name => (name === 'X-Session-End' ? header : null) },
+        json: async () => { if (body === undefined) throw new Error('no JSON'); return body; },
+        clone() { return this; },
+    });
+    const ctx = vm.createContext({
+        fetch: async () => {
+            const next = answers.shift();
+            if (!next || next.network) throw new Error('network');
+            return response(next);
+        },
+        setTimeout: () => 1, clearTimeout: () => {}, setInterval: () => 1, clearInterval: () => {},
+        window: { location: { pathname: '/messages', search: '', replace: url => left.push(url) } },
+    });
+    vm.runInContext(fs.readFileSync(path.join(frontend, 'session-guard.js'), 'utf8'), ctx);
+    const st = vm.runInContext('sessionGuardState', ctx);
+    st.active = true;
+    return { ctx, st };
+}
+const settle = async () => { for (let i = 0; i < 10; i++) await new Promise(resolve => setImmediate(resolve)); };
+
+test('an activity report whose answer was lost is not sent again by itself', async () => {
+    const { ctx, st } = guardWith([{ network: true }], []);
+    st.idleEnabled = true;
+    st.pending = true;
+    await ctx.sessionGuardReport(false);
+    assert.equal(st.pending, false);
+    assert.equal(st.reportTimer, null);
+});
+
+test('an ended answer is checked again with the cookie the browser holds now', async () => {
+    const left = [];
+    const alive = { status: 200, body: { authenticated: true, session: session({ idle_enabled: false, idle_seconds_left: null, idle_timeout_seconds: null }) } };
+    const { ctx, st } = guardWith([alive], left);
+    // A late answer for a cookie another tab has replaced since
+    ctx.sessionGuardHandle({ seq: ++st.seq, kind: 'ended', reason: '' });
+    await settle();
+    assert.deepEqual(left, []);
+    assert.equal(st.leaving, false);
+    // The browser's cookie has ended too: now it leaves, with the reason
+    const answers = [{ status: 401, header: 'session_idle', body: { reason: 'session_idle' } }];
+    const second = guardWith(answers, left);
+    second.ctx.sessionGuardHandle({ seq: ++second.st.seq, kind: 'ended', reason: '' });
+    await settle();
+    assert.deepEqual(left, ['/login?reason=session_idle&next=%2Fmessages']);
+});
+
+test('a 401 without a reason after the longest session ended here says so', async () => {
+    const { ctx, st } = guardWith([], []);
+    st.longestAt = Date.now() - 1000;
+    const bare = { headers: { get: () => null }, clone: () => ({ json: async () => { throw new Error('no JSON'); } }) };
+    assert.equal(await ctx.sessionGuardReasonOf(bare), 'session_expired');
+    st.longestAt = Date.now() + 60000;
+    assert.equal(await ctx.sessionGuardReasonOf(bare), '');
+});

@@ -26,6 +26,7 @@ const SESSION_GUARD_POLL_EVERY = 60000;     // the regular status check
 const SESSION_GUARD_ASK_BEFORE = 60000;     // "Are you still there?" a minute before
 const SESSION_GUARD_NOTICE_BEFORE = 300000; // the longest-session notice, five minutes before
 const SESSION_GUARD_TICK = 5000;            // the clock that notices a sleep
+const SESSION_GUARD_TIMEOUT = 15000;        // a request that has not answered by then failed
 // What counts as activity: no mousemove and no scroll, which a page can cause by itself
 const SESSION_GUARD_ACTIVITY_EVENTS = ['keydown', 'pointerdown', 'click', 'input', 'wheel', 'touchstart'];
 // The X of the notice (UI_CLOSE_ICON in utils.js)
@@ -152,17 +153,21 @@ function sessionGuardNoticeText(msLeft) {
 
 // ---------- Talking to the server ----------
 
-// The reason a 401 gives: the X-Session-End header, else `reason` in its JSON body
+// The reason a 401 gives: the X-Session-End header, else `reason` in its JSON
+// body, else the limit whose time has passed here (the browser drops the cookie
+// when the longest session ends, so the server cannot say it then)
 async function sessionGuardReasonOf(response) {
     const header = response && response.headers && typeof response.headers.get === 'function'
         ? response.headers.get('X-Session-End') : null;
     if (sessionGuardReason(header)) return header;
+    let reason = '';
     try {
         const body = await response.clone().json();
-        return sessionGuardReason(body && body.reason);
+        reason = sessionGuardReason(body && body.reason);
     } catch (e) {
-        return '';
+        // not JSON
     }
+    return reason || sessionGuardGuessReason(sessionGuardState, Date.now());
 }
 
 // One request, as what it means for the guard:
@@ -170,19 +175,18 @@ async function sessionGuardReasonOf(response) {
 // (the network or the server failed: never a sign-out)
 async function sessionGuardSend(url, method) {
     const seq = ++sessionGuardState.seq;
-    let response;
+    const control = typeof AbortController === 'function' ? new AbortController() : null;
+    const timer = control ? setTimeout(() => control.abort(), SESSION_GUARD_TIMEOUT) : null;
+    let response, body;
     try {
-        response = await fetch(url, { method, credentials: 'same-origin', cache: 'no-store' });
-    } catch (e) {
-        return { seq, kind: 'retry' };
-    }
-    if (response.status === 401) return { seq, kind: 'ended', reason: await sessionGuardReasonOf(response) };
-    if (!response.ok) return { seq, kind: 'retry' };
-    let body;
-    try {
+        response = await fetch(url, { method, credentials: 'same-origin', cache: 'no-store', signal: control ? control.signal : undefined });
+        if (response.status === 401) return { seq, kind: 'ended', reason: await sessionGuardReasonOf(response) };
+        if (!response.ok) return { seq, kind: 'retry' };
         body = await response.json();
     } catch (e) {
         return { seq, kind: 'retry' };
+    } finally {
+        clearTimeout(timer);
     }
     if (body && body.authenticated === false) return { seq, kind: 'ended', reason: sessionGuardReason(body.reason) };
     return { seq, kind: 'ok', session: sessionGuardSessionOf(body) };
@@ -202,7 +206,7 @@ function sessionGuardHandle(answer) {
         // An older request that failed does not end a session a newer one saw alive
         if (answer.seq <= state.applied) return;
         state.applied = answer.seq;
-        sessionGuardLeave(answer.reason || sessionGuardGuessReason(state, Date.now()));
+        sessionGuardConfirmEnd(answer.reason);
         return;
     }
     if (!answer.session) {
@@ -218,6 +222,22 @@ function sessionGuardHandle(answer) {
     }
     sessionGuardRender();
     sessionGuardScheduleCheck();
+}
+
+// Ask once more before leaving: a late answer for a cookie that another tab has
+// replaced since (a sign-in settings save issues a new one) ends nothing
+async function sessionGuardConfirmEnd(reason) {
+    const state = sessionGuardState;
+    const again = await sessionGuardSend('/api/auth/status', 'GET');
+    if (!state.active || state.leaving) return;
+    if (again.kind === 'ended') {
+        sessionGuardLeave(again.reason || reason || sessionGuardGuessReason(state, Date.now()));
+    } else if (again.kind === 'retry') {
+        state.failures++;
+        sessionGuardScheduleCheck(sessionGuardRetryDelay(state.failures));
+    } else {
+        sessionGuardHandle(again);
+    }
 }
 
 function sessionGuardScheduleCheck(delay) {
@@ -274,8 +294,9 @@ async function sessionGuardReport(force) {
     } finally {
         state.reporting = false;
     }
-    // Not reported: it goes again after the wait
-    if (answer.kind === 'retry') state.pending = true;
+    // A report whose answer was lost is not sent again: the server may have
+    // counted it, and repeating it would count activity nobody made. The next
+    // real activity reports again
     if (force) sessionGuardAskError(answer.kind === 'retry' ? 'Could not reach the server. Check your connection and try again.' : '');
     sessionGuardHandle(answer);
     if (state.pending) sessionGuardScheduleReport();

@@ -359,6 +359,7 @@ def test_stored_session_limits_are_checked_on_load(monkeypatch, stored, expected
 @pytest.mark.parametrize("values", [
     {"session_idle_timeout_minutes": 4}, {"session_idle_timeout_minutes": 1441},
     {"session_expiry_hours": 0}, {"session_idle_enabled": "maybe"},
+    {"session_idle_timeout_minutes": 5.5}, {"session_expiry_hours": "two"},
 ])
 def test_invalid_session_limits_are_refused_on_save(values):
     with pytest.raises(HTTPException) as refused:
@@ -377,3 +378,36 @@ def test_the_new_settings_change_nothing_by_default(monkeypatch):
         monkeypatch.delenv(key, raising=False)
     fresh = Settings()
     assert (fresh.session_idle_enabled, fresh.session_idle_timeout_minutes, fresh.session_expiry_hours) == (False, 60, 24)
+
+
+def test_whole_numbers_sent_as_decimals_are_saved_as_whole_numbers(store):
+    operator = signed_in()
+    _save(operator, {"session_expiry_hours": 2})
+    # 5.0 and 2.0 are whole numbers; stored as they came they would read back as
+    # nothing and fall back to the defaults, 60 minutes and 24 hours
+    _save(operator, {**_idle(5.0), "session_expiry_hours": 2.0})
+    assert (settings.session_idle_timeout_minutes, settings.session_expiry_hours) == (5, 2)
+    assert (str(store["session_idle_timeout_minutes"]), str(store["session_expiry_hours"])) == ("5", "2")
+
+
+def test_a_session_that_ends_while_a_save_runs_is_not_re_issued(clock, monkeypatch):
+    operator = signed_in()
+    _save(operator, {"session_expiry_hours": 2})
+    clock["t"] += 2 * HOUR - 1
+    reload_settings = settings_router.reload_settings
+
+    def late_reload(db):
+        # The save was let in; the session reaches its length before the new settings apply
+        clock["t"] += 2
+        return reload_settings(db)
+
+    monkeypatch.setattr(settings_router, "reload_settings", late_reload)
+    response = _save(operator, {"auth_password": "new-test-password", "session_expiry_hours": 24})
+    assert session.SESSION_COOKIE_NAME + "=" not in response.headers.get("set-cookie", "")
+    assert not session._session_store
+
+
+def test_time_left_is_rounded_up_so_zero_means_ended(clock):
+    client = signed_in()
+    clock["t"] += 24 * HOUR - 0.5
+    assert client.get("/api/auth/status").json()["session"]["longest_seconds_left"] == 1

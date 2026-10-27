@@ -139,8 +139,11 @@ def _end_reason(record: Dict[str, Any], now: float) -> Optional[str]:
 
 
 def _end(key: str, reason: str, now: float) -> None:
-    """Remove a session that a limit ended and remember why."""
-    _session_store.pop(key, None)
+    """Remove a session that a limit ended and remember why. The record is
+    marked too, so a copy of its clocks can never start it again (create_session)."""
+    record = _session_store.pop(key, None)
+    if record is not None:
+        record["ended"] = reason
     _tombstones.pop(key, None)
     _tombstones[key] = (reason, now + _TOMBSTONE_SECONDS)
     cap = max(0, int(settings.session_max_entries))
@@ -236,6 +239,10 @@ def create_session(user_info: Dict[str, Any], *, generation: int,
         session_id = secrets.token_urlsafe(32)
         now = _now()
         if clocks is not None:
+            # A session that ended meanwhile, or that the settings in force end,
+            # is not re-issued: the operator signs in again
+            if clocks.get("ended") or _end_reason(clocks, now):
+                raise SessionRevokedError("The session ended before it could be re-issued")
             login_at, active_at, issued_hours = clocks["login_at"], clocks["active_at"], clocks["issued_hours"]
         else:
             login_at, active_at, issued_hours = now, now, _longest_hours()
@@ -348,10 +355,10 @@ def _limits(record: Dict[str, Any], now: float) -> Dict[str, Any]:
     idle_on = bool(settings.session_idle_enabled)
     idle = _idle_seconds() if idle_on else None
     return {
-        "longest_seconds_left": max(0, int(longest_left)),
+        "longest_seconds_left": max(0, math.ceil(longest_left)),
         "idle_enabled": idle_on,
         "idle_timeout_seconds": idle,
-        "idle_seconds_left": max(0, int(record["active_at"] + idle - now)) if idle_on else None,
+        "idle_seconds_left": max(0, math.ceil(record["active_at"] + idle - now)) if idle_on else None,
     }
 
 

@@ -262,7 +262,7 @@ var SETTINGS_FIELD_DESCRIPTIONS = {
     oauth2_scopes: 'OAuth2 scopes to request. Default: openid profile email.',
     oauth2_use_oidc_discovery: 'Enable OIDC discovery (uses .well-known/openid-configuration). Default: true.',
     session_secret_key: 'Secret key for signing session cookies. REQUIRED if OAuth2 enabled. Generate: openssl rand -hex 32. Use a strong secret in production.',
-    session_expiry_hours: 'Longest session in hours, counted from sign-in whatever the activity. Five minutes before, the page says so. A shorter value applies to open sessions at once; a longer one from the next sign-in. Default: 24.',
+    session_expiry_hours: 'Longest session in hours, counted from sign-in whatever the activity. Five minutes before, the page says so. A shorter value applies to open sessions at once; a longer one applies in full from the next sign-in. Default: 24.',
     session_idle_enabled: 'Sign out after a period without activity. Typing, clicking, scrolling with the wheel and touching count as activity; pages that refresh by themselves do not. A minute before, the page asks whether you are still there. Default: off.',
     session_idle_timeout_minutes: 'Minutes without activity before sign-out, from 5 to 1440. Default: 60.',
     session_max_entries: 'Maximum active login sessions per process. At capacity, new logins wait until a session expires or a user signs out. Existing sessions stay signed in. Default: 50.',

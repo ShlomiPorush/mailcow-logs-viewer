@@ -24,6 +24,8 @@ from conftest import registered_routes
 # Answered by the auth middleware or the origin guard for any call, as the
 # document's description says; a route documents them only when it gives them itself
 APP_WIDE_STATUSES = {401, 403, 429}
+# The auth middleware's plain-text 401 answers (app/auth.py); any other 401 is a route's
+_MIDDLEWARE_401_SENTENCES = {b"Authentication required", b"Incorrect username or password"}
 
 # Answered by the auth middleware for an agent's bearer token, not by a route
 MIDDLEWARE_OPERATIONS = {("GET", "/api/agent/access"), ("GET", "/api/agent/endpoints")}
@@ -112,7 +114,7 @@ class Contract:
             # Not a route's answer: the auth middleware's plain sentence when Basic auth
             # is on without a password, for any call (the document's description says so)
             return None
-        if status == 401 and media != "application/json":
+        if status == 401 and media != "application/json" and body in _MIDDLEWARE_401_SENTENCES:
             # Not a route's answer either: the auth middleware's plain sentence for a
             # call without credentials, for any call (the document's description says so)
             return None

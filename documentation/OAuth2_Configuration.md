@@ -141,7 +141,7 @@ Use your own tenant ID. Do not use the shared multi-tenant address unless you li
 
 Both sign-in methods give the browser a cookie named `session_id` (`HttpOnly`, `SameSite=Lax`). The cookie is marked `Secure` when the request came over HTTPS, directly or through a proxy that sends `X-Forwarded-Proto: https`. Use HTTPS for anything outside a private network.
 
-- A session lasts at most **Longest session** (`SESSION_EXPIRY_HOURS`, default 24), counted from sign-in whatever the activity. Five minutes before, the page says so. A shorter value applies to open sessions at once; a longer one from the next sign-in.
+- A session lasts at most **Longest session** (`SESSION_EXPIRY_HOURS`, default 24), counted from sign-in whatever the activity. Five minutes before, the page says so. A shorter value applies to open sessions at once; a longer one applies in full from the next sign-in.
 - **Sign out after inactivity** (`SESSION_IDLE_ENABLED`, off by default) ends a session after **Inactivity limit** minutes without activity (`SESSION_IDLE_TIMEOUT_MINUTES`, default 60, from 5 to 1440). Typing, clicking, scrolling with the wheel and touching count as activity; pages that refresh by themselves do not, so a dashboard left open on a screen is signed out too. A minute before, the page asks whether you are still there. Turning it on does not sign out people who are already signed in: their inactivity time starts then.
 - After a session ends this way, the login page says why. Both limits apply to Basic Auth and OAuth2 sign-ins alike. AI agents and API calls with a username and password are not affected.
 - Sessions are kept in memory, so every restart of the app signs everyone out.
