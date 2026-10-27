@@ -16,10 +16,13 @@ const { JSDOM, VirtualConsole } = require(path.join(modules, 'jsdom'));
 const frontend = path.join(__dirname, '../../frontend');
 const read = name => fs.readFileSync(path.join(frontend, name), 'utf8');
 
-// The page as served, without its scripts; the app's own scripts run in its order
+// The page as served. jsdom loads no external file, so its script tags stay
+// inert; the app's own scripts (not the vendored libraries) run in its order
 const html = read('index.html');
-const scripts = [...html.matchAll(/<script src="\/static\/([\w.-]+\.js)\?v=[^"]*"><\/script>/g)].map(m => m[1]);
-const markup = html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/g, '');
+const scripts = [...new JSDOM(html).window.document.querySelectorAll('script[src]')]
+    .map(el => new URL(el.getAttribute('src'), 'http://localhost').pathname)
+    .filter(src => /^\/static\/[\w.-]+\.js$/.test(src))
+    .map(src => src.slice('/static/'.length));
 
 const INFO = { app_title: 'mailcow Logs Viewer', version: '3.0.0', auth_enabled: true, disabled_features: [],
     settings_edit_via_ui_enabled: true, timezone: 'UTC' };
@@ -30,7 +33,7 @@ const answer = body => ({ ok: true, status: 200, headers: { get: () => null }, j
 // at once); every other request never does. jsdom fires DOMContentLoaded itself
 // once the scripts below have run.
 function boot(address) {
-    const dom = new JSDOM(markup, { runScripts: 'dangerously', pretendToBeVisual: true,
+    const dom = new JSDOM(html, { runScripts: 'dangerously', pretendToBeVisual: true,
         url: `http://localhost${address}`, virtualConsole: new VirtualConsole() });
     const w = dom.window;
     w.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} });
