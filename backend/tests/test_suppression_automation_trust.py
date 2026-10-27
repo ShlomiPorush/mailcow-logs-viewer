@@ -260,7 +260,7 @@ def test_a_mailcow_changed_during_the_sync_leaves_the_list_incomplete(monkeypatc
     monkeypatch.setattr(config, '_cached_domains_complete', None)
     monkeypatch.setattr(scheduler, 'update_job_status', Mock())
 
-    async def domains():
+    async def domains(**kwargs):
         monkeypatch.setattr(scheduler.mailcow_api, 'base_url', 'https://other-mailcow.example.com')
         return [{'domain_name': HOSTED, 'active': 1}]
     monkeypatch.setattr(scheduler.mailcow_api, 'get_domains', domains)

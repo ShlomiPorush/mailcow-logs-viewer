@@ -19,7 +19,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 
 from .app_time import UTC, app_tz, format_clock
-from .config import settings, set_cached_active_domains, local_domains_complete, is_hosted_domain
+from .config import settings, set_cached_active_domains, cached_domains_known, local_domains_complete, is_hosted_domain
 from .database import get_db_context, SessionLocal
 from .mailcow_api import MailcowWriteUnknownError, mailcow_api, mailcow_handled_items
 from .services.suppression_events import disabled_by_hand, record_bounces, record_stuck
@@ -42,7 +42,7 @@ from .services.dovecot_parser import (
     pick_worst_verdict,
     resolve_session_verdicts,
 )
-from .routers.domains import check_domain_dns, store_dns_check_worker
+from .routers.domains import check_domain_dns, store_dns_check_worker, init_server_ip
 from .routers.suppressions import auto_suppression_address, AUTOMATIC_SOURCES, RSPAMD_SOURCE
 from .services.dmarc_imap_service import sync_dmarc_reports_from_imap
 from .services.dmarc_notifications import send_dmarc_error_notification
@@ -956,6 +956,15 @@ def _trim_postfix_cache():
 
 async def fetch_and_store_rspamd():
     """Fetch Rspamd logs from API and store in DB (paginated - fetches all available logs)"""
+    # Each message is stored with its direction, which depends on this
+    # mailcow's domains: without the list it could be stored wrong. Until the
+    # list is read (the app no longer reads it at startup) this run imports
+    # nothing, and a later one resumes where the last one stopped.
+    if not local_domains_complete(mailcow_api.base_url):
+        await sync_local_domains()
+        if not local_domains_complete(mailcow_api.base_url):
+            logger.warning("[RSPAMD] Waiting for the list of this mailcow's domains, not importing this run")
+            return
     last_fetch_run_time['rspamd'] = datetime.now(timezone.utc)
     
     page_size = settings.fetch_count_rspamd
@@ -2648,18 +2657,20 @@ async def sync_local_domains():
         # Both lists come from one mailcow: one that changed in Settings
         # meanwhile leaves the list incomplete until the next sync
         source = mailcow_api.base_url
-        domains = await mailcow_api.get_domains()
+        # Strict: an answer that is not a list of them fails the sync and keeps
+        # the previous list, instead of reading as a mailcow without domains
+        domains = await mailcow_api.get_domains(strict=True)
         active_domains = [d['domain_name'] for d in domains if d.get('active') == 1 and d.get('domain_name')]
-        alias_map = await mailcow_api.get_alias_domain_map()
+        alias_map = await mailcow_api.get_alias_domain_map(strict=True)
         alias_domains = sorted(alias_map.keys())
         # Merge: primary domains + alias domains (no duplicates)
         all_domains = list(dict.fromkeys((active_domains or []) + (alias_domains or [])))
+        # A domain turned off in mailcow is still hosted here for the mail
+        # it accepted before, which can wait in the queue
+        hosted = list(dict.fromkeys(all_domains + [d['domain_name'] for d in domains if d.get('domain_name')]))
+        complete_for = source if mailcow_api.base_url == source else None
         if all_domains:
-            # A domain turned off in mailcow is still hosted here for the mail
-            # it accepted before, which can wait in the queue
-            hosted = list(dict.fromkeys(all_domains + [d['domain_name'] for d in domains if d.get('domain_name')]))
-            set_cached_active_domains(all_domains, complete_for=source if mailcow_api.base_url == source else None,
-                                      hosted=hosted)
+            set_cached_active_domains(all_domains, complete_for=complete_for, hosted=hosted)
             # Persist which primary domain each alias points at, so mailbox
             # statistics and the Domains page can use the mapping (issue #92)
             try:
@@ -2674,6 +2685,15 @@ async def sync_local_domains():
             update_job_status('sync_local_domains', 'success')
             return True
         else:
+            # mailcow answered that it has none: the list is read (the jobs
+            # waiting for it go on), and Status still shows the sync failed.
+            # A list this mailcow gave before is kept, the domains it only
+            # hosts too: an empty answer for a moment (while mailcow starts)
+            # would store every direction wrong and let the queue cleanup
+            # delete mail waiting for a hosted domain.
+            # An answer that lists only domains turned off is used as it is.
+            if hosted or not (local_domains_complete(source) and cached_domains_known()):
+                set_cached_active_domains([], complete_for=complete_for, hosted=hosted)
             logger.warning("⚠ No active domains retrieved")
             update_job_status('sync_local_domains', 'failed', "No domains")
             return False
@@ -3153,6 +3173,14 @@ async def sync_transports_job():
             update_job_status('sync_transports', 'failed', 'API not configured')
             return
 
+        # The WAN IP is read here when not known yet (the app no longer reads
+        # it at startup). When mailcow cannot be asked the run fails before
+        # the stored hosts are changed, so the WAN IP row is not turned off.
+        wan_ip = None
+        if settings.blacklist_source_server_ip:
+            from .routers.domains import load_server_ip
+            wan_ip = await load_server_ip()
+
         # Fetch Transports and Relay Hosts using mailcow_api (per-source toggles)
         transports_data = await mailcow_api.get_transports() if settings.blacklist_source_transports else []
         relayhosts_data = await mailcow_api.get_relayhosts() if settings.blacklist_source_relayhosts else []
@@ -3236,11 +3264,8 @@ async def sync_transports_job():
         # The auto-detected WAN IP, when that source is enabled. When disabled
         # the entry is simply not included here, so the deactivation loop below
         # turns the existing 'system' row off without deleting it.
-        if settings.blacklist_source_server_ip:
-            from .routers.domains import get_cached_server_ip
-            wan_ip = get_cached_server_ip()
-            if wan_ip and wan_ip not in hosts_to_monitor:
-                hosts_to_monitor[wan_ip] = 'system'
+        if wan_ip and wan_ip not in hosts_to_monitor:
+            hosts_to_monitor[wan_ip] = 'system'
 
         added_count, updated_count, deactivated_count = await asyncio.get_running_loop().run_in_executor(
             get_thread_pool_executor(), _store_monitored_hosts, hosts_to_monitor
@@ -4160,6 +4185,17 @@ def start_scheduler():
             replace_existing=True,
             max_instances=1,
             next_run_time=datetime.now(timezone.utc)
+        )
+
+        # The server IP for the pages that show it (Settings, the blacklist
+        # summary), read once soon after startup instead of during it; the
+        # jobs that need it read it themselves
+        scheduler.add_job(
+            init_server_ip,
+            'date',
+            run_date=datetime.now(timezone.utc) + timedelta(seconds=5),
+            id='server_ip_startup',
+            name='Server IP (Startup)'
         )
 
         # Job 11: Update GeoIP database (weekly, Sunday at 3 AM)

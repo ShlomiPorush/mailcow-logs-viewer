@@ -20,7 +20,7 @@ from starlette.datastructures import MutableHeaders
 from contextlib import asynccontextmanager, suppress
 from typing import Optional
 
-from .config import settings, set_cached_active_domains, reload_settings
+from .config import settings, reload_settings
 from .database import init_db, check_db_connection
 from .scheduler import start_scheduler, stop_scheduler
 from .raw_logs_worker import start_raw_logs_scheduler, stop_raw_logs_scheduler
@@ -222,30 +222,11 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"Error initializing GeoIP: {e}")
 
-    # Test mailcow API connection and fetch active domains
-    try:
-        api_ok = await mailcow_api.test_connection()
-        if not api_ok:
-            logger.warning("mailcow API connection test failed - check your configuration")
-        else:
-            try:
-                active_domains = await mailcow_api.get_active_domains()
-                if active_domains:
-                    set_cached_active_domains(active_domains)
-                    logger.info(f"Loaded {len(active_domains)} active domains from mailcow API")
-                else:
-                    logger.warning("No active domains found in mailcow - check your configuration")
-            except Exception as e:
-                logger.error(f"Failed to fetch active domains: {e}")
-            # Initialize server IP cache for SPF checks
-            try:
-                from app.routers.domains import init_server_ip
-                await init_server_ip()
-            except Exception as e:
-                logger.warning(f"Failed to initialize server IP cache: {e}")
-    except Exception as e:
-        logger.error(f"mailcow API test failed: {e}")
-    
+    # mailcow is not asked anything here: while it cannot be reached, startup
+    # would wait for it before serving a single page. The domain list is read
+    # by the domain sync the scheduler starts at once, and the server IP by
+    # the jobs and pages that need it.
+
     # Start background scheduler
     try:
         start_scheduler()

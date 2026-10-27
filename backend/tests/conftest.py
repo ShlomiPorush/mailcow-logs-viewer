@@ -76,6 +76,13 @@ def local_domains_loaded(monkeypatch):
     monkeypatch.setattr(config, "_cached_domains_complete", mailcow_api.base_url)
 
 
+@pytest.fixture(autouse=True)
+def mailcow_reachable(monkeypatch):
+    """No test starts with mailcow refused because an earlier test could not connect to it."""
+    from app import mailcow_api as client
+    monkeypatch.setattr(client.mailcow_api, "_reachability", client._Reachability())
+
+
 # One Contract per app, shared by the whole run: building it copies the document
 _contracts = {}
 

@@ -28,7 +28,7 @@ def test_database_work_keeps_loop_responsive(monkeypatch, state):
     db.query.return_value.filter.return_value.first.return_value = None
     db.commit.side_effect = lambda: threads.append(threading.get_ident())
 
-    async def domains():
+    async def domains(**kwargs):
         api_threads.append(threading.get_ident())
         return [{"domain_name": "primary.test", "active": 1}]
 
@@ -91,5 +91,6 @@ def test_no_domains_does_not_replace_persisted_mapping(monkeypatch, state):
     monkeypatch.setattr(scheduler, "get_db_context", session)
     assert asyncio.run(scheduler.sync_local_domains()) is False
     session.assert_not_called()
-    state[0].assert_not_called()
+    # mailcow answered that it has none: the list is read, empty
+    state[0].assert_called_once_with([], complete_for=scheduler.mailcow_api.base_url, hosted=[])
     state[1].assert_not_called()

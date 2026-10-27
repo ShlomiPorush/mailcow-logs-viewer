@@ -1446,6 +1446,12 @@ def is_hosted_domain(domain: Optional[str]) -> bool:
     return name in _cached_hosted_domains or name in {d.lower() for d in (_cached_active_domains or [])}
 
 
+def cached_domains_known() -> bool:
+    """Whether the cache holds any domain: an active one, or one only hosted
+    (turned off in mailcow, its mail can still wait in the queue)."""
+    return bool(_cached_active_domains or _cached_hosted_domains)
+
+
 def local_domains_complete(mailcow_url: Optional[str]) -> bool:
     """Whether every domain of that mailcow is known, alias domains included."""
     return _cached_domains_complete is not None and _cached_domains_complete == mailcow_url

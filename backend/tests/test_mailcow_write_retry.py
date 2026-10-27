@@ -67,13 +67,13 @@ def _release(api_key=True):
     return asyncio.run(go())
 
 
-def test_a_connection_never_made_is_tried_again(mailcow):
+def test_a_free_connection_is_waited_for_again(mailcow):
     failures = {"left": 2}
 
     def answer(request):
         if failures["left"]:
             failures["left"] -= 1
-            raise httpx.ConnectError("refused", request=request)
+            raise httpx.PoolTimeout("every connection busy", request=request)
         mailcow["reached"].append(request)
         return httpx.Response(200, json=[{"type": "success", "msg": ["item_released", "1"]}])
     mailcow["answer"] = answer
@@ -81,15 +81,22 @@ def test_a_connection_never_made_is_tried_again(mailcow):
     assert (mailcow["attempts"], len(mailcow["reached"])) == (3, 1)
 
 
-@pytest.mark.parametrize("error", [httpx.ConnectTimeout, httpx.PoolTimeout], ids=["connect-timeout", "pool-timeout"])
-def test_a_connection_never_made_fails_as_mailcow_not_answering(mailcow, error):
+@pytest.mark.parametrize("error, attempts", [
+    (httpx.ConnectError, 1),
+    (httpx.ConnectTimeout, 1),
+    (httpx.PoolTimeout, 3),
+], ids=["connect-error", "connect-timeout", "pool-timeout"])
+def test_a_connection_never_made_fails_as_mailcow_not_answering(mailcow, error, attempts):
+    """A connection that could not be made is not tried again seconds later:
+    the page is told at once and can try again itself."""
     def answer(request):
         raise error("no connection", request=request)
     mailcow["answer"] = answer
     with pytest.raises(MailcowAPIError) as raised:
         _release()
     assert not isinstance(raised.value, MailcowWriteUnknownError)
-    assert (mailcow["attempts"], len(mailcow["reached"])) == (3, 0)
+    assert raised.value.transient is True
+    assert (mailcow["attempts"], len(mailcow["reached"])) == (attempts, 0)
 
 
 @pytest.mark.parametrize("then", [

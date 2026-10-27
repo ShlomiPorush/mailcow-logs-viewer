@@ -160,7 +160,7 @@ def test_local_domains_stay_as_they_were_when_mailcow_fails(monkeypatch):
     """A failed domain read must not leave only the alias domains as local."""
     from app import scheduler
 
-    async def aliases():
+    async def aliases(**kwargs):
         return {"alias.example": "example.com"}
 
     monkeypatch.setattr(scheduler.mailcow_api, "get_domains", _no_mailcow_async)
