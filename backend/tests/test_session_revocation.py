@@ -217,23 +217,19 @@ def test_a_login_let_in_before_a_password_change_gets_no_session(monkeypatch):
     assert not session._session_store
 
 
-def test_a_session_about_to_be_revoked_cannot_be_exchanged_for_a_new_one(monkeypatch):
+def test_a_session_cannot_be_exchanged_for_a_new_one(monkeypatch):
+    """A new session needs the password, so a stolen cookie cannot be turned
+    into a session that outlives a revocation."""
     stolen = signed_in()
-    lookup = auth_module.get_session_from_request
-
-    def found_then_revoked(request):
-        found = lookup(request)
-        session.revoke_all_sessions()
-        return found
-
-    monkeypatch.setattr(auth_module, "get_session_from_request", found_then_revoked)
-    assert stolen.post("/api/auth/session").status_code == 409
+    assert stolen.post("/api/auth/session").status_code == 401
+    session.revoke_all_sessions()
+    assert stolen.post("/api/auth/session").status_code == 401
     assert not session._session_store
 
 
 def _admitted_request(generation=None):
     request = Request({"type": "http", "method": "POST", "path": "/api/auth/session",
-                       "headers": [], "query_string": b""})
+                       "headers": [(b"authorization", basic()["Authorization"].encode())], "query_string": b""})
     if generation is not None:
         request.state.auth_generation = generation
     return request
@@ -283,13 +279,13 @@ def test_the_oauth2_client_takes_the_new_provider_before_new_sessions_begin(monk
         monkeypatch.setattr(client, name, getattr(client, name, None), raising=False)
     monkeypatch.setattr(client, "reload_config", type(client).reload_config.__get__(client))
     token_url_at_revocation = []
-    revoke = settings_router.revoke_all_sessions
+    revoke = settings_router.revoke_all_sessions_keeping
 
-    def note_then_revoke():
+    def note_then_revoke(*args):
         token_url_at_revocation.append(client.token_url)
-        return revoke()
+        return revoke(*args)
 
-    monkeypatch.setattr(settings_router, "revoke_all_sessions", note_then_revoke)
+    monkeypatch.setattr(settings_router, "revoke_all_sessions_keeping", note_then_revoke)
     operator = signed_in()
     response = operator.put("/api/settings", json={"oauth2_token_url": "https://id.example.test/new-token"})
     assert response.status_code == 200

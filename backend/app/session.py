@@ -1,16 +1,24 @@
 """
 Session management for OAuth2 authentication
 Uses HTTP-only cookies with server-side session storage
+
+A session has two limits, whichever sign-in started it: the longest session
+(session_expiry_hours, counted from sign-in) and, when it is on, sign-out after
+inactivity (session_idle_timeout_minutes since the last interaction the browser
+reported through POST /api/auth/activity). The server record alone decides:
+the signed cookie only names the record.
 """
 import logging
+import math
 import secrets
 import time
+from collections import OrderedDict
 from threading import RLock
-from typing import Dict, Optional, Any
-from datetime import datetime, timedelta
+from typing import Callable, Dict, NamedTuple, Optional, Any, Tuple
 from fastapi import Request, Response
-from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
+from itsdangerous import URLSafeTimedSerializer, BadSignature
 
+from . import config as _config
 from .config import settings
 
 logger = logging.getLogger(__name__)
@@ -25,6 +33,19 @@ _next_capacity_cleanup = 0.0
 # when it changes.
 _auth_generation = 0
 
+# Why a session ended by a limit, kept for a while so the page can say so:
+# key -> (reason, until). At most session_max_entries, the oldest dropped
+# first; a session whose entry is gone is simply not signed in.
+SESSION_EXPIRED = "session_expired"
+SESSION_IDLE = "session_idle"
+_TOMBSTONE_SECONDS = 600
+_tombstones: "OrderedDict[str, Tuple[str, float]]" = OrderedDict()
+
+
+def _now() -> float:
+    """The clock every session limit is measured with (tests replace it)."""
+    return time.time()
+
 
 class SessionCapacityError(Exception):
     """No new sessions can be admitted without removing a live session."""
@@ -34,6 +55,16 @@ class SessionRevokedError(Exception):
     """Every session was revoked after the request was admitted, for example by
     a password change: a session issued now would outlive that change."""
 
+
+class SessionState(NamedTuple):
+    """A request's cookie session: its key and record while it is valid, or
+    why it ended by a limit (None when there is no session to speak of)."""
+    key: Optional[str]
+    data: Optional[Dict[str, Any]]
+    ended: Optional[str]
+
+
+_NO_SESSION = SessionState(None, None, None)
 
 # Session cookie name
 SESSION_COOKIE_NAME = "session_id"
@@ -66,6 +97,119 @@ def get_serializer() -> URLSafeTimedSerializer:
     return URLSafeTimedSerializer(get_session_secret_key())
 
 
+def _unsign(session_id: Optional[str]) -> Optional[str]:
+    """The server-side key a signed cookie names, or None when the signature fails.
+
+    No max_age: how long a session lasts is decided by its record only.
+    """
+    if not session_id:
+        return None
+    try:
+        key = get_serializer().loads(session_id)
+    except BadSignature as e:
+        logger.debug(f"Invalid session signature: {e}")
+        return None
+    return key if isinstance(key, str) else None
+
+
+# ── Limits ─────────────────────────────────────────────────────────────────
+
+def _longest_hours(source=None) -> int:
+    return max(1, int((source or settings).session_expiry_hours))
+
+
+def _idle_seconds(source=None) -> int:
+    return max(5, min(1440, int((source or settings).session_idle_timeout_minutes))) * 60
+
+
+def _longest_seconds(record: Dict[str, Any]) -> int:
+    """A shorter setting applies to open sessions; a longer one never goes past
+    the length the session was issued with."""
+    return min(int(record["issued_hours"]), _longest_hours()) * 3600
+
+
+def _end_reason(record: Dict[str, Any], now: float) -> Optional[str]:
+    """Why this session has ended under the settings in force, or None while
+    it is valid. Called under _session_lock, which also holds the settings."""
+    if now - record["login_at"] >= _longest_seconds(record):
+        return SESSION_EXPIRED
+    if settings.session_idle_enabled and now - record["active_at"] >= _idle_seconds():
+        return SESSION_IDLE
+    return None
+
+
+def _end(key: str, reason: str, now: float) -> None:
+    """Remove a session that a limit ended and remember why."""
+    _session_store.pop(key, None)
+    _tombstones.pop(key, None)
+    _tombstones[key] = (reason, now + _TOMBSTONE_SECONDS)
+    cap = max(0, int(settings.session_max_entries))
+    while len(_tombstones) > cap:
+        _tombstones.popitem(last=False)
+    logger.debug(f"Session {key[:8]}... ended: {reason}")
+
+
+def _tombstone(key: str, now: float) -> Optional[str]:
+    entry = _tombstones.get(key)
+    if entry is None:
+        return None
+    reason, until = entry
+    if now >= until:
+        _tombstones.pop(key, None)
+        return None
+    return reason
+
+
+def _check(key: Optional[str]) -> SessionState:
+    """The one validity check: the live record for this key, or why it ended.
+
+    An ended session is removed at once; nothing brings it back.
+    """
+    if not key:
+        return _NO_SESSION
+    with _session_lock:
+        now = _now()
+        record = _session_store.get(key)
+        if record is None:
+            return SessionState(None, None, _tombstone(key, now))
+        reason = _end_reason(record, now)
+        if reason:
+            _end(key, reason, now)
+            return SessionState(None, None, reason)
+        return SessionState(key, record, None)
+
+
+def _publish_settings(new: Any, assign: Callable[[], None]) -> None:
+    """Put new settings in force (config.reload_settings) under the session lock.
+
+    Sessions that ended under the settings in force stay ended, whatever the
+    new ones say, and so do sessions the new settings end: a shorter limit
+    ends them now, so a later longer one cannot bring them back. When sign-out
+    after inactivity is switched on, every session still valid starts its idle
+    time now, not from its last activity under a policy that did not count it.
+    """
+    with _session_lock:
+        now = _now()
+        idle_was_on = bool(settings.session_idle_enabled)
+        for key in list(_session_store):
+            reason = _end_reason(_session_store[key], now)
+            if reason:
+                _end(key, reason, now)
+        assign()
+        if not idle_was_on and bool(getattr(new, "session_idle_enabled", False)):
+            for record in _session_store.values():
+                record["active_at"] = now
+        for key in list(_session_store):
+            reason = _end_reason(_session_store[key], now)
+            if reason:
+                _end(key, reason, now)
+
+
+_config.set_settings_publisher(_publish_settings)
+
+
+# ── Sessions ───────────────────────────────────────────────────────────────
+
 def create_session(user_info: Dict[str, Any], *, generation: int) -> str:
     """
     Create a new session and return session ID
@@ -90,15 +234,13 @@ def create_session(user_info: Dict[str, Any], *, generation: int) -> str:
             if len(_session_store) >= settings.session_max_entries:
                 raise SessionCapacityError("Login capacity reached. Try again later.")
         session_id = secrets.token_urlsafe(32)
-        expires_at = datetime.utcnow() + timedelta(hours=settings.session_expiry_hours)
-
-        session_data = {
+        now = _now()
+        _session_store[session_id] = {
             "user_info": user_info,
-            "created_at": datetime.utcnow().isoformat(),
-            "expires_at": expires_at.isoformat(),
+            "login_at": now,
+            "active_at": now,
+            "issued_hours": _longest_hours(),
         }
-
-        _session_store[session_id] = session_data
 
         # Sign the session ID
         serializer = get_serializer()
@@ -120,28 +262,7 @@ def get_session(session_id: str) -> Optional[Dict[str, Any]]:
         Session data or None if invalid/expired
     """
     with _session_lock:
-        try:
-            # Verify and unsign the session ID
-            serializer = get_serializer()
-            unsigned_session_id = serializer.loads(session_id, max_age=settings.session_expiry_hours * 3600)
-        except (BadSignature, SignatureExpired) as e:
-            logger.debug(f"Invalid session signature: {e}")
-            return None
-
-        # Get session from store
-        session_data = _session_store.get(unsigned_session_id)
-        if not session_data:
-            logger.debug(f"Session {unsigned_session_id[:8]}... not found in store")
-            return None
-
-        # Check expiration
-        expires_at = datetime.fromisoformat(session_data["expires_at"])
-        if datetime.utcnow() > expires_at:
-            logger.debug(f"Session {unsigned_session_id[:8]}... expired")
-            _session_store.pop(unsigned_session_id, None)
-            return None
-
-        return session_data
+        return _check(_unsign(session_id)).data
 
 
 def delete_session(session_id: str) -> bool:
@@ -155,10 +276,8 @@ def delete_session(session_id: str) -> bool:
         True if session was deleted, False otherwise
     """
     with _session_lock:
-        try:
-            serializer = get_serializer()
-            unsigned_session_id = serializer.loads(session_id, max_age=settings.session_expiry_hours * 3600)
-        except (BadSignature, SignatureExpired):
+        unsigned_session_id = _unsign(session_id)
+        if unsigned_session_id is None:
             return False
 
         if unsigned_session_id in _session_store:
@@ -175,14 +294,36 @@ def revoke_all_sessions() -> int:
     Returns the generation this revocation started. A session issued with it
     is refused once any later revocation has run.
     """
+    return revoke_all_sessions_keeping(None, None)[0]
+
+
+def revoke_all_sessions_keeping(keep: Optional[Dict[str, Any]], admitted: Optional[int]) -> Tuple[int, Optional[str]]:
+    """revoke_all_sessions, keeping one session under a new key: the operator
+    who saved a sign-in change stays signed in (routers/settings.py).
+
+    Done in the same step as the revocation, so the kept session is never out
+    of the store where a limit can end it. It is kept only while it is still
+    there and valid, and only when no other revocation ran since its request
+    was let in (`admitted`). It keeps its sign-in time, last activity and
+    length, so saving never extends it. Returns the generation this revocation
+    started and the kept session's signed ID, or None.
+    """
     global _auth_generation
     with _session_lock:
+        key = next((k for k, record in _session_store.items() if record is keep), None) if keep is not None else None
+        if key is not None and (admitted != _auth_generation or _check(key).data is None):
+            key = None
         count = len(_session_store)
         _session_store.clear()
         _auth_generation += 1
         generation = _auth_generation
+        signed = None
+        if key is not None:
+            new_key = secrets.token_urlsafe(32)
+            _session_store[new_key] = keep
+            signed = get_serializer().dumps(new_key)
     logger.info(f"Revoked {count} session(s) after an authentication settings change")
-    return generation
+    return generation, signed
 
 
 def auth_generation() -> int:
@@ -191,26 +332,19 @@ def auth_generation() -> int:
         return _auth_generation
 
 
+def session_state(request: Request) -> SessionState:
+    """The request's cookie session, checked against both limits."""
+    return _check(_unsign(request.cookies.get(SESSION_COOKIE_NAME)))
+
+
 def session_key_from_request(request: Request) -> Optional[str]:
     """The server-side key of the request's valid session, or None."""
-    session_id = request.cookies.get(SESSION_COOKIE_NAME)
-    if not session_id:
-        return None
-    with _session_lock:
-        try:
-            key = get_serializer().loads(session_id, max_age=settings.session_expiry_hours * 3600)
-        except (BadSignature, SignatureExpired):
-            return None
-        return key if is_session_active(key) else None
+    return session_state(request).key
 
 
 def is_session_active(key: str) -> bool:
-    """Whether the session with this server-side key still exists and has not expired."""
-    with _session_lock:
-        session_data = _session_store.get(key)
-        if not session_data:
-            return False
-        return datetime.utcnow() <= datetime.fromisoformat(session_data["expires_at"])
+    """Whether the session with this server-side key exists and neither limit has ended it."""
+    return _check(key).data is not None
 
 
 def get_session_from_request(request: Request) -> Optional[Dict[str, Any]]:
@@ -223,11 +357,40 @@ def get_session_from_request(request: Request) -> Optional[Dict[str, Any]]:
     Returns:
         Session data or None if not found/invalid
     """
-    session_id = request.cookies.get(SESSION_COOKIE_NAME)
-    if not session_id:
-        return None
+    return session_state(request).data
 
-    return get_session(session_id)
+
+def _limits(record: Dict[str, Any], now: float) -> Dict[str, Any]:
+    longest_left = record["login_at"] + _longest_seconds(record) - now
+    idle_on = bool(settings.session_idle_enabled)
+    idle = _idle_seconds() if idle_on else None
+    return {
+        "longest_seconds_left": max(0, math.ceil(longest_left)),
+        "idle_enabled": idle_on,
+        "idle_timeout_seconds": idle,
+        "idle_seconds_left": max(0, math.ceil(record["active_at"] + idle - now)) if idle_on else None,
+    }
+
+
+def session_limits(request: Request) -> Optional[Dict[str, Any]]:
+    """How long the request's cookie session has left under each limit, or
+    None without a valid one. Reading it never counts as activity."""
+    with _session_lock:
+        state = session_state(request)
+        return _limits(state.data, _now()) if state.data is not None else None
+
+
+def record_activity(request: Request) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+    """The person used the page: restart the idle time of the request's own
+    cookie session. Returns its limits, or None and why it ended (None when
+    there is no session). An ended session stays ended."""
+    with _session_lock:
+        state = session_state(request)
+        if state.data is None:
+            return None, state.ended
+        now = _now()
+        state.data["active_at"] = now
+        return _limits(state.data, now), None
 
 
 def is_secure_request(request: Optional[Request]) -> bool:
@@ -247,6 +410,16 @@ def is_secure_request(request: Optional[Request]) -> bool:
     return request.url.scheme == "https"
 
 
+def _cookie_max_age(session_id: str) -> int:
+    """Seconds until the session reaches the length it was issued with: the
+    full length at sign-in, the time left when a session is re-issued."""
+    with _session_lock:
+        record = _session_store.get(_unsign(session_id) or "")
+        if record is None:
+            return _longest_hours() * 3600
+        return max(1, math.ceil(record["login_at"] + int(record["issued_hours"]) * 3600 - _now()))
+
+
 def set_session_cookie(
     response: Response, session_id: str, request: Optional[Request] = None
 ) -> None:
@@ -261,7 +434,7 @@ def set_session_cookie(
     response.set_cookie(
         key=SESSION_COOKIE_NAME,
         value=session_id,
-        max_age=settings.session_expiry_hours * 3600,
+        max_age=_cookie_max_age(session_id),
         httponly=True,
         secure=is_secure_request(request),
         samesite="lax",  # Lax for CSRF protection while allowing navigation
@@ -295,18 +468,17 @@ def cleanup_expired_sessions() -> int:
         Number of sessions cleaned up
     """
     with _session_lock:
-        now = datetime.utcnow()
-        expired_sessions = []
+        now = _now()
+        ended = 0
+        for key in list(_session_store):
+            reason = _end_reason(_session_store[key], now)
+            if reason:
+                _end(key, reason, now)
+                ended += 1
+        for key in [k for k, (_reason, until) in _tombstones.items() if now >= until]:
+            _tombstones.pop(key, None)
 
-        for session_id, session_data in list(_session_store.items()):
-            expires_at = datetime.fromisoformat(session_data["expires_at"])
-            if now > expires_at:
-                expired_sessions.append(session_id)
+        if ended:
+            logger.debug(f"Cleaned up {ended} expired sessions")
 
-        for session_id in expired_sessions:
-            _session_store.pop(session_id, None)
-
-        if expired_sessions:
-            logger.debug(f"Cleaned up {len(expired_sessions)} expired sessions")
-
-        return len(expired_sessions)
+        return ended

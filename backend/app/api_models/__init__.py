@@ -38,6 +38,17 @@ class ErrorDetail(Fixed):
     detail: str = Field(description="What went wrong")
 
 
+class SessionEnded(Fixed):
+    """A session cookie that a limit ended; the X-Session-End header carries the reason too."""
+    detail: str = Field(description="What happened")
+    reason: str = Field(description="session_expired (the longest session) or session_idle (inactivity)")
+
+
+# Not signed in: the route's own sentence, or a session a limit ended (the
+# sign-in check's plain-text answer is app-wide, in the document's description)
+NotSignedIn = Union[SessionEnded, ErrorDetail]
+
+
 class ServerError(Fixed):
     """An internal error. A failure the route did not catch also has `error` (main.py's handler)."""
     detail: str = Field(description="What went wrong; the details are in the container log")
@@ -62,6 +73,7 @@ Invalid = Union[ValidationErrors, ErrorDetail]
 
 _ERROR_TEXT = {
     400: "Bad request",
+    401: "Not signed in, or the session ended (reason says why)",
     403: "Not allowed: the feature is off or the call is refused",
     404: "Not found",
     409: "Conflict",
@@ -96,7 +108,8 @@ def documented(ok: Any, *, status: int = 200, description: str = "Success",
                errors: Optional[Dict[int, Any]] = None, media_type: Optional[str] = None) -> Dict[int, Dict[str, Any]]:
     """The ``responses=`` value for a route: its answer and the errors it gives.
 
-    ``errors`` maps a status to its model, or to None for ErrorDetail (ServerError for 500). With
+    ``errors`` maps a status to its model, or to None for ErrorDetail (ServerError for 500,
+    NotSignedIn for 401). With
     ``ok`` None the answer keeps the route's response class (text, a file); ``media_type``
     then documents its body as text of that type.
     """
@@ -106,6 +119,6 @@ def documented(ok: Any, *, status: int = 200, description: str = "Success",
     elif media_type:
         out[status]["content"] = {media_type: {"schema": {"type": "string"}}}
     for code, model in (errors or {}).items():
-        default = ServerError if code == 500 else ErrorDetail
+        default = {500: ServerError, 401: NotSignedIn}.get(code, ErrorDetail)
         out[code] = {"model": model or default, "description": _ERROR_TEXT.get(code, "Error")}
     return out

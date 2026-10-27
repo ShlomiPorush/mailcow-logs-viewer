@@ -34,8 +34,7 @@ from ..services.geoip_downloader import is_license_configured, get_geoip_status
 from .domains import get_cached_server_ip
 from ..mailcow_api import mailcow_api, MailcowAPIError
 from ..services.oauth2_client import oauth2_client
-from ..session import get_session_from_request, create_session, set_session_cookie, revoke_all_sessions
-from ..session import SessionCapacityError, SessionRevokedError
+from ..session import get_session, get_session_from_request, set_session_cookie, revoke_all_sessions_keeping
 
 from ..utils import format_datetime_for_api as format_datetime_utc
 from ..api_models import Invalid, documented
@@ -286,6 +285,37 @@ def _validate_agent_access(allowed: Dict[str, Any], current: Optional[Settings] 
     if agents_without_sign_in(True) and not agents_without_sign_in(False):
         raise HTTPException(status_code=400, detail=(
             "Agent access needs Basic Auth or OAuth2 sign-in. Turn on sign-in, or turn off agent access."))
+
+
+def _whole_number(value: Any) -> int:
+    """A whole number sent as a number or as its digits; anything else raises ValueError."""
+    if isinstance(value, bool):
+        raise ValueError("Not a number")
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    return int(str(value).strip())
+
+
+def _validate_session_limits(allowed: Dict[str, Any]) -> None:
+    """Save the session limits as whole numbers, as the stored settings are
+    read back (5.0 would be read as nothing and fall back to the default).
+    The longest session is at least an hour, without an upper bound; sign-out
+    after inactivity takes 5 to 1440 minutes. The value in effect sent back
+    as it is always saves (the page posts every key)."""
+    for key, low, high in (("session_expiry_hours", 1, None), ("session_idle_timeout_minutes", 5, 1440)):
+        if key not in allowed:
+            continue
+        try:
+            value = _whole_number(allowed[key])
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail=f"Invalid settings for: {key}")
+        allowed[key] = value
+        if value == getattr(settings, key, None):
+            continue
+        if value < low or (high is not None and value > high):
+            raise HTTPException(status_code=400, detail=f"Invalid settings for: {key}")
 
 
 def _validate_display_formats(allowed: Dict[str, Any]) -> None:
@@ -902,6 +932,7 @@ def update_settings(body: Dict[str, Any], request: Request = None, response: Res
     _validate_display_formats(allowed)
     _validate_bounce_actions(allowed)
     _validate_agent_access(allowed)
+    _validate_session_limits(allowed)
     # For sensitive keys, mask placeholder means "do not change" - omit from payload
     # Empty string means "clear this value" and should be kept
     for sk in _SENSITIVE_SETTING_KEYS:
@@ -1037,7 +1068,14 @@ def update_settings(body: Dict[str, Any], request: Request = None, response: Res
     # login let in after the revocation below must not finish with the old one
     oauth2_client.reload_config()
     if _session_bound_values(saved) != prev_sign_in:
-        revoked = revoke_all_sessions()
+        # Keep the operator who saved signed in: the same session under a new key,
+        # in the same step as the revocation (session.py). Only when this save's
+        # revocation is the one change since the request was let in, and only while
+        # the session is still valid; a later revocation ends it too.
+        admitted = getattr(getattr(request, "state", None), "auth_generation", None)
+        keep = operator_session if (operator_session and saved.is_authentication_enabled
+                                    and response is not None and isinstance(admitted, int)) else None
+        kept = revoke_all_sessions_keeping(keep, admitted)[1]
         # Connected agents end with the sessions, for good (agent_access/store.py).
         # Should this fail, every agent request repeats the check before it runs.
         try:
@@ -1045,16 +1083,11 @@ def update_settings(body: Dict[str, Any], request: Request = None, response: Res
             check_sign_in_unchanged(db)
         except Exception as e:
             logger.error(f"Could not disconnect agents after the sign-in change: {e}")
-        # Keep the operator who saved signed in, with a session issued under the new settings.
-        # Only when this save's revocation is the one change since the request was
-        # let in, and no later one ran meanwhile: otherwise that change ends it too.
-        admitted = getattr(getattr(request, "state", None), "auth_generation", None)
-        if (operator_session and saved.is_authentication_enabled and response is not None
-                and isinstance(admitted, int) and admitted + 1 == revoked):
-            try:
-                set_session_cookie(response, create_session(operator_session["user_info"], generation=revoked), request)
-            except (SessionRevokedError, SessionCapacityError) as e:
-                logger.info(f"The operator who saved signs in again: {e}")
+        # The cookie only for a kept session still alive (another change may have ended it meanwhile)
+        if kept and get_session(kept) is not None:
+            set_session_cookie(response, kept, request)
+        elif keep is not None:
+            logger.info("The operator who saved signs in again")
     # A feature switched off here should drop its data now, not at the next restart;
     # the sweep then takes Security's temporary bans out, or loads the Suppressions feature's blocks back
     feature_data_errors = cleanup_disabled_feature_data(db)

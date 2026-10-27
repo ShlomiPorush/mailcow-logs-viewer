@@ -103,7 +103,7 @@ def test_provider_info_with_oauth2(provider):
 
 def test_status_signed_out(signed_out):
     r = _client().get('/api/auth/status')
-    assert r.status_code == 200 and r.json() == {'authenticated': False, 'auth_type': None, 'user': None}
+    assert r.status_code == 200 and r.json() == {'authenticated': False, 'auth_type': None, 'user': None, 'session': None}
 
 
 def test_status_with_basic_auth_and_with_a_session(basic):

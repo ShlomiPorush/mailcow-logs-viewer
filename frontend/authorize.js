@@ -197,6 +197,17 @@ function consentRender(data) {
     window.scrollTo(0, 0);
 }
 
+// The session ended (or there is none): to the login page, which says why when
+// a limit ended it (session-guard.js), and back to this request after signing in
+async function consentToLogin(response) {
+    const here = window.location.pathname + window.location.search;
+    if (typeof sessionGuardLoginPath === 'function') {
+        window.location.replace(sessionGuardLoginPath(await sessionGuardReasonOf(response), here));
+    } else {
+        window.location.replace('/login?next=' + encodeURIComponent(here));
+    }
+}
+
 async function consentAnswer(allow) {
     const buttons = [consentEl('consent-allow'), consentEl('consent-deny')];
     const error = consentEl('consent-form-error');
@@ -222,7 +233,7 @@ async function consentAnswer(allow) {
             body: JSON.stringify(payload),
         });
         if (response.status === 401) {
-            window.location.replace('/login?next=' + encodeURIComponent(window.location.pathname + window.location.search));
+            await consentToLogin(response);
             return;
         }
         if (!response.ok) {
@@ -268,7 +279,7 @@ async function consentLoad() {
     try {
         const response = await fetch(`/api/agents/consent/${encodeURIComponent(consentRequestId)}`, { credentials: 'same-origin' });
         if (response.status === 401) {
-            window.location.replace('/login?next=' + encodeURIComponent(window.location.pathname + window.location.search));
+            await consentToLogin(response);
             return;
         }
         if (!response.ok) {

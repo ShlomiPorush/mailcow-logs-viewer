@@ -15,7 +15,7 @@
     
     <style>.hidden{display:none}</style>
     <link rel="stylesheet" href="/static/assets/css/utilities.css?v=1">
-    <link rel="stylesheet" href="/static/assets/css/ui.css?v=23">
+    <link rel="stylesheet" href="/static/assets/css/ui.css?v=24">
     <style>
         .loading {
             border: 3px solid var(--ui-line);
@@ -40,6 +40,11 @@
             <p class="ui-muted">Please enter your credentials to continue</p>
         </div>
         
+        <!-- Why the last session ended (?reason=), above both sign-in methods -->
+        <div id="login-notice" class="hidden ui-banner ui-banner-warn ui-login-notice" role="status">
+            <span id="login-notice-text"></span>
+        </div>
+
         <!-- OAuth2 Login Section -->
         <div id="oauth2-section" class="hidden ui-login-oauth">
             <button 
@@ -307,9 +312,34 @@
             }
         }
         
+        // Why the last session ended (?reason=, from session-guard.js and the
+        // server). Only known reasons are shown, never the value as given; the
+        // reason leaves the address, ?next= stays
+        function showSignOutReason() {
+            const urlParams = new URLSearchParams(window.location.search);
+            if (!urlParams.has('reason')) return;
+            let message = '';
+            switch (urlParams.get('reason')) {
+                case 'session_idle':
+                    message = 'You were signed out because there was no activity. Sign in again to continue.';
+                    break;
+                case 'session_expired':
+                    message = 'Your session reached its maximum length. Sign in again to continue.';
+                    break;
+            }
+            if (message) {
+                document.getElementById('login-notice-text').textContent = message;
+                document.getElementById('login-notice').classList.remove('hidden');
+            }
+            urlParams.delete('reason');
+            const rest = urlParams.toString();
+            window.history.replaceState({}, document.title, window.location.pathname + (rest ? `?${rest}` : ''));
+        }
+
         // Load app title and configure login options on page load
         document.addEventListener('DOMContentLoaded', async () => {
             // Check for errors first
+            showSignOutReason();
             checkForErrors();
             
             // First check if authentication is enabled

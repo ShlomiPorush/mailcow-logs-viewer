@@ -15,13 +15,16 @@ from fastapi import APIRouter, Request, Response, HTTPException, status
 from fastapi.responses import JSONResponse, RedirectResponse
 from typing import Optional
 
-from ..auth import safe_return_path
+from .. import auth as auth_module
+from ..auth import safe_return_path, session_ended_response
 from ..config import settings
 from ..session import (
     create_session,
     SessionCapacityError,
     SessionRevokedError,
     get_session_from_request,
+    record_activity,
+    session_limits,
     delete_session,
     set_session_cookie,
     clear_session_cookie,
@@ -173,21 +176,27 @@ def verify_basic_auth():
     return {"verified": True}
 
 
-@router.post("/auth/session", responses=documented(m.BasicSession, errors={400: None, 409: None, 503: None}))
+@router.post("/auth/session", responses=documented(m.BasicSession, errors={400: None, 401: None, 409: None, 503: None}))
 def create_basic_auth_session(request: Request):
     """
     Exchange verified Basic Auth credentials for a session cookie.
 
-    Not in public_paths, so the middleware has already checked the
-    Authorization header by the time this runs: reaching this function means
-    the credentials are valid. The password is never stored in the browser -
-    the login form sends it once, here, and from then on the HttpOnly session
-    cookie authenticates every request.
+    The Authorization header is checked here on every call, through the same
+    failure budget as everywhere else, also when the request carries a valid
+    session cookie: a session never renews itself, only the password starts
+    a new one with a new longest session. The password is never stored in
+    the browser - the login form sends it once, here, and from then on the
+    HttpOnly session cookie authenticates every request.
     """
     if not settings.is_basic_auth_enabled:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Basic authentication is not enabled",
+        )
+    if not auth_module._authenticate_basic_request(request):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect username or password",
         )
 
     username = settings.auth_username
@@ -391,20 +400,41 @@ def oauth2_logout_get():
     )
 
 
+@router.post("/auth/activity", responses=documented(m.SessionActivity, errors={401: None}))
+def session_activity(request: Request):
+    """
+    The person used the page (typed, clicked, scrolled or touched): restart
+    the inactivity time of this request's own session cookie.
+
+    Pages that refresh by themselves never call this, so they do not keep a
+    session alive. Only the cookie's own session is touched, and a session
+    that ended stays ended. Not for agents.
+    """
+    limits, ended = record_activity(request)
+    if limits is None:
+        if ended:
+            return session_ended_response(ended)
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="No session to keep active")
+    return {"session": limits}
+
+
 @router.get("/auth/status", responses=documented(m.AuthStatus))
 def auth_status(request: Request):
     """
     Check authentication status
-    Returns current user info if authenticated
+    Returns current user info if authenticated, and for a session cookie how
+    long the session has left. Reading it never counts as activity.
     """
     # Session cookie (OAuth2 login, or Basic Auth exchanged for a session)
     session_data = get_session_from_request(request)
-    if session_data:
+    limits = session_limits(request) if session_data else None
+    if session_data and limits is not None:
         user_info = session_data.get("user_info", {})
         return {
             "authenticated": True,
             "auth_type": user_info.get("auth_method", "oauth2"),
             "user": user_info,
+            "session": limits,
         }
     
     # Check Basic Auth (if enabled)
@@ -417,10 +447,12 @@ def auth_status(request: Request):
                 "authenticated": True,
                 "auth_type": "basic",
                 "user": None,  # Basic Auth doesn't provide user info
+                "session": None,
             }
     
     return {
         "authenticated": False,
         "auth_type": None,
         "user": None,
+        "session": None,
     }
