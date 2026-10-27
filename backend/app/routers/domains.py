@@ -77,10 +77,26 @@ SPF_A_MX_RE = re.compile(
 _server_ip_cache = None
 
 
+async def load_server_ip():
+    """The server IP, read from mailcow when it is not cached yet.
+
+    Raises MailcowAPIError when mailcow could not be asked, so a job that
+    needs the address fails instead of going on without it; None when
+    mailcow answered without one.
+    """
+    global _server_ip_cache
+
+    if _server_ip_cache is None:
+        _server_ip_cache = await mailcow_api.get_status_host_ip(strict=True)
+        if _server_ip_cache:
+            logger.info(f"Server IP cached successfully: {_server_ip_cache}")
+    return _server_ip_cache
+
+
 async def init_server_ip():
     """
-    Initialize and cache server IP address from mailcow API
-    Called once during application startup
+    Initialize and cache server IP address from mailcow API.
+    Forgiving: None when mailcow could not be asked as well.
     """
     global _server_ip_cache
     

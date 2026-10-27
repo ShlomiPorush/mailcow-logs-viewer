@@ -7,12 +7,15 @@ import json
 import math
 import httpx
 import logging
+import threading
+import time
 import weakref
+from contextlib import contextmanager
 from http.cookiejar import CookieJar, DefaultCookiePolicy
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 from typing import List, Dict, Any, Optional
 from datetime import datetime
-from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
+from tenacity import retry, retry_if_exception, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 from .config import settings
 
@@ -77,8 +80,16 @@ def _objects_only(data: list, what: str) -> list:
 
 
 class MailcowAPIError(Exception):
-    """Custom exception for mailcow API errors"""
-    pass
+    """Custom exception for mailcow API errors.
+
+    `transient` says whether trying again later can help: mailcow could not be
+    reached, did not answer in time or failed itself (5xx). A refusal (4xx) or
+    an answer this app cannot read is not.
+    """
+
+    def __init__(self, *args, transient: bool = False):
+        super().__init__(*args)
+        self.transient = transient
 
 
 class MailcowShownError(MailcowAPIError):
@@ -112,13 +123,112 @@ class MailcowWriteUnknownError(MailcowShownError):
     sent again. `cause` is what happened, for the log."""
     MESSAGE = "mailcow did not confirm the change. It may still be running. Check the result before trying again."
 
-    def __init__(self, cause: str):
+    def __init__(self, cause: str, transient: bool = False):
         self.cause = cause
-        super().__init__(self.MESSAGE)
+        super().__init__(self.MESSAGE, transient=transient)
 
 
-# The request never reached mailcow: the only failures a write is sent again after
+class MailcowUnreachableError(MailcowShownError):
+    """mailcow could not be connected to a moment ago, so this request was not
+    sent: the page fails at once instead of waiting for the same failure."""
+    MESSAGE = "mailcow cannot be reached"
+
+    def __init__(self):
+        super().__init__(self.MESSAGE, transient=True)
+
+
+# The request never reached mailcow
 _NOT_SENT = (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout)
+
+# How long an address whose connection failed is not tried again
+_UNREACHABLE_SECONDS = 30
+# The connection itself gets at most this long, whatever the request timeout
+_CONNECT_TIMEOUT_SECONDS = 10
+
+
+def _origin(url: str) -> tuple:
+    """Scheme, host and port of a URL: what one connection failure is about."""
+    parts = urlsplit(url)
+    scheme = (parts.scheme or "").lower()
+    try:
+        port = parts.port
+    except ValueError:
+        port = None
+    return scheme, (parts.hostname or "").lower(), port or {"http": 80, "https": 443}.get(scheme)
+
+
+class _Reachability:
+    """Which addresses could not be connected to a moment ago.
+
+    After a failed connection the address is refused locally for
+    _UNREACHABLE_SECONDS; then one request (the probe) is let through, and its
+    outcome decides. Shared by every event loop of the process (manual job
+    runs have their own), so it is guarded by a thread lock and never awaits.
+    """
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._down = {}         # origin -> {"until": monotonic time, "probe": token or None}
+        self._generation = 0    # a reset makes the outcomes of earlier requests count for nothing
+
+    def reset(self) -> None:
+        with self._lock:
+            self._down.clear()
+            self._generation += 1
+
+    def admit(self, url: str) -> tuple:
+        """Let one network attempt to `url` go, or raise MailcowUnreachableError."""
+        origin = _origin(url)
+        with self._lock:
+            state = self._down.get(origin)
+            if state is None:
+                return origin, self._generation, None
+            if state["probe"] is not None or time.monotonic() < state["until"]:
+                raise MailcowUnreachableError()
+            token = object()
+            state["probe"] = token
+            return origin, self._generation, token
+
+    def record(self, ticket: tuple, outcome: Optional[str]) -> None:
+        """outcome: "unreachable", "reachable", or None when the attempt tells neither."""
+        origin, generation, token = ticket
+        with self._lock:
+            if generation != self._generation:
+                return
+            state = self._down.get(origin)
+            if outcome == "reachable":
+                self._down.pop(origin, None)
+            elif outcome == "unreachable":
+                if state is None:
+                    state = self._down[origin] = {"until": 0.0, "probe": None}
+                state["until"] = time.monotonic() + _UNREACHABLE_SECONDS
+                if state["probe"] is token:
+                    state["probe"] = None
+            elif state is not None and token is not None and state["probe"] is token:
+                state["probe"] = None
+
+    @contextmanager
+    def attempt(self, url: str):
+        """Around one network attempt: admission first, its outcome always recorded."""
+        ticket = self.admit(url)
+        outcome = None
+        try:
+            yield
+            outcome = "reachable"   # any HTTP answer, whatever its status
+        except (httpx.ConnectError, httpx.ConnectTimeout):
+            outcome = "unreachable"
+            raise
+        finally:
+            self.record(ticket, outcome)
+
+
+def _read_retryable(error: BaseException) -> bool:
+    """A read is tried again only when that can help soon: not when mailcow
+    could not be connected to, and not after a timeout, which would only make
+    the page wait as long again. Never a cancellation."""
+    if not isinstance(error, Exception) or isinstance(error, MailcowUnreachableError):
+        return False
+    return not isinstance(error.__cause__, (httpx.ConnectError, httpx.TimeoutException))
 
 
 class MailcowAPI:
@@ -131,6 +241,9 @@ class MailcowAPI:
         # Keyed weakly by loop because manually triggered jobs run in their
         # own short-lived loop; a client must never be shared across loops.
         self._clients = weakref.WeakKeyDictionary()
+        # While mailcow cannot be connected to, requests fail at once instead
+        # of each waiting for the connection timeout (and its retries)
+        self._reachability = _Reachability()
         self._update_config()
         logger.info(f"mailcow API client initialized for {self.base_url} (SSL verification: {self.verify_ssl})")
 
@@ -140,7 +253,9 @@ class MailcowAPI:
         client = self._clients.get(loop)
         if client is None or client.is_closed:
             client = httpx.AsyncClient(
-                timeout=self.timeout,
+                # A connection that is not made within seconds will not be
+                # made: the full timeout is for mailcow's answer
+                timeout=httpx.Timeout(self.timeout, connect=min(_CONNECT_TIMEOUT_SECONDS, self.timeout)),
                 verify=self.verify_ssl,
                 # Every request carries the API key, so mailcow's session
                 # cookie is never kept: a session mailcow stopped honouring
@@ -214,6 +329,9 @@ class MailcowAPI:
         self._update_config()
         if old_conn != (self.timeout, self.verify_ssl) or old_url != self.base_url:
             self._drop_clients()
+            # A new address or connection setting is tried at once; requests
+            # still running on the old ones change nothing
+            self._reachability.reset()
         if old_url != self.base_url:
             logger.info(f"mailcow API client configuration reloaded: {old_url} -> {self.base_url}")
     
@@ -225,6 +343,7 @@ class MailcowAPI:
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=2, max=10),
+        retry=retry_if_exception(_read_retryable),
         reraise=True,
     )
     async def _make_request(self, endpoint: str, method: str = "GET", **kwargs) -> Any:
@@ -246,24 +365,30 @@ class MailcowAPI:
         
         client = self._get_client()
         try:
-            response = await client.request(
-                method=method,
-                url=url,
-                headers=self.headers,
-                **kwargs
-            )
+            with self._reachability.attempt(url):
+                response = await client.request(
+                    method=method,
+                    url=url,
+                    headers=self.headers,
+                    **kwargs
+                )
             response.raise_for_status()
             return _strict_json(response)
-                
+
+        except MailcowUnreachableError:
+            logger.debug(f"Not requesting {url}: mailcow could not be connected to a moment ago")
+            raise
         except httpx.HTTPStatusError as e:
             logger.error(f"HTTP error {e.response.status_code} for {url}: {e}")
             if e.response.status_code in (401, 403):
                 self._discard_client(client)
-            raise MailcowAPIError(f"API returned status {e.response.status_code}")
+            raise MailcowAPIError(f"API returned status {e.response.status_code}",
+                                  transient=e.response.status_code >= 500) from e
         except httpx.RequestError as e:
             logger.error(f"Request error for {url}: {e}")
             self._discard_client(client)
-            raise MailcowAPIError(f"Failed to connect to mailcow API: {e}")
+            raise MailcowAPIError(f"Failed to connect to mailcow API: {e}",
+                                  transient=isinstance(e, httpx.TransportError)) from e
         except Exception as e:
             logger.error(f"Unexpected error for {url}: {e}")
             raise MailcowAPIError(f"Unexpected error: {e}")
@@ -273,8 +398,10 @@ class MailcowAPI:
         Make HTTP request to mailcow API using the Read-Write API key.
         Used exclusively for edit/update operations.
 
-        A write is sent again only when the connection was never made
-        (_NOT_SENT). After mailcow received it, a timeout, a dropped or
+        A write is sent again only when every connection of the client was
+        busy (PoolTimeout): nothing was sent, and one frees up soon. A
+        connection that could not be made fails at once, so the page can try
+        again itself. After mailcow received it, a timeout, a dropped or
         unreadable answer or a 5xx is MailcowWriteUnknownError: mailcow may
         have made the change or still be making it, and a quarantine release
         sent twice reaches the recipient twice.
@@ -300,13 +427,14 @@ class MailcowAPI:
         try:
             return await self._rw_attempt(endpoint, method, **kwargs)
         except _NOT_SENT as e:
-            raise MailcowAPIError(f"RW API request failed: {str(e)}")
+            raise MailcowAPIError(f"RW API request failed: {str(e)}", transient=True) from e
 
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=2, max=10),
-        # Only a connection never made: anything later may have changed mailcow
-        retry=retry_if_exception_type(_NOT_SENT),
+        # Only a free connection waited for: anything later may have changed
+        # mailcow, and a connection that failed would fail again
+        retry=retry_if_exception_type(httpx.PoolTimeout),
         reraise=True,
     )
     async def _rw_attempt(self, endpoint: str, method: str, **kwargs) -> Any:
@@ -315,12 +443,13 @@ class MailcowAPI:
 
         client = self._get_client()
         try:
-            response = await client.request(
-                method,
-                url,
-                headers=self.headers_rw,
-                **kwargs
-            )
+            with self._reachability.attempt(url):
+                response = await client.request(
+                    method,
+                    url,
+                    headers=self.headers_rw,
+                    **kwargs
+                )
         except httpx.PoolTimeout:
             raise   # every connection of this client busy here: the client itself is fine
         except _NOT_SENT:
@@ -329,7 +458,8 @@ class MailcowAPI:
         except httpx.RequestError as e:
             # Sent, and then the answer timed out, broke off or could not be decoded
             self._discard_client(client)
-            raise self._write_unknown(endpoint, f"{type(e).__name__}: {e}")
+            raise self._write_unknown(endpoint, f"{type(e).__name__}: {e}",
+                                      transient=isinstance(e, httpx.TransportError))
 
         if response.status_code == 401:
             self._discard_client(client)
@@ -340,7 +470,7 @@ class MailcowAPI:
             raise MailcowRwKeyError("read_only")
 
         if response.status_code >= 500:
-            raise self._write_unknown(endpoint, f"status {response.status_code}: {response.text[:200]}")
+            raise self._write_unknown(endpoint, f"status {response.status_code}: {response.text[:200]}", transient=True)
         if not response.is_success:
             raise MailcowAPIError(f"RW API request failed with status {response.status_code}: {response.text}")
 
@@ -356,9 +486,9 @@ class MailcowAPI:
         return response.text
 
     @staticmethod
-    def _write_unknown(endpoint: str, cause: str) -> MailcowWriteUnknownError:
+    def _write_unknown(endpoint: str, cause: str, transient: bool = False) -> MailcowWriteUnknownError:
         logger.warning(f"mailcow did not confirm the write to {endpoint}: {cause}")
-        return MailcowWriteUnknownError(cause)
+        return MailcowWriteUnknownError(cause, transient=transient)
 
     async def check_rw_key(self) -> Dict[str, Any]:
         """Check that mailcow accepts the Read-Write key for writes, changing nothing.
@@ -373,9 +503,13 @@ class MailcowAPI:
         if not self.headers_rw:
             return {"configured": False, "valid": False, "error": None}
         client = self._get_client()
+        url = f"{self.base_url}/api/v1/edit/mlv-key-check"
         try:
-            response = await client.post(f"{self.base_url}/api/v1/edit/mlv-key-check",
-                                         headers=self.headers_rw, json={"items": [], "attr": {}})
+            with self._reachability.attempt(url):
+                response = await client.post(url, headers=self.headers_rw, json={"items": [], "attr": {}})
+        except MailcowUnreachableError:
+            logger.warning("Read-Write API key check not sent: mailcow could not be connected to a moment ago")
+            return {"configured": True, "valid": False, "error": "connection"}
         except httpx.RequestError as e:
             self._discard_client(client)
             logger.warning(f"Read-Write API key check could not reach mailcow: {e}")
@@ -411,9 +545,13 @@ class MailcowAPI:
         if not settings.rspamd_password:
             return {"configured": False, "valid": False, "error": None}
         client = self._get_client()
+        url = self._rspamd_url("/rspamd/auth")
         try:
-            response = await client.get(self._rspamd_url("/rspamd/auth"),
-                                        headers={"Password": settings.rspamd_password})
+            with self._reachability.attempt(url):
+                response = await client.get(url, headers={"Password": settings.rspamd_password})
+        except MailcowUnreachableError:
+            logger.warning("Rspamd password check not sent: Rspamd could not be connected to a moment ago")
+            return {"configured": True, "valid": False, "error": "connection"}
         except httpx.RequestError as e:
             logger.warning(f"Rspamd password check could not reach Rspamd: {e}")
             return {"configured": True, "valid": False, "error": "connection"}
@@ -873,18 +1011,26 @@ class MailcowAPI:
             logger.error(f"Failed to fetch version: {e}")
             raise
     
-    async def get_domains(self) -> List[Dict[str, Any]]:
+    async def get_domains(self, strict: bool = False) -> List[Dict[str, Any]]:
         """
         Fetch all domains from mailcow
-        
+
+        Args:
+            strict: raise MailcowAPIError for an answer that is not a list of
+                domains, instead of reading it as none
+
         Returns:
             List of domains
         """
         logger.info("Fetching domains")
         try:
             data = await self._make_request("/api/v1/get/domain/all")
-            
+            if data == {}:
+                data = []   # mailcow answers {} when it has no domains
+
             if not isinstance(data, list):
+                if strict:
+                    raise MailcowAPIError(f"Unexpected domains answer: {str(data)[:200]}")
                 logger.warning(f"Unexpected domains response format: {type(data)}")
                 return []
             
@@ -950,13 +1096,14 @@ class MailcowAPI:
             logger.error(f"Failed to fetch alias domains: {e}")
             raise
 
-    async def get_alias_domain_map(self) -> Dict[str, str]:
+    async def get_alias_domain_map(self, strict: bool = False) -> Dict[str, str]:
         """
         Fetch active alias domains WITH their targets: {alias_domain: target_domain}.
 
         get_alias_domains() above returns only the names (enough for direction
         classification); mailbox attribution and the Domains page need to know
-        which primary domain each alias points at.
+        which primary domain each alias points at. strict: an answer that is
+        neither a list nor {} (null, a string, a number) raises too.
         """
         logger.info("Fetching alias domain map")
         data = await self._make_request("/api/v1/get/alias-domain/all")
@@ -964,6 +1111,8 @@ class MailcowAPI:
             # mailcow answers {} when there are none; anything else is not a list of them
             raise MailcowAPIError(f"Unexpected alias domain answer: {str(data)[:200]}")
         if not isinstance(data, list):
+            if strict and data != {}:
+                raise MailcowAPIError(f"Unexpected alias domain answer: {str(data)[:200]}")
             return {}
         return {
             item['alias_domain'].lower(): item['target_domain'].lower()
@@ -1284,10 +1433,14 @@ class MailcowAPI:
             logger.error(f"mailcow API connection test: FAILED - {e}")
             return False
     
-    async def get_status_host_ip(self) -> Optional[str]:
+    async def get_status_host_ip(self, strict: bool = False) -> Optional[str]:
         """
         Fetch server IP address from mailcow
-        
+
+        Args:
+            strict: raise MailcowAPIError when mailcow could not be asked,
+                instead of answering None as for an answer without an address
+
         Returns:
             IPv4 address string or None if not found
         """
@@ -1312,6 +1465,8 @@ class MailcowAPI:
             
         except MailcowAPIError as e:
             logger.error(f"Failed to fetch server IP: {e}")
+            if strict:
+                raise
             return None
     
     async def get_dkim(self, domain: str) -> Optional[Dict[str, Any]]:
@@ -1614,23 +1769,28 @@ class MailcowAPI:
         
         client = self._get_client()
         try:
-            response = await client.get(
-                url,
-                params={"id": item_id},
-                headers=self.headers
-            )
+            with self._reachability.attempt(url):
+                response = await client.get(
+                    url,
+                    params={"id": item_id},
+                    headers=self.headers
+                )
             response.raise_for_status()
-                
+
             data = response.json()
             # The response is a list with a single element
             if isinstance(data, list) and len(data) > 0:
                 return data[0]
             return data
-                
+
+        except MailcowUnreachableError:
+            raise
         except httpx.HTTPStatusError as e:
-            raise MailcowAPIError(f"Failed to get quarantine details: HTTP {e.response.status_code}")
+            raise MailcowAPIError(f"Failed to get quarantine details: HTTP {e.response.status_code}",
+                                  transient=e.response.status_code >= 500)
         except Exception as e:
-            raise MailcowAPIError(f"Failed to get quarantine details: {str(e)}")
+            raise MailcowAPIError(f"Failed to get quarantine details: {str(e)}",
+                                  transient=isinstance(e, httpx.TransportError))
 
     async def _make_rspamd_request(self, endpoint: str, method: str = "GET", extra_headers: dict = None, **kwargs) -> Any:
         """
@@ -1670,14 +1830,15 @@ class MailcowAPI:
         
         client = self._get_client()
         try:
-            response = await client.request(method, url, headers=headers, **kwargs)
-                
+            with self._reachability.attempt(url):
+                response = await client.request(method, url, headers=headers, **kwargs)
+
             if response.status_code == 401 or response.status_code == 403:
                 raise MailcowAPIError("Rspamd password authentication failed. Check RSPAMD_PASSWORD setting.")
-                
+
             response.raise_for_status()
             return response
-                
+
         except httpx.HTTPStatusError as e:
             if e.response.status_code in (301, 302, 303, 307, 308) and not rspamd_base:
                 raise MailcowAPIError(
@@ -1685,9 +1846,11 @@ class MailcowAPI:
                     "before authentication. Set RSPAMD_URL to reach the Rspamd controller directly, "
                     "e.g. http://rspamd-mailcow:11334"
                 )
-            raise MailcowAPIError(f"Rspamd API request failed with status {e.response.status_code}")
+            raise MailcowAPIError(f"Rspamd API request failed with status {e.response.status_code}",
+                                  transient=e.response.status_code >= 500)
         except httpx.RequestError as e:
-            raise MailcowAPIError(f"Rspamd API request failed: {str(e)}")
+            raise MailcowAPIError(f"Rspamd API request failed: {str(e)}",
+                                  transient=isinstance(e, httpx.TransportError))
 
     async def get_rspamd_maps(self) -> List[Dict[str, Any]]:
         """
