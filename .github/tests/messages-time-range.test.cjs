@@ -31,6 +31,7 @@ function harness(filters, appTimezone = 'Europe/Berlin') {
         renderMessagesNew: () => { calls.newShown++; },
         messagesShowNew: options => { calls.showNew.push(options); },
         MESSAGES_ROLLING_PRESETS: ['today', '7days', '30days', '90days'],
+        messagesExact: null,   // no entity card set whole values
         URLSearchParams,
         appTimezone,
         currentFilters: { messages: filters },
@@ -67,6 +68,7 @@ function harness(filters, appTimezone = 'Europe/Berlin') {
     });
     vm.runInContext(zoneHelpers, context);
     vm.runInContext([
+        source.match(/^const MESSAGES_FILTER_KEYS = .*$/m)[0],
         extract('smartRefreshMessages'),
         extract('messagesQueryParams'),
         extract('messagesFilterParams'),
@@ -74,7 +76,9 @@ function harness(filters, appTimezone = 'Europe/Berlin') {
         extract('messagesRangeFilters'),
         extract('applyMessagesCustomDateRange'),
         extract('messagesPresetStart'),
+        extract('messagesShowDatePreset'),
         extract('selectMessagesDatePreset'),
+        extract('messagesShowRange'),
         extract('mailFlowHour'),
         extract('mailFlowSpan'),
         extract('openMessagesRange'),

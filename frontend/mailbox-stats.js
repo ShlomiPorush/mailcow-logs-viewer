@@ -513,6 +513,63 @@ function closeMailboxActivity() {
     document.getElementById('mailbox-activity-modal').classList.add('hidden');
 }
 
+// One mailbox's activity on Mailbox Stats, from anywhere (the entity card's
+// "Open mailbox"): by the mailbox's address, or by an alias's, which opens the
+// mailbox the alias belongs to (the aliases the list returns with each mailbox,
+// alias-domain addresses included). The mailbox is fetched, so it opens also
+// when this page never loaded or shows other mailboxes. The page's period
+// becomes the one given: preset ('today', '7days', '30days', '90days') or the
+// days from startDay to endDay (YYYY-MM-DD); the search finds the mailbox and
+// inactive mailboxes are listed too. onMoved runs once the page is open, before
+// the activity opens. Resolves to whether the Mailbox Stats page opened.
+async function openMailboxFor(address, { preset = '', startDay = '', endDay = '', onMoved = null } = {}) {
+    const wanted = String(address || '').trim().toLowerCase();
+    if (!wanted) return false;
+    if (preset) mailboxStatsShowPreset(preset);
+    else if (startDay && endDay) {
+        document.getElementById('mailbox-stats-date-range').value = 'custom';
+        document.getElementById('mailbox-stats-start-date').value = startDay;
+        document.getElementById('mailbox-stats-end-date').value = endDay;
+        const label = document.getElementById('date-range-label');
+        if (label) label.textContent = `${formatDayKey(startDay)} - ${formatDayKey(endDay)}`;
+        updateDatePresetButtons('custom');
+    }
+    const search = document.getElementById('mailbox-stats-search');
+    if (search) search.value = wanted;
+    const domain = document.getElementById('mailbox-stats-domain-filter');
+    if (domain) domain.value = '';
+    const activeOnly = document.getElementById('mailbox-stats-active-only');
+    if (activeOnly) activeOnly.checked = false;
+    if (!(await navigateTo('mailbox-stats', { sub: 'statistics' }))) return false;
+    if (typeof onMoved === 'function') onMoved();
+    let data = null;
+    try {
+        const response = await authenticatedFetch(mailboxStatsListUrl(1));
+        if (response.ok) data = await response.json();
+    } catch (e) {
+        data = null;
+    }
+    if (!data) {
+        showToast('The mailbox could not be loaded. Try again in a moment.', 'error');
+        return true;
+    }
+    const mailboxes = Array.isArray(data.mailboxes) ? data.mailboxes : [];
+    const mb = mailboxes.find(m => String(m.username || '').toLowerCase() === wanted)
+        || mailboxes.find(m => (m.aliases || []).some(a => String(a.alias_address || '').toLowerCase() === wanted));
+    if (!mb) {
+        showToast('This mailbox is not in Mailbox Stats yet. Its statistics are fetched from mailcow every few minutes.', 'warning');
+        return true;
+    }
+    // The dialog reads the mailbox and its time slots from the cache
+    const cached = mailboxStatsCache.mailboxes || [];
+    const at = cached.findIndex(m => m.username === mb.username);
+    mailboxStatsCache.mailboxes = at < 0 ? [...cached, mb] : cached.map((m, i) => (i === at ? mb : m));
+    mailboxStatsCache.activityUnit = data.activity_unit || 'day';
+    mailboxStatsCache.activityBuckets = data.activity_buckets || [];
+    openMailboxActivity(mb.username);
+    return true;
+}
+
 function mailboxRateLimitLabel(mb) {
     if (!mb.rl_value) return 'None';
     const frame = { s: 'sec', m: 'min', h: 'hour', d: 'day' }[mb.rl_frame] || mb.rl_frame || 'min';
@@ -662,6 +719,14 @@ function closeDateRangePicker() {
 }
 
 function selectDatePreset(preset) {
+    mailboxStatsShowPreset(preset);
+    // Close dropdown and reload data
+    closeDateRangePicker();
+    loadMailboxStats();
+}
+
+// The period set to a preset, without loading
+function mailboxStatsShowPreset(preset) {
     // Update hidden input
     const hiddenInput = document.getElementById('mailbox-stats-date-range');
     if (hiddenInput) hiddenInput.value = preset;
@@ -682,10 +747,6 @@ function selectDatePreset(preset) {
 
     // Update active state on buttons
     updateDatePresetButtons(preset);
-
-    // Close dropdown and reload data
-    closeDateRangePicker();
-    loadMailboxStats();
 }
 
 function updateDatePresetButtons(activePreset) {

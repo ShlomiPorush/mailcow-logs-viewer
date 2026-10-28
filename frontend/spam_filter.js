@@ -886,9 +886,13 @@ function suppressionDialog(id, title, body, actions, { size = 'sm', close = () =
 
 // A block made from a queued message (Queue > Suppress) keeps that message in its Block details
 let suppressionFromQueue = null;
+// What the dialog's opener does once the block is added (the entity card reads itself again)
+let suppressionAfterAdd = null;
 
-function showAddSuppressionModal(prefillEmail, queueId) {
+// notes: what the Notes field starts with; onAdded: called after the block is added
+function showAddSuppressionModal(prefillEmail, queueId, { notes = 'Added from queue page', onAdded = null } = {}) {
     suppressionFromQueue = queueId && prefillEmail ? { email: String(prefillEmail).toLowerCase(), queueId } : null;
+    suppressionAfterAdd = typeof onAdded === 'function' ? onAdded : null;
     suppressionDialog('add-suppression-modal', 'Add Suppression', `
         <label><span class="ui-label">Type</span>
             <select id="new-suppression-type" class="ui-select" onchange="updateSuppressionInputPlaceholder()">
@@ -929,7 +933,7 @@ function showAddSuppressionModal(prefillEmail, queueId) {
     // Pre-fill email if provided (e.g., from queue page)
     if (prefillEmail) {
         document.getElementById('new-suppression-email').value = prefillEmail;
-        document.getElementById('new-suppression-notes').value = 'Added from queue page';
+        document.getElementById('new-suppression-notes').value = notes || '';
     }
 
     uiGuardDialog(document.getElementById('add-suppression-modal'));
@@ -1026,6 +1030,9 @@ async function createSuppression() {
         loadSuppressionStats();
         // Fix #4: Auto-sync to Rspamd after changes
         autoSyncToRspamd();
+        const after = suppressionAfterAdd;
+        suppressionAfterAdd = null;
+        if (after) after();
         
     } catch (error) {
         showToast(error.message, 'error');

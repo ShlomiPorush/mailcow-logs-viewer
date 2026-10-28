@@ -542,6 +542,30 @@ function securityOpenEvents(ip) {
     applyNetfilterFilters();
 }
 
+// The Events of one value, from an entity card ("Show security events"): an IP or
+// an account matched whole, or the accounts on a domain, over the card's period
+// (start, end: ISO instants; period: how the chip names it). Every other filter is
+// cleared, as the search's address row does (search.js gsOpenAddress). Resolves
+// to whether the Security page opened.
+async function openSecurityEventsFor({ ip = '', username = '', domain = '', start = '', end = '', period = '' } = {}) {
+    ['netfilter-filter-action', 'netfilter-filter-country'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.value = '';
+    });
+    const ipField = document.getElementById('netfilter-filter-ip');
+    if (ipField) ipField.value = ip;
+    const userField = document.getElementById('netfilter-filter-username');
+    if (userField) userField.value = username;
+    netfilterExact = { ip, username, domain, start_date: start, end_date: end, period };
+    currentFilters.netfilter = netfilterWithExact(netfilterFilterFields());
+    currentPage.netfilter = 1;
+    const page = document.getElementById('content-netfilter');
+    const already = !!page && !page.classList.contains('hidden');
+    if (!(await navigateTo('netfilter', { sub: 'events' }))) return false;
+    if (already) loadNetfilterLogs(1);
+    return true;
+}
+
 // Someone is working in the Settings cards: an open card, unsaved changes, or the
 // focus in one of their fields
 function securityEditing() {

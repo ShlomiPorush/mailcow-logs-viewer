@@ -387,10 +387,11 @@ function formatListTime(isoString) {
 
 // A "More" menu for a table row. It opens as a popover, so the table's own
 // scrolling cannot clip it; the toggle listener below puts it under its button.
+// small: false gives it a full-size button, beside other full-size ones (the entity card)
 let uiMenuSeq = 0;
-function uiMenu(label, itemsHtml) {
+function uiMenu(label, itemsHtml, { small = true } = {}) {
     const id = `ui-menu-${++uiMenuSeq}`;
-    return `<button type="button" class="ui-btn ui-btn-sm" popovertarget="${id}" aria-haspopup="menu">${escapeHtml(label)}</button>
+    return `<button type="button" class="ui-btn${small ? ' ui-btn-sm' : ''}" popovertarget="${id}" aria-haspopup="menu">${escapeHtml(label)}</button>
         <div id="${id}" popover class="ui-menu" role="menu" onclick="if (event.target.closest('button')) this.hidePopover()">${itemsHtml}</div>`;
 }
 

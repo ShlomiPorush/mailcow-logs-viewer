@@ -17,6 +17,13 @@
  * @param {string} options.filterType - 'sender' | 'recipient' | 'search'
  * @param {string} options.direction - 'inbound' | 'outbound' | 'internal'
  * @param {string} options.status - 'delivered' | 'bounced' | 'deferred' | 'rejected'
+ * @param {string} options.ip - Source IP to filter by
+ * @param {string} options.address - From or to this address, matched whole (it has no field of its own)
+ * @param {string} options.domain - From or to an address on this domain (the part after the last @)
+ * @param {boolean} options.exact - Match the email and the IP whole, not as a part (the entity card)
+ * @param {string} options.datePreset - A time preset ('today', '7days', '30days', '90days'), or
+ * @param {string} options.start - with options.end, an exact range (ISO instants, the end inclusive)
+ * @returns {Promise<boolean>} whether the Messages page opened
  */
 function navigateToMessagesWithFilter(options) {
     // Clear existing filters first
@@ -62,10 +69,26 @@ function navigateToMessagesWithFilter(options) {
         filterStatus.value = options.status;
     }
 
+    if (options.ip && filterIp) filterIp.value = options.ip;
+
+    // Whole values (the entity card): the fields set here, and an address or a
+    // domain, which have no field. A filter changed later drops them (applyMessagesFilters)
+    const field = el => (el ? el.value : '');
+    messagesExact = options.exact || options.address || options.domain ? {
+        sender: options.exact ? field(filterSender) : '', recipient: options.exact ? field(filterRecipient) : '',
+        user: options.exact ? field(filterUser) : '', ip: options.exact ? field(filterIp) : '',
+        address: options.address || '', domain: options.domain || '',
+    } : null;
+
+    // The period, when one is given: a preset up to now, or an exact range
+    if (options.datePreset && MESSAGES_ROLLING_PRESETS.includes(options.datePreset)) messagesShowDatePreset(options.datePreset);
+    else if (options.start && options.end) messagesShowRange(options.start, options.end);
+
     // Navigate to Messages tab
-    navigateTo('messages').then(moved => {
+    return navigateTo('messages').then(moved => {
         // Apply filters after navigation
         if (moved) setTimeout(() => { if (typeof applyMessagesFilters === 'function') applyMessagesFilters(); }, 100);
+        return moved;
     });
 }
 
@@ -1546,12 +1569,57 @@ async function messagesFetch(url, timeout = 0) {
     }
 }
 
+// The Messages filters every request sends: the list, its facet counts and the
+// new-mail count (the CSV export sends currentFilters.messages as it is).
+// exact, address and domain come from an entity card (messagesExact)
+const MESSAGES_FILTER_KEYS = ['search', 'sender', 'recipient', 'direction', 'user', 'status', 'ip', 'address', 'domain', 'exact', 'start_date', 'end_date'];
+
+// The filters an entity card opened Messages with ("Show messages"), matched
+// whole and not as a part: the sender, recipient, user and IP it set, and an
+// address or a domain, which have no field (from or to them). They hold until
+// one of those fields is changed or cleared; a chip above the list names them
+// and takes them off (updateMessagesFilterState).
+let messagesExact = null;   // { sender, recipient, user, ip, address, domain } or null
+const MESSAGES_EXACT_FIELDS = ['sender', 'recipient', 'user', 'ip'];
+
+// The fields' filters with the whole-value ones that still hold
+function messagesWithExact(fields) {
+    const x = messagesExact;
+    if (x && MESSAGES_EXACT_FIELDS.some(key => (fields[key] || '') !== (x[key] || ''))) messagesExact = null;
+    if (!messagesExact) return fields;
+    return { ...fields, exact: 'true', ...(x.address ? { address: x.address } : {}), ...(x.domain ? { domain: x.domain } : {}) };
+}
+
+// What the chip says: each whole value, as a person reads the filter
+function messagesExactParts(x) {
+    const parts = [];
+    if (x.address) parts.push(['From or to', x.address]);
+    if (x.domain) parts.push(['From or to', `@${x.domain}`]);
+    if (x.sender) parts.push(['From', x.sender]);
+    if (x.recipient) parts.push(['To', x.recipient]);
+    if (x.user) parts.push(['Signed in as', x.user]);
+    if (x.ip) parts.push(['IP', x.ip]);
+    return parts;
+}
+
+// The chip's X: the whole values go, with the fields they had set; the period stays
+function clearMessagesExact() {
+    if (messagesExact) {
+        MESSAGES_EXACT_FIELDS.forEach(key => {
+            const el = messagesExact[key] && document.getElementById(`messages-filter-${key}`);
+            if (el) el.value = '';
+        });
+    }
+    messagesExact = null;
+    applyMessagesFilters();
+}
+
 // The list's query; with a cursor, the page that starts after it, holding only
 // what the first page's watermark (upto) held
 function messagesQueryParams(cursor = null, limit = 50, upto = null) {
     const filters = messagesRangeFilters(currentFilters.messages || {});
     const params = new URLSearchParams({ page: 1, limit });
-    for (const key of ['search', 'sender', 'recipient', 'direction', 'user', 'status', 'ip', 'start_date', 'end_date']) {
+    for (const key of MESSAGES_FILTER_KEYS) {
         if (filters[key]) params.append(key, filters[key]);
     }
     if (messagesOrder === 'asc') params.append('order', 'asc');
@@ -3137,6 +3205,18 @@ function renderMailFlowStats() {
     }
 }
 
+// The Messages period set to an exact range, without applying it: the custom
+// range picker shows its days, in the app's zone like its Apply reads
+function messagesShowRange(start, endInclusive, label = '') {
+    document.getElementById('messages-date-range').value = 'custom';
+    document.getElementById('messages-start-date').value = start;
+    document.getElementById('messages-end-date').value = endInclusive;
+    document.getElementById('messages-date-range-start').value = zonedDateString(Date.parse(start));
+    document.getElementById('messages-date-range-end').value = zonedDateString(Date.parse(endInclusive));
+    document.getElementById('messages-date-range-label').textContent = label || mailFlowSpan(Date.parse(start), Date.parse(endInclusive) + 1);
+    setMessagesDatePresetActive(null);
+}
+
 // The Messages page over a span of time (and a mailbox): every other filter
 // cleared, the exact start and end kept (its date picker shows their days and
 // keeps them until another range is applied). endInclusive: the last moment
@@ -3150,14 +3230,8 @@ function openMessagesRange({ start, endInclusive, user = '', label = '' }) {
         const field = document.getElementById('messages-filter-user');
         if (field) field.value = user;
     }
-    document.getElementById('messages-date-range').value = 'custom';
-    document.getElementById('messages-start-date').value = start;
-    document.getElementById('messages-end-date').value = endInclusive;
-    // The custom range picker shows the days, in the app's zone like its Apply reads
-    document.getElementById('messages-date-range-start').value = zonedDateString(Date.parse(start));
-    document.getElementById('messages-date-range-end').value = zonedDateString(Date.parse(endInclusive));
-    document.getElementById('messages-date-range-label').textContent = label || mailFlowSpan(Date.parse(start), Date.parse(endInclusive) + 1);
-    setMessagesDatePresetActive(null);
+    messagesExact = null;
+    messagesShowRange(start, endInclusive, label);
     currentFilters.messages = { start_date: start, end_date: endInclusive, ...(user ? { user } : {}) };
     currentPage.messages = 1;
     navigateTo('messages');
@@ -3418,13 +3492,55 @@ async function loadDashboardStatusSummary() {
 // NETFILTER LOGS
 // =============================================================================
 
-function applyNetfilterFilters() {
-    currentFilters.netfilter = {
+// The filters an entity card opened the Events with ("Show security events",
+// openSecurityEventsFor in security.js): an IP or an account matched whole, or
+// the accounts on a domain, over the card's period. They hold until the IP or
+// Username field is changed or cleared; a chip beside the count names them and
+// takes them off. The CSV export sends them too (currentFilters.netfilter).
+let netfilterExact = null;   // { ip, username, domain, start_date, end_date, period } or null
+
+function netfilterFilterFields() {
+    return {
         ip: document.getElementById('netfilter-filter-ip').value,
         username: document.getElementById('netfilter-filter-username').value,
         action: document.getElementById('netfilter-filter-action').value,
         country_code: document.getElementById('netfilter-filter-country').value
     };
+}
+
+// The fields' filters with the whole-value ones that still hold
+function netfilterWithExact(fields) {
+    const x = netfilterExact;
+    if (x && ((fields.ip || '') !== (x.ip || '') || (fields.username || '') !== (x.username || ''))) netfilterExact = null;
+    if (!netfilterExact) return fields;
+    return {
+        ...fields, ...(x.ip ? { exact_ip: 'true' } : {}), ...(x.username ? { exact_username: 'true' } : {}),
+        ...(x.domain ? { username_domain: x.domain } : {}),
+        ...(x.start_date ? { start_date: x.start_date } : {}), ...(x.end_date ? { end_date: x.end_date } : {}),
+    };
+}
+
+// The chip, as the Security Overview's country and network chips (security.js renderSecurityOverview)
+function renderNetfilterExact() {
+    const slot = document.getElementById('netfilter-exact');
+    if (!slot) return;
+    const x = netfilterExact;
+    const what = !x ? '' : x.ip ? ['IP', x.ip] : x.username ? ['Account', x.username] : x.domain ? ['Accounts on', x.domain] : '';
+    slot.innerHTML = what ? `<span class="ui-sec-filter" title="Matched whole, not as a part of a longer value"><span>${escapeHtml(what[0])} <bdi>${escapeHtml(what[1])}</bdi>${x.period ? `, ${escapeHtml(x.period)}` : ''}</span><button type="button" onclick="clearNetfilterExact()" aria-label="Remove this filter" title="Remove this filter">&times;</button></span>` : '';
+}
+
+// The chip's X: the whole values go, with the fields they had set, and the period
+function clearNetfilterExact() {
+    if (netfilterExact) {
+        if (netfilterExact.ip) document.getElementById('netfilter-filter-ip').value = '';
+        if (netfilterExact.username) document.getElementById('netfilter-filter-username').value = '';
+    }
+    netfilterExact = null;
+    applyNetfilterFilters();
+}
+
+function applyNetfilterFilters() {
+    currentFilters.netfilter = netfilterWithExact(netfilterFilterFields());
     currentPage.netfilter = 1;
     loadNetfilterLogs();
 }
@@ -3434,6 +3550,7 @@ function clearNetfilterFilters() {
     document.getElementById('netfilter-filter-username').value = '';
     document.getElementById('netfilter-filter-action').value = '';
     document.getElementById('netfilter-filter-country').value = '';
+    netfilterExact = null;
     currentFilters.netfilter = {};
     currentPage.netfilter = 1;
     loadNetfilterLogs();
@@ -3442,6 +3559,7 @@ function clearNetfilterFilters() {
 async function loadNetfilterLogs(page = 1) {
     const container = document.getElementById('netfilter-logs');
     uiFilterBarSync();
+    renderNetfilterExact();
 
     try {
         container.innerHTML = '<div class="ui-loading" role="status"><div class="loading"></div><p>Loading...</p></div>';
@@ -4763,7 +4881,7 @@ async function loadQuarantineRuleHistory({ quiet = false } = {}) {
 // =============================================================================
 
 function applyMessagesFilters() {
-    currentFilters.messages = {
+    currentFilters.messages = messagesWithExact({
         search: document.getElementById('messages-filter-search').value,
         sender: document.getElementById('messages-filter-sender').value,
         recipient: document.getElementById('messages-filter-recipient').value,
@@ -4774,7 +4892,7 @@ function applyMessagesFilters() {
         date_range: document.getElementById('messages-date-range').value,
         start_date: document.getElementById('messages-start-date').value,
         end_date: document.getElementById('messages-end-date').value
-    };
+    });
     currentPage.messages = 1;
     loadMessages();
 }
@@ -4793,7 +4911,7 @@ function toggleMessagesFilters(open) {
 // How many filters are on, for the button badge and the Clear filters link
 function updateMessagesFilterState() {
     const f = currentFilters.messages || {};
-    const advanced = ['sender', 'recipient', 'user', 'ip'].filter(k => f[k]).length;
+    const advanced = ['sender', 'recipient', 'user', 'ip', 'address', 'domain'].filter(k => f[k]).length;
     const any = advanced || f.search || f.status || f.direction || f.start_date || f.end_date || f.date_range;
     const badge = document.getElementById('messages-filters-n');
     if (badge) { badge.textContent = advanced || ''; badge.classList.toggle('hidden', !advanced); }
@@ -4801,6 +4919,13 @@ function updateMessagesFilterState() {
     if (button) button.setAttribute('aria-label', advanced ? `Filters, ${advanced} in use` : 'Filters');
     const clear = document.getElementById('messages-clear-filters');
     if (clear) clear.classList.toggle('hidden', !any);
+    // The whole values an entity card set, as the Security page's filter chip (security.js renderSecurityOverview)
+    const chips = document.getElementById('messages-exact');
+    if (chips) {
+        const parts = f.exact && messagesExact ? messagesExactParts(messagesExact) : [];
+        chips.innerHTML = parts.length ? `<span class="ui-sec-filter" title="Matched whole, not as a part of a longer value"><span>${parts.map(([label, value]) =>
+            `${escapeHtml(label)} <bdi>${escapeHtml(value)}</bdi>`).join(', ')}</span><button type="button" onclick="clearMessagesExact()" aria-label="Remove this filter" title="Remove this filter">&times;</button></span>` : '';
+    }
 }
 
 function clearMessagesFilters() {
@@ -4811,6 +4936,7 @@ function clearMessagesFilters() {
     document.getElementById('messages-filter-user').value = '';
     document.getElementById('messages-filter-status').value = '';
     document.getElementById('messages-filter-ip').value = '';
+    messagesExact = null;
     // Reset date range
     document.getElementById('messages-date-range').value = '';
     document.getElementById('messages-start-date').value = '';
@@ -4893,7 +5019,8 @@ function messagesRangeFilters(filters, now = new Date()) {
     return { ...filters, start_date: messagesPresetStart(filters.date_range, now), end_date: '' };
 }
 
-function selectMessagesDatePreset(preset, now = new Date()) {
+// The Messages period set to a preset, without applying it
+function messagesShowDatePreset(preset, now = new Date()) {
     const labels = { '': 'All Time', 'today': 'Today', '7days': 'Last 7 Days', '30days': 'Last 30 Days', '90days': 'Last 90 Days' };
     document.getElementById('messages-date-range-label').textContent = labels[preset] || 'All Time';
     document.getElementById('messages-date-range').value = preset;
@@ -4904,6 +5031,10 @@ function selectMessagesDatePreset(preset, now = new Date()) {
     document.getElementById('messages-end-date').value = startDate ? new Date(now).toISOString() : '';
 
     setMessagesDatePresetActive(preset);
+}
+
+function selectMessagesDatePreset(preset, now = new Date()) {
+    messagesShowDatePreset(preset, now);
 
     // Close dropdown and apply
     document.getElementById('messages-date-range-dropdown').classList.add('hidden');
@@ -4972,7 +5103,7 @@ const MESSAGE_DIRECTION_FACETS = [['', 'Any direction'], ['inbound', 'Inbound'],
 function messagesFilterParams(filters) {
     filters = messagesRangeFilters(filters);
     const params = new URLSearchParams();
-    for (const key of ['search', 'sender', 'recipient', 'direction', 'user', 'status', 'ip', 'start_date', 'end_date']) {
+    for (const key of MESSAGES_FILTER_KEYS) {
         if (filters[key]) params.append(key, filters[key]);
     }
     return params;
