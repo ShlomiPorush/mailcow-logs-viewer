@@ -944,7 +944,10 @@ def _store_postfix_page(logs):
                     message = log_entry.get('message', '')
                     parsed = parse_postfix_message(message)
                     queue_id = parsed.get('queue_id')
-                    unique_id = _postfix_line_key(time_val, log_entry.get('program'), queue_id, message)
+                    # From the values as stored: an over-long program or queue
+                    # id is cut to its column, and the key must match that row
+                    as_stored = _fit_columns(PostfixLog, dict(program=log_entry.get('program'), queue_id=queue_id))
+                    unique_id = _postfix_line_key(time_val, as_stored['program'], as_stored['queue_id'], message)
 
                     if unique_id in seen_postfix or unique_id in page_seen:
                         page_skipped += 1
