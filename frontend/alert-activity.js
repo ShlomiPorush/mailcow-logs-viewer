@@ -272,7 +272,7 @@ function alertActivityOverview(data, span) {
 
 function alertActivityList(title, rows, total, tone) {
     if (!rows.length) return '';
-    return `<div class="ui-aa-box"><h4>${escapeHtml(title)}</h4>${rows.map(r => `<div class="ui-aa-row"><span title="${escapeHtml(r.name)}">${escapeHtml(r.name)}</span>
+    return `<div class="ui-aa-box"><h4>${escapeHtml(title)}</h4>${rows.map(r => `<div class="ui-aa-row"><span title="${escapeHtml(r.name)}">${uiEntity('auto', r.name, { plain: true })}</span>
         <span class="ui-aa-bar"><i style="width:${total ? r.count / total * 100 : 0}%;${tone ? `background:var(--ui-${tone(r.name)})` : ''}"></i></span><b>${Number(r.count).toLocaleString()}</b></div>`).join('')}</div>`;
 }
 

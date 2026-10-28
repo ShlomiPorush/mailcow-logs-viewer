@@ -409,8 +409,10 @@ test('aliases and their mailboxes keep each delivery\'s own Dovecot verdict', as
         h.context.pickMessageRecipient(i);
         assert.deepEqual(timelineLines(h.element('md-timeline-slot').innerHTML), { all: 2, shared: 0 }, alias);
     }
-    // The address is copied with a click, as before
-    assert.match(row('team@example.com'), /copyToClipboard\('team@example\.com', event\)/);
+    // The address opens its card on a click and copies from the icon beside it
+    assert.match(row('team@example.com'), /<button type="button" class="ui-ent-btn" data-entity-kind="address" data-entity-value="team@example\.com"/);
+    assert.match(row('team@example.com'), /data-entity-copy="team@example\.com"/);
+    assert.doesNotMatch(row('team@example.com'), /onclick="copyToClipboard/);
 });
 
 test('a mailbox Rspamd named stays a recipient though an alias also reached it', async () => {

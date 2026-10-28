@@ -155,11 +155,11 @@ function renderDeviceRow(d, newAfter, staleBefore) {
     const isStale = new Date(d.last_seen).getTime() < staleBefore;
     return `
         <div class="ui-tr">
-            <span class="ui-td">${copyableText(d.username)}</span>
+            <span class="ui-td">${uiEntity('address', d.username)}</span>
             <div class="ui-td ui-q-who">
                 <div><bdi title="${escapeHtml(`Device ID ${d.device_id}${d.model ? ` (reported as ${d.device_type})` : ''}`)}">${escapeHtml(name)}</bdi>${client ? ` <small class="ui-muted" title="${escapeHtml(DEVICE_CLIENT_NOTE[client] || 'Recognised from how the app names the device')}">${escapeHtml(client)}</small>` : ''} ${isNew ? uiTag('New', 'info') : ''}</div>
             </div>
-            <div class="ui-td ui-q-who ui-dev-ip"><div><small class="ui-sec-unit">IP </small>${d.last_ip ? copyableText(d.last_ip, 'ui-mono') : '<span class="ui-muted">-</span>'}</div>${deviceLocation(d)}</div>
+            <div class="ui-td ui-q-who ui-dev-ip"><div><small class="ui-sec-unit">IP </small>${d.last_ip ? uiEntity('ip', d.last_ip, { mono: true }) : '<span class="ui-muted">-</span>'}</div>${deviceLocation(d)}</div>
             <span class="ui-td ui-td-wrap"><small class="ui-sec-unit">Last request </small>${escapeHtml(d.last_command || '-')} ${deviceStatusTag(d.last_status)}</span>
             <span class="ui-td"><small class="ui-sec-unit">First seen </small>${uiTime(d.first_seen, formatAgo(d.first_seen), { title: formatTime(d.first_seen) })}</span>
             <span class="ui-td${isStale ? ' ui-muted' : ''}"><small class="ui-sec-unit">Last seen </small>${uiTime(d.last_seen, formatAgo(d.last_seen), { title: formatTime(d.last_seen) })}</span>

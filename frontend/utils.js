@@ -733,6 +733,106 @@ function copyableText(text, extraClasses) {
     return `<span class="copyable${cls}" onclick="copyToClipboard('${safeText}', event)" title="Click to copy"><bdi>${escaped}</bdi><svg class="copy-icon w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg></span>`;
 }
 
+// =============================================================================
+// Entities: an IP address, an email address (or mailbox) or a domain shown as a
+// value opens its card (entity-card.js). The value is a real button carrying its
+// kind and value as data; one listener below opens the card, so no handler holds
+// the value. Copying moves to the icon beside it, shown on hover.
+// =============================================================================
+
+const UI_ENTITY_KINDS = ['ip', 'address', 'domain'];
+const UI_ENTITY_IPV4 = /^(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(?:\.(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$/;
+const UI_ENTITY_LABEL = /^[a-z0-9_](?:[a-z0-9_-]{0,61}[a-z0-9_])?$/i;
+
+// The browser's side of the normalizer the card's API uses
+// (backend/app/services/entity_values.py), as far as a value needs to be told
+// apart: one IP (no network, no zone), one domain, one address split on its last @
+function entityIsIp(value) {
+    const v = String(value);
+    if (UI_ENTITY_IPV4.test(v)) return true;
+    if (!v.includes(':') || !/^[0-9a-f:.]+$/i.test(v) || v.length > 45) return false;
+    const halves = v.split('::');
+    if (halves.length > 2) return false;
+    const groups = halves.map(h => (h ? h.split(':') : []));
+    const parts = groups.flat();
+    // An IPv4 tail (::ffff:192.0.2.1) counts as two groups
+    const tail = parts.length && parts[parts.length - 1].includes('.') ? parts.pop() : null;
+    if (tail !== null && !UI_ENTITY_IPV4.test(tail)) return false;
+    if (!parts.every(p => /^[0-9a-f]{1,4}$/i.test(p))) return false;
+    const count = parts.length + (tail !== null ? 2 : 0);
+    return halves.length === 2 ? count < 8 : count === 8;
+}
+
+function entityIsDomain(value) {
+    let v = String(value);
+    if (v.endsWith('.')) v = v.slice(0, -1);
+    if (!v || v.length > 253 || /[@/:\s]/.test(v)) return false;
+    const labels = v.split('.');
+    if (labels.length < 2 || /^\d+$/.test(labels[labels.length - 1])) return false;
+    // A label in Unicode (an IDN as people write it) passes as letters and digits
+    return labels.every(l => UI_ENTITY_LABEL.test(l) || (/[^\x00-\x7f]/.test(l) && l.length <= 63 && /^[\p{L}\p{M}\p{N}_-]+$/u.test(l)));
+}
+
+// 'ip', 'address' or 'domain' for a value, or null when it is none of them
+function entityKindOf(value) {
+    if (value === null || value === undefined) return null;
+    const v = String(value).trim();
+    // Whitespace or a control character inside: not one value
+    if (!v || v.length > 254 || /[\s\x00-\x1f\x7f]/.test(v)) return null;
+    if (v.includes('@')) {
+        const at = v.lastIndexOf('@');
+        const local = v.slice(0, at);
+        return local && local.length <= 64 && entityIsDomain(v.slice(at + 1)) ? 'address' : null;
+    }
+    if (entityIsIp(v)) return 'ip';
+    if (entityIsDomain(v)) return 'domain';
+    return null;
+}
+
+// A value that opens its card. kind is 'ip', 'address', 'domain' or 'auto' (read
+// from the value). A value that is not of its kind (a network, '-', "unknown")
+// stays what it was: click to copy, or plain text with { plain: true }.
+// options.mono writes it in the mono font; options.label shows other text than
+// the value (the value still opens and copies)
+function uiEntity(kind, value, { mono = false, cls = '', plain = false, label = '' } = {}) {
+    const text = value === null || value === undefined ? '' : String(value).trim();
+    const found = entityKindOf(text);
+    if (!found || (kind !== 'auto' && kind !== found)) {
+        if (plain || !text || text === '-') return escapeHtml(text || '-');
+        return copyableText(text, [mono ? 'ui-mono' : '', cls].filter(Boolean).join(' '));
+    }
+    const what = { ip: 'IP address', address: 'address', domain: 'domain' }[found];
+    // As an attribute, character for character (escapeHtml also unescapes \")
+    const v = text.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' })[c]);
+    return `<span class="ui-ent${cls ? ` ${escapeHtml(cls)}` : ''}"><button type="button" class="ui-ent-btn${mono ? ' ui-mono' : ''}" data-entity-kind="${found}" data-entity-value="${v}" title="Open the card of this ${what}"><bdi>${label ? escapeHtml(label) : v}</bdi></button>`
+        + `<button type="button" class="ui-ent-copy" data-entity-copy="${v}" title="Copy" aria-label="Copy ${v}"><svg class="copy-icon" width="13" height="13" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg></button></span>`;
+}
+
+// One listener for every entity value, in the capture phase: it runs before the
+// click reaches the row the value sits in, and stops it there, so a row that opens
+// on click (a message, a DMARC source) does not open as well. Enter and Space on
+// the button arrive here as a click too
+function uiEntityClick(event) {
+    const target = event.target instanceof Element ? event.target : null;
+    if (!target) return;
+    const copy = target.closest('[data-entity-copy]');
+    const entity = copy ? null : target.closest('[data-entity-kind]');
+    if (!copy && !entity) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (copy) {
+        copyToClipboard(copy.dataset.entityCopy, { currentTarget: copy, stopPropagation() {}, preventDefault() {} });
+        return;
+    }
+    // An entity is never offered inside a row menu; should one be, the menu closes first
+    const menu = entity.closest('.ui-menu');
+    if (menu && typeof menu.hidePopover === 'function') { try { menu.hidePopover(); } catch (e) { /* closed already */ } }
+    if (typeof openEntityCard === 'function') openEntityCard(entity.dataset.entityKind, entity.dataset.entityValue, { from: entity });
+}
+if (typeof document !== 'undefined' && document && typeof document.addEventListener === 'function') {
+    document.addEventListener('click', uiEntityClick, true);
+}
+
 // options.action: { label, ariaLabel, onAction } a button that runs onAction and
 // closes the toast (Undo, Retry); options.duration: how long it stays (ms; Infinity
 // keeps it until closed). One toast at a time: a new one replaces the last, and

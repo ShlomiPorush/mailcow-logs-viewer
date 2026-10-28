@@ -1451,7 +1451,7 @@ function renderMessageRow(msg) {
     return `
         <div class="ui-msg-item${tone ? ` ui-msg-${tone}` : ''}" data-key="${escapeHtml(msg.correlation_key || '')}"${msg.message_id ? ` data-mid="${encodeURIComponent(msg.message_id)}"` : ''} role="button" tabindex="0" data-row-open onclick="if (!uiRowHeld(event)) viewMessageDetails('${escapeJsArg(msg.correlation_key)}')">
             <div class="ui-msg-l1">
-                <b class="ui-msg-from">${escapeHtml(msg.sender || 'Unknown')}</b>
+                <b class="ui-msg-from">${msg.sender ? uiEntity('address', msg.sender, { plain: true }) : 'Unknown'}</b>
                 ${uiTime(msg.first_seen, formatListTime(msg.first_seen), { title: formatTime(msg.first_seen) })}
             </div>
             <p class="ui-msg-sub" dir="auto" title="${escapeHtml(msg.subject || 'No subject')}">${escapeHtml(msg.subject || 'No subject')}</p>
@@ -1459,7 +1459,7 @@ function renderMessageRow(msg) {
                 ${uiCorrelationTag(msg)}
                 ${msg.direction ? uiDirectionTag(msg.direction) : ''}
                 ${msg.is_spam ? '<span class="ui-tag ui-tag-spam">SPAM</span>' : ''}
-                <span class="ui-msg-to" title="${escapeHtml(msg.recipient || '')}">to ${escapeHtml(msg.recipient || 'Unknown')}</span>
+                <span class="ui-msg-to" title="${escapeHtml(msg.recipient || '')}">to ${msg.recipient ? uiEntity('address', msg.recipient, { plain: true }) : 'Unknown'}</span>
                 ${renderMailboxFolderHint(msg)}
                 ${renderDeliveriesChip(msg)}
             </div>
@@ -1743,12 +1743,12 @@ function renderNetfilterData(data) {
                 const flagUrl = log.country_code ? getFlagUrl(log.country_code, '16x12') : '';
                 const place = [log.country_name, log.city].filter(Boolean).join(', ');
                 const org = log.asn_org ? ` (${log.asn_org})` : '';
-                const account = log.username && log.username !== '-' ? copyableText(log.username)
+                const account = log.username && log.username !== '-' ? uiEntity('address', log.username)
                     : (log.attempts_left !== null && log.attempts_left !== undefined ? `<span class="ui-muted">${escapeHtml(String(log.attempts_left))} attempts left</span>` : '<span class="ui-muted">-</span>');
                 return `
                 <div class="ui-ev-row ui-msg-${uiActionTone(log.action)}">
                     ${uiTime(log.time, formatListTime(log.time), { title: formatTime(log.time), cls: 'ui-muted' })}
-                    <b class="ui-mono">${log.ip ? copyableText(log.ip) : '-'}</b>
+                    <b class="ui-mono">${log.ip ? uiEntity('ip', log.ip, { mono: true }) : '-'}</b>
                     <span class="ui-ev-account">${account}</span>
                     <span>${uiActionTag(log.action)}</span>
                     <span class="ui-ev-where" title="${escapeHtml(place + org)}">${flagUrl ? `<img src="${flagUrl}" alt="" width="16" height="12" onerror="this.style.display='none'">` : ''}${escapeHtml(place || '-')}</span>
@@ -3700,8 +3700,8 @@ function drawQueueRows() {
                 <div class="ui-tr ui-q-row" data-queue-id="${escapeHtml(qid)}">
                     ${canAct ? `<input type="checkbox" class="queue-checkbox ui-check" value="${escapeHtml(qid)}" onchange="queueUpdateSelection()" aria-label="Select ${escapeHtml(qid)}" />` : ''}
                     <div class="ui-td ui-q-who">
-                        <div>${recipients.map(r => copyableText(r.email)).join(', ')}</div>
-                        <small>From ${copyableText(item.sender)}, queued <span title="${escapeHtml(formatTime(queued))}">${formatAgo(queued)}</span>, ID ${copyableText(qid)}</small>
+                        <div>${recipients.map(r => uiEntity('address', r.email)).join(', ')}</div>
+                        <small>From ${uiEntity('address', item.sender)}, queued <span title="${escapeHtml(formatTime(queued))}">${formatAgo(queued)}</span>, ID ${copyableText(qid)}</small>
                     </div>
                     <span class="ui-td">${uiTag(stateText, queueTone)}</span>
                     <div class="ui-td ui-td-wrap ui-mono ui-q-resp">${responses.length
@@ -3986,9 +3986,9 @@ function drawQuarantineRows(data) {
                     ${canAct ? `<input type="checkbox" class="quarantine-checkbox ui-check" value="${escapeHtml(String(itemId))}" onchange="quarantineUpdateSelection()" aria-label="Select message" />` : ''}
                     <div class="ui-td ui-q-who">
                         <button type="button" class="ui-link-row" dir="auto" title="View details" onclick="showQuarantineDetails('${idArg}')">${escapeHtml(item.subject || 'No subject')}</button>
-                        <small>${escapeHtml(item.sender || 'Unknown')}${item.qid ? `, ID ${escapeHtml(item.qid)}` : ''}</small>
+                        <small>${item.sender ? uiEntity('address', item.sender, { plain: true }) : 'Unknown'}${item.qid ? `, ID ${escapeHtml(item.qid)}` : ''}</small>
                     </div>
-                    <span class="ui-td">${escapeHtml(item.rcpt || 'Unknown')}</span>
+                    <span class="ui-td">${item.rcpt ? uiEntity('address', item.rcpt, { plain: true }) : 'Unknown'}</span>
                     <span class="ui-td ui-td-wrap">${uiTag(item.action || 'Quarantined', quarantineActionTone(item.action))}${item.virus_flag ? ` ${uiTag('Virus', 'spam')}` : ''}</span>
                     <span class="ui-td ui-td-end${hasScore && item.score >= 15 ? ' ui-text-fail' : ''}"${hasScore && isFinite(Number(item.score)) ? ` data-sort="${Number(item.score)}"` : ''}><small class="ui-sec-unit">Score </small>${hasScore ? item.score.toFixed(1) : '-'}</span>
                     <time class="ui-td" title="${escapeHtml(formatTime(item.created))}"${isFinite(Date.parse(item.created)) ? ` data-sort="${Date.parse(item.created)}"` : ''}><small class="ui-sec-unit">Held </small>${formatAgo(item.created).replace(' ago', '')}</time>
@@ -4012,7 +4012,7 @@ function drawQuarantineRows(data) {
 // A click on the row opens the message, like the Messages list; its buttons,
 // checkbox and copyable values keep their own click
 function quarantineRowClick(event, itemId) {
-    if (event.target.closest('button, a, input, select, label, .copyable, [role="menu"]') || uiRowHeld(event)) return;
+    if (event.target.closest('button, a, input, select, label, .copyable, .ui-ent, [role="menu"]') || uiRowHeld(event)) return;
     showQuarantineDetails(itemId);
 }
 
@@ -4191,7 +4191,7 @@ function renderQuarantineDetailContent(data, itemId) {
     const zeroSymbols = allSymbols.filter(s => (s.score || 0) === 0).sort((a, b) => (a.name || '').localeCompare(b.name || ''));
 
     const recipientsHtml = (data.recipients || []).map(r =>
-        `<span class="ui-qd-rcpt"><small class="${r.type === 'smtp' ? 'ui-text-info' : 'ui-muted'}">${escapeHtml(r.type)}</small> ${copyableText(r.address)}</span>`
+        `<span class="ui-qd-rcpt"><small class="${r.type === 'smtp' ? 'ui-text-info' : 'ui-muted'}">${escapeHtml(r.type)}</small> ${uiEntity('address', r.address)}</span>`
     ).join(' ');
 
     const score = data.score || 0;
@@ -4223,8 +4223,8 @@ function renderQuarantineDetailContent(data, itemId) {
         <div class="ui-qd">
             <div class="ui-md-ids ui-qd-facts">
                 <div class="ui-md-fact ui-qd-wide"><span>Subject</span><div dir="auto">${copyableText(data.subject || '-')}</div></div>
-                <div class="ui-md-fact"><span>From (Header)</span><div>${copyableText(data.header_from || '-')}</div></div>
-                <div class="ui-md-fact"><span>Envelope From</span><div class="ui-mono">${copyableText(data.env_from || '-')}</div></div>
+                <div class="ui-md-fact"><span>From (Header)</span><div>${uiEntity('address', data.header_from || '-')}</div></div>
+                <div class="ui-md-fact"><span>Envelope From</span><div class="ui-mono">${uiEntity('address', data.env_from || '-', { mono: true })}</div></div>
                 <div class="ui-md-fact ui-qd-wide"><span>Recipients</span><div class="ui-chip-row">${recipientsHtml || '<span class="ui-muted">-</span>'}</div></div>
                 <div class="ui-md-fact"><span>Score</span><div class="ui-text-${scoreTone}"><b>${score.toFixed(2)}</b></div></div>
                 <div class="ui-md-fact"><span>Action</span><div>${uiTag(data.action || '-', quarantineActionTone(data.action))}</div></div>
@@ -4670,7 +4670,7 @@ async function testQuarantineRules() {
             const tone = group.action === 'delete' ? 'fail' : 'ok';
             const itemsHtml = group.items.map(m => `
                 <div class="ui-qt-item${group.rule_enabled ? ` ui-qt-${tone}` : ''}">
-                    <div>${escapeHtml(m.sender || '?')} → ${escapeHtml(m.recipient || '?')}</div>
+                    <div>${uiEntity('address', m.sender || '?', { plain: true })} → ${uiEntity('address', m.recipient || '?', { plain: true })}</div>
                     <small class="ui-muted" dir="auto" title="${escapeHtml(m.subject || '')}">${escapeHtml((m.subject || 'No subject').substring(0, 80))}</small>
                 </div>
             `).join('');
@@ -4742,7 +4742,7 @@ async function loadQuarantineRuleHistory({ quiet = false } = {}) {
         uiReplaceKeepingFocus(container, `<div class="ui-qt-history">${data.data.map(log => `
             <div class="ui-qt-hrow">
                 ${uiTag(log.action, log.action === 'delete' ? 'fail' : 'ok')}
-                <span class="ui-q-who" title="${escapeHtml(log.sender || '')} → ${escapeHtml(log.recipient || '')}">${escapeHtml(log.sender || '?')} → ${escapeHtml(log.recipient || '?')}</span>
+                <span class="ui-q-who" title="${escapeHtml(log.sender || '')} → ${escapeHtml(log.recipient || '')}">${uiEntity('address', log.sender || '?', { plain: true })} → ${uiEntity('address', log.recipient || '?', { plain: true })}</span>
                 ${uiTime(log.created_at, formatTime(log.created_at), { title: `Rule: ${log.rule_name || ''}`, cls: 'ui-muted' })}
             </div>
         `).join('')}</div>`);
@@ -5742,7 +5742,7 @@ function renderBlacklistStatus(data) {
             return `
             <section class="ui-panel ui-bl-row">
                 <div class="ui-st-host-head">
-                    <b class="ui-mono">${escapeHtml(host.hostname)}</b>
+                    <b class="ui-mono">${uiEntity('ip', host.hostname, { mono: true, plain: true })}</b>
                     <span class="ui-tag ui-tag-line">${escapeHtml(host.source || 'system')}</span>
                     ${result}
                     <span class="ui-st-host-tools">
@@ -5839,7 +5839,7 @@ function renderStatusCorrelation(correlation, incompleteList, maxAgeMinutes) {
                 ${incompleteList.map(item => `
                     <div class="ui-tr">
                         <span class="ui-td ui-mono">${copyableText(item.message_id || 'N/A')}</span>
-                        <span class="ui-td">${copyableText(item.sender || 'N/A')} → ${copyableText(item.recipient || 'N/A')}</span>
+                        <span class="ui-td">${uiEntity('address', item.sender || 'N/A')} → ${uiEntity('address', item.recipient || 'N/A')}</span>
                         <span class="ui-td ui-td-end ui-text-warn">${escapeHtml(String(item.age_minutes))}m ago</span>
                     </div>`).join('')}
             </div>

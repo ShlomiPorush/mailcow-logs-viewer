@@ -83,7 +83,7 @@ function renderSmtpAbusePanel() {
 
     const mailboxRow = item => `
         <tr>
-            <td class="ui-mono ui-dtable-wrap">${escapeHtml(item.email)}</td>
+            <td class="ui-mono ui-dtable-wrap">${uiEntity('address', item.email, { mono: true, plain: true })}</td>
             <td>${escapeHtml(String(item.message_count))}</td>
             <td>${
                 item.blocked_by_protection
@@ -164,7 +164,7 @@ function renderSmtpAbusePanel() {
                     <ul class="ui-sa-items">${
                         filteredWhitelist.map(item => `
                         <li>
-                            <span class="ui-mono ui-dtable-wrap">${escapeHtml(item.email)}</span>
+                            <span class="ui-mono ui-dtable-wrap">${uiEntity('address', item.email, { mono: true, plain: true })}</span>
                             ${locked ? '' : `<button type="button" onclick="removeSmtpAbuseWhitelist('${escapeJsArg(item.email)}')" class="ui-btn ui-btn-sm ui-btn-danger">Remove</button>`}
                         </li>`).join('') || '<li class="ui-muted">No matching entries</li>'
                     }</ul>

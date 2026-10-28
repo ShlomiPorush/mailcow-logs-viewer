@@ -269,7 +269,7 @@ function renderDomainAccordionRow(domain, open = false) {
             <div class="ui-td ui-q-who">
                 <div>
                     <button type="button" class="ui-row-chev" aria-expanded="${open}" aria-controls="${domainId}-details" aria-label="Details of ${escapeHtml(domain.domain_name)}" onclick="event.stopPropagation(); toggleDomainDetails('${escapeJsArg(domainId)}')"><svg id="${domainId}-icon-desktop" class="ui-domain-chevron" width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"${open ? ' style="transform: rotate(90deg)"' : ''}><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg></button>
-                    ${copyableText(domain.domain_name)}
+                    ${uiEntity('domain', domain.domain_name)}
                     ${domain.active ? '' : uiTag('Inactive', '')}
                 </div>
                 <small>${escapeHtml(String(domain.mboxes_in_domain))} mailboxes, ${escapeHtml(String(domain.aliases_in_domain))} aliases${issues ? ', needs a DNS change' : ''}</small>
@@ -338,7 +338,7 @@ function renderSpfCheckedIps(check) {
     const rows = checkedIps.map(entry => `
         <div class="ui-dns-ip">
             <div>
-                <code>${copyableText(entry.ip || '')}</code>
+                <code>${uiEntity('ip', entry.ip || '', { mono: true })}</code>
                 <small class="ui-muted">${escapeHtml(spfIpSourceLabel(entry.source))}</small>
             </div>
             ${entry.authorized ? uiTag('Authorized', 'ok') : uiTag('Not authorized', 'fail')}

@@ -496,6 +496,73 @@
 #message-modal .ui-md-content { padding: var(--ui-pad-x); }
 #message-modal .ui-md-timeline-head { top: var(--ui-md-tabs-h, 41px); z-index: 5; }
 #message-modal :is(.ui-md-rcpts, .ui-md-timeline) { scroll-margin-top: calc(var(--ui-md-tabs-h, 41px) + 8px); }
+
+/* ---------- Entity values and the entity card (utils.js uiEntity, entity-card.js) ---------- */
+/* A value that opens its card: the .copyable box (index.html) with the clickable-row
+   tint (.ui-md-clickable) and a dotted underline that marks it as a link */
+.ui-ent { position: relative; display: inline-flex; align-items: center; min-width: 0; max-width: 100%; vertical-align: bottom; }
+.ui-ent-btn { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 1px 4px; margin: -1px -4px;
+    border: 0; border-radius: 4px; background: none; color: inherit; font: inherit; font-weight: inherit; text-align: start; cursor: pointer;
+    text-decoration: underline dotted color-mix(in srgb, var(--ui-muted) 80%, transparent); text-decoration-thickness: 1px; text-underline-offset: 3px;
+    transition: background-color .15s ease; }
+.ui-ent-btn.ui-mono { font-size: .9em; }
+:is(b, .ui-mono) > .ui-ent > .ui-ent-btn.ui-mono { font-size: 1em; }
+@media (hover: hover) { .ui-ent-btn:hover { background: color-mix(in srgb, var(--ui-accent) 6%, transparent); text-decoration-style: solid; text-decoration-color: currentColor; } }
+.ui-ent-btn:focus-visible { outline: 2px solid var(--ui-focus); outline-offset: 2px; }
+/* Copy beside the value: the .copyable icon, on hover only; a touch screen copies in the card */
+.ui-ent-copy { position: absolute; inset-inline-start: calc(100% + 2px); top: 50%; translate: 0 -50%; display: inline-grid; place-items: center;
+    width: 18px; height: 18px; padding: 0; border: 0; border-radius: 4px; background: none; color: var(--ui-muted); cursor: pointer; opacity: 0; transition: opacity .15s ease; }
+@media (hover: hover) { .ui-ent:hover .ui-ent-copy { opacity: .7; } }
+@media (hover: none) { .ui-ent-copy { display: none; } }
+.ui-ent-copy:focus-visible { opacity: 1; outline: 2px solid var(--ui-focus); outline-offset: 1px; }
+.ui-ent-copy .copy-icon.copied { opacity: 1; }
+/* In a cell that clips with an ellipsis the icon would float out of sight: there it takes its
+   place in the line, as the .copyable icon does */
+:is(.ui-msg-from, .ui-msg-to, .ui-ev-account, .ui-td, .ui-md-rrow-addr, .ui-md-to-list, .ui-aa-row) .ui-ent-copy { position: static; translate: none; flex: none; margin-inline-start: 2px; }
+/* and the focus ring is drawn inside the value, where the cell does not cut it off */
+:is(.ui-msg-from, .ui-msg-to, .ui-ev-account, .ui-td, .ui-md-rrow-addr, .ui-md-to-list, .ui-aa-row) .ui-ent-btn { margin: 0 -2px; padding: 2px; }
+:is(.ui-msg-from, .ui-msg-to, .ui-ev-account, .ui-td, .ui-md-rrow-addr, .ui-md-to-list, .ui-aa-row) .ui-ent-btn:focus-visible { outline-offset: -2px; }
+/* "to <address>" in a Messages row: the address keeps its ellipsis inside the row's width */
+.ui-msg-to:has(> .ui-ent) { display: inline-flex; align-items: baseline; gap: .3em; min-width: 0; }
+
+/* The card: the #message-modal frame above (one scroll, pinned tabs), one size across tabs */
+#entity-card .ui-md-body { padding: 0; }
+#entity-card .ui-md-body > .ui-tabs { position: sticky; top: 0; z-index: 6; background: var(--ui-bg); }
+#entity-card .ui-md-content { padding: var(--ui-pad-x); }
+#entity-card .ui-md-content:empty { display: none; }
+.ui-ent-title { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; }
+.ui-ent-title .copyable { font-family: var(--ui-mono); font-weight: 600; }
+.ui-ent-who > div { min-width: 0; }
+.ui-ent-who .ui-sec-flag { vertical-align: -1px; }
+/* Where the card's actions go (L3: Ban, Allow, Show messages, Watch); empty for now */
+.ui-ent-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: -4px 0 16px; }
+.ui-ent-acts:empty { display: none; }
+/* Tiles: .ui-st-cards, three a row in the wide dialog, two on a phone */
+.ui-st-cards.ui-ent-tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.ui-ent-tiles .ui-st-card b { font-size: 20px; }
+.ui-ent-tiles .ui-st-card.is-off b { font-size: 15px; font-weight: 650; }
+.ui-ent-tiles .ui-st-card.is-off b.ui-fail { color: var(--ui-fail); }
+.ui-ent-tiles .ui-st-card small { overflow-wrap: anywhere; }
+/* Recent: .ui-sec-ev rows with a line between them, like .ui-kv */
+.ui-ent-recent .ui-sec-ev { grid-template-columns: 96px minmax(0, 1fr) auto; padding: 8px 0; border-top: 1px solid var(--ui-line); font-size: var(--ui-fs); }
+.ui-ent-recent .ui-sec-ev:first-child { border-top: 0; }
+.ui-ent-recent .ui-sec-ev time { font-size: var(--ui-fs-sm); }
+.ui-ent-recent .ui-sec-ev > span { min-width: 0; overflow-wrap: anywhere; }
+.ui-ent-link { font-size: 12.5px; font-weight: 600; }
+.ui-ent-note { margin: 0; font-size: var(--ui-fs-sm); }
+/* Timeline: .ui-steps per day, the kind as a line tag */
+.ui-ent-day .ui-steps { margin-top: 10px; }
+.ui-ent-kind { margin-inline-start: 6px; font-size: 11px; vertical-align: 1px; }
+.ui-ent-day li > b { overflow-wrap: anywhere; }
+/* Lists in the card sit flush in a panel; the count above them is the search's "more" bar */
+.ui-ent-flush { overflow: visible; }
+.ui-ent-flush .ui-msg-item:first-child, .ui-ent-flush .ui-ev-row.ui-ev-head { border-top: 0; }
+.ui-ent-sum { cursor: default; }
+@media (hover: hover) { .ui-ent-sum:hover { background: none; } }
+.ui-ev-row.ui-ent-ev { grid-template-columns: 64px minmax(0, 1.2fr) 100px minmax(0, 2fr); }
+.ui-ent-ev .ui-ev-msg { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ui-muted); }
+.ui-ent-dm { --ui-cols: minmax(160px, 1.4fr) 100px 110px 100px 100px minmax(110px, 1fr); --ui-table-min: 700px; }
+#entity-card .ui-empty b.ui-text-fail { color: var(--ui-fail); }
 .ui-md-timeline-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
 .ui-md-timeline-tools .ui-picker-btn { max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* With one recipient picked, the lines every recipient shares stay, dimmed */
@@ -2852,12 +2919,18 @@ html .markdown-body .markdown-alert-caution .markdown-alert-title { color: var(-
     html.ui-gs-locked, html.ui-gs-locked body { overflow: hidden; }
     /* A message opened from the search comes over it */
     html:has(#message-modal:not(.hidden)) .ui-gs.is-sheet { z-index: 49; }
+    html:has(#entity-card:not(.hidden)) .ui-gs.is-sheet { z-index: 49; }
 }
 
 /* Message Details over the page: what is behind it stays put while it is open */
 html:has(#message-modal:not(.hidden):not(.ui-docked)),
 html:has(#message-modal:not(.hidden):not(.ui-docked)) body,
 html:has(#message-modal:not(.hidden):not(.ui-docked)) :is(.ui-page, .ui-scroll, .ui-gs-body, .ui-sidenav) { overflow: hidden !important; }
+/* The same for the entity card */
+html:has(#entity-card:not(.hidden)),
+html:has(#entity-card:not(.hidden)) body,
+html:has(#entity-card:not(.hidden)) :is(.ui-page, .ui-scroll, .ui-gs-body, .ui-sidenav) { overflow: hidden !important; }
+#entity-card .ui-dialog-body { overscroll-behavior: contain; }
 #message-modal .ui-dialog-body, #message-modal-content { overscroll-behavior: contain; }
 
 /* DMARC & TLS (dmarc.js): bordered cards with a header, the content beside a side
@@ -3124,6 +3197,12 @@ button.ui-aa-col:focus-visible { outline: 2px solid var(--ui-focus); outline-off
     .ui-dialog-backdrop:not(.ui-docked) .ui-dialog > .ui-dialog-foot { padding-bottom: calc(12px + env(safe-area-inset-bottom)); }
     /* Message details scroll in their own content (DS-14), which must clear the home bar too */
     #message-modal:not(.ui-docked) .ui-md-content { padding-bottom: calc(var(--ui-pad-x) + env(safe-area-inset-bottom)); }
+    #entity-card .ui-md-content { padding-bottom: calc(var(--ui-pad-x) + env(safe-area-inset-bottom)); }
+    .ui-st-cards.ui-ent-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+    .ui-ent-recent .ui-sec-ev { grid-template-columns: 76px minmax(0, 1fr); }
+    .ui-ent-recent .ui-sec-ev > .ui-tag { grid-column: 2; justify-self: start; }
+    .ui-ev-row.ui-ent-ev { grid-template-columns: minmax(0, 1fr) auto; }
+    .ui-ent-ev .ui-ev-msg { grid-column: 1 / -1; }
 }
 
 /* The container log (index.html): the shared dialog frame, a terminal inside */
