@@ -96,6 +96,18 @@
     --ui-dir-in: #4338CA;
     --ui-dir-out: #1D4ED8;
     --ui-dir-int: #0F766E;
+    /* A status colour as text on its own tint (tags, banners, verdicts): 30% of the way to the
+       ink, so it reads at 4.5:1 also on a selected row, in both themes. Dots, bars and borders
+       keep the status colour itself */
+    --ui-ok-text: color-mix(in srgb, var(--ui-ok) 70%, var(--ui-ink));
+    --ui-warn-text: color-mix(in srgb, var(--ui-warn) 70%, var(--ui-ink));
+    --ui-fail-text: color-mix(in srgb, var(--ui-fail) 70%, var(--ui-ink));
+    --ui-spam-text: color-mix(in srgb, var(--ui-spam) 70%, var(--ui-ink));
+    --ui-info-text: color-mix(in srgb, var(--ui-info) 70%, var(--ui-ink));
+    --ui-muted-text: color-mix(in srgb, var(--ui-muted) 70%, var(--ui-ink));
+    --ui-dir-in-text: color-mix(in srgb, var(--ui-dir-in) 70%, var(--ui-ink));
+    --ui-dir-out-text: color-mix(in srgb, var(--ui-dir-out) 70%, var(--ui-ink));
+    --ui-dir-int-text: color-mix(in srgb, var(--ui-dir-int) 70%, var(--ui-ink));
 
     /* Navigation */
     --ui-side: #FFFFFF;
@@ -184,12 +196,12 @@
 /* ---------- Tags (status) and chips (filters) ---------- */
 
 .ui-tag { display: inline-block; padding: 2px 8px; border-radius: 6px; font-size: 12px; font-weight: 700; line-height: 1.4;
-    color: var(--ui-muted); background: color-mix(in srgb, var(--ui-muted) 14%, transparent); }
-.ui-tag-ok { color: var(--ui-ok); background: color-mix(in srgb, var(--ui-ok) 14%, transparent); }
-.ui-tag-warn { color: var(--ui-warn); background: color-mix(in srgb, var(--ui-warn) 15%, transparent); }
-.ui-tag-fail { color: var(--ui-fail); background: color-mix(in srgb, var(--ui-fail) 14%, transparent); }
-.ui-tag-spam { color: var(--ui-spam); background: color-mix(in srgb, var(--ui-spam) 14%, transparent); }
-.ui-tag-info { color: var(--ui-info); background: color-mix(in srgb, var(--ui-info) 14%, transparent); }
+    color: var(--ui-muted-text); background: color-mix(in srgb, var(--ui-muted) 14%, transparent); }
+.ui-tag-ok { color: var(--ui-ok-text); background: color-mix(in srgb, var(--ui-ok) 14%, transparent); }
+.ui-tag-warn { color: var(--ui-warn-text); background: color-mix(in srgb, var(--ui-warn) 15%, transparent); }
+.ui-tag-fail { color: var(--ui-fail-text); background: color-mix(in srgb, var(--ui-fail) 14%, transparent); }
+.ui-tag-spam { color: var(--ui-spam-text); background: color-mix(in srgb, var(--ui-spam) 14%, transparent); }
+.ui-tag-info { color: var(--ui-info-text); background: color-mix(in srgb, var(--ui-info) 14%, transparent); }
 
 .ui-chip { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 11px; border-radius: 999px;
     border: 1px solid var(--ui-line); background: var(--ui-raise); color: var(--ui-ink); font: inherit; font-size: 13px; font-weight: 500; white-space: nowrap; cursor: pointer; }
@@ -227,11 +239,11 @@
 /* ---------- Banners ---------- */
 
 .ui-banner { display: flex; gap: 12px; align-items: flex-start; padding: 12px var(--ui-pad-x); border-radius: var(--ui-radius);
-    color: var(--ui-info); background: color-mix(in srgb, var(--ui-info) 12%, transparent); font-weight: 600; }
+    color: var(--ui-info-text); background: color-mix(in srgb, var(--ui-info) 12%, transparent); font-weight: 600; }
 .ui-banner p { margin: 2px 0 0; color: var(--ui-ink); font-weight: 400; opacity: .85; }
-.ui-banner-ok { color: var(--ui-ok); background: color-mix(in srgb, var(--ui-ok) 13%, transparent); }
-.ui-banner-warn { color: var(--ui-warn); background: color-mix(in srgb, var(--ui-warn) 14%, transparent); }
-.ui-banner-fail { color: var(--ui-fail); background: color-mix(in srgb, var(--ui-fail) 13%, transparent); }
+.ui-banner-ok { color: var(--ui-ok-text); background: color-mix(in srgb, var(--ui-ok) 13%, transparent); }
+.ui-banner-warn { color: var(--ui-warn-text); background: color-mix(in srgb, var(--ui-warn) 14%, transparent); }
+.ui-banner-fail { color: var(--ui-fail-text); background: color-mix(in srgb, var(--ui-fail) 13%, transparent); }
 .ui-banner > .ui-btn { flex: none; margin-inline-start: auto; }
 /* No sign-in configured: a warn banner at the top of the Dashboard. The action
    sits on the right, as in .ui-locked, with the dismiss button last; on phones
@@ -446,7 +458,7 @@
 .ui-md-footer { margin-top: auto; padding-top: 12px; border-top: 1px solid var(--ui-line); flex: none; }
 .ui-md-extra { display: grid; gap: 2px; margin-top: 4px; color: var(--ui-ink); font-size: var(--ui-fs-sm); font-weight: 400; }
 .ui-md-extra p { margin: 0; }
-.ui-banner-muted { color: var(--ui-muted); background: color-mix(in srgb, var(--ui-muted) 12%, transparent); }
+.ui-banner-muted { color: var(--ui-muted-text); background: color-mix(in srgb, var(--ui-muted) 12%, transparent); }
 .ui-md-verdict-icon { font-size: 18px; line-height: 1; }
 .ui-md-errors { flex: none; }
 .ui-md-error-list { display: grid; gap: 8px; max-height: 10rem; overflow-y: auto; margin-top: 6px; color: var(--ui-ink); font-weight: 400; }
@@ -557,10 +569,10 @@
 .ui-fct-dot.ui-dir-inbound { background: var(--ui-dir-in); }
 .ui-fct-dot.ui-dir-outbound { background: var(--ui-dir-out); }
 .ui-fct-dot.ui-dir-internal { background: var(--ui-dir-int); }
-.ui-tag-dir { font-weight: 600; background: color-mix(in srgb, var(--ui-muted) 12%, transparent); color: var(--ui-muted); }
-.ui-tag-dir.ui-dir-inbound { color: var(--ui-dir-in); background: color-mix(in srgb, var(--ui-dir-in) 13%, transparent); }
-.ui-tag-dir.ui-dir-outbound { color: var(--ui-dir-out); background: color-mix(in srgb, var(--ui-dir-out) 13%, transparent); }
-.ui-tag-dir.ui-dir-internal { color: var(--ui-dir-int); background: color-mix(in srgb, var(--ui-dir-int) 13%, transparent); }
+.ui-tag-dir { font-weight: 600; background: color-mix(in srgb, var(--ui-muted) 12%, transparent); color: var(--ui-muted-text); }
+.ui-tag-dir.ui-dir-inbound { color: var(--ui-dir-in-text); background: color-mix(in srgb, var(--ui-dir-in) 13%, transparent); }
+.ui-tag-dir.ui-dir-outbound { color: var(--ui-dir-out-text); background: color-mix(in srgb, var(--ui-dir-out) 13%, transparent); }
+.ui-tag-dir.ui-dir-internal { color: var(--ui-dir-int-text); background: color-mix(in srgb, var(--ui-dir-int) 13%, transparent); }
 /* To: one line however many recipients; the link opens the full list */
 .ui-md-to { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
 .ui-md-to-list { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -642,7 +654,7 @@
 .ui-md-who > span { color: var(--ui-muted); }
 .ui-md-who > div { overflow-wrap: anywhere; font-weight: 600; }
 .ui-md-verdict-bar { margin: 18px 0 16px; padding: 14px 18px; border-radius: var(--ui-radius); font-weight: 600; font-size: 1.05em;
-    color: var(--ui-muted); background: color-mix(in srgb, var(--ui-muted) 12%, transparent); }
+    color: var(--ui-muted-text); background: color-mix(in srgb, var(--ui-muted) 12%, transparent); }
 .ui-md-verdict-bar small { display: block; margin-top: 3px; color: var(--ui-ink); font-weight: 400; font-size: .85em; opacity: .85; }
 /* The verdict and the spam summary share the bar, the summary opens its tab */
 .ui-md-verdict-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 20px; }
@@ -653,11 +665,11 @@
 .ui-md-spam small { color: var(--ui-muted); font-size: 11px; font-weight: 600; }
 .ui-md-spam b { font-size: 15px; }
 .ui-md-spam svg { color: var(--ui-muted); }
-.ui-md-verdict-ok { color: var(--ui-ok); background: color-mix(in srgb, var(--ui-ok) 13%, transparent); }
-.ui-md-verdict-warn { color: var(--ui-warn); background: color-mix(in srgb, var(--ui-warn) 14%, transparent); }
-.ui-md-verdict-fail { color: var(--ui-fail); background: color-mix(in srgb, var(--ui-fail) 13%, transparent); }
-.ui-md-verdict-spam { color: var(--ui-spam); background: color-mix(in srgb, var(--ui-spam) 13%, transparent); }
-.ui-md-verdict-info { color: var(--ui-info); background: color-mix(in srgb, var(--ui-info) 12%, transparent); }
+.ui-md-verdict-ok { color: var(--ui-ok-text); background: color-mix(in srgb, var(--ui-ok) 13%, transparent); }
+.ui-md-verdict-warn { color: var(--ui-warn-text); background: color-mix(in srgb, var(--ui-warn) 14%, transparent); }
+.ui-md-verdict-fail { color: var(--ui-fail-text); background: color-mix(in srgb, var(--ui-fail) 13%, transparent); }
+.ui-md-verdict-spam { color: var(--ui-spam-text); background: color-mix(in srgb, var(--ui-spam) 13%, transparent); }
+.ui-md-verdict-info { color: var(--ui-info-text); background: color-mix(in srgb, var(--ui-info) 12%, transparent); }
 
 /* "What happened": a vertical timeline of steps */
 .ui-steps { list-style: none; margin-block: 10px 0; margin-inline: 6px 0; padding: 0; border-inline-start: 2px solid var(--ui-line); }
@@ -1214,8 +1226,8 @@ body { font-family: var(--ui-font); background: var(--ui-bg); color: var(--ui-in
 .ui-nav-item[aria-current="page"], .mobile-menu-item.active { background: var(--ui-side-on); color: var(--ui-side-on-ink); font-weight: 650; }
 .ui-nav-item[aria-current="page"] svg, .mobile-menu-item.active svg { color: inherit; }
 .ui-nav-count { margin-inline-start: auto; padding: 1px 7px; border-radius: 6px; font-size: 11.5px; font-weight: 700; font-variant-numeric: tabular-nums;
-    color: var(--ui-warn); background: color-mix(in srgb, var(--ui-warn) 18%, transparent); }
-.ui-nav-count.is-fail { color: var(--ui-fail); background: color-mix(in srgb, var(--ui-fail) 18%, transparent); }
+    color: var(--ui-warn-text); background: color-mix(in srgb, var(--ui-warn) 18%, transparent); }
+.ui-nav-count.is-fail { color: var(--ui-fail-text); background: color-mix(in srgb, var(--ui-fail) 18%, transparent); }
 .ui-nav-item[aria-current="page"] .ui-nav-count, .mobile-menu-item.active .ui-nav-count { background: transparent; color: inherit; }
 
 .ui-side-foot { margin-top: auto; padding: 14px 10px 0; color: var(--ui-side-muted); font-size: 12px; line-height: 1.6; }
@@ -1605,7 +1617,7 @@ body { font-family: var(--ui-font); background: var(--ui-bg); color: var(--ui-in
 .ui-st-panel { display: grid; gap: var(--ui-gap); }
 .ui-st-panel.hidden { display: none; }
 .ui-tab-n { margin-inline-start: 4px; padding: 0 6px; border-radius: 6px; background: var(--ui-panel); color: var(--ui-muted); font-size: 11.5px; font-weight: 700; }
-.ui-tab-n.is-fail { background: color-mix(in srgb, var(--ui-fail) 14%, transparent); color: var(--ui-fail); }
+.ui-tab-n.is-fail { background: color-mix(in srgb, var(--ui-fail) 14%, transparent); color: var(--ui-fail-text); }
 .ui-tab-n.hidden { display: none; }
 
 /* Segmented filter (All / Problems / Off) */
@@ -1726,7 +1738,7 @@ button.ui-st-card { cursor: pointer; }
 .ui-jobrow-runs, .ui-jobrow-last { color: var(--ui-muted); font-size: 13px; }
 .ui-jobrow-last { white-space: nowrap; }
 .ui-jobrow-act { text-align: end; }
-.ui-job-error { grid-column: 1 / -1; margin: 0; padding: 6px 10px; border-radius: var(--ui-radius-sm); color: var(--ui-fail);
+.ui-job-error { grid-column: 1 / -1; margin: 0; padding: 6px 10px; border-radius: var(--ui-radius-sm); color: var(--ui-fail-text);
     background: color-mix(in srgb, var(--ui-fail) 9%, transparent); font-size: 12px; overflow-wrap: anywhere; }
 
 .ui-tag-btn { border: 0; cursor: pointer; font: inherit; font-size: 11.5px; }
@@ -2009,7 +2021,7 @@ button.ui-st-card { cursor: pointer; }
 .ui-rl-sender p { margin: 10px 0 0; }
 .ui-rl-sender .ui-chip-row { margin-top: 8px; }
 .ui-rl-note { margin: 10px var(--ui-pad-x); font-size: var(--ui-fs-sm); }
-.ui-rl-warning { margin: 0; padding: 8px var(--ui-pad-x); color: var(--ui-warn); background: color-mix(in srgb, var(--ui-warn) 10%, transparent); font-size: var(--ui-fs-sm); }
+.ui-rl-warning { margin: 0; padding: 8px var(--ui-pad-x); color: var(--ui-warn-text); background: color-mix(in srgb, var(--ui-warn) 10%, transparent); font-size: var(--ui-fs-sm); }
 .ui-rl-form { display: grid; gap: 10px; padding: 12px var(--ui-pad-x); border-top: 1px solid var(--ui-line); background: color-mix(in srgb, var(--ui-ink) 3%, transparent); }
 .ui-rl-form p { margin: 0; font-size: var(--ui-fs-sm); }
 .ui-rl-form-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; }
@@ -2120,7 +2132,7 @@ button.ui-st-card { cursor: pointer; }
 .ui-set-pill { display: inline-flex; align-items: center; gap: 4px; margin-inline-start: 6px; padding: 0 7px; border-radius: 6px; vertical-align: 1px;
     background: var(--ui-bg); box-shadow: inset 0 0 0 1px var(--ui-line); color: var(--ui-muted); font-size: 11px; font-weight: 700; white-space: nowrap; }
 .ui-set-pill svg { display: inline-block; }
-.ui-set-pill.is-changed { background: color-mix(in srgb, var(--ui-info) 14%, transparent); box-shadow: none; color: var(--ui-info); }
+.ui-set-pill.is-changed { background: color-mix(in srgb, var(--ui-info) 14%, transparent); box-shadow: none; color: var(--ui-info-text); }
 
 /* Stored secrets */
 .ui-set-secret { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-height: var(--ui-ctl-h); }
@@ -2500,21 +2512,21 @@ html .markdown-body {
 html .markdown-body .markdown-alert { margin: 0 0 16px; padding: 10px 14px; border: 0; border-inline-start: 3px solid var(--ui-info);
     border-radius: 0; border-start-end-radius: var(--ui-radius-sm); border-end-end-radius: var(--ui-radius-sm); background: color-mix(in srgb, var(--ui-info) 8%, transparent); color: inherit; }
 html .markdown-body .markdown-alert > :last-child { margin-bottom: 0; }
-html .markdown-body .markdown-alert-title { display: flex; align-items: center; gap: 6px; margin: 0 0 4px; font-weight: 700; color: var(--ui-info); }
+html .markdown-body .markdown-alert-title { display: flex; align-items: center; gap: 6px; margin: 0 0 4px; font-weight: 700; color: var(--ui-info-text); }
 html .markdown-body .markdown-alert-tip { border-inline-start-color: var(--ui-ok); background: color-mix(in srgb, var(--ui-ok) 8%, transparent); }
-html .markdown-body .markdown-alert-tip .markdown-alert-title { color: var(--ui-ok); }
+html .markdown-body .markdown-alert-tip .markdown-alert-title { color: var(--ui-ok-text); }
 html .markdown-body .markdown-alert-important { border-inline-start-color: var(--ui-spam); background: color-mix(in srgb, var(--ui-spam) 8%, transparent); }
-html .markdown-body .markdown-alert-important .markdown-alert-title { color: var(--ui-spam); }
+html .markdown-body .markdown-alert-important .markdown-alert-title { color: var(--ui-spam-text); }
 html .markdown-body .markdown-alert-warning { border-inline-start-color: var(--ui-warn); background: color-mix(in srgb, var(--ui-warn) 9%, transparent); }
-html .markdown-body .markdown-alert-warning .markdown-alert-title { color: var(--ui-warn); }
+html .markdown-body .markdown-alert-warning .markdown-alert-title { color: var(--ui-warn-text); }
 html .markdown-body .markdown-alert-caution { border-inline-start-color: var(--ui-fail); background: color-mix(in srgb, var(--ui-fail) 8%, transparent); }
-html .markdown-body .markdown-alert-caution .markdown-alert-title { color: var(--ui-fail); }
+html .markdown-body .markdown-alert-caution .markdown-alert-title { color: var(--ui-fail-text); }
 /* The changelog and help modals force every element to white in dark mode; the callout titles keep their colour */
-.dark #changelog-content .markdown-alert .markdown-alert-title, .dark .update-changelog-content .markdown-alert .markdown-alert-title { color: var(--ui-info) !important; }
-.dark #changelog-content .markdown-alert-tip .markdown-alert-title, .dark .update-changelog-content .markdown-alert-tip .markdown-alert-title { color: var(--ui-ok) !important; }
-.dark #changelog-content .markdown-alert-important .markdown-alert-title, .dark .update-changelog-content .markdown-alert-important .markdown-alert-title { color: var(--ui-spam) !important; }
-.dark #changelog-content .markdown-alert-warning .markdown-alert-title, .dark .update-changelog-content .markdown-alert-warning .markdown-alert-title { color: var(--ui-warn) !important; }
-.dark #changelog-content .markdown-alert-caution .markdown-alert-title, .dark .update-changelog-content .markdown-alert-caution .markdown-alert-title { color: var(--ui-fail) !important; }
+.dark #changelog-content .markdown-alert .markdown-alert-title, .dark .update-changelog-content .markdown-alert .markdown-alert-title { color: var(--ui-info-text) !important; }
+.dark #changelog-content .markdown-alert-tip .markdown-alert-title, .dark .update-changelog-content .markdown-alert-tip .markdown-alert-title { color: var(--ui-ok-text) !important; }
+.dark #changelog-content .markdown-alert-important .markdown-alert-title, .dark .update-changelog-content .markdown-alert-important .markdown-alert-title { color: var(--ui-spam-text) !important; }
+.dark #changelog-content .markdown-alert-warning .markdown-alert-title, .dark .update-changelog-content .markdown-alert-warning .markdown-alert-title { color: var(--ui-warn-text) !important; }
+.dark #changelog-content .markdown-alert-caution .markdown-alert-title, .dark .update-changelog-content .markdown-alert-caution .markdown-alert-title { color: var(--ui-fail-text) !important; }
 
 /* Dashboard server health: the Status cards, two per row in the side column */
 /* About: one card per thing the app depends on, with where to fix it */
@@ -2744,7 +2756,7 @@ html .markdown-body .markdown-alert-caution .markdown-alert-title { color: var(-
 .ui-prot-name { display: inline-flex; align-items: center; gap: 4px; padding-block: 3px; padding-inline: 10px 4px; border-radius: 999px; background: var(--ui-bg);
     border: 1px solid var(--ui-line); font: 13px var(--ui-mono); }
 .ui-prot-name button { width: 20px; height: 20px; border: 0; border-radius: 50%; background: none; color: var(--ui-muted); font-size: 15px; line-height: 1; cursor: pointer; }
-@media (hover: hover) { .ui-prot-name button:hover { background: color-mix(in srgb, var(--ui-fail) 14%, transparent); color: var(--ui-fail); } }
+@media (hover: hover) { .ui-prot-name button:hover { background: color-mix(in srgb, var(--ui-fail) 14%, transparent); color: var(--ui-fail-text); } }
 .ui-prot-add { display: flex; gap: 8px; }
 .ui-prot-add .ui-input { flex: 1; min-width: 0; }
 .ui-prot-suggest { display: grid; gap: 6px; font-size: 12.5px; }
