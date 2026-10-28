@@ -700,7 +700,7 @@ Messages with their Postfix and Rspamd data combined.
   "data": [
     {
       "correlation_key": "abc123def456...", "message_id": "<unique-id@example.com>", "queue_id": "ABC123DEF",
-      "sender": "user@example.com", "recipient": "recipient@example.net", "subject": "Hello World",
+      "sender": "user@example.com", "recipient": "recipient@example.net", "recipient_count": 2, "subject": "Hello World",
       "direction": "outbound", "final_status": "delivered", "is_complete": true,
       "first_seen": "2025-12-25T10:30:00Z", "last_seen": "2025-12-25T10:30:05Z",
       "dovecot_status": "stored", "dovecot_mailbox": "INBOX", "deliveries": 1,
@@ -710,7 +710,9 @@ Messages with their Postfix and Rspamd data combined.
 }
 ```
 
-**One row per message:** a message delivered more than once (a forward, a BCC copy, a quarantine release) has one correlation per delivery leg, but the list returns one row for it. Rows are grouped by Message-ID; a correlation without one is grouped by its own `correlation_key` and never merged. The filters apply to the legs first, and the earliest matching leg represents the message, so a search answers with the leg that matched. `deliveries` is the number of legs the message has in the database, including legs the filters did not match. `total` and `pages` count messages, not legs. The legs are listed in `related_deliveries` of the details endpoint.
+**One row per message:** a message delivered more than once (a forward, a BCC copy, a quarantine release) has one correlation per delivery leg, but the list returns one row for it. Rows are grouped by Message-ID; a correlation without one is grouped by its own `correlation_key` and never merged. The filters apply to the legs first, and the earliest matching leg represents the message, so a search answers with the leg that matched. `deliveries` is the number of legs the message has in the database, including legs the filters did not match; a leg to or from an excluded address is not counted, as the details do not list it. `total` and `pages` count messages, not legs. The legs are listed in `related_deliveries` of the details endpoint.
+
+**Recipients:** `recipient` is the row's own recipient. `recipient_count` is how many recipients the message has across all its delivery legs (a message forwarded or sent on counts the recipients of every delivery), the same number as `recipient_count` of the details endpoint: per delivery, the addresses Rspamd named (else those Postfix delivered to) and any address only Postfix logged, without excluded addresses. An address counts once whatever its case, and an alias counts once however many mailboxes it reached. It is at least 1 when `recipient` is set.
 
 **`watermark`:** the id of the newest delivery leg stored when the list was read; the list holds nothing stored after it. Pass it as `upto_id` to read the next pages of the same list, and as `after_id` to `GET /api/messages/new` to count what came after.
 
@@ -727,10 +729,10 @@ The message with its related logs. An unknown key returns 404; `rspamd` is null 
   "correlation_key": "abc123def456...",
   "message_id": "<unique-id@example.com>",
   "recipients": ["recipient@example.net", "cc@example.net"],
-  "recipient_count": 2,
+  "recipient_count": 3,
   "final_status": "delivered",
   "related_deliveries": [
-    {"correlation_key": "789abc012def...", "sender": "recipient@example.net", "recipient": "forward-target@example.org", "direction": "outbound", "final_status": "rejected", "first_seen": "2025-12-25T10:30:07Z", "queue_id": "5D9C86E1234", "dovecot_status": null, "dovecot_mailbox": null}
+    {"correlation_key": "789abc012def...", "sender": "recipient@example.net", "recipient": "forward-target@example.org", "direction": "outbound", "final_status": "rejected", "first_seen": "2025-12-25T10:30:07Z", "queue_id": "5D9C86E1234", "dovecot_status": null, "dovecot_mailbox": null, "recipients": ["forward-target@example.org"]}
   ],
   "rspamd": {"score": 0.5, "required_score": 15, "action": "no action", "symbols": {"MAILCOW_AUTH": {"score": -20, "description": "mailcow authenticated"}}, "is_spam": false, "ip": "192.0.2.100", "user": "user@example.com", "has_auth": true, "size": 1024},
   "dovecot": {"status": "stored", "mailbox": "Junk", "detail": null, "logs": [{"time": "2025-12-25T10:30:06Z", "message": "lmtp(recipient@example.net)...: stored mail into mailbox 'Junk'", "verdict": "stored", "recipient": "recipient@example.net", "mailbox": "Junk"}]},

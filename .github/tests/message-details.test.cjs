@@ -114,8 +114,8 @@ test('failed fetch and disabled security retain their behavior', async () => {
 test('shared list hints remain available and escape folder names', () => {
     const h = harness({});
     assert.equal(h.context.renderMailboxFolderHint({ dovecot_status: 'stored', dovecot_mailbox: '<Junk>' }), '<span>Folder: &lt;Junk&gt;</span>');
-    assert.equal(h.context.renderDeliveriesChip({ deliveries: 2 }), '<span>Deliveries: 2</span>');
-    assert.equal(h.context.renderDeliveriesChip({ deliveries: 1 }), '');
+    // A message delivered twice is one email: its row counts recipients, not deliveries
+    assert.equal(typeof h.context.renderDeliveriesChip, 'undefined');
 });
 
 test('message listeners close on backdrop, and on Escape when docked', async () => {
@@ -546,4 +546,51 @@ test('a relay tooltip fits the width it has, shows on a tap or the focus, and a 
     const rows = h.context.renderRecipientRows();
     assert.match(rows, /onfocus="mdRelayTip\(this\.parentElement\)" class="ui-row-open/);
     assert.match(rows, /<div class="ui-md-rrow" title="[^"]*" onclick="if \(!uiRowHeld\(event\) && !mdRelayTapped\(event\)\) pickMessageRecipient/);
+});
+
+test('a message delivered twice: the header names both recipients, the logs stay this delivery\'s', async () => {
+    // Delivery 1 (viewed) to a local mailbox, delivery 2 of the same message to an outside address
+    const data = { ...message(), final_status: 'delivered', related_deliveries: [{ correlation_key: 'second-key', sender: 'sender@example.com',
+        recipient: 'friend@outside.example.net', direction: 'outbound', final_status: 'deferred', first_seen: '2026-01-01T00:01:00Z',
+        queue_id: 'TEST456', dovecot_status: null, dovecot_mailbox: null, recipients: ['friend@outside.example.net'] }] };
+    const h = harness(data);
+    await h.context.viewMessageDetails('example-key');
+    const header = h.element('message-modal-header').innerHTML;
+    assert.match(header, /To \(2\)/);
+    assert.match(header, /data-entity-value="recipient@example\.com"[\s\S]*?<\/span>, <span class="ui-ent"><button[^>]*data-entity-value="friend@outside\.example\.net"/);
+    assert.match(header, /All 2 recipients/);
+    // The outcome is this delivery's: no "Delivered to 1 of 2"
+    assert.doesNotMatch(header, /of 2 recipients/);
+
+    const section = h.context.renderRecipientsSection();
+    assert.match(section, /Recipients <span class="ui-muted">2<\/span>/);
+    // This delivery's recipient keeps its own row, which shows its logs
+    assert.match(section, /pickMessageRecipient\(0, true\)[\s\S]*recipient@example\.com/);
+    // The other delivery's recipient shows that delivery's outcome and opens it
+    const other = section.split('Other deliveries of this message')[1] || '';
+    assert.match(other, /friend@outside\.example\.net/);
+    assert.match(other, /viewMessageDetails\('second-key'\)/);
+    assert.match(other, /Deferred/i);
+    assert.doesNotMatch(other, /pickMessageRecipient/);
+    // The status filter is this delivery's, which has one recipient: none is offered
+    assert.doesNotMatch(section, /ui-chip-row/);
+    // The Logs tab's card names this delivery's recipients as such, not as the message's To
+    h.context.renderPostfixTab(h.element('content'), data);
+    const logs = h.element('content').innerHTML;
+    assert.match(logs, /This delivery \(1\)/);
+    assert.doesNotMatch(logs, /To \(1\)/);
+});
+
+test('a delivery with nothing logged yet names the one recipient another delivery reached', async () => {
+    const data = { ...message(), recipient: null, recipients: [], postfix: [],
+        related_deliveries: [{ correlation_key: 'second-key', sender: 'sender@example.com', recipient: 'friend@outside.example.net',
+            direction: 'outbound', final_status: 'delivered', first_seen: '2026-01-01T00:01:00Z', queue_id: 'TEST456',
+            dovecot_status: null, dovecot_mailbox: null, recipients: ['friend@outside.example.net'] }] };
+    const h = harness(data);
+    await h.context.viewMessageDetails('example-key');
+    const header = h.element('message-modal-header').innerHTML;
+    const to = header.split('<span>To</span>')[1] || '';
+    assert.match(to, /^<div>[\s\S]*friend@outside\.example\.net/);
+    assert.doesNotMatch(to.split('</div>')[0], />-</);
+    assert.doesNotMatch(header, /All \d+ recipients/);
 });

@@ -135,6 +135,7 @@ async function viewMessageDetails(correlationKey) {
         currentModalData = data;
         currentModalTab = 'overview';
         mdRecipients = messageRecipients(data);
+        mdOtherRecipients = messageRecipientsAll(data, mdRecipients).slice(mdRecipients.length);
         mdOwners = mdAddressOwners(data);
         Object.assign(mdView, { status: '', query: '', all: false, picked: -1, source: '' });
         if (typeof uiPickers !== 'undefined') delete uiPickers.query['md-rcpt-pick'];
@@ -534,6 +535,8 @@ function mdRelayTip(root) {
 // a status filter, a search, the whole list or its first rows, the recipient
 // whose lines the timeline shows (-1: all) and the timeline's source
 let mdRecipients = [];
+// Recipients only the message's other deliveries reached: listed, never picked
+let mdOtherRecipients = [];
 let mdOwners = new Map();
 const mdView = { status: '', query: '', all: false, picked: -1, source: '' };
 const MD_RCPT_ROWS = 6;
@@ -661,8 +664,12 @@ function messageRecipients(data) {
     // that list can hold such a mailbox; what Rspamd named is always kept.
     const expanded = new Set([...owners].filter(([to, set]) => !set.has(to)).map(([to]) => to));
     const listed = (data.recipients || []).map(mdAddressKey);
-    const deliveredTo = [...new Set((data.postfix || []).filter(log => log.recipient).map(log => mdAddressKey(log.recipient)))];
-    const fromPostfix = listed.length > 0 && listed.length === deliveredTo.length && listed.every((key, i) => key === deliveredTo[i]);
+    // The list is the one taken from Postfix when it names the same addresses, in
+    // any order: lines logged in the same second can come in either order. The
+    // Messages list counts by the same rules (services/message_recipients.py)
+    const deliveredTo = new Set((data.postfix || []).filter(log => log.recipient).map(log => mdAddressKey(log.recipient)));
+    const listedSet = new Set(listed);
+    const fromPostfix = listedSet.size > 0 && listedSet.size === deliveredTo.size && [...listedSet].every(key => deliveredTo.has(key));
     (data.recipients || []).forEach(address => {
         const key = mdAddressKey(address);
         if (!fromPostfix || !expanded.has(key) || written.has(key)) add(address);
@@ -698,6 +705,23 @@ function messageRecipients(data) {
         const delivered = [...reached.keys()].filter(to => to !== r.key).map(to => reached.get(to).address);
         return { ...r, status, last, attempts: worst ? worst.attempts : 0, relay: last ? last.relay : '', reason, delivered };
     });
+}
+
+// The recipients of the whole message: this delivery's (messageRecipients()),
+// then those only its other deliveries reached (a forward, a copy sent on),
+// each address once. A message that passed through the server twice is one
+// email. The Messages list counts the same (services/message_recipients.py).
+// An entry of another delivery carries that delivery (leg), not a status.
+function messageRecipientsAll(data, own = messageRecipients(data)) {
+    const seen = new Set(own.map(r => r.key));
+    const others = [];
+    (data.related_deliveries || []).forEach(leg => (leg.recipients || []).forEach(address => {
+        const key = mdAddressKey(address);
+        if (!key || seen.has(key)) return;
+        seen.add(key);
+        others.push({ address: String(address).trim(), key, leg });
+    }));
+    return own.concat(others);
 }
 
 function mdStatusCounts(recipients) {
@@ -843,20 +867,54 @@ function renderRecipientRows() {
             </div>`;
     };
     return `
-        <div class="ui-chip-row">
+        ${mdRecipients.length > 1 ? `<div class="ui-chip-row">
             ${chip('', 'All', mdRecipients.length)}
             ${mdStatusList(mdRecipients).map(s => chip(s.status, s.word, s.count)).join('')}
-        </div>
+        </div>` : ''}
         <div class="ui-md-rlist">${shown.length ? shown.map(row).join('') : '<div class="ui-md-rnone">No recipient matches</div>'}</div>
-        ${rows.length > MD_RCPT_ROWS ? `<button type="button" class="ui-btn ui-btn-sm ui-md-rmore" data-md-focus="more" onclick="moreMessageRecipients()">${mdView.all ? 'Show fewer' : `Show all ${rows.length}`}</button>` : ''}`;
+        ${rows.length > MD_RCPT_ROWS ? `<button type="button" class="ui-btn ui-btn-sm ui-md-rmore" data-md-focus="more" onclick="moreMessageRecipients()">${mdView.all ? 'Show fewer' : `Show all ${rows.length}`}</button>` : ''}
+        ${renderOtherDeliveryRecipients()}`;
+}
+
+// The recipients only the message's other deliveries reached, after this
+// delivery's. Each shows the outcome of its own delivery, never this one's,
+// and opens that delivery; the status filter is this delivery's, so they
+// stay out of a filtered list.
+function renderOtherDeliveryRecipients() {
+    const query = mdView.query.trim().toLowerCase();
+    const others = mdView.status ? [] : mdOtherRecipients.filter(r => !query || r.address.toLowerCase().includes(query));
+    if (!others.length) return '';
+    // The delivery's outcome in the words and tones of the rows above it. It is
+    // the row's open button, as the status of the rows above is theirs
+    const outcome = r => {
+        const leg = r.leg;
+        let word = 'no final status';
+        let tone = '';
+        if (leg.final_status) {
+            const status = leg.final_status === 'delivered' ? 'sent' : leg.final_status;
+            const info = mdStatusInfo(status);
+            word = info.word;
+            tone = (MD_RCPT_STATUS[status] ? info.tone : UI_STATUS_TONE[leg.final_status]) || '';
+        }
+        return `<button type="button" aria-label="${escapeHtml(word)}, open the delivery to ${escapeHtml(r.address)}" class="ui-row-open ui-tag${tone ? ` ui-tag-${tone}` : ''}">${escapeHtml(word)}</button>`;
+    };
+    const row = r => `
+            <div class="ui-md-rrow" title="Open the delivery to ${escapeHtml(r.address)}" onclick="if (!uiRowHeld(event)) viewMessageDetails('${escapeJsArg(r.leg.correlation_key)}')">
+                <span class="ui-md-rrow-addr">${uiEntity('address', r.address)}</span>${outcome(r)}
+                <span class="ui-md-rrow-sub"><span>In another delivery of this message</span>${r.leg.first_seen ? `<span>· ${escapeHtml(formatTime(r.leg.first_seen))}</span>` : ''}</span>
+            </div>`;
+    return `
+        <h5 class="ui-md-sub">Other deliveries of this message</h5>
+        <div class="ui-md-rlist">${others.map(row).join('')}</div>`;
 }
 
 function renderRecipientsSection() {
-    if (mdRecipients.length < 2) return '';
+    const total = mdRecipients.length + mdOtherRecipients.length;
+    if (total < 2) return '';
     return `
         <section class="ui-md-rcpts" id="md-rcpts">
             <div class="ui-md-rcpts-head">
-                <h4 class="ui-md-h">Recipients <span class="ui-muted">${mdRecipients.length}</span></h4>
+                <h4 class="ui-md-h">Recipients <span class="ui-muted">${total}</span></h4>
                 <input type="search" class="ui-input" placeholder="Find a recipient" aria-label="Find a recipient" autocomplete="off" spellcheck="false" value="${escapeHtml(mdView.query)}" oninput="searchMessageRecipients(this.value)">
             </div>
             <div class="ui-md-rcpts" id="md-rcpt-results">${renderRecipientRows()}</div>
@@ -889,16 +947,21 @@ function renderMessageHeader(data) {
     const header = document.getElementById('message-modal-header');
     if (!header) return;
     const recipients = (data.recipients && data.recipients.length) ? data.recipients : (data.recipient ? [data.recipient] : []);
-    // A message to many: To stays one line, and the outcome counts recipients
-    const all = messageRecipients(data);
+    // A message to many: To stays one line and names every recipient of the
+    // message, its other deliveries' too; the outcome and its counts are this
+    // delivery's, as are the timeline and the logs below
+    const own = messageRecipients(data);
+    const all = messageRecipientsAll(data, own);
     const many = all.length > 1;
-    const counted = recipientsVerdict(data, all);
+    const counted = recipientsVerdict(data, own);
     const verdict = counted || messageVerdict(data);
     // Each status but Delivered, as a count that opens those recipients
-    const tally = counted ? mdStatusList(all).filter(s => s.status !== 'sent') : [];
+    const tally = counted ? mdStatusList(own).filter(s => s.status !== 'sent') : [];
     const toHtml = many
         ? `<div class="ui-md-to"><span class="ui-md-to-list">${all.slice(0, 12).map(r => uiEntity('address', r.address, { plain: true })).join(', ')}</span><button type="button" class="ui-md-link" onclick="showMessageRecipients('')">All ${all.length} recipients</button></div>`
-        : uiEntity('address', recipients[0] || '-');
+        // One recipient: the one counted, which may be another delivery's when this
+        // one has none logged yet
+        : uiEntity('address', all.length ? all[0].address : (recipients[0] || '-'));
     const facts = [];
     if (data.rspamd && data.rspamd.size) facts.push(formatSize(data.rspamd.size));
     if (data.direction) facts.push(data.direction);
@@ -1173,13 +1236,15 @@ function renderPostfixTab(content, data) {
         </div>
     ` : '';
 
+    // This delivery's recipients: the header's To names the whole message's, which a
+    // message delivered more than once has more of
     let toFact = '';
     if (many) {
         // The Recipients list below names them all
     } else if (recipientsFromPostfix.size > 0) {
-        toFact = mdFact(`To (${recipientsFromPostfix.size})`, recipientsFromPostfix.size === 1 ? uiEntity('address', Array.from(recipientsFromPostfix)[0]) : `${recipientsFromPostfix.size} recipients`);
+        toFact = mdFact(`This delivery (${recipientsFromPostfix.size})`, recipientsFromPostfix.size === 1 ? uiEntity('address', Array.from(recipientsFromPostfix)[0]) : `${recipientsFromPostfix.size} recipients`);
     } else if (data.recipients && data.recipients.length > 0) {
-        toFact = mdFact(`To (${data.recipients.length})`, data.recipients.length === 1 ? uiEntity('address', data.recipients[0]) : `${data.recipients.length} recipients`);
+        toFact = mdFact(`This delivery (${data.recipients.length})`, data.recipients.length === 1 ? uiEntity('address', data.recipients[0]) : `${data.recipients.length} recipients`);
     }
 
     // A message to many names its server when all its recipients went through one;

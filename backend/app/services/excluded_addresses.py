@@ -119,6 +119,26 @@ def postfix_line_visible(model=PostfixLog):
     return not_(or_(_postfix_listed(model, hidden), and_(model.queue_id.isnot(None), same_message)))
 
 
+def postfix_line_visible_among(queue_ids, model=PostfixLog):
+    """postfix_line_visible() for lines of a few queues only (a page's): the
+    listed lines of those queues are found first, by the queue id index, and
+    each line is checked against them. postfix_line_visible() checks each line
+    against the whole table, which the planner may scan by time.
+
+    queue_ids: a list, or a select of queue ids."""
+    hidden = listed()
+    if not hidden:
+        return true()
+    # MATERIALIZED: found once; inlined, PostgreSQL checks each line against the
+    # table again (by the time index), which is what this avoids
+    marks = select(PostfixLog.queue_id, PostfixLog.time).where(
+        PostfixLog.queue_id.in_(queue_ids), _postfix_listed(PostfixLog, hidden)).cte('listed_marks').prefix_with('MATERIALIZED')
+    near = exists().where(marks.c.queue_id == model.queue_id,
+                          marks.c.time >= model.time - QUEUE_WINDOW,
+                          marks.c.time <= model.time + QUEUE_WINDOW)
+    return not_(or_(_postfix_listed(model, hidden), and_(model.queue_id.isnot(None), near)))
+
+
 def _recipients_listed(column, hidden):
     # Only a JSON array holds recipients; any other value (or NULL) names none
     array = case((func.jsonb_typeof(column) == 'array', column), else_=cast(literal('[]'), JSONB))
@@ -162,6 +182,29 @@ def delivery_hidden(correlation, lines: list) -> bool:
     return bool(correlation.queue_id) and at is not None and any(
         l.queue_id == correlation.queue_id and l.time is not None and abs(l.time - at) <= QUEUE_WINDOW
         and postfix_line_listed(l.sender, l.recipient, l.message) for l in lines)
+
+
+def hidden_deliveries(db, legs) -> set:
+    """The correlation keys of the legs delivery_hidden() hides, for many legs
+    at once: by their own sender or recipient, or by a listed Postfix line (such
+    as orig_to) of their queue occurrence. One query whatever the number of legs."""
+    hidden = listed()
+    if not hidden:
+        return set()
+    found = {leg.correlation_key for leg in legs if any_listed(leg.sender, leg.recipient)}
+    queued = [leg for leg in legs if leg.correlation_key not in found and leg.queue_id
+              and (leg.first_seen or leg.created_at) is not None]
+    if queued:
+        marks: Dict[str, list] = {}
+        for queue_id, time in db.query(PostfixLog.queue_id, PostfixLog.time).filter(
+                PostfixLog.queue_id.in_(list({leg.queue_id for leg in queued})), PostfixLog.time.isnot(None),
+                _postfix_listed(PostfixLog, hidden)).all():
+            marks.setdefault(queue_id, []).append(time)
+        for leg in queued:
+            at = leg.first_seen or leg.created_at
+            if any(abs(time - at) <= QUEUE_WINDOW for time in marks.get(leg.queue_id, [])):
+                found.add(leg.correlation_key)
+    return found
 
 
 def visible_recipients(recipients) -> list:

@@ -49,7 +49,10 @@ class MessageRow(Fixed):
     message_id: Optional[str]
     queue_id: Optional[str]
     sender: Optional[str]
-    recipient: Optional[str]
+    recipient: Optional[str] = Field(description="The leg's recipient")
+    recipient_count: int = Field(description="The message's recipients across all its delivery legs: the "
+                                             "details' recipient_count (excluded addresses left out); at least 1 "
+                                             "when the leg names a recipient")
     subject: Optional[str]
     direction: Optional[str] = Field(description="inbound, outbound or internal")
     final_status: Optional[str] = Field(description="Such as delivered, deferred, bounced, rejected, spam or discarded")
@@ -60,7 +63,7 @@ class MessageRow(Fixed):
                                                       "forwarded or failed; null without Dovecot information")
     dovecot_mailbox: Optional[str] = Field(description="The folder it was filed into")
     deliveries: int = Field(description="Delivery legs this message has in the database, including legs the "
-                                        "filters did not match")
+                                        "filters did not match; a leg to or from an excluded address is not counted")
     spam_score: Optional[float]
     is_spam: Optional[bool]
     user: Optional[str] = Field(description="Authenticated sender, from Rspamd")
@@ -90,6 +93,9 @@ class RelatedDelivery(Fixed):
     queue_id: Optional[str]
     dovecot_status: Optional[str]
     dovecot_mailbox: Optional[str]
+    recipients: List[str] = Field(description="The recipients of this delivery, as the message dialog lists them: "
+                                               "one address per recipient, an alias rather than the mailboxes it "
+                                               "reached")
 
 
 class RspamdScan(Fixed):
@@ -165,7 +171,12 @@ class MessageDetailsResponse(Fixed):
     sender: Optional[str]
     recipient: Optional[str] = Field(description="The leg's recipient")
     recipients: List[str] = Field(description="Every recipient, from Rspamd, else from the Postfix lines")
-    recipient_count: int
+    recipient_count: int = Field(description="How many recipients the whole message has, as the message dialog "
+                                             "counts them: those of this delivery and of the related deliveries, "
+                                             "one per address in any case, an alias once however many mailboxes "
+                                             "it reached, addresses only Postfix logged included; at least 1 when "
+                                             "the leg names a recipient. It can differ from the length of "
+                                             "`recipients`, which lists this delivery's only")
     subject: Optional[str] = Field(description="Taken from another leg of the same message when this one has none")
     direction: Optional[str]
     final_status: Optional[str]

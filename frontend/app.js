@@ -1485,9 +1485,8 @@ function renderMessageRow(msg) {
                 ${uiCorrelationTag(msg)}
                 ${msg.direction ? uiDirectionTag(msg.direction) : ''}
                 ${msg.is_spam ? '<span class="ui-tag ui-tag-spam">SPAM</span>' : ''}
-                <span class="ui-msg-to" title="${escapeHtml(msg.recipient || '')}">to ${msg.recipient ? uiEntity('address', msg.recipient, { plain: true }) : 'Unknown'}</span>
+                <span class="ui-msg-rcpt"><span class="ui-msg-to" title="${escapeHtml(msg.recipient || '')}">to ${msg.recipient ? uiEntity('address', msg.recipient, { plain: true }) : 'Unknown'}</span>${renderRecipientMore(msg)}</span>
                 ${renderMailboxFolderHint(msg)}
-                ${renderDeliveriesChip(msg)}
             </div>
         </div>`;
 }

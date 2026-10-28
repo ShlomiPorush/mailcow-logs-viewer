@@ -143,6 +143,8 @@ async function gsSearchMessages(q, signal) {
         items: (data.data || []).map(m => ({
             title: m.subject || '(no subject)',
             sub: (m.sender || '') + ' → ' + (m.recipient || ''),
+            // "+2" when the message has more recipients, as in the Messages list
+            subTag: renderRecipientMore(m),
             at: formatAgo(m.first_seen || m.last_seen),
             open: () => viewMessageDetails(m.correlation_key),
             // A message opens over the search, which stays for the next one
@@ -462,7 +464,7 @@ function gsItem(category, item, q) {
     const on = index === gsActive;
     return `<div class="ui-gs-row${on ? ' is-active' : ''}" role="row" data-gs-index="${index}">`
         + `<div class="ui-gs-item" id="ui-gs-opt-${index}" role="gridcell" aria-selected="${on}">`
-        + `<span class="ui-gs-ic">${gsIcon(category)}</span><b>${gsMark(item.title, q)}</b><small>${gsMark(item.sub, q)}</small>${item.at ? `<span class="ui-gs-at">${escapeHtml(item.at)}</span>` : ''}</div>`
+        + `<span class="ui-gs-ic">${gsIcon(category)}</span><b>${gsMark(item.title, q)}</b>${item.subTag ? `<small class="ui-gs-sub"><span>${gsMark(item.sub, q)}</span>${item.subTag}</small>` : `<small>${gsMark(item.sub, q)}</small>`}${item.at ? `<span class="ui-gs-at">${escapeHtml(item.at)}</span>` : ''}</div>`
         + gsActsHtml(index, item, gsActs(item))
         + '</div>';
 }

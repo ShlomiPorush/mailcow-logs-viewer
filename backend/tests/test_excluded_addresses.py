@@ -409,3 +409,47 @@ def test_block_details_do_not_show_an_excluded_address_message(client):
         with get_db_context() as db:
             db.query(SpamSuppression).filter(SpamSuppression.id == block_id).delete(synchronize_session=False)
             db.commit()
+
+
+def test_an_alias_delivery_is_gone_from_every_message_reader_after_the_cleanup(client):
+    """A message whose only delivery reached NORMAL as an alias of the listed
+    address (orig_to), stored before the address was listed. The readers that
+    count or list the whole table check only a delivery's own addresses (reading
+    every delivery's Postfix lines would slow every count); listing the address
+    asks for a cleanup pass, which deletes the delivery, and then the timeline's
+    message count, the recent activity, the Status page's pending list and a
+    block's link to the message leave it out."""
+    from app.database import get_db_context
+    from app.models import MessageCorrelation, SpamSuppression, SuppressionEvent
+
+    def unique_messages():
+        hours = client.get('/api/stats/timeline', params={'hours': 24}).json()['timeline']
+        return sum(hour['unique_messages'] for hour in hours)
+    before = unique_messages()
+    now = datetime.utcnow().replace(microsecond=0) - timedelta(minutes=5)
+    with get_db_context() as db:
+        db.add(MessageCorrelation(correlation_key=f'alias-only-{MARK}', message_id=f'alias-only-{MSGID}', queue_id=Q_ORIG,
+                                  sender=SENDER, recipient=NORMAL, subject=f'alias only {MARK}', is_complete=False,
+                                  first_seen=now, last_seen=now + timedelta(minutes=4), created_at=now + timedelta(minutes=4)))
+        block = SpamSuppression(email=f'bounced-alias-{MARK}@example.test', reason='hard_bounce', source='auto')
+        db.add(block)
+        db.flush()
+        db.add(SuppressionEvent(suppression_id=block.id, kind='hard_bounce', outcome='blocked', dsn='5.1.1',
+                                sender=SENDER, recipient=block.email, queue_id=Q_ORIG,
+                                correlation_key=f'alias-only-{MARK}'))
+        db.commit()
+        block_id = block.id
+    try:
+        from app import scheduler
+        scheduler.cleanup_blacklisted_data()
+        assert unique_messages() == before
+        activity = client.get('/api/stats/recent-activity', params={'limit': 500}).json()['activity']
+        assert f'alias-only-{MARK}' not in {a['correlation_key'] for a in activity}
+        pending = client.get('/api/settings/info').json()['recent_incomplete_correlations']
+        assert Q_ORIG not in {row['queue_id'] for row in pending}
+        [event] = client.get(f'/api/suppressions/{block_id}/events').json()['events']
+        assert event['message_available'] is False
+    finally:
+        with get_db_context() as db:
+            db.query(SpamSuppression).filter(SpamSuppression.id == block_id).delete(synchronize_session=False)
+            db.commit()
