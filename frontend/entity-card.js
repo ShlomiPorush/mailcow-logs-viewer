@@ -42,6 +42,9 @@ function openEntityCard(kind, value, { from = null } = {}) {
     if (!card) return;
     const seq = ++entityCardSeq;
     const wasOpen = !card.classList.contains('hidden');
+    // The focus goes back to what opened the card when it closes, also when it was
+    // opened from code (no click or key the layers saw first)
+    if (!wasOpen && from && typeof uiLayerOpener === 'function') uiLayerOpener(from);
     entityCardPlace(card, from, wasOpen);
     entityCardState = { kind, value: String(value), data: null, tab: 'overview', filter: 'all' };
 
@@ -87,10 +90,27 @@ function closeEntityCard() {
     if (content) content.innerHTML = '';
 }
 
-// To Settings from a source that is off: the card closes first, so Back does not open it again
-function entityCardSettings() {
+// To Settings from a source that is off. A page with changes not saved asks first
+// (router.js); once the move is made, the card closes, and so do the dialogs under
+// it that only show something (a message, another detail view), which would
+// otherwise cover Settings. A dialog with fields of its own stays: it asks itself
+// before anything in it is dropped
+async function entityCardSettings() {
+    const moved = await navigateTo('settings');
+    if (!moved) return;
     closeEntityCard();
-    navigateTo('settings');
+    entityCardCloseViews();
+}
+
+function entityCardCloseViews() {
+    if (typeof openOverlays !== 'function') return;
+    const views = openOverlays().filter(el => el.matches('.ui-dialog-backdrop') && el.id !== 'entity-card'
+        && !el.querySelector('form, textarea, select, input:not([type="search"]):not([type="hidden"])'));
+    // Top first, each through its own X
+    views.reverse().forEach(el => {
+        const close = el.querySelector('.ui-dialog-head [aria-label="Close"]');
+        if (close) close.click();
+    });
 }
 
 async function entityCardLoad(seq, kind, value) {
@@ -140,9 +160,11 @@ function entityCardHeader(data) {
     const shown = data ? (data.display || data.value) : entityCardState.value;
     const facts = data ? entityCardFacts(data) : [];
     const verdict = data ? entityCardVerdict(data) : null;
-    // The value copies on click here; everywhere else a click opens this card
+    // The value copies on click here (a button, so the keyboard copies it too);
+    // everywhere else a click opens this card
+    const v = uiEntityAttr(shown);
     header.innerHTML = `
-        <h2 class="ui-md-subject ui-ent-title">${copyableText(shown)}</h2>
+        <h2 class="ui-md-subject ui-ent-title"><button type="button" class="copyable ui-ent-value" data-entity-copy="${v}" title="Click to copy" aria-label="Copy ${v}"><bdi>${v}</bdi><svg class="copy-icon w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg></button></h2>
         ${facts.length ? `<div class="ui-md-who ui-ent-who">${facts.map(([label, html]) => `<span>${escapeHtml(label)}</span><div>${html}</div>`).join('')}</div>` : ''}
         ${verdict ? `<div class="ui-md-verdict-bar${verdict.tone ? ` ui-md-verdict-${verdict.tone}` : ''}"><div>${escapeHtml(verdict.text)}${verdict.note ? `<small>${escapeHtml(verdict.note)}</small>` : ''}</div></div>` : ''}
         <div class="ui-ent-acts" id="entity-card-actions"></div>`;
@@ -175,16 +197,34 @@ function entityCardValue(kind, value, opts = {}) {
     return uiEntity(kind, value, { ...opts });
 }
 
+// The timeline's sources that are off or failed, as a person names them
+function entityLeftOut(data) {
+    const left = data && data.timeline && Array.isArray(data.timeline.left_out) ? data.timeline.left_out : [];
+    return left.map(name => ENTITY_SOURCE_NAMES[name] || name);
+}
+
+// "Nothing" is said only of the sources that were read; the others are named
+// short: the header line, which names the sources left out without the reason
+function entityNothingText(data, short = false) {
+    const left = entityLeftOut(data);
+    if (left.length && short) return `Nothing found in the sources that could be read. Not included: ${left.join(', ')}`;
+    return left.length
+        ? `Nothing found in ${entityRangeText(data)} in the sources that could be read. Not included, because they are turned off or could not be read: ${left.join(', ')}.`
+        : `Nothing stored in ${entityRangeText(data)}.`;
+}
+
 function entityCardSeen(data) {
     const timeline = data.timeline;
     if (!timeline || !Array.isArray(timeline.items)) return null;
     const items = timeline.items.filter(i => i && i.time);
-    if (!items.length) return `<span class="ui-muted">Nothing stored in ${escapeHtml(entityRangeText(data))}</span>`;
+    if (!items.length) return `<span class="ui-muted">${escapeHtml(entityNothingText(data, true))}</span>`;
     const last = items[0].time;
     const first = items[items.length - 1].time;
+    const left = entityLeftOut(data);
+    const missing = left.length ? `<span class="ui-muted">. Not included: ${escapeHtml(left.join(', '))}</span>` : '';
     // A list cut at its newest rows does not reach the first event
-    if (timeline.truncated) return `Last ${uiTime(last, formatAgo(last), { title: formatTime(last) })}`;
-    return `First ${uiTime(first, formatDay(first), { title: formatTime(first) })}, last ${uiTime(last, formatAgo(last), { title: formatTime(last) })}`;
+    if (timeline.truncated) return `Last ${uiTime(last, formatAgo(last), { title: formatTime(last) })}${missing}`;
+    return `First ${uiTime(first, formatDay(first), { title: formatTime(first) })}, last ${uiTime(last, formatAgo(last), { title: formatTime(last) })}${missing}`;
 }
 
 function entityCardFacts(data) {
@@ -195,7 +235,7 @@ function entityCardFacts(data) {
             const flag = geo.country_code ? getFlagUrl(geo.country_code, '16x12') : '';
             const place = [geo.country_name, geo.city].filter(Boolean).join(', ');
             const network = [geo.asn, geo.asn_org].filter(Boolean).join(' ');
-            facts.push(['From', `${flag ? `<img class="ui-sec-flag" src="${flag}" alt="" width="16" height="12" onerror="this.remove()">` : ''}${escapeHtml(place || 'Unknown place')}${network ? ` <span class="ui-muted">&middot; ${escapeHtml(network)}</span>` : ''}`]);
+            facts.push(['From', `${flag ? `<img class="ui-sec-flag" src="${flag}" alt="" width="16" height="12" onerror="this.remove()">` : ''}<bdi>${escapeHtml(place || 'Unknown place')}</bdi>${network ? ` <span class="ui-muted">&middot; <bdi>${escapeHtml(network)}</bdi></span>` : ''}`]);
         } else if (geo.state !== 'ok') {
             facts.push(['From', `<span class="ui-muted">${escapeHtml(geo.state === 'disabled' ? (geo.reason || 'GeoIP is not set up.') : 'The place could not be read.')}</span>`]);
         }
@@ -203,7 +243,7 @@ function entityCardFacts(data) {
         if (seen) facts.push(['Seen', seen]);
     } else if (data.kind === 'address') {
         const mailbox = entitySrc(data, 'mailbox');
-        if (entityOk(mailbox) && mailbox.mailbox && mailbox.mailbox.name) facts.push(['Name', escapeHtml(mailbox.mailbox.name)]);
+        if (entityOk(mailbox) && mailbox.mailbox && mailbox.mailbox.name) facts.push(['Name', `<bdi>${escapeHtml(mailbox.mailbox.name)}</bdi>`]);
         if (entityOk(mailbox) && mailbox.alias && mailbox.alias.goto) {
             const targets = String(mailbox.alias.goto).split(',').map(s => s.trim()).filter(Boolean);
             facts.push(['Goes to', targets.slice(0, 6).map(t => entityCardValue('address', t)).join(', ') + (targets.length > 6 ? ` <span class="ui-muted">and ${targets.length - 6} more</span>` : '')]);
@@ -231,11 +271,14 @@ function entityCardVerdict(data) {
             if (lists.denylisted_as) return { tone: 'fail', text: 'On the denylist', note: `Listed as ${lists.denylisted_as}.` };
             if (lists.allowlisted_as) return { tone: 'ok', text: 'On the allowlist', note: `Listed as ${lists.allowlisted_as}. Fail2ban never bans it.` };
         }
+        // "Not banned" only from lists that were read
+        const listsNote = lists.reason || (lists.state === 'disabled' ? 'The Fail2ban lists are turned off.' : 'The Fail2ban lists could not be read.');
+        if (fails && !entityOk(lists)) return { tone: 'warn', text: 'To review: ban state not known', note: `${failNote} ${listsNote}` };
         if (fails) return { tone: 'warn', text: 'To review: not banned', note: failNote };
         // "No failed logins" only from a source that answered, never from one that is off or failed
         if (security.state === 'disabled') return { tone: 'info', text: 'Failed logins not known', note: security.reason || 'The Security feature is turned off.' };
         if (security.state !== 'ok') return { tone: 'info', text: 'Failed logins not known', note: security.reason || 'The security events could not be read.' };
-        if (lists.state === 'error') return { tone: 'info', text: 'Ban state not known', note: lists.reason || 'The Fail2ban lists could not be read.' };
+        if (!entityOk(lists)) return { tone: 'info', text: 'No failed logins, ban state not known', note: `None in ${entityRangeText(data)}. ${listsNote}` };
         return { tone: 'ok', text: 'No failed logins', note: `None in ${entityRangeText(data)}.` };
     }
     if (data.kind === 'address') {
@@ -393,7 +436,7 @@ function entityOverview(data) {
         ];
     } else if (data.kind === 'address') {
         const supTile = entitySourceTile('Suppressions', s('suppression'), sup => {
-            if (sup.entry) return { value: sup.entry.active ? 'Suppressed' : 'Suppression ended', tone: sup.entry.active ? 'warn' : '', note: escapeHtml(sup.entry.reason || sup.entry.source || '') };
+            if (sup.entry) return { value: sup.entry.active ? 'Suppressed' : 'Suppression ended', tone: sup.entry.active ? 'warn' : '', note: `<bdi>${escapeHtml(sup.entry.reason || sup.entry.source || '')}</bdi>` };
             if (sup.domain_entry && sup.domain_entry.active) return { value: 'Domain suppressed', tone: 'warn', note: `${escapeHtml(sup.domain_entry.email)} is on the list` };
             return { value: 'Not suppressed', note: 'Mail to it is sent' };
         });
@@ -422,7 +465,7 @@ function entityOverview(data) {
                 return { value: 'All good', note: when };
             }),
             entitySourceTile('Suppressions', s('suppression'), sup => (sup.entry
-                ? { value: sup.entry.active ? 'Suppressed' : 'Suppression ended', tone: sup.entry.active ? 'warn' : '', note: escapeHtml(sup.entry.reason || sup.entry.source || '') }
+                ? { value: sup.entry.active ? 'Suppressed' : 'Suppression ended', tone: sup.entry.active ? 'warn' : '', note: `<bdi>${escapeHtml(sup.entry.reason || sup.entry.source || '')}</bdi>` }
                 : { value: 'Not suppressed', note: 'Mail to it is sent' })),
         ];
     }
@@ -440,9 +483,11 @@ function entityRecent(data) {
         return `<section><div class="ui-md-card-head"><h4 class="ui-md-h">Recent messages</h4><button type="button" class="ui-link-row ui-link ui-ent-link" onclick="entityCardTab('messages')">Open messages</button></div><div class="ui-ent-recent">${rows.join('')}</div></section>`;
     }
     const items = data.timeline && Array.isArray(data.timeline.items) ? data.timeline.items : [];
-    if (!items.length) return `<section><div class="ui-md-card-head"><h4 class="ui-md-h">Recent</h4></div><p class="ui-muted ui-ent-note">Nothing stored in ${escapeHtml(entityRangeText(data))}.</p></section>`;
+    if (!items.length) return `<section><div class="ui-md-card-head"><h4 class="ui-md-h">Recent</h4></div><p class="ui-muted ui-ent-note">${escapeHtml(entityNothingText(data))}</p></section>`;
     const rows = items.slice(0, ENTITY_RECENT).map(item => entityRecentRow(item.time, entityEvent(item, data)));
-    return `<section><div class="ui-md-card-head"><h4 class="ui-md-h">Recent</h4><button type="button" class="ui-link-row ui-link ui-ent-link" onclick="entityCardTab('timeline')">Open timeline</button></div><div class="ui-ent-recent">${rows.join('')}</div></section>`;
+    const left = entityLeftOut(data);
+    const missing = left.length ? `<p class="ui-muted ui-ent-note">Not included, because they are turned off or could not be read: ${escapeHtml(left.join(', '))}.</p>` : '';
+    return `<section><div class="ui-md-card-head"><h4 class="ui-md-h">Recent</h4><button type="button" class="ui-link-row ui-link ui-ent-link" onclick="entityCardTab('timeline')">Open timeline</button></div><div class="ui-ent-recent">${rows.join('')}</div>${missing}</section>`;
 }
 
 function entityRecentRow(time, ev) {
@@ -469,7 +514,7 @@ function entityEvent(item, data) {
             const word = ENTITY_STATUS_WORDS[item.status] || 'Message';
             return {
                 title: `${escapeHtml(word)}: ${v('address', item.sender)} to ${v('address', item.recipient)}`,
-                detail: escapeHtml(item.subject || 'No subject'), short: '',
+                detail: escapeHtml(item.subject || 'No subject'), detailDir: true, short: '',
                 tone: UI_STATUS_TONE[item.status] || '', tag: item.status ? uiStatusTag(item.status) : uiTag('Message', ''),
             };
         }
@@ -493,7 +538,7 @@ function entityEvent(item, data) {
         case 'device_first_seen':
         case 'device_last_seen': {
             const first = item.kind === 'device_first_seen';
-            const device = escapeHtml(item.device_type || 'Unknown device');
+            const device = `<bdi>${escapeHtml(item.device_type || 'Unknown device')}</bdi>`;
             const whose = kind === 'ip' ? ` of ${v('address', item.username)}` : (item.ip ? ` from ${v('ip', item.ip)}` : '');
             return {
                 title: `Device ${first ? 'first' : 'last'} seen: ${device}${whose}`,
@@ -540,8 +585,8 @@ function entityTimeline(data) {
     });
     const notes = [];
     if (timeline.truncated) notes.push(`Only the newest ${items.length} events are shown; more happened in ${entityRangeText(data)}.`);
-    const left = (timeline.left_out || []).map(name => ENTITY_SOURCE_NAMES[name] || name);
-    if (left.length) notes.push(`Not included, because they are turned off or could not be read: ${left.join(', ')}.`);
+    const left = entityLeftOut(data);
+    const missing = left.length ? `<p class="ui-muted ui-ent-note" role="note">Not included, because they are turned off or could not be read: ${escapeHtml(left.join(', '))}.</p>` : '';
     notes.push(`Shows what is stored for ${entityRangeText(data)}: messages, security events and bans, protection catches and when a device was seen.`);
     const body = days.length ? days.map(day => `
         <section class="ui-ent-day"><h4 class="ui-md-h">${escapeHtml(entityDayLabel(day.key))}</h4><ol class="ui-steps">${day.items.map(item => {
@@ -551,12 +596,13 @@ function entityTimeline(data) {
             <li class="${ev.tone ? `ui-step-${ev.tone}` : ''}">
                 ${uiTime(item.time, formatClock(item.time), { title: formatTime(item.time), cls: 'ui-step-time' })}
                 <b>${ev.title} ${kindTag}</b>
-                ${ev.detail ? `<span>${ev.detail}</span>` : ''}
+                ${ev.detail ? `<span${ev.detailDir ? ' dir="auto"' : ''}>${ev.detail}</span>` : ''}
             </li>`;
         }).join('')}</ol></section>`).join('')
-        : `<p class="ui-empty">Nothing stored in ${escapeHtml(entityRangeText(data))}.</p>`;
+        : `<p class="ui-empty">${escapeHtml(left.length ? 'Nothing found in the sources that could be read.' : `Nothing stored in ${entityRangeText(data)}.`)}</p>`;
     return `<div class="ui-md-stack">
         ${items.length ? `<div class="ui-chip-row" role="group" aria-label="Show">${chips}</div>` : ''}
+        ${missing}
         ${body}
         ${notes.map(n => `<p class="ui-muted ui-ent-note">${escapeHtml(n)}</p>`).join('')}
     </div>`;
@@ -605,7 +651,7 @@ function entityCatchRows(src, data) {
     if (!entityOk(src) || !Array.isArray(src.items) || !src.items.length) return '';
     const rows = src.items.map(c => {
         const rule = typeof securityRuleName === 'function' ? securityRuleName(c.rule) : c.rule;
-        const who = data.kind === 'ip' ? escapeHtml(c.reason || '') : `${entityCardValue('ip', c.ip, { mono: true })}${c.reason ? ` <span class="ui-muted">${escapeHtml(c.reason)}</span>` : ''}`;
+        const who = data.kind === 'ip' ? `<bdi>${escapeHtml(c.reason || '')}</bdi>` : `${entityCardValue('ip', c.ip, { mono: true })}${c.reason ? ` <span class="ui-muted"><bdi>${escapeHtml(c.reason)}</bdi></span>` : ''}`;
         return `<div class="ui-sec-ev">${uiTime(c.last_seen || c.first_seen, formatAgo(c.last_seen || c.first_seen), { title: formatTime(c.last_seen || c.first_seen) })}<span><b>${escapeHtml(rule)}</b> ${who}</span>${c.status ? uiTag(c.status === 'watching' ? 'Watching' : c.status, c.status === 'banned' ? 'fail' : 'info') : ''}</div>`;
     }).join('');
     return `<section><div class="ui-md-card-head"><h4 class="ui-md-h">Protection catches <span class="ui-muted">${entityNum(src.count)}</span></h4></div><div class="ui-ent-recent">${rows}</div></section>`;
@@ -675,7 +721,7 @@ function entityDmarc(data) {
             <span class="ui-td"><small class="ui-sec-unit">Last report </small>${d.last_period_end ? uiTime(d.last_period_end, formatDay(d.last_period_end), { title: formatTime(d.last_period_end) }) : '-'}</span>
         </div>`).join('');
     const recordRows = records.slice(0, 20).map(r => `
-        <div class="ui-sec-ev">${uiTime(r.period_end, formatDay(r.period_end), { title: `Period ${formatTime(r.period_begin)} to ${formatTime(r.period_end)}` })}<span>${entityNum(r.count)} for ${entityCardValue('domain', r.domain)} <span class="ui-muted">reported by ${escapeHtml(r.org_name || '-')}, SPF ${escapeHtml(r.spf_result || '-')}, DKIM ${escapeHtml(r.dkim_result || '-')}</span></span>${r.disposition ? uiTag(r.disposition, r.disposition === 'none' ? '' : 'warn') : ''}</div>`).join('');
+        <div class="ui-sec-ev">${uiTime(r.period_end, formatDay(r.period_end), { title: `Period ${formatTime(r.period_begin)} to ${formatTime(r.period_end)}` })}<span>${entityNum(r.count)} for ${entityCardValue('domain', r.domain)} <span class="ui-muted">reported by <bdi>${escapeHtml(r.org_name || '-')}</bdi>, SPF ${escapeHtml(r.spf_result || '-')}, DKIM ${escapeHtml(r.dkim_result || '-')}</span></span>${r.disposition ? uiTag(r.disposition, r.disposition === 'none' ? '' : 'warn') : ''}</div>`).join('');
     return `<div class="ui-md-stack">
         ${entitySummary(`<b>${entityNum(src.messages)}</b> messages from this address in ${uiCountLabel(src.reports, 'DMARC report', 'DMARC reports')} for ${entityNum(src.domains)} ${src.domains === 1 ? 'domain' : 'domains'}`)}
         <div class="ui-panel ui-ent-flush"><div class="ui-table ui-stack ui-ent-dm" data-sort-icon="off">

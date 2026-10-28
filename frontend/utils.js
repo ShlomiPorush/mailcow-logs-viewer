@@ -802,10 +802,14 @@ function uiEntity(kind, value, { mono = false, cls = '', plain = false, label = 
         return copyableText(text, [mono ? 'ui-mono' : '', cls].filter(Boolean).join(' '));
     }
     const what = { ip: 'IP address', address: 'address', domain: 'domain' }[found];
-    // As an attribute, character for character (escapeHtml also unescapes \")
-    const v = text.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' })[c]);
+    const v = uiEntityAttr(text);
     return `<span class="ui-ent${cls ? ` ${escapeHtml(cls)}` : ''}"><button type="button" class="ui-ent-btn${mono ? ' ui-mono' : ''}" data-entity-kind="${found}" data-entity-value="${v}" title="Open the card of this ${what}"><bdi>${label ? escapeHtml(label) : v}</bdi></button>`
         + `<button type="button" class="ui-ent-copy" data-entity-copy="${v}" title="Copy" aria-label="Copy ${v}"><svg class="copy-icon" width="13" height="13" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg></button></span>`;
+}
+
+// A value as an attribute, character for character (escapeHtml also unescapes \")
+function uiEntityAttr(text) {
+    return String(text).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' })[c]);
 }
 
 // One listener for every entity value, in the capture phase: it runs before the
@@ -818,6 +822,9 @@ function uiEntityClick(event) {
     const copy = target.closest('[data-entity-copy]');
     const entity = copy ? null : target.closest('[data-entity-kind]');
     if (!copy && !entity) return;
+    // A click that selects text, or one with a modifier or another button, is left
+    // alone, so the row it sits in decides as before (uiRowHeld)
+    if (entity && uiEntitySelecting(event, entity)) return;
     event.preventDefault();
     event.stopPropagation();
     if (copy) {
@@ -831,6 +838,19 @@ function uiEntityClick(event) {
 }
 if (typeof document !== 'undefined' && document && typeof document.addEventListener === 'function') {
     document.addEventListener('click', uiEntityClick, true);
+}
+
+// A click on an entity value that is not a plain "open it": Shift, Ctrl, Cmd or Alt
+// held, a button other than the main one, or the end of a text selection that
+// covers the value (a drag, a double click). Enter and Space (a click with no
+// mouse, detail 0) always open. uiRowHeld cannot tell here: in this listener the
+// event's currentTarget is the document, not the row
+function uiEntitySelecting(event, entity) {
+    if (event.button || event.shiftKey || event.ctrlKey || event.metaKey || event.altKey) return true;
+    if (!event.detail) return false;
+    const selection = typeof window.getSelection === 'function' ? window.getSelection() : null;
+    if (!selection || selection.isCollapsed || !selection.rangeCount || !String(selection)) return false;
+    return selection.getRangeAt(0).intersectsNode(entity) || uiPressMoved(event) || event.detail > 1;
 }
 
 // options.action: { label, ariaLabel, onAction } a button that runs onAction and

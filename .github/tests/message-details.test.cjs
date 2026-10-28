@@ -223,7 +223,7 @@ test('the Logs tab lists the recipients, problems first, and shows one recipient
     assert.ok(ranks[0] < ranks[ranks.length - 1], 'a problem leads, a delivery trails');
     assert.doesNotMatch(timeline.split('id="log-timeline-entries"')[1], /a@example\.net/, 'the lines, the picker lists everyone');
     assert.match(timeline, /is-shared[\s\S]*All recipients/);
-    assert.match(h.element('md-rcpt-results').innerHTML, /aria-pressed="true" title="Show the logs of b@example\.net"/);
+    assert.match(h.element('md-rcpt-results').innerHTML, /aria-pressed="true" aria-label="Show the logs of b@example\.net"/);
     // The same row again shows every recipient
     h.context.pickMessageRecipient(b, true);
     assert.match(h.element('md-timeline-slot').innerHTML, /5 entries/);
@@ -540,7 +540,10 @@ test('a relay tooltip fits the width it has, shows on a tap or the focus, and a 
     const hovered = host({ host: 'mx.example.net', ip: '192.0.2.9' }, 100, 100);
     h.context.mdRelayTipTap({ pointerType: 'mouse' }, hovered);
     assert.equal(clickOn(hovered, 'mouse'), false, 'a mouse click opens the row');
-    // A row fits its relay's tooltip when it takes the focus (after a resize too)
+    // A row fits its relay's tooltip when its button takes the focus (after a resize too);
+    // a click on the row, not on the tooltip, picks it
     await h.context.viewMessageDetails('example-key');
-    assert.match(h.context.renderRecipientRows(), /onfocus="mdRelayTip\(this\)" onclick="if \(!uiRowHeld\(event\) && !mdRelayTapped\(event\)\) pickMessageRecipient/);
+    const rows = h.context.renderRecipientRows();
+    assert.match(rows, /onfocus="mdRelayTip\(this\.parentElement\)" class="ui-row-open/);
+    assert.match(rows, /<div class="ui-md-rrow" title="[^"]*" onclick="if \(!uiRowHeld\(event\) && !mdRelayTapped\(event\)\) pickMessageRecipient/);
 });

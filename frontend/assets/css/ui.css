@@ -462,7 +462,7 @@
 .ui-md-rlist > :last-child { border-end-start-radius: calc(var(--ui-radius) - 1px); border-end-end-radius: calc(var(--ui-radius) - 1px); }
 .ui-md-rrow { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 2px 12px; padding: 9px 12px; background: var(--ui-bg); cursor: pointer; }
 @media (hover: hover) { .ui-md-rrow:hover { background: color-mix(in srgb, var(--ui-ink) 4%, var(--ui-bg)); } }
-.ui-md-rrow[aria-pressed="true"] { background: color-mix(in srgb, var(--ui-info) 10%, var(--ui-bg)); box-shadow: inset 3px 0 0 var(--ui-info); }
+.ui-md-rrow:has(> .ui-row-open[aria-pressed="true"]) { background: color-mix(in srgb, var(--ui-info) 10%, var(--ui-bg)); box-shadow: inset 3px 0 0 var(--ui-info); }
 .ui-md-rrow-addr { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
 .ui-md-rrow-sub { grid-column: 1 / -1; display: flex; gap: 6px; min-width: 0; color: var(--ui-muted); font-size: 12px; }
 .ui-md-rrow-sub > span { flex: none; }
@@ -531,7 +531,13 @@
 #entity-card .ui-md-content { padding: var(--ui-pad-x); }
 #entity-card .ui-md-content:empty { display: none; }
 .ui-ent-title { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; }
+/* A long value wraps (overflow-wrap below), so the title need not clip: the ring shows whole */
+.ui-md-header .ui-md-subject.ui-ent-title { display: flex; overflow: visible; -webkit-line-clamp: unset; line-clamp: none; }
 .ui-ent-title .copyable { font-family: var(--ui-mono); font-weight: 600; }
+/* The value is a copy button there: the .copyable look, the keyboard's ring and its icon */
+.ui-ent-title button.copyable { border: 0; background: none; color: inherit; font-size: inherit; line-height: inherit; letter-spacing: inherit; text-align: start; overflow-wrap: anywhere; }
+.ui-ent-title button.copyable:focus-visible { outline: 2px solid var(--ui-focus); outline-offset: 2px; }
+.ui-ent-title button.copyable:focus-visible .copy-icon { opacity: .5; }
 .ui-ent-who > div { min-width: 0; }
 .ui-ent-who .ui-sec-flag { vertical-align: -1px; }
 /* Where the card's actions go (L3: Ban, Allow, Show messages, Watch); empty for now */
@@ -1840,6 +1846,16 @@ button.ui-st-card { cursor: pointer; }
 .ui-row-chev { all: unset; cursor: pointer; }
 .ui-row-chev:focus-visible { outline: 2px solid var(--ui-focus); outline-offset: 2px; border-radius: 3px; }
 [data-row-open]:focus-visible { outline: 2px solid var(--ui-focus); outline-offset: -2px; }
+/* The same for a row whose text holds buttons (a message, a recipient, a delivery):
+   the row opens on a click, the keyboard opens it on the button in it that names it
+   (.ui-row-open), which keeps the look of its text; the row shows the ring */
+.ui-row-open { cursor: inherit; user-select: text; }
+.ui-row-open:not(.ui-tag) { padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: start; }
+.ui-msg-l1 > .ui-msg-at { flex: none; }
+.ui-msg-col .ui-msg-l1 > .ui-msg-at { margin-inline-start: auto; }
+.ui-row-open:focus-visible { outline: none; }
+.ui-row-open.ui-tag:focus-visible { box-shadow: 0 0 0 2px var(--ui-focus); }
+:is(.ui-msg-item, .ui-md-leg):has(.ui-row-open:focus-visible), .ui-md-rrow:has(> .ui-row-open:focus-visible) { outline: 2px solid var(--ui-focus); outline-offset: -2px; }
 [dir="rtl"] .ui-domain-chevron { transform: scaleX(-1); }
 .ui-domain-details { grid-column: 1 / -1; display: grid; gap: 16px; padding: 6px 0 10px; cursor: default; }
 .ui-domain-details.hidden { display: none; }

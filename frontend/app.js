@@ -1446,13 +1446,18 @@ function messagesScrollToEnd(container) {
 // One row of the Messages list (also used by the smart refresh), as in the
 // mockup: sender and time, subject, then the outcome tag and the direction.
 // Queue ID, message ID, score, user and IP are in the reading pane.
+// A click anywhere on the row opens the message (selecting its text does not,
+// uiRowHeld); the keyboard opens it on its time, a real button named after the
+// subject whose click reaches the row. The row itself is no button: the sender
+// and recipient in it are buttons of their own (uiEntity), and the subject stays
+// text that can be selected (a browser selects no text inside a button)
 function renderMessageRow(msg) {
     const tone = messageRowTone(msg);
     return `
-        <div class="ui-msg-item${tone ? ` ui-msg-${tone}` : ''}" data-key="${escapeHtml(msg.correlation_key || '')}"${msg.message_id ? ` data-mid="${encodeURIComponent(msg.message_id)}"` : ''} role="button" tabindex="0" data-row-open onclick="if (!uiRowHeld(event)) viewMessageDetails('${escapeJsArg(msg.correlation_key)}')">
+        <div class="ui-msg-item${tone ? ` ui-msg-${tone}` : ''}" data-key="${escapeHtml(msg.correlation_key || '')}"${msg.message_id ? ` data-mid="${encodeURIComponent(msg.message_id)}"` : ''} onclick="if (!uiRowHeld(event)) viewMessageDetails('${escapeJsArg(msg.correlation_key)}')">
             <div class="ui-msg-l1">
                 <b class="ui-msg-from">${msg.sender ? uiEntity('address', msg.sender, { plain: true }) : 'Unknown'}</b>
-                ${uiTime(msg.first_seen, formatListTime(msg.first_seen), { title: formatTime(msg.first_seen) })}
+                <button type="button" class="ui-row-open ui-msg-at" aria-label="Open the message: ${escapeHtml(msg.subject || 'No subject')}">${uiTime(msg.first_seen, formatListTime(msg.first_seen), { title: formatTime(msg.first_seen) })}</button>
             </div>
             <p class="ui-msg-sub" dir="auto" title="${escapeHtml(msg.subject || 'No subject')}">${escapeHtml(msg.subject || 'No subject')}</p>
             <div class="ui-msg-l3">

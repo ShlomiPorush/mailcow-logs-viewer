@@ -21,6 +21,9 @@ const BODY = `<section id="content-messages"><span id="messages-count"></span><d
 const message = n => ({ correlation_key: `k${n}`, message_id: `<m${n}@example.com>`, sender: 's@example.com', recipient: 'r@example.org',
     subject: `Message ${n}`, direction: 'inbound', final_status: 'delivered', first_seen: '2026-10-24T10:00:00Z' });
 
+// The row of what has the focus: a row opens on its subject, a button (renderMessageRow)
+const rowOf = p => p.w.document.activeElement.closest('[data-key]');
+
 function page() {
     const dom = new JSDOM(`<!doctype html><html lang="en"><head><title>t</title></head><body>${BODY}</body></html>`,
         { runScripts: 'dangerously', pretendToBeVisual: true, url: 'http://localhost/messages' });
@@ -76,19 +79,20 @@ test('a redraw at the top gives the focus back to its row', async () => {
     const p = page();
     p.run("messagesOrder = 'desc'");
     await p.w.loadMessages({ rows: 50 });
-    p.$$('.ui-msg-item')[3].focus();
-    assert.equal(p.w.document.activeElement.dataset.key, 'k4');
+    p.$$('.ui-msg-item .ui-row-open')[3].focus();
+    assert.equal(rowOf(p).dataset.key, 'k4');
     // Something changed on the first page; the user is at the top
     p.run("messagesAtNewEdge = () => true; lastDataCache.messages = { stale: true }");
     await p.w.smartRefreshMessages();
-    assert.equal(p.w.document.activeElement.dataset.key, 'k4');
+    assert.equal(rowOf(p).dataset.key, 'k4');
+    assert.ok(p.w.document.activeElement.matches('.ui-row-open'), 'on the button that opens the row');
 });
 
 test('oldest first at the end, a status change is drawn with nothing new, and the focus stays', async () => {
     const p = page();
     p.run('total = 30');
     await p.w.loadMessages({ rows: 50 });
-    p.$$('.ui-msg-item')[29].focus();
+    p.$$('.ui-msg-item .ui-row-open')[29].focus();
     // Message 3 was delivered late: deferred before, delivered now; no new mail
     p.run(`messagesAtNewEdge = () => true;
         const read = authenticatedFetch;
@@ -98,7 +102,7 @@ test('oldest first at the end, a status change is drawn with nothing new, and th
     await p.w.smartRefreshMessages();
     assert.ok(p.w.asked.some(url => url.startsWith('/api/messages?')), 'the list was read again');
     assert.equal(p.w.eval('lastDataCache.messages.data[2].final_status'), 'delivered');
-    assert.equal(p.w.document.activeElement.dataset.key, 'k30');
+    assert.equal(rowOf(p).dataset.key, 'k30');
     // Read again with nothing changed: not drawn again
     p.$$('.ui-msg-item')[0].dataset.mark = '1';
     await p.w.smartRefreshMessages();
