@@ -182,9 +182,20 @@ def parse_document(url: str, body: bytes, publisher: str) -> ClientDocument:
             or not all(isinstance(u, str) and valid_redirect_uri(u) for u in uris):
         raise ClientDocumentError("no_redirects")
     method = doc.get("token_endpoint_auth_method", "none")
-    if method != "none":
+    if method != "none" and not _also_offers_none(doc.get("token_endpoint_auth_methods_supported")):
         raise ClientDocumentError("auth_method")
     return ClientDocument(url, name.strip(), tuple(uris), publisher)
+
+
+def _also_offers_none(methods) -> bool:
+    """Whether a client that prefers another method lists "none" among the ones it supports.
+
+    Not in the CIMD draft: ChatGPT's document asks for private_key_jwt and lists
+    ["none", "private_key_jwt"] next to it. Such a client is a public client here
+    like any other (PKCE S256, the exact redirect, no client authentication).
+    """
+    return (isinstance(methods, list) and 0 < len(methods) <= 10
+            and all(isinstance(m, str) for m in methods) and "none" in methods)
 
 
 async def fetch(url: str) -> ClientDocument:

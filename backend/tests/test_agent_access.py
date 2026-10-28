@@ -908,6 +908,68 @@ def test_cimd_refuses_unsafe_addresses(url):
         cimd._check_url(url)
 
 
+AGENT_REDIRECT = "https://agent.example/oauth/callback"
+
+
+def _doc(**fields) -> bytes:
+    import json
+    return json.dumps({"client_id": DOC_URL, "client_name": "Example Agent",
+                       "redirect_uris": [AGENT_REDIRECT], **fields}).encode()
+
+
+# ChatGPT's document asks for private_key_jwt and lists "none" among the methods it supports
+CHATGPT_SHAPED = {"token_endpoint_auth_method": "private_key_jwt",
+                  "token_endpoint_auth_methods_supported": ["none", "private_key_jwt"],
+                  "jwks_uri": "https://agent.example/oauth/jwks.json"}
+
+
+@pytest.mark.parametrize("fields", [{}, {"token_endpoint_auth_method": "none"},
+                                    {"token_endpoint_auth_method": "none", "token_endpoint_auth_methods_supported": None},
+                                    CHATGPT_SHAPED])
+def test_cimd_accepts_clients_that_can_go_without_authentication(fields):
+    doc = cimd.parse_document(DOC_URL, _doc(**fields), "agent.example")
+    assert doc.redirect_uris == (AGENT_REDIRECT,)
+
+
+@pytest.mark.parametrize("fields", [
+    {"token_endpoint_auth_method": "private_key_jwt"},
+    {"token_endpoint_auth_method": "private_key_jwt", "token_endpoint_auth_methods_supported": ["private_key_jwt"]},
+    {"token_endpoint_auth_method": "client_secret_basic", "token_endpoint_auth_methods_supported": []},
+    {"token_endpoint_auth_method": "private_key_jwt", "token_endpoint_auth_methods_supported": "none"},
+    {"token_endpoint_auth_method": "private_key_jwt", "token_endpoint_auth_methods_supported": ["none", 123]},
+    {"token_endpoint_auth_method": "private_key_jwt", "token_endpoint_auth_methods_supported": [["none"]]},
+    {"token_endpoint_auth_method": "private_key_jwt", "token_endpoint_auth_methods_supported": ["None"]},
+    {"token_endpoint_auth_method": "private_key_jwt", "token_endpoint_auth_methods_supported": ["none"] * 11},
+])
+def test_cimd_refuses_clients_that_need_authentication(fields):
+    with pytest.raises(cimd.ClientDocumentError) as caught:
+        cimd.parse_document(DOC_URL, _doc(**fields), "agent.example")
+    assert caught.value.reason == "auth_method"
+
+
+def test_a_chatgpt_shaped_client_connects_and_refreshes(live_agents, fake_web):
+    import httpx
+    answers, _ = fake_web
+    answers["response"] = httpx.Response(200, stream=httpx.ByteStream(_doc(**CHATGPT_SHAPED)))
+    client = _signed_in()
+    verifier, challenge = _pkce()
+    request_id = _request_id(_authorize(client, DOC_URL, challenge, redirect=AGENT_REDIRECT))
+    answer = client.post(f"/api/agents/consent/{request_id}", json={
+        "allow": True, "name": "My agent", "views": ["security"], "acts": [], "days": 7})
+    assert answer.status_code == 200, answer.text
+    redirect = urlsplit(answer.json()["redirect"])
+    assert f"{redirect.scheme}://{redirect.netloc}{redirect.path}" == AGENT_REDIRECT
+    tokens = client.post("/oauth/token", data={
+        "grant_type": "authorization_code", "code": parse_qs(redirect.query)["code"][0], "client_id": DOC_URL,
+        "redirect_uri": AGENT_REDIRECT, "code_verifier": verifier, "resource": APP_URL + "/mcp"})
+    assert tokens.status_code == 200, tokens.text
+    assert _mcp(client, tokens.json()["access_token"], "ping").status_code == 200
+    fresh = client.post("/oauth/token", data={"grant_type": "refresh_token", "client_id": DOC_URL,
+                                              "refresh_token": tokens.json()["refresh_token"]})
+    assert fresh.status_code == 200, fresh.text
+    assert _mcp(client, fresh.json()["access_token"], "ping").status_code == 200
+
+
 def test_the_page_shows_a_fixed_text_for_every_reason():
     for reason, text in cimd.REASONS.items():
         error = cimd.ClientDocumentError(reason)
