@@ -15,7 +15,7 @@ from ..database import get_db
 from ..models import PostfixLog, RspamdLog, NetfilterLog, MessageCorrelation
 from ..mailcow_api import MailcowShownError, mailcow_api
 from ..config import settings
-from ..services import excluded_addresses, geoip_service, protection_rules, security_addresses
+from ..services import entity_values, excluded_addresses, geoip_service, protection_rules, security_addresses
 from ..services.security_addresses import netfilter_service  # noqa: F401  (tests import it from here)
 from ..app_time import as_utc
 from ..utils import internal_error, format_datetime_for_api as format_datetime_utc, RangeStart, RangeEnd
@@ -854,8 +854,8 @@ async def unban_fail2ban(request: Request):
     """
     try:
         body = await request.json()
-        ip = body.get("ip")
-        if not ip:
+        ip = body.get("ip") if isinstance(body, dict) else None
+        if not ip or not isinstance(ip, str):
             raise HTTPException(status_code=400, detail="Missing 'ip' field")
         
         current = await mailcow_api.get_fail2ban()
@@ -982,10 +982,16 @@ async def _change_fail2ban_list(ip: str, list_name: str, remove: bool) -> dict:
 
 
 async def _ip_from_body(request: Request) -> str:
+    """The one address or network to add to a Fail2ban list. mailcow keeps each
+    list as comma or newline separated text, so a value with a comma, a line
+    break or a space in it would add several entries: it is refused."""
     body = await request.json()
-    ip = body.get("ip")
-    if not ip:
+    ip = body.get("ip") if isinstance(body, dict) else None
+    if ip is None or ip == "":
         raise HTTPException(status_code=400, detail="Missing 'ip' field")
+    problem = entity_values.fail2ban_entry_problem(ip)
+    if problem:
+        raise HTTPException(status_code=400, detail=problem)
     return ip
 
 
@@ -1027,8 +1033,11 @@ async def remove_from_fail2ban_list(request: Request):
     """
     try:
         body = await request.json()
+        if not isinstance(body, dict):
+            body = {}
         ip, list_name = body.get("ip"), body.get("list")
-        if not ip:
+        # Any text: an entry on the list may also be a host name mailcow took
+        if not ip or not isinstance(ip, str):
             raise HTTPException(status_code=400, detail="Missing 'ip' field")
         if list_name not in ("blacklist", "whitelist"):
             raise HTTPException(status_code=400, detail="'list' must be blacklist or whitelist")
@@ -1050,7 +1059,10 @@ async def repair_fail2ban_entry(request: Request):
     """
     try:
         body = await request.json()
-        entry, list_name = (body.get("entry") or "").strip(), body.get("list")
+        if not isinstance(body, dict):
+            body = {}
+        entry, list_name = body.get("entry"), body.get("list")
+        entry = entry.strip() if isinstance(entry, str) else ""
         if list_name not in ("blacklist", "whitelist"):
             raise HTTPException(status_code=400, detail="'list' must be blacklist or whitelist")
         address = security_addresses.legacy_ipv6_entry(entry)
