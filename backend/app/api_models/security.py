@@ -407,6 +407,11 @@ class CheckStarted(Fixed):
     message: str
 
 
+class CheckBusy(Fixed):
+    status: str = Field(description="busy: a check is already running, nothing was started")
+    message: str
+
+
 class CheckProgress(Fixed):
     in_progress: bool
     current: int

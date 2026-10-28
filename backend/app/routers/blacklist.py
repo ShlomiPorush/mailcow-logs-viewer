@@ -89,7 +89,10 @@ def get_monitored_hosts() -> Dict[str, Any]:
         logger.error(f"Error getting monitored hosts: {e}")
         return {"hosts": []}
 
-@router.post("/check", response_model=None, responses=documented(Union[m.CheckStarted, m.BlocklistCheck], description="Without a host: the check of every monitored address started in the background. With one: its check, from the cache unless force; status error when it could not run", errors={422: Invalid}))
+BUSY_TEXT = "A blocklist check is already running. Try again when it is done."
+
+
+@router.post("/check", response_model=None, responses=documented(Union[m.CheckStarted, m.CheckBusy, m.BlocklistCheck], description="Without a host: the check of every monitored address started in the background. With one: its check, from the cache unless force; status error when it could not run. status busy when a check (of any address, from any page or the schedule) is already running: nothing was started", errors={422: Invalid}))
 async def check_blacklists(
     host: str = Query(None, description="Host/IP to check (default: system IP)"),
     force: bool = Query(False, description="Force new check ignoring cache")
@@ -98,7 +101,15 @@ async def check_blacklists(
     Get IP blacklist check results for a specific host
     """
     target_ip = host
-    
+    from ..scheduler import blacklist_check_lock
+
+    # One check at a time, whoever starts it (the schedule, Status, an entity
+    # card): checks share the progress and the batch state, so another one
+    # started now would corrupt both. Nothing is started; the caller says so
+    lock = blacklist_check_lock()
+    if lock.locked():
+        return {"status": "busy", "message": BUSY_TEXT}
+
     # If no host specified, check ALL monitored hosts (background job)
     if not target_ip:
         from ..scheduler import check_monitored_hosts_job
@@ -122,7 +133,10 @@ async def check_blacklists(
               pass # use hostname as is if resolution fails
              
     try:
-        results = await get_blacklist_check_results(force=force, ip=target_ip)
+        if lock.locked():   # taken while the host name resolved
+            return {"status": "busy", "message": BUSY_TEXT}
+        async with lock:
+            results = await get_blacklist_check_results(force=force, ip=target_ip)
         return results
     except Exception as e:
         logger.error(f"Error checking blacklists: {type(e).__name__} - {str(e)}")

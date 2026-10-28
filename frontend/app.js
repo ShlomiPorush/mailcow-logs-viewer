@@ -1577,17 +1577,23 @@ const MESSAGES_FILTER_KEYS = ['search', 'sender', 'recipient', 'direction', 'use
 // The filters an entity card opened Messages with ("Show messages"), matched
 // whole and not as a part: the sender, recipient, user and IP it set, and an
 // address or a domain, which have no field (from or to them). They hold until
-// one of those fields is changed or cleared; a chip above the list names them
-// and takes them off (updateMessagesFilterState).
-let messagesExact = null;   // { sender, recipient, user, ip, address, domain } or null
+// a field the card filled is changed or cleared (another condition added keeps
+// them, and is matched whole too); a chip above the list names them and takes
+// them off (updateMessagesFilterState). Filters set any other way drop them:
+// they hold only while the filters in use are the ones they made (filters).
+let messagesExact = null;   // { sender, recipient, user, ip, address, domain, filters } or null
 const MESSAGES_EXACT_FIELDS = ['sender', 'recipient', 'user', 'ip'];
 
 // The fields' filters with the whole-value ones that still hold
 function messagesWithExact(fields) {
+    // Filters set since by anything but the card's: its whole values went with them
+    if (messagesExact && messagesExact.filters && currentFilters.messages !== messagesExact.filters) messagesExact = null;
     const x = messagesExact;
-    if (x && MESSAGES_EXACT_FIELDS.some(key => (fields[key] || '') !== (x[key] || ''))) messagesExact = null;
+    if (x && MESSAGES_EXACT_FIELDS.some(key => x[key] && (fields[key] || '') !== x[key])) messagesExact = null;
     if (!messagesExact) return fields;
-    return { ...fields, exact: 'true', ...(x.address ? { address: x.address } : {}), ...(x.domain ? { domain: x.domain } : {}) };
+    const filters = { ...fields, exact: 'true', ...(x.address ? { address: x.address } : {}), ...(x.domain ? { domain: x.domain } : {}) };
+    x.filters = filters;
+    return filters;
 }
 
 // What the chip says: each whole value, as a person reads the filter
@@ -3495,9 +3501,12 @@ async function loadDashboardStatusSummary() {
 // The filters an entity card opened the Events with ("Show security events",
 // openSecurityEventsFor in security.js): an IP or an account matched whole, or
 // the accounts on a domain, over the card's period. They hold until the IP or
-// Username field is changed or cleared; a chip beside the count names them and
-// takes them off. The CSV export sends them too (currentFilters.netfilter).
-let netfilterExact = null;   // { ip, username, domain, start_date, end_date, period } or null
+// Username field it filled is changed or cleared (another condition added keeps
+// them); a chip beside the count names them and takes them off. Filters set any
+// other way (the search's address row, an alert, Security's own links) drop
+// them: they hold only while the filters in use are the ones they made
+// (filters). The CSV export sends them too (currentFilters.netfilter).
+let netfilterExact = null;   // { ip, username, domain, start_date, end_date, period, filters } or null
 
 function netfilterFilterFields() {
     return {
@@ -3510,18 +3519,24 @@ function netfilterFilterFields() {
 
 // The fields' filters with the whole-value ones that still hold
 function netfilterWithExact(fields) {
+    // Filters set since by anything but the card's (an alert, the search): its whole values went with them
+    if (netfilterExact && netfilterExact.filters && currentFilters.netfilter !== netfilterExact.filters) netfilterExact = null;
     const x = netfilterExact;
-    if (x && ((fields.ip || '') !== (x.ip || '') || (fields.username || '') !== (x.username || ''))) netfilterExact = null;
+    if (x && ((x.ip && (fields.ip || '') !== x.ip) || (x.username && (fields.username || '') !== x.username))) netfilterExact = null;
     if (!netfilterExact) return fields;
-    return {
+    const filters = {
         ...fields, ...(x.ip ? { exact_ip: 'true' } : {}), ...(x.username ? { exact_username: 'true' } : {}),
         ...(x.domain ? { username_domain: x.domain } : {}),
         ...(x.start_date ? { start_date: x.start_date } : {}), ...(x.end_date ? { end_date: x.end_date } : {}),
     };
+    x.filters = filters;
+    return filters;
 }
 
 // The chip, as the Security Overview's country and network chips (security.js renderSecurityOverview)
 function renderNetfilterExact() {
+    // Filters set since by anything but the card's: its whole values went with them
+    if (netfilterExact && netfilterExact.filters && currentFilters.netfilter !== netfilterExact.filters) netfilterExact = null;
     const slot = document.getElementById('netfilter-exact');
     if (!slot) return;
     const x = netfilterExact;
@@ -4910,6 +4925,8 @@ function toggleMessagesFilters(open) {
 
 // How many filters are on, for the button badge and the Clear filters link
 function updateMessagesFilterState() {
+    // Filters set since by anything but the card's (openMessagesRange, a search): its whole values went with them
+    if (messagesExact && messagesExact.filters && currentFilters.messages !== messagesExact.filters) messagesExact = null;
     const f = currentFilters.messages || {};
     const advanced = ['sender', 'recipient', 'user', 'ip', 'address', 'domain'].filter(k => f[k]).length;
     const any = advanced || f.search || f.status || f.direction || f.start_date || f.end_date || f.date_range;
@@ -4923,7 +4940,7 @@ function updateMessagesFilterState() {
     const chips = document.getElementById('messages-exact');
     if (chips) {
         const parts = f.exact && messagesExact ? messagesExactParts(messagesExact) : [];
-        chips.innerHTML = parts.length ? `<span class="ui-sec-filter" title="Matched whole, not as a part of a longer value"><span>${parts.map(([label, value]) =>
+        chips.innerHTML = parts.length ? `<span class="ui-sec-filter" title="Matched whole, not as a part of a longer value. While this is on, a sender, recipient, user or IP added is matched whole too"><span>${parts.map(([label, value]) =>
             `${escapeHtml(label)} <bdi>${escapeHtml(value)}</bdi>`).join(', ')}</span><button type="button" onclick="clearMessagesExact()" aria-label="Remove this filter" title="Remove this filter">&times;</button></span>` : '';
     }
 }
@@ -5731,6 +5748,19 @@ async function checkBlacklists(force = false, host = null) {
         const response = await authenticatedFetch(`/api/blacklist/check${qs ? '?' + qs : ''}`, { method: 'POST' });
         if (!response.ok) {
             throw new Error(`HTTP ${response.status}`);
+        }
+        const body = await response.json().catch(() => null);
+        if (body && body.status === 'busy') {
+            // Another check runs (the schedule's, an entity card's): nothing was started.
+            // Checking every host, the progress shown is that check's, and the list
+            // is read again when it ends; one host stops here
+            showToast(body.message || 'A blocklist check is already running. Try again when it is done.', 'warning');
+            if (host) {
+                clearInterval(progressInterval);
+                const temp = document.getElementById('blacklist-temp-progress');
+                if (temp) temp.remove();
+            }
+            return;
         }
         if (host) {
             // Single-host checks return the finished result directly - the

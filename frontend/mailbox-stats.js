@@ -514,17 +514,20 @@ function closeMailboxActivity() {
 }
 
 // One mailbox's activity on Mailbox Stats, from anywhere (the entity card's
-// "Open mailbox"): by the mailbox's address, or by an alias's, which opens the
-// mailbox the alias belongs to (the aliases the list returns with each mailbox,
-// alias-domain addresses included). The mailbox is fetched, so it opens also
-// when this page never loaded or shows other mailboxes. The page's period
-// becomes the one given: preset ('today', '7days', '30days', '90days') or the
-// days from startDay to endDay (YYYY-MM-DD); the search finds the mailbox and
-// inactive mailboxes are listed too. onMoved runs once the page is open, before
-// the activity opens. Resolves to whether the Mailbox Stats page opened.
+// "Open mailbox"): by the mailbox's address as stored (an alias's mailbox is
+// resolved by the server, entity_summary._mailbox). It is fetched by that whole
+// address (username=), so it opens also when this page never loaded or would
+// put it on a later page. The page's period becomes the one given: preset
+// ('today', '7days', '30days', '90days') or the days from startDay to endDay
+// (YYYY-MM-DD); the search shows the mailbox, and inactive mailboxes and those
+// with no mail in the period are listed too. onMoved runs once the page is open,
+// before the activity opens. An answer that comes after another opening, or after
+// the user left the page, opens nothing. Resolves to whether the page opened.
+let openMailboxSeq = 0;
 async function openMailboxFor(address, { preset = '', startDay = '', endDay = '', onMoved = null } = {}) {
     const wanted = String(address || '').trim().toLowerCase();
     if (!wanted) return false;
+    const seq = ++openMailboxSeq;
     if (preset) mailboxStatsShowPreset(preset);
     else if (startDay && endDay) {
         document.getElementById('mailbox-stats-date-range').value = 'custom';
@@ -540,22 +543,28 @@ async function openMailboxFor(address, { preset = '', startDay = '', endDay = ''
     if (domain) domain.value = '';
     const activeOnly = document.getElementById('mailbox-stats-active-only');
     if (activeOnly) activeOnly.checked = false;
+    // Hide Zero Activity would hide a mailbox with no mail in the period
+    const hideZero = document.getElementById('mailbox-stats-hide-zero');
+    if (hideZero) hideZero.checked = false;
     if (!(await navigateTo('mailbox-stats', { sub: 'statistics' }))) return false;
     if (typeof onMoved === 'function') onMoved();
     let data = null;
     try {
-        const response = await authenticatedFetch(mailboxStatsListUrl(1));
+        const response = await authenticatedFetch(`${mailboxStatsListUrl(1)}&username=${encodeURIComponent(wanted)}`);
         if (response.ok) data = await response.json();
     } catch (e) {
         data = null;
     }
+    // Opened again since, or the page left: this answer opens nothing
+    const page = document.getElementById('content-mailbox-stats');
+    if (seq !== openMailboxSeq || (typeof currentTab !== 'undefined' && currentTab !== 'mailbox-stats')
+        || (page && page.classList.contains('hidden'))) return true;
     if (!data) {
         showToast('The mailbox could not be loaded. Try again in a moment.', 'error');
         return true;
     }
     const mailboxes = Array.isArray(data.mailboxes) ? data.mailboxes : [];
-    const mb = mailboxes.find(m => String(m.username || '').toLowerCase() === wanted)
-        || mailboxes.find(m => (m.aliases || []).some(a => String(a.alias_address || '').toLowerCase() === wanted));
+    const mb = mailboxes.find(m => String(m.username || '').toLowerCase() === wanted);
     if (!mb) {
         showToast('This mailbox is not in Mailbox Stats yet. Its statistics are fetched from mailcow every few minutes.', 'warning');
         return true;

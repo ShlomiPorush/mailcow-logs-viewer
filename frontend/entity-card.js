@@ -40,6 +40,7 @@ function openEntityCard(kind, value, { from = null } = {}) {
     if (!UI_ENTITY_KINDS.includes(kind) || !value) return;
     const card = document.getElementById('entity-card');
     if (!card) return;
+    entityRblStop();
     const seq = ++entityCardSeq;
     const wasOpen = !card.classList.contains('hidden');
     // The focus goes back to what opened the card when it closes, also when it was
@@ -81,6 +82,7 @@ function closeEntityCard() {
     if (!card) return;
     entityCardSeq++;
     entityCardState = null;
+    entityRblStop();
     card.classList.add('hidden');
     const header = document.getElementById('entity-card-header');
     if (header) header.innerHTML = '';
@@ -368,7 +370,19 @@ function entityCardVerdict(data) {
 // The Watch toggle (layer L5a) goes first, in #entity-card-watch.
 
 let entityRwAsked = false;   // the Read-Write key asked for again once (entityCardLoad)
-let entityRblCheck = null;   // { value, percent, text } while a blocklist check runs
+let entityRblCheck = null;   // this card's check while it runs: { run, value, percent, text, started, poll, asking }
+let entityRblRuns = 0;       // each check started; a late answer for an older one is dropped
+let entityRblBusy = null;    // the value whose Check now found another check running
+// The progress is asked for every second as the Status page does, for 3 minutes at
+// most, each request given 5 seconds
+const ENTITY_RBL_POLL = { every: 1000, max: 3 * 60000, request: 5000 };
+
+// The card's check is left to the server once the card closes or shows another value
+function entityRblStop() {
+    if (entityRblCheck) clearInterval(entityRblCheck.poll);
+    entityRblCheck = null;
+    entityRblBusy = null;
+}
 
 const ENTITY_ACTIONS = {
     // kind: the buttons in order ([action, stays on a phone]), and what only More holds
@@ -386,6 +400,15 @@ function entityActionLabel(data, act) {
     }[act] || act;
 }
 
+// The mailbox here an address is or delivers to, as stored (the server resolved
+// an alias's target: alias.local_mailbox), else ''
+function entityMailboxOf(data) {
+    const m = entitySrc(data, 'mailbox');
+    if (!entityOk(m)) return '';
+    if (m.local === true && m.mailbox && m.mailbox.username) return m.mailbox.username;
+    return (m.alias && m.alias.local_mailbox) || '';
+}
+
 // Whether the card shown offers an action
 function entityCanAct(data, act) {
     const src = name => entitySrc(data, name);
@@ -400,11 +423,8 @@ function entityCanAct(data, act) {
         case 'rbl': return data.kind === 'ip' && entityOk(src('rbl'));
         // Not on the list yet; an entry there, active or ended, is changed on the Suppressions page
         case 'suppress': return data.kind === 'address' && entityOk(src('suppression')) && !src('suppression').entry;
-        // A mailbox here, or an alias of one: Mailbox Stats shows the mailbox
-        case 'mailbox': {
-            const m = src('mailbox');
-            return data.kind === 'address' && entityOk(m) && (m.local === true || !!(m.alias && m.alias.primary_mailbox));
-        }
+        // A mailbox here, or an alias that delivers to one: Mailbox Stats shows the mailbox
+        case 'mailbox': return data.kind === 'address' && !!entityMailboxOf(data);
         case 'copy': return true;
         default: return false;
     }
@@ -421,7 +441,7 @@ function entityCardActionsHtml(data) {
     const titles = {
         ban: `Put ${entry} on the Fail2ban denylist; it stays until removed`,
         allow: `Never ban ${entry}`,
-        mailbox: entityOk(entitySrc(data, 'mailbox')) && entitySrc(data, 'mailbox').local !== true ? 'Open the mailbox this alias belongs to' : '',
+        mailbox: entitySrc(data, 'mailbox').local !== true && entityMailboxOf(data) ? `Open ${entityMailboxOf(data)}, the mailbox this alias delivers to` : '',
     };
     const title = act => (titles[act] ? ` title="${escapeHtml(titles[act])}"` : '');
     // The Security list's pair: Ban in red text, Allow plain (security.js securityRowWhy)
@@ -493,7 +513,7 @@ async function entityCardAct(act, button) {
             return entityCardCheckRbl();
         case 'mailbox': {
             const range = period.preset ? { preset: period.preset } : { startDay: period.startDay, endDay: period.endDay };
-            return openMailboxFor(shown, { ...range, onMoved: () => { closeEntityCard(); entityCardCloseViews(); } });
+            return openMailboxFor(entityMailboxOf(data), { ...range, onMoved: () => { closeEntityCard(); entityCardCloseViews(); } });
         }
         case 'copy':
             copyToClipboard(shown);
@@ -524,6 +544,8 @@ function entityRblTile(data) {
             else if (r.status === 'error') shown = { value: 'Check failed', tone: 'warn', note: when };
             else shown = { value: 'Not listed', note: [`On none of ${entityNum(r.total_blacklists)}`, when].filter(Boolean).join('. ') };
         }
+        // Check now found another check running (from Status, the schedule or another card)
+        if (entityRblBusy === data.value) shown.note = `${shown.note}. <span class="ui-text-warn">A blocklist check is already running.</span> Try again when it is done.`;
         return { ...shown, action: button };
     }, '', 'entity-rbl-tile');
 }
@@ -555,27 +577,37 @@ function entityRblRedraw(whole = false) {
 // time: the progress is one for the whole app
 async function entityCardCheckRbl() {
     const data = entityCardState && entityCardState.data;
-    if (!data || data.kind !== 'ip') return;
-    if (entityRblCheck) {
-        if (entityRblCheck.value !== data.value) showToast('A blocklist check is running. Try again when it is done.', 'warning');
-        return;
-    }
+    if (!data || data.kind !== 'ip' || entityRblCheck) return;
     const value = data.value;
-    entityRblCheck = { value, percent: 0, text: 'Starting the check...' };
+    entityRblBusy = null;
+    const check = { run: ++entityRblRuns, value, percent: 0, text: 'Starting the check...', started: Date.now(), poll: null, asking: false };
+    entityRblCheck = check;
     entityRblRedraw(true);
-    const poll = setInterval(async () => {
+    // Its progress, while this card shows this check: a closed or replaced card
+    // stops it (entityRblStop), and so does the time limit; one request at a time
+    check.poll = setInterval(async () => {
+        if (entityRblCheck !== check) { clearInterval(check.poll); return; }
+        if (Date.now() - check.started > ENTITY_RBL_POLL.max) {
+            clearInterval(check.poll);
+            check.text = 'Still checking. The result shows here when it is done.';
+            entityRblRedraw();
+            return;
+        }
+        if (check.asking) return;
+        check.asking = true;
         try {
-            const response = await authenticatedFetch('/api/blacklist/progress');
-            if (!response.ok || !entityRblCheck) return;
-            const progress = await response.json();
-            if (!entityRblCheck || !progress || !progress.total) return;
-            entityRblCheck.percent = Math.max(0, Math.min(100, Number(progress.percent) || 0));
-            entityRblCheck.text = `${Number(progress.current) || 0} of ${Number(progress.total)} lists checked`;
+            const response = await authenticatedFetch('/api/blacklist/progress', { timeout: ENTITY_RBL_POLL.request });
+            const progress = response.ok ? await response.json() : null;
+            if (entityRblCheck !== check || !progress || !progress.total) return;
+            check.percent = Math.max(0, Math.min(100, Number(progress.percent) || 0));
+            check.text = `${Number(progress.current) || 0} of ${Number(progress.total)} lists checked`;
             entityRblRedraw();
         } catch (e) {
             // The next tick asks again
+        } finally {
+            check.asking = false;
         }
-    }, 1000);
+    }, ENTITY_RBL_POLL.every);
     let result = null;
     let problem = '';
     try {
@@ -586,16 +618,24 @@ async function entityCardCheckRbl() {
     } catch (e) {
         problem = 'The server could not be reached.';
     } finally {
-        clearInterval(poll);
-        entityRblCheck = null;
+        clearInterval(check.poll);
+    }
+    // The card closed, or shows something else, since: the check is the server's now
+    if (entityRblCheck !== check) return;
+    entityRblCheck = null;
+    if (result && result.status === 'busy') {
+        // Nothing was started: another check runs (the Status page's, the schedule's)
+        entityRblBusy = value;
+        showToast(result.message || 'A blocklist check is already running. Try again when it is done.', 'warning');
+        entityRblRedraw(true);
+        return;
     }
     if (!result || result.status === 'error') {
         showToast(`Could not check ${value} against the blocklists. ${problem || (result && result.error) || ''}`.trim(), 'error');
     } else {
         showToast(`Blocklist check done for ${value}`, 'success');
     }
-    const state = entityCardState;
-    if (state && state.data && state.data.value === value) entityCardRefresh();
+    entityCardRefresh();
 }
 
 // =============================================================================

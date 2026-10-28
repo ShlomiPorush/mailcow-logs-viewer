@@ -371,6 +371,13 @@ job_status = {
 _blacklist_last_listed_actionable_count = 0
 _blacklist_check_lock = asyncio.Lock()
 
+
+def blacklist_check_lock() -> asyncio.Lock:
+    """The one lock of every blocklist check: the scheduled and manual job and a
+    single address checked from the API (routers/blacklist.py) all hold it."""
+    return _blacklist_check_lock
+
+
 # Returned by a job that skipped because another run of it holds its lock; that
 # run sets the job status when it ends, so a manual run must not mark it done
 JOB_SKIPPED = "skipped"

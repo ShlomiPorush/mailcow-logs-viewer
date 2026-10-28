@@ -36,7 +36,13 @@ const STUBS = `
             return { ok: status < 400, status, headers: { get: () => 'text/csv' }, json: async () => body, blob: async () => ({}) };
         });
     };
-    navigateTo = async (...args) => { window.navs.push(args); return true; };
+    // A move shows that page, as the router does (the page in use is currentTab)
+    navigateTo = async (...args) => {
+        window.navs.push(args);
+        currentTab = args[0];
+        document.querySelectorAll('.tab-content').forEach(el => el.classList.toggle('hidden', el.id !== 'content-' + args[0]));
+        return true;
+    };
     checkAuthentication = async () => false;
     mailcowRwConfigured = true;`;
 
@@ -203,7 +209,7 @@ test('Show messages opens Messages on the IP matched whole: a chip says so, a fa
     assert.equal($(w, '#messages-exact').innerHTML, '');
 });
 
-test('Show messages for an address or a domain filters from or to it; changing a field it set drops it', async () => {
+test('Show messages for an address or a domain filters from or to it; another condition added keeps it', async () => {
     const w = page();
     w.reply = url => (url.startsWith('/api/messages') ? { data: [], total: 0, status: {}, direction: {} } : {});
     await openCard(w, 'address', 'J.Doe@Example.net', addressCard('j.doe@example.net'));
@@ -227,12 +233,98 @@ test('Show messages for an address or a domain filters from or to it; changing a
     list = params(asked(w, '/api/messages?').at(-1).url);
     assert.equal(list.get('domain'), 'example.net');
     assert.equal(list.get('address'), null, 'the address before is gone');
-    // An IP typed into the filters: a filter the card did not set, so the card's go
+    // An IP typed into the filters: another condition, so the card's domain stays
     $(w, '#messages-filter-ip').value = '192.0.2.9';
     w.applyMessagesFilters();
     await settle(w);
     list = params(asked(w, '/api/messages?').at(-1).url);
-    assert.equal(list.get('domain'), null);
+    assert.equal(list.get('domain'), 'example.net');
+    assert.equal(list.get('ip'), '192.0.2.9');
+    assert.equal(list.get('exact'), 'true');
+    assert.match($(w, '#messages-exact').textContent, /example\.net/);
+});
+
+test('a condition added keeps the whole value the card set; changing or clearing that value drops it', async () => {
+    const w = page();
+    w.reply = url => (url.startsWith('/api/messages') ? { data: [], total: 0, status: {}, direction: {} }
+        : url.startsWith('/api/logs/netfilter') ? { data: [], total: 0, page: 1, pages: 0 } : {});
+    await openCard(w, 'ip', '203.0.113.45', ipCard());
+    $(w, '[data-ent-act="messages"]').click();
+    await wait(w, 150);
+    await settle(w);
+    $(w, '#messages-filter-sender').value = 'billing@example.net';
+    w.applyMessagesFilters();
+    await settle(w);
+    let list = params(asked(w, '/api/messages?').at(-1).url);
+    assert.equal(list.get('exact'), 'true', 'Sender added: still whole');
+    assert.equal(list.get('ip'), '203.0.113.45');
+    assert.equal(list.get('sender'), 'billing@example.net');
+    $(w, '#messages-filter-ip').value = '203.0.113';
+    w.applyMessagesFilters();
+    await settle(w);
+    list = params(asked(w, '/api/messages?').at(-1).url);
+    assert.equal(list.get('exact'), null, 'the IP it set was changed');
+    assert.equal($(w, '#messages-exact').innerHTML, '');
+
+    // The same on Security events: a Username added keeps the IP whole, the IP cleared drops it
+    await openCard(w, 'ip', '203.0.113.45', ipCard());
+    $(w, '[data-ent-act="security"]').click();
+    await settle(w);
+    $(w, '#netfilter-filter-username').value = 'admin@example.com';
+    w.applyNetfilterFilters();
+    await settle(w);
+    assert.equal(w.eval('currentFilters.netfilter').exact_ip, 'true');
+    $(w, '#netfilter-filter-ip').value = '';
+    w.applyNetfilterFilters();
+    await settle(w);
+    assert.equal(w.eval('currentFilters.netfilter').exact_ip, undefined);
+});
+
+test('filters set any other way take the card\'s whole values with them: no stale chip, no hidden restriction', async () => {
+    const w = page();
+    w.reply = url => (url.startsWith('/api/messages') ? { data: [], total: 0, status: {}, direction: {} }
+        : url.startsWith('/api/logs/netfilter') ? { data: [], total: 0, page: 1, pages: 0 } : {});
+    const fromDomainCard = async () => {
+        await openCard(w, 'domain', 'example.net', domainCard());
+        $(w, '[data-ent-act="security"]').click();
+        await settle(w);
+        w.loadNetfilterLogs(1);
+        await settle(w);
+        assert.match($(w, '#netfilter-exact').textContent, /Accounts on\s+example\.net/);
+    };
+    // The search's address row (search.js gsOpenAddress) sets the filters itself, from another
+    // page: Security then loads with them (loadNetfilterLogs, as the router does)
+    await fromDomainCard();
+    await w.navigateTo('dashboard');
+    await w.gsOpenAddress('198.51.100.7');
+    w.loadNetfilterLogs(1);
+    await settle(w);
+    assert.equal($(w, '#netfilter-exact').innerHTML, '', 'no chip left from the card');
+    w.applyNetfilterFilters();
+    assert.equal(w.eval('currentFilters.netfilter').username_domain, undefined);
+    // An alert's events (alert-activity.js openAlertSecurityEvents), applied later
+    await fromDomainCard();
+    w.openAlertSecurityEvents('ann@example.org');
+    await wait(w, 150);
+    await settle(w);
+    assert.equal(w.eval('currentFilters.netfilter').username_domain, undefined);
+    assert.equal(w.eval('currentFilters.netfilter').username, 'ann@example.org');
+    // Security's own Events link for an address (security.js securityOpenEvents)
+    await fromDomainCard();
+    w.securityOpenEvents('198.51.100.8');
+    await settle(w);
+    assert.equal(w.eval('currentFilters.netfilter').username_domain, undefined);
+    assert.equal($(w, '#netfilter-exact').innerHTML, '');
+    // Messages: the Dashboard chart's range (openMessagesRange)
+    await openCard(w, 'address', 'j.doe@example.net', addressCard('j.doe@example.net'));
+    $(w, '[data-ent-act="messages"]').click();
+    await wait(w, 150);
+    await settle(w);
+    w.openMessagesRange({ start: '2026-10-28T08:00:00Z', endInclusive: '2026-10-28T08:59:59.999Z' });
+    w.loadMessages();
+    await settle(w);
+    const list = params(asked(w, '/api/messages?').at(-1).url);
+    assert.equal(list.get('address'), null);
     assert.equal(list.get('exact'), null);
     assert.equal($(w, '#messages-exact').innerHTML, '');
 });
@@ -394,6 +486,7 @@ const mailboxRow = (username, aliases = []) => ({
 test('Open mailbox finds the mailbox when Mailbox Stats never loaded, over the card period', async () => {
     const w = page();
     assert.equal(w.eval('mailboxStatsCache.mailboxes'), null, 'nothing loaded');
+    assert.equal($(w, '#mailbox-stats-hide-zero').checked, true, 'Hide Zero Activity is on by default');
     w.reply = url => (url.startsWith('/api/mailbox-stats/all')
         ? { mailboxes: [mailboxRow('xj.doe@example.net'), mailboxRow('j.doe@example.net')], activity_unit: 'day', activity_buckets: ['2026-10-27', '2026-10-28'] } : {});
     await openCard(w, 'address', 'j.doe@example.net', addressCard('j.doe@example.net'));
@@ -401,26 +494,70 @@ test('Open mailbox finds the mailbox when Mailbox Stats never loaded, over the c
     await settle(w, 10);
     assert.deepEqual(nav(w), ['mailbox-stats', { sub: 'statistics' }]);
     const q = params(asked(w, '/api/mailbox-stats/all').at(-1).url);
-    assert.equal(q.get('search'), 'j.doe@example.net');
+    assert.equal(q.get('username'), 'j.doe@example.net', 'the mailbox by its whole address, on any page');
     assert.equal(q.get('date_range'), '7days', 'the period of the card');
     assert.equal(q.get('active_only'), 'false');
+    assert.equal(q.get('hide_zero'), null, 'a mailbox with no mail in the period is listed too');
+    assert.equal($(w, '#mailbox-stats-hide-zero').checked, false, 'and the page says so');
     assert.ok($(w, '#entity-card').classList.contains('hidden'), 'the card closed');
     assert.ok(!$(w, '#mailbox-activity-modal').classList.contains('hidden'), 'the activity is open');
     assert.equal($(w, '#mailbox-activity-title').textContent, 'j.doe@example.net', 'the mailbox asked for, not one that only contains it');
 });
 
-test('Open mailbox on an alias opens the mailbox it belongs to', async () => {
+const aliasSource = local => ok({ local: false, mailbox: null,
+    alias: { address: 'sales@example.net', goto: local || 'ann@outside.test', primary_mailbox: local || 'ann@outside.test', local_mailbox: local, active: true } });
+
+test('Open mailbox on an alias opens the mailbox here it delivers to, and is not offered for one that forwards out', async () => {
     const w = page();
     w.reply = url => (url.startsWith('/api/mailbox-stats/all')
         ? { mailboxes: [mailboxRow('j.doe@example.net', ['sales@example.net'])], activity_unit: 'day', activity_buckets: [] } : {});
-    await openCard(w, 'address', 'sales@example.net', addressCard('sales@example.net', {
-        mailbox: ok({ local: false, mailbox: null, alias: { address: 'sales@example.net', goto: 'j.doe@example.net', primary_mailbox: 'j.doe@example.net', active: true } }),
-    }));
-    assert.equal($(w, '[data-ent-act="mailbox"]').title, 'Open the mailbox this alias belongs to');
+    await openCard(w, 'address', 'sales@example.net', addressCard('sales@example.net', { mailbox: aliasSource('j.doe@example.net') }));
+    assert.equal($(w, '[data-ent-act="mailbox"]').title, 'Open j.doe@example.net, the mailbox this alias delivers to');
     $(w, '[data-ent-act="mailbox"]').click();
     await settle(w, 10);
-    assert.equal(params(asked(w, '/api/mailbox-stats/all').at(-1).url).get('search'), 'sales@example.net');
+    assert.equal(params(asked(w, '/api/mailbox-stats/all').at(-1).url).get('username'), 'j.doe@example.net', 'the mailbox the server resolved');
     assert.equal($(w, '#mailbox-activity-title').textContent, 'j.doe@example.net');
+    // Its first target is outside this mailcow: no mailbox to open
+    await openCard(w, 'address', 'sales@example.net', addressCard('sales@example.net', { mailbox: aliasSource(null) }));
+    assert.equal($(w, '[data-ent-act="mailbox"]'), null);
+});
+
+test('Open mailbox asks for the mailbox as stored, an IDN domain as ASCII, not as the card shows it', async () => {
+    const w = page();
+    const stored = 'ann@xn--bcher-kva.example';
+    w.reply = url => (url.startsWith('/api/mailbox-stats/all') ? { mailboxes: [mailboxRow(stored)], activity_unit: 'day', activity_buckets: [] } : {});
+    const card = addressCard(stored, { mailbox: ok({ local: true, mailbox: { username: stored, name: 'Ann', domain: 'xn--bcher-kva.example', active: true }, alias: null }) });
+    card.display = 'Ann@bücher.example';
+    await openCard(w, 'address', 'Ann@bücher.example', card);
+    $(w, '[data-ent-act="mailbox"]').click();
+    await settle(w, 10);
+    assert.equal(params(asked(w, '/api/mailbox-stats/all').at(-1).url).get('username'), stored);
+    assert.equal($(w, '#mailbox-activity-title').textContent, stored);
+});
+
+test('a mailbox that comes after the user left Mailbox Stats, or after another opening, opens nothing', async () => {
+    const w = page();
+    const held = [];
+    w.reply = url => (url.startsWith('/api/mailbox-stats/all') ? new Promise(resolve => held.push(resolve)) : {});
+    const answer = (i, name) => held[i]({ mailboxes: [mailboxRow(name)], activity_unit: 'day', activity_buckets: [] });
+    await openCard(w, 'address', 'j.doe@example.net', addressCard('j.doe@example.net'));
+    $(w, '[data-ent-act="mailbox"]').click();
+    await settle(w);
+    await w.navigateTo('messages');   // the user moved on while it loaded
+    answer(0, 'j.doe@example.net');
+    await settle(w, 10);
+    assert.ok($(w, '#mailbox-activity-modal').classList.contains('hidden'), 'not over Messages');
+    // Two openings: only the last one opens
+    const first = w.openMailboxFor('j.doe@example.net', { preset: '7days' });
+    await settle(w);
+    const second = w.openMailboxFor('bob@example.net', { preset: '7days' });
+    await settle(w);
+    answer(2, 'bob@example.net');
+    await second;
+    answer(1, 'j.doe@example.net');
+    await first;
+    await settle(w);
+    assert.equal($(w, '#mailbox-activity-title').textContent, 'bob@example.net');
 });
 
 // --------------------------------------------------------------- Add to Suppressions
@@ -440,4 +577,95 @@ test('Add to Suppressions opens the Add dialog with the address, and the card re
     assert.equal(JSON.parse(asked(w, '/api/suppressions', 'POST')[0].body).email, 'j.doe@example.net');
     assert.deepEqual(acts(w), ['Open mailbox', 'Show messages', 'More'], 'already on the list: not offered again');
     assert.match($(w, '#entity-card-header').textContent, /On the suppression list/);
+});
+
+// --------------------------------------------------------------- Check now: one check at a time
+
+test('Check now when another check runs: the server starts nothing, the tile says so and Check now stays to try again', async () => {
+    const w = page();
+    const toasts = [];
+    w.showToast = (message, type) => toasts.push([message, type]);
+    w.reply = (url, method) => (url.startsWith('/api/blacklist/check') && method === 'POST'
+        ? { status: 'busy', message: 'A blocklist check is already running. Try again when it is done.' } : {});
+    await openCard(w, 'ip', '203.0.113.45', ipCard());
+    const reads = asked(w, '/api/entities/ip').length;
+    $(w, '[data-ent-act="rbl-tile"]').click();
+    await settle(w, 10);
+    assert.match($(w, '#entity-rbl-tile').textContent, /A blocklist check is already running/);
+    const button = $(w, '[data-ent-act="rbl-tile"]');
+    assert.equal(button.textContent, 'Check now');
+    assert.equal(button.getAttribute('aria-disabled'), null);
+    assert.deepEqual(JSON.parse(JSON.stringify(toasts)), [['A blocklist check is already running. Try again when it is done.', 'warning']]);
+    assert.equal(asked(w, '/api/entities/ip').length, reads, 'nothing to read again');
+});
+
+test('the Status page says when a check already runs instead of "completed"', async () => {
+    const w = page();
+    const toasts = [];
+    w.showToast = (message, type) => toasts.push([message, type]);
+    w.reply = (url, method) => (url.startsWith('/api/blacklist/check') && method === 'POST'
+        ? { status: 'busy', message: 'A blocklist check is already running. Try again when it is done.' } : {});
+    await w.checkHost('mail.example.com');
+    await settle(w);
+    const said = JSON.parse(JSON.stringify(toasts)).map(t => t[0]);
+    assert.ok(said.includes('A blocklist check is already running. Try again when it is done.'));
+    assert.ok(!said.some(t => /Check completed/.test(t)), said.join(' | '));
+});
+
+test('the progress of a check stops with its card, and a late answer of an older check changes nothing', async () => {
+    const w = page();
+    w.eval('ENTITY_RBL_POLL.every = 50');
+    let finish;
+    const progress = [];
+    w.reply = (url, method) => {
+        if (url.startsWith('/api/blacklist/check') && method === 'POST') return new Promise(resolve => { finish = resolve; });
+        if (url === '/api/blacklist/progress') return new Promise(resolve => progress.push(resolve));
+        return {};
+    };
+    await openCard(w, 'ip', '203.0.113.45', ipCard());
+    $(w, '[data-ent-act="rbl-tile"]').click();
+    await wait(w, 120);
+    assert.ok(progress.length >= 1, 'the progress is asked for');
+    assert.equal(progress.length, asked(w, '/api/blacklist/progress').length);
+    assert.equal(w.requests.filter(r => r.url === '/api/blacklist/progress').length, progress.length);
+    // One request at a time: no second while the first is out
+    assert.equal(progress.length, 1);
+    // The card shows another address: its own check is gone, the old progress lands on nothing
+    await openCard(w, 'ip', '198.51.100.23', ipCard());
+    progress[0]({ in_progress: true, current: 40, total: 42, percent: 95 });
+    await wait(w, 200);
+    assert.equal(asked(w, '/api/blacklist/progress').length, 1, 'no more progress asked for after the card changed');
+    assert.doesNotMatch($(w, '#entity-rbl-tile').textContent, /40 of 42/);
+    // The old check ends: the card of the other address is not read again
+    const reads = asked(w, '/api/entities/ip').length;
+    finish({ status: 'clean', total_blacklists: 42 });
+    await settle(w, 10);
+    assert.equal(asked(w, '/api/entities/ip').length, reads);
+    // Closed while it runs: the progress stops too
+    $(w, '[data-ent-act="rbl-tile"]').click();
+    await wait(w, 120);
+    const before = asked(w, '/api/blacklist/progress').length;
+    progress.at(-1)({ in_progress: true, current: 1, total: 42, percent: 2 });
+    w.closeEntityCard();
+    await wait(w, 200);
+    assert.equal(asked(w, '/api/blacklist/progress').length, before);
+});
+
+test('the progress is asked for a limited time, each request with a time limit', async () => {
+    const w = page();
+    w.eval('ENTITY_RBL_POLL.every = 40; ENTITY_RBL_POLL.max = 300');
+    const options = [];
+    const before = w.authenticatedFetch;
+    w.reply = (url, method) => (url.startsWith('/api/blacklist/check') && method === 'POST' ? new Promise(() => {})
+        : url === '/api/blacklist/progress' ? { in_progress: true, current: 3, total: 42, percent: 7 } : {});
+    await openCard(w, 'ip', '203.0.113.45', ipCard());
+    w.authenticatedFetch = (url, opts = {}) => { if (url === '/api/blacklist/progress') options.push(opts); return before(url, opts); };
+    $(w, '[data-ent-act="rbl-tile"]').click();
+    await wait(w, 500);
+    const asks = options.length;
+    assert.ok(asks >= 2, 'it was asked');
+    assert.ok(options.every(o => o.timeout === 5000), 'each request has its own limit');
+    await wait(w, 300);
+    assert.equal(options.length, asks, 'no more after the limit');
+    assert.match($(w, '#entity-rbl-tile').textContent, /Still checking/);
 });

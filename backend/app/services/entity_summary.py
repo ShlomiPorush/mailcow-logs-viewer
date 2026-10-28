@@ -549,11 +549,17 @@ def _mailbox(db: Session, address: str) -> dict:
     forms = entity_values.address_forms(address)
     box = db.query(MailboxStatistics).filter(func.lower(MailboxStatistics.username).in_(forms)).first()
     alias = db.query(AliasStatistics).filter(func.lower(AliasStatistics.alias_address).in_(forms)).first()
+    # The mailbox an alias delivers to, only when it is a mailbox here: primary_mailbox
+    # is the alias's first target as mailcow lists it, which may be an outside address
+    target = None
+    if alias is not None and alias.primary_mailbox:
+        target = db.query(MailboxStatistics.username).filter(
+            func.lower(MailboxStatistics.username) == alias.primary_mailbox.strip().lower()).limit(1).scalar()
     return {
         "local": box is not None,
         "mailbox": {"username": box.username, "name": box.name, "domain": box.domain, "active": box.active} if box else None,
         "alias": {"address": alias.alias_address, "goto": alias.goto, "primary_mailbox": alias.primary_mailbox,
-                  "active": alias.active} if alias else None,
+                  "local_mailbox": target, "active": alias.active} if alias else None,
     }
 
 

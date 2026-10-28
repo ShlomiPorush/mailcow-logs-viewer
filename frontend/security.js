@@ -539,6 +539,7 @@ function securityOpenEvents(ip) {
     securityShowTab('events');
     const field = document.getElementById('netfilter-filter-ip');
     if (field) field.value = ip;
+    netfilterExact = null;   // an entity card's whole values do not carry over (app.js)
     applyNetfilterFilters();
 }
 

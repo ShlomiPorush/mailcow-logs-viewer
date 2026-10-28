@@ -206,6 +206,7 @@ class AliasFacts(Fixed):
     address: str
     goto: Optional[str] = Field(description="Where it delivers, comma separated")
     primary_mailbox: Optional[str]
+    local_mailbox: Optional[str] = Field(description="The mailbox here the alias delivers to, as stored: primary_mailbox when it is a mailbox on this mailcow, else null")
     active: Optional[bool]
 
 
