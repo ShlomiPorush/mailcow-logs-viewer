@@ -128,3 +128,38 @@ def test_a_skipped_manual_run_keeps_the_result_a_full_check_wrote_meanwhile(stat
     assert status['status'] == 'failed'
     assert status['error'] == 'mailcow did not answer'
     assert status['retryable'] is True
+
+
+def test_the_manual_mark_is_the_entry_it_wrote_not_one_read_back(statuses, monkeypatch):
+    """The Run is accepted in the threadpool; a full check on the event loop can
+    write its own 'running' right after the Run's. The Run's task then skips,
+    and must not undo the running check's status."""
+    monkeypatch.setattr(settings._inner, 'disabled_features', '')
+    statuses['blacklist_check'] = {'last_run': datetime(2026, 10, 27, 6, 0), 'status': 'success', 'error': None, 'retryable': False}
+    real = scheduler.update_job_status
+    scan = {}
+
+    def write_then_scan(name, status, *args, **kwargs):
+        entry = real(name, status, *args, **kwargs)
+        if name == 'blacklist_check' and status == 'running' and not scan:
+            # The full check starts between the Run's write and anything after it
+            scan['entry'] = real('blacklist_check', 'running')
+        return entry
+
+    monkeypatch.setattr(settings_router, 'update_job_status', write_then_scan)
+
+    async def job(**kwargs):
+        return scheduler.JOB_SKIPPED   # the running full check holds the job
+
+    monkeypatch.setattr(scheduler, 'check_monitored_hosts_job', job)
+    tasks = BackgroundTasks()
+    assert settings_router.trigger_job('blacklist_check', tasks)['status'] == 'started'
+    asyncio.run(tasks())
+    assert statuses['blacklist_check'] is scan['entry'], "the running check's status stays"
+    assert statuses['blacklist_check']['status'] == 'running'
+
+
+def test_update_job_status_returns_the_entry_it_wrote(statuses):
+    entry = scheduler.update_job_status('blacklist_check', 'failed', 'example error', retryable=True)
+    assert entry is statuses['blacklist_check']
+    assert entry['status'] == 'failed' and entry['error'] == 'example error' and entry['retryable'] is True

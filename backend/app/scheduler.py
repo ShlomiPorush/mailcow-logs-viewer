@@ -424,19 +424,24 @@ JOB_SKIPPED = "skipped"
 # manual run must not overwrite it
 JOB_STATUS_SET = "status_set"
 
-def update_job_status(job_name: str, status: str, error: str = None, retryable: bool = False):
-    """Update job execution status.
+def update_job_status(job_name: str, status: str, error: str = None, retryable: bool = False) -> dict:
+    """Update job execution status. Returns the entry it wrote: a caller that
+    must later tell its own write from another run's keeps it (the manual
+    runner), never reading the shared dict back, where another run may have
+    written in between.
 
     retryable: the failure may pass by itself (mailcow could not be reached,
     timed out or failed itself), so retry_failed_jobs runs the job again
     soon. Kept here only, never in an API answer.
     """
-    job_status[job_name] = {
+    entry = {
         'last_run': datetime.now(timezone.utc),
         'status': status,
         'error': error,
         'retryable': retryable,
     }
+    job_status[job_name] = entry
+    return entry
 
 
 def _transient(error: BaseException) -> bool:

@@ -1667,10 +1667,12 @@ def trigger_job(job_name: str, background_tasks: BackgroundTasks):
     previous = dict(current_status)
 
     # Mark job as running immediately (only for non-self-managing jobs)
+    # This run's mark, the entry it wrote (not read back: a full check on the
+    # event loop may write its own in between): a status written since by
+    # another run is not this run's to undo
+    mark = None
     if not self_managing:
-        update_job_status(status_key, 'running')
-    # This run's mark: a status written since by another run is not this run's to undo
-    mark = get_job_status().get(status_key)
+        mark = update_job_status(status_key, 'running')
 
     # Run job in background. An async wrapper runs on the application loop,
     # the same loop APScheduler uses, so the job shares its asyncio locks and
