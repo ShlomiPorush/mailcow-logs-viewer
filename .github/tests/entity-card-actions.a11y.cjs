@@ -119,7 +119,7 @@ test('each kind offers its actions, the main one stays on a phone and the rest f
     const w = page();
     await openCard(w, 'ip', '203.0.113.45', ipCard());
     assert.deepEqual(acts(w), ['Show messages', 'Show security events', 'Ban', 'Allow', 'More']);
-    assert.deepEqual(menu(w), ['Show messages (phone)', 'Show security events (phone)', 'Allow (phone)', 'Check blocklists now', 'Copy address']);
+    assert.deepEqual(menu(w), ['Show messages (phone)', 'Show security events (phone)', 'Allow (phone)', 'Check blocklists now']);
     assert.ok($(w, '[data-ent-act="ban"]').classList.contains('ui-btn-danger'));
     assert.ok(!$(w, '[data-ent-act="ban"]').classList.contains('ui-ent-fold'), 'Ban stays on a phone');
     assert.ok($(w, '[data-ent-act="allow"]').classList.contains('ui-ent-fold'));
@@ -129,11 +129,12 @@ test('each kind offers its actions, the main one stays on a phone and the rest f
 
     await openCard(w, 'address', 'j.doe@example.net', addressCard('j.doe@example.net'));
     assert.deepEqual(acts(w), ['Open mailbox', 'Show messages', 'Add to Suppressions', 'More']);
-    assert.deepEqual(menu(w), ['Show messages (phone)', 'Add to Suppressions (phone)', 'Show security events', 'Copy address']);
+    assert.deepEqual(menu(w), ['Show messages (phone)', 'Add to Suppressions (phone)', 'Show security events']);
 
     await openCard(w, 'domain', 'example.net', domainCard());
-    assert.deepEqual(acts(w), ['Show messages', 'Show security events', 'More']);
-    assert.deepEqual(menu(w), ['Show security events (phone)', 'Copy domain']);
+    assert.deepEqual(acts(w), ['Show messages', 'Show security events']);
+    assert.deepEqual(menu(w), ['Show security events (phone)']);
+    assert.ok($(w, '#entity-card-actions .ui-ent-more-phone'), 'More holds only what a phone folds, so only a phone shows it');
 });
 
 test('an action that does not apply, or whose source is off, is not offered', async () => {
@@ -145,7 +146,7 @@ test('an action that does not apply, or whose source is off, is not offered', as
         messages: off('This address is excluded, so Messages does not keep or show its mail.'),
     }));
     assert.deepEqual(acts(w), ['More']);
-    assert.deepEqual(menu(w), ['Show security events', 'Copy address']);
+    assert.deepEqual(menu(w), ['Show security events']);
     // Already on the suppression list; Mailbox Stats could not be read
     await openCard(w, 'address', 'bob@example.net', addressCard('bob@example.net', {
         suppression: ok({ entry: { active: true, reason: 'manual' }, domain_entry: null }),
@@ -158,8 +159,8 @@ test('an action that does not apply, or whose source is off, is not offered', as
         security: off('The Security feature is turned off.'), lists: off('The Security feature is turned off.'),
         protection: off('The Security feature is turned off.'), rbl: off('The IP blocklists feature is turned off.'),
     }));
-    assert.deepEqual(acts(w), ['Show messages', 'More']);
-    assert.deepEqual(menu(w), ['Copy address']);
+    assert.deepEqual(acts(w), ['Show messages'], 'nothing left for More');
+    assert.deepEqual(menu(w), []);
     assert.equal($(w, '#entity-card .ui-locked'), null);
     assert.equal($(w, '[data-ent-act="rbl-tile"]'), null, 'no Check now in the Blocklists tile');
     assert.match($(w, '#entity-rbl-tile').textContent, /Disabled in Settings/);

@@ -386,9 +386,9 @@ function entityRblStop() {
 
 const ENTITY_ACTIONS = {
     // kind: the buttons in order ([action, stays on a phone]), and what only More holds
-    ip: { buttons: [['messages'], ['security'], ['ban', true], ['allow']], menu: ['rbl', 'copy'] },
-    address: { buttons: [['mailbox', true], ['messages'], ['suppress']], menu: ['security', 'copy'] },
-    domain: { buttons: [['messages', true], ['security']], menu: ['copy'] },
+    ip: { buttons: [['messages'], ['security'], ['ban', true], ['allow']], menu: ['rbl'] },
+    address: { buttons: [['mailbox', true], ['messages'], ['suppress']], menu: ['security'] },
+    domain: { buttons: [['messages', true], ['security']], menu: [] },
 };
 
 const entityRw = () => typeof mailcowRwConfigured !== 'undefined' && !!mailcowRwConfigured;
@@ -396,7 +396,7 @@ const entityRw = () => typeof mailcowRwConfigured !== 'undefined' && !!mailcowRw
 function entityActionLabel(data, act) {
     return {
         messages: 'Show messages', security: 'Show security events', ban: 'Ban', allow: 'Allow', rbl: 'Check blocklists now',
-        mailbox: 'Open mailbox', suppress: 'Add to Suppressions', copy: data.kind === 'domain' ? 'Copy domain' : 'Copy address',
+        mailbox: 'Open mailbox', suppress: 'Add to Suppressions',
     }[act] || act;
 }
 
@@ -425,7 +425,6 @@ function entityCanAct(data, act) {
         case 'suppress': return data.kind === 'address' && entityOk(src('suppression')) && !src('suppression').entry;
         // A mailbox here, or an alias that delivers to one: Mailbox Stats shows the mailbox
         case 'mailbox': return data.kind === 'address' && !!entityMailboxOf(data);
-        case 'copy': return true;
         default: return false;
     }
 }
@@ -447,12 +446,16 @@ function entityCardActionsHtml(data) {
     // The Security list's pair: Ban in red text, Allow plain (security.js securityRowWhy)
     const button = ({ act, stays }) => `<button type="button" class="ui-btn${act === 'ban' ? ' ui-btn-danger' : ''}${stays ? '' : ' ui-ent-fold'}" data-ent-act="${act}"${title(act)} onclick="entityCardAct('${act}', this)">${escapeHtml(entityActionLabel(data, act))}</button>`;
     const item = (act, phoneOnly) => `<button type="button" role="menuitem"${phoneOnly ? ' class="ui-ent-phone"' : ''} data-ent-act="${act}-menu" onclick="entityCardAct('${act}', this)">${escapeHtml(entityActionLabel(data, act))}</button>`;
+    const menuOnly = plan.menu.filter(act => entityCanAct(data, act));
     const items = buttons.filter(b => !b.stays).map(b => item(b.act, true)).join('')
-        + plan.menu.filter(act => entityCanAct(data, act)).map(act => item(act, false)).join('');
+        + menuOnly.map(act => item(act, false)).join('');
+    // More that holds only what a phone folds away is a phone's alone
+    const more = !items ? '' : menuOnly.length ? uiMenu('More', items, { small: false })
+        : `<span class="ui-ent-more-phone">${uiMenu('More', items, { small: false })}</span>`;
     const locked = data.kind === 'ip' && entitySrc(data, 'lists').state !== 'disabled' && !entityRw()
         ? `<div class="ui-list-note ui-flush">${uiLocked('Ban and Allow are locked', `Banning or allowing this address from here ${UI_RW_KEY_TEXT}`,
             '<button type="button" class="ui-btn ui-btn-sm" onclick="entityCardSettings()">Open Settings</button>')}</div>` : '';
-    return `<div class="ui-ent-acts" id="entity-card-actions"><span id="entity-card-watch" hidden></span>${buttons.map(button).join('')}${items ? uiMenu('More', items, { small: false }) : ''}</div>${locked}`;
+    return `<div class="ui-ent-acts" id="entity-card-actions"><span id="entity-card-watch" hidden></span>${buttons.map(button).join('')}${more}</div>${locked}`;
 }
 
 // The card's period as the pages take it: a preset up to now (the card's own
@@ -515,9 +518,6 @@ async function entityCardAct(act, button) {
             const range = period.preset ? { preset: period.preset } : { startDay: period.startDay, endDay: period.endDay };
             return openMailboxFor(entityMailboxOf(data), { ...range, onMoved: () => { closeEntityCard(); entityCardCloseViews(); } });
         }
-        case 'copy':
-            copyToClipboard(shown);
-            return;
         default:
             return;
     }
