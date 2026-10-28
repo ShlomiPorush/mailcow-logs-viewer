@@ -220,6 +220,9 @@ POLICY: Dict[Tuple[str, str], Rule] = {
 
 _SIGN_IN = "sign-in and sessions are for people only"
 _SETTINGS = "only people change settings, because a change could turn off sign-in or agent limits, or send alerts elsewhere"
+# The card gathers several areas (messages, security, DMARC, mailboxes) in one
+# answer, so no single scope covers it; agents read those areas one by one
+_ENTITY = "the entity card gathers several areas in one answer and is for people in the app"
 
 EXCLUDED: Dict[Tuple[str, str], str] = {
     **{(m, p): _SIGN_IN for m, p in (
@@ -245,6 +248,7 @@ EXCLUDED: Dict[Tuple[str, str], str] = {
     ("POST", "/api/notifications/test"): "test messages are not available to agents",
     ("POST", "/api/dmarc/upload"): "file uploads are not offered to agents",
     ("POST", "/api/suppressions/import"): "file uploads are not offered to agents",
+    **{("GET", p): _ENTITY for p in ("/api/entities/ip", "/api/entities/address", "/api/entities/domain")},
 }
 
 # Managing agents is for people, whatever the method (consent.py registers these)

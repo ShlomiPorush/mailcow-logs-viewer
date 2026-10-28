@@ -47,6 +47,7 @@ from .routers import (
     protection as protection_router,
     notifications as notifications_router,
     rate_limits as rate_limits_router,
+    entities as entities_router,
 )
 from .migrations import run_migrations
 from .agent_access import consent as agent_consent, live as agent_live, mcp as agent_mcp, oauth as agent_oauth
@@ -442,6 +443,7 @@ app.include_router(smtp_abuse_router.router, prefix="/api", tags=["SMTP Abuse Pr
 app.include_router(protection_router.router, prefix="/api", tags=["Protection Rules"])
 app.include_router(notifications_router.router, prefix="/api", tags=["Notifications"])
 app.include_router(rate_limits_router.router, prefix="/api", tags=["Rate Limits"])
+app.include_router(entities_router.router, prefix="/api", tags=["Entities"])
 app.include_router(agent_consent.router, prefix="/api")
 
 # Agent access: OAuth discovery, sign-in and the MCP endpoint live outside /api
