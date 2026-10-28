@@ -1369,8 +1369,15 @@ const uiFitObserver = typeof ResizeObserver === 'function'
     ? new ResizeObserver(entries => uiFitAddresses(entries.map(entry => entry.target)))
     : null;
 
-function uiFitCut(local, keep) {
-    return (local.slice(0, Math.max(1, keep)).replace(/[._+-]+$/, '') || local.charAt(0)) + '…';
+// The local part in characters as a reader sees them (an accent or an emoji is
+// never split), and the first keep of them with the ellipsis; none at all
+// before the domain itself is cut
+const uiFitSegmenter = typeof Intl !== 'undefined' && Intl.Segmenter ? new Intl.Segmenter() : null;
+function uiFitChars(text) {
+    return uiFitSegmenter ? Array.from(uiFitSegmenter.segment(text), part => part.segment) : Array.from(text);
+}
+function uiFitCut(chars, keep) {
+    return chars.slice(0, keep).join('').replace(/[._+-]+$/, '') + '…';
 }
 
 function uiFitFits(line) {
@@ -1388,25 +1395,25 @@ function uiFitAddresses(lines) {
         if (btn.dataset.fitTitle === undefined) btn.dataset.fitTitle = btn.title;
         loc.textContent = local;
         line.classList.remove('is-over');
-        jobs.push({ line, loc, btn, full, local, lo: 0, hi: local.length - 1 });
+        jobs.push({ line, loc, btn, full, local, cut: false, over: false });
     }
     // A binary search on how much of the local part stays. Each round writes every
     // line and then reads every line, so a round costs one layout for all of them
     const cut = jobs.filter(job => job.line.clientWidth && !uiFitFits(job.line));
+    cut.forEach(job => { job.cut = true; job.chars = uiFitChars(job.local); job.lo = 0; job.hi = job.chars.length - 1; });
     let open = cut.filter(job => job.lo < job.hi);
     while (open.length) {
-        open.forEach(job => { job.mid = Math.ceil((job.lo + job.hi) / 2); job.loc.textContent = uiFitCut(job.local, job.mid); });
+        open.forEach(job => { job.mid = Math.ceil((job.lo + job.hi) / 2); job.loc.textContent = uiFitCut(job.chars, job.mid); });
         open.forEach(job => { if (uiFitFits(job.line)) job.lo = job.mid; else job.hi = job.mid - 1; });
         open = open.filter(job => job.lo < job.hi);
     }
-    cut.forEach(job => { job.loc.textContent = uiFitCut(job.local, job.lo); });
+    cut.forEach(job => { job.loc.textContent = uiFitCut(job.chars, job.lo); });
     cut.forEach(job => { job.over = !uiFitFits(job.line); });
     for (const job of jobs) {
-        const isCut = cut.includes(job);
-        job.line.classList.toggle('is-over', !!job.over);
-        if (isCut) job.btn.setAttribute('aria-label', job.full);
+        job.line.classList.toggle('is-over', job.over);
+        if (job.cut) job.btn.setAttribute('aria-label', job.full);
         else job.btn.removeAttribute('aria-label');
-        job.btn.title = isCut ? job.full : job.btn.dataset.fitTitle;
+        job.btn.title = job.cut ? job.full : job.btn.dataset.fitTitle;
     }
 }
 
