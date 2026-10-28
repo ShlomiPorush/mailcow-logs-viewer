@@ -1691,7 +1691,7 @@ button.ui-st-card { cursor: pointer; }
 .ui-ctr b { overflow: hidden; font-size: 14px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .ui-ctr small { color: var(--ui-muted); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .ui-ctr-act { grid-column: 1 / -1; }
-.ui-ctr.is-down { background: color-mix(in srgb, var(--ui-fail) 10%, var(--ui-panel)); color: var(--ui-fail); }
+.ui-ctr.is-down { background: color-mix(in srgb, var(--ui-fail) 10%, var(--ui-panel)); color: var(--ui-fail-text); }
 .ui-ctr.is-down small { color: inherit; }
 .ui-ctr.is-ignored { color: var(--ui-muted); }
 .ui-ctr.is-ignored .ui-mdot { background: var(--ui-line); }
@@ -2920,9 +2920,10 @@ html:has(#message-modal:not(.hidden):not(.ui-docked)) :is(.ui-page, .ui-scroll, 
 .ui-dm-sup { margin-inline-start: 4px; color: var(--ui-muted); font-size: 11px; font-weight: 500; letter-spacing: 0; line-height: 0; white-space: nowrap; cursor: help; }
 .ui-dm-ttl h2 .ui-dm-sup { font-size: 13px; }
 .ui-dm-pill { display: inline-block; padding: 1px 8px; border-radius: 6px; font-size: 12px; font-weight: 650; white-space: nowrap;
-    background: color-mix(in srgb, var(--dm-t) 15%, transparent); color: var(--dm-t); }
+    background: color-mix(in srgb, var(--dm-t) 15%, transparent); color: var(--dm-tx); }
 .ui-dm-pill.is-solid { background: var(--dm-t); color: #fff; }
-.ui-dm-ok { --dm-t: var(--ui-ok); } .ui-dm-warn { --dm-t: var(--ui-warn); } .ui-dm-fail { --dm-t: var(--ui-fail); } .ui-dm-mut { --dm-t: var(--ui-muted); }
+.ui-dm-ok { --dm-t: var(--ui-ok); --dm-tx: var(--ui-ok-text); } .ui-dm-warn { --dm-t: var(--ui-warn); --dm-tx: var(--ui-warn-text); }
+.ui-dm-fail { --dm-t: var(--ui-fail); --dm-tx: var(--ui-fail-text); } .ui-dm-mut { --dm-t: var(--ui-muted); --dm-tx: var(--ui-muted-text); }
 .ui-dm-legend { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-bottom: 10px; font-size: 12.5px; color: var(--ui-muted); }
 .ui-dm-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-inline-end: 6px; vertical-align: -1px; background: var(--ui-ok); }
 .ui-dm-legend i.is-warn { background: var(--ui-warn); } .ui-dm-legend i.is-fail { background: var(--ui-fail); }
