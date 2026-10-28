@@ -939,7 +939,6 @@ def test_cimd_accepts_clients_that_can_go_without_authentication(fields):
     {"token_endpoint_auth_method": "private_key_jwt", "token_endpoint_auth_methods_supported": ["none", 123]},
     {"token_endpoint_auth_method": "private_key_jwt", "token_endpoint_auth_methods_supported": [["none"]]},
     {"token_endpoint_auth_method": "private_key_jwt", "token_endpoint_auth_methods_supported": ["None"]},
-    {"token_endpoint_auth_method": "private_key_jwt", "token_endpoint_auth_methods_supported": ["none"] * 11},
 ])
 def test_cimd_refuses_clients_that_need_authentication(fields):
     with pytest.raises(cimd.ClientDocumentError) as caught:

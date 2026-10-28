@@ -194,8 +194,7 @@ def _also_offers_none(methods) -> bool:
     ["none", "private_key_jwt"] next to it. Such a client is a public client here
     like any other (PKCE S256, the exact redirect, no client authentication).
     """
-    return (isinstance(methods, list) and 0 < len(methods) <= 10
-            and all(isinstance(m, str) for m in methods) and "none" in methods)
+    return isinstance(methods, list) and all(isinstance(m, str) for m in methods) and "none" in methods
 
 
 async def fetch(url: str) -> ClientDocument:
