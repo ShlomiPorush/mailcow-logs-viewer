@@ -113,7 +113,10 @@ test('failed fetch and disabled security retain their behavior', async () => {
 
 test('shared list hints remain available and escape folder names', () => {
     const h = harness({});
-    assert.equal(h.context.renderMailboxFolderHint({ dovecot_status: 'stored', dovecot_mailbox: '<Junk>' }), '<span>Folder: &lt;Junk&gt;</span>');
+    // The folder is in the status tag's tooltip, escaped
+    const stored = { final_status: 'delivered', is_complete: true, dovecot_status: 'stored', dovecot_mailbox: '<Junk>' };
+    assert.match(h.context.uiCorrelationTag(stored, { folder: true }), /title="delivered, folder &lt;Junk&gt;"/);
+    assert.doesNotMatch(h.context.uiCorrelationTag(stored), /folder/);
     // A message delivered twice is one email: its row counts recipients, not deliveries
     assert.equal(typeof h.context.renderDeliveriesChip, 'undefined');
 });

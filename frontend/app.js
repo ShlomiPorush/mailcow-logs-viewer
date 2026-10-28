@@ -1477,18 +1477,22 @@ function renderMessageRow(msg) {
     return `
         <div class="ui-msg-item${tone ? ` ui-msg-${tone}` : ''}" data-key="${escapeHtml(msg.correlation_key || '')}"${msg.message_id ? ` data-mid="${encodeURIComponent(msg.message_id)}"` : ''} onclick="if (!uiRowHeld(event)) viewMessageDetails('${escapeJsArg(msg.correlation_key)}')">
             <div class="ui-msg-l1">
-                <b class="ui-msg-from">${msg.sender ? uiEntity('address', msg.sender, { plain: true }) : 'Unknown'}</b>
+                <b class="ui-msg-from ui-fit" title="${escapeHtml(msg.sender || '')}">${messageRowAddress(msg.sender)}</b>
                 <button type="button" class="ui-row-open ui-msg-at" aria-label="${msg.first_seen ? `${escapeHtml(formatListTime(msg.first_seen))}, open` : 'Open'} the message: ${escapeHtml(msg.subject || 'No subject')}">${uiTime(msg.first_seen, formatListTime(msg.first_seen), { title: formatTime(msg.first_seen) })}</button>
             </div>
-            <p class="ui-msg-sub" dir="auto" title="${escapeHtml(msg.subject || 'No subject')}">${escapeHtml(msg.subject || 'No subject')}</p>
+            <div class="ui-msg-to ui-fit" title="${escapeHtml(msg.recipient || '')}"><span class="ui-msg-to-word">to</span> ${messageRowAddress(msg.recipient)}${renderRecipientMore(msg)}</div>
             <div class="ui-msg-l3">
-                ${uiCorrelationTag(msg)}
-                ${msg.direction ? uiDirectionTag(msg.direction) : ''}
-                ${msg.is_spam ? '<span class="ui-tag ui-tag-spam">SPAM</span>' : ''}
-                <span class="ui-msg-rcpt"><span class="ui-msg-to" title="${escapeHtml(msg.recipient || '')}">to ${msg.recipient ? uiEntity('address', msg.recipient, { plain: true }) : 'Unknown'}</span>${renderRecipientMore(msg)}</span>
-                ${renderMailboxFolderHint(msg)}
+                <p class="ui-msg-sub" dir="auto" title="${escapeHtml(msg.subject || 'No subject')}">${escapeHtml(msg.subject || 'No subject')}</p>
+                <span class="ui-msg-tags">${uiCorrelationTag(msg, { folder: true })}${msg.direction ? uiDirectionTag(msg.direction, { short: true }) : ''}${msg.is_spam ? '<span class="ui-tag ui-tag-spam">SPAM</span>' : ''}</span>
             </div>
         </div>`;
+}
+
+// An address in a Messages row opens its card; a long one loses the end of its
+// local part, never its domain (uiFitAddresses)
+function messageRowAddress(value) {
+    const html = value ? uiEntity('address', value, { plain: true, fit: true }) : 'Unknown';
+    return html.startsWith('<span class="ui-ent') ? html : `<span class="ui-fit-text">${html}</span>`;
 }
 
 // The coloured edge of a row follows its final status.
