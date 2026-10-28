@@ -137,8 +137,14 @@ def _like_suffix(column, domain: str):
     return func.lower(column).like(f"%@{escaped}", escape="\\")
 
 
-def _domain_match(column, domain: str):
+def domain_match(column, domain: str):
+    """The column holds an address on the domain (normalized): the part after its
+    last @ is the domain, in any case and in each form of an IDN. Also used by
+    the Messages and Security events filters, so a list shows what a card counts."""
     return or_(*[_like_suffix(column, form) for form in entity_values.domain_forms(domain)])
+
+
+_domain_match = domain_match
 
 
 # ---------------------------------------------------------------- IP by value

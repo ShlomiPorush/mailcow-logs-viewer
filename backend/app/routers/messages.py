@@ -157,6 +157,30 @@ def message_sort_time():
 
 EXACT_DESCRIPTION = ("Match sender, recipient, user and ip exactly (an address in any case, the IP as written "
                      "canonically) instead of as a part. Off by default")
+ADDRESS_DESCRIPTION = "Messages from or to this email address, matched whole in any case (the entity card's count)"
+DOMAIN_DESCRIPTION = ("Messages from or to an address on this domain: the part after the last @ is the domain, "
+                      "so a subdomain is not included")
+
+
+def address_equals(column, value: str):
+    """The column holds this address, whole, in any case (and in each form of an
+    IDN domain). A value that is not an address is compared as written."""
+    try:
+        forms = entity_values.address_forms(entity_values.normalize_address(value)[0])
+    except entity_values.InvalidValue:
+        forms = [value.strip().lower()]
+    return func.lower(column).in_(forms)
+
+
+def on_domain(column, value: str):
+    """The column's address is on this domain (the part after its last '@'),
+    as the entity card counts it. A value that is not a domain matches nothing."""
+    from ..services.entity_summary import domain_match
+    try:
+        domain = entity_values.normalize_domain(value)
+    except entity_values.InvalidValue:
+        return literal(False)
+    return domain_match(column, domain)
 
 
 def _address_match(column, value: str, exact: bool):
@@ -165,11 +189,7 @@ def _address_match(column, value: str, exact: bool):
     indexed on the deliveries (idx_correlation_sender_lower and _recipient_lower)."""
     if not exact:
         return column.ilike(f"%{value}%")
-    try:
-        forms = entity_values.address_forms(entity_values.normalize_address(value)[0])
-    except entity_values.InvalidValue:
-        forms = [value.strip().lower()]
-    return func.lower(column).in_(forms)
+    return address_equals(column, value)
 
 
 def _ip_match(column, value: str, exact: bool):
@@ -182,12 +202,15 @@ def _ip_match(column, value: str, exact: bool):
 
 
 def _filtered_messages_query(db, search=None, sender=None, recipient=None, direction=None, status=None,
-                             user=None, ip=None, start_date=None, end_date=None, exact=False, base=None):
+                             user=None, ip=None, start_date=None, end_date=None, exact=False, base=None,
+                             address=None, domain=None):
     """The message legs matching the Messages filters. Shared by the list, its
     facet counts, the new-mail count and the CSV export, so a count always
     equals what the list shows for it. With exact, sender, recipient, user and
-    ip match whole values (the entity card's "Show messages"). base is the
-    query to filter (the export's, with its own columns), else the deliveries."""
+    ip match whole values (the entity card's "Show messages"). address and
+    domain are whole matches always: from or to the address, from or to an
+    address on the domain, as the entity card counts them. base is the query
+    to filter (the export's, with its own columns), else the deliveries."""
     # A direct call (tests) may pass the Query default object: only True turns it on
     exact = exact is True
     # Excluded addresses, here in the query, so pages, totals and facet
@@ -226,7 +249,16 @@ def _filtered_messages_query(db, search=None, sender=None, recipient=None, direc
     
     if recipient:
         query = query.filter(_address_match(MessageCorrelation.recipient, recipient, exact))
-    
+
+    # A direct call (tests) may pass the Query default object: only text filters
+    if isinstance(address, str) and address.strip():
+        query = query.filter(or_(address_equals(MessageCorrelation.sender, address),
+                                 address_equals(MessageCorrelation.recipient, address)))
+
+    if isinstance(domain, str) and domain.strip():
+        query = query.filter(or_(on_domain(MessageCorrelation.sender, domain),
+                                 on_domain(MessageCorrelation.recipient, domain)))
+
     if direction:
         query = query.filter(MessageCorrelation.direction == direction)
     
@@ -307,6 +339,8 @@ def get_message_facets(
     end_date: Optional[RangeEnd] = Query(None),
     since: List[str] = Query([], description="Time ranges to count, as name:start, an ISO instant or a YYYY-MM-DD day (e.g. today:2026-09-27T00:00:00Z)"),
     exact: bool = Query(False, description=EXACT_DESCRIPTION),
+    address: Optional[str] = Query(None, max_length=320, description=ADDRESS_DESCRIPTION),
+    domain: Optional[str] = Query(None, max_length=260, description=DOMAIN_DESCRIPTION),
     db: Session = Depends(get_db)
 ):
     """
@@ -320,7 +354,7 @@ def get_message_facets(
     """
     try:
         common = dict(search=search, sender=sender, recipient=recipient, user=user, ip=ip,
-                      start_date=start_date, end_date=end_date, exact=exact)
+                      start_date=start_date, end_date=end_date, exact=exact, address=address, domain=domain)
         by_status = {
             value: _count_messages(_filtered_messages_query(db, direction=direction, status=value, **common))
             for value in FACET_STATUSES
@@ -334,7 +368,8 @@ def get_message_facets(
             "direction": {"all": _count_messages(_filtered_messages_query(db, status=status, **common)), **by_direction},
         }
         if since:
-            undated = dict(search=search, sender=sender, recipient=recipient, user=user, ip=ip, exact=exact)
+            undated = dict(search=search, sender=sender, recipient=recipient, user=user, ip=ip, exact=exact,
+                           address=address, domain=domain)
             by_time = {"all": _count_messages(_filtered_messages_query(db, direction=direction, status=status, **undated))}
             for item in since[:8]:
                 name, _, iso = item.partition(':')
@@ -371,6 +406,8 @@ def count_new_messages(
     start_date: Optional[RangeStart] = Query(None),
     end_date: Optional[RangeEnd] = Query(None),
     exact: bool = Query(False, description=EXACT_DESCRIPTION),
+    address: Optional[str] = Query(None, max_length=320, description=ADDRESS_DESCRIPTION),
+    domain: Optional[str] = Query(None, max_length=260, description=DOMAIN_DESCRIPTION),
     db: Session = Depends(get_db)
 ):
     """
@@ -381,7 +418,7 @@ def count_new_messages(
     """
     try:
         query = _filtered_messages_query(db, search, sender, recipient, direction, status, user, ip, start_date, end_date,
-                                         exact=exact)
+                                         exact=exact, address=address, domain=domain)
         fresh = query.filter(MessageCorrelation.id > after_id).with_entities(
             MessageCorrelation.message_id.label("message_id"),
             message_group_key().label("group_key"),
@@ -417,6 +454,8 @@ def get_unified_messages(
     cursor: Optional[str] = Query(None, max_length=80, description="The next_cursor of the page before: the messages after it, instead of a page number"),
     upto_id: Optional[int] = Query(None, ge=0, description="The watermark of the list's first page: the next pages hold only what it held"),
     exact: bool = Query(False, description=EXACT_DESCRIPTION),
+    address: Optional[str] = Query(None, max_length=320, description=ADDRESS_DESCRIPTION),
+    domain: Optional[str] = Query(None, max_length=260, description=DOMAIN_DESCRIPTION),
     db: Session = Depends(get_db)
 ):
     """
@@ -439,7 +478,7 @@ def get_unified_messages(
         # A direct call (tests) leaves the Query default, which is no watermark
         watermark = upto_id if isinstance(upto_id, int) else messages_watermark(db)
         query = _filtered_messages_query(db, search, sender, recipient, direction, status, user, ip, start_date, end_date,
-                                         exact=exact)
+                                         exact=exact, address=address, domain=domain)
         query = query.filter(MessageCorrelation.id <= watermark)
 
         # One row per message, not one per delivery leg (issue #36). The filters
