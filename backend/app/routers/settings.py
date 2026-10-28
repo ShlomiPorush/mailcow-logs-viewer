@@ -710,7 +710,7 @@ def get_settings_info(request: Request = None, db: Session = Depends(get_db)):
                 },
                 "sync_transports": {
                     "interval": "6 hours" if settings.is_feature_enabled('blacklist') else "Disabled (feature off)",
-                    "description": "Sync Transports & Relayhosts from mailcow",
+                    "description": "Syncs transports and relayhosts from mailcow",
                     "feature_disabled": not settings.is_feature_enabled('blacklist'),
                     "status": jobs_status.get('sync_transports', {}).get('status', 'unknown') if settings.is_feature_enabled('blacklist') else 'disabled',
                     "last_run": format_datetime_utc(jobs_status.get('sync_transports', {}).get('last_run')) if settings.is_feature_enabled('blacklist') else None,

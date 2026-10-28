@@ -31,6 +31,20 @@ test('Status, Jobs lists every job the server reports', () => {
     assert.deepEqual(serverJobs.filter(key => !shown.includes(key)), []);
 });
 
+test('every job Status, Jobs and the search offer to run is in the manual-run map', () => {
+    // The keys of job_mapping in POST /api/settings/jobs/{job}/run: a key missing
+    // there answers 404 on Run (issue #82)
+    const routers = fs.readFileSync(path.join(root, 'backend/app/routers/settings.py'), 'utf8');
+    const block = slice(routers, 'job_mapping = {', '\n    }\n');
+    const runnable = [...block.matchAll(/^ {8}'(\w+)': \(/gm)].map(m => m[1]);
+    assert.ok(runnable.length > 20, runnable.join());
+
+    const context = vm.createContext({});
+    vm.runInContext(slice(app, 'function statusJobCategories(jobs)', 'function renderStatusJobsTable'), context);
+    const keys = Array.from(context.statusJobCategories(new Proxy({}, { get: () => ({}) })).flatMap(cat => cat.jobs.map(([, key]) => key)));
+    assert.deepEqual(keys.filter(key => !runnable.includes(key)), []);
+});
+
 test('the blocklist button reads Check all now again after a check', async () => {
     const original = '<svg aria-hidden="true"></svg>Check all now';
     const btn = { disabled: false, innerHTML: original };

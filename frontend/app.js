@@ -6160,11 +6160,9 @@ function statusJobGroupToggled(el) {
     if (el.open) statusJobsOpen.add(el.dataset.group); else statusJobsOpen.delete(el.dataset.group);
 }
 
+// The Run button of a job (Status > Jobs, Needs attention): it shows the run starting
 async function triggerBackgroundJob(jobKey, buttonEl, jobName = null) {
     if (!buttonEl) return;
-
-    // Use jobName if provided, otherwise fallback to jobKey
-    const displayName = jobName || jobKey;
 
     // Disable button and show loading
     buttonEl.disabled = true;
@@ -6174,13 +6172,39 @@ async function triggerBackgroundJob(jobKey, buttonEl, jobName = null) {
     buttonEl.classList.add('opacity-50', 'cursor-not-allowed');
 
     try {
-        const response = await authenticatedFetch(`/api/settings/jobs/${jobKey}/run`, {
+        await runBackgroundJob(jobKey, jobName);
+    } finally {
+        // Re-enable button
+        buttonEl.disabled = false;
+        buttonEl.innerHTML = originalContent;
+        buttonEl.classList.remove('opacity-50', 'cursor-not-allowed');
+    }
+}
+
+// Run a job now (POST /api/settings/jobs/{job}/run), from any button or none. The
+// server checks the job can run (409 with the reason when it cannot) and is not
+// running already (409). Says how it went and resolves to 'started', 'running',
+// 'unavailable' or 'failed'
+async function runBackgroundJob(jobKey, jobName = null) {
+    // Use jobName if provided, otherwise fallback to jobKey
+    const displayName = jobName || jobKey;
+    try {
+        const response = await authenticatedFetch(`/api/settings/jobs/${encodeURIComponent(jobKey)}/run`, {
             method: 'POST'
         });
 
         if (!response.ok) {
-            const err = await response.json();
-            throw new Error(err.detail || `HTTP ${response.status}`);
+            const err = await response.json().catch(() => null);
+            const detail = uiApiErrorText(err, `HTTP ${response.status}`);
+            if (response.status === 409 && /already running/i.test(detail)) {
+                showToast(`Job "${displayName}" is already running`, 'warning');
+                return 'running';
+            }
+            if (response.status === 409) {
+                showToast(`Job "${displayName}" cannot run now. ${detail.replace(/^The job cannot run\.\s*/, '')}`.trim(), 'warning');
+                return 'unavailable';
+            }
+            throw new Error(detail);
         }
 
         showToast(`Job "${displayName}" started successfully`, 'success');
@@ -6189,19 +6213,11 @@ async function triggerBackgroundJob(jobKey, buttonEl, jobName = null) {
         setTimeout(() => {
             loadStatusExtended();
         }, 1000);
-
+        return 'started';
     } catch (error) {
-        if (error.message.includes('409')) {
-            showToast(`Job "${displayName}" is already running`, 'warning');
-        } else {
-            console.error(`Failed to trigger job ${jobKey}:`, error); // nosemgrep: javascript.lang.security.audit.unsafe-formatstring.unsafe-formatstring
-            showToast(`Failed to start job: ${error.message}`, 'error');
-        }
-    } finally {
-        // Re-enable button
-        buttonEl.disabled = false;
-        buttonEl.innerHTML = originalContent;
-        buttonEl.classList.remove('opacity-50', 'cursor-not-allowed');
+        console.error(`Failed to trigger job ${jobKey}:`, error); // nosemgrep: javascript.lang.security.audit.unsafe-formatstring.unsafe-formatstring
+        showToast(`Failed to start job: ${error.message}`, 'error');
+        return 'failed';
     }
 }
 

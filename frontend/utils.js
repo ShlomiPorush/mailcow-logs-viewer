@@ -387,11 +387,16 @@ function formatListTime(isoString) {
 
 // A "More" menu for a table row. It opens as a popover, so the table's own
 // scrolling cannot clip it; the toggle listener below puts it under its button.
-// small: false gives it a full-size button, beside other full-size ones (the entity card)
+// small: false gives it a full-size button, beside other full-size ones (the entity card).
+// icon: an icon button instead (the three dots of a search row), label naming it;
+// cls and attrs: more classes and attributes for that button (trusted markup)
 let uiMenuSeq = 0;
-function uiMenu(label, itemsHtml, { small = true } = {}) {
+function uiMenu(label, itemsHtml, { small = true, icon = '', cls = '', attrs = '' } = {}) {
     const id = `ui-menu-${++uiMenuSeq}`;
-    return `<button type="button" class="ui-btn${small ? ' ui-btn-sm' : ''}" popovertarget="${id}" aria-haspopup="menu">${escapeHtml(label)}</button>
+    const button = icon
+        ? `<button type="button" class="ui-icon-btn${cls ? ` ${cls}` : ''}" popovertarget="${id}" aria-haspopup="menu" aria-label="${escapeHtml(label)}" title="${escapeHtml(label)}"${attrs ? ` ${attrs}` : ''}>${icon}</button>`
+        : `<button type="button" class="ui-btn${small ? ' ui-btn-sm' : ''}${cls ? ` ${cls}` : ''}" popovertarget="${id}" aria-haspopup="menu"${attrs ? ` ${attrs}` : ''}>${escapeHtml(label)}</button>`;
+    return `${button}
         <div id="${id}" popover class="ui-menu" role="menu" onclick="if (event.target.closest('button')) this.hidePopover()">${itemsHtml}</div>`;
 }
 
@@ -1203,6 +1208,18 @@ function uiConfirmLeave(target, { keep = false } = {}) {
     return uiUnsavedAsking;
 }
 
+// When a job runs and what it keeps, as Status > Jobs and the search write it
+function jobRunsText(job) {
+    return [
+        job.interval,
+        // A clock-time job's time as the setting writes it, in the app's zone
+        job.clock ? `${job.clock.weekday ? `Weekly, ${job.clock.weekday}` : 'Daily'} at ${formatClockAt(job.clock.hour, job.clock.minute)} (${job.clock.zone})` : job.schedule,
+        job.retention ? `keeps ${job.retention}` : '',
+        job.max_age ? `Max: ${job.max_age}` : '',
+        job.expire_after ? `Expire: ${job.expire_after}` : '',
+    ].filter(Boolean).join(', ');
+}
+
 function renderJobCard(name, jobKey, job) {
     if (!job) {
         return '';
@@ -1238,23 +1255,14 @@ function renderJobCard(name, jobKey, job) {
         }
     }
 
-    const runs = [
-        job.interval,
-        // A clock-time job's time as the setting writes it, in the app's zone
-        job.clock ? `${job.clock.weekday ? `Weekly, ${job.clock.weekday}` : 'Daily'} at ${formatClockAt(job.clock.hour, job.clock.minute)} (${job.clock.zone})` : job.schedule,
-        job.retention ? `keeps ${job.retention}` : '',
-        job.max_age ? `Max: ${job.max_age}` : '',
-        job.expire_after ? `Expire: ${job.expire_after}` : '',
-    ].filter(Boolean);
-
     // A healthy job shows a green dot and no tag; everything else says what it is
     const failed = !isDisabled && job.status === 'failed';
     const dot = isDisabled ? '' : failed ? ' ui-mdot-fail' : job.status === 'running' ? ' ui-mdot-info' : job.status === 'success' ? ' ui-mdot-ok' : '';
     return `
-        <div class="ui-jobrow${isDisabled ? ' is-off' : ''}${failed ? ' is-failed' : ''}">
+        <div class="ui-jobrow${isDisabled ? ' is-off' : ''}${failed ? ' is-failed' : ''}" data-job="${escapeHtml(jobKey)}">
             <i class="ui-mdot${dot}"></i>
             <span class="ui-jobrow-name"><b>${escapeHtml(name)}</b>${job.description ? `<small title="${escapeHtml(job.description)}">${escapeHtml(job.description)}</small>` : ''}${isDisabled && !isFeatureOff && job.disabled_reason ? `<small class="ui-text-warn">${escapeHtml(job.disabled_reason)}</small>` : ''}</span>
-            <span class="ui-jobrow-runs">${escapeHtml(runs.join(', ') || '-')}${job.pending_items !== undefined ? ` <small class="ui-text-warn">Pending: ${escapeHtml(String(job.pending_items))}</small>` : ''}</span>
+            <span class="ui-jobrow-runs">${escapeHtml(jobRunsText(job) || '-')}${job.pending_items !== undefined ? ` <small class="ui-text-warn">Pending: ${escapeHtml(String(job.pending_items))}</small>` : ''}</span>
             <span class="ui-jobrow-last" title="${job.last_run ? escapeHtml(formatTime(job.last_run)) : ''}">${job.last_run ? formatAgo(job.last_run) : 'Not run yet'}</span>
             <span class="ui-jobrow-tag">${job.status === 'success' && !isDisabled ? '' : statusBadge}</span>
             <span class="ui-jobrow-act">${!isDisabled ? `

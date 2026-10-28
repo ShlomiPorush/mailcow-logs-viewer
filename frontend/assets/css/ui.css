@@ -2902,12 +2902,21 @@ html .markdown-body .markdown-alert-caution .markdown-alert-title { color: var(-
 .ui-gs-sec { display: flex; justify-content: space-between; align-items: baseline; padding: 10px 10px 4px; font-size: 11.5px; font-weight: 650;
     letter-spacing: .04em; text-transform: uppercase; color: var(--ui-muted); }
 .ui-gs-sec .ui-link { padding: 0; border: 0; background: none; font: inherit; font-size: 12.5px; font-weight: 600; letter-spacing: 0; text-transform: none; color: var(--ui-ink); }
+/* A result row: the result, then the buttons that act on it (Card, Ban, Allow, Run) */
+.ui-gs-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; border-radius: 8px; cursor: pointer; }
 .ui-gs-item { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; align-items: center; gap: 2px 10px; width: 100%; padding: 7px 10px;
     border: 0; border-radius: 8px; background: none; color: inherit; font: inherit; text-align: start; cursor: pointer; }
-@media (hover: hover) { .ui-gs-item:hover, .ui-gs-more:hover { background: var(--ui-panel); } }
+@media (hover: hover) { .ui-gs-row:hover, .ui-gs-more:hover { background: var(--ui-panel); } }
 /* The result Enter opens: a bar on its side, plain enough to follow with the arrows */
-.ui-gs-item.is-active, .ui-gs-more.is-active { background: var(--ui-panel); box-shadow: inset 3px 0 0 var(--ui-ink); }
-[dir="rtl"] .ui-gs-item.is-active, [dir="rtl"] .ui-gs-more.is-active { box-shadow: inset -3px 0 0 var(--ui-ink); }
+.ui-gs-row.is-active, .ui-gs-more.is-active { background: var(--ui-panel); box-shadow: inset 3px 0 0 var(--ui-ink); }
+[dir="rtl"] .ui-gs-row.is-active, [dir="rtl"] .ui-gs-more.is-active { box-shadow: inset -3px 0 0 var(--ui-ink); }
+/* The buttons show on the active row and on hover, like the hover-only copy icon */
+.ui-gs-acts { display: flex; align-items: center; gap: 6px; padding-inline-end: 10px; visibility: hidden; opacity: 0; transition: opacity .15s ease; cursor: default; }
+.ui-gs-row.is-active .ui-gs-acts, .ui-gs-row:focus-within .ui-gs-acts { visibility: visible; opacity: 1; }
+@media (hover: hover) { .ui-gs-row:hover .ui-gs-acts { visibility: visible; opacity: 1; } }
+.ui-gs-dots { display: none; }
+/* Ban in a row menu: red text, as .ui-btn-danger */
+.ui-menu button.ui-text-fail { color: var(--ui-fail); }
 .ui-gs-tab:focus-visible, .ui-gs-item:focus-visible, .ui-gs-more:focus-visible { outline: 2px solid var(--ui-focus); outline-offset: -2px; }
 .ui-gs-ic { grid-row: 1 / span 2; display: grid; place-items: center; color: var(--ui-muted); }
 .ui-gs-item b { font-weight: 600; font-size: 13.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -2945,6 +2954,11 @@ html .markdown-body .markdown-alert-caution .markdown-alert-title { color: var(-
     .ui-gs.is-sheet .ui-gs-body { padding-bottom: calc(16px + env(safe-area-inset-bottom)); }
     .ui-gs.is-sheet .ui-gs-item { padding: 10px; }
     .ui-gs.is-sheet .ui-gs-keys { display: none; }
+    /* No button row on a phone: a tap opens the row, one "..." button its menu; the
+       button spans the two text lines, so the row keeps its height */
+    .ui-gs-acts { visibility: visible; opacity: 1; padding-inline-end: 4px; }
+    .ui-gs-acts > .ui-btn { display: none; }
+    .ui-gs-dots { display: inline-grid; margin-block: -6px; color: var(--ui-muted); }
     html.ui-gs-locked, html.ui-gs-locked body { overflow: hidden; }
     /* A message opened from the search comes over it */
     html:has(#message-modal:not(.hidden)) .ui-gs.is-sheet { z-index: 49; }
