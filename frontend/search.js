@@ -245,8 +245,10 @@ const GS_IP_ACTIVITY = [
 
 // A typed address the lists do not hold, as its card has it (GET /api/entities/ip,
 // the card's own period): what it holds, or "No activity" only when every source
-// of activity was read and holds nothing. A source that is off or failed, or a
-// card that could not be read, says nothing either way. The value comes back as
+// of activity was read and holds nothing. A source whose feature is off in
+// Settings (disabled) keeps no data, so it does not stand in the way; one that
+// failed or is missing, or a card that could not be read, says nothing either
+// way. The value comes back as
 // the server writes it (IPv6 compressed, an IPv4 mapped into IPv6 as IPv4)
 async function gsTypedIp(ip, signal) {
     let data = null;
@@ -264,7 +266,8 @@ async function gsTypedIp(ip, signal) {
     const days = Math.round((Date.parse(range.end) - Date.parse(range.start)) / 86400000);
     const within = days > 0 ? ` in the last ${uiCountLabel(days, 'day', 'days')}` : '';
     if (found.length) return { value, sub: found.map(([n, one, many]) => uiCountLabel(n, one, many)).join(' · ') + within };
-    if (data && read.length === GS_IP_ACTIVITY.length) return { value, sub: `No activity${within}` };
+    const unread = GS_IP_ACTIVITY.filter(([name]) => !sources[name] || !['ok', 'disabled'].includes(sources[name].state));
+    if (data && read.length && !unread.length) return { value, sub: `No activity${within}` };
     return { value, sub: 'Not in these results' };
 }
 

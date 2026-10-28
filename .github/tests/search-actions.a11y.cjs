@@ -615,9 +615,16 @@ test('S3: a typed address the lists do not hold says what its card holds, read e
     await search(w, '198.51.100.201');
     assert.equal(rowOf(w, '198.51.100.201').querySelector('small').textContent, '2 messages · 3 security events in the last 7 days');
 
-    // A source not read (off, failed) or a card that could not be read claims nothing
-    for (const entity of [v => ipEntity(v, { dmarc: { state: 'disabled', reason: 'DMARC is turned off.' } }),
+    // A source turned off in Settings keeps no data: it does not stand in the way
+    w.reply = server({ addresses: [], entity: v => ipEntity(v, { dmarc: { state: 'disabled', reason: 'DMARC is turned off in Settings.' } }) });
+    await search(w, '198.51.100.203');
+    assert.equal(rowOf(w, '198.51.100.203').querySelector('small').textContent, 'No activity in the last 7 days');
+
+    // A source that failed or is missing, or a card that could not be read, claims nothing
+    const without = (card, name) => { delete card.sources[name]; return card; };
+    for (const entity of [v => ipEntity(v, { dmarc: { state: 'error', reason: 'The query failed.' } }),
         v => ipEntity(v, { messages: { state: 'error', reason: 'The query failed.' } }),
+        v => without(ipEntity(v), 'devices'),
         () => ({ __status: 500, detail: 'Internal error' })]) {
         w.reply = server({ addresses: [], entity });
         await search(w, '198.51.100.202');
