@@ -179,7 +179,7 @@ test('Show messages opens Messages on the IP matched whole: a chip says so, a fa
     await settle(w);
     let list = params(asked(w, '/api/messages?').at(-1).url);
     assert.equal(list.get('ip'), '203.0.113.45');
-    assert.equal(list.get('exact'), 'true');
+    assert.equal(list.get('exact_ip'), 'true');
     assert.ok(list.get('start_date'), 'the card period: its last 7 days');
     assert.equal($(w, '#messages-date-range').value, '7days');
     assert.equal($(w, '#messages-filter-ip').value, '203.0.113.45');
@@ -191,20 +191,20 @@ test('Show messages opens Messages on the IP matched whole: a chip says so, a fa
     await settle(w);
     list = params(asked(w, '/api/messages?').at(-1).url);
     assert.equal(list.get('status'), 'delivered');
-    assert.equal(list.get('exact'), 'true');
+    assert.equal(list.get('exact_ip'), 'true');
     const facets = params(asked(w, '/api/messages/facets').at(-1).url);
-    assert.equal(facets.get('exact'), 'true');
+    assert.equal(facets.get('exact_ip'), 'true');
     assert.equal(facets.get('ip'), '203.0.113.45');
     // The export sends what the list shows
     await w.exportCSV('messages');
     const exported = params(asked(w, '/api/export/messages/csv', 'HEAD').at(-1).url);
-    assert.equal(exported.get('exact'), 'true');
+    assert.equal(exported.get('exact_ip'), 'true');
     assert.equal(exported.get('ip'), '203.0.113.45');
     // The chip's X takes it off, with the IP it set
     $(w, '#messages-exact button').click();
     await settle(w);
     list = params(asked(w, '/api/messages?').at(-1).url);
-    assert.equal(list.get('exact'), null);
+    assert.equal(list.get('exact_ip'), null);
     assert.equal(list.get('ip'), null);
     assert.equal($(w, '#messages-exact').innerHTML, '');
 });
@@ -240,7 +240,8 @@ test('Show messages for an address or a domain filters from or to it; another co
     list = params(asked(w, '/api/messages?').at(-1).url);
     assert.equal(list.get('domain'), 'example.net');
     assert.equal(list.get('ip'), '192.0.2.9');
-    assert.equal(list.get('exact'), 'true');
+    assert.equal(list.get('exact'), null, 'the IP typed is matched as a part, as on any visit');
+    assert.equal(list.get('exact_ip'), null);
     assert.match($(w, '#messages-exact').textContent, /example\.net/);
 });
 
@@ -256,14 +257,15 @@ test('a condition added keeps the whole value the card set; changing or clearing
     w.applyMessagesFilters();
     await settle(w);
     let list = params(asked(w, '/api/messages?').at(-1).url);
-    assert.equal(list.get('exact'), 'true', 'Sender added: still whole');
+    assert.equal(list.get('exact_ip'), 'true', 'Sender added: the IP is still whole');
+    assert.equal(list.get('exact'), null, 'and the Sender is a part, as on any visit');
     assert.equal(list.get('ip'), '203.0.113.45');
     assert.equal(list.get('sender'), 'billing@example.net');
     $(w, '#messages-filter-ip').value = '203.0.113';
     w.applyMessagesFilters();
     await settle(w);
     list = params(asked(w, '/api/messages?').at(-1).url);
-    assert.equal(list.get('exact'), null, 'the IP it set was changed');
+    assert.equal(list.get('exact_ip'), null, 'the IP it set was changed');
     assert.equal($(w, '#messages-exact').innerHTML, '');
 
     // The same on Security events: a Username added keeps the IP whole, the IP cleared drops it
@@ -668,4 +670,77 @@ test('the progress is asked for a limited time, each request with a time limit',
     await wait(w, 300);
     assert.equal(options.length, asks, 'no more after the limit');
     assert.match($(w, '#entity-rbl-tile').textContent, /Still checking/);
+});
+
+// --------------------------------------------------------------- review round 2
+
+test('a condition added to a card\'s filter is matched as a part, in the list, the counts, the new mail and the export', async () => {
+    const w = page();
+    w.reply = url => (url.startsWith('/api/messages/facets') ? { status: {}, direction: {}, time: {} }
+        : url.startsWith('/api/messages/new') ? { count: 0, watermark: 5 }
+        : url.startsWith('/api/messages') ? { data: [], total: 0, watermark: 5 } : {});
+    const sent = (part, method = 'GET') => params(asked(w, part, method).at(-1).url);
+    // A domain card, then a partial sender typed in: no exact anywhere
+    await openCard(w, 'domain', 'example.net', domainCard());
+    $(w, '[data-ent-act="messages"]').click();
+    await wait(w, 150);
+    await settle(w);
+    $(w, '#messages-filter-sender').value = 'billing';
+    w.applyMessagesFilters();
+    await settle(w, 10);
+    for (const q of [sent('/api/messages?'), sent('/api/messages/facets')]) {
+        assert.equal(q.get('domain'), 'example.net');
+        assert.equal(q.get('sender'), 'billing');
+        assert.equal(q.get('exact'), null, 'billing matches billing@example.com, as on any visit');
+        assert.equal(q.get('exact_ip'), null);
+    }
+    await w.exportCSV('messages');
+    const exported = sent('/api/export/messages/csv', 'HEAD');
+    assert.equal(exported.get('exact'), null);
+    assert.equal(exported.get('domain'), 'example.net');
+    // The new-mail count asks with the same filters
+    const fresh = w.messagesFilterParams(w.eval('currentFilters.messages'));
+    assert.equal(fresh.get('exact'), null);
+    assert.equal(fresh.get('domain'), 'example.net');
+    // An IP card: the IP whole (exact_ip), the sender added still a part
+    await openCard(w, 'ip', '203.0.113.45', ipCard());
+    $(w, '[data-ent-act="messages"]').click();
+    await wait(w, 150);
+    await settle(w);
+    $(w, '#messages-filter-sender').value = 'billing';
+    w.applyMessagesFilters();
+    await settle(w, 10);
+    for (const q of [sent('/api/messages?'), sent('/api/messages/facets'), w.messagesFilterParams(w.eval('currentFilters.messages'))]) {
+        assert.equal(q.get('exact_ip'), 'true');
+        assert.equal(q.get('exact'), null);
+        assert.equal(q.get('sender'), 'billing');
+    }
+    await w.exportCSV('messages');
+    assert.equal(sent('/api/export/messages/csv', 'HEAD').get('exact_ip'), 'true');
+    assert.equal(sent('/api/export/messages/csv', 'HEAD').get('exact'), null);
+});
+
+test('a mailbox that comes after the period, the filters or the view changed opens nothing', async () => {
+    const w = page();
+    const held = [];
+    w.reply = url => (url.startsWith('/api/mailbox-stats/all') && url.includes('username=') ? new Promise(resolve => held.push(resolve)) : {});
+    const answer = i => held[i]({ mailboxes: [mailboxRow('j.doe@example.net')], activity_unit: 'day', activity_buckets: [] });
+    // Asked over 7 days, then Today chosen before the answer
+    const first = w.openMailboxFor('j.doe@example.net', { preset: '7days' });
+    await settle(w);
+    w.selectDatePreset('today');
+    await settle(w);
+    answer(0);
+    await first;
+    await settle(w);
+    assert.ok($(w, '#mailbox-activity-modal').classList.contains('hidden'), 'not over another period');
+    // Asked, then Rate Limits opened on the same page
+    const second = w.openMailboxFor('j.doe@example.net', { preset: '7days' });
+    await settle(w);
+    w.mailboxStatsSwitchView('rate-limits');
+    await settle(w);
+    answer(1);
+    await second;
+    await settle(w);
+    assert.ok($(w, '#mailbox-activity-modal').classList.contains('hidden'), 'not over Rate Limits');
 });

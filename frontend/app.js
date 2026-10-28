@@ -20,7 +20,7 @@
  * @param {string} options.ip - Source IP to filter by
  * @param {string} options.address - From or to this address, matched whole (it has no field of its own)
  * @param {string} options.domain - From or to an address on this domain (the part after the last @)
- * @param {boolean} options.exact - Match the email and the IP whole, not as a part (the entity card)
+ * @param {boolean} options.exact - Match the IP whole, not as a part (the entity card); other filters stay a part
  * @param {string} options.datePreset - A time preset ('today', '7days', '30days', '90days'), or
  * @param {string} options.start - with options.end, an exact range (ISO instants, the end inclusive)
  * @returns {Promise<boolean>} whether the Messages page opened
@@ -74,10 +74,8 @@ function navigateToMessagesWithFilter(options) {
     // Whole values (the entity card): the fields set here, and an address or a
     // domain, which have no field. A filter changed later drops them (applyMessagesFilters)
     const field = el => (el ? el.value : '');
-    messagesExact = options.exact || options.address || options.domain ? {
-        sender: options.exact ? field(filterSender) : '', recipient: options.exact ? field(filterRecipient) : '',
-        user: options.exact ? field(filterUser) : '', ip: options.exact ? field(filterIp) : '',
-        address: options.address || '', domain: options.domain || '',
+    messagesExact = (options.exact && field(filterIp)) || options.address || options.domain ? {
+        ip: options.exact ? field(filterIp) : '', address: options.address || '', domain: options.domain || '',
     } : null;
 
     // The period, when one is given: a preset up to now, or an exact range
@@ -1571,18 +1569,20 @@ async function messagesFetch(url, timeout = 0) {
 
 // The Messages filters every request sends: the list, its facet counts and the
 // new-mail count (the CSV export sends currentFilters.messages as it is).
-// exact, address and domain come from an entity card (messagesExact)
-const MESSAGES_FILTER_KEYS = ['search', 'sender', 'recipient', 'direction', 'user', 'status', 'ip', 'address', 'domain', 'exact', 'start_date', 'end_date'];
+// exact_ip, address and domain come from an entity card (messagesExact); exact
+// (every address and IP filter whole) is the API's, which the page keeps sending
+// when a filter has it
+const MESSAGES_FILTER_KEYS = ['search', 'sender', 'recipient', 'direction', 'user', 'status', 'ip', 'address', 'domain', 'exact_ip', 'exact', 'start_date', 'end_date'];
 
 // The filters an entity card opened Messages with ("Show messages"), matched
-// whole and not as a part: the sender, recipient, user and IP it set, and an
-// address or a domain, which have no field (from or to them). They hold until
-// a field the card filled is changed or cleared (another condition added keeps
-// them, and is matched whole too); a chip above the list names them and takes
-// them off (updateMessagesFilterState). Filters set any other way drop them:
-// they hold only while the filters in use are the ones they made (filters).
-let messagesExact = null;   // { sender, recipient, user, ip, address, domain, filters } or null
-const MESSAGES_EXACT_FIELDS = ['sender', 'recipient', 'user', 'ip'];
+// whole and not as a part, each in a filter of its own: the IP it set (exact_ip),
+// and an address or a domain, which have no field (from or to them). A condition
+// added keeps them and is matched as a part, as on any visit; they go when the
+// IP the card filled is changed or cleared. A chip above the list names them and
+// takes them off (updateMessagesFilterState). Filters set any other way drop
+// them: they hold only while the filters in use are the ones they made (filters).
+let messagesExact = null;   // { ip, address, domain, filters } or null
+const MESSAGES_EXACT_FIELDS = ['ip'];
 
 // The fields' filters with the whole-value ones that still hold
 function messagesWithExact(fields) {
@@ -1591,7 +1591,7 @@ function messagesWithExact(fields) {
     const x = messagesExact;
     if (x && MESSAGES_EXACT_FIELDS.some(key => x[key] && (fields[key] || '') !== x[key])) messagesExact = null;
     if (!messagesExact) return fields;
-    const filters = { ...fields, exact: 'true', ...(x.address ? { address: x.address } : {}), ...(x.domain ? { domain: x.domain } : {}) };
+    const filters = { ...fields, ...(x.ip ? { exact_ip: 'true' } : {}), ...(x.address ? { address: x.address } : {}), ...(x.domain ? { domain: x.domain } : {}) };
     x.filters = filters;
     return filters;
 }
@@ -1601,9 +1601,6 @@ function messagesExactParts(x) {
     const parts = [];
     if (x.address) parts.push(['From or to', x.address]);
     if (x.domain) parts.push(['From or to', `@${x.domain}`]);
-    if (x.sender) parts.push(['From', x.sender]);
-    if (x.recipient) parts.push(['To', x.recipient]);
-    if (x.user) parts.push(['Signed in as', x.user]);
     if (x.ip) parts.push(['IP', x.ip]);
     return parts;
 }
@@ -4939,8 +4936,8 @@ function updateMessagesFilterState() {
     // The whole values an entity card set, as the Security page's filter chip (security.js renderSecurityOverview)
     const chips = document.getElementById('messages-exact');
     if (chips) {
-        const parts = f.exact && messagesExact ? messagesExactParts(messagesExact) : [];
-        chips.innerHTML = parts.length ? `<span class="ui-sec-filter" title="Matched whole, not as a part of a longer value. While this is on, a sender, recipient, user or IP added is matched whole too"><span>${parts.map(([label, value]) =>
+        const parts = messagesExact && messagesExact.filters === f ? messagesExactParts(messagesExact) : [];
+        chips.innerHTML = parts.length ? `<span class="ui-sec-filter" title="Matched whole, not as a part of a longer value"><span>${parts.map(([label, value]) =>
             `${escapeHtml(label)} <bdi>${escapeHtml(value)}</bdi>`).join(', ')}</span><button type="button" onclick="clearMessagesExact()" aria-label="Remove this filter" title="Remove this filter">&times;</button></span>` : '';
     }
 }

@@ -549,16 +549,19 @@ async function openMailboxFor(address, { preset = '', startDay = '', endDay = ''
     if (!(await navigateTo('mailbox-stats', { sub: 'statistics' }))) return false;
     if (typeof onMoved === 'function') onMoved();
     let data = null;
+    // The period and filters asked with: an answer for others is not this page's
+    const asked = mailboxStatsListUrl(1);
     try {
-        const response = await authenticatedFetch(`${mailboxStatsListUrl(1)}&username=${encodeURIComponent(wanted)}`);
+        const response = await authenticatedFetch(`${asked}&username=${encodeURIComponent(wanted)}`);
         if (response.ok) data = await response.json();
     } catch (e) {
         data = null;
     }
-    // Opened again since, or the page left: this answer opens nothing
+    // Opened again since, the page left, or its view, period or filters changed: this answer opens nothing
     const page = document.getElementById('content-mailbox-stats');
     if (seq !== openMailboxSeq || (typeof currentTab !== 'undefined' && currentTab !== 'mailbox-stats')
-        || (page && page.classList.contains('hidden'))) return true;
+        || (page && page.classList.contains('hidden')) || mailboxStatsView !== 'statistics'
+        || mailboxStatsListUrl(1) !== asked) return true;
     if (!data) {
         showToast('The mailbox could not be loaded. Try again in a moment.', 'error');
         return true;

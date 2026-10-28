@@ -12,7 +12,8 @@ from ..models import PostfixLog, RspamdLog, NetfilterLog, MessageCorrelation
 from ..app_time import local_now, to_local
 from ..config import settings
 from ..utils import internal_error, RangeStart, RangeEnd
-from .messages import (ADDRESS_DESCRIPTION, DOMAIN_DESCRIPTION, EXACT_DESCRIPTION, _filtered_messages_query,
+from .messages import (ADDRESS_DESCRIPTION, DOMAIN_DESCRIPTION, EXACT_DESCRIPTION, EXACT_IP_DESCRIPTION,
+                       _filtered_messages_query,
                        address_equals, message_sort_time, on_domain)
 from ..services.entity_values import spellings_of_typed_ip
 from ..services import excluded_addresses
@@ -323,6 +324,7 @@ def export_messages_csv(
     exact: bool = Query(False, description=EXACT_DESCRIPTION),
     address: Optional[str] = Query(None, max_length=320, description=ADDRESS_DESCRIPTION),
     domain: Optional[str] = Query(None, max_length=260, description=DOMAIN_DESCRIPTION),
+    exact_ip: bool = Query(False, description=EXACT_IP_DESCRIPTION),
     db: Session = Depends(get_csv_db)
 ):
     """
@@ -339,7 +341,7 @@ def export_messages_csv(
         # addresses and the exact mode included, so the file holds what the list shows
         query = _filtered_messages_query(db, search, sender, recipient, direction, status, user, ip,
                                          start_date, end_date, exact=exact, base=query,
-                                         address=address, domain=domain)
+                                         address=address, domain=domain, exact_ip=exact_ip)
         query = query.options(load_only(
             MessageCorrelation.first_seen, MessageCorrelation.sender, MessageCorrelation.recipient,
             MessageCorrelation.subject, MessageCorrelation.direction, MessageCorrelation.final_status,

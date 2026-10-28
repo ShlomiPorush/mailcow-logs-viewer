@@ -1528,6 +1528,15 @@ def validate_geoip_db():
 # MANUAL JOB TRIGGER
 # =============================================================================
 
+def _restore_job_status(status_key: str, previous: dict) -> None:
+    """A job's status back to what it was before a manual run that did nothing."""
+    statuses = get_job_status()
+    if previous:
+        statuses[status_key] = dict(previous)
+    else:
+        statuses[status_key] = {'last_run': None, 'status': 'idle', 'error': None}
+
+
 @router.post("/settings/jobs/{job_name}/run", responses=documented(m.JobStarted, description="The job started in the background", errors={404: None, 409: None}))
 def trigger_job(job_name: str, background_tasks: BackgroundTasks):
     """
@@ -1644,7 +1653,14 @@ def trigger_job(job_name: str, background_tasks: BackgroundTasks):
         current_status = get_job_status().get(status_key, {})
     if current_status.get('status') == 'running':
         raise HTTPException(status_code=409, detail=f"Job {job_name} is already running")
-    
+    # A blocklist check started elsewhere (an entity card's Check now) holds the
+    # job's lock without its status: refused here, before the job is marked running
+    if job_name == 'blacklist_check':
+        from ..scheduler import blacklist_check_lock
+        if blacklist_check_lock().locked():
+            raise HTTPException(status_code=409, detail="A blocklist check is already running. Try again when it is done.")
+    previous = dict(current_status)
+
     # Mark job as running immediately (only for non-self-managing jobs)
     if not self_managing:
         update_job_status(status_key, 'running')
@@ -1662,6 +1678,12 @@ def trigger_job(job_name: str, background_tasks: BackgroundTasks):
             # that skipped leaves it to the run that holds the job
             if not self_managing and result not in (JOB_SKIPPED, JOB_STATUS_SET):
                 update_job_status(status_key, 'success')
+            # ... unless nothing that sets it holds the job: a blocklist check of
+            # one address (taken since the check above) leaves the status as it was
+            elif not self_managing and result == JOB_SKIPPED and job_name == 'blacklist_check':
+                from ..scheduler import blacklist_check_holder
+                if blacklist_check_holder() != 'full':
+                    _restore_job_status(status_key, previous)
         except Exception as e:
             logger.error(f"Manual job {job_name} failed: {e}")
             if not self_managing:
