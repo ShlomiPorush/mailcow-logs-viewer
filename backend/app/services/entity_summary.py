@@ -90,12 +90,27 @@ def _from_epoch(value: Optional[int]) -> Optional[str]:
 
 # ---------------------------------------------------------------- sources
 
-def _run(db: Session, feature: Optional[str], what: str, read: Callable[[], dict]) -> dict:
-    """One source's answer: disabled while its feature is off, error when it fails."""
+def _run(db: Session, feature: Optional[str], what: str, read: Callable[[], dict], snapshot: bool = False) -> dict:
+    """One source's answer: disabled while its feature is off, error when it fails.
+
+    With snapshot the source reads in one REPEATABLE READ transaction of its
+    own (as routers/security_alerts.py does): the address candidates it pages
+    through (_ip_value_match) and the counts built on them see the same rows,
+    even while an import commits. The card only reads, so ending the read
+    transaction before and after it loses nothing; the other sources keep
+    the default isolation (the connection's level is reset when it goes back
+    to the pool)."""
     if feature and not settings.is_feature_enabled(feature):
         return {"state": "disabled", "reason": f"The {_FEATURE_NAMES[feature]} feature is turned off."}
     try:
-        return {"state": "ok", "reason": None, **read()}
+        if snapshot:
+            _rollback(db)
+            db.connection(execution_options={"isolation_level": "REPEATABLE READ"})
+        try:
+            return {"state": "ok", "reason": None, **read()}
+        finally:
+            if snapshot:
+                _rollback(db)
     except Off as e:
         return {"state": "disabled", "reason": str(e)}
     except Unavailable as e:
@@ -648,10 +663,11 @@ def ip_summary(db: Session, ip: str, start: datetime, end: datetime,
         "security": _run(db, "netfilter", "the security events",
                          lambda: _security(db, _ip_spellings_match(NetfilterLog.ip, ip), start, end, with_ips=False)),
         "lists": _run(db, "netfilter", "the Fail2ban lists", lambda: _lists(ip, read_fail2ban)),
-        "protection": _run(db, "netfilter", "the protection catches", lambda: _protection_of_ip(db, ip, start, end)),
-        "devices": _run(db, "devices", "the devices", lambda: _devices_of_ip(db, ip, start, end)),
-        "dmarc": _run(db, "dmarc", "the DMARC reports", lambda: _dmarc_of_ip(db, ip, start, end)),
-        "rbl": _run(db, "blacklist", "the blocklist check", lambda: _rbl(db, ip)),
+        "protection": _run(db, "netfilter", "the protection catches", lambda: _protection_of_ip(db, ip, start, end),
+                           snapshot=True),
+        "devices": _run(db, "devices", "the devices", lambda: _devices_of_ip(db, ip, start, end), snapshot=True),
+        "dmarc": _run(db, "dmarc", "the DMARC reports", lambda: _dmarc_of_ip(db, ip, start, end), snapshot=True),
+        "rbl": _run(db, "blacklist", "the blocklist check", lambda: _rbl(db, ip), snapshot=True),
         "geo": _run(db, None, "the place of the address", lambda: _geo(ip)),
     }
     # Only the device's last address is stored: an IP card says when it was last seen from there

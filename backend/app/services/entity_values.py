@@ -91,16 +91,31 @@ def ip_spellings(ip: str) -> List[str]:
     indexed IN (...) on a stored column: the canonical form, and for IPv4 the
     IPv4-mapped IPv6 spellings (three prefixes, the tail dotted, in compressed
     hex or in zero-padded hex, lower and upper case); for IPv6 the compressed
-    and exploded forms in both cases. Any other spelling needs same_ip()."""
+    and exploded forms in both cases, and for an IPv4-compatible address
+    (::a.b.c.d) the same three tails after its prefixes. Any other spelling
+    needs same_ip()."""
     address = ipaddress.ip_address(ip)
     if address.version == 6:
         forms = [str(address), address.exploded]
+        if address != ipaddress.IPv6Address(0) and int(address) >> 32 == 0:
+            # IPv4-compatible (::a.b.c.d): glibc's inet_ntop, which Rspamd uses, writes
+            # the tail dotted. Another address than a.b.c.d or ::ffff:a.b.c.d
+            forms += _embedded_ipv4_forms(ipaddress.IPv4Address(int(address)), _COMPATIBLE_PREFIXES)
         return list(dict.fromkeys(forms + [f.upper() for f in forms]))
+    forms = _embedded_ipv4_forms(address, _MAPPED_PREFIXES)
+    return list(dict.fromkeys([str(address)] + forms + [f.upper() for f in forms]))
+
+
+_COMPATIBLE_PREFIXES = ("::", "0:0:0:0:0:0:", "0000:0000:0000:0000:0000:0000:")
+
+
+def _embedded_ipv4_forms(address: ipaddress.IPv4Address, prefixes) -> List[str]:
+    """An IPv4 address as the tail of an IPv6 text after each prefix: dotted,
+    in compressed hex and in zero-padded hex (lower case)."""
     packed = address.packed
     high, low = (packed[0] << 8) | packed[1], (packed[2] << 8) | packed[3]
     tails = (str(address), f"{high:x}:{low:x}", f"{high:04x}:{low:04x}")
-    forms = [prefix + tail for prefix in _MAPPED_PREFIXES for tail in tails]
-    return list(dict.fromkeys([str(address)] + forms + [f.upper() for f in forms]))
+    return [prefix + tail for prefix in prefixes for tail in tails]
 
 
 def spellings_of_typed_ip(value) -> List[str]:
