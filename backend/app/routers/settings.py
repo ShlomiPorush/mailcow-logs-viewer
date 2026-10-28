@@ -1543,7 +1543,7 @@ def _restore_job_status(status_key: str, previous: dict, mark: dict) -> None:
 
 
 @router.post("/settings/jobs/{job_name}/run", responses=documented(m.JobStarted, description="The job started in the background", errors={404: None, 409: None}))
-def trigger_job(job_name: str, background_tasks: BackgroundTasks):
+async def trigger_job(job_name: str, background_tasks: BackgroundTasks):
     """
     Manually trigger a background job.
     

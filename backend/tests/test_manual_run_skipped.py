@@ -51,7 +51,7 @@ def test_a_manual_import_that_meets_another_import_leaves_the_status_to_it(featu
 
     # Status accepts the Run while no import runs
     tasks = BackgroundTasks()
-    assert settings_router.trigger_job('dmarc_imap_sync', tasks)['status'] == 'started'
+    assert asyncio.run(settings_router.trigger_job('dmarc_imap_sync', tasks))['status'] == 'started'
 
     # The scheduled import takes the lock before the manual run's task starts
     owner = threading.Thread(target=lambda: asyncio.run(scheduler.dmarc_imap_sync_job()))
@@ -82,7 +82,7 @@ def test_a_manual_blacklist_check_that_meets_another_check_leaves_the_status_to_
 
     async def main():
         tasks = BackgroundTasks()
-        assert settings_router.trigger_job('blacklist_check', tasks)['status'] == 'started'
+        assert (await settings_router.trigger_job('blacklist_check', tasks))['status'] == 'started'
         # A full check (the Blacklist page's or the schedule's) holds the lock; it sets the status
         async with scheduler.blacklist_check_hold('full'):
             scheduler.update_job_status('blacklist_check', 'running')   # as the full check does
@@ -103,7 +103,7 @@ def test_a_manual_blacklist_check_that_runs_is_marked_a_success(features_on, mon
     monkeypatch.setattr(scheduler, "_run_check_monitored_hosts", fake_check)
     scheduler.update_job_status('blacklist_check', 'idle')
     tasks = BackgroundTasks()
-    assert settings_router.trigger_job('blacklist_check', tasks)['status'] == 'started'
+    assert asyncio.run(settings_router.trigger_job('blacklist_check', tasks))['status'] == 'started'
     asyncio.run(tasks())
     assert checks == [False]
     assert scheduler.job_status['blacklist_check']['status'] == 'success'
