@@ -23,7 +23,7 @@ Only the container state `running` counts as running. An ignored container stays
 
 A recent **Last Fetch Run** with an older **Last Import** usually means mailcow had no new lines.
 
-**Waiting to be linked** lists up to five recent messages that are not fully linked yet. The app keeps trying until they are linked or reach **Max Correlation Age Minutes** (10 by default, under **Settings** > **Correlation**), then marks them expired.
+**Waiting to be linked** lists up to five recent messages that are not fully linked yet. The app keeps trying until they are linked or reach **Stop looking after (minutes)** (10 by default, under **Settings** > **Message linking**), then marks them expired.
 
 ## Jobs
 

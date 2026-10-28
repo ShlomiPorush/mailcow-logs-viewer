@@ -167,10 +167,10 @@ test('the Outgoing spam card and its setting do not say IMAP is never affected',
     assert.doesNotMatch(intro(false), /app passwords/);
     const context = load();
     vm.runInContext(fs.readFileSync(path.join(frontend, 'settings.js'), 'utf8'), context);
-    assert.doesNotMatch(context.SETTINGS_FIELD_DESCRIPTIONS.smtp_abuse_enabled, /IMAP is never affected/);
+    assert.doesNotMatch(context.SETTINGS_FIELD_DESCRIPTIONS.smtp_abuse_enabled || '', /IMAP is never affected/);
     const tab = context.SETTINGS_EDIT_TABS.find(t => t.id === 'smtp_abuse').description;
     assert.doesNotMatch(tab, /IMAP is never affected|Abuse Protection/);
-    assert.match(tab, /Security → Settings → Outgoing spam/);
+    assert.match(tab, /Security > Settings > Outgoing spam/);
 });
 
 test('Unban names and drops the network Fail2ban banned around the address', async () => {

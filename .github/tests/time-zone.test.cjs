@@ -349,8 +349,8 @@ test('the Time Zone setting is a searchable list of IANA zones under Application
 test('with no zone set the Time Zone field shows UTC, said once', () => {
     for (const value of ['', 'UTC']) {
         const html = settingsField(value);
-        // The description says it; no note under the field repeats it
-        assert.match(html, /The app&#039;s time zone\. Default: UTC\./);
+        // The picker says it; no description or note under the field repeats it
+        assert.doesNotMatch(html, /ui-set-desc|Default: UTC/);
         assert.doesNotMatch(html, /data-zone-note/);
         // Empty is UTC, the default: not marked as changed
         assert.doesNotMatch(html, /Changed|Reset to default/);

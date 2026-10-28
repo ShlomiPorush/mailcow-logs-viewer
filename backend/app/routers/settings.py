@@ -226,7 +226,7 @@ def _reject_moved_secrets(allowed: Dict[str, Any]) -> None:
 # Settings that take one or more email addresses
 _ADDRESS_LIST_LABELS = {
     "admin_email": "Admin Email",
-    "blacklist_alert_email": "Blacklist Alert Email",
+    "blacklist_alert_email": "Blocklist alert email",
     "dmarc_error_email": "Report Import Error Email",
 }
 

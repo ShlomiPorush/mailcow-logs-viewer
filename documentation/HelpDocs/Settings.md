@@ -58,11 +58,11 @@ For **Alert destinations** (Slack, Telegram, ntfy and others) and which alert go
 
 **Test SMTP** sends a real test email to **Admin Email** (or to **SMTP User** when that is empty) using the saved settings, and shows each step of the connection. Save your changes before you test.
 
-For port 587, turn on **SMTP Use TLS** (STARTTLS); port 465 always uses implicit TLS. **SMTP Verify SSL** checks the server's certificate: **Automatic** checks host names such as `smtp.example.com` and skips `localhost`, IP addresses and container names. Keep **Off** only for a self-signed certificate.
+For port 587, turn on **Use STARTTLS** (STARTTLS); port 465 always uses implicit TLS. **Verify certificate** checks the server's certificate: **Automatic** checks host names such as `smtp.example.com` and skips `localhost`, IP addresses and container names. Keep **Off** only for a self-signed certificate.
 
 ## Authentication
 
-Basic authentication and OAuth2/OIDC can be on together. Turning on **Basic Auth Enabled** asks you to type the username and password again before it saves, so a typo cannot lock you out. See [Sign-in configuration](../OAuth2_Configuration.md).
+Basic authentication and OAuth2/OIDC can be on together. Turning on **Enable Basic Auth** asks you to type the username and password again before it saves, so a typo cannot lock you out. See [Sign-in configuration](../OAuth2_Configuration.md).
 
 **Sign-in Security** limits how long a browser stays signed in, for both sign-in methods. **Longest session (hours)** counts from sign-in whatever the activity. **Sign out after inactivity**, off by default, ends a session after **Inactivity limit (minutes)** without typing, clicking, scrolling with the wheel or touching; pages that refresh by themselves do not count. A minute before, the page asks whether you are still there. A shorter longest session applies to open sessions at once, so a session already past it ends; turning on sign-out after inactivity does not sign anyone out, because their inactivity time starts then. AI agents are not affected. See [Sessions and signing out](../OAuth2_Configuration.md#sessions-and-signing-out).
 
@@ -84,7 +84,7 @@ Which sending addresses must pass each domain's SPF check on [Domains](Domains.m
 
 ## DMARC & TLS
 
-**Retention Days**, **Manual Upload Enabled** and **Allow Report Delete** apply to DMARC and TLS reports alike. The **Insights** values only shape the DMARC policy recommendations; nothing here changes your DNS.
+**Keep reports for (days)**, **Allow uploading reports** and **Allow deleting reports** apply to DMARC and TLS reports alike. The **Insights** values only shape the DMARC policy recommendations; nothing here changes your DNS.
 
 ## DMARC & TLS IMAP
 
@@ -99,9 +99,9 @@ Saving a new license key opens **GeoIP Database Setup**, which checks the key, d
 ![GeoIP Database Setup](../../images/docs/settings-geoip-setup-light.webp#gh-light-mode-only)
 ![GeoIP Database Setup](../../images/docs/settings-geoip-setup-dark.webp#gh-dark-mode-only)
 
-## IP Blacklist (RBL)
+## Blocklists
 
-Which addresses **Status** > **Blocklists** checks, and the DNS resolver it asks. Spamhaus refuses queries from public resolvers such as Google or Cloudflare, so use your own resolver. Switching on **Blacklist Source Transports** or **Blacklist Source Relayhosts** adds their addresses right away. See [Blocklist monitoring](IP_Blacklist_Monitor.md).
+Which addresses **Status** > **Blocklists** checks, and the DNS resolver it asks. Spamhaus refuses queries from public resolvers such as Google or Cloudflare, so use your own resolver. Switching on **Transport IPs** or **Relayhost IPs** adds their addresses right away. See [Blocklist monitoring](IP_Blacklist_Monitor.md).
 
 ## Outbound
 
@@ -114,7 +114,7 @@ What happens when outgoing mail cannot be delivered. The blocked addresses are l
 
 ## Quarantine
 
-Limits for the rules on **Quarantine** > **Auto-Rules**. A new **Quarantine Rules Interval** applies when you save it.
+Limits for the rules on **Quarantine** > **Auto-Rules**. A new **Run every (minutes)** applies when you save it.
 
 ## When something is missing
 

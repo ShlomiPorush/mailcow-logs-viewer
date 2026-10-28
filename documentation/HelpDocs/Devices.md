@@ -25,11 +25,11 @@ The app recognizes Outlook, Windows Mail, Apple Mail, Samsung Email and Gmail by
 
 ## Settings that change this page
 
-**Retention Days** under **Settings** > **Devices** removes a device when its last request is older than that many days. The default is 90; `0` keeps devices forever. The cleanup runs daily at 03:30.
+**Keep inactive devices for (days)** under **Settings** > **Devices** removes a device when its last request is older than that many days. The default is 90; `0` keeps devices forever. The cleanup runs daily at 03:30.
 
 Country, city and network need the MaxMind keys under **Settings** > **MaxMind**. Without the GeoIP databases, **Location needs GeoIP** appears above the list.
 
-Turning off **Devices** under **Settings** > **Features** hides the page, stops the updates and deletes the list. When you turn it on again, the app rebuilds the list from the SOGo log lines it still has; those are kept for **Raw Logs Retention Days** under **Settings** > **Logs**, 2 days by default. While Devices is on, the app collects the SOGo log even if the Logs page is off or SOGo is unticked there.
+Turning off **Devices** under **Settings** > **Features** hides the page, stops the updates and deletes the list. When you turn it on again, the app rebuilds the list from the SOGo log lines it still has; those are kept for **Keep raw logs for (days)** under **Settings** > **Logs**, 2 days by default. While Devices is on, the app collects the SOGo log even if the Logs page is off or SOGo is unticked there.
 
 ## When something is missing
 

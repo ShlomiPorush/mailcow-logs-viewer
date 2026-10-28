@@ -247,18 +247,18 @@ window.disabledFeatures = [];
 
 // All toggleable feature definitions (for settings UI)
 const TOGGLEABLE_FEATURES = [
-    { id: 'netfilter', label: 'Security', description: 'Fail2Ban management and security events' },
-    { id: 'queue', label: 'Queue', description: 'Outbound > Queue: mail waiting in the Postfix queue' },
+    { id: 'netfilter', label: 'Security', description: 'Failed logins, bans and protection rules' },
+    { id: 'queue', label: 'Queue', description: 'Outbound > Queue: mail waiting to be delivered' },
     { id: 'suppressions', label: 'Suppressions', description: 'Outbound > Suppressions: recipients blocked after failed delivery' },
-    { id: 'quarantine', label: 'Quarantine', description: 'Quarantined emails and auto-rules' },
-    { id: 'rspamd', label: 'Rspamd', description: 'The Rspamd maps that allow or block mail, incoming and outgoing' },
-    { id: 'domains', label: 'Domains', description: 'Domain DNS analysis and transports' },
-    { id: 'dmarc', label: 'DMARC & TLS', description: 'DMARC/TLS reports and IMAP sync' },
+    { id: 'quarantine', label: 'Quarantine', description: 'Quarantined mail and its automatic rules' },
+    { id: 'rspamd', label: 'Rspamd', description: 'The Rspamd maps that allow or block mail' },
+    { id: 'domains', label: 'Domains', description: 'DNS checks and transports for your domains' },
+    { id: 'dmarc', label: 'DMARC & TLS', description: 'DMARC and TLS reports' },
     { id: 'mailbox-stats', label: 'Mailbox Stats', description: 'Mailbox and alias statistics' },
-    { id: 'rate-limits', label: 'Rate Limits', description: 'Sender rate limit hits and the configured limits' },
-    { id: 'devices', label: 'Devices', description: 'ActiveSync phones and tablets, read from the SOGo log' },
-    { id: 'logs', label: 'Logs', description: 'Raw service log viewer' },
-    { id: 'blacklist', label: 'IP Blacklist Monitor', description: 'DNS blacklist monitoring for your IPs' },
+    { id: 'rate-limits', label: 'Rate Limits', description: 'Senders that hit a rate limit, and the limits' },
+    { id: 'devices', label: 'Devices', description: 'Phones and tablets that sync over ActiveSync' },
+    { id: 'logs', label: 'Logs', description: 'Live logs from the mailcow services' },
+    { id: 'blacklist', label: 'Blocklists', description: 'Checks your mail server IPs against spam blocklists' },
 ];
 
 function isFeatureDisabled(featureId) {

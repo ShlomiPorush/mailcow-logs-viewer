@@ -23,26 +23,26 @@ Ignoring a list applies to every address: the app still checks and shows it, but
 
 ## Settings that change this page
 
-**Settings** > **IP Blacklist (RBL)** chooses which addresses are checked:
+**Settings** > **Blocklists** chooses which addresses are checked:
 
 | Setting | Default | What is checked |
 | --- | --- | --- |
-| **Blacklist Source Server IP** | On | The WAN address that mailcow reports. |
-| **Blacklist Source Transports** | On | The public addresses of active mailcow transports. |
-| **Blacklist Source Relayhosts** | On | The public addresses of active mailcow relayhosts. |
-| **Blacklist Source Manual Hosts** | Empty | More IPv4 or IPv6 addresses and hostnames, comma-separated. |
+| **Mail server IP (auto-detected)** | On | The WAN address that mailcow reports. |
+| **Transport IPs** | On | The public addresses of active mailcow transports. |
+| **Relayhost IPs** | On | The public addresses of active mailcow relayhosts. |
+| **Additional hosts** | Empty | More IPv4 or IPv6 addresses and hostnames, comma-separated. |
 
-A hostname is resolved to all of its IPv4 addresses; private addresses are skipped. If mail leaves through a relay, turn off **Blacklist Source Server IP**. The SPF addresses on [Domains](Domains.md) are set separately.
+A hostname is resolved to all of its IPv4 addresses; private addresses are skipped. If mail leaves through a relay, turn off **Mail server IP (auto-detected)**. The SPF addresses on [Domains](Domains.md) are set separately.
 
-**Blacklist DNS Servers** sets the resolvers, comma-separated; empty uses the container's resolver. Use your own recursive resolver (in mailcow, `172.22.1.254`): Spamhaus refuses queries from public resolvers such as Google, Cloudflare or Quad9.
+**DNS resolvers** sets the resolvers, comma-separated; empty uses the container's resolver. Use your own recursive resolver (in mailcow, `172.22.1.254`): Spamhaus refuses queries from public resolvers such as Google, Cloudflare or Quad9.
 
-Turning off **IP Blacklist Monitor** under **Settings** > **Features** hides this tab and the blocklist figures on the Dashboard and Status, stops the checks, and deletes the saved results.
+Turning off **Blocklists** under **Settings** > **Features** hides this tab and the blocklist figures on the Dashboard and Status, stops the checks, and deletes the saved results.
 
 ## Checks and alerts
 
 The app checks every address shortly after it starts and daily at 05:00 in the app's time zone. Scheduled checks reuse results younger than 24 hours; the buttons always query again. Every 6 hours the app reads transports and relayhosts from mailcow and checks new addresses right away, without alerts.
 
-A check that finds a listing sends an **IP blacklist** alert, again on every later check while the listing lasts. Scheduled checks and **Check all now** send it; **Check now** does not. The app also tells you when fewer addresses are listed and when all are clear. UCEPROTECT Level 2 or Level 3 listings alone send no alert. The email goes to **Blacklist Alert Email**, or to **Admin Email** when that is empty; see [Notifications](../Notifications.md).
+A check that finds a listing sends an **IP blacklist** alert, again on every later check while the listing lasts. Scheduled checks and **Check all now** send it; **Check now** does not. The app also tells you when fewer addresses are listed and when all are clear. UCEPROTECT Level 2 or Level 3 listings alone send no alert. The email goes to **Blocklist alert email**, or to **Admin Email** when that is empty; see [Notifications](../Notifications.md).
 
 ## When something is missing
 

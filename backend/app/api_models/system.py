@@ -34,6 +34,6 @@ class InfoResponse(Fixed):
     timezone_configured: Optional[str] = Field(None, description="Signed in only: TZ as configured")
     date_format: str = Field(None, description="Signed in only")
     time_format: str = Field(None, description="Signed in only")
-    blacklist_count: int = Field(None, description="Signed in only: addresses hidden by Blacklist Emails")
+    blacklist_count: int = Field(None, description="Signed in only: addresses hidden by Addresses to exclude")
     disabled_features: List[str] = Field(None, description="Signed in only")
     settings_edit_via_ui_enabled: bool = Field(None, description="Signed in only: whether Settings can be edited")

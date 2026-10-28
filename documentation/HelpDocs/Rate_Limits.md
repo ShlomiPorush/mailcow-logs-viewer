@@ -9,7 +9,7 @@ Hits come from mailcow's `ratelimited` log; configured limits come from mailcow.
 
 The chart counts blocked sends in the selected window: hourly for the last 24 hours, daily for longer windows.
 
-Hits are kept for **Rate Limits Retention Days** under **Settings** > **Logs**, 90 days by default, and never less than **Raw Logs Retention Days**. The window offers only what that covers: with 90 days, up to **Last 90 days**. History from before the upgrade that raw log cleanup had already removed does not come back.
+Hits are kept for **Keep rate limit hits for (days)** under **Settings** > **Logs**, 90 days by default, and never less than **Keep raw logs for (days)**. The window offers only what that covers: with 90 days, up to **Last 90 days**. History from before the upgrade that raw log cleanup had already removed does not come back.
 
 ## Blocked senders
 

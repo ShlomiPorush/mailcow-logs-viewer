@@ -15,7 +15,7 @@ let settingsFirstTab = null;
 // Labels the key cannot spell well. Next to the other addresses, "Error Email" alone would not say whose errors
 const SETTINGS_LABEL_OVERRIDES = {
     dmarc_error_email: 'Report Import Error Email',
-    eas_devices_retention_days: 'Retention Days',
+    eas_devices_retention_days: 'Keep inactive devices for (days)',
     tz: 'Time Zone',
     // Outbound: what the setting does, in words; the search shows these names
     suppression_enabled: 'Handle undeliverable mail automatically',
@@ -35,7 +35,78 @@ const SETTINGS_LABEL_OVERRIDES = {
     agent_access_max_days: 'Maximum access duration (days)',
     session_idle_enabled: 'Sign out after inactivity',
     session_idle_timeout_minutes: 'Inactivity limit (minutes)',
-    session_expiry_hours: 'Longest session (hours)'
+    session_expiry_hours: 'Longest session (hours)',
+    // Names that say what the setting does, with the unit of a number
+    mailcow_api_timeout: 'API timeout (seconds)',
+    mailcow_api_verify_ssl: 'Verify certificate',
+    fetch_interval: 'Fetch every (seconds)',
+    fetch_count_postfix: 'Postfix logs per request',
+    fetch_count_rspamd: 'Rspamd logs per request',
+    fetch_count_netfilter: 'Netfilter logs per request',
+    fetch_max_pages: 'Maximum pages per fetch',
+    retention_days: 'Keep logs for (days)',
+    blacklist_emails: 'Addresses to exclude',
+    max_correlation_age_minutes: 'Stop looking after (minutes)',
+    correlation_check_interval: 'Check every (seconds)',
+    max_search_results: 'Maximum search results',
+    csv_export_limit: 'CSV export limit (rows)',
+    scheduler_workers: 'Background job threads',
+    debug: 'Debug mode',
+    blacklist_source_server_ip: 'Mail server IP (auto-detected)',
+    blacklist_source_transports: 'Transport IPs',
+    blacklist_source_relayhosts: 'Relayhost IPs',
+    blacklist_source_manual_hosts: 'Additional hosts',
+    blacklist_dns_servers: 'DNS resolvers',
+    domain_spf_source_server_ip: 'Mail server IP (auto-detected)',
+    domain_spf_source_transports: 'Transport IPs',
+    domain_spf_source_relayhosts: 'Relayhost IPs',
+    domain_spf_source_manual_hosts: 'Additional hosts',
+    domain_spf_source_dmarc_history: 'IPs from DMARC reports',
+    basic_auth_enabled: 'Enable Basic Auth',
+    auth_max_failure_clients: 'Tracked failed sign-in addresses',
+    oauth2_enabled: 'Enable OAuth2',
+    session_max_entries: 'Maximum sessions',
+    smtp_enabled: 'Enable SMTP',
+    smtp_use_tls: 'Use STARTTLS',
+    smtp_use_ssl: 'Use SSL',
+    smtp_verify_ssl: 'Verify certificate',
+    smtp_from: 'From address',
+    dns_change_alerts_enabled: 'DNS change alerts',
+    smtp_abuse_enabled: 'Stop mailboxes that send too much',
+    smtp_abuse_threshold: 'Messages allowed',
+    smtp_abuse_window_minutes: 'Time window (minutes)',
+    smtp_abuse_revoke_app_passwords: 'Also delete app passwords',
+    smtp_abuse_unblock_grace_minutes: 'Grace after unblocking (minutes)',
+    smtp_abuse_help_address: 'Support address',
+    anomaly_detection_enabled: 'Enable anomaly detection',
+    anomaly_volume_multiplier: 'Spike multiplier',
+    anomaly_volume_min_messages: 'Minimum messages',
+    anomaly_baseline_days: 'History to learn from (days)',
+    anomaly_auth_failure_threshold: 'Failed logins',
+    anomaly_check_interval: 'Check every (minutes)',
+    anomaly_alert_cooldown_hours: 'Quiet period (hours)',
+    dmarc_retention_days: 'Keep reports for (days)',
+    dmarc_manual_upload_enabled: 'Allow uploading reports',
+    dmarc_allow_report_delete: 'Allow deleting reports',
+    dmarc_insights_window_days: 'Look back (days)',
+    dmarc_insights_pass_threshold: 'Pass rate needed (%)',
+    dmarc_insights_min_volume: 'Minimum messages',
+    dmarc_imap_enabled: 'Enable IMAP import',
+    dmarc_imap_verify_ssl: 'Verify certificate',
+    dmarc_imap_delete_after: 'Delete emails after import',
+    dmarc_imap_interval: 'Import every (seconds)',
+    dmarc_imap_run_on_startup: 'Import at startup',
+    dmarc_imap_batch_size: 'Emails per batch',
+    dmarc_imap_scan_all_unseen: 'Scan all unread emails',
+    raw_logs_enabled: 'Collect raw logs',
+    raw_logs_fetch_interval: 'Fetch every (seconds)',
+    raw_logs_fetch_count: 'Entries per service per fetch',
+    raw_logs_retention_days: 'Keep raw logs for (days)',
+    rate_limits_retention_days: 'Keep rate limit hits for (days)',
+    quarantine_rules_max_actions: 'Maximum actions per run',
+    quarantine_rules_interval: 'Run every (minutes)',
+    quarantine_rules_log_retention_days: 'Keep rule history for (days)',
+    blacklist_alert_email: 'Blocklist alert email'
 };
 
 const SETTINGS_LOCK_ICON = '<svg width="12" height="12" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true"><path fill-rule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clip-rule="evenodd"></path></svg>';
@@ -180,149 +251,93 @@ function showFeatureDisableConfirmModal(featureIds) {
 // Per-field descriptions (from env.example comments)
 var SETTINGS_FIELD_DESCRIPTIONS = {
     // Anomaly detection
-    anomaly_detection_enabled: 'Watch each mailbox against its own normal sending pattern and alert on suspicious changes. Alerts only - nothing is ever blocked by this feature.',
-    anomaly_check_interval: 'How often to look for anomalies (minutes). This is also the size of the window each run examines.',
-    anomaly_volume_multiplier: 'How many times above its own normal rate a mailbox must send before alerting. Example: 5 = sending five times more than usual for that mailbox.',
-    anomaly_volume_min_messages: 'Noise floor: a mailbox must send at least this many messages in the window before a spike can alert. Prevents alerts on tiny numbers (2 messages instead of the usual 0).',
-    anomaly_baseline_days: 'How many days of history are used to learn what "normal" looks like for each mailbox.',
-    anomaly_auth_failure_threshold: 'Alert when a username collects this many failed login attempts within the window - typically a brute-force or password-guessing attack.',
-    anomaly_alert_cooldown_hours: 'After an alert for a mailbox, stay quiet about the same problem for this many hours. Prevents alert storms during an ongoing incident.',
+    anomaly_volume_multiplier: "5 means five times the mailbox's usual rate.",
+    anomaly_volume_min_messages: 'A spike below this many messages does not alert.',
+    anomaly_auth_failure_threshold: 'Alert when one username fails to log in this many times within one check interval.',
+    anomaly_alert_cooldown_hours: 'No repeat alert about the same mailbox or username during this time.',
 
     // SMTP abuse protection
-    smtp_abuse_enabled: 'Automatically disable sending (SMTP) for a mailbox that crosses the limit below. The mailbox still receives mail; if its app passwords are revoked too, mail apps that sign in with one stop working. Requires a Read-Write mailcow API key.',
-    smtp_abuse_threshold: 'Maximum messages a single mailbox may send within the time window. Above this, sending is disabled for that mailbox. Set it comfortably above your busiest legitimate sender.',
-    smtp_abuse_window_minutes: 'The rolling time window used to count messages. Example: 100 messages / 60 minutes.',
-    smtp_abuse_revoke_app_passwords: 'Also delete the mailbox app passwords when blocking. Recommended: a compromised account usually sends through an app password, so revoking cuts the attacker off even if they know the password.',
-    smtp_abuse_unblock_grace_minutes: 'After you re-enable a mailbox manually, do not block it again automatically for this long. Without it the mailbox would be blocked again within a minute, because the old messages are still inside the counting window.',
-    smtp_abuse_help_address: 'Support address shown to the user in the email telling them their sending was paused. Falls back to the admin email.',
+    smtp_abuse_threshold: 'Per mailbox, within the time window. Set it well above your busiest real sender.',
+    smtp_abuse_revoke_app_passwords: 'Recommended: a compromised mailbox usually sends through an app password. Mail apps that sign in with one stop working.',
+    smtp_abuse_unblock_grace_minutes: 'After you unblock a mailbox, it is not blocked again during this time.',
+    smtp_abuse_help_address: 'Shown in the email that tells the mailbox owner their sending was paused. Empty uses the admin email.',
 
     // DMARC insights
-    dmarc_insights_window_days: 'How many days of DMARC reports to analyse when suggesting a policy change.',
-    dmarc_insights_pass_threshold: 'Minimum DMARC pass rate (%) before suggesting a stricter policy. Higher = more cautious advice.',
-    dmarc_insights_min_volume: 'Minimum number of reported messages before any recommendation is made, so advice is not based on a handful of messages.',
+    dmarc_insights_pass_threshold: 'The pass rate needed before the app suggests a stricter policy.',
+    dmarc_insights_min_volume: 'No advice until the reports cover this many messages.',
 
     // Rspamd
-    rspamd_url: 'Address of the Rspamd controller. Leave empty to reach it through mailcow itself (mailcow URL + /rspamd) - correct for most setups, including when this app runs on a different server. Only set it if this app can reach Rspamd directly on the network and the path through mailcow fails (for example a 302 from a reverse proxy). Same Docker network as mailcow: http://rspamd-mailcow:11334',
+    rspamd_url: 'Leave empty for most setups: the app reaches Rspamd through mailcow. Set it only if that fails, such as http://rspamd-mailcow:11334 on the same Docker network.',
 
     // DNS change alerts
-    dns_change_alerts_enabled: 'Alert when a domain SPF, DKIM, DMARC, TLSA, MTA-STS or TLS-RPT record changes, when DNSSEC stops validating, or when a TLSA record no longer matches the mail server certificate, so you can update the records at your registrar. The alert names the domain and shows the old and new value. A failed DNS lookup never counts as a change.',
+    dns_change_alerts_enabled: "Alert when a domain's SPF, DKIM, DMARC, TLSA, MTA-STS or TLS-RPT record changes, when DNSSEC stops validating, or when a TLSA record no longer matches the certificate.",
 
     // Blacklist checks
-    blacklist_dns_servers: 'DNS resolvers used for blacklist (RBL) lookups, comma-separated. Spamhaus rejects queries coming from public resolvers (Google, Cloudflare, Quad9), so this should be your own resolver - in a mailcow setup: 172.22.1.254. Leave empty to use the container default.',
-    blacklist_source_server_ip: 'Monitor the auto-detected WAN IP (reported by the mailcow status API) on spam blacklists (RBLs). Turn this off when outbound mail leaves through a relay host, so only the other sources are monitored. Default: true.',
-    blacklist_source_transports: 'Monitor the public IPs of active mailcow transports on spam blacklists. Each transport nexthop is resolved to all of its public IPs, so relay pools with several addresses are fully covered. Default: true.',
-    blacklist_source_relayhosts: 'Monitor the public IPs of active mailcow relayhosts (sender-dependent transports) on spam blacklists. Default: true.',
-    blacklist_source_manual_hosts: 'Additional hosts to monitor on spam blacklists, comma-separated. Accepts IPv4/IPv6 addresses and hostnames (a hostname is resolved to all of its public IPs). Monitored in addition to the sources above - these may also be hosts unrelated to this mailcow server.',
+    blacklist_dns_servers: 'Spamhaus refuses public resolvers such as Google or Cloudflare, so use your own. In mailcow: 172.22.1.254. Separate with commas; empty uses the container default.',
+    blacklist_source_server_ip: 'Turn off if outgoing mail leaves through a relay.',
+    blacklist_source_relayhosts: "mailcow's sender-dependent transports.",
+    blacklist_source_manual_hosts: 'IPs or host names, separated by commas.',
 
     // Domain SPF check sources
-    domain_spf_source_server_ip: 'Validate the auto-detected WAN IP against each domain SPF record. Turn this off when outbound mail leaves through a relay host and the WAN IP is not supposed to be in your SPF records. Default: true.',
-    domain_spf_source_transports: 'Also validate the public IPs resolved from active mailcow transport nexthops against each domain SPF record. Enable when outbound mail leaves through transports whose IPs must be authorized in your SPF records. Default: false.',
-    domain_spf_source_relayhosts: 'Also validate the public IPs resolved from active mailcow relayhosts against each domain SPF record. Default: false.',
-    domain_spf_source_manual_hosts: 'Additional hosts that must pass each domain SPF check, comma-separated. Accepts IPv4/IPv6 addresses and hostnames. Outbound sending addresses only - every entry must pass the SPF check, so do not add addresses that never send mail (such as an inbound-only MX).',
-    domain_spf_source_dmarc_history: 'Also validate source IPs observed with a passing SPF result in the last 30 days of imported DMARC aggregate reports for each domain. Caution: with relaxed SPF alignment, an IP sending from an ESP subdomain can appear as an aligned pass without being listed in the domain own SPF record, which then shows up as a false warning here. Default: false.',
+    domain_spf_source_server_ip: 'Turn off if outgoing mail leaves through a relay and this IP is not in your SPF records.',
+    domain_spf_source_transports: 'Turn on if outgoing mail leaves through mailcow transports.',
+    domain_spf_source_relayhosts: 'Turn on if outgoing mail leaves through relayhosts.',
+    domain_spf_source_manual_hosts: 'IPs or host names that send mail, separated by commas. Do not add a receive-only server: it would fail the check.',
+    domain_spf_source_dmarc_history: 'IPs that passed SPF in the last 30 days of DMARC reports. May warn about an IP that passed only through a subdomain.',
 
-    mailcow_url: 'Your mailcow instance URL (without trailing slash).',
-    mailcow_api_key: 'mailcow API key (Read-Only). Generate from System → Configuration → Access → Administrators → API in mailcow admin. Required permissions: Read access to logs. In mailcow the key must be active, and its allowed IPs must include the address this app connects from.',
-    mailcow_api_key_rw: 'mailcow API key (Read-Write). Optional. Generate a separate key from System → Configuration → Access → Administrators → API with write permissions. Used for actions such as quarantine, queue, Fail2Ban, rate limits and Rspamd maps. In mailcow the key must be active, and its allowed IPs must include the address this app connects from.',
-    mailcow_api_timeout: 'API request timeout in seconds.',
-    mailcow_api_verify_ssl: 'Verify SSL certificates when connecting to mailcow API. Set to false for development with self-signed certificates. Default: true.',
-    fetch_interval: 'Seconds between log fetches from mailcow. Lower = more frequent updates, higher load. Default: 60.',
-    fetch_count_postfix: 'Postfix logs to fetch per API request (page size for paginated fetching). The system paginates through all available logs until catching up. Default: 2000.',
-    fetch_count_rspamd: 'Rspamd logs to fetch per API request (page size for paginated fetching). The system paginates through all available logs until catching up. Default: 500.',
-    fetch_count_netfilter: 'Netfilter logs to fetch per request. Default: 500.',
-    fetch_max_pages: 'Maximum number of pages to fetch per cycle for Postfix/Rspamd. Safety limit to prevent infinite loops. Total logs per cycle = page size × max pages. Default: 50.',
-    retention_days: 'Days to keep logs in database. Older logs are automatically deleted. Recommended: 7 for most, 30 for compliance. Default: 7.',
-    max_correlation_age_minutes: 'Stop searching for correlations older than this (minutes).',
-    correlation_check_interval: 'Seconds between correlation completion checks. Default: 120.',
+    mailcow_url: 'Such as https://mail.example.com.',
+    mailcow_api_key: "A read-only API key from mailcow: System > Configuration > Access > Administrators > API. Its allowed IPs must include this app's address.",
+    mailcow_api_key_rw: 'Optional. Needed for actions such as quarantine, queue, Fail2Ban, rate limits and Rspamd maps. Create it the same way, with write access.',
+    mailcow_api_verify_ssl: 'Turn off only for a self-signed certificate.',
+    fetch_max_pages: 'A page is one request of the size above, for Postfix and Rspamd.',
+    max_correlation_age_minutes: "How long the app keeps looking for a message's delivery logs.",
     app_port: 'Application port (internal container port). Default: 8080.',
-    log_level: 'Log level: DEBUG, INFO, WARNING, ERROR, CRITICAL. Default: WARNING.',
-    app_title: 'Application title (shown in browser tab).',
-    app_logo_url: 'Logo URL (optional; leave empty to use the default project icon).',
-    tz: "The app's time zone. Default: UTC.",
-    date_format: "Select your date format. Default: Browser.",
-    time_format: "Select your time format. Default: 24-hour.",
-    debug: 'Enable debug mode (shows detailed errors). Use only for development. Never enable in production. Default: false.',
-    max_search_results: 'Maximum records to return in search results. Default: 1000.',
-    csv_export_limit: 'CSV export row limit. Default: 10000.',
-    scheduler_workers: 'Thread pool size for blocking scheduler jobs (e.g. the DMARC & TLS IMAP import). Valid range: 1-64. Default: 4.',
-    blacklist_emails: 'Comma-separated addresses, such as a BCC archive. Mail to or from them is not stored or shown in Messages.',
+    log_level: 'DEBUG, INFO, WARNING, ERROR or CRITICAL.',
+    app_title: 'Shown in the browser tab and the sidebar.',
+    app_logo_url: 'Empty uses the default icon.',
+    debug: 'Shows detailed errors. Do not turn on in production.',
+    scheduler_workers: 'Threads for background jobs. From 1 to 64.',
+    blacklist_emails: 'Mail to or from these addresses, such as a BCC archive, is not stored or shown. Separate with commas.',
     auth_enabled: 'Deprecated: use Basic auth enabled. When enabled, enables Basic Auth. Default: false.',
-    basic_auth_enabled: 'Enable Basic HTTP authentication. When enabled, ALL pages and API require login. Default: false.',
-    auth_username: 'Basic auth username. Default: admin.',
-    auth_password: 'Basic auth password (required if Basic auth enabled). Leave empty to disable. Use a strong password in production.',
-    oauth2_enabled: 'Enable OAuth2/OIDC authentication. Works with Mailcow, Keycloak, etc. Default: false.',
-    oauth2_provider_name: 'Display name for the OAuth2 provider (e.g. Mailcow, Keycloak).',
-    oauth2_issuer_url: 'OIDC Discovery: set issuer URL and endpoints are auto-discovered. Mailcow: https://mail.example.com. Keycloak: https://keycloak.example.com/realms/myrealm',
-    oauth2_authorization_url: 'Manual: OAuth2 authorization endpoint (if discovery not supported).',
-    oauth2_token_url: 'Manual: OAuth2 token endpoint.',
-    oauth2_userinfo_url: 'Manual: OAuth2 UserInfo endpoint.',
-    oauth2_client_id: 'OAuth2 Client ID from your provider.',
-    oauth2_client_secret: 'OAuth2 Client Secret from your provider.',
-    oauth2_redirect_uri: 'OAuth2 Redirect URI (callback). Must match the URI configured in your OAuth2 provider.',
-    oauth2_scopes: 'OAuth2 scopes to request. Default: openid profile email.',
-    oauth2_use_oidc_discovery: 'Enable OIDC discovery (uses .well-known/openid-configuration). Default: true.',
-    session_secret_key: 'Secret key for signing session cookies. REQUIRED if OAuth2 enabled. Generate: openssl rand -hex 32. Use a strong secret in production.',
-    session_expiry_hours: 'Longest session in hours, counted from sign-in whatever the activity. Five minutes before, the page says so. A shorter value applies to open sessions at once; a longer one applies in full from the next sign-in. Default: 24.',
-    session_idle_enabled: 'Sign out after a period without activity. Typing, clicking, scrolling with the wheel and touching count as activity; pages that refresh by themselves do not. A minute before, the page asks whether you are still there. Default: off.',
-    session_idle_timeout_minutes: 'Minutes without activity before sign-out, from 5 to 1440. Default: 60.',
-    session_max_entries: 'Maximum active login sessions per process. At capacity, new logins wait until a session expires or a user signs out. Existing sessions stay signed in. Default: 50.',
-    agent_access_enabled: 'Default: off.',
-    agent_access_url: 'The address agents use to reach this app, such as https://logs.example.com. Changing it disconnects every agent until you change it back. Default: empty.',
-    agent_access_max_days: 'The longest access you can give an agent, from 1 to 365 days. Applies to new access only. Default: 90.',
-    auth_max_failure_clients: 'Maximum client addresses tracked for failed Basic Auth attempts per process. At capacity, new addresses must wait before trying Basic Auth. Existing sessions remain usable. Default: 10000.',
-    smtp_enabled: 'Enable SMTP for sending notifications (alerts, weekly summary).',
-    smtp_host: 'SMTP server hostname.',
-    smtp_port: 'SMTP server port (587 for TLS, 465 for SSL, 25 for plain).',
-    smtp_use_tls: 'Use STARTTLS for SMTP. Recommended.',
-    smtp_use_ssl: 'Use implicit SSL for SMTP (usually port 465).',
-    smtp_verify_ssl: 'Check the SMTP server certificate before the password is sent, so nobody between this app and the server can read it. Off (default) does not check. Automatic checks host names such as smtp.example.com and skips localhost, IP addresses and container names. On always checks. Automatic or On is recommended; keep Off only for a server with a self-signed certificate.',
-    smtp_user: 'SMTP username (usually email address).',
-    smtp_password: 'SMTP password.',
-    smtp_from: 'From address for emails (defaults to SMTP user if not set).',
-    smtp_relay_mode: 'Relay mode: for local relay servers that do not require authentication. When enabled, username and password are not required.',
-    admin_email: 'Administrator email for system notifications. Separate several addresses with commas.',
-    blacklist_alert_email: 'Email for IP blacklist alerts (uses Admin email if not set). Separate several addresses with commas.',
-    dmarc_retention_days: 'How many days DMARC and TLS reports are kept. Default: 60.',
-    dmarc_manual_upload_enabled: 'Allow uploading DMARC and TLS reports by hand on the DMARC & TLS page. Default: true.',
-    dmarc_allow_report_delete: 'Allow deleting DMARC and TLS reports from the UI. Default: false.',
-    enable_weekly_summary: 'Enable weekly summary email report (sent to admin email). Default: true.',
-    dmarc_imap_enabled: 'Import DMARC and TLS reports automatically from an IMAP mailbox.',
-    dmarc_imap_host: 'IMAP server hostname (e.g. imap.gmail.com).',
-    dmarc_imap_port: 'IMAP server port (993 for SSL, 143 for non-SSL). Default: 993.',
-    dmarc_imap_use_ssl: 'Use SSL/TLS for IMAP connection. Default: true.',
-    dmarc_imap_verify_ssl: 'Check the IMAP server certificate before the password is sent, so nobody between this app and the server can read it. Off (default) does not check. Automatic checks host names such as imap.example.com and skips localhost, IP addresses and container names. On always checks. Automatic or On is recommended; keep Off only for a server with a self-signed certificate.',
-    dmarc_imap_user: 'IMAP username (email address).',
-    dmarc_imap_password: 'IMAP password.',
-    dmarc_imap_folder: 'IMAP folder to scan for DMARC and TLS reports. Default: INBOX.',
-    dmarc_imap_delete_after: 'Delete emails after successful processing. Default: true.',
-    dmarc_imap_interval: 'Interval between IMAP syncs in seconds. Default: 3600 (1 hour).',
-    dmarc_imap_run_on_startup: 'Run IMAP sync once on application startup. Default: true.',
-    dmarc_imap_batch_size: 'Number of emails to process per batch. Default: 10.',
-    dmarc_imap_scan_all_unseen: 'Scan all unread emails for DMARC/TLS-RPT attachments, not just those matching known subject patterns. Enable if you receive reports from providers that use non-English subjects. Only recommended for dedicated DMARC mailboxes.',
-    dmarc_error_email: 'Email for errors while importing DMARC and TLS reports (defaults to the Admin email if not set). Separate several addresses with commas.',
-    maxmind_account_id: 'MaxMind Account ID for GeoIP database downloads. Required to download GeoLite2 databases.',
-    maxmind_license_key: 'MaxMind License Key for GeoIP database downloads. Required to download GeoLite2 databases. Keep this secret.',
+    basic_auth_enabled: 'Every page and the API need a username and password.',
+    oauth2_enabled: 'Sign in through mailcow, Keycloak or another OIDC provider.',
+    oauth2_provider_name: 'Shown on the sign-in button, such as mailcow or Keycloak.',
+    oauth2_issuer_url: 'Such as https://mail.example.com for mailcow. The endpoints are then found automatically.',
+    oauth2_redirect_uri: 'Must match the redirect URI set at your provider.',
+    session_secret_key: 'Required for OAuth2. Create one with: openssl rand -hex 32',
+    session_expiry_hours: 'Counted from sign-in. A shorter value also ends open sessions that are older. The page warns five minutes before.',
+    session_idle_timeout_minutes: 'From 5 to 1440.',
+    session_max_entries: 'When full, new sign-ins wait until a session ends.',
+    agent_access_url: 'The address agents use to reach this app, such as https://logs.example.com. Changing it disconnects every agent.',
+    agent_access_max_days: 'From 1 to 365. Applies to new access only.',
+    auth_max_failure_clients: 'When full, the oldest address is dropped to make room. Signed-in users are not affected.',
+    smtp_port: '587 for STARTTLS, 465 for SSL.',
+    smtp_verify_ssl: "Checks the server's certificate before the password is sent. Automatic skips localhost, IPs and container names. Use Off only for a self-signed certificate.",
+    smtp_from: 'Required in relay mode. Otherwise empty uses the SMTP username.',
+    smtp_relay_mode: 'For a local relay that needs no username or password.',
+    admin_email: "Receives the app's emails. Separate addresses with commas.",
+    blacklist_alert_email: 'For blocklist alerts. Empty uses the admin email.',
+    enable_weekly_summary: 'Sent to the admin email.',
+    dmarc_imap_port: '993 for SSL, 143 without.',
+    dmarc_imap_verify_ssl: "Checks the server's certificate before the password is sent. Automatic skips localhost, IPs and container names. Use Off only for a self-signed certificate.",
+    dmarc_imap_scan_all_unseen: 'Scans all unread emails, not only those with a known report subject. Use it for reports with non-English subjects, on a mailbox used only for reports.',
+    dmarc_error_email: 'For errors while importing DMARC and TLS reports. Empty uses the admin email.',
     disabled_features: 'Disable features to hide their pages and stop their background jobs. Core features (Dashboard, Messages, Settings, Status) are always enabled.',
-    raw_logs_enabled: 'Collect the services ticked below for the Logs page. When off, the Logs page says collection is off and shows no logs. The services other pages read (listed under Services) are collected either way.',
-    raw_logs_fetch_interval: 'Seconds between raw log fetch cycles. Lower = more frequent updates. Default: 30.',
-    raw_logs_fetch_count: 'Number of log entries to fetch per service per cycle. Higher values catch more logs but increase API load. Default: 1000.',
-    raw_logs_retention_days: 'Days to keep raw logs in the database. Older logs are deleted once a day; Status > Jobs shows when. Default: 2.',
-    rate_limits_retention_days: 'Days to keep the senders that hit a rate limit, for the Rate Limits page. Never less than Raw Logs Retention Days. Default: 90.',
-    eas_devices_retention_days: 'Days to keep a device that stopped syncing before it is removed from the Devices page. 0 keeps every device. Default: 90.',
-    raw_logs_services: 'The services the Logs page shows. A service marked Always collected keeps coming in when switched off here, because another page reads it; the Logs page then just does not show it.',
-    rspamd_password: 'Rspamd UI/API password for reading Rspamd map data. Required to view and edit Rspamd maps.',
+    raw_logs_enabled: 'When off, the Logs page shows no logs. Services other pages need are still collected.',
+    rate_limits_retention_days: 'Kept at least as long as the raw logs.',
+    eas_devices_retention_days: '0 keeps every device.',
+    raw_logs_services: 'The services shown on the Logs page.',
+    rspamd_password: 'Needed to view and edit Rspamd maps.',
     suppression_enabled: 'Off pauses automatic handling and block expiry. Manual changes still work.',
     suppression_auto_detect: 'On when a choice below needs the mail logs. Set by those choices, not on its own.',
-    suppression_rspamd_sync: "Keeps the suppression list and this app's part of the Rspamd recipient denylist in step, both ways: changes on either side reach the other. Off, this app keeps no suppression list: turning it off deletes the list, turning it on loads this app's blocks back from Rspamd. Needs the Rspamd password and a read-write API key.",
+    suppression_rspamd_sync: "Keeps the suppression list and Rspamd in step, both ways. Turning it off deletes the list; turning it on loads this app's blocks back from Rspamd. Needs the Rspamd password and the read-write API key.",
     suppression_whitelist_domains: 'No automatic blocks or queue deletion. Separate exact domains with commas; subdomains are not included.',
     suppression_hard_bounce_action: 'What happens when the receiving server rejects a message permanently (5.x.x).',
     suppression_soft_bounce_action: 'What happens when delivery fails for now (4.x.x) and the queue is not cleaned.',
     suppression_soft_bounce_threshold: 'Failures before the address is blocked. Each failed retry counts, even for the same message.',
     suppression_base_expiry_days: 'Repeated failures increase the block length.',
     suppression_max_expiry_days: 'The longest a block grows with repeated failures.',
-    quarantine_rules_max_actions: 'Safety limit: maximum emails to release/delete per scheduler run. Prevents accidental mass-processing from overly broad rules. Default: 50.',
-    quarantine_rules_interval: 'Minutes between quarantine rule processing runs. Lower = faster response to new quarantine items, higher = less API load on mailcow. Default: 5.',
-    quarantine_rules_log_retention_days: 'Days to keep quarantine auto-rule action history. Older action logs are automatically cleaned up. Default: 30.',
+    quarantine_rules_max_actions: 'Limits the damage of a rule that matches too much.',
     queue_cleanup_enabled: 'Delete delayed mail after some time in the queue.',
     queue_cleanup_block: 'Also block the recipients of the delayed mail deleted. Needs Sync with Rspamd.',
     queue_cleanup_threshold_minutes: 'Minutes in the queue before delayed mail is deleted.'
@@ -979,14 +994,14 @@ function settingsTimeZoneKnown(name) {
 // Keys grouped logically within each tab
 var SETTINGS_EDIT_TABS = [
     {
-        id: 'mailcow', label: 'Mailcow', description: 'Your mailcow instance URL and API credentials. API key needs read access to logs (generate from System → Configuration → Access → Administrators → API in mailcow admin). Set verify SSL to false only for development with self-signed certificates.', groups: [
+        id: 'mailcow', label: 'Mailcow', description: 'Connect this app to your mailcow server.', groups: [
             { label: 'Connection', keys: ['mailcow_url', 'mailcow_api_key', 'mailcow_api_key_rw'] },
             { label: 'Rspamd', keys: ['rspamd_password', 'rspamd_url'] },
             { label: 'Advanced', keys: ['mailcow_api_timeout', 'mailcow_api_verify_ssl'] }
         ]
     },
     {
-        id: 'fetch', label: 'Fetch', description: 'How often to fetch logs from mailcow and how many records per request. Lower interval = more frequent updates, higher load. Retention: how many days to keep logs in the database (older logs are deleted).', groups: [
+        id: 'fetch', label: 'Fetch', description: 'How often logs are read from mailcow, and how long they are kept.', groups: [
             { label: 'Timing', keys: ['fetch_interval'] },
             { label: 'Counts per Request', keys: ['fetch_count_postfix', 'fetch_count_rspamd', 'fetch_count_netfilter'] },
             { label: 'Pagination', keys: ['fetch_max_pages'] },
@@ -995,12 +1010,12 @@ var SETTINGS_EDIT_TABS = [
         ]
     },
     {
-        id: 'correlation', label: 'Correlation', description: 'Correlation links Postfix logs to messages. Max age: stop searching for correlations older than this (minutes). Check interval: how often to run the correlation job (seconds).', groups: [
+        id: 'correlation', label: 'Message linking', description: 'Links each message to its Postfix delivery logs.', groups: [
             { label: 'Settings', keys: ['max_correlation_age_minutes', 'correlation_check_interval'] }
         ]
     },
     {
-        id: 'application', label: 'Application', description: 'Web app port, title, logo and time zone. Log level: DEBUG, INFO, WARNING, ERROR, CRITICAL. Debug mode shows detailed errors (do not enable in production). Search/CSV limits and scheduler worker count.', groups: [
+        id: 'application', label: 'Application', groups: [
             { label: 'Basic', keys: ['app_port', 'app_title', 'app_logo_url'] },
             { label: 'Time', keys: ['tz', 'date_format', 'time_format'] },
             { label: 'Logging', keys: ['log_level', 'debug'] },
@@ -1008,29 +1023,29 @@ var SETTINGS_EDIT_TABS = [
         ]
     },
     {
-        id: 'features', label: 'Features', description: 'Turn off what you do not use. A feature that is off disappears from the menu and stops its background jobs. Turning a feature off deletes its stored data, so you are asked first.', groups: [
+        id: 'features', label: 'Features', description: 'A feature that is off leaves the menu and stops its background jobs. Turning one off deletes its data.', groups: [
             { label: 'Features', keys: ['disabled_features'] }
         ]
     },
     {
-        id: 'blacklist', label: 'IP Blacklist (RBL)', description: 'The blacklist monitor checks whether your mail server IPs are listed on spam blacklists (Spamhaus and others). Choose which hosts are monitored below. Note: Spamhaus refuses queries sent through public DNS resolvers, so point this at your own resolver if the Spamhaus checks come back as unknown.', groups: [
+        id: 'blacklist', label: 'Blocklists', description: 'Checks whether your mail server IPs are listed on spam blocklists, such as Spamhaus.', groups: [
             { label: 'Monitoring sources', keys: ['blacklist_source_server_ip', 'blacklist_source_transports', 'blacklist_source_relayhosts', 'blacklist_source_manual_hosts'] },
             { label: 'DNS resolver', keys: ['blacklist_dns_servers'] }
         ]
     },
     {
-        id: 'domains', label: 'Domains', description: 'DNS checks for your domains (SPF, DKIM, DMARC, DNSSEC, DANE, MTA-STS) on the Domains page. Choose which sending IPs must pass each domain SPF record - with a relay setup the relay IPs matter, not the auto-detected WAN IP.', groups: [
+        id: 'domains', label: 'Domains', description: "Choose which sending IPs must pass each domain's SPF check on the Domains page.", groups: [
             { label: 'SPF check sources', keys: ['domain_spf_source_server_ip', 'domain_spf_source_transports', 'domain_spf_source_relayhosts', 'domain_spf_source_manual_hosts', 'domain_spf_source_dmarc_history'] }
         ]
     },
     {
-        id: 'auth', label: 'Authentication', description: 'How users sign in to this app. Basic authentication protects every page and API endpoint with a username and password. OAuth2/OIDC signs users in through an external provider (mailcow, Keycloak, ...). Both can be enabled at the same time. Changing these settings disconnects every AI agent.', groups: [
+        id: 'auth', label: 'Authentication', description: 'How users sign in to this app. Basic Auth and OAuth2 can both be on. Changing these settings disconnects every AI agent.', groups: [
             { label: 'Basic Auth', keys: ['basic_auth_enabled', 'auth_username', 'auth_password', 'auth_max_failure_clients'] },
             { label: 'OAuth2 / OIDC', keys: ['oauth2_enabled', 'oauth2_provider_name'] },
             { label: 'OAuth2 - Discovery (automatic)', keys: ['oauth2_issuer_url', 'oauth2_use_oidc_discovery'] },
             { label: 'OAuth2 - Endpoints (only without discovery)', keys: ['oauth2_authorization_url', 'oauth2_token_url', 'oauth2_userinfo_url'] },
             { label: 'OAuth2 - Credentials', keys: ['oauth2_client_id', 'oauth2_client_secret', 'oauth2_redirect_uri', 'oauth2_scopes'] },
-            { label: 'Sign-in Security', intro: 'For people signed in to this app in a browser, with Basic Auth or OAuth2/OIDC. AI agents and API tokens are not affected.', keys: ['session_idle_enabled', 'session_idle_timeout_minutes', 'session_expiry_hours'] },
+            { label: 'Sign-in Security', intro: 'Applies to browser sign-ins. AI agents and API tokens are not affected.', keys: ['session_idle_enabled', 'session_idle_timeout_minutes', 'session_expiry_hours'] },
             { label: 'Sessions', keys: ['session_secret_key', 'session_max_entries'] }
         ]
     },
@@ -1040,7 +1055,7 @@ var SETTINGS_EDIT_TABS = [
         ]
     },
     {
-        id: 'smtp', label: 'SMTP', description: 'SMTP for sending notifications (alerts, weekly summary). Relay mode: for local relay servers that do not require authentication (only host and from address needed).', groups: [
+        id: 'smtp', label: 'SMTP', description: "Sends the app's emails: alerts and the weekly summary.", groups: [
             { label: 'Enable', keys: ['smtp_enabled'] },
             { label: 'Server', keys: ['smtp_host', 'smtp_port'] },
             { label: 'Security', keys: ['smtp_use_tls', 'smtp_use_ssl', 'smtp_verify_ssl'] },
@@ -1049,20 +1064,20 @@ var SETTINGS_EDIT_TABS = [
         ]
     },
     {
-        id: 'notifications', label: 'Notifications', description: 'Where alerts are delivered. Add one or more destinations (Slack, Telegram, ntfy, ...) below and choose which alerts each one receives, plus the email addresses used for the different alert types.', groups: [
+        id: 'notifications', label: 'Notifications', description: 'Where alerts go: email addresses, and destinations such as Slack or Telegram.', groups: [
             { label: 'Email addresses', keys: ['admin_email', 'blacklist_alert_email', 'dmarc_error_email', 'enable_weekly_summary'] },
             { label: 'Alert types', keys: ['dns_change_alerts_enabled'] }
         ]
     },
     {
-        id: 'smtp_abuse', label: 'SMTP Abuse (Beta)', description: 'Beta - please report issues on GitHub. Enforcement layer: automatically disables SMTP (sending) for a mailbox that exceeds a hard outbound limit - the usual signature of a compromised account. The mailbox still receives mail; if its app passwords are revoked too, mail apps that sign in with one stop working. Requires a Read-Write mailcow API key. Manage blocked mailboxes and the whitelist under Security → Settings → Outgoing spam.', groups: [
+        id: 'smtp_abuse', label: 'SMTP Abuse (Beta)', description: 'Stops sending for a mailbox that sends more than the limit, the usual sign of a compromised mailbox. It still receives mail. Needs the read-write API key. Blocked mailboxes are listed in Security > Settings > Outgoing spam.', groups: [
             { label: 'Enable', keys: ['smtp_abuse_enabled'] },
             { label: 'Limit', keys: ['smtp_abuse_threshold', 'smtp_abuse_window_minutes'] },
             { label: 'Response', keys: ['smtp_abuse_revoke_app_passwords', 'smtp_abuse_unblock_grace_minutes', 'smtp_abuse_help_address'] }
         ]
     },
     {
-        id: 'anomaly', label: 'Anomaly Detection (Beta)', description: 'Beta - please report issues on GitHub. Detect compromised mailboxes and auth attacks. Alerts when a mailbox sends far above its own baseline (possible account takeover). Daily send patterns are learned automatically - a mailbox that sends a big batch at the same hour every day will not alert unless it bursts off-schedule or far above its usual size or when a username accumulates many auth failures. Alerts go to email + webhook and appear on the dashboard.', groups: [
+        id: 'anomaly', label: 'Anomaly Detection (Beta)', description: 'Alerts when a mailbox sends far more than usual for it, or when a username collects many failed logins. Nothing is blocked.', groups: [
             { label: 'Enable', keys: ['anomaly_detection_enabled'] },
             { label: 'Volume Spike', keys: ['anomaly_volume_multiplier', 'anomaly_volume_min_messages', 'anomaly_baseline_days'] },
             { label: 'Auth Failures', keys: ['anomaly_auth_failure_threshold'] },
@@ -1070,14 +1085,14 @@ var SETTINGS_EDIT_TABS = [
         ]
     },
     {
-        id: 'dmarc', label: 'DMARC & TLS', description: 'How long DMARC and TLS reports are kept (days). Allow uploading reports by hand and deleting them from the UI. Weekly summary: enable email report sent to admin.', groups: [
+        id: 'dmarc', label: 'DMARC & TLS', groups: [
             { label: 'Retention', keys: ['dmarc_retention_days'] },
             { label: 'Features', keys: ['dmarc_manual_upload_enabled', 'dmarc_allow_report_delete'] },
             { label: 'Insights (policy recommendations)', keys: ['dmarc_insights_window_days', 'dmarc_insights_pass_threshold', 'dmarc_insights_min_volume'] }
         ]
     },
     {
-        id: 'dmarc_imap', label: 'DMARC & TLS IMAP', description: 'Import DMARC and TLS reports automatically from an IMAP mailbox: the address in the rua= of your DMARC and TLS-RPT records. Set host, port, user, password and folder (e.g. INBOX). Delete after: remove emails after processing. Interval in seconds; run on startup to sync once at start.', groups: [
+        id: 'dmarc_imap', label: 'DMARC & TLS IMAP', description: 'Imports reports automatically from the mailbox in the rua= address of your DMARC and TLS-RPT records.', groups: [
             { label: 'Enable', keys: ['dmarc_imap_enabled'] },
             { label: 'Connection', keys: ['dmarc_imap_host', 'dmarc_imap_port', 'dmarc_imap_use_ssl', 'dmarc_imap_verify_ssl'] },
             { label: 'Authentication', keys: ['dmarc_imap_user', 'dmarc_imap_password'] },
@@ -1085,13 +1100,13 @@ var SETTINGS_EDIT_TABS = [
         ]
     },
     {
-        id: 'maxmind', label: 'MaxMind', description: 'MaxMind GeoIP database configuration for IP geolocation. Account ID and License Key are required to download GeoLite2 databases. Status shows whether databases are configured and up to date.', groups: [
+        id: 'maxmind', label: 'MaxMind', description: 'Shows the country of IP addresses. A free MaxMind account downloads the GeoLite2 databases.', groups: [
             { label: 'Credentials', keys: ['maxmind_account_id', 'maxmind_license_key'] },
             { label: 'Status', keys: [] }  // Status will be displayed separately, not as editable field
         ]
     },
     {
-        id: 'logs', label: 'Logs', description: 'Live log viewer settings. Controls background collection of raw logs from mailcow services. Logs are stored in a separate database table and streamed via WebSocket to the Logs page. Adjust fetch interval and retention to balance freshness vs. storage usage.', groups: [
+        id: 'logs', label: 'Logs', description: 'Collects raw logs from the mailcow services for the Logs page.', groups: [
             { label: 'Enable', keys: ['raw_logs_enabled'] },
             { label: 'Fetch Settings', keys: ['raw_logs_fetch_interval', 'raw_logs_fetch_count'] },
             { label: 'Retention', keys: ['raw_logs_retention_days', 'rate_limits_retention_days'] },
@@ -1099,7 +1114,7 @@ var SETTINGS_EDIT_TABS = [
         ]
     },
     {
-        id: 'devices', label: 'Devices', description: 'The Devices page lists the phones and tablets that sync over ActiveSync. It reads the SOGo log through the mailcow API every minute.', groups: [
+        id: 'devices', label: 'Devices', description: 'Phones and tablets that sync over ActiveSync.', groups: [
             { label: 'Retention', keys: ['eas_devices_retention_days'] }
         ]
     },
@@ -1121,7 +1136,7 @@ var SETTINGS_EDIT_TABS = [
         ]
     },
     {
-        id: 'quarantine', label: 'Quarantine', description: 'Quarantine auto-rules settings. Rules automatically release or delete quarantined emails based on sender, domain, recipient, or subject patterns. Requires a Read-Write API key.', groups: [
+        id: 'quarantine', label: 'Quarantine', description: 'Rules that release or delete quarantined mail automatically. Needs the read-write API key.', groups: [
             { label: 'Auto-Rules Scheduler', keys: ['quarantine_rules_max_actions', 'quarantine_rules_interval', 'quarantine_rules_log_retention_days'] }
         ]
     }

@@ -23,7 +23,7 @@ Each alert goes to its email recipients and to every enabled destination that ha
 | Topic | Events | Email recipients |
 | --- | --- | --- |
 | **Security** | Anomaly detection, protection rules and abuse protection blocks. | **Admin Email** |
-| **IP blacklist** | A host is listed, fewer hosts are listed, or all are clear again. | **Blacklist Alert Email**, else **Admin Email** |
+| **IP blacklist** | A host is listed, fewer hosts are listed, or all are clear again. | **Blocklist alert email**, else **Admin Email** |
 | **DNS record changes** | A changed SPF, DKIM, DMARC, TLSA, MTA-STS or TLS-RPT record, DNSSEC that stopped validating, or a TLSA record that no longer matches the certificate. | **Admin Email** |
 | **DMARC processing errors** | DMARC or TLS report emails the IMAP import could not read. | **Report Import Error Email**, else **Admin Email** |
 
@@ -37,11 +37,11 @@ Each address field takes several addresses separated by commas; they all get one
 
 ## SMTP
 
-Email needs **SMTP Enabled** with a host, user and password, or with **SMTP Relay Mode**, a host and **SMTP From** ([all SMTP fields](HelpDocs/Settings.md#smtp)); enabled destinations receive their subscribed alerts without SMTP, but the weekly summary and mailbox-owner notices are email-only.
+Email needs **Enable SMTP** with a host, user and password, or with **SMTP Relay Mode**, a host and **From address** ([all SMTP fields](HelpDocs/Settings.md#smtp)); enabled destinations receive their subscribed alerts without SMTP, but the weekly summary and mailbox-owner notices are email-only.
 
-**SMTP Verify SSL** defaults to **Off**; **Automatic** checks dotted host names but skips `localhost`, IP addresses and single-label container names, while **On** always checks the certificate.
+**Verify certificate** defaults to **Off**; **Automatic** checks dotted host names but skips `localhost`, IP addresses and single-label container names, while **On** always checks the certificate.
 
-**Test SMTP** sends a real email to **Admin Email** (or **SMTP User** when it is empty), even while **SMTP Enabled** is off.
+**Test SMTP** sends a real email to **Admin Email** (or **SMTP User** when it is empty), even while **Enable SMTP** is off.
 
 ## Every email subject
 
@@ -66,7 +66,7 @@ A topic in the last column means the message goes to that topic's email recipien
 
 Blocklist alerts come from the daily 05:00 check, the check at startup, **Check all now** on **Status** > **Blocklists** and **Run** on **IP Blacklist Check (All Hosts)**; a check of one host sends nothing. Ignored lists never count, and UCEPROTECT Level 2 and 3 do not count on their own. The previous count is kept in memory, so a restart resets it.
 
-The weekly summary is sent on Mondays at 09:00 in the app's time zone (`TZ`) and covers the seven days before it: mail, the current system figures, blocklists, DNS problems and the five mailboxes with the most failures. **Run** on **Weekly Summary Report** under **Status** > **Jobs** sends it at once, unless **Enable Weekly Summary** is off. **Enable Weekly Summary** and **DNS Change Alerts Enabled** are both on by default.
+The weekly summary is sent on Mondays at 09:00 in the app's time zone (`TZ`) and covers the seven days before it: mail, the current system figures, blocklists, DNS problems and the five mailboxes with the most failures. **Run** on **Weekly Summary Report** under **Status** > **Jobs** sends it at once, unless **Enable Weekly Summary** is off. **Enable Weekly Summary** and **DNS change alerts** are both on by default.
 
 What the owner of a blocked mailbox is told is in [Outgoing spam](HelpDocs/Abuse_Protection.md#what-happens-when-a-mailbox-is-stopped). Turning sending back on sends no email.
 

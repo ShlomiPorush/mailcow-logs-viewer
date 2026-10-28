@@ -62,11 +62,11 @@ Under **Settings** > **Logs**:
 
 | Setting | Default | Effect |
 |---|---|---|
-| **Raw Logs Enabled** (`RAW_LOGS_ENABLED`) | On | Collects the selected services for this page. Off, the viewer is disabled. |
-| **Raw Logs Fetch Interval** (`RAW_LOGS_FETCH_INTERVAL`) | 30 seconds | How often mailcow logs are fetched. |
-| **Raw Logs Fetch Count** (`RAW_LOGS_FETCH_COUNT`) | 1000 | Lines fetched per service. Postfix and Rspamd can read up to 10 extra pages when one fetch is not enough. |
-| **Raw Logs Retention Days** (`RAW_LOGS_RETENTION_DAYS`) | 2 | Days retained. Cleanup runs daily at 3:00. |
-| **Rate Limits Retention Days** (`RATE_LIMITS_RETENTION_DAYS`) | 90 | Days the Ratelimited lines are kept, for **Rate Limits**. Never less than Raw Logs Retention Days. |
+| **Collect raw logs** (`RAW_LOGS_ENABLED`) | On | Collects the selected services for this page. Off, the viewer is disabled. |
+| **Fetch every (seconds)** (`RAW_LOGS_FETCH_INTERVAL`) | 30 seconds | How often mailcow logs are fetched. |
+| **Entries per service per fetch** (`RAW_LOGS_FETCH_COUNT`) | 1000 | Lines fetched per service. Postfix and Rspamd can read up to 10 extra pages when one fetch is not enough. |
+| **Keep raw logs for (days)** (`RAW_LOGS_RETENTION_DAYS`) | 2 | Days retained. Cleanup runs daily at 3:00. |
+| **Keep rate limit hits for (days)** (`RATE_LIMITS_RETENTION_DAYS`) | 90 | Days the Ratelimited lines are kept, for **Rate Limits**. Never less than **Keep raw logs for (days)**. |
 | **Raw Logs Services** (`RAW_LOGS_SERVICES`) | All ten | A comma-separated service list, or `all`. An environment value locks the UI switches. |
 
 Some services remain collected even when hidden here or the Logs feature is off:
@@ -79,9 +79,9 @@ Ratelimited and SOGo stop only when neither Logs nor their dependent feature nee
 
 ## When something is missing
 
-- **Live Log Viewer is Disabled.** Enable **Raw Logs Enabled** under **Settings** > **Logs**.
+- **Live Log Viewer is Disabled.** Enable **Collect raw logs** under **Settings** > **Logs**.
 - **No log services available.** Enable a service under **Settings** > **Logs** > **Services**.
 - **No log entries found.** Wait for collection. A service your mailcow version does not offer stays empty; fetch failures can also delay entries.
 - **Disconnected.** Check sign-in and WebSocket proxy forwarding. Authentication refusal stops automatic retries.
 - **Failed to load logs** or **Failed to load log services.** Check **View Container Logs** for database or server errors.
-- Older lines may have expired under **Raw Logs Retention Days**.
+- Older lines may have expired under **Keep raw logs for (days)**.

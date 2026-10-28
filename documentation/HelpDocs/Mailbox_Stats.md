@@ -30,7 +30,7 @@ Click the small chart in **Activity** to see the mailbox's sent and received mes
 
 ## Settings that change this page
 
-The counts come from the message history, which **Retention Days** under **Settings** > **Fetch** keeps for 7 days by default. A longer period cannot show more than that. Mailbox and alias details sync from mailcow every 5 minutes, and the list can be up to 5 minutes old.
+The counts come from the message history, which **Keep logs for (days)** under **Settings** > **Fetch** keeps for 7 days by default. A longer period cannot show more than that. Mailbox and alias details sync from mailcow every 5 minutes, and the list can be up to 5 minutes old.
 
 **Mailbox Stats** and **Rate Limits** are separate switches under **Settings** > **Features**. Turning off **Mailbox Stats** deletes the stored mailbox and alias details, not the messages. While **Rate Limits** is on, the mailbox details stay, because Rate Limits reads each mailbox's limit from them. If **Rate Limits** stays on, the sidebar entry is called **Rate Limits** and opens only that tab.
 

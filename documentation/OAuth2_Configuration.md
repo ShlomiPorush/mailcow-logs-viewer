@@ -15,7 +15,7 @@ AUTH_USERNAME=admin
 AUTH_PASSWORD=replace-with-a-long-random-password
 ```
 
-To set it up in the app instead, fill in **Auth Username** and **Auth Password** in **Settings** > **Authentication**, turn on **Basic Auth Enabled** and save. The app asks you to type the username and password again, so you cannot lock yourself out with a typo, and it does not let you clear the password while Basic authentication is on.
+To set it up in the app instead, fill in **Auth Username** and **Auth Password** in **Settings** > **Authentication**, turn on **Enable Basic Auth** and save. The app asks you to type the username and password again, so you cannot lock yourself out with a typo, and it does not let you clear the password while Basic authentication is on.
 
 Scripts and API clients can send an `Authorization: Basic` header with every request instead of signing in.
 
@@ -24,7 +24,7 @@ Scripts and API clients can send an `Authorization: Basic` header with every req
 
 After 10 failed attempts within 15 minutes, the app refuses further Basic sign-in attempts from that address ("Too many login attempts") until the oldest failures are more than 15 minutes old. IPv6 addresses are counted per `/64` network. Users who are already signed in are not affected.
 
-Behind a reverse proxy, the app must know the real visitor address, or all visitors share one counter. See [Reverse proxy](Reverse_Proxy.md). **Auth Max Failure Clients** (`AUTH_MAX_FAILURE_CLIENTS`, default 10,000) caps how many addresses the app tracks.
+Behind a reverse proxy, the app must know the real visitor address, or all visitors share one counter. See [Reverse proxy](Reverse_Proxy.md). **Tracked failed sign-in addresses** (`AUTH_MAX_FAILURE_CLIENTS`, default 10,000) caps how many addresses the app tracks.
 
 ## OAuth2/OIDC
 
@@ -145,7 +145,7 @@ Both sign-in methods give the browser a cookie named `session_id` (`HttpOnly`, `
 - **Sign out after inactivity** (`SESSION_IDLE_ENABLED`, off by default) ends a session after **Inactivity limit** minutes without activity (`SESSION_IDLE_TIMEOUT_MINUTES`, default 60, from 5 to 1440). Typing, clicking, scrolling with the wheel and touching count as activity; pages that refresh by themselves do not, so a dashboard left open on a screen is signed out too. A minute before, the page asks whether you are still there. Turning it on does not sign out people who are already signed in: their inactivity time starts then.
 - After a session ends this way, the login page says why. Both limits apply to Basic Auth and OAuth2 sign-ins alike. AI agents and API calls with a username and password are not affected.
 - Sessions are kept in memory, so every restart of the app signs everyone out.
-- **Session Max Entries** (`SESSION_MAX_ENTRIES`, default 50) caps open sessions. When it is reached, existing sessions keep working and new sign-ins fail with "Login capacity reached" until a session expires or someone signs out.
+- **Maximum sessions** (`SESSION_MAX_ENTRIES`, default 50) caps open sessions. When it is reached, existing sessions keep working and new sign-ins fail with "Login capacity reached" until a session expires or someone signs out.
 - **Logout** ends the session in this app only. It does not sign you out of your identity provider.
 - Saving a change to the sign-in settings signs everyone out. The person who saved gets a new session and stays signed in.
 
@@ -168,5 +168,5 @@ If you lock yourself out:
 | The provider button fails at once | The issuer URL (the app adds `/.well-known/openid-configuration`), network access from the app to the provider, and the provider's certificate. The reason is in the app's log. |
 | The provider rejects the callback | The callback URL must be identical at the provider and in `OAUTH2_REDIRECT_URI`: scheme, host, port and path. |
 | "Invalid authentication state" | Start the login again in the same browser and finish it within 10 minutes. |
-| "Login capacity reached" | Sign out unused sessions or wait for them to expire, or raise **Session Max Entries**. |
+| "Login capacity reached" | Sign out unused sessions or wait for them to expire, or raise **Maximum sessions**. |
 | Everyone gets "Too many login attempts" at once | The app sees the proxy's address instead of the visitor's. Check `FORWARDED_ALLOW_IPS` in [Reverse proxy](Reverse_Proxy.md). |
