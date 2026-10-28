@@ -172,6 +172,7 @@ def client(monkeypatch):
                 'active_bans': [{'network': f'{IP}/32', 'ip': IP, 'banned_until': '00h 20m 00s', 'queued_for_unban': 0}]}
     monkeypatch.setattr(mailcow_api, 'get_fail2ban', fake_fail2ban)
 
+    from app import models  # noqa: F401  (create_all only knows the tables of imported models)
     from app.database import init_db
     init_db()
     _cleanup()
@@ -232,12 +233,6 @@ def test_rbl_is_the_stored_check_or_not_checked(client):
     assert checked["checked_at"] == "2020-03-10T12:00:00Z"
     unchecked = _card(client, "ip", UNCHECKED_IP)["sources"]["rbl"]
     assert unchecked == {"state": "ok", "reason": None, "checked": False, "monitored": False}
-
-
-def test_ip_card_reads_ipv6_in_any_form(client):
-    card = _card(client, "ip", "2001:DB8:0:0::1")
-    assert card["value"] == "2001:db8::1"
-    assert card["sources"]["messages"]["count"] == 0
 
 
 def test_lists_unknown_when_mailcow_does_not_answer(client, monkeypatch):

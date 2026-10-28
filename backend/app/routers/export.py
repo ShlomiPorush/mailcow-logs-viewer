@@ -13,6 +13,7 @@ from ..app_time import local_now, to_local
 from ..config import settings
 from ..utils import internal_error, RangeStart, RangeEnd
 from .messages import EXACT_DESCRIPTION, _filtered_messages_query, message_sort_time
+from ..services.entity_values import canonical_ip
 from ..services import excluded_addresses
 from ..services.csv_export import csv_download, csv_query_rows, get_csv_db
 from ..api_models import CsvFile, Invalid, documented
@@ -244,7 +245,7 @@ def export_netfilter_csv(
             )
         
         if ip and exact_ip is True:
-            query = query.filter(NetfilterLog.ip == ip)
+            query = query.filter(NetfilterLog.ip == canonical_ip(ip))
         elif ip:
             query = query.filter(NetfilterLog.ip.ilike(f"%{ip}%"))
         

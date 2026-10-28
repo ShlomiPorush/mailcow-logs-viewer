@@ -173,12 +173,12 @@ def _address_match(column, value: str, exact: bool):
 
 
 def _ip_match(column, value: str, exact: bool):
+    """An ip filter on RspamdLog.ip: a part of it, or with exact the address.
+    Rspamd writes an address in its canonical form (see entity_summary, "IP by
+    value"), so the address typed in any spelling is compared in that form."""
     if not exact:
         return column.ilike(f"%{value}%")
-    try:
-        return column.in_(entity_values.ip_forms(entity_values.normalize_ip(value)))
-    except entity_values.InvalidValue:
-        return column == value.strip()
+    return column == entity_values.canonical_ip(value)
 
 
 def _filtered_messages_query(db, search=None, sender=None, recipient=None, direction=None, status=None,

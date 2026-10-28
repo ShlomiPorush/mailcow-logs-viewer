@@ -39,11 +39,26 @@ def test_ip_refuses_what_is_not_one_address(given, says):
     assert says in str(e.value)
 
 
-def test_ip_forms_cover_how_other_systems_write_ipv6():
-    forms = ev.ip_forms("2001:db8::1")
-    assert "2001:db8::1" in forms and "2001:0db8:0000:0000:0000:0000:0000:0001" in forms
-    assert "2001:DB8::1" in forms
-    assert ev.ip_forms("203.0.113.4") == ["203.0.113.4"]
+@pytest.mark.parametrize("stored", ["2001:db8::1", "2001:DB8::1", "2001:db8:0:0::1", "2001:0db8:0000:0000:0000:0000:0000:0001",
+                                    " 2001:db8::1 "])
+def test_same_ip_compares_ipv6_by_value(stored):
+    assert ev.same_ip(stored, "2001:db8::1")
+
+
+@pytest.mark.parametrize("stored", ["2001:db8::10", "2001:db8::/64", "mail.example.com", "", None, "2001:db8::1%eth0"])
+def test_same_ip_refuses_other_values(stored):
+    assert not ev.same_ip(stored, "2001:db8::1")
+
+
+def test_same_ip_reads_an_ipv4_address_mapped_into_ipv6():
+    assert ev.same_ip("::ffff:203.0.113.4", "203.0.113.4")
+    assert ev.same_ip("203.0.113.4", "203.0.113.4") and not ev.same_ip("203.0.113.45", "203.0.113.4")
+
+
+def test_canonical_ip():
+    assert ev.canonical_ip("2001:DB8:0:0::1") == "2001:db8::1"
+    assert ev.canonical_ip(" 203.0.113.4 ") == "203.0.113.4"
+    assert ev.canonical_ip("not-an-ip ") == "not-an-ip"
 
 
 # ---------------------------------------------------------------- address

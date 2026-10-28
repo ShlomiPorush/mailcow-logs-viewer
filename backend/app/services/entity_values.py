@@ -25,10 +25,7 @@ import re
 import unicodedata
 from typing import List, Optional, Tuple
 
-try:  # IDNA 2008 with UTS #46 mapping; httpx brings it
-    import idna as _idna
-except ImportError:  # pragma: no cover - the image always has it
-    _idna = None
+import idna  # IDNA 2008 with UTS #46 mapping; httpx depends on it
 
 ADDRESS_MAX = 254
 LOCAL_MAX = 64
@@ -86,14 +83,28 @@ def normalize_ip(value) -> str:
     return str(address)
 
 
-def ip_forms(ip: str) -> List[str]:
-    """The ways another system may have written a canonical IP: compressed and
-    exploded, in lower and upper case (DMARC reporters write what they like)."""
-    address = ipaddress.ip_address(ip)
-    forms = [str(address)]
-    if address.version == 6:
-        forms += [address.exploded, str(address).upper(), address.exploded.upper()]
-    return list(dict.fromkeys(forms))
+def canonical_ip(value: str) -> str:
+    """A typed address in the canonical form; text that is not one address as
+    it was typed (compared with a stored address, it then matches nothing)."""
+    try:
+        return normalize_ip(value)
+    except InvalidValue:
+        return value.strip() if isinstance(value, str) else value
+
+
+def same_ip(stored, ip: str) -> bool:
+    """Whether stored text holds the address ip (canonical) by value: any
+    spelling of an IPv6 address, an IPv4 address mapped into IPv6. Text that
+    is not one address (a network, a host name, garbage) holds none."""
+    if not isinstance(stored, str):
+        return False
+    try:
+        address = ipaddress.ip_address(stored.strip())
+    except ValueError:
+        return False
+    if address.version == 6 and address.ipv4_mapped:
+        address = address.ipv4_mapped
+    return address == ipaddress.ip_address(ip)
 
 
 def fail2ban_entry_problem(value) -> Optional[str]:
@@ -124,14 +135,9 @@ def fail2ban_entry_problem(value) -> Optional[str]:
 def _to_ascii(value: str) -> str:
     if value.isascii():
         return value.lower()
-    if _idna is not None:
-        try:
-            return _idna.encode(value, uts46=True).decode("ascii").lower()
-        except _idna.IDNAError:
-            raise InvalidValue("Enter a valid domain, like example.com.")
-    try:  # pragma: no cover
-        return value.encode("idna").decode("ascii").lower()
-    except UnicodeError:  # pragma: no cover
+    try:
+        return idna.encode(value, uts46=True).decode("ascii").lower()
+    except idna.IDNAError:
         raise InvalidValue("Enter a valid domain, like example.com.")
 
 
@@ -158,10 +164,10 @@ def domain_forms(domain: str) -> List[str]:
     """A normalized domain as ASCII and, when it is an IDN, in Unicode too: logs
     keep the form the mail had."""
     forms = [domain]
-    if "xn--" in domain and _idna is not None:
+    if "xn--" in domain:
         try:
-            forms.append(_idna.decode(domain).lower())
-        except _idna.IDNAError:
+            forms.append(idna.decode(domain).lower())
+        except idna.IDNAError:
             pass
     return list(dict.fromkeys(forms))
 

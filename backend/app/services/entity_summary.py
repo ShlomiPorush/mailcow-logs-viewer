@@ -22,10 +22,11 @@ last seen.
 """
 import ipaddress
 import logging
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Callable, Dict, List, Optional, Tuple
 
-from sqlalchemy import and_, case, cast, desc, distinct, exists, func, literal, or_, select
+from sqlalchemy import and_, case, cast, desc, distinct, exists, false, func, literal, or_, select
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Session
 
@@ -125,6 +126,34 @@ def _domain_match(column, domain: str):
     return or_(*[_like_suffix(column, form) for form in entity_values.domain_forms(domain)])
 
 
+# ---------------------------------------------------------------- IP by value
+# How each stored address column is matched (ip is canonical, from entity_values):
+# - rspamd_logs.ip, netfilter_logs.ip: text equality on the canonical form, which
+#   keeps their indexes. netfilter_logs.ip is written by netfilter_address()
+#   (str(ipaddress), migration 0024 cleared older rows that disagreed with it);
+#   rspamd_logs.ip is the text Rspamd's history sends, which Rspamd formats with
+#   inet_ntop (lower case, zeros compressed, the form ipaddress writes).
+# - every other column (eas_devices.last_ip, protection_hits.ip, dmarc_records.source_ip,
+#   blacklist_checks.server_ip, monitored_hosts.hostname) may hold another spelling,
+#   a network, a host name or, for DMARC rows stored before validation (#330),
+#   anything. PostgreSQL has no safe cast for such text, so _ip_value_match reads
+#   the distinct candidate texts of a bounded set and compares them with ipaddress.
+IP_TEXTS_READ = 20000
+
+
+def _ip_value_match(texts_query, column, ip: str):
+    """A condition: column holds ip by value. texts_query selects rows of the
+    bounded set to look in. ipaddress reads an IPv4 address in one spelling
+    only, so equality finds it; other candidates are IPv6 texts (any IPv6
+    spelling, or an IPv4 address mapped into IPv6), read and compared here."""
+    v4 = ipaddress.ip_address(ip).version == 4
+    pattern = f"%:{ip}" if v4 else "%:%"
+    texts = [t for (t,) in texts_query.with_entities(column).filter(column.like(pattern)).distinct()
+             .limit(IP_TEXTS_READ).all() if entity_values.same_ip(t, ip)]
+    conditions = ([column == ip] if v4 else []) + ([column.in_(texts)] if texts else [])
+    return or_(*conditions) if conditions else false()
+
+
 # ---------------------------------------------------------------- messages
 
 def _message_group_key():
@@ -172,7 +201,7 @@ def _in_range(start: datetime, end: datetime):
 
 def _messages_of_ip(db: Session, ip: str, start: datetime, end: datetime) -> dict:
     scanned_from = MessageCorrelation.rspamd_log_id.in_(
-        select(RspamdLog.id).where(RspamdLog.ip.in_(entity_values.ip_forms(ip))))
+        select(RspamdLog.id).where(RspamdLog.ip == ip))  # canonical text, see "IP by value"
     condition = and_(_in_range(start, end), scanned_from)
     count, = _count_messages(db, condition)
     return {"count": count, "items": _latest_messages(db, condition)}
@@ -256,11 +285,20 @@ def _usernames_match(match_value):
     return exists(select(literal(1)).select_from(names).where(match_value(names.c.value)))
 
 
+def _protection_window(start: datetime, end: datetime):
+    """Open catches always; closed ones when they overlap the range."""
+    return or_(ProtectionHit.status.in_(protection_rules.OPEN_STATUSES),
+               and_(ProtectionHit.last_seen >= start, ProtectionHit.first_seen <= end))
+
+
+def _protection_of_ip(db: Session, ip: str, start: datetime, end: datetime) -> dict:
+    # A catch's address is a log's text (or a network, for the subnet rule): by value
+    window = _protection_window(start, end)
+    return _protection(db, _ip_value_match(db.query(ProtectionHit).filter(window), ProtectionHit.ip, ip), start, end)
+
+
 def _protection(db: Session, condition, start: datetime, end: datetime) -> dict:
-    # Open catches always; closed ones when they overlap the range
-    relevant = and_(condition, or_(
-        ProtectionHit.status.in_(protection_rules.OPEN_STATUSES),
-        and_(ProtectionHit.last_seen >= start, ProtectionHit.first_seen <= end)))
+    relevant = and_(condition, _protection_window(start, end))
     total, open_count = db.query(
         func.count(ProtectionHit.id),
         func.count(ProtectionHit.id).filter(ProtectionHit.status.in_(protection_rules.OPEN_STATUSES)),
@@ -272,8 +310,18 @@ def _protection(db: Session, condition, start: datetime, end: datetime) -> dict:
 
 # ---------------------------------------------------------------- devices
 
+def _device_window(start: datetime, end: datetime):
+    return and_(EasDevice.last_seen >= start, EasDevice.first_seen <= end)
+
+
+def _devices_of_ip(db: Session, ip: str, start: datetime, end: datetime) -> dict:
+    # Written canonically, but the table is small: matched by value all the same
+    window = _device_window(start, end)
+    return _devices(db, _ip_value_match(db.query(EasDevice).filter(window), EasDevice.last_ip, ip), start, end)
+
+
 def _devices(db: Session, condition, start: datetime, end: datetime) -> dict:
-    seen = and_(condition, EasDevice.last_seen >= start, EasDevice.first_seen <= end)
+    seen = and_(condition, _device_window(start, end))
     total = db.query(func.count(EasDevice.id)).filter(seen).scalar() or 0
     rows = db.query(EasDevice).filter(seen).order_by(desc(EasDevice.last_seen), desc(EasDevice.id)).limit(ITEMS).all()
     return {"count": total, "items": [{
@@ -293,20 +341,29 @@ def _report_overlaps(start: datetime, end: datetime):
     return and_(DMARCReport.end_date >= _epoch(start), DMARCReport.begin_date <= _epoch(end))
 
 
+def _report_domain():
+    """A report's domain as one key: lower case, without a trailing dot, as
+    normalize_domain() writes the domain asked for (reporters write either)."""
+    return func.rtrim(func.lower(DMARCReport.domain), ".")
+
+
 def _dmarc_of_ip(db: Session, ip: str, start: datetime, end: datetime) -> dict:
     """The aggregate DMARC records that name the IP as a source, for every
     domain: who reported it, for which period, and when the report came in."""
-    where = and_(DMARCRecord.source_ip.in_(entity_values.ip_forms(ip)), _report_overlaps(start, end))
+    in_range = db.query(DMARCRecord).join(DMARCReport, DMARCRecord.dmarc_report_id == DMARCReport.id).filter(
+        _report_overlaps(start, end))
+    where = and_(_ip_value_match(in_range, DMARCRecord.source_ip, ip), _report_overlaps(start, end))
     joined = lambda q: q.select_from(DMARCRecord).join(DMARCReport, DMARCRecord.dmarc_report_id == DMARCReport.id).filter(where)  # noqa: E731
+    domain = _report_domain()
     messages, reports, domains = joined(db.query(
         func.coalesce(func.sum(DMARCRecord.count), 0), func.count(distinct(DMARCReport.id)),
-        func.count(distinct(DMARCReport.domain)))).one()
+        func.count(distinct(domain)))).one()
     dmarc_pass = or_(DMARCRecord.spf_result == "pass", DMARCRecord.dkim_result == "pass")
     by_domain = joined(db.query(
-        DMARCReport.domain, func.coalesce(func.sum(DMARCRecord.count), 0), _passed(dmarc_pass),
+        domain, func.coalesce(func.sum(DMARCRecord.count), 0), _passed(dmarc_pass),
         _passed(DMARCRecord.spf_result == "pass"), _passed(DMARCRecord.dkim_result == "pass"),
         func.count(distinct(DMARCReport.id)), func.max(DMARCReport.end_date), func.max(DMARCReport.created_at),
-    )).group_by(DMARCReport.domain).order_by(desc(func.sum(DMARCRecord.count)), DMARCReport.domain).limit(DMARC_DOMAINS).all()
+    )).group_by(domain).order_by(desc(func.sum(DMARCRecord.count)), domain).limit(DMARC_DOMAINS).all()
     records = joined(db.query(DMARCRecord, DMARCReport)).order_by(
         desc(DMARCReport.end_date), desc(DMARCRecord.id)).limit(ITEMS).all()
     return {
@@ -316,7 +373,7 @@ def _dmarc_of_ip(db: Session, ip: str, start: datetime, end: datetime) -> dict:
             "reports": count, "last_period_end": _from_epoch(last_end), "last_received": iso(last_received),
         } for d, total, passed, spf, dkim, count, last_end, last_received in by_domain],
         "records": [{
-            "domain": report.domain, "org_name": report.org_name, "report_id": report.report_id,
+            "domain": report.domain.lower().rstrip("."), "org_name": report.org_name, "report_id": report.report_id,
             "period_begin": _from_epoch(report.begin_date), "period_end": _from_epoch(report.end_date),
             "received": iso(report.created_at), "count": record.count, "disposition": record.disposition,
             "spf_result": record.spf_result, "dkim_result": record.dkim_result, "header_from": record.header_from,
@@ -325,7 +382,7 @@ def _dmarc_of_ip(db: Session, ip: str, start: datetime, end: datetime) -> dict:
 
 
 def _dmarc_of_domain(db: Session, domain: str, start: datetime, end: datetime) -> dict:
-    where = and_(DMARCReport.domain.in_(entity_values.domain_forms(domain)), _report_overlaps(start, end))
+    where = and_(_report_domain().in_(entity_values.domain_forms(domain)), _report_overlaps(start, end))
     reports, last_end, last_received = db.query(
         func.count(DMARCReport.id), func.max(DMARCReport.end_date), func.max(DMARCReport.created_at)).filter(where).one()
     dmarc_pass = or_(DMARCRecord.spf_result == "pass", DMARCRecord.dkim_result == "pass")
@@ -347,9 +404,10 @@ def _rbl(db: Session, ip: str) -> dict:
     lookup: "Check now" is POST /api/blacklist/check."""
     from .blacklist_service import apply_ignored_lists
     from .ignore_lists import IGNORED_BLOCKLISTS_KEY, load_ignored
-    forms = entity_values.ip_forms(ip)
-    monitored = db.query(MonitoredHost.id).filter(MonitoredHost.hostname.in_(forms), MonitoredHost.active == True).first() is not None  # noqa: E712
-    check = db.query(BlacklistCheck).filter(BlacklistCheck.server_ip.in_(forms)).order_by(
+    hosts = db.query(MonitoredHost).filter(MonitoredHost.active == True)  # noqa: E712
+    monitored = hosts.filter(_ip_value_match(hosts, MonitoredHost.hostname, ip)).first() is not None
+    checks = db.query(BlacklistCheck)
+    check = checks.filter(_ip_value_match(checks, BlacklistCheck.server_ip, ip)).order_by(
         desc(BlacklistCheck.checked_at), desc(BlacklistCheck.id)).first()
     if check is None:
         return {"checked": False, "monitored": monitored}
@@ -382,11 +440,70 @@ def _suppression_dict(row: Optional[SpamSuppression]) -> Optional[dict]:
             "bounce_count": row.bounce_count}
 
 
-def _suppression_entry(db: Session, forms: List[str], kind: str) -> Optional[dict]:
-    row = db.query(SpamSuppression).filter(func.lower(SpamSuppression.email).in_(forms)).filter(
-        or_(SpamSuppression.type == kind, and_(SpamSuppression.type.is_(None), literal(kind == "email")))
-    ).order_by(SpamSuppression.id).first()
+# A suppression row holds the value of a line of the Rspamd regexp map
+# (routers/suppressions.py). The card recognises the forms the app stores, by
+# equality, and never runs a stored pattern:
+# - an address: the address in lower case (automatic blocks, the Add form), or
+#   /^address$/i escaped (the pattern wizard, and lines read back from Rspamd);
+# - a domain: /^.+@domain$/i (the Add form), /^.+@(.+\.)?domain$/i (the pattern
+#   wizard, subdomains too), the older unanchored /.+@domain/i, with or without
+#   the i flag, or the bare domain of a row of type domain (the API and the CSV
+#   import take one).
+# The dots are escaped, and a hyphen too when Python's re.escape wrote the value.
+
+def _js_escape(text: str) -> str:
+    """escapeRegex of the frontend (utils.js)."""
+    return re.sub(r"[.*+?^${}()|\[\]\\]", lambda m: "\\" + m.group(0), text)
+
+
+def _escapes(text: str) -> List[str]:
+    return list(dict.fromkeys((_js_escape(text), re.escape(text))))
+
+
+def _address_entry_values(address: str) -> List[str]:
+    values = []
+    for form in entity_values.address_forms(address):
+        values.append(form)
+        values += [f"/^{escaped}$/{flags}" for escaped in _escapes(form) for flags in ("i", "")]
+    return list(dict.fromkeys(v.lower() for v in values))
+
+
+def _domain_entry_values(domain: str) -> List[str]:
+    values = []
+    for form in entity_values.domain_forms(domain):
+        for escaped in _escapes(form):
+            for flags in ("i", ""):
+                values += [f"/^.+@{escaped}$/{flags}", f"/^.+@(.+\\.)?{escaped}$/{flags}", f"/.+@{escaped}/{flags}"]
+    return list(dict.fromkeys(v.lower() for v in values))
+
+
+def _first_entry(db: Session, condition) -> Optional[dict]:
+    row = db.query(SpamSuppression).filter(condition).order_by(
+        desc(SpamSuppression.active), SpamSuppression.id).first()
     return _suppression_dict(row)
+
+
+def _address_entry(db: Session, address: str) -> Optional[dict]:
+    return _first_entry(db, and_(func.lower(SpamSuppression.email).in_(_address_entry_values(address)),
+                                 or_(SpamSuppression.type.is_(None), SpamSuppression.type != "domain")))
+
+
+def _domain_entry(db: Session, domain: str) -> Optional[dict]:
+    email = func.lower(SpamSuppression.email)
+    return _first_entry(db, or_(email.in_(_domain_entry_values(domain)),
+                                and_(email.in_(entity_values.domain_forms(domain)), SpamSuppression.type == "domain")))
+
+
+def _suppressions(db: Session, read: Callable[[], dict]) -> dict:
+    """The suppression list's answer, while the app keeps the list: with "Sync
+    with Rspamd" off it keeps none, and while its blocks are loaded back from
+    Rspamd it is not complete. Either way the card says so, never "no entry"."""
+    from ..routers.suppressions import import_pending, rspamd_sync_on
+    if not rspamd_sync_on():
+        raise Off("Sync with Rspamd is off, so the app keeps no suppression list.")
+    if import_pending(db):
+        raise Off("The suppression list is being loaded back from Rspamd. Try again in a few minutes.")
+    return read()
 
 
 def _mailbox(db: Session, address: str) -> dict:
@@ -439,9 +556,11 @@ _LABELS = {"message": "Message", "security": "Security event", "ban": "Banned", 
            "protection": "Protection catch", "device_first_seen": "Device first seen",
            "device_last_seen": "Device last seen"}
 
-def _timeline(sources: Dict[str, dict], device_first_seen: bool) -> dict:
+def _timeline(sources: Dict[str, dict], start: datetime, end: datetime, device_first_seen: bool) -> dict:
     """The sources' newest rows in one list, newest first. A source that is
-    off or failed adds nothing and is named in left_out."""
+    off or failed adds nothing and is named in left_out. Only events whose own
+    time is in the range: a device seen before and after it, or a catch opened
+    before it, is in its source's list (it is current) but not in the timeline."""
     items, truncated, left_out = [], False, []
     for name in ("messages", "security", "protection", "devices"):
         source = sources.get(name)
@@ -473,7 +592,9 @@ def _timeline(sources: Dict[str, dict], device_first_seen: bool) -> dict:
                         continue
                     items.append({"time": at, "kind": kind, "username": row["username"], "device_id": row["device_id"],
                                   "device_type": row["device_type"], "ip": row["last_ip"]})
-    items = [i for i in items if i["time"]]
+    # The times are ISO strings of one format (iso()), so they compare as text
+    first, last = iso(start), iso(end)
+    items = [i for i in items if i["time"] and first <= i["time"] <= last]
     items.sort(key=lambda i: (i["time"], -_KIND_ORDER[i["kind"]]), reverse=True)
     if len(items) > TIMELINE:
         items, truncated = items[:TIMELINE], True
@@ -492,28 +613,30 @@ def ip_summary(db: Session, ip: str, start: datetime, end: datetime,
                read_fail2ban: Callable[[], Optional[dict]]) -> dict:
     """Everything stored about one IP (normalized). read_fail2ban returns
     mailcow's Fail2ban answer, or None when mailcow did not answer."""
-    forms = entity_values.ip_forms(ip)
     sources = {
         "messages": _run(db, None, "the messages", lambda: _messages_of_ip(db, ip, start, end)),
+        # Canonical text, see "IP by value"
         "security": _run(db, "netfilter", "the security events",
-                         lambda: _security(db, NetfilterLog.ip.in_(forms), start, end, with_ips=False)),
+                         lambda: _security(db, NetfilterLog.ip == ip, start, end, with_ips=False)),
         "lists": _run(db, "netfilter", "the Fail2ban lists", lambda: _lists(ip, read_fail2ban)),
-        "protection": _run(db, "netfilter", "the protection catches",
-                           lambda: _protection(db, ProtectionHit.ip.in_(forms), start, end)),
-        "devices": _run(db, "devices", "the devices", lambda: _devices(db, EasDevice.last_ip.in_(forms), start, end)),
+        "protection": _run(db, "netfilter", "the protection catches", lambda: _protection_of_ip(db, ip, start, end)),
+        "devices": _run(db, "devices", "the devices", lambda: _devices_of_ip(db, ip, start, end)),
         "dmarc": _run(db, "dmarc", "the DMARC reports", lambda: _dmarc_of_ip(db, ip, start, end)),
         "rbl": _run(db, "blacklist", "the blocklist check", lambda: _rbl(db, ip)),
         "geo": _run(db, None, "the place of the address", lambda: _geo(ip)),
     }
     return {"kind": "ip", "value": ip, "display": ip, "range": _range_dict(start, end), "sources": sources,
             # Only the device's last address is stored: an IP card says when it was last seen from there
-            "timeline": _timeline(sources, device_first_seen=False)}
+            "timeline": _timeline(sources, start, end, device_first_seen=False)}
 
 
 def address_summary(db: Session, address: str, display: str, start: datetime, end: datetime) -> dict:
     """Everything stored about one email address or mailbox (normalized)."""
     forms = entity_values.address_forms(address)
     domain = entity_values.address_domain(address)
+    # Each source shows what its own page shows. Messages leaves an excluded
+    # address out, as the Messages page does; Security, Protection, Devices and
+    # Suppressions list it, as their pages do (owner decision, review R2).
     excluded = any(excluded_addresses.is_listed(form) for form in forms)
     if excluded:
         messages = {"state": "disabled",
@@ -528,14 +651,13 @@ def address_summary(db: Session, address: str, display: str, start: datetime, en
         "protection": _run(db, "netfilter", "the protection catches",
                            lambda: _protection(db, _usernames_match(lambda v: func.lower(v).in_(forms)), start, end)),
         "devices": _run(db, "devices", "the devices", lambda: _devices(db, lowered(EasDevice.username), start, end)),
-        "suppression": _run(db, "suppressions", "the suppression list", lambda: {
-            "entry": _suppression_entry(db, forms, "email"),
-            "domain_entry": _suppression_entry(db, entity_values.domain_forms(domain), "domain")}),
+        "suppression": _run(db, "suppressions", "the suppression list", lambda: _suppressions(db, lambda: {
+            "entry": _address_entry(db, address), "domain_entry": _domain_entry(db, domain)})),
         "mailbox": _run(db, "mailbox-stats", "the mailboxes", lambda: _mailbox(db, address)),
     }
     return {"kind": "address", "value": address, "display": display, "domain": domain,
             "hosted_domain": _hosted(domain), "excluded": excluded, "range": _range_dict(start, end),
-            "sources": sources, "timeline": _timeline(sources, device_first_seen=True)}
+            "sources": sources, "timeline": _timeline(sources, start, end, device_first_seen=True)}
 
 
 def domain_summary(db: Session, domain: str, start: datetime, end: datetime) -> dict:
@@ -553,7 +675,7 @@ def domain_summary(db: Session, domain: str, start: datetime, end: datetime) -> 
                         lambda: _devices(db, _domain_match(EasDevice.username, domain), start, end)),
         "dmarc": _run(db, "dmarc", "the DMARC reports", lambda: _dmarc_of_domain(db, domain, start, end)),
         "suppression": _run(db, "suppressions", "the suppression list",
-                            lambda: {"entry": _suppression_entry(db, forms, "domain")}),
+                            lambda: _suppressions(db, lambda: {"entry": _domain_entry(db, domain)})),
         "mailboxes": _run(db, "mailbox-stats", "the mailboxes", lambda: _mailboxes_of_domain(db, domain)),
         "dns": _run(db, "domains", "the DNS checks", lambda: _dns(db, domain)),
     }
