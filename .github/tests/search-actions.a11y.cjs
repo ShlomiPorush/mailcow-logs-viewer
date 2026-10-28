@@ -41,7 +41,7 @@ const STUBS = `
     window.cards = [];
     window.reply = () => ({});
     authenticatedFetch = (url, options = {}) => {
-        const request = { url, method: (options.method || 'GET').toUpperCase(), body: options.body };
+        const request = { url, method: (options.method || 'GET').toUpperCase(), body: options.body, signal: options.signal };
         window.requests.push(request);
         return Promise.resolve(window.reply(url, request.method, options.body)).then(body => {
             const status = body && body.__status ? body.__status : 200;
@@ -71,9 +71,24 @@ function page({ phone = false } = {}) {
     return w;
 }
 
+// GET /api/entities/ip as the card reads it: every source read, nothing in them,
+// over the default 7 days (sources: what to change)
+const RANGE = { start: '2026-10-21T12:00:00Z', end: '2026-10-28T12:00:00Z' };
+function ipEntity(value, sources = {}) {
+    const ok = extra => ({ state: 'ok', reason: null, ...extra });
+    return { kind: 'ip', value, display: value, range: RANGE, sources: {
+        messages: ok({ count: 0, items: [] }), security: ok({ events: 0, rule_matches: 0, bans: 0, unbans: 0, items: [] }),
+        lists: ok({ allowlisted_as: null, denylisted_as: null, ban: null }), protection: ok({ count: 0, open: 0, items: [] }),
+        devices: ok({ count: 0, items: [] }), dmarc: ok({ messages: 0, reports: 0, domains: 0, by_domain: [], records: [] }),
+        rbl: ok({ checked: false, monitored: false }), geo: { state: 'disabled', reason: 'No MaxMind key' }, ...sources },
+        timeline: { items: [], truncated: false, left_out: [] } };
+}
+
 // The answers of a mailcow with one address on the review list and a few mailboxes, domains and jobs
-function server({ addresses = [{ ip: '203.0.113.45', state: 'review', country: 'Netherlands', attempts: 38, last_seen: ago(24) }], jobs = JOBS } = {}) {
+function server({ addresses = [{ ip: '203.0.113.45', state: 'review', country: 'Netherlands', attempts: 38, last_seen: ago(24) }], jobs = JOBS,
+    entity = value => ipEntity(value) } = {}) {
     return (url, method) => {
+        if (url.startsWith('/api/entities/ip')) return entity(new URL(url, 'http://localhost').searchParams.get('value'));
         if (url.startsWith('/api/security/addresses')) {
             const banned = url.includes('list=banned');
             const items = addresses.filter(a => (a.state === 'banned') === banned);
@@ -188,13 +203,13 @@ test('a job the page does not know (not in the manual-run map) is not offered', 
 
 // --------------------------------------------------------------- the values typed
 
-test('one valid IP that matches nothing gets one row: No activity recorded, with its buttons', async () => {
+test('one valid IP that matches nothing gets one row with its buttons, and what its card holds', async () => {
     const w = page();
     w.reply = server({ addresses: [] });
     await search(w, '198.51.100.200');
     assert.deepEqual(groups(w), ['IP addresses · 1']);
     const row = rowOf(w, '198.51.100.200');
-    assert.equal(row.querySelector('.ui-gs-item small').textContent, 'No activity recorded');
+    assert.equal(row.querySelector('.ui-gs-item small').textContent, 'No activity in the last 7 days');
     assert.deepEqual(buttons(row), ['Card', 'Ban', 'Allow']);
     // An IPv6 address too
     await search(w, '2001:db8::7');
@@ -203,7 +218,7 @@ test('one valid IP that matches nothing gets one row: No activity recorded, with
     w.reply = server({ addresses: [{ ip: '198.51.100.20', state: 'review', attempts: 2, last_seen: ago(3) }] });
     await search(w, '198.51.100.2');
     assert.deepEqual(rows(w).filter(r => r.closest('#ui-gs-panel')).map(titleOf).slice(0, 2), ['198.51.100.2', '198.51.100.20']);
-    assert.equal(rowOf(w, '198.51.100.2').querySelector('small').textContent, 'No activity recorded');
+    assert.equal(rowOf(w, '198.51.100.2').querySelector('small').textContent, 'No activity in the last 7 days');
 });
 
 test('a network, a range, a list or text that is not one IP gets no Ban or Allow', async () => {
@@ -490,4 +505,203 @@ test('the results are a grid axe accepts, with buttons in their rows', async () 
             assert.deepEqual(Array.from(result.violations, v => `${v.id}: ${v.nodes.map(n => n.target.join(' ')).join(', ')}`), [], `${text}${phone ? ' (phone)' : ''}`);
         }
     }
+});
+
+// --------------------------------------------------------------- review fixes
+
+// A key as a browser presses it on the focused element: Enter clicks a button on
+// keydown unless the keydown was cancelled; a held key repeats keydown with repeat set
+function press(w, keyName, { repeat = false } = {}) {
+    const el = w.document.activeElement;
+    const ok = el.dispatchEvent(new w.KeyboardEvent('keydown', { key: keyName, repeat, bubbles: true, cancelable: true }));
+    if (ok && keyName === 'Enter' && el.tagName === 'BUTTON' && !el.disabled) el.click();
+}
+function release(w, keyName) {
+    const el = w.document.activeElement;
+    const ok = el.dispatchEvent(new w.KeyboardEvent('keyup', { key: keyName, bubbles: true, cancelable: true }));
+    if (ok && keyName === ' ' && el.tagName === 'BUTTON' && !el.disabled) el.click();
+}
+// Enter held down on a control: the press, repeats before and after the question
+// takes the focus (it does after 100 ms), then the release
+async function holdEnter(w) {
+    press(w, 'Enter');
+    await settle(w, 2);
+    for (let i = 0; i < 3; i++) press(w, 'Enter', { repeat: true });
+    await wait(w, 160);
+    for (let i = 0; i < 6; i++) { press(w, 'Enter', { repeat: true }); await wait(w, 30); }
+    release(w, 'Enter');
+    await settle(w);
+}
+
+test('S1: Enter held on Ban, Allow or Run in the search opens the question and never answers it', async () => {
+    for (const act of ['ban', 'allow']) {
+        const w = page();
+        await search(w, '203.0.113.45');
+        const field = input(w);
+        field.setSelectionRange(field.value.length, field.value.length);
+        key(w, field, 'ArrowRight');
+        while (w.document.activeElement.dataset.gsAct !== act) key(w, w.document.activeElement, 'ArrowRight');
+        await holdEnter(w);
+        assert.ok(confirmShown(w), `${act}: the question is open`);
+        assert.equal(asked(w, '/api/fail2ban/', 'POST').length, 0, `${act}: nothing was written`);
+        assert.equal(w.document.activeElement.id, 'app-confirm-cancel', `${act}: the question starts on Cancel`);
+        // A new press on Cancel answers it: Cancel
+        press(w, 'Enter');
+        await settle(w, 12);
+        assert.equal(confirmShown(w), null);
+        assert.equal(asked(w, '/api/fail2ban/', 'POST').length, 0);
+    }
+    const w = page();
+    await search(w, 'imap import');
+    const field = input(w);
+    field.setSelectionRange(field.value.length, field.value.length);
+    key(w, field, 'ArrowRight');
+    assert.equal(w.document.activeElement.dataset.gsAct, 'run');
+    await holdEnter(w);
+    assert.ok(confirmShown(w), 'Run: the question is open');
+    assert.equal(asked(w, '/api/settings/jobs/', 'POST').length, 0, 'Run: nothing ran');
+    assert.equal(w.document.activeElement.id, 'app-confirm-cancel');
+    // A deliberate press on Run still runs it
+    $(w, '#app-confirm-ok').focus();
+    press(w, 'Enter');
+    await settle(w, 12);
+    assert.equal(asked(w, '/api/settings/jobs/', 'POST').length, 1);
+});
+
+test('S1: Enter held on the card\'s Ban (the same banIP) never answers its question either', async () => {
+    const w = page();
+    const base = w.reply;
+    w.reply = (url, method) => (url.startsWith('/api/entities/') ? ipEntity('203.0.113.45') : base(url, method));
+    w.openEntityCard('ip', '203.0.113.45');
+    await settle(w);
+    const ban = $(w, '#entity-card-actions [data-ent-act="ban"]');
+    assert.ok(ban, 'the card offers Ban');
+    ban.focus();
+    await holdEnter(w);
+    assert.ok(confirmShown(w));
+    assert.equal(asked(w, '/api/fail2ban/', 'POST').length, 0);
+    assert.equal(w.document.activeElement.id, 'app-confirm-cancel');
+});
+
+test('S1: any question ignores a held key; one that does not write still starts on its main button', async () => {
+    const w = page();
+    let answered = null;
+    w.showConfirmModal({ title: 'Delete Message', message: 'Delete this message from the queue?', confirmText: 'Delete', isDangerous: true })
+        .then(result => { answered = result; });
+    // The key that went down before the question
+    w.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Enter' }));
+    await wait(w, 160);
+    assert.equal(w.document.activeElement.id, 'app-confirm-ok', 'the default is unchanged');
+    for (let i = 0; i < 5; i++) press(w, 'Enter', { repeat: true });
+    await settle(w);
+    assert.equal(answered, null, 'repeats do not answer');
+    release(w, 'Enter');
+    press(w, 'Enter');
+    await settle(w);
+    assert.equal(answered, true, 'a new press does');
+});
+
+test('S3: a typed address the lists do not hold says what its card holds, read exactly', async () => {
+    const w = page();
+    w.reply = server({ addresses: [] });
+    await search(w, '198.51.100.200');
+    const entityAsks = asked(w, '/api/entities/ip');
+    assert.deepEqual(Array.from(entityAsks, r => r.url), ['/api/entities/ip?value=198.51.100.200'], 'one request, the value only (the card\'s own period)');
+    assert.equal(rowOf(w, '198.51.100.200').querySelector('small').textContent, 'No activity in the last 7 days');
+
+    // Activity kept for it: the counts, not "nothing"
+    w.reply = server({ addresses: [], entity: v => ipEntity(v, {
+        messages: { state: 'ok', count: 2, items: [] }, security: { state: 'ok', events: 3, rule_matches: 3, bans: 0, unbans: 0, items: [] } }) });
+    await search(w, '198.51.100.201');
+    assert.equal(rowOf(w, '198.51.100.201').querySelector('small').textContent, '2 messages · 3 security events in the last 7 days');
+
+    // A source not read (off, failed) or a card that could not be read claims nothing
+    for (const entity of [v => ipEntity(v, { dmarc: { state: 'disabled', reason: 'DMARC is turned off.' } }),
+        v => ipEntity(v, { messages: { state: 'error', reason: 'The query failed.' } }),
+        () => ({ __status: 500, detail: 'Internal error' })]) {
+        w.reply = server({ addresses: [], entity });
+        await search(w, '198.51.100.202');
+        const row = rowOf(w, '198.51.100.202');
+        assert.equal(row.querySelector('small').textContent, 'Not in these results');
+        assert.deepEqual(buttons(row), ['Card', 'Ban', 'Allow'], 'the buttons stay');
+    }
+
+    // The value as the server writes it is what Ban sends; the row shows what was typed
+    w.reply = server({ addresses: [], entity: () => ipEntity('198.51.100.7') });
+    await search(w, '::ffff:198.51.100.7');
+    rowOf(w, '::ffff:198.51.100.7').querySelector('[data-gs-act="ban"]').click();
+    await answer(w, true);
+    assert.deepEqual(JSON.parse(asked(w, '/api/fail2ban/ban', 'POST')[0].body), { ip: '198.51.100.7/32' });
+});
+
+test('S3: the card is asked once typing pauses, and an older ask is cancelled', async () => {
+    const w = page();
+    const held = [];
+    const base = server({ addresses: [] });
+    w.reply = (url, method) => (url.startsWith('/api/entities/ip')
+        ? new Promise(resolve => held.push({ url, resolve })) : base(url, method));
+    await settle(w, 2);
+    const field = input(w);
+    field.focus();
+    for (const text of ['198.51.100.2', '198.51.100.20', '198.51.100.201']) {
+        field.value = text;
+        field.dispatchEvent(new w.Event('input', { bubbles: true }));
+        await wait(w, 40);
+    }
+    await wait(w, 260);
+    await settle(w);
+    assert.deepEqual(held.map(h => h.url), ['/api/entities/ip?value=198.51.100.201'], 'only the value typed last');
+    // Typed on: the ask on its way is cancelled and its late answer is dropped
+    field.value = '198.51.100.9';
+    field.dispatchEvent(new w.Event('input', { bubbles: true }));
+    await wait(w, 260);
+    await settle(w);
+    const first = asked(w, '/api/entities/ip').find(r => r.url.endsWith('198.51.100.201'));
+    assert.equal(first.signal.aborted, true);
+    held[0].resolve(ipEntity('198.51.100.201', { messages: { state: 'ok', count: 9, items: [] } }));
+    held[1].resolve(ipEntity('198.51.100.9'));
+    await settle(w);
+    assert.equal(rowOf(w, '198.51.100.201'), undefined);
+    assert.equal(rowOf(w, '198.51.100.9').querySelector('small').textContent, 'No activity in the last 7 days');
+});
+
+test('S4: the field controls the grid itself, which keeps its id while its rows change', async () => {
+    const w = page();
+    await settle(w, 2);
+    const grid = w.document.getElementById(input(w).getAttribute('aria-controls'));
+    assert.ok(grid, 'aria-controls names an element from the start');
+    assert.equal(grid.getAttribute('role'), 'grid');
+    assert.equal(input(w).getAttribute('aria-haspopup'), 'grid');
+    await search(w, '203.0.113.45');
+    assert.equal(w.document.getElementById(input(w).getAttribute('aria-controls')), grid, 'the same grid');
+    assert.ok(grid.contains(w.document.getElementById(input(w).getAttribute('aria-activedescendant'))), 'the active cell is in it');
+    key(w, input(w), 'ArrowDown');
+    assert.ok(grid.contains(w.document.getElementById(input(w).getAttribute('aria-activedescendant'))));
+    await search(w, 'run');
+    assert.equal(w.document.getElementById('ui-gs-grid'), grid);
+});
+
+test('S5: while an input method composes, and with a modifier, Right stays in the field', async () => {
+    const w = page();
+    w.eval('openEntityCard = (kind, value) => window.cards.push([kind, value])');
+    await search(w, '203.0.113.45');
+    const field = input(w);
+    field.setSelectionRange(field.value.length, field.value.length);
+    key(w, field, 'ArrowRight', { isComposing: true });
+    assert.equal(w.document.activeElement, field, 'composing');
+    const ime = new w.KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true });
+    Object.defineProperty(ime, 'keyCode', { value: 229 });
+    field.dispatchEvent(ime);
+    assert.equal(w.document.activeElement, field, 'keyCode 229');
+    for (const mod of ['ctrlKey', 'metaKey', 'altKey', 'shiftKey']) {
+        key(w, field, 'ArrowRight', { [mod]: true });
+        assert.equal(w.document.activeElement, field, mod);
+    }
+    // Enter that ends a composition opens nothing
+    key(w, field, 'Enter', { isComposing: true });
+    await settle(w);
+    assert.equal(w.cards.length, 0);
+    // A plain Right still goes in
+    key(w, field, 'ArrowRight');
+    assert.equal(w.document.activeElement.dataset.gsAct, 'card');
 });

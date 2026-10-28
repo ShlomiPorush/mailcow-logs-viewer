@@ -760,10 +760,12 @@ function entityIsIp(value) {
     const halves = v.split('::');
     if (halves.length > 2) return false;
     const groups = halves.map(h => (h ? h.split(':') : []));
-    const parts = groups.flat();
-    // An IPv4 tail (::ffff:192.0.2.1) counts as two groups
-    const tail = parts.length && parts[parts.length - 1].includes('.') ? parts.pop() : null;
+    // An IPv4 tail (::ffff:192.0.2.1) is the address's last group, after the ::
+    // when there is one, and counts as two groups ('192.0.2.1::' is no address)
+    const last = groups[groups.length - 1];
+    const tail = last.length && last[last.length - 1].includes('.') ? last.pop() : null;
     if (tail !== null && !UI_ENTITY_IPV4.test(tail)) return false;
+    const parts = groups.flat();
     if (!parts.every(p => /^[0-9a-f]{1,4}$/i.test(p))) return false;
     const count = parts.length + (tail !== null ? 2 : 0);
     return halves.length === 2 ? count < 8 : count === 8;
@@ -1017,9 +1019,22 @@ function uiDialog({ id, title, size, body = '', foot = '', close = null, role = 
     return { backdrop, dialog, body: bodyEl, foot: footId ? document.getElementById(footId) : dialog.querySelector(':scope > .ui-dialog-foot') };
 }
 
+// The keys held down right now: a question tells a key pressed for it from one
+// that was already down when it opened (showConfirmModal)
+const uiKeysDown = new Set();
+if (typeof window !== 'undefined' && window && typeof window.addEventListener === 'function') {
+    window.addEventListener('keydown', e => uiKeysDown.add(e.key), true);
+    window.addEventListener('keyup', e => uiKeysDown.delete(e.key), true);
+    window.addEventListener('blur', () => uiKeysDown.clear());
+}
+
 /**
  * Show a styled confirmation modal (replaces native confirm()).
  * Returns a Promise<boolean>: true if confirmed, false if cancelled.
+ * A key held down when it opens never answers it: Enter or Space that repeats
+ * (a held key that opened it, such as Enter on a Ban button) is dropped, and so
+ * is the release of a key that went down before it. focusCancel starts on
+ * Cancel, for a question whose answer writes to mailcow.
  */
 function showConfirmModal({ title = 'Confirm', message = 'Are you sure?', confirmText = 'Confirm', cancelText = 'Cancel', confirmColor, isDangerous = false, focusCancel = false, noHistory = false } = {}) {
     return new Promise((resolve) => {
@@ -1046,7 +1061,26 @@ function showConfirmModal({ title = 'Confirm', message = 'Are you sure?', confir
         const cancelBtn = document.getElementById('app-confirm-cancel');
         const okBtn = document.getElementById('app-confirm-ok');
 
+        // Capture on the window comes before the page's own key handlers: a repeat
+        // of a held key presses no button, here or under the question
+        const held = new Set(uiKeysDown);
+        const guard = (e) => {
+            if (e.key !== 'Enter' && e.key !== ' ') return;
+            if (e.type === 'keyup') {
+                if (held.delete(e.key)) e.preventDefault();
+                return;
+            }
+            // A new press (not a repeat) of a key whose release was missed counts
+            if (!e.repeat) { held.delete(e.key); return; }
+            e.preventDefault();
+            e.stopImmediatePropagation();
+        };
+        window.addEventListener('keydown', guard, true);
+        window.addEventListener('keyup', guard, true);
+
         function cleanup(result) {
+            window.removeEventListener('keydown', guard, true);
+            window.removeEventListener('keyup', guard, true);
             overlay.remove();
             document.body.style.overflow = overflowBefore;
             resolve(result);

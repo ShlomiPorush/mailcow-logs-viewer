@@ -223,22 +223,59 @@ async function gsSearchAddresses(q, signal) {
         return a.network_size ? { title: a.ip, ...fields } : gsEntityItem('ip', a.ip, fields);
     });
     let count = (counts.review || 0) + (counts.banned || 0);
-    // One valid address typed that nothing matches still gets its row: its card, Ban and Allow
+    // One valid address typed that the lists do not hold still gets its row: its
+    // card, Ban and Allow, and what the app keeps about it (read as its card reads it)
     const typed = q.trim();
     if (entityKindOf(typed) === 'ip' && !rows.some(a => String(a.ip).toLowerCase() === typed.toLowerCase())) {
-        items.unshift(gsEntityItem('ip', typed, { sub: 'No activity recorded' }));
+        const { value, sub } = await gsTypedIp(typed, signal);
+        items.unshift(gsEntityItem('ip', value, { sub, title: typed }));
         count += 1;
     }
     return { count, items };
 }
 
+// The sources of the IP card that hold activity, and how a count of each reads
+const GS_IP_ACTIVITY = [
+    ['messages', s => s.count, 'message', 'messages'],
+    ['security', s => s.events, 'security event', 'security events'],
+    ['protection', s => s.count, 'protection catch', 'protection catches'],
+    ['devices', s => s.count, 'device', 'devices'],
+    ['dmarc', s => s.messages, 'DMARC message', 'DMARC messages'],
+];
+
+// A typed address the lists do not hold, as its card has it (GET /api/entities/ip,
+// the card's own period): what it holds, or "No activity" only when every source
+// of activity was read and holds nothing. A source that is off or failed, or a
+// card that could not be read, says nothing either way. The value comes back as
+// the server writes it (IPv6 compressed, an IPv4 mapped into IPv6 as IPv4)
+async function gsTypedIp(ip, signal) {
+    let data = null;
+    try {
+        data = await gsJson(`/api/entities/ip?value=${encodeURIComponent(ip)}`, signal);
+    } catch (error) {
+        // An older search, cancelled: dropped with it
+        if (error && error.name === 'AbortError') throw error;
+    }
+    const sources = (data && data.sources) || {};
+    const value = data && entityKindOf(data.value) === 'ip' ? data.value : ip;
+    const read = GS_IP_ACTIVITY.filter(([name]) => sources[name] && sources[name].state === 'ok');
+    const found = read.map(([name, n, one, many]) => [Number(n(sources[name])) || 0, one, many]).filter(([n]) => n > 0);
+    const range = (data && data.range) || {};
+    const days = Math.round((Date.parse(range.end) - Date.parse(range.start)) / 86400000);
+    const within = days > 0 ? ` in the last ${uiCountLabel(days, 'day', 'days')}` : '';
+    if (found.length) return { value, sub: found.map(([n, one, many]) => uiCountLabel(n, one, many)).join(' · ') + within };
+    if (data && read.length === GS_IP_ACTIVITY.length) return { value, sub: `No activity${within}` };
+    return { value, sub: 'Not in these results' };
+}
+
 // A row for an IP address, an email address (a mailbox) or a domain: Enter and a
 // click open its card. A value that is not one of its kind (as the server reads it,
-// entityKindOf in utils.js) keeps the way it opened before, without buttons
-function gsEntityItem(kind, value, { sub = '', at = '', open = null } = {}) {
+// entityKindOf in utils.js) keeps the way it opened before, without buttons.
+// title: what the row shows, when it is not the value (the address as typed)
+function gsEntityItem(kind, value, { sub = '', at = '', open = null, title = '' } = {}) {
     const text = String(value || '').trim();
-    if (entityKindOf(text) !== kind) return { title: text, sub, at, open: open || (() => {}) };
-    return { title: text, sub, at, entity: { kind, value: text }, hint: 'card', keep: 'entity-card',
+    if (entityKindOf(text) !== kind) return { title: title || text, sub, at, open: open || (() => {}) };
+    return { title: title || text, sub, at, entity: { kind, value: text }, hint: 'card', keep: 'entity-card',
         open: () => openEntityCard(kind, text, { from: gsOpener() }) };
 }
 
@@ -434,14 +471,30 @@ function gsCountText(result) {
     return Number(result.count).toLocaleString();
 }
 
-function gsRender() {
+// The panel's three parts, made once: the grid keeps its id, which the field's
+// aria-controls names, while its rows are drawn again
+function gsPanelParts() {
     const panel = gsEl('ui-gs-panel');
-    if (!panel) return;
+    if (!panel) return null;
+    if (!gsEl('ui-gs-grid')) {
+        panel.innerHTML = '<nav class="ui-gs-tabs" role="tablist" aria-label="Result types"></nav>'
+            + '<div class="ui-gs-body" id="ui-gs-grid" role="grid" aria-label="Results" aria-readonly="true"></div>'
+            + '<div class="ui-gs-keys" aria-hidden="true"></div>';
+    }
+    return { panel, tabs: panel.querySelector('.ui-gs-tabs'), grid: gsEl('ui-gs-grid'), keys: panel.querySelector('.ui-gs-keys') };
+}
+let gsDrawn = '';   // the query and tab last drawn: a new one starts at the top
+
+function gsRender() {
+    const parts = gsPanelParts();
+    if (!parts) return;
+    const { panel, grid } = parts;
     const root = gsEl('ui-gs');
     root.classList.toggle('has-q', !!gsQuery);
     gsShown = [];
     if (!gsQuery) {
-        panel.innerHTML = '';
+        parts.tabs.innerHTML = grid.innerHTML = parts.keys.innerHTML = '';
+        gsDrawn = '';
         gsEl('ui-gs-input').removeAttribute('aria-activedescendant');
         return;
     }
@@ -493,9 +546,13 @@ function gsRender() {
 
     // A row's button that had the focus goes with the redraw: the keys stay in the search
     const inActs = !!(document.activeElement && panel.contains(document.activeElement) && document.activeElement.closest('.ui-gs-acts'));
-    panel.innerHTML = `<nav class="ui-gs-tabs" role="tablist" aria-label="Result types">${tabs}</nav>
-        <div class="ui-gs-body" role="grid" aria-label="Results" aria-readonly="true">${body}</div>
-        <div class="ui-gs-keys" aria-hidden="true"><span><kbd>↑</kbd><kbd>↓</kbd> move</span><span><kbd>Tab</kbd> type</span><span><kbd>Enter</kbd> ${enter}</span><span><kbd>Esc</kbd> close</span></div>`;
+    parts.tabs.innerHTML = tabs;
+    grid.innerHTML = body;
+    parts.keys.innerHTML = `<span><kbd>↑</kbd><kbd>↓</kbd> move</span><span><kbd>Tab</kbd> type</span><span><kbd>Enter</kbd> ${enter}</span><span><kbd>Esc</kbd> close</span>`;
+    if (gsDrawn !== `${gsTab}|${gsQuery}`) {
+        gsDrawn = `${gsTab}|${gsQuery}`;
+        grid.scrollTop = 0;
+    }
     const active = panel.querySelector('.ui-gs-row.is-active > .ui-gs-item, .ui-gs-more.is-active');
     active?.closest('[role="row"]').scrollIntoView({ block: 'nearest' });
     if (inActs) gsToField();
@@ -638,7 +695,9 @@ async function gsRunJob(job) {
     const ok = await showConfirmModal({
         title: `Run ${job.name}`,
         message: `${job.name} runs once now, outside its schedule${effect ? `, and ${effect}` : ''}.`,
-        confirmText: 'Run'
+        confirmText: 'Run',
+        // What it does can write to mailcow: the question starts on Cancel
+        focusCancel: true
     });
     if (ok) {
         await runBackgroundJob(job.key, job.name);
@@ -863,6 +922,7 @@ function initGlobalSearch() {
     const input = gsEl('ui-gs-input');
     const panel = gsEl('ui-gs-panel');
     if (!root || !input || !panel) return;
+    gsPanelParts();
 
     input.addEventListener('focus', gsOpen);
     input.addEventListener('input', () => gsRun(input.value));
@@ -873,6 +933,9 @@ function initGlobalSearch() {
     root.addEventListener('keydown', event => {
         // A row menu that is open keeps its own keys (Escape closes it)
         if (event.target.closest('.ui-menu')) return;
+        // While an input method composes a word, its keys are the word's, not the search's
+        if (event.isComposing || event.keyCode === 229) return;
+        const plain = !event.shiftKey && !event.ctrlKey && !event.metaKey && !event.altKey;
         const onTab = !!event.target.closest('[data-gs-tab]');
         const inPanel = panel.contains(event.target);
         const inActs = event.target.closest('.ui-gs-acts');
@@ -880,14 +943,14 @@ function initGlobalSearch() {
         const rtl = getComputedStyle(root).direction === 'rtl';
         const forward = rtl ? 'ArrowLeft' : 'ArrowRight';
         const backward = rtl ? 'ArrowRight' : 'ArrowLeft';
-        if (inActs && (event.key === forward || event.key === backward)) {
+        if (inActs && plain && (event.key === forward || event.key === backward)) {
             event.preventDefault();
             gsStepAct(inActs, event.target, event.key === forward ? 1 : -1);
         } else if (inActs && event.key === 'Escape') {
             event.preventDefault();
             event.stopPropagation();
             gsToField();
-        } else if (event.target === input && event.key === forward && !event.shiftKey && gsIntoActs()) {
+        } else if (event.target === input && event.key === forward && plain && gsIntoActs()) {
             event.preventDefault();
         } else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
             event.preventDefault();

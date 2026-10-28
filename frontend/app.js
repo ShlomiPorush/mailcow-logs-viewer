@@ -1865,7 +1865,7 @@ function fail2banBare(entry) {
 
 async function unbanIP(ip, btnEl) {
     const ipWithMask = fail2banEntry(ip);
-    if (!await showConfirmModal({ title: 'Unban IP', message: 'Unban ' + ip + '?', confirmText: 'Unban' })) return;
+    if (!await showConfirmModal({ title: 'Unban IP', message: 'Unban ' + ip + '?', confirmText: 'Unban', focusCancel: true })) return;
     try {
         if (btnEl) {
             btnEl.disabled = true;
@@ -1906,7 +1906,7 @@ async function unbanIP(ip, btnEl) {
 
 async function banIP(ip, btnEl) {
     const ipWithMask = fail2banEntry(ip);
-    if (!await showConfirmModal({ title: 'Ban IP', message: `Are you sure you want to permanently ban ${ipWithMask}?\n\nThis will add the IP to the Fail2Ban denylist.`, confirmText: 'Ban', isDangerous: true })) return;
+    if (!await showConfirmModal({ title: 'Ban IP', message: `Are you sure you want to permanently ban ${ipWithMask}?\n\nThis will add the IP to the Fail2Ban denylist.`, confirmText: 'Ban', isDangerous: true, focusCancel: true })) return;
 
     if (btnEl) {
         btnEl.disabled = true;
@@ -1948,7 +1948,7 @@ async function banIP(ip, btnEl) {
 
 async function allowIP(ip, btnEl) {
     const ipWithMask = fail2banEntry(ip);
-    if (!await showConfirmModal({ title: 'Allow IP', message: `Add ${ipWithMask} to the Fail2Ban allowlist?\n\nFailed attempts from this address will never lead to a ban.`, confirmText: 'Allow' })) return;
+    if (!await showConfirmModal({ title: 'Allow IP', message: `Add ${ipWithMask} to the Fail2Ban allowlist?\n\nFailed attempts from this address will never lead to a ban.`, confirmText: 'Allow', focusCancel: true })) return;
     if (btnEl) {
         btnEl.disabled = true;
         btnEl.textContent = 'Allowing...';
