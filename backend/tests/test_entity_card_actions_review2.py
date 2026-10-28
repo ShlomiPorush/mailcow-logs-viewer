@@ -172,7 +172,7 @@ def test_run_while_a_single_address_check_holds_the_lock_is_refused(api, statuse
     assert statuses['blacklist_check'] == before, "not marked running"
 
 
-@pytest.mark.parametrize("holder,restored", [("host", True), (None, True), ("full", False)])
+@pytest.mark.parametrize("holder,restored", [("host", True), (None, True), ("full", False)])  # full: it wrote its status
 def test_a_run_that_skipped_for_a_single_address_check_leaves_the_status_as_it_was(api, statuses, monkeypatch, holder, restored):
     """The check of one address took the lock after the Run was accepted: the
     job skips, and no run of the job is there to set its status."""
@@ -180,6 +180,8 @@ def test_a_run_that_skipped_for_a_single_address_check_leaves_the_status_as_it_w
     statuses['blacklist_check'] = dict(before)
 
     async def job(**kwargs):
+        if holder == 'full':
+            scheduler.update_job_status('blacklist_check', 'running')   # the full check that holds the job
         return scheduler.JOB_SKIPPED
 
     monkeypatch.setattr(scheduler, 'check_monitored_hosts_job', job)

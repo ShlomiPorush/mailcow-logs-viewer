@@ -85,6 +85,7 @@ def test_a_manual_blacklist_check_that_meets_another_check_leaves_the_status_to_
         assert settings_router.trigger_job('blacklist_check', tasks)['status'] == 'started'
         # A full check (the Blacklist page's or the schedule's) holds the lock; it sets the status
         async with scheduler.blacklist_check_hold('full'):
+            scheduler.update_job_status('blacklist_check', 'running')   # as the full check does
             await tasks()
             return scheduler.job_status['blacklist_check']['status']
 

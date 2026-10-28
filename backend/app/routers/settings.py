@@ -1528,9 +1528,14 @@ def validate_geoip_db():
 # MANUAL JOB TRIGGER
 # =============================================================================
 
-def _restore_job_status(status_key: str, previous: dict) -> None:
-    """A job's status back to what it was before a manual run that did nothing."""
+def _restore_job_status(status_key: str, previous: dict, mark: dict) -> None:
+    """A job's status back to what it was before a manual run that did nothing,
+    only while it is still that run's mark (the very object it wrote): a run of
+    the job that wrote its own status since (a full check that started and
+    ended meanwhile) keeps it."""
     statuses = get_job_status()
+    if statuses.get(status_key) is not mark:
+        return
     if previous:
         statuses[status_key] = dict(previous)
     else:
@@ -1656,15 +1661,17 @@ def trigger_job(job_name: str, background_tasks: BackgroundTasks):
     # A blocklist check started elsewhere (an entity card's Check now) holds the
     # job's lock without its status: refused here, before the job is marked running
     if job_name == 'blacklist_check':
-        from ..scheduler import blacklist_check_lock
-        if blacklist_check_lock().locked():
+        from ..scheduler import blacklist_check_admits
+        if not blacklist_check_admits():
             raise HTTPException(status_code=409, detail="A blocklist check is already running. Try again when it is done.")
     previous = dict(current_status)
 
     # Mark job as running immediately (only for non-self-managing jobs)
     if not self_managing:
         update_job_status(status_key, 'running')
-    
+    # This run's mark: a status written since by another run is not this run's to undo
+    mark = get_job_status().get(status_key)
+
     # Run job in background. An async wrapper runs on the application loop,
     # the same loop APScheduler uses, so the job shares its asyncio locks and
     # HTTP clients with the scheduled runs (a private loop broke the locks).
@@ -1679,11 +1686,10 @@ def trigger_job(job_name: str, background_tasks: BackgroundTasks):
             if not self_managing and result not in (JOB_SKIPPED, JOB_STATUS_SET):
                 update_job_status(status_key, 'success')
             # ... unless nothing that sets it holds the job: a blocklist check of
-            # one address (taken since the check above) leaves the status as it was
+            # one address (taken since the check above) leaves the status as it
+            # was, while the status is still this run's mark
             elif not self_managing and result == JOB_SKIPPED and job_name == 'blacklist_check':
-                from ..scheduler import blacklist_check_holder
-                if blacklist_check_holder() != 'full':
-                    _restore_job_status(status_key, previous)
+                _restore_job_status(status_key, previous, mark)
         except Exception as e:
             logger.error(f"Manual job {job_name} failed: {e}")
             if not self_managing:
