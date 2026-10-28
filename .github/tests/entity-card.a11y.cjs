@@ -317,16 +317,18 @@ test('U4: message, recipient and delivery rows hold buttons but are no buttons t
     assert.deepEqual(await nestedInteractive(w, list), []);
     assert.equal(list.querySelectorAll('[role="button"] button, [tabindex] button, button button').length, 0);
 
-    // Messages row: its time is the button that opens it, named after the subject (the
-    // subject stays text that can be selected); the values open their cards
+    // Messages row: its time is the button that opens it, named by the time it shows and
+    // the subject (the subject stays text that can be selected); the values open their cards
     const row = list.querySelector('.ui-msg-item');
     const open = row.querySelector('.ui-row-open');
     assert.equal(open.tagName, 'BUTTON');
-    assert.equal(open.getAttribute('aria-label'), 'Open the message: Hello');
+    const shown = open.textContent.trim();
+    assert.ok(shown && shown !== '-');
+    assert.equal(open.getAttribute('aria-label'), `${shown}, open the message: Hello`);
     assert.equal(row.querySelector('.ui-msg-sub').closest('button'), null, 'the subject is no button');
     assert.ok(!row.hasAttribute('role') && !row.hasAttribute('tabindex'));
     const tabbable = [...row.querySelectorAll('button')].filter(b => !b.matches('.ui-ent-copy'));
-    assert.deepEqual(Array.from(tabbable, b => b.getAttribute('aria-label') || b.textContent.trim()), ['ann@example.com', 'Open the message: Hello', 'bob@example.net']);
+    assert.deepEqual(Array.from(tabbable, b => b.getAttribute('aria-label') || b.textContent.trim()), ['ann@example.com', `${shown}, open the message: Hello`, 'bob@example.net']);
     open.click();            // Enter on a button is its click
     assert.deepEqual(opened, ['k1']);
     row.querySelector('.ui-msg-l3').click();   // anywhere on the row, with the mouse
@@ -340,8 +342,9 @@ test('U4: message, recipient and delivery rows hold buttons but are no buttons t
     // Recipient rows: the status is the toggle that shows that recipient's logs
     const toggles = [...list.querySelectorAll('#rcpts .ui-md-rrow > .ui-row-open')];
     assert.equal(toggles.length, 2);
-    assert.match(toggles[0].getAttribute('aria-label'), /^Show the logs of /);
-    toggles.find(t => t.getAttribute('aria-label') === 'Show the logs of b@example.net').click();
+    // Named by the status it shows, so a screen reader hears it too
+    for (const t of toggles) assert.ok(t.getAttribute('aria-label').startsWith(`${t.textContent.trim()}, show the logs of `));
+    toggles.find(t => t.getAttribute('aria-label').endsWith(', show the logs of b@example.net')).click();
     assert.equal(w.eval('mdView.picked'), w.eval("mdRecipients.findIndex(r => r.key === 'b@example.net')"));
     // A delivery leg opens its message from its number
     const leg = list.querySelector('.ui-md-leg:not(.is-current) .ui-row-open');

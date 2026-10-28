@@ -223,7 +223,7 @@ test('the Logs tab lists the recipients, problems first, and shows one recipient
     assert.ok(ranks[0] < ranks[ranks.length - 1], 'a problem leads, a delivery trails');
     assert.doesNotMatch(timeline.split('id="log-timeline-entries"')[1], /a@example\.net/, 'the lines, the picker lists everyone');
     assert.match(timeline, /is-shared[\s\S]*All recipients/);
-    assert.match(h.element('md-rcpt-results').innerHTML, /aria-pressed="true" aria-label="Show the logs of b@example\.net"/);
+    assert.match(h.element('md-rcpt-results').innerHTML, /aria-pressed="true" aria-label="[^"]+, show the logs of b@example\.net"/);
     // The same row again shows every recipient
     h.context.pickMessageRecipient(b, true);
     assert.match(h.element('md-timeline-slot').innerHTML, /5 entries/);

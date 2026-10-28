@@ -1457,7 +1457,7 @@ function renderMessageRow(msg) {
         <div class="ui-msg-item${tone ? ` ui-msg-${tone}` : ''}" data-key="${escapeHtml(msg.correlation_key || '')}"${msg.message_id ? ` data-mid="${encodeURIComponent(msg.message_id)}"` : ''} onclick="if (!uiRowHeld(event)) viewMessageDetails('${escapeJsArg(msg.correlation_key)}')">
             <div class="ui-msg-l1">
                 <b class="ui-msg-from">${msg.sender ? uiEntity('address', msg.sender, { plain: true }) : 'Unknown'}</b>
-                <button type="button" class="ui-row-open ui-msg-at" aria-label="Open the message: ${escapeHtml(msg.subject || 'No subject')}">${uiTime(msg.first_seen, formatListTime(msg.first_seen), { title: formatTime(msg.first_seen) })}</button>
+                <button type="button" class="ui-row-open ui-msg-at" aria-label="${msg.first_seen ? `${escapeHtml(formatListTime(msg.first_seen))}, open` : 'Open'} the message: ${escapeHtml(msg.subject || 'No subject')}">${uiTime(msg.first_seen, formatListTime(msg.first_seen), { title: formatTime(msg.first_seen) })}</button>
             </div>
             <p class="ui-msg-sub" dir="auto" title="${escapeHtml(msg.subject || 'No subject')}">${escapeHtml(msg.subject || 'No subject')}</p>
             <div class="ui-msg-l3">

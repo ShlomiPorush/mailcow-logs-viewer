@@ -837,7 +837,7 @@ function renderRecipientRows() {
             : `${host ? `<span class="ui-md-rrow-via">via ${renderRelay(r.relay, false)}</span>` : `<span>${escapeHtml(info.word)}</span>`}${r.delivered.length ? `<span>· to <bdi>${escapeHtml(r.delivered.join(', '))}</bdi></span>` : ''}${r.attempts > 1 ? `<span>· ${r.attempts} attempts</span>` : ''}${r.last.time ? `<span>· ${escapeHtml(formatTime(r.last.time))}</span>` : ''}`;
         return `
             <div class="ui-md-rrow" title="Show the logs of ${escapeHtml(r.address)}" onclick="if (!uiRowHeld(event) && !mdRelayTapped(event)) pickMessageRecipient(${index}, true)">
-                <span class="ui-md-rrow-addr">${uiEntity('address', r.address)}</span><button type="button" data-md-focus="row-${index}" aria-pressed="${mdView.picked === index}" aria-label="Show the logs of ${escapeHtml(r.address)}" onfocus="mdRelayTip(this.parentElement)" class="ui-row-open ui-tag${info.tone ? ` ui-tag-${info.tone}` : ''}">${escapeHtml(info.word)}</button>
+                <span class="ui-md-rrow-addr">${uiEntity('address', r.address)}</span><button type="button" data-md-focus="row-${index}" aria-pressed="${mdView.picked === index}" aria-label="${escapeHtml(info.word)}, show the logs of ${escapeHtml(r.address)}" onfocus="mdRelayTip(this.parentElement)" class="ui-row-open ui-tag${info.tone ? ` ui-tag-${info.tone}` : ''}">${escapeHtml(info.word)}</button>
                 <span class="ui-md-rrow-sub">${sub}</span>
                 ${r.reason ? `<span class="ui-md-rrow-why ${info.tone && info.tone !== 'ok' ? `ui-text-${info.tone}` : 'ui-muted'}">${escapeHtml(r.reason)}</span>` : ''}
             </div>`;
