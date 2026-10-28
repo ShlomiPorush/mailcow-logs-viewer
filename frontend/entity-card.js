@@ -385,10 +385,11 @@ function entityRblStop() {
 }
 
 const ENTITY_ACTIONS = {
-    // kind: the buttons in order ([action, stays on a phone]), and what only More holds
-    ip: { buttons: [['messages'], ['security'], ['ban', true], ['allow']], menu: ['rbl'] },
-    address: { buttons: [['mailbox', true], ['messages'], ['suppress']], menu: ['security'] },
-    domain: { buttons: [['messages', true], ['security']], menu: [] },
+    // kind: the buttons in order ([action, stays on a phone]). Every action is a button;
+    // only a phone folds the rest into More (Check now lives in the Blocklists tile)
+    ip: { buttons: [['messages'], ['security'], ['ban', true], ['allow']] },
+    address: { buttons: [['mailbox', true], ['messages'], ['suppress'], ['security']] },
+    domain: { buttons: [['messages', true], ['security']] },
 };
 
 const entityRw = () => typeof mailcowRwConfigured !== 'undefined' && !!mailcowRwConfigured;
@@ -435,6 +436,8 @@ function entityCardActionsHtml(data) {
     const buttons = plan.buttons.filter(([act]) => entityCanAct(data, act)).map(([act, stays]) => ({ act, stays: !!stays }));
     // A phone keeps one button at least: the first, when the main one is not offered
     if (buttons.length && !buttons.some(b => b.stays)) buttons[0].stays = true;
+    // A More for a single action would only hide it behind a tap: then it stays a button
+    if (buttons.filter(b => !b.stays).length < 2) buttons.forEach(b => { b.stays = true; });
     // The entry Fail2ban gets, as banIP writes it (app.js fail2banEntry)
     const entry = typeof fail2banEntry === 'function' ? fail2banEntry(data.value) : data.value;
     const titles = {
@@ -446,12 +449,9 @@ function entityCardActionsHtml(data) {
     // The Security list's pair: Ban in red text, Allow plain (security.js securityRowWhy)
     const button = ({ act, stays }) => `<button type="button" class="ui-btn${act === 'ban' ? ' ui-btn-danger' : ''}${stays ? '' : ' ui-ent-fold'}" data-ent-act="${act}"${title(act)} onclick="entityCardAct('${act}', this)">${escapeHtml(entityActionLabel(data, act))}</button>`;
     const item = (act, phoneOnly) => `<button type="button" role="menuitem"${phoneOnly ? ' class="ui-ent-phone"' : ''} data-ent-act="${act}-menu" onclick="entityCardAct('${act}', this)">${escapeHtml(entityActionLabel(data, act))}</button>`;
-    const menuOnly = plan.menu.filter(act => entityCanAct(data, act));
-    const items = buttons.filter(b => !b.stays).map(b => item(b.act, true)).join('')
-        + menuOnly.map(act => item(act, false)).join('');
-    // More that holds only what a phone folds away is a phone's alone
-    const more = !items ? '' : menuOnly.length ? uiMenu('More', items, { small: false })
-        : `<span class="ui-ent-more-phone">${uiMenu('More', items, { small: false })}</span>`;
+    const items = buttons.filter(b => !b.stays).map(b => item(b.act, true)).join('');
+    // More holds only what a phone folds away, so only a phone shows it
+    const more = items ? `<span class="ui-ent-more-phone">${uiMenu('More', items, { small: false })}</span>` : '';
     const locked = data.kind === 'ip' && entitySrc(data, 'lists').state !== 'disabled' && !entityRw()
         ? `<div class="ui-list-note ui-flush">${uiLocked('Ban and Allow are locked', `Banning or allowing this address from here ${UI_RW_KEY_TEXT}`,
             '<button type="button" class="ui-btn ui-btn-sm" onclick="entityCardSettings()">Open Settings</button>')}</div>` : '';

@@ -118,8 +118,8 @@ async function openCard(w, kind, value, card) {
 test('each kind offers its actions, the main one stays on a phone and the rest fold into More', async () => {
     const w = page();
     await openCard(w, 'ip', '203.0.113.45', ipCard());
-    assert.deepEqual(acts(w), ['Show messages', 'Show security events', 'Ban', 'Allow', 'More']);
-    assert.deepEqual(menu(w), ['Show messages (phone)', 'Show security events (phone)', 'Allow (phone)', 'Check blocklists now']);
+    assert.deepEqual(acts(w), ['Show messages', 'Show security events', 'Ban', 'Allow'], 'every action is a button, no More on a desktop');
+    assert.deepEqual(menu(w), ['Show messages (phone)', 'Show security events (phone)', 'Allow (phone)']);
     assert.ok($(w, '[data-ent-act="ban"]').classList.contains('ui-btn-danger'));
     assert.ok(!$(w, '[data-ent-act="ban"]').classList.contains('ui-ent-fold'), 'Ban stays on a phone');
     assert.ok($(w, '[data-ent-act="allow"]').classList.contains('ui-ent-fold'));
@@ -128,13 +128,17 @@ test('each kind offers its actions, the main one stays on a phone and the rest f
     assert.doesNotMatch($(w, '#entity-card-actions').innerHTML, /onclick="[^"]*203\.0\.113\.45/);
 
     await openCard(w, 'address', 'j.doe@example.net', addressCard('j.doe@example.net'));
-    assert.deepEqual(acts(w), ['Open mailbox', 'Show messages', 'Add to Suppressions', 'More']);
-    assert.deepEqual(menu(w), ['Show messages (phone)', 'Add to Suppressions (phone)', 'Show security events']);
+    assert.deepEqual(acts(w), ['Open mailbox', 'Show messages', 'Add to Suppressions', 'Show security events']);
+    assert.deepEqual(menu(w), ['Show messages (phone)', 'Add to Suppressions (phone)', 'Show security events (phone)']);
 
     await openCard(w, 'domain', 'example.net', domainCard());
     assert.deepEqual(acts(w), ['Show messages', 'Show security events']);
-    assert.deepEqual(menu(w), ['Show security events (phone)']);
-    assert.ok($(w, '#entity-card-actions .ui-ent-more-phone'), 'More holds only what a phone folds, so only a phone shows it');
+    assert.deepEqual(menu(w), [], 'one action to fold stays a button: no More for it');
+    assert.equal($(w, '#entity-card-actions .ui-ent-more-phone'), null);
+    assert.ok(!$(w, '[data-ent-act="security"]').classList.contains('ui-ent-fold'), 'it stays a button on a phone too');
+    // More is a phone's alone: it holds what a phone folds away
+    await openCard(w, 'ip', '203.0.113.45', ipCard());
+    assert.ok($(w, '#entity-card-actions > .ui-ent-more-phone'));
 });
 
 test('an action that does not apply, or whose source is off, is not offered', async () => {
@@ -145,14 +149,14 @@ test('an action that does not apply, or whose source is off, is not offered', as
         suppression: off('Sync with Rspamd is off, so the app keeps no suppression list.'),
         messages: off('This address is excluded, so Messages does not keep or show its mail.'),
     }));
-    assert.deepEqual(acts(w), ['More']);
-    assert.deepEqual(menu(w), ['Show security events']);
+    assert.deepEqual(acts(w), ['Show security events']);
+    assert.deepEqual(menu(w), []);
     // Already on the suppression list; Mailbox Stats could not be read
     await openCard(w, 'address', 'bob@example.net', addressCard('bob@example.net', {
         suppression: ok({ entry: { active: true, reason: 'manual' }, domain_entry: null }),
         mailbox: { state: 'error', reason: 'Could not read the mailboxes.' },
     }));
-    assert.deepEqual(acts(w), ['Show messages', 'More']);
+    assert.deepEqual(acts(w), ['Show messages', 'Show security events']);
     assert.ok(!$(w, '[data-ent-act="messages"]').classList.contains('ui-ent-fold'), 'the first stays on a phone when the main one is not offered');
     // Security off: no events, no Ban or Allow and no lock either; blocklists off: no Check now
     await openCard(w, 'ip', '203.0.113.45', ipCard({
@@ -401,7 +405,7 @@ test('Ban asks first: Cancel changes nothing, Ban bans and the card reads itself
     assert.deepEqual(JSON.parse(posts[0].body), { ip: '203.0.113.45/32' });
     assert.equal(asked(w, '/api/entities/ip').length, reads + 1, 'the card read itself again');
     assert.match($(w, '#entity-card-header').textContent, /On the denylist/);
-    assert.deepEqual(acts(w), ['Show messages', 'Show security events', 'Allow', 'More'], 'Ban is gone once on the denylist');
+    assert.deepEqual(acts(w), ['Show messages', 'Show security events', 'Allow'], 'Ban is gone once on the denylist');
 });
 
 test('Allow asks first and allows', async () => {
@@ -427,7 +431,7 @@ test('without the Read-Write key Ban and Allow are locked, not hidden, and a lis
     w.reply = url => (url === '/api/rw-status' ? { rw_configured: false } : {});
     await openCard(w, 'ip', '203.0.113.45', ipCard());
     assert.equal(asked(w, '/api/rw-status').length, 1, 'the key is asked for once more');
-    assert.deepEqual(acts(w), ['Show messages', 'Show security events', 'More']);
+    assert.deepEqual(acts(w), ['Show messages', 'Show security events']);
     const lock = $(w, '#entity-card-header .ui-locked');
     assert.ok(lock, 'the locked note shows');
     assert.match(lock.textContent, /Ban and Allow are locked/);
@@ -439,7 +443,7 @@ test('without the Read-Write key Ban and Allow are locked, not hidden, and a lis
     // With the key, a list that could not be read leaves both; the state reads as not known
     w.eval('mailcowRwConfigured = true');
     await openCard(w, 'ip', '203.0.113.45', ipCard({ lists: { state: 'error', reason: 'mailcow did not answer.' } }));
-    assert.deepEqual(acts(w), ['Show messages', 'Show security events', 'Ban', 'Allow', 'More']);
+    assert.deepEqual(acts(w), ['Show messages', 'Show security events', 'Ban', 'Allow']);
     assert.match($(w, '#entity-card-header').textContent, /ban state not known/);
 });
 
@@ -578,7 +582,7 @@ test('Add to Suppressions opens the Add dialog with the address, and the card re
     await w.createSuppression();
     await settle(w, 12);
     assert.equal(JSON.parse(asked(w, '/api/suppressions', 'POST')[0].body).email, 'j.doe@example.net');
-    assert.deepEqual(acts(w), ['Open mailbox', 'Show messages', 'More'], 'already on the list: not offered again');
+    assert.deepEqual(acts(w), ['Open mailbox', 'Show messages', 'Show security events'], 'already on the list: not offered again');
     assert.match($(w, '#entity-card-header').textContent, /On the suppression list/);
 });
 
