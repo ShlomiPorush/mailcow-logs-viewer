@@ -98,6 +98,15 @@ def _get_dovecot_logs(
     return entries
 
 
+def _postfix_line_identity(log) -> tuple:
+    """
+    Two stored Postfix lines are the same line only when every field of
+    uq_postfix_log matches, the whole message included: lines of one queue in
+    the same second often share a long start (two long aliases of one mailbox).
+    """
+    return (log.time, log.program, log.queue_id, log.message)
+
+
 def _group_postfix_by_recipient(postfix_logs) -> dict:
     """
     Group Postfix logs by recipient for better display
@@ -115,8 +124,7 @@ def _group_postfix_by_recipient(postfix_logs) -> dict:
     seen_messages = set()  # Track seen messages to avoid duplicates
     
     for log in postfix_logs:
-        # Create a unique key for deduplication
-        msg_key = f"{log.time}:{log.message or ''}"
+        msg_key = _postfix_line_identity(log)
         if msg_key in seen_messages:
             continue
         seen_messages.add(msg_key)
@@ -665,13 +673,11 @@ def get_message_full_details(
                 PostfixLog.id.in_(unique_ids)
             ).order_by(PostfixLog.time).all()
 
-        # Deduplicate postfix_logs by message content (same time + same message = duplicate)
+        # Deduplicate postfix_logs (the same line stored twice)
         seen_messages = set()
         deduplicated_postfix_logs = []
         for log in postfix_logs:
-            # The whole line: two lines can share their start and differ later
-            # (two long aliases delivered to one mailbox in the same second)
-            msg_key = f"{log.time}:{log.message or ''}"
+            msg_key = _postfix_line_identity(log)
             if msg_key not in seen_messages:
                 seen_messages.add(msg_key)
                 deduplicated_postfix_logs.append(log)
