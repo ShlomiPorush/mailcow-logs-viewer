@@ -1036,7 +1036,11 @@ if (typeof window !== 'undefined' && window && typeof window.addEventListener ==
  * is the release of a key that went down before it. focusCancel starts on
  * Cancel, for a question whose answer writes to mailcow.
  */
+// The open question's own close: a second question closes the first as cancelled
+// (its promise settles, its key guard and focus timer go) before it opens
+let confirmModalClose = null;
 function showConfirmModal({ title = 'Confirm', message = 'Are you sure?', confirmText = 'Confirm', cancelText = 'Cancel', confirmColor, isDangerous = false, focusCancel = false, noHistory = false } = {}) {
+    if (confirmModalClose) confirmModalClose(false);
     return new Promise((resolve) => {
         const existing = document.getElementById('app-confirm-modal');
         if (existing) existing.remove();
@@ -1078,18 +1082,29 @@ function showConfirmModal({ title = 'Confirm', message = 'Are you sure?', confir
         window.addEventListener('keydown', guard, true);
         window.addEventListener('keyup', guard, true);
 
+        let focusTimer = null;
+        let settled = false;
         function cleanup(result) {
+            if (settled) return;
+            settled = true;
+            if (confirmModalClose === cleanup) confirmModalClose = null;
+            clearTimeout(focusTimer);
             window.removeEventListener('keydown', guard, true);
             window.removeEventListener('keyup', guard, true);
             overlay.remove();
             document.body.style.overflow = overflowBefore;
             resolve(result);
         }
+        confirmModalClose = cleanup;
         // Escape (through the layers in router.js) and a click outside cancel
         overlay.addEventListener('click', (e) => { if (uiBackdropClick(e)) cleanup(false); });
         cancelBtn.addEventListener('click', () => cleanup(false));
         okBtn.addEventListener('click', () => cleanup(true));
-        setTimeout(() => (focusCancel ? cancelBtn : okBtn).focus(), 100);
+        // On Cancel at once, before the layers (router.js) would put it on the main
+        // button: a new Enter in the first moments cancels. The main button gets it
+        // after a moment, as before
+        if (focusCancel) cancelBtn.focus({ preventScroll: true });
+        else focusTimer = setTimeout(() => { if (!settled) okBtn.focus(); }, 100);
     });
 }
 

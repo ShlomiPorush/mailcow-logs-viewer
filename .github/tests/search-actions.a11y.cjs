@@ -712,3 +712,57 @@ test('S5: while an input method composes, and with a modifier, Right stays in th
     key(w, field, 'ArrowRight');
     assert.equal(w.document.activeElement.dataset.gsAct, 'card');
 });
+
+// --------------------------------------------------------------- review round 2
+
+test('S6: a question that writes to mailcow is on Cancel at once, so a new Enter in its first moments cancels', async () => {
+    const asks = [
+        ['Allow', w => w.allowIP('203.0.113.45'), '/api/fail2ban/allow'],
+        ['Ban', w => w.banIP('203.0.113.45'), '/api/fail2ban/ban'],
+        ['Unban', w => w.unbanIP('203.0.113.45'), '/api/fail2ban/unban'],
+        ['Remove', w => w.securityRemoveFromList('whitelist', '203.0.113.45/32'), '/api/fail2ban/'],
+        ['Run', w => w.gsRunJob({ key: 'fetch_logs', name: 'Fetch Logs', description: 'Imports logs from mailcow API' }), '/api/settings/jobs/'],
+    ];
+    for (const [name, open, writes] of asks) {
+        const w = page();
+        await settle(w, 2);
+        open(w);
+        // Before the 100 ms the main button used to wait for, after the layers placed the focus
+        await wait(w, 40);
+        assert.ok(confirmShown(w), `${name}: asked`);
+        assert.equal(w.document.activeElement.id, 'app-confirm-cancel', `${name}: on Cancel`);
+        release(w, 'Enter');
+        press(w, 'Enter');
+        await settle(w, 12);
+        assert.equal(confirmShown(w), null, `${name}: the new Enter answered Cancel`);
+        assert.equal(asked(w, writes, 'POST').length, 0, `${name}: nothing was written`);
+    }
+});
+
+test('S7: a second question closes the first through its own close: it settles, and its key guard and timer go', async () => {
+    const w = page();
+    await settle(w, 2);
+    const focused = [];
+    const focus = w.HTMLElement.prototype.focus;
+    w.HTMLElement.prototype.focus = function (...args) { focused.push(this.id); return focus.apply(this, args); };
+    let first = 'open';
+    w.showConfirmModal({ title: 'First', message: 'First?' }).then(result => { first = result; });
+    let second = 'open';
+    w.showConfirmModal({ title: 'Second', message: 'Second?' }).then(result => { second = result; });
+    await settle(w);
+    assert.equal(first, false, 'the first settles as cancelled');
+    assert.equal(w.document.querySelectorAll('#app-confirm-modal').length, 1);
+    $(w, '#app-confirm-cancel').click();
+    await settle(w);
+    assert.equal(second, false);
+    // Neither question's focus timer fires once it is gone
+    focused.length = 0;
+    await wait(w, 160);
+    assert.deepEqual(Array.from(focused).filter(id => id === 'app-confirm-ok'), []);
+    // And no guard is left: a held Enter reaches the page again
+    const seen = [];
+    w.document.addEventListener('keydown', e => seen.push(e.defaultPrevented));
+    w.document.body.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Enter', repeat: true, bubbles: true, cancelable: true }));
+    assert.deepEqual(Array.from(seen), [false]);
+    w.HTMLElement.prototype.focus = focus;
+});
