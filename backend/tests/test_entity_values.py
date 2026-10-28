@@ -55,10 +55,25 @@ def test_same_ip_reads_an_ipv4_address_mapped_into_ipv6():
     assert ev.same_ip("203.0.113.4", "203.0.113.4") and not ev.same_ip("203.0.113.45", "203.0.113.4")
 
 
-def test_canonical_ip():
-    assert ev.canonical_ip("2001:DB8:0:0::1") == "2001:db8::1"
-    assert ev.canonical_ip(" 203.0.113.4 ") == "203.0.113.4"
-    assert ev.canonical_ip("not-an-ip ") == "not-an-ip"
+def test_ip_spellings_of_an_ipv4_address():
+    spellings = ev.ip_spellings("203.0.113.4")
+    for text in ("203.0.113.4", "::ffff:203.0.113.4", "::FFFF:203.0.113.4", "::ffff:cb00:7104", "::FFFF:CB00:7104",
+                 "0:0:0:0:0:ffff:cb00:7104", "0000:0000:0000:0000:0000:ffff:cb00:7104", "::ffff:cb00:7104"):
+        assert text in spellings, text
+    assert ev.ip_spellings("192.0.2.1")[1:4] == ["::ffff:192.0.2.1", "::ffff:c000:201", "::ffff:c000:0201"]
+    assert "::ffff:cb00:7105" not in spellings
+    assert all(ev.same_ip(s, "203.0.113.4") for s in spellings)
+
+
+def test_ip_spellings_of_an_ipv6_address():
+    assert ev.ip_spellings("2001:db8::1") == [
+        "2001:db8::1", "2001:0db8:0000:0000:0000:0000:0000:0001", "2001:DB8::1", "2001:0DB8:0000:0000:0000:0000:0000:0001"]
+
+
+def test_spellings_of_typed_ip():
+    assert ev.spellings_of_typed_ip("2001:DB8:0:0::1")[0] == "2001:db8::1"
+    assert ev.spellings_of_typed_ip(" 203.0.113.4 ")[0] == "203.0.113.4"
+    assert ev.spellings_of_typed_ip("not-an-ip ") == ["not-an-ip"]
 
 
 # ---------------------------------------------------------------- address

@@ -26,7 +26,7 @@ import re
 from datetime import datetime, timedelta, timezone
 from typing import Callable, Dict, List, Optional, Tuple
 
-from sqlalchemy import and_, case, cast, desc, distinct, exists, false, func, literal, or_, select
+from sqlalchemy import and_, case, cast, desc, distinct, exists, func, literal, or_, select
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Session
 
@@ -128,30 +128,48 @@ def _domain_match(column, domain: str):
 
 # ---------------------------------------------------------------- IP by value
 # How each stored address column is matched (ip is canonical, from entity_values):
-# - rspamd_logs.ip, netfilter_logs.ip: text equality on the canonical form, which
-#   keeps their indexes. netfilter_logs.ip is written by netfilter_address()
-#   (str(ipaddress), migration 0024 cleared older rows that disagreed with it);
-#   rspamd_logs.ip is the text Rspamd's history sends, which Rspamd formats with
-#   inet_ntop (lower case, zeros compressed, the form ipaddress writes).
+# - always: an indexed IN over entity_values.ip_spellings(ip), a closed set (the
+#   canonical form, the IPv4-mapped IPv6 spellings of an IPv4 address, IPv6
+#   compressed and exploded in both cases). The writers store text as they got it
+#   (Rspamd's history for rspamd_logs.ip), so the common spellings are all there.
+# - rspamd_logs.ip and netfilter_logs.ip (the big tables) use only that set.
 # - every other column (eas_devices.last_ip, protection_hits.ip, dmarc_records.source_ip,
-#   blacklist_checks.server_ip, monitored_hosts.hostname) may hold another spelling,
-#   a network, a host name or, for DMARC rows stored before validation (#330),
-#   anything. PostgreSQL has no safe cast for such text, so _ip_value_match reads
-#   the distinct candidate texts of a bounded set and compares them with ipaddress.
-IP_TEXTS_READ = 20000
+#   blacklist_checks.server_ip, monitored_hosts.hostname) may hold any spelling, a
+#   network, a host name or, for DMARC rows stored before validation (#330),
+#   anything. PostgreSQL has no safe cast for such text, so _ip_value_match also
+#   pages through every distinct candidate text of a bounded set and compares
+#   them with ipaddress. Past IP_TEXTS_CEILING candidates the source fails rather
+#   than answer with a count that may miss some.
+IP_TEXTS_CHUNK = 5000
+IP_TEXTS_CEILING = 200000
+
+
+def _ip_spellings_match(column, ip: str):
+    """An indexed condition: column holds one of the closed set of spellings of ip."""
+    return column.in_(entity_values.ip_spellings(ip))
 
 
 def _ip_value_match(texts_query, column, ip: str):
-    """A condition: column holds ip by value. texts_query selects rows of the
-    bounded set to look in. ipaddress reads an IPv4 address in one spelling
-    only, so equality finds it; other candidates are IPv6 texts (any IPv6
-    spelling, or an IPv4 address mapped into IPv6), read and compared here."""
-    v4 = ipaddress.ip_address(ip).version == 4
-    pattern = f"%:{ip}" if v4 else "%:%"
-    texts = [t for (t,) in texts_query.with_entities(column).filter(column.like(pattern)).distinct()
-             .limit(IP_TEXTS_READ).all() if entity_values.same_ip(t, ip)]
-    conditions = ([column == ip] if v4 else []) + ([column.in_(texts)] if texts else [])
-    return or_(*conditions) if conditions else false()
+    """A condition: column holds ip by value. texts_query selects the rows of
+    the bounded set to look in. Candidates are texts that can be another
+    spelling of ip: any IPv6 text for an IPv6 address, one with ffff (an
+    IPv4-mapped address) for an IPv4 address. Raises Unavailable past the ceiling."""
+    spellings = entity_values.ip_spellings(ip)
+    candidate = column.like("%:%") if ipaddress.ip_address(ip).version == 6 else column.ilike("%ffff%")
+    found, read, last = set(spellings), 0, None
+    while True:
+        page = texts_query.with_entities(column).filter(candidate)
+        if last is not None:
+            page = page.filter(column > last)
+        chunk = [t for (t,) in page.distinct().order_by(column).limit(IP_TEXTS_CHUNK).all()]
+        read += len(chunk)
+        if read > IP_TEXTS_CEILING:
+            raise Unavailable("Too many different addresses are stored to compare them all. Try a shorter range.")
+        found.update(t for t in chunk if entity_values.same_ip(t, ip))
+        if len(chunk) < IP_TEXTS_CHUNK:
+            break
+        last = chunk[-1]
+    return column.in_(sorted(found))
 
 
 # ---------------------------------------------------------------- messages
@@ -189,7 +207,7 @@ def _latest_messages(db: Session, condition, limit: int = ITEMS) -> List[dict]:
     rows = db.query(MessageCorrelation).join(legs, MessageCorrelation.id == legs.c.leg_id).filter(
         legs.c.leg_rank == 1).order_by(desc(legs.c.sort_time), desc(legs.c.leg_id)).limit(limit).all()
     return [{
-        "correlation_key": m.correlation_key, "first_seen": iso(m.first_seen), "sender": m.sender,
+        "_at": m.first_seen, "correlation_key": m.correlation_key, "first_seen": iso(m.first_seen), "sender": m.sender,
         "recipient": m.recipient, "subject": m.subject, "direction": m.direction, "final_status": m.final_status,
     } for m in rows]
 
@@ -201,7 +219,7 @@ def _in_range(start: datetime, end: datetime):
 
 def _messages_of_ip(db: Session, ip: str, start: datetime, end: datetime) -> dict:
     scanned_from = MessageCorrelation.rspamd_log_id.in_(
-        select(RspamdLog.id).where(RspamdLog.ip == ip))  # canonical text, see "IP by value"
+        select(RspamdLog.id).where(_ip_spellings_match(RspamdLog.ip, ip)))  # see "IP by value"
     condition = and_(_in_range(start, end), scanned_from)
     count, = _count_messages(db, condition)
     return {"count": count, "items": _latest_messages(db, condition)}
@@ -235,7 +253,7 @@ def _security(db: Session, condition, start: datetime, end: datetime, with_ips: 
         "events": figures[0], "rule_matches": figures[1], "bans": figures[2], "unbans": figures[3],
         "last_seen": iso(figures[5]),
         "items": [{
-            "time": iso(r.time), "ip": r.ip, "action": r.action, "rule_id": r.rule_id, "username": r.username,
+            "_at": r.time, "time": iso(r.time), "ip": r.ip, "action": r.action, "rule_id": r.rule_id, "username": r.username,
             "service": security_addresses.netfilter_service(r.message)[0], "attempts_left": r.attempts_left,
             "message": r.message,
         } for r in rows],
@@ -305,7 +323,7 @@ def _protection(db: Session, condition, start: datetime, end: datetime) -> dict:
     ).filter(relevant).one()
     rows = db.query(ProtectionHit).filter(relevant).order_by(
         desc(ProtectionHit.last_seen), desc(ProtectionHit.id)).limit(ITEMS).all()
-    return {"count": total, "open": open_count, "items": [protection_rules.hit_dict(h) for h in rows]}
+    return {"count": total, "open": open_count, "items": [{**protection_rules.hit_dict(h), "_at": h.first_seen} for h in rows]}
 
 
 # ---------------------------------------------------------------- devices
@@ -327,7 +345,7 @@ def _devices(db: Session, condition, start: datetime, end: datetime) -> dict:
     return {"count": total, "items": [{
         "id": d.id, "username": d.username, "device_id": d.device_id, "device_type": d.device_type,
         "last_ip": d.last_ip, "last_command": d.last_command,
-        "first_seen": iso(d.first_seen), "last_seen": iso(d.last_seen),
+        "first_seen": iso(d.first_seen), "last_seen": iso(d.last_seen), "_first": d.first_seen, "_last": d.last_seen,
     } for d in rows]}
 
 
@@ -574,33 +592,44 @@ def _timeline(sources: Dict[str, dict], start: datetime, end: datetime, device_f
             truncated = True
         for row in source["items"]:
             if name == "messages":
-                items.append({"time": row["first_seen"], "kind": "message", "correlation_key": row["correlation_key"],
+                items.append({"_at": row["_at"], "time": row["first_seen"], "kind": "message", "correlation_key": row["correlation_key"],
                               "sender": row["sender"], "recipient": row["recipient"], "subject": row["subject"],
                               "direction": row["direction"], "status": row["final_status"]})
             elif name == "security":
                 kind = ("security" if row["rule_id"] is not None else "ban" if row["action"] in _BAN_ACTIONS
                         else "unban" if row["action"] == "unban" else None)
                 if kind:  # the "N more attempts" and list lines that follow are not events of their own
-                    items.append({"time": row["time"], "kind": kind, "ip": row["ip"], "username": row["username"],
+                    items.append({"_at": row["_at"], "time": row["time"], "kind": kind, "ip": row["ip"], "username": row["username"],
                                   "service": row["service"]})
             elif name == "protection":
-                items.append({"time": row["first_seen"], "kind": "protection", "hit_id": row["id"], "ip": row["ip"],
+                items.append({"_at": row["_at"], "time": row["first_seen"], "kind": "protection", "hit_id": row["id"], "ip": row["ip"],
                               "rule": row["rule"], "status": row["status"]})
             else:
-                for kind, at in (("device_first_seen", row["first_seen"]), ("device_last_seen", row["last_seen"])):
+                for kind, at, raw in (("device_first_seen", row["first_seen"], row["_first"]),
+                                     ("device_last_seen", row["last_seen"], row["_last"])):
                     if kind == "device_first_seen" and not device_first_seen:
                         continue
-                    items.append({"time": at, "kind": kind, "username": row["username"], "device_id": row["device_id"],
-                                  "device_type": row["device_type"], "ip": row["last_ip"]})
-    # The times are ISO strings of one format (iso()), so they compare as text
-    first, last = iso(start), iso(end)
-    items = [i for i in items if i["time"] and first <= i["time"] <= last]
-    items.sort(key=lambda i: (i["time"], -_KIND_ORDER[i["kind"]]), reverse=True)
+                    items.append({"_at": raw, "time": at, "kind": kind, "username": row["username"],
+                                  "device_id": row["device_id"], "device_type": row["device_type"], "ip": row["last_ip"]})
+    # By the stored times (naive UTC, to the microsecond), not the answer's
+    # text, which drops the fraction of a second
+    items = [i for i in items if i["_at"] is not None and start <= i["_at"] <= end]
+    items.sort(key=lambda i: (i["_at"], -_KIND_ORDER[i["kind"]]), reverse=True)
     if len(items) > TIMELINE:
         items, truncated = items[:TIMELINE], True
     for item in items:
+        del item["_at"]
         item["label"] = _LABELS[item["kind"]]
     return {"items": items, "truncated": truncated, "left_out": left_out}
+
+
+def _without_private_keys(sources: Dict[str, dict]) -> Dict[str, dict]:
+    """The sources as answered: their rows lose the stored times kept for the timeline."""
+    for source in sources.values():
+        for row in source.get("items") or []:
+            for key in [k for k in row if k.startswith("_")]:
+                del row[key]
+    return sources
 
 
 # ---------------------------------------------------------------- the three cards
@@ -615,9 +644,9 @@ def ip_summary(db: Session, ip: str, start: datetime, end: datetime,
     mailcow's Fail2ban answer, or None when mailcow did not answer."""
     sources = {
         "messages": _run(db, None, "the messages", lambda: _messages_of_ip(db, ip, start, end)),
-        # Canonical text, see "IP by value"
+        # The closed set of spellings, see "IP by value"
         "security": _run(db, "netfilter", "the security events",
-                         lambda: _security(db, NetfilterLog.ip == ip, start, end, with_ips=False)),
+                         lambda: _security(db, _ip_spellings_match(NetfilterLog.ip, ip), start, end, with_ips=False)),
         "lists": _run(db, "netfilter", "the Fail2ban lists", lambda: _lists(ip, read_fail2ban)),
         "protection": _run(db, "netfilter", "the protection catches", lambda: _protection_of_ip(db, ip, start, end)),
         "devices": _run(db, "devices", "the devices", lambda: _devices_of_ip(db, ip, start, end)),
@@ -625,9 +654,10 @@ def ip_summary(db: Session, ip: str, start: datetime, end: datetime,
         "rbl": _run(db, "blacklist", "the blocklist check", lambda: _rbl(db, ip)),
         "geo": _run(db, None, "the place of the address", lambda: _geo(ip)),
     }
-    return {"kind": "ip", "value": ip, "display": ip, "range": _range_dict(start, end), "sources": sources,
-            # Only the device's last address is stored: an IP card says when it was last seen from there
-            "timeline": _timeline(sources, start, end, device_first_seen=False)}
+    # Only the device's last address is stored: an IP card says when it was last seen from there
+    timeline = _timeline(sources, start, end, device_first_seen=False)
+    return {"kind": "ip", "value": ip, "display": ip, "range": _range_dict(start, end),
+            "sources": _without_private_keys(sources), "timeline": timeline}
 
 
 def address_summary(db: Session, address: str, display: str, start: datetime, end: datetime) -> dict:
@@ -655,9 +685,10 @@ def address_summary(db: Session, address: str, display: str, start: datetime, en
             "entry": _address_entry(db, address), "domain_entry": _domain_entry(db, domain)})),
         "mailbox": _run(db, "mailbox-stats", "the mailboxes", lambda: _mailbox(db, address)),
     }
+    timeline = _timeline(sources, start, end, device_first_seen=True)
     return {"kind": "address", "value": address, "display": display, "domain": domain,
             "hosted_domain": _hosted(domain), "excluded": excluded, "range": _range_dict(start, end),
-            "sources": sources, "timeline": _timeline(sources, start, end, device_first_seen=True)}
+            "sources": _without_private_keys(sources), "timeline": timeline}
 
 
 def domain_summary(db: Session, domain: str, start: datetime, end: datetime) -> dict:
@@ -680,4 +711,4 @@ def domain_summary(db: Session, domain: str, start: datetime, end: datetime) -> 
         "dns": _run(db, "domains", "the DNS checks", lambda: _dns(db, domain)),
     }
     return {"kind": "domain", "value": domain, "display": forms[-1], "hosted": _hosted(domain),
-            "range": _range_dict(start, end), "sources": sources}
+            "range": _range_dict(start, end), "sources": _without_private_keys(sources)}

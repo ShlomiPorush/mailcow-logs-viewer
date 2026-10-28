@@ -547,8 +547,8 @@ def get_netfilter_logs(
             )
         
         if ip and exact_ip is True:
-            # Netfilter lines store the address canonically (netfilter_address)
-            query = query.filter(NetfilterLog.ip == entity_values.canonical_ip(ip))
+            # The address in any spelling a stored line can hold (entity_values.ip_spellings)
+            query = query.filter(NetfilterLog.ip.in_(entity_values.spellings_of_typed_ip(ip)))
         elif ip:
             query = query.filter(NetfilterLog.ip.ilike(f"%{ip}%"))
         

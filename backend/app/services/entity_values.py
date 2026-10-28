@@ -83,13 +83,33 @@ def normalize_ip(value) -> str:
     return str(address)
 
 
-def canonical_ip(value: str) -> str:
-    """A typed address in the canonical form; text that is not one address as
-    it was typed (compared with a stored address, it then matches nothing)."""
+_MAPPED_PREFIXES = ("::ffff:", "0:0:0:0:0:ffff:", "0000:0000:0000:0000:0000:ffff:")
+
+
+def ip_spellings(ip: str) -> List[str]:
+    """A closed set of texts that hold the canonical address ip, for an
+    indexed IN (...) on a stored column: the canonical form, and for IPv4 the
+    IPv4-mapped IPv6 spellings (three prefixes, the tail dotted, in compressed
+    hex or in zero-padded hex, lower and upper case); for IPv6 the compressed
+    and exploded forms in both cases. Any other spelling needs same_ip()."""
+    address = ipaddress.ip_address(ip)
+    if address.version == 6:
+        forms = [str(address), address.exploded]
+        return list(dict.fromkeys(forms + [f.upper() for f in forms]))
+    packed = address.packed
+    high, low = (packed[0] << 8) | packed[1], (packed[2] << 8) | packed[3]
+    tails = (str(address), f"{high:x}:{low:x}", f"{high:04x}:{low:04x}")
+    forms = [prefix + tail for prefix in _MAPPED_PREFIXES for tail in tails]
+    return list(dict.fromkeys([str(address)] + forms + [f.upper() for f in forms]))
+
+
+def spellings_of_typed_ip(value) -> List[str]:
+    """ip_spellings of a typed address; text that is not one address as it was
+    typed (compared with a stored address, it then matches nothing)."""
     try:
-        return normalize_ip(value)
+        return ip_spellings(normalize_ip(value))
     except InvalidValue:
-        return value.strip() if isinstance(value, str) else value
+        return [value.strip() if isinstance(value, str) else value]
 
 
 def same_ip(stored, ip: str) -> bool:
