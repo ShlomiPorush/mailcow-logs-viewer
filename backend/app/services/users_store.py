@@ -11,7 +11,7 @@ import re
 import threading
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from sqlalchemy import func, text
 from sqlalchemy.exc import IntegrityError
@@ -102,12 +102,10 @@ class SignIn:
     password: bool
     env_name: str
     oauth2: bool
-    # Sign-in is on by one of the two readings that stored_sign_in combines
-    on: bool = False
 
     @property
     def enabled(self) -> bool:
-        return self.basic or self.oauth2 or self.on
+        return self.basic or self.oauth2
 
 
 def sign_in_now(source=None) -> SignIn:
@@ -116,13 +114,11 @@ def sign_in_now(source=None) -> SignIn:
                   bool(source.is_oauth2_enabled))
 
 
-def stored_sign_in(db: Session) -> SignIn:
-    """Sign-in as the guards count it under the lock: a method counts only when it is on both as
-    saved and as in force. A Settings save releases the lock when it commits, before the shared
-    settings are reloaded, and a failed reload keeps the old ones in force."""
-    saved, now = sign_in_now(build_settings(db)), sign_in_now()
-    return SignIn(saved.basic and now.basic, saved.password and now.password, saved.env_name,
-                  saved.oauth2 and now.oauth2, on=saved.enabled or now.enabled)
+def sign_in_readings(db: Session) -> Tuple[SignIn, SignIn]:
+    """Sign-in as saved and as in force, each checked on its own under the lock: a Settings save
+    releases the lock when it commits, before the shared settings are reloaded, and a failed
+    reload keeps the old ones in force."""
+    return sign_in_now(build_settings(db)), sign_in_now()
 
 
 def usable_admins(db: Session, sign_in: SignIn, default: str) -> int:
@@ -140,13 +136,18 @@ def usable_admins(db: Session, sign_in: SignIn, default: str) -> int:
     return count
 
 
-def _guard(db: Session, before: int, sign_in: SignIn, default: str) -> None:
-    """Refuse a change after which no admin can sign in. A state that had none
-    before is not made worse by a change that adds none."""
+def _admins(db: Session, readings, default: str) -> List[int]:
+    return [usable_admins(db, sign_in, default) for sign_in in readings]
+
+
+def _guard(db: Session, readings, before: List[int], default: str) -> None:
+    """Refuse a change after which no admin can sign in under either reading. A
+    reading that had none before is not made worse by a change that adds none."""
     db.flush()
-    if sign_in.enabled and before > 0 and usable_admins(db, sign_in, default) == 0:
-        db.rollback()
-        raise UserError(409, NO_ADMIN_LEFT)
+    for sign_in, count in zip(readings, before):
+        if sign_in.enabled and count > 0 and usable_admins(db, sign_in, default) == 0:
+            db.rollback()
+            raise UserError(409, NO_ADMIN_LEFT)
 
 
 # ── Rows as the API shows them ─────────────────────────────────────────────
@@ -228,15 +229,15 @@ def create_user(db: Session, *, kind: str, username: Optional[str], email: Optio
         user = User(kind="oauth2", email=(email or "").strip(), email_norm=norm, access=access_level, scopes=scopes,
                     disabled=disabled, created_at=now, updated_at=now)
     lock(db)
-    sign_in = stored_sign_in(db)
-    if kind == "local" and norm in (sign_in.env_name, env_admin_name()):
+    readings = sign_in_readings(db)
+    if kind == "local" and norm in {r.env_name for r in readings}:
         db.rollback()
         raise UserError(409, "This is the built-in admin's username. Choose another one.")
     default = read_default(db)["value"]
-    before = usable_admins(db, sign_in, default)
+    before = _admins(db, readings, default)
     db.add(user)
     try:
-        _guard(db, before, sign_in, default)
+        _guard(db, readings, before, default)
         db.commit()
     except IntegrityError:
         db.rollback()
@@ -267,10 +268,10 @@ def update_user(db: Session, user_id: int, *, access_level: str, views, acts, di
     if new_hash is not None and user.kind != "local":
         db.rollback()
         raise UserError(422, "An OAuth2 entry has no password here; the provider checks it.")
-    sign_in = stored_sign_in(db)
+    readings = sign_in_readings(db)
     default = read_default(db)["value"]
-    before = usable_admins(db, sign_in, default)
-    ends_sessions = (new_hash is not None or user.access != access_level
+    before = _admins(db, readings, default)
+    ends_sessions =(new_hash is not None or user.access != access_level
                      or (user.scopes or "") != scopes or bool(user.disabled) != disabled)
     table = User.__table__
     changed = db.execute(
@@ -283,7 +284,7 @@ def update_user(db: Session, user_id: int, *, access_level: str, views, acts, di
     if changed.rowcount != 1:
         db.rollback()
         raise UserError(409, STALE_USER)
-    _guard(db, before, sign_in, default)
+    _guard(db, readings, before, default)
     db.commit()
     db.refresh(user)
     if ends_sessions and user.kind == "local":
@@ -298,11 +299,11 @@ def delete_user(db: Session, user_id: int) -> None:
         db.rollback()
         raise UserError(404, NOT_FOUND)
     kind = user.kind
-    sign_in = stored_sign_in(db)
+    readings = sign_in_readings(db)
     default = read_default(db)["value"]
-    before = usable_admins(db, sign_in, default)
+    before = _admins(db, readings, default)
     db.delete(user)
-    _guard(db, before, sign_in, default)
+    _guard(db, readings, before, default)
     db.commit()
     if kind == "local":
         _end_local_sessions(user_id)
@@ -314,14 +315,11 @@ def set_default(db: Session, value: str, version: int) -> Dict[str, Any]:
     if current["version"] != version:
         db.rollback()
         raise UserError(409, STALE_DEFAULT)
-    sign_in = stored_sign_in(db)
-    before = usable_admins(db, sign_in, current["value"])
+    readings = sign_in_readings(db)
+    before = _admins(db, readings, current["value"])
     _write_key(db, access.DEFAULT_ACCESS_KEY, value)
     _write_key(db, access.DEFAULT_VERSION_KEY, str(version + 1))
-    db.flush()
-    if sign_in.enabled and before > 0 and usable_admins(db, sign_in, value) == 0:
-        db.rollback()
-        raise UserError(409, NO_ADMIN_LEFT)
+    _guard(db, readings, before, value)
     db.commit()
     return {"default_access": value, "version": version + 1}
 
@@ -345,8 +343,10 @@ def check_sign_in_settings(db: Session, before, allowed: Dict[str, Any]) -> None
         db.rollback()
         raise UserError(400, "A local user has this username. Choose another username for the built-in admin.")
     default = read_default(db)["value"]
-    if (sign_in_after.enabled and usable_admins(db, sign_in_after, default) == 0
-            and (not sign_in_before.enabled or usable_admins(db, sign_in_before, default) > 0)):
+    # Before, as saved and as in force: with sign-in off there, everyone was an admin
+    if sign_in_after.enabled and usable_admins(db, sign_in_after, default) == 0 and any(
+            not reading.enabled or usable_admins(db, reading, default) > 0
+            for reading in (sign_in_before, sign_in_now())):
         db.rollback()
         raise UserError(409, NO_ADMIN_LEFT)
 

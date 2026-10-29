@@ -1348,13 +1348,16 @@ def test_job_errors_name_no_settings_for_who_may_not_read_them(people, stored, m
     raw_job = next(iter(raw_logs_worker.raw_logs_job_status))
     monkeypatch.setitem(raw_logs_worker.raw_logs_job_status, raw_job,
                         {**raw_logs_worker.raw_logs_job_status[raw_job], "error": LEAKY_ERROR})
-    stored(DMARCSync(sync_type="auto", status="failed", started_at=datetime.utcnow(), error_message=LEAKY_ERROR))
+    stored(DMARCSync(sync_type="auto", status="failed", started_at=datetime.utcnow(), error_message=LEAKY_ERROR,
+                     failed_emails=[{"email_id": "1", "message_id": "<r1@example.com>", "subject": "Report",
+                                     "error": LEAKY_ERROR}]))
     admin = _admin()
     person = _person(admin, "no-settings", views=("status", "dmarc", "logs"))
     answers = {
         "info": lambda c: c.get("/api/settings/info").json()["background_jobs"]["dmarc_imap_sync"]["error"],
         "imap status": lambda c: c.get("/api/dmarc/imap/status").json()["latest_sync"]["error_message"],
         "imap history": lambda c: c.get("/api/dmarc/imap/history").json()["data"][0]["error_message"],
+        "imap failed email": lambda c: c.get("/api/dmarc/imap/history").json()["data"][0]["failed_emails"][0]["error"],
         "raw logs": lambda c: c.get("/api/raw-logs/worker-status").json()["jobs"][raw_job]["error"],
     }
     for name, read in answers.items():
@@ -1379,3 +1382,60 @@ def test_a_disabled_oauth2_entry_is_refused_on_its_next_request_and_its_stream_c
             ws.receive_json()
     assert closed.value.code == raw_logs.WS_SESSION_ENDED
     _ended(carol.get("/api/messages"))
+
+
+# ── Round 3: each sign-in reading checked on its own ───────────────────────
+
+def test_a_demotion_needs_an_admin_under_the_reading_in_force(oauth2, monkeypatch):
+    """A save switched to Basic with a password and OAuth2 off, but its reload failed: OAuth2 is
+    still the only sign-in in force, so its last admin cannot be demoted."""
+    from app.database import get_db_context
+    monkeypatch.setattr(settings._inner, "basic_auth_enabled", False)
+    _store_default("none")
+    with get_db_context() as db:
+        row = users_store.create_user(db, kind="oauth2", username=None, email="carol@example.com", password=None,
+                                      access_level="admin", views=(), acts=(), disabled=False)
+    saved = settings._inner.model_copy(update={"basic_auth_enabled": True, "oauth2_enabled": False})
+    monkeypatch.setattr(users_store, "build_settings", lambda db: saved)
+    with get_db_context() as db:
+        with pytest.raises(users_store.UserError) as refused:
+            users_store.update_user(db, row["id"], access_level="viewer", views=(), acts=(), disabled=False,
+                                    password=None, row_version=row["row_version"])
+    assert refused.value.status == 409
+    with get_db_context() as db:
+        with pytest.raises(users_store.UserError):
+            users_store.delete_user(db, row["id"])
+
+
+def test_a_demotion_with_another_admin_under_both_readings_passes(oauth2, monkeypatch):
+    from app.database import get_db_context
+    monkeypatch.setattr(settings._inner, "basic_auth_enabled", False)
+    _store_default("none")
+    with get_db_context() as db:
+        first = users_store.create_user(db, kind="oauth2", username=None, email="carol@example.com", password=None,
+                                        access_level="admin", views=(), acts=(), disabled=False)
+    with get_db_context() as db:
+        users_store.create_user(db, kind="oauth2", username=None, email="dave@example.com", password=None,
+                                access_level="admin", views=(), acts=(), disabled=False)
+    saved = settings._inner.model_copy(update={"basic_auth_enabled": True})
+    monkeypatch.setattr(users_store, "build_settings", lambda db: saved)
+    with get_db_context() as db:
+        changed = users_store.update_user(db, first["id"], access_level="viewer", views=(), acts=(), disabled=False,
+                                          password=None, row_version=first["row_version"])
+    assert changed["access"] == "viewer"
+
+
+def test_a_settings_save_counts_the_reading_in_force_before_it(oauth2, monkeypatch):
+    """In force: OAuth2 only with an admin entry; as saved: Basic without a password, so no admin there.
+    A save that keeps that leaves nobody who can sign in, whatever the saved reading had before."""
+    from app.database import get_db_context
+    monkeypatch.setattr(settings._inner, "basic_auth_enabled", False)
+    _store_default("none")
+    with get_db_context() as db:
+        users_store.create_user(db, kind="oauth2", username=None, email="carol@example.com", password=None,
+                                access_level="admin", views=(), acts=(), disabled=False)
+    before = settings._inner.model_copy(update={"basic_auth_enabled": True, "auth_password": "",
+                                                "oauth2_enabled": False})
+    with get_db_context() as db:
+        with pytest.raises(users_store.UserError):
+            users_store.check_sign_in_settings(db, before, {"auth_username": "root"})

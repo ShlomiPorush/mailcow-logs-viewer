@@ -1840,7 +1840,9 @@ def get_sync_history(
                     'reports_duplicate': sync.reports_duplicate,
                     'reports_failed': sync.reports_failed,
                     'error_message': job_error(request, sync.error_message),
-                    'failed_emails': sync.failed_emails
+                    'failed_emails': [{**item, 'error': job_error(request, item.get('error'))}
+                                      if isinstance(item, dict) and 'error' in item else item
+                                      for item in sync.failed_emails] if sync.failed_emails else sync.failed_emails
                 }
                 for sync in syncs
             ]
