@@ -35,6 +35,7 @@ function element() {
 function load({ fetch } = {}) {
     const toasts = [];
     const reloads = [];
+    const timers = [];
     const elements = {};
     const own = {
         hidden: false,
@@ -55,12 +56,18 @@ function load({ fetch } = {}) {
     const context = vm.createContext({
         document, window, history: { replaceState() {}, pushState() {} }, localStorage: stub(), navigator: stub(),
         location: win.location, console: { log() {}, error() {}, warn() {} },
-        // A timer runs at once: the reload after "Your access changed." is seen here
-        setTimeout: fn => { fn(); return 0; }, clearTimeout() {}, setInterval() {}, requestAnimationFrame() {},
+        // Timers wait in a queue; the test runs the ones of a given delay (flush)
+        setTimeout: (fn, ms) => { timers.push({ fn, ms }); return timers.length; }, clearTimeout() {}, setInterval() {}, requestAnimationFrame() {},
         MutationObserver: function () { return { observe() {} }; }, appTimezone: 'UTC', fetch,
     });
     for (const file of ['utils.js', 'router.js', 'app.js']) vm.runInContext(fs.readFileSync(path.join(frontend, file), 'utf8'), context);
-    return { run: code => vm.runInContext(code, context), toasts, reloads };
+    // Runs the waiting timers of this delay (and what they start, when it has the same delay)
+    const flush = ms => {
+        for (let i = 0; i < timers.length; i++) {
+            if (timers[i].ms === ms && !timers[i].done) { timers[i].done = true; timers[i].fn(); }
+        }
+    };
+    return { run: code => vm.runInContext(code, context), toasts, reloads, flush };
 }
 
 const VIEWER = { authenticated: true, is_admin: false, scopes: ['status:read', 'messages:read'] };
@@ -73,11 +80,32 @@ test('the same access, in any order, keeps the page; other access reloads it onc
     assert.deepEqual(p.reloads, []);
     // An action granted: the page reloads into it, with a word first
     assert.equal(p.run(`appAccessCheck(${JSON.stringify({ ...VIEWER, scopes: [...VIEWER.scopes, 'status:write'] })})`), true);
+    p.flush(1500);
     assert.equal(p.reloads.length, 1);
     assert.ok(p.toasts.some(t => t.includes('Your access changed.')));
     // Another answer before the reload happens does not reload again
     p.run(`appAccessCheck(${JSON.stringify({ ...VIEWER, is_admin: true })})`);
     assert.equal(p.reloads.length, 1);
+});
+
+test('a reload the person cancels (unsaved changes) is asked again by the next check, not in a loop', () => {
+    const p = load();
+    p.run(`setAppAccess(${JSON.stringify(VIEWER)})`);
+    const other = JSON.stringify({ ...VIEWER, is_admin: true });
+    p.run(`appAccessCheck(${other})`);
+    p.flush(1500);
+    assert.equal(p.reloads.length, 1);
+    // The browser asked about the unsaved changes and the person stayed: the page runs on.
+    // A check within the next seconds asks nothing more
+    p.run(`appAccessCheck(${other})`);
+    p.flush(1500);
+    assert.equal(p.reloads.length, 1);
+    // A few seconds on, the next check asks again, once
+    p.flush(5000);
+    p.run(`appAccessCheck(${other})`);
+    p.flush(1500);
+    assert.equal(p.reloads.length, 2);
+    assert.equal(p.toasts.filter(t => t.includes('Your access changed.')).length, 2);
 });
 
 test('admin and a view taken away count as a change; a signed-out or unknown answer does not', () => {
@@ -116,7 +144,34 @@ test('a call refused for lack of access shows one message, not the caller\'s err
     await p.run(`(async () => {
         const response = await authenticatedFetch('/api/status/containers/x/ignore', { method: 'PUT' });
         if (!response.ok) showToast('HTTP ' + response.status, 'error');
-        showToast('Could not save the change. Try again.', 'error');
+    })()`);
+    assert.deepEqual(p.toasts.filter(t => t), ['✗ You do not have permission for this.']);
+});
+
+test('a refusal and an unrelated error at the same time show both', async () => {
+    const p = load({ fetch: refusing('You do not have permission for this.') });
+    await p.run(`(async () => {
+        const refused = authenticatedFetch('/api/status/containers/x/ignore', { method: 'PUT' });
+        // Another request fails meanwhile, for its own reason
+        showToast('Could not reach the server. Check your connection and try again.', 'error');
+        const response = await refused;
+        if (!response.ok) showToast('HTTP ' + response.status, 'error');
+        // Later, an error of its own: shown
+        showToast('Could not save the user. Try again.', 'error');
+    })()`);
+    assert.deepEqual(p.toasts.filter(t => t), [
+        '✗ Could not reach the server. Check your connection and try again.',
+        '✗ You do not have permission for this.',
+        '✗ Could not save the user. Try again.',
+    ]);
+});
+
+test('the caller\'s error that repeats the server\'s sentence is left out too', async () => {
+    const p = load({ fetch: refusing('You do not have permission for this.') });
+    await p.run(`(async () => {
+        const response = await authenticatedFetch('/api/users/1', { method: 'DELETE' });
+        const body = await response.json();
+        showToast('Could not delete the user: ' + body.detail, 'error');
     })()`);
     assert.deepEqual(p.toasts.filter(t => t), ['✗ You do not have permission for this.']);
 });

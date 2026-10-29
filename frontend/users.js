@@ -9,6 +9,9 @@
 // =============================================================================
 
 let usersData = null;
+// Bumped by every load and every change made here: an answer read before a newer one
+// started (a refresh that overlaps a save) is dropped instead of drawing the old state
+let usersSeq = 0;
 
 const USERS_ACCESS_LABELS = { admin: 'Admin', operator: 'Operator', viewer: 'Viewer', custom: 'Custom', none: 'No access' };
 const USERS_ACCESS_TONES = { admin: 'warn', operator: 'info', viewer: '' };
@@ -19,10 +22,13 @@ const USERS_ICON_KEY = '<svg class="ui-channel-icon" width="20" height="20" fill
 async function loadUsersPanel() {
     const panel = document.getElementById('users-panel');
     if (!panel) return;
+    const seq = ++usersSeq;
     try {
         const response = await authenticatedFetch('/api/users');
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        usersData = await response.json();
+        const data = await response.json();
+        if (seq !== usersSeq) return;
+        usersData = data;
         renderUsersPanel();
     } catch (e) {
         console.error('Users error:', e);
@@ -100,7 +106,7 @@ function usersBuiltinRow() {
     const form = !!document.querySelector('[data-tab-extra="users"]');
     const where = form ? 'Change its name and password in Authentication.' : 'Change its name and password in <code>.env</code>.';
     return `
-        <div class="ui-channel ui-agent">
+        <div class="ui-channel ui-agent" data-key="user-builtin">
             ${USERS_ICON_KEY}
             <div class="ui-q-who">
                 <div class="ui-agent-title"><b>${escapeHtml(builtin.username || '')}</b> ${uiTag('Admin', 'warn')} ${uiTag('Built-in', 'info')}</div>
@@ -120,7 +126,7 @@ function usersRow(user) {
         : user.kind === 'oauth2' ? 'Signs in with OAuth2'
             : `Signs in with a password · last signed in ${usersWhen(user.last_login_at)}`;
     return `
-        <div class="ui-channel ui-agent${blocked ? ' is-off' : ''}">
+        <div class="ui-channel ui-agent${blocked ? ' is-off' : ''}" data-key="user-${id}">
             ${USERS_ICON_PERSON}
             <div class="ui-q-who">
                 <div class="ui-agent-title"><b>${escapeHtml(usersName(user))}</b>${state} ${usersAccessChips(user)}</div>
@@ -140,7 +146,7 @@ function usersDefaultPanel() {
     const value = oauth2.default_access;
     const note = value === 'none' ? 'Only users on the list can sign in.' : 'Applies at once, also to people who are signed in now.';
     return `
-        <section class="ui-panel ui-set-channels ui-users-default" aria-labelledby="users-default-h">
+        <section class="ui-panel ui-set-channels ui-users-default" aria-labelledby="users-default-h" data-key="oauth2-default">
             <div class="ui-list-head"><h4 class="ui-md-h" id="users-default-h">Everyone else who signs in with OAuth2</h4></div>
             <p class="ui-set-desc">Users who sign in with OAuth2 and are not on the list above get this access. To give one user other access, add them by email.</p>
             <div class="ui-sec-mode">
@@ -165,11 +171,12 @@ async function refreshUsersPanel() {
     const panel = document.getElementById('users-panel');
     const busy = () => !!document.querySelector('.ui-dialog-backdrop:not(.hidden)');
     if (!panel || !usersData || !panel.getClientRects().length || busy()) return;
+    const seq = ++usersSeq;
     try {
         const response = await authenticatedFetch('/api/users', { timeout: PAGE_REFRESH_TIMEOUT });
         if (!response.ok) return;
         const data = await response.json();
-        if (busy() || JSON.stringify(data) === JSON.stringify(usersData)) return;
+        if (seq !== usersSeq || busy() || JSON.stringify(data) === JSON.stringify(usersData)) return;
         usersData = data;
         uiReplaceKeepingFocus(panel, usersPanelHtml());
     } catch (e) {
@@ -184,7 +191,7 @@ function usersPanelHtml() {
     const signInOff = !usersData.builtin.basic_auth_enabled && !usersData.oauth2.enabled;
     return `
         <section class="ui-panel ui-set-channels" aria-labelledby="users-list-h">
-            <div class="ui-list-head">
+            <div class="ui-list-head" data-key="users-head">
                 <h4 class="ui-md-h" id="users-list-h">${uiCountLabel(count, 'user', 'users')}</h4>
                 <button type="button" onclick="editUser(null)" class="ui-btn ui-btn-sm ui-btn-primary ui-head-actions">Add user</button>
             </div>
@@ -196,6 +203,7 @@ function usersPanelHtml() {
 
 async function setUsersDefault(value) {
     if (!uiMayAct('admin')) return;
+    usersSeq++;
     const oauth2 = usersData && usersData.oauth2;
     if (!oauth2 || oauth2.default_access === value) return;
     try {
@@ -211,6 +219,8 @@ async function setUsersDefault(value) {
             if (response.status === 409) loadUsersPanel();
             return;
         }
+        // A refresh that started while this was saved may have read the old value: dropped
+        usersSeq++;
         oauth2.default_access = body.default_access || value;
         oauth2.version = body.version;
         renderUsersPanel();
@@ -352,6 +362,7 @@ function closeUserEditModal(saved = false) {
 async function saveUser(event, userId) {
     event.preventDefault();
     if (!uiMayAct('admin')) return;
+    usersSeq++;
     const modal = document.getElementById('user-edit-modal');
     const error = document.getElementById('user-edit-error');
     const say = text => { error.textContent = text; error.classList.remove('hidden'); };
@@ -402,6 +413,7 @@ async function saveUser(event, userId) {
 
 async function deleteUser(userId) {
     if (!uiMayAct('admin')) return;
+    usersSeq++;
     const user = (usersData?.users || []).find(u => u.id === userId);
     if (!user) return;
     const name = usersName(user);

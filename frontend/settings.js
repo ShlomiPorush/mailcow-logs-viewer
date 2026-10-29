@@ -1865,7 +1865,8 @@ function renderSettings(content, data) {
         <!-- Edit Configuration (only when SETTINGS_EDIT_VIA_UI_ENABLED) -->
         <div class="settings-edit-layout ui-set-edit">
             ${navHtml}
-            <div class="settings-edit-content">
+            <!-- The column scrolls on a wide screen; a section redrawn by its refresh keeps the place (app.js uiReplaceKeepingFocus) -->
+            <div class="settings-edit-content" data-keep-scroll>
                 ${!data.settings_migrated ? `<div class="ui-set-actions" id="settings-edit-actions">
                     <button type="button" id="settings-import-env-btn" class="ui-btn ui-btn-primary">Migrate Settings from ENV</button>
                     <p class="ui-set-migrate-note">Click once to copy your current configuration into the database. After that you can edit the fields below and save.</p>

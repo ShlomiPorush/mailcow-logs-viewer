@@ -156,7 +156,7 @@ async function authenticatedFetch(url, options = {}) {
         }
         // A call the person's access does not cover: said once for a burst, and the
         // menu and controls follow the access the server has now
-        // Awaited, so the caller's own error comes after it and is not shown over it (utils.js uiToastSuppressed)
+        // Awaited, so the shared message comes first and the caller's error about it is left out (utils.js uiToastSuppressed)
         if (response.status === 403 && !ownNotPermitted) await noteNotPermitted(response);
 
         // The timer stays to the end of the body (reading it is part of the request);
@@ -173,7 +173,7 @@ async function noteNotPermitted(response) {
     try {
         const body = await response.clone().json();
         if (body && body.detail === UI_NOT_PERMITTED) {
-            uiNotPermitted();
+            uiNoteRefusal();
             refreshAppAccess();
         }
     } catch (e) {

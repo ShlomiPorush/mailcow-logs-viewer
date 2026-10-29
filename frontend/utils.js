@@ -242,7 +242,11 @@ function appAccessCheck(status) {
     if (!appAccessReloading) {
         appAccessReloading = true;
         showToast('Your access changed.', 'info');
-        setTimeout(() => location.reload(), 1500);
+        setTimeout(() => {
+            location.reload();
+            // Still here: the person chose to stay with unsaved changes. The next check asks again
+            setTimeout(() => { appAccessReloading = false; }, 5000);
+        }, 1500);
     }
     return true;
 }
@@ -259,21 +263,32 @@ function userCan(area, kind = 'read') {
 }
 
 const UI_NOT_PERMITTED = 'You do not have permission for this.';
-let uiNotPermittedAt = 0;       // the last time it was said
-let uiNotPermittedSeenAt = 0;   // the last refusal, said or not
+let uiNotPermittedAt = 0;      // the last time it was said
+let uiRefusalsPending = 0;     // refused calls whose caller has not shown its own error yet
 
 // Said once for a burst of refused calls, not once per call
 function uiNotPermitted() {
-    uiNotPermittedSeenAt = Date.now();
     if (Date.now() - uiNotPermittedAt < 10000) return;
     uiNotPermittedAt = Date.now();
     showToast(UI_NOT_PERMITTED, 'error');
 }
 
-// Right after a refusal it is the one message: the error the caller adds ("HTTP 403",
-// "Could not ...") is not shown over it (showToast)
+// A call the server refused for lack of access (app.js authenticatedFetch): said once, and
+// its caller's own error about it is left out (uiToastSuppressed)
+function uiNoteRefusal() {
+    uiRefusalsPending++;
+    uiNotPermitted();
+}
+
+// The caller's error about a refused call names the status ("HTTP 403") or repeats the
+// server's sentence; that one is not shown over the shared message. Any other error is
+// (a failed connection, another refusal's own words)
 function uiToastSuppressed(message, type) {
-    return type === 'error' && message !== UI_NOT_PERMITTED && Date.now() - uiNotPermittedSeenAt < 3000;
+    if (type !== 'error' || !uiRefusalsPending || message === UI_NOT_PERMITTED) return false;
+    const text = String(message);
+    if (!/\b403\b/.test(text) && !text.includes(UI_NOT_PERMITTED)) return false;
+    uiRefusalsPending--;
+    return true;
 }
 
 // The first check of every function that sends a change: a way in that showed no
