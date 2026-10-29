@@ -141,10 +141,17 @@ function uiTag(text, tone) {
     return `<span class="ui-tag${tone ? ` ui-tag-${tone}` : ''}">${escapeHtml(String(text))}</span>`;
 }
 
-// Inbound, outbound and internal keep their own colours, as before the redesign
-function uiDirectionTag(direction) {
+// Inbound, outbound and internal keep their own colours, as before the redesign.
+// short: In, Out or Int (a Messages row), with the whole word as tooltip and for
+// a screen reader
+const UI_DIRECTION_SHORT = { inbound: 'In', outbound: 'Out', internal: 'Int' };
+function uiDirectionTag(direction, { short = false } = {}) {
     const known = ['inbound', 'outbound', 'internal'].includes(direction);
-    return `<span class="ui-tag ui-tag-dir${known ? ` ui-dir-${direction}` : ''}">${escapeHtml(String(direction))}</span>`;
+    const cls = `ui-tag ui-tag-dir${known ? ` ui-dir-${direction}` : ''}`;
+    if (short && known) {
+        return `<span class="${cls}" title="${direction}"><span aria-hidden="true">${UI_DIRECTION_SHORT[direction]}</span><span class="ui-sr-only">${direction}</span></span>`;
+    }
+    return `<span class="${cls}">${escapeHtml(String(direction))}</span>`;
 }
 
 function uiStatusTag(status) {
@@ -153,12 +160,15 @@ function uiStatusTag(status) {
 
 // The correlation status of a message (getCorrelationStatusDisplay) as a v3
 // tag: same text and tooltip, tone from the final status; Linked is good and
-// Pending waits.
-function uiCorrelationTag(msg) {
+// Pending waits. folder: the tooltip also names the folder Dovecot stored the
+// message in (a Messages row; the reading pane shows it as a tag). A folder other
+// than the inbox is the usual answer to "the mail never arrived" (issue #65)
+function uiCorrelationTag(msg, { folder = false } = {}) {
     const status = getCorrelationStatusDisplay(msg);
     if (!status) return '';
     const tone = UI_STATUS_TONE[msg.final_status] || (msg.is_complete ? 'ok' : 'warn');
-    const title = msg.final_status || (msg.is_complete ? 'Correlation complete' : 'Waiting for Postfix logs');
+    let title = msg.final_status || (msg.is_complete ? 'Correlation complete' : 'Waiting for Postfix logs');
+    if (folder && msg.dovecot_status === 'stored' && msg.dovecot_mailbox) title += `, folder ${msg.dovecot_mailbox}`;
     // The word only; the symbol (checkmark, cross) of the old badge is left out, the tone carries it
     const text = status.display.replace(/^[^A-Za-z0-9]+\s*/, '');
     return `<span class="ui-tag ui-tag-${tone}" title="${escapeHtml(title)}">${escapeHtml(text)}</span>`;
@@ -801,8 +811,9 @@ function entityKindOf(value) {
 // from the value). A value that is not of its kind (a network, '-', "unknown")
 // stays what it was: click to copy, or plain text with { plain: true }.
 // options.mono writes it in the mono font; options.label shows other text than
-// the value (the value still opens and copies)
-function uiEntity(kind, value, { mono = false, cls = '', plain = false, label = '' } = {}) {
+// the value (the value still opens and copies); options.fit splits an address
+// into its local part and its domain, for uiFitAddresses
+function uiEntity(kind, value, { mono = false, cls = '', plain = false, label = '', fit = false } = {}) {
     const text = value === null || value === undefined ? '' : String(value).trim();
     const found = entityKindOf(text);
     if (!found || (kind !== 'auto' && kind !== found)) {
@@ -811,7 +822,11 @@ function uiEntity(kind, value, { mono = false, cls = '', plain = false, label = 
     }
     const what = { ip: 'IP address', address: 'address', domain: 'domain' }[found];
     const v = uiEntityAttr(text);
-    return `<span class="ui-ent${cls ? ` ${escapeHtml(cls)}` : ''}"><button type="button" class="ui-ent-btn${mono ? ' ui-mono' : ''}" data-entity-kind="${found}" data-entity-value="${v}" title="Open the card of this ${what}"><bdi>${label ? escapeHtml(label) : v}</bdi></button>`
+    const at = text.lastIndexOf('@');
+    const shown = label ? escapeHtml(label)
+        : fit && found === 'address' && at > 0 ? `<span class="ui-fit-loc">${uiEntityAttr(text.slice(0, at))}</span><span class="ui-fit-dom">${uiEntityAttr(text.slice(at))}</span>`
+        : v;
+    return `<span class="ui-ent${cls ? ` ${escapeHtml(cls)}` : ''}"><button type="button" class="ui-ent-btn${mono ? ' ui-mono' : ''}" data-entity-kind="${found}" data-entity-value="${v}" title="Open the card of this ${what}"><bdi>${shown}</bdi></button>`
         + `<button type="button" class="ui-ent-copy" data-entity-copy="${v}" title="Copy" aria-label="Copy ${v}"><svg class="copy-icon" width="13" height="13" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg></button></span>`;
 }
 
@@ -1325,17 +1340,6 @@ function renderJobCard(name, jobKey, job) {
     `;
 }
 
-// Shared message-list metadata.
-// The folder Dovecot actually delivered a message into. A folder other than
-// the inbox is the usual explanation for "the mail never arrived" when Rspamd
-// did not flag it as spam (issue #65).
-function renderMailboxFolderHint(msg) {
-    if (msg.dovecot_status !== 'stored') return '';
-    const folder = msg.dovecot_mailbox;
-    if (!folder) return '';
-    return `<span>Folder: ${escapeHtml(folder)}</span>`;
-}
-
 // A message to several people names its first recipient and how many more,
 // "to a@example.com +2". The count is a quiet tag beside the address that is
 // never cut short; a screen reader hears "and 2 more recipients". A message
@@ -1347,6 +1351,90 @@ function renderRecipientMore(msg) {
     if (more < 1) return '';
     const said = `and ${more} more ${more === 1 ? 'recipient' : 'recipients'}`;
     return `<span class="ui-tag ui-rcpt-more" title="${said}"><span aria-hidden="true">+${more}</span><span class="ui-sr-only"> ${said}</span></span>`;
+}
+
+// =============================================================================
+// Addresses that keep their domain. In a line marked .ui-fit, an address split
+// by uiEntity(..., { fit: true }) that does not fit loses the end of its local
+// part, never its domain: "finance-depa...@example.net" with one ellipsis
+// character. CSS can only cut the end of a line, and an ellipsis box leaves a
+// gap before the box after it, so each line is measured when it is drawn and
+// again when its width changes (a ResizeObserver per line, which also gives the
+// first measure), and again when the web font arrives. A cut address keeps the
+// whole value as the button's name and tooltip. A domain longer than the line
+// ends in an ellipsis itself (is-over).
+// =============================================================================
+const uiFitLines = new Set();
+const uiFitObserver = typeof ResizeObserver === 'function'
+    ? new ResizeObserver(entries => uiFitAddresses(entries.map(entry => entry.target)))
+    : null;
+
+// The local part in characters as a reader sees them (an accent or an emoji is
+// never split), and the first keep of them with the ellipsis; none at all
+// before the domain itself is cut
+const uiFitSegmenter = typeof Intl !== 'undefined' && Intl.Segmenter ? new Intl.Segmenter() : null;
+function uiFitChars(text) {
+    return uiFitSegmenter ? Array.from(uiFitSegmenter.segment(text), part => part.segment) : Array.from(text);
+}
+function uiFitCut(chars, keep) {
+    return chars.slice(0, keep).join('').replace(/[._+-]+$/, '') + '…';
+}
+
+function uiFitFits(line) {
+    return line.scrollWidth <= line.clientWidth;
+}
+
+function uiFitAddresses(lines) {
+    const jobs = [];
+    for (const line of lines) {
+        const loc = line.isConnected ? line.querySelector('.ui-fit-loc') : null;
+        const btn = loc && loc.closest('.ui-ent-btn');
+        if (!btn) continue;
+        const full = btn.dataset.entityValue || '';
+        const local = full.slice(0, full.lastIndexOf('@'));
+        if (btn.dataset.fitTitle === undefined) btn.dataset.fitTitle = btn.title;
+        loc.textContent = local;
+        line.classList.remove('is-over');
+        jobs.push({ line, loc, btn, full, local, cut: false, over: false });
+    }
+    // A binary search on how much of the local part stays. Each round writes every
+    // line and then reads every line, so a round costs one layout for all of them
+    const cut = jobs.filter(job => job.line.clientWidth && !uiFitFits(job.line));
+    cut.forEach(job => { job.cut = true; job.chars = uiFitChars(job.local); job.lo = 0; job.hi = job.chars.length - 1; });
+    let open = cut.filter(job => job.lo < job.hi);
+    while (open.length) {
+        open.forEach(job => { job.mid = Math.ceil((job.lo + job.hi) / 2); job.loc.textContent = uiFitCut(job.chars, job.mid); });
+        open.forEach(job => { if (uiFitFits(job.line)) job.lo = job.mid; else job.hi = job.mid - 1; });
+        open = open.filter(job => job.lo < job.hi);
+    }
+    cut.forEach(job => { job.loc.textContent = uiFitCut(job.chars, job.lo); });
+    cut.forEach(job => { job.over = !uiFitFits(job.line); });
+    for (const job of jobs) {
+        job.line.classList.toggle('is-over', job.over);
+        if (job.cut) job.btn.setAttribute('aria-label', job.full);
+        else job.btn.removeAttribute('aria-label');
+        job.btn.title = job.cut ? job.full : job.btn.dataset.fitTitle;
+    }
+}
+
+function uiFitWatch(node, on) {
+    const lines = node.matches('.ui-fit') ? [node] : node.querySelectorAll('.ui-fit');
+    for (const line of lines) {
+        if (on) { uiFitLines.add(line); uiFitObserver.observe(line); }
+        else { uiFitLines.delete(line); uiFitObserver.unobserve(line); }
+    }
+}
+
+// Lines are watched while they are on the page (only where there is a page to
+// watch: the frontend tests load this file without one)
+if (uiFitObserver && typeof MutationObserver !== 'undefined' && document.body) {
+    new MutationObserver(records => {
+        for (const record of records) {
+            record.removedNodes.forEach(node => { if (node instanceof Element) uiFitWatch(node, false); });
+            record.addedNodes.forEach(node => { if (node instanceof Element) uiFitWatch(node, true); });
+        }
+    }).observe(document.body, { subtree: true, childList: true });
+    if (document.fonts) document.fonts.addEventListener('loadingdone', () => uiFitAddresses([...uiFitLines]));
 }
 
 // =============================================================================

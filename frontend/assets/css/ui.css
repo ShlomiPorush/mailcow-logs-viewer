@@ -355,13 +355,28 @@
 .ui-msg-warn { border-inline-start-color: var(--ui-warn); }
 .ui-msg-fail { border-inline-start-color: var(--ui-fail); }
 .ui-msg-spam { border-inline-start-color: var(--ui-spam); }
-.ui-msg-l1 { display: flex; align-items: baseline; gap: 10px; }
+/* Three lines: the sender and the time, a grid row so the time never wraps; "to" and the
+   recipient with "+N", in ink (only "to" is muted); the subject with compact tags at its end.
+   The folder is in the status tag's tooltip and the reading pane */
+.ui-msg-l1 { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: baseline; gap: 10px; }
 .ui-msg-l1 .ui-msg-who { flex: 1; min-width: 0; }
-.ui-msg-l1 time { flex: none; color: var(--ui-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
-.ui-msg-l3 { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin-top: 6px; color: var(--ui-muted); font-size: 12px; }
-.ui-msg-l3 .ui-tag { margin-inline-end: -6px; }
-.ui-msg-l3 b { font-weight: 650; color: var(--ui-ink); }
-.ui-msg-l3 b.ui-text-fail { color: var(--ui-fail); }
+.ui-msg-l1 time { flex: none; color: var(--ui-muted); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ui-msg-to { margin-top: 1px; font-size: 12.5px; }
+.ui-msg-to-word { flex: none; color: var(--ui-muted); }
+.ui-msg-l3 { display: flex; align-items: center; gap: 6px; margin-top: 3px; }
+.ui-msg-l3 .ui-msg-sub { flex: 1 1 auto; min-width: 0; margin: 0; font-size: .95em; }
+.ui-msg-tags { flex: none; display: flex; gap: 3px; }
+/* The tag lettering (.ui-tag, 12px), a little lighter, with less room around it */
+.ui-msg-tags .ui-tag { padding: 0 4px; font-size: 12px; font-weight: 650; line-height: 18px; }
+/* A line of addresses that keep their domain (utils.js uiFitAddresses): one line, which the
+   value and its copy icon join; "+N" right after the value, the icon (hover only) at the end */
+.ui-fit { display: flex; align-items: baseline; gap: 5px; min-width: 0; overflow: hidden; white-space: nowrap; }
+.ui-fit .ui-ent { display: contents; }
+.ui-fit .ui-ent-btn { flex: none; overflow: visible; text-overflow: clip; }
+.ui-fit .ui-rcpt-more { order: 1; align-self: center; }
+.ui-fit .ui-ent-copy { order: 2; }
+.ui-fit.is-over .ui-ent-btn { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.ui-fit-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .ui-msg-mid { max-width: 22ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .ui-pagination { display: flex; align-items: center; justify-content: center; gap: 12px; padding: 14px var(--ui-pad-x); border-top: 1px solid var(--ui-line); }
@@ -380,7 +395,6 @@
     /* Phones: search, Apply and Clear stay; the other filters open with "Filters" */
     .ui-filters:not(.is-open) .ui-filter-extra { display: none; }
     .ui-filters-toggle { display: inline-flex; }
-    .ui-msg-l1 { flex-wrap: wrap; }
     .ui-alert > .ui-btn { margin-inline-start: 18px; }
 }
 
@@ -524,9 +538,6 @@
 /* and the focus ring is drawn inside the value, where the cell does not cut it off */
 :is(.ui-msg-from, .ui-msg-to, .ui-ev-account, .ui-td, .ui-md-rrow-addr, .ui-md-to-list, .ui-aa-row) .ui-ent-btn { margin: 0 -2px; padding: 2px; }
 :is(.ui-msg-from, .ui-msg-to, .ui-ev-account, .ui-td, .ui-md-rrow-addr, .ui-md-to-list, .ui-aa-row) .ui-ent-btn:focus-visible { outline-offset: -2px; }
-/* "to <address>" in a Messages row: the address keeps its ellipsis inside the row's width */
-.ui-msg-to:has(> .ui-ent) { display: inline-flex; align-items: baseline; gap: .3em; min-width: 0; }
-
 /* The card: the #message-modal frame above (one scroll, pinned tabs), one size across tabs */
 #entity-card .ui-md-body { padding: 0; }
 #entity-card .ui-md-body > .ui-tabs { position: sticky; top: 0; z-index: 6; background: var(--ui-bg); }
@@ -690,16 +701,7 @@
 .ui-msg-items { flex: 1; overflow-y: auto; }
 
 .ui-msg-col .ui-msg-item { padding-block: var(--ui-pad-y); padding-inline: 13px 16px; border-top: 0; border-bottom: 1px solid var(--ui-line); }
-.ui-msg-col .ui-msg-l1 { display: flex; align-items: baseline; gap: 8px; }
 .ui-msg-from { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-weight: 700; }
-.ui-msg-col .ui-msg-l1 time { margin-inline-start: auto; }
-.ui-msg-col .ui-msg-sub { margin: 2px 0 6px; font-size: .95em; }
-.ui-msg-col .ui-msg-l3 { margin-top: 0; gap: 4px 8px; }
-.ui-msg-col .ui-msg-l3 .ui-tag { margin-inline-end: 0; }
-.ui-msg-to { max-width: 16ch; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-/* "to a@example.com +2": the address keeps its ellipsis, the count stays whole beside it */
-.ui-msg-rcpt { display: inline-flex; align-items: center; gap: 5px; min-width: 0; max-width: 100%; }
-.ui-msg-rcpt .ui-msg-to { min-width: 0; }
 /* The neutral tag (.ui-tag), quieter: a size smaller and less bold, like .ui-tag-dir */
 .ui-tag.ui-rcpt-more { flex: none; margin: 0; padding: 0 5px; font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .ui-msg-more { margin: 0; padding: 14px var(--ui-pad-x) 22px; color: var(--ui-muted); font-size: var(--ui-fs-sm); text-align: center; }

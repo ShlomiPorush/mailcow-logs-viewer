@@ -64,17 +64,82 @@ test('three recipients: "+2" beside the address, read as "and 2 more recipients"
     const p = page();
     p.$('#messages-logs').innerHTML = p.w.renderMessageRow(message('one', 1)) + p.w.renderMessageRow(message('three', 3));
     const row = p.$('.ui-msg-item[data-key="three"]');
-    const tag = row.querySelector('.ui-msg-rcpt > .ui-rcpt-more');
+    const tag = row.querySelector('.ui-msg-to > .ui-rcpt-more');
     assert.ok(tag, 'the count sits with the address');
-    assert.equal(tag.previousElementSibling.className, 'ui-msg-to', 'right after the address');
+    assert.equal(tag.previousElementSibling.className, 'ui-ent', 'right after the address');
     assert.equal(tag.querySelector('[aria-hidden="true"]').textContent, '+2');
     assert.equal(tag.getAttribute('title'), 'and 2 more recipients');
-    assert.match(spoken(row.querySelector('.ui-msg-rcpt')).replace(/\s+/g, ' '), /^to r@example\.net and 2 more recipients$/);
+    assert.match(spoken(row.querySelector('.ui-msg-to')).replace(/\s+/g, ' '), /^to r@example\.net and 2 more recipients$/);
     assert.ok(!spoken(row).includes('+2'), 'the "+2" itself is not read out');
 
     p.run(axeSource);
     const result = await p.w.axe.run(p.w.document, { rules: { 'color-contrast': { enabled: false }, region: { enabled: false } } });
     assert.deepEqual(Array.from(result.violations, v => `${v.id}: ${v.nodes.map(n => n.target).join(', ')}`), []);
+});
+
+test('a long address loses the end of its local part, never its domain', () => {
+    const p = page();
+    const long = { ...message('long', 3), recipient: 'finance-department-notifications@example.net' };
+    p.$('#messages-logs').innerHTML = p.w.renderMessageRow(long);
+    // jsdom has no layout: the line is as wide as room characters, its shown text 8px a character
+    const line = p.$('.ui-msg-to');
+    const shown = () => line.textContent.length - [...line.querySelectorAll('.ui-sr-only')].reduce((n, el) => n + el.textContent.length, 0);
+    let room = 34;
+    Object.defineProperty(line, 'clientWidth', { get: () => room * 8 });
+    Object.defineProperty(line, 'scrollWidth', { get: () => shown() * 8 });
+    p.w.uiFitAddresses([line]);
+    const btn = line.querySelector('.ui-ent-btn');
+    assert.match(btn.textContent, /^finance-[a-z-]*[a-z]…@example\.net$/);
+    assert.ok(shown() <= room && shown() >= room - 2, 'as much as fits');
+    assert.equal(line.querySelector('.ui-rcpt-more [aria-hidden="true"]').textContent, '+2', 'the count stays whole');
+    // The button opens, copies and is named by the whole address
+    assert.equal(btn.dataset.entityValue, long.recipient);
+    assert.equal(line.querySelector('.ui-ent-copy').dataset.entityCopy, long.recipient);
+    assert.equal(btn.getAttribute('aria-label'), long.recipient);
+    assert.equal(btn.title, long.recipient);
+    // Wide enough again: the whole address, and the button's own name and tooltip
+    room = 80;
+    p.w.uiFitAddresses([line]);
+    assert.equal(btn.textContent, long.recipient);
+    assert.equal(btn.getAttribute('aria-label'), null);
+    assert.equal(btn.title, 'Open the card of this address');
+    // Room for the domain and no more: no letter of the local part, the domain whole
+    room = 16 + 2;   // "to ", the ellipsis and "@example.net", "+2"
+    p.w.uiFitAddresses([line]);
+    assert.equal(btn.textContent, '…@example.net');
+    assert.ok(!line.classList.contains('is-over'));
+    // A domain longer than the line: the domain itself ends in an ellipsis (CSS)
+    room = 12;
+    p.w.uiFitAddresses([line]);
+    assert.ok(line.classList.contains('is-over'));
+    assert.ok(line.querySelector('.ui-fit-dom').textContent === '@example.net', 'the domain is never cut in the text');
+});
+
+test('a cut never splits a character', () => {
+    const p = page();
+    // A letter outside the Basic Multilingual Plane is two UTF-16 units
+    const odd = { ...message('odd', 1), recipient: '\u{10400}\u{10401}\u{10402}\u{10403}\u{10404}\u{10405}@example.net' };
+    p.$('#messages-logs').innerHTML = p.w.renderMessageRow(odd);
+    const line = p.$('.ui-msg-to');
+    // Each UTF-16 unit is as wide as a letter here, so every length of cut is tried
+    const shown = () => line.textContent.length;
+    let room = 0;
+    Object.defineProperty(line, 'clientWidth', { get: () => room * 8 });
+    Object.defineProperty(line, 'scrollWidth', { get: () => shown() * 8 });
+    for (room = 17; room <= 28; room++) {
+        p.w.uiFitAddresses([line]);
+        const text = line.querySelector('.ui-ent-btn').textContent;
+        assert.ok(!/[\uD800-\uDFFF]/.test(text.replace(/[\u{10000}-\u{10FFFF}]/gu, '')), `no lone surrogate at ${room}: ${JSON.stringify(text)}`);
+    }
+});
+
+test('a row that is not an address keeps its text', () => {
+    const p = page();
+    p.$('#messages-logs').innerHTML = p.w.renderMessageRow({ ...message('odd', 1), sender: 'MAILER-DAEMON', recipient: null });
+    assert.equal(p.$('.ui-msg-from').textContent, 'MAILER-DAEMON');
+    assert.equal(p.$('.ui-msg-to').textContent, 'to Unknown');
+    p.w.uiFitAddresses([p.$('.ui-msg-from'), p.$('.ui-msg-to')]);
+    assert.equal(p.$('.ui-msg-from').textContent, 'MAILER-DAEMON');
 });
 
 test('the global search shows the same count on a message', () => {
