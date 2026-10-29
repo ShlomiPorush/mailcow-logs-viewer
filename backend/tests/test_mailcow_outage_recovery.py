@@ -186,7 +186,7 @@ def test_the_retry_runs_every_five_minutes_and_is_not_a_job_on_status(monkeypatc
     # Not on Status, and no Run button for it
     assert 'retry_failed_jobs' not in scheduler.job_status
     with pytest.raises(HTTPException) as refused:
-        settings_router.trigger_job('retry_failed_jobs', BackgroundTasks())
+        run(settings_router.trigger_job('retry_failed_jobs', BackgroundTasks()))
     assert refused.value.status_code == 404
 
 
@@ -335,7 +335,7 @@ def test_a_rejected_key_is_not_checked_more_often(jobs, monkeypatch):
 def _manual_run(job):
     scheduler.job_status[job] = {'last_run': None, 'status': 'idle', 'error': None}
     tasks = BackgroundTasks()
-    assert settings_router.trigger_job(job, tasks)['status'] == 'started'
+    assert run(settings_router.trigger_job(job, tasks))['status'] == 'started'
     run(tasks())
     return scheduler.job_status[job]
 

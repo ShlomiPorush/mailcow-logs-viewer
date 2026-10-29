@@ -16,6 +16,7 @@ from ..models import PostfixLog, RspamdLog, NetfilterLog, MessageCorrelation
 from ..mailcow_api import MailcowShownError, mailcow_api
 from ..config import settings
 from ..services import entity_values, excluded_addresses, geoip_service, protection_rules, security_addresses
+from .messages import address_equals, on_domain
 from ..services.security_addresses import netfilter_service  # noqa: F401  (tests import it from here)
 from ..app_time import as_utc
 from ..utils import internal_error, format_datetime_for_api as format_datetime_utc, RangeStart, RangeEnd
@@ -523,6 +524,8 @@ def get_netfilter_logs(
     ip: Optional[str] = Query(None),
     exact_ip: bool = Query(False, description="Match the IP exactly instead of as a part"),
     username: Optional[str] = Query(None),
+    exact_username: bool = Query(False, description="Match the user name as a whole address in any case instead of as a part"),
+    username_domain: Optional[str] = Query(None, max_length=260, description="Lines whose user name is an address on this domain (the part after the last @)"),
     action: Optional[str] = Query(None),
     country_code: Optional[str] = Query(None, description="Filter by country code (e.g., US, IL)"),
     start_date: Optional[RangeStart] = Query(None),
@@ -552,9 +555,15 @@ def get_netfilter_logs(
         elif ip:
             query = query.filter(NetfilterLog.ip.ilike(f"%{ip}%"))
         
-        if username:
+        if username and exact_username is True:
+            # The whole address in any case, as the entity card counts it
+            query = query.filter(address_equals(NetfilterLog.username, username))
+        elif username:
             query = query.filter(NetfilterLog.username.ilike(f"%{username}%"))
-        
+
+        if isinstance(username_domain, str) and username_domain.strip():
+            query = query.filter(NetfilterLog.username.isnot(None), on_domain(NetfilterLog.username, username_domain))
+
         if action:
             # Backward compatibility: 'ban' filter should also include legacy 'banned' values
             if action == 'ban':

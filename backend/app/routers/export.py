@@ -12,7 +12,9 @@ from ..models import PostfixLog, RspamdLog, NetfilterLog, MessageCorrelation
 from ..app_time import local_now, to_local
 from ..config import settings
 from ..utils import internal_error, RangeStart, RangeEnd
-from .messages import EXACT_DESCRIPTION, _filtered_messages_query, message_sort_time
+from .messages import (ADDRESS_DESCRIPTION, DOMAIN_DESCRIPTION, EXACT_DESCRIPTION, EXACT_IP_DESCRIPTION,
+                       _filtered_messages_query,
+                       address_equals, message_sort_time, on_domain)
 from ..services.entity_values import spellings_of_typed_ip
 from ..services import excluded_addresses
 from ..services.csv_export import csv_download, csv_query_rows, get_csv_db
@@ -217,6 +219,8 @@ def export_netfilter_csv(
     ip: Optional[str] = Query(None),
     exact_ip: bool = Query(False, description="Match the IP exactly instead of as a part, as the Events list does"),
     username: Optional[str] = Query(None),
+    exact_username: bool = Query(False, description="Match the user name as a whole address in any case instead of as a part"),
+    username_domain: Optional[str] = Query(None, max_length=260, description="Lines whose user name is an address on this domain (the part after the last @)"),
     action: Optional[str] = Query(None),
     country_code: Optional[str] = Query(None),
     start_date: Optional[RangeStart] = Query(None),
@@ -249,9 +253,14 @@ def export_netfilter_csv(
         elif ip:
             query = query.filter(NetfilterLog.ip.ilike(f"%{ip}%"))
         
-        if username:
+        if username and exact_username is True:
+            query = query.filter(address_equals(NetfilterLog.username, username))
+        elif username:
             query = query.filter(NetfilterLog.username.ilike(f"%{username}%"))
-        
+
+        if isinstance(username_domain, str) and username_domain.strip():
+            query = query.filter(NetfilterLog.username.isnot(None), on_domain(NetfilterLog.username, username_domain))
+
         if action:
             # As in the list: 'ban' also matches the older 'banned' lines
             if action == 'ban':
@@ -313,6 +322,9 @@ def export_messages_csv(
     end_date: Optional[RangeEnd] = Query(None),
     order: str = Query("desc", pattern="^(asc|desc)$"),
     exact: bool = Query(False, description=EXACT_DESCRIPTION),
+    address: Optional[str] = Query(None, max_length=320, description=ADDRESS_DESCRIPTION),
+    domain: Optional[str] = Query(None, max_length=260, description=DOMAIN_DESCRIPTION),
+    exact_ip: bool = Query(False, description=EXACT_IP_DESCRIPTION),
     db: Session = Depends(get_csv_db)
 ):
     """
@@ -328,7 +340,8 @@ def export_messages_csv(
         # The very filters of the Messages list (messages.py), excluded
         # addresses and the exact mode included, so the file holds what the list shows
         query = _filtered_messages_query(db, search, sender, recipient, direction, status, user, ip,
-                                         start_date, end_date, exact=exact, base=query)
+                                         start_date, end_date, exact=exact, base=query,
+                                         address=address, domain=domain, exact_ip=exact_ip)
         query = query.options(load_only(
             MessageCorrelation.first_seen, MessageCorrelation.sender, MessageCorrelation.recipient,
             MessageCorrelation.subject, MessageCorrelation.direction, MessageCorrelation.final_status,

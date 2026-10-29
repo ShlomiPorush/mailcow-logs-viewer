@@ -40,6 +40,7 @@ function openEntityCard(kind, value, { from = null } = {}) {
     if (!UI_ENTITY_KINDS.includes(kind) || !value) return;
     const card = document.getElementById('entity-card');
     if (!card) return;
+    entityRblStop();
     const seq = ++entityCardSeq;
     const wasOpen = !card.classList.contains('hidden');
     // The focus goes back to what opened the card when it closes, also when it was
@@ -81,6 +82,7 @@ function closeEntityCard() {
     if (!card) return;
     entityCardSeq++;
     entityCardState = null;
+    entityRblStop();
     card.classList.add('hidden');
     const header = document.getElementById('entity-card-header');
     if (header) header.innerHTML = '';
@@ -113,7 +115,10 @@ function entityCardCloseViews() {
     });
 }
 
-async function entityCardLoad(seq, kind, value) {
+// keep: the card read again after an action (entityCardRefresh): the open tab,
+// the timeline filter, the scroll and the focus stay, and a failed read keeps
+// what is shown
+async function entityCardLoad(seq, kind, value, { keep = false } = {}) {
     let data = null;
     let problem = '';
     try {
@@ -121,21 +126,63 @@ async function entityCardLoad(seq, kind, value) {
         const body = await response.json().catch(() => null);
         if (!response.ok) problem = uiApiErrorText(body, `The server answered ${response.status}.`);
         else data = body;
+        // Ban and Allow come with the Read-Write key: asked once more when it is not known to be there
+        if (kind === 'ip' && !entityRwAsked && typeof mailcowRwConfigured !== 'undefined' && !mailcowRwConfigured
+            && typeof fetchRwStatus === 'function') {
+            entityRwAsked = true;
+            await fetchRwStatus();
+        }
     } catch (error) {
         problem = 'The server could not be reached.';
     }
     // Another card was opened, or this one closed, while this one loaded
     if (seq !== entityCardSeq || !entityCardState) return;
     if (!data || typeof data !== 'object' || !data.sources) {
+        if (keep) {
+            showToast(`The card could not be read again. ${problem || ''}`.trim(), 'error');
+            return;
+        }
         const content = document.getElementById('entity-card-content');
         if (content) content.innerHTML = `<div class="ui-empty" role="alert"><b class="ui-text-fail">Could not load this card</b>${escapeHtml(problem || 'The answer was not readable.')}</div>`;
         return;
     }
+    const body = document.getElementById('entity-card-body');
+    const scroll = keep && body ? body.scrollTop : 0;
+    const focused = keep ? entityCardFocusKey() : null;
     entityCardState.data = data;
     entityCardTitle(kind, data);
     entityCardHeader(data);
     entityCardDrawTabs();
-    entityCardShowTab('overview');
+    entityCardShowTab(keep ? entityCardState.tab : 'overview');
+    if (keep) {
+        if (body) body.scrollTop = scroll;
+        entityCardRefocus(focused);
+    }
+}
+
+// The card read again, after an action changed what it shows (a ban, a block,
+// a blocklist check). An older answer still on its way is dropped
+function entityCardRefresh() {
+    const state = entityCardState;
+    if (!state || !state.data) return;
+    entityCardLoad(++entityCardSeq, state.kind, state.value, { keep: true });
+}
+
+// What had the focus in the card, to find it again once the card is drawn anew
+function entityCardFocusKey() {
+    const card = document.getElementById('entity-card');
+    const el = document.activeElement;
+    if (!card || !el || !card.contains(el) || el === card) return null;
+    const act = el.closest('[data-ent-act]');
+    return act ? `[data-ent-act="${act.dataset.entAct}"]` : el.id ? `#${el.id}` : '.ui-ent-value';
+}
+
+// Its action again, else the value at the top: never lost to the page under the card
+function entityCardRefocus(key) {
+    if (!key) return;
+    const card = document.getElementById('entity-card');
+    const el = card && (card.querySelector(`${key}:not([disabled])`) || card.querySelector('.ui-ent-value'));
+    if (el) el.focus();
 }
 
 // =============================================================================
@@ -167,9 +214,7 @@ function entityCardHeader(data) {
         <h2 class="ui-md-subject ui-ent-title"><button type="button" class="copyable ui-ent-value" data-entity-copy="${v}" title="Click to copy" aria-label="Copy ${v}"><bdi>${v}</bdi><svg class="copy-icon w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg></button></h2>
         ${facts.length ? `<div class="ui-md-who ui-ent-who">${facts.map(([label, html]) => `<span>${escapeHtml(label)}</span><div>${html}</div>`).join('')}</div>` : ''}
         ${verdict ? `<div class="ui-md-verdict-bar${verdict.tone ? ` ui-md-verdict-${verdict.tone}` : ''}"><div>${escapeHtml(verdict.text)}${verdict.note ? `<small>${escapeHtml(verdict.note)}</small>` : ''}</div></div>` : ''}
-        <div class="ui-ent-acts" id="entity-card-actions"></div>`;
-    // #entity-card-actions: the card's actions go here (Show messages, Ban, Allow,
-    // Add to Suppressions, Open mailbox, Check now, Watch); none are offered yet
+        ${data ? entityCardActionsHtml(data) : ''}`;
 }
 
 const entitySrc = (data, name) => (data && data.sources && data.sources[name]) || { state: 'error', reason: null };
@@ -312,6 +357,288 @@ function entityCardVerdict(data) {
 }
 
 // =============================================================================
+// ACTIONS
+// =============================================================================
+// Under the state bar (mockup 01, 02). An action opens a page filtered to this
+// value, or changes something through the flow the app already has for it, with
+// that flow's own confirmation: banIP and allowIP (app.js), the Add Suppression
+// dialog (spam_filter.js). An action whose feature is off is not offered (the
+// tile or tab says why); Ban and Allow without the Read-Write key show the locked
+// note the Security list shows (security.js renderSecurityOverview). Handlers
+// carry no value: entityCardAct reads it from the card shown.
+// On a phone the main action stays and the others fold into More (v3 rule MO-6).
+// The Watch toggle (layer L5a) goes first, in #entity-card-watch.
+
+let entityRwAsked = false;   // the Read-Write key asked for again once (entityCardLoad)
+let entityRblCheck = null;   // this card's check while it runs: { run, value, percent, text, started, poll, asking }
+let entityRblRuns = 0;       // each check started; a late answer for an older one is dropped
+let entityRblBusy = null;    // the value whose Check now found another check running
+// The progress is asked for every second as the Status page does, for 3 minutes at
+// most, each request given 5 seconds
+const ENTITY_RBL_POLL = { every: 1000, max: 3 * 60000, request: 5000 };
+
+// The card's check is left to the server once the card closes or shows another value
+function entityRblStop() {
+    if (entityRblCheck) clearInterval(entityRblCheck.poll);
+    entityRblCheck = null;
+    entityRblBusy = null;
+}
+
+const ENTITY_ACTIONS = {
+    // kind: the buttons in order ([action, stays on a phone]). Every action is a button;
+    // only a phone folds the rest into More (Check now lives in the Blocklists tile)
+    ip: { buttons: [['messages'], ['security'], ['ban', true], ['allow']] },
+    address: { buttons: [['mailbox', true], ['messages'], ['suppress'], ['security']] },
+    domain: { buttons: [['messages', true], ['security']] },
+};
+
+const entityRw = () => typeof mailcowRwConfigured !== 'undefined' && !!mailcowRwConfigured;
+
+function entityActionLabel(data, act) {
+    return {
+        messages: 'Show messages', security: 'Show security events', ban: 'Ban', allow: 'Allow', rbl: 'Check blocklists now',
+        mailbox: 'Open mailbox', suppress: 'Add to Suppressions',
+    }[act] || act;
+}
+
+// The mailbox here an address is or delivers to, as stored (the server resolved
+// an alias's target: alias.local_mailbox), else ''
+function entityMailboxOf(data) {
+    const m = entitySrc(data, 'mailbox');
+    if (!entityOk(m)) return '';
+    if (m.local === true && m.mailbox && m.mailbox.username) return m.mailbox.username;
+    return (m.alias && m.alias.local_mailbox) || '';
+}
+
+// Whether the card shown offers an action
+function entityCanAct(data, act) {
+    const src = name => entitySrc(data, name);
+    const on = name => src(name).state !== 'disabled';
+    const lists = src('lists');
+    switch (act) {
+        case 'messages': return on('messages');
+        case 'security': return on('security');
+        // A list that could not be read leaves both: the ban state reads as not known
+        case 'ban': return data.kind === 'ip' && on('lists') && entityRw() && !(entityOk(lists) && lists.denylisted_as);
+        case 'allow': return data.kind === 'ip' && on('lists') && entityRw() && !(entityOk(lists) && lists.allowlisted_as);
+        case 'rbl': return data.kind === 'ip' && entityOk(src('rbl'));
+        // Not on the list yet; an entry there, active or ended, is changed on the Suppressions page
+        case 'suppress': return data.kind === 'address' && entityOk(src('suppression')) && !src('suppression').entry;
+        // A mailbox here, or an alias that delivers to one: Mailbox Stats shows the mailbox
+        case 'mailbox': return data.kind === 'address' && !!entityMailboxOf(data);
+        default: return false;
+    }
+}
+
+function entityCardActionsHtml(data) {
+    const plan = ENTITY_ACTIONS[data.kind];
+    if (!plan) return '';
+    const buttons = plan.buttons.filter(([act]) => entityCanAct(data, act)).map(([act, stays]) => ({ act, stays: !!stays }));
+    // A phone keeps one button at least: the first, when the main one is not offered
+    if (buttons.length && !buttons.some(b => b.stays)) buttons[0].stays = true;
+    // A More for a single action would only hide it behind a tap: then it stays a button
+    if (buttons.filter(b => !b.stays).length < 2) buttons.forEach(b => { b.stays = true; });
+    // The entry Fail2ban gets, as banIP writes it (app.js fail2banEntry)
+    const entry = typeof fail2banEntry === 'function' ? fail2banEntry(data.value) : data.value;
+    const titles = {
+        ban: `Put ${entry} on the Fail2ban denylist; it stays until removed`,
+        allow: `Never ban ${entry}`,
+        mailbox: entitySrc(data, 'mailbox').local !== true && entityMailboxOf(data) ? `Open ${entityMailboxOf(data)}, the mailbox this alias delivers to` : '',
+    };
+    const title = act => (titles[act] ? ` title="${escapeHtml(titles[act])}"` : '');
+    // The Security list's pair: Ban in red text, Allow plain (security.js securityRowWhy)
+    const button = ({ act, stays }) => `<button type="button" class="ui-btn${act === 'ban' ? ' ui-btn-danger' : ''}${stays ? '' : ' ui-ent-fold'}" data-ent-act="${act}"${title(act)} onclick="entityCardAct('${act}', this)">${escapeHtml(entityActionLabel(data, act))}</button>`;
+    const item = (act, phoneOnly) => `<button type="button" role="menuitem"${phoneOnly ? ' class="ui-ent-phone"' : ''} data-ent-act="${act}-menu" onclick="entityCardAct('${act}', this)">${escapeHtml(entityActionLabel(data, act))}</button>`;
+    const items = buttons.filter(b => !b.stays).map(b => item(b.act, true)).join('');
+    // More holds only what a phone folds away, so only a phone shows it
+    const more = items ? `<span class="ui-ent-more-phone">${uiMenu('More', items, { small: false })}</span>` : '';
+    const locked = data.kind === 'ip' && entitySrc(data, 'lists').state !== 'disabled' && !entityRw()
+        ? `<div class="ui-list-note ui-flush">${uiLocked('Ban and Allow are locked', `Banning or allowing this address from here ${UI_RW_KEY_TEXT}`,
+            '<button type="button" class="ui-btn ui-btn-sm" onclick="entityCardSettings()">Open Settings</button>')}</div>` : '';
+    return `<div class="ui-ent-acts" id="entity-card-actions"><span id="entity-card-watch" hidden></span>${buttons.map(button).join('')}${more}</div>${locked}`;
+}
+
+// The card's period as the pages take it: a preset up to now (the card's own
+// range is the last 7 days by default), else its exact start and end
+function entityCardPeriod(data) {
+    const r = (data && data.range) || {};
+    const start = Date.parse(r.start);
+    const end = Date.parse(r.end);
+    const days = isNaN(start) || isNaN(end) ? 0 : (end - start) / 86400000;
+    const preset = [7, 30, 90].find(n => Math.abs(days - n) < 0.001);
+    return {
+        preset: preset ? `${preset}days` : '', start: r.start || '', end: r.end || '', text: entityRangeText(data),
+        startDay: isNaN(start) ? '' : zonedDateString(new Date(start)), endDay: isNaN(end) ? '' : zonedDateString(new Date(end)),
+    };
+}
+
+// To another page: once it is open, the card closes, with the dialogs under it
+// that only show something (as entityCardSettings does)
+async function entityCardLeave(moving) {
+    if (!(await moving)) return;
+    closeEntityCard();
+    entityCardCloseViews();
+}
+
+// The card read again after an action, when it still shows that value
+function entityCardRefreshFor(kind, value) {
+    const state = entityCardState;
+    if (state && state.data && state.kind === kind && state.data.value === value) entityCardRefresh();
+}
+
+async function entityCardAct(act, button) {
+    const data = entityCardState && entityCardState.data;
+    if (!data || !entityCanAct(data, act)) return;
+    const { kind, value } = data;
+    const shown = data.display || value;
+    const period = entityCardPeriod(data);
+    switch (act) {
+        case 'messages': {
+            const filter = kind === 'ip' ? { ip: shown, exact: true } : kind === 'address' ? { address: shown } : { domain: shown };
+            const range = period.preset ? { datePreset: period.preset } : { start: period.start, end: period.end };
+            return entityCardLeave(navigateToMessagesWithFilter({ ...filter, ...range }));
+        }
+        case 'security': {
+            const filter = kind === 'ip' ? { ip: shown } : kind === 'address' ? { username: shown } : { domain: shown };
+            // A preset runs up to now, so new events come in as the list refreshes
+            return entityCardLeave(openSecurityEventsFor({ ...filter, start: period.start, end: period.preset ? '' : period.end, period: period.text }));
+        }
+        case 'ban':
+            if (await banIP(value, button)) entityCardRefreshFor(kind, value);
+            return;
+        case 'allow':
+            if (await allowIP(value, button)) entityCardRefreshFor(kind, value);
+            return;
+        case 'suppress':
+            showAddSuppressionModal(shown, null, { notes: '', onAdded: () => entityCardRefreshFor(kind, value) });
+            return;
+        case 'rbl':
+            return entityCardCheckRbl();
+        case 'mailbox': {
+            const range = period.preset ? { preset: period.preset } : { startDay: period.startDay, endDay: period.endDay };
+            return openMailboxFor(entityMailboxOf(data), { ...range, onMoved: () => { closeEntityCard(); entityCardCloseViews(); } });
+        }
+        default:
+            return;
+    }
+}
+
+// --------------------------------------------------------------- blocklists
+
+// The Blocklists tile: the last stored check and Check now; while a check runs,
+// its progress (the meter of the Status page's check, app.js checkBlacklists)
+function entityRblTile(data) {
+    const can = entityCanAct(data, 'rbl');
+    const run = entityRblCheck && entityRblCheck.value === data.value ? entityRblCheck : null;
+    const button = can ? `<button type="button" class="ui-btn ui-btn-sm" data-ent-act="rbl-tile"${run ? ' aria-disabled="true"' : ''} onclick="entityCardAct('rbl', this)">${run ? 'Checking...' : 'Check now'}</button>` : '';
+    if (run) {
+        const meter = `<span class="ui-meter ui-meter-info ui-ent-meter" role="progressbar" aria-label="Blocklist check" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${run.percent}"><i style="width: ${run.percent}%"></i></span>`;
+        return entityTile('Blocklists', { id: 'entity-rbl-tile', value: '<span class="ui-muted">Checking...</span>', note: escapeHtml(run.text), action: meter + button });
+    }
+    return entitySourceTile('Blocklists', entitySrc(data, 'rbl'), r => {
+        let shown;
+        if (!r.checked) shown = { value: '<span class="ui-muted">Not checked</span>', note: r.monitored ? 'Waiting for its first check' : 'This address was never checked' };
+        else {
+            const when = r.checked_at ? `Checked ${uiTime(r.checked_at, formatAgo(r.checked_at), { title: formatTime(r.checked_at) })}` : '';
+            if (r.status === 'listed') shown = { value: `Listed on ${entityNum(r.listed_count)} of ${entityNum(r.total_blacklists)}`, tone: 'fail', note: [escapeHtml((r.listed || []).slice(0, 3).join(', ')), when].filter(Boolean).join('. ') };
+            else if (r.status === 'error') shown = { value: 'Check failed', tone: 'warn', note: when };
+            else shown = { value: 'Not listed', note: [`On none of ${entityNum(r.total_blacklists)}`, when].filter(Boolean).join('. ') };
+        }
+        // Check now found another check running (from Status, the schedule or another card)
+        if (entityRblBusy === data.value) shown.note = `${shown.note}. <span class="ui-text-warn">A blocklist check is already running.</span> Try again when it is done.`;
+        return { ...shown, action: button };
+    }, '', 'entity-rbl-tile');
+}
+
+// The tile drawn again: whole when a check starts, else its meter and line only,
+// so the focus stays on its button
+function entityRblRedraw(whole = false) {
+    const tile = document.getElementById('entity-rbl-tile');
+    const data = entityCardState && entityCardState.data;
+    if (!tile || !data) return;
+    if (whole) {
+        const focused = entityCardFocusKey();
+        tile.outerHTML = entityRblTile(data);
+        entityCardRefocus(focused);
+        return;
+    }
+    const run = entityRblCheck;
+    const meter = tile.querySelector('.ui-ent-meter');
+    const line = tile.querySelector('small');
+    if (!run || !meter) return;
+    meter.setAttribute('aria-valuenow', String(run.percent));
+    meter.firstElementChild.style.width = `${run.percent}%`;
+    if (line) line.textContent = run.text;
+}
+
+// Check now: POST /api/blacklist/check with the address and force in the URL,
+// its progress read from /api/blacklist/progress every second as the Status
+// page's check does; the tile shows the stored result after it. One check at a
+// time: the progress is one for the whole app
+async function entityCardCheckRbl() {
+    const data = entityCardState && entityCardState.data;
+    if (!data || data.kind !== 'ip' || entityRblCheck) return;
+    const value = data.value;
+    entityRblBusy = null;
+    const check = { run: ++entityRblRuns, value, percent: 0, text: 'Starting the check...', started: Date.now(), poll: null, asking: false };
+    entityRblCheck = check;
+    entityRblRedraw(true);
+    // Its progress, while this card shows this check: a closed or replaced card
+    // stops it (entityRblStop), and so does the time limit; one request at a time
+    check.poll = setInterval(async () => {
+        if (entityRblCheck !== check) { clearInterval(check.poll); return; }
+        if (Date.now() - check.started > ENTITY_RBL_POLL.max) {
+            clearInterval(check.poll);
+            check.text = 'Still checking. The result shows here when it is done.';
+            entityRblRedraw();
+            return;
+        }
+        if (check.asking) return;
+        check.asking = true;
+        try {
+            const response = await authenticatedFetch('/api/blacklist/progress', { timeout: ENTITY_RBL_POLL.request });
+            const progress = response.ok ? await response.json() : null;
+            if (entityRblCheck !== check || !progress || !progress.total) return;
+            check.percent = Math.max(0, Math.min(100, Number(progress.percent) || 0));
+            check.text = `${Number(progress.current) || 0} of ${Number(progress.total)} lists checked`;
+            entityRblRedraw();
+        } catch (e) {
+            // The next tick asks again
+        } finally {
+            check.asking = false;
+        }
+    }, ENTITY_RBL_POLL.every);
+    let result = null;
+    let problem = '';
+    try {
+        const response = await authenticatedFetch(`/api/blacklist/check?host=${encodeURIComponent(value)}&force=true`, { method: 'POST' });
+        const body = await response.json().catch(() => null);
+        if (!response.ok) problem = uiApiErrorText(body, `The server answered ${response.status}.`);
+        else result = body;
+    } catch (e) {
+        problem = 'The server could not be reached.';
+    } finally {
+        clearInterval(check.poll);
+    }
+    // The card closed, or shows something else, since: the check is the server's now
+    if (entityRblCheck !== check) return;
+    entityRblCheck = null;
+    if (result && result.status === 'busy') {
+        // Nothing was started: another check runs (the Status page's, the schedule's)
+        entityRblBusy = value;
+        showToast(result.message || 'A blocklist check is already running. Try again when it is done.', 'warning');
+        entityRblRedraw(true);
+        return;
+    }
+    if (!result || result.status === 'error') {
+        showToast(`Could not check ${value} against the blocklists. ${problem || (result && result.error) || ''}`.trim(), 'error');
+    } else {
+        showToast(`Blocklist check done for ${value}`, 'success');
+    }
+    entityCardRefresh();
+}
+
+// =============================================================================
 // TABS
 // =============================================================================
 
@@ -385,21 +712,22 @@ function entitySourceState(src, what) {
 // OVERVIEW
 // =============================================================================
 
-// One tile; a tile that has a tab opens it
-function entityTile(label, { value = '', note = '', tone = '', tab = '', off = false } = {}) {
-    const open = tab && !off;
+// One tile; a tile that has a tab opens it. action: a button under it (such a
+// tile opens no tab: a button holds no other button); id: to draw it again alone
+function entityTile(label, { value = '', note = '', tone = '', tab = '', off = false, action = '', id = '' } = {}) {
+    const open = tab && !off && !action;
     const tag = open ? `button type="button" onclick="entityCardTab('${tab}')"` : 'div';
-    return `<${tag} class="ui-st-card${off ? ' is-off' : ''}"><span class="ui-st-card-label">${escapeHtml(label)}</span><b${tone ? ` class="ui-${tone}"` : ''}>${value}</b>${note ? `<small>${note}</small>` : ''}</${open ? 'button' : 'div'}>`;
+    return `<${tag}${id ? ` id="${id}"` : ''} class="ui-st-card${off ? ' is-off' : ''}"><span class="ui-st-card-label">${escapeHtml(label)}</span><b${tone ? ` class="ui-${tone}"` : ''}>${value}</b>${note ? `<small>${note}</small>` : ''}${action ? `<span class="ui-ent-tile-act">${action}</span>` : ''}</${open ? 'button' : 'div'}>`;
 }
 
 // A tile for a source: its figures when ok, else what is wrong, quietly
-function entitySourceTile(label, src, ok, tab = '') {
-    if (!src || src.state === 'error') return entityTile(label, { value: 'Could not be read', note: escapeHtml(src && src.reason ? src.reason : ''), tone: 'fail', off: true });
+function entitySourceTile(label, src, ok, tab = '', id = '') {
+    if (!src || src.state === 'error') return entityTile(label, { value: 'Could not be read', note: escapeHtml(src && src.reason ? src.reason : ''), tone: 'fail', off: true, id });
     if (src.state === 'disabled') {
         const inSettings = /turned off|not set up/i.test(src.reason || '');
-        return entityTile(label, { value: `<span class="ui-muted">${inSettings ? 'Disabled in Settings' : 'Not shown'}</span>`, note: escapeHtml(src.reason || ''), off: true });
+        return entityTile(label, { value: `<span class="ui-muted">${inSettings ? 'Disabled in Settings' : 'Not shown'}</span>`, note: escapeHtml(src.reason || ''), off: true, id });
     }
-    return entityTile(label, { ...ok(src), tab });
+    return entityTile(label, { ...ok(src), tab, id });
 }
 
 // What the newest messages ended as, when the list holds all of them
@@ -425,13 +753,7 @@ function entityOverview(data) {
                     : l.denylisted_as ? { value: 'On the denylist', tone: 'fail', note: `As ${escapeHtml(l.denylisted_as)}` }
                         : l.allowlisted_as ? { value: 'On the allowlist', note: `As ${escapeHtml(l.allowlisted_as)}` }
                             : { value: 'Not listed', note: 'On neither list' })),
-            entitySourceTile('Blocklists', s('rbl'), r => {
-                if (!r.checked) return { value: '<span class="ui-muted">Not checked</span>', note: r.monitored ? 'Waiting for its first check' : 'This address was never checked' };
-                const when = r.checked_at ? `Checked ${uiTime(r.checked_at, formatAgo(r.checked_at), { title: formatTime(r.checked_at) })}` : '';
-                if (r.status === 'listed') return { value: `Listed on ${entityNum(r.listed_count)} of ${entityNum(r.total_blacklists)}`, tone: 'fail', note: [escapeHtml((r.listed || []).slice(0, 3).join(', ')), when].filter(Boolean).join('. ') };
-                if (r.status === 'error') return { value: 'Check failed', tone: 'warn', note: when };
-                return { value: 'Not listed', note: [`On none of ${entityNum(r.total_blacklists)}`, when].filter(Boolean).join('. ') };
-            }),
+            entityRblTile(data),
             entitySourceTile('DMARC reports', s('dmarc'), d => ({ value: entityNum(d.messages), note: d.reports ? `Messages in ${uiCountLabel(d.reports, 'report', 'reports')} for ${uiCountLabel(d.domains, 'domain', 'domains')}` : 'No report names it' }), 'dmarc'),
         ];
     } else if (data.kind === 'address') {
@@ -613,7 +935,12 @@ function entityTimeline(data) {
 // =============================================================================
 
 // The count above a list, in the frame of the search's "See all" bar
-function entitySummary(html) {
+// (search.js gsRender). act: it opens the list on its page, as that action does
+function entitySummary(html, act = '') {
+    if (act) {
+        const label = { messages: 'Open in Messages', security: 'Open in Security' }[act];
+        return `<button type="button" class="ui-gs-more ui-ent-go" data-ent-act="${act}-bar" onclick="entityCardAct('${act}', this)"><span>${html}</span><span class="ui-link">${label}</span></button>`;
+    }
     return `<div class="ui-gs-more ui-ent-sum"><span>${html}</span></div>`;
 }
 
@@ -626,7 +953,7 @@ function entityMessages(data) {
     const split = data.kind !== 'ip' && (src.sent !== undefined || src.received !== undefined) ? ` (${entityNum(src.sent)} sent, ${entityNum(src.received)} received)` : '';
     if (!count) return `<div class="ui-md-stack">${entitySummary(`No messages ${what} in ${escapeHtml(entityRangeText(data))}`)}</div>`;
     return `<div class="ui-md-stack">
-        ${entitySummary(`<b>${entityNum(count)}</b> ${count === 1 ? 'message' : 'messages'} ${what} in ${escapeHtml(entityRangeText(data))}${split}`)}
+        ${entitySummary(`<b>${entityNum(count)}</b> ${count === 1 ? 'message' : 'messages'} ${what} in ${escapeHtml(entityRangeText(data))}${split}`, entityCanAct(data, 'messages') ? 'messages' : '')}
         <div class="ui-panel ui-ent-flush">${items.map(renderMessageRow).join('')}</div>
         ${items.length < count ? `<p class="ui-muted ui-ent-note">The newest ${items.length} are shown.</p>` : ''}
     </div>`;
@@ -667,7 +994,7 @@ function entitySecurity(data) {
     if (data.kind !== 'ip' && src.ips) parts.push(`from ${entityNum(src.ips)} ${src.ips === 1 ? 'address' : 'addresses'}`);
     if (!count) return `<div class="ui-md-stack">${entitySummary(`No security events in ${escapeHtml(entityRangeText(data))}`)}${catches}</div>`;
     return `<div class="ui-md-stack">
-        ${entitySummary(`<b>${entityNum(count)}</b> security ${count === 1 ? 'event' : 'events'} in ${escapeHtml(entityRangeText(data))} (${parts.join(', ')})`)}
+        ${entitySummary(`<b>${entityNum(count)}</b> security ${count === 1 ? 'event' : 'events'} in ${escapeHtml(entityRangeText(data))} (${parts.join(', ')})`, entityCanAct(data, 'security') ? 'security' : '')}
         <div class="ui-panel ui-ent-flush"><div class="ui-ev-list">
             <div class="ui-ev-row ui-ev-head ui-ent-ev"><span>When</span><span>${data.kind === 'ip' ? 'Account' : 'Address'}</span><span>Action</span><span>Log line</span></div>
             ${items.map(item => entitySecurityRow(item, data)).join('')}

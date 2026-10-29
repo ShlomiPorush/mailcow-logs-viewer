@@ -588,7 +588,7 @@ def test_run_now_keeps_a_failure_the_sweep_reported(monkeypatch):
     monkeypatch.setattr(scheduler, 'cleanup_disabled_feature_data', lambda: {'dmarc': 'disk full'})
     monkeypatch.setitem(scheduler.job_status, 'feature_data_sweep', {'last_run': None, 'status': 'idle', 'error': None})
     tasks = BackgroundTasks()
-    trigger_job('feature_data_sweep', tasks)
+    asyncio.run(trigger_job('feature_data_sweep', tasks))
     asyncio.run(tasks())
     assert scheduler.job_status['feature_data_sweep']['status'] == 'failed'
     assert 'disk full' in scheduler.job_status['feature_data_sweep']['error']

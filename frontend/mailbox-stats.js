@@ -513,6 +513,75 @@ function closeMailboxActivity() {
     document.getElementById('mailbox-activity-modal').classList.add('hidden');
 }
 
+// One mailbox's activity on Mailbox Stats, from anywhere (the entity card's
+// "Open mailbox"): by the mailbox's address as stored (an alias's mailbox is
+// resolved by the server, entity_summary._mailbox). It is fetched by that whole
+// address (username=), so it opens also when this page never loaded or would
+// put it on a later page. The page's period becomes the one given: preset
+// ('today', '7days', '30days', '90days') or the days from startDay to endDay
+// (YYYY-MM-DD); the search shows the mailbox, and inactive mailboxes and those
+// with no mail in the period are listed too. onMoved runs once the page is open,
+// before the activity opens. An answer that comes after another opening, or after
+// the user left the page, opens nothing. Resolves to whether the page opened.
+let openMailboxSeq = 0;
+async function openMailboxFor(address, { preset = '', startDay = '', endDay = '', onMoved = null } = {}) {
+    const wanted = String(address || '').trim().toLowerCase();
+    if (!wanted) return false;
+    const seq = ++openMailboxSeq;
+    if (preset) mailboxStatsShowPreset(preset);
+    else if (startDay && endDay) {
+        document.getElementById('mailbox-stats-date-range').value = 'custom';
+        document.getElementById('mailbox-stats-start-date').value = startDay;
+        document.getElementById('mailbox-stats-end-date').value = endDay;
+        const label = document.getElementById('date-range-label');
+        if (label) label.textContent = `${formatDayKey(startDay)} - ${formatDayKey(endDay)}`;
+        updateDatePresetButtons('custom');
+    }
+    const search = document.getElementById('mailbox-stats-search');
+    if (search) search.value = wanted;
+    const domain = document.getElementById('mailbox-stats-domain-filter');
+    if (domain) domain.value = '';
+    const activeOnly = document.getElementById('mailbox-stats-active-only');
+    if (activeOnly) activeOnly.checked = false;
+    // Hide Zero Activity would hide a mailbox with no mail in the period
+    const hideZero = document.getElementById('mailbox-stats-hide-zero');
+    if (hideZero) hideZero.checked = false;
+    if (!(await navigateTo('mailbox-stats', { sub: 'statistics' }))) return false;
+    if (typeof onMoved === 'function') onMoved();
+    let data = null;
+    // The period and filters asked with: an answer for others is not this page's
+    const asked = mailboxStatsListUrl(1);
+    try {
+        const response = await authenticatedFetch(`${asked}&username=${encodeURIComponent(wanted)}`);
+        if (response.ok) data = await response.json();
+    } catch (e) {
+        data = null;
+    }
+    // Opened again since, the page left, or its view, period or filters changed: this answer opens nothing
+    const page = document.getElementById('content-mailbox-stats');
+    if (seq !== openMailboxSeq || (typeof currentTab !== 'undefined' && currentTab !== 'mailbox-stats')
+        || (page && page.classList.contains('hidden')) || mailboxStatsView !== 'statistics'
+        || mailboxStatsListUrl(1) !== asked) return true;
+    if (!data) {
+        showToast('The mailbox could not be loaded. Try again in a moment.', 'error');
+        return true;
+    }
+    const mailboxes = Array.isArray(data.mailboxes) ? data.mailboxes : [];
+    const mb = mailboxes.find(m => String(m.username || '').toLowerCase() === wanted);
+    if (!mb) {
+        showToast('This mailbox is not in Mailbox Stats yet. Its statistics are fetched from mailcow every few minutes.', 'warning');
+        return true;
+    }
+    // The dialog reads the mailbox and its time slots from the cache
+    const cached = mailboxStatsCache.mailboxes || [];
+    const at = cached.findIndex(m => m.username === mb.username);
+    mailboxStatsCache.mailboxes = at < 0 ? [...cached, mb] : cached.map((m, i) => (i === at ? mb : m));
+    mailboxStatsCache.activityUnit = data.activity_unit || 'day';
+    mailboxStatsCache.activityBuckets = data.activity_buckets || [];
+    openMailboxActivity(mb.username);
+    return true;
+}
+
 function mailboxRateLimitLabel(mb) {
     if (!mb.rl_value) return 'None';
     const frame = { s: 'sec', m: 'min', h: 'hour', d: 'day' }[mb.rl_frame] || mb.rl_frame || 'min';
@@ -662,6 +731,14 @@ function closeDateRangePicker() {
 }
 
 function selectDatePreset(preset) {
+    mailboxStatsShowPreset(preset);
+    // Close dropdown and reload data
+    closeDateRangePicker();
+    loadMailboxStats();
+}
+
+// The period set to a preset, without loading
+function mailboxStatsShowPreset(preset) {
     // Update hidden input
     const hiddenInput = document.getElementById('mailbox-stats-date-range');
     if (hiddenInput) hiddenInput.value = preset;
@@ -682,10 +759,6 @@ function selectDatePreset(preset) {
 
     // Update active state on buttons
     updateDatePresetButtons(preset);
-
-    // Close dropdown and reload data
-    closeDateRangePicker();
-    loadMailboxStats();
 }
 
 function updateDatePresetButtons(activePreset) {

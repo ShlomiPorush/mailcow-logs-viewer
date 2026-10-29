@@ -516,6 +516,8 @@
 @media (hover: none) { .ui-ent-copy { display: none; } }
 .ui-ent-copy:focus-visible { opacity: 1; outline: 2px solid var(--ui-focus); outline-offset: 1px; }
 .ui-ent-copy .copy-icon.copied { opacity: 1; }
+/* In a list of values joined by commas the icon would open a gap before the comma; each value copies from its card */
+.ui-md-to-list .ui-ent-copy { display: none; }
 /* In a cell that clips with an ellipsis the icon would float out of sight: there it takes its
    place in the line, as the .copyable icon does */
 :is(.ui-msg-from, .ui-msg-to, .ui-ev-account, .ui-td, .ui-md-rrow-addr, .ui-md-to-list, .ui-aa-row) .ui-ent-copy { position: static; translate: none; flex: none; margin-inline-start: 2px; }
@@ -540,9 +542,18 @@
 .ui-ent-title button.copyable:focus-visible .copy-icon { opacity: .5; }
 .ui-ent-who > div { min-width: 0; }
 .ui-ent-who .ui-sec-flag { vertical-align: -1px; }
-/* Where the card's actions go (L3: Ban, Allow, Show messages, Watch); empty for now */
+/* The card's actions: a wrapping row of .ui-btn like .ui-form-actions, More a .ui-menu.
+   Phones keep the main action and fold the others into More (v3 rule MO-6) */
 .ui-ent-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: -4px 0 16px; }
 .ui-ent-acts:empty { display: none; }
+.ui-ent-acts + .ui-list-note.ui-flush { margin-top: -4px; }
+.ui-menu .ui-ent-phone { display: none; }
+.ui-ent-more-phone { display: none; }
+@media (max-width: 760px) { .ui-ent-fold { display: none; } .ui-menu .ui-ent-phone { display: block; } .ui-ent-more-phone { display: contents; } }
+/* A tile's own button (Check now) and the meter of a check under way */
+.ui-ent-tile-act { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; margin-top: 6px; }
+.ui-ent-meter { display: block; width: 100%; }
+.ui-ent-tile-act .ui-btn[aria-disabled="true"] { opacity: .6; cursor: default; }
 /* Tiles: .ui-st-cards, three a row in the wide dialog, two on a phone */
 .ui-st-cards.ui-ent-tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .ui-ent-tiles .ui-st-card b { font-size: 20px; }
@@ -661,6 +672,8 @@
 .ui-search input { flex: 1; min-width: 0; height: 100%; border: 0; outline: none; background: none; color: var(--ui-ink); font: inherit; }
 .ui-msg-summary { margin: 8px 2px 0; color: var(--ui-muted); font-size: 12.5px; }
 .ui-msg-summary #messages-count { color: var(--ui-ink); font-weight: 600; }
+/* The whole-value filter an entity card set: the Security filter chip, beside the count like Clear filters */
+#messages-exact > .ui-sec-filter { margin-inline-start: 8px; vertical-align: 1px; }
 /* Below 1280px, where the facets hide, outcome, direction and time are buttons that open their choices */
 .ui-msg-pickers { display: none; }
 .ui-msg-range-host { display: inline-block; }

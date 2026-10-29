@@ -23,6 +23,7 @@ from ..api_models import mailboxes as m
 logger = logging.getLogger(__name__)
 
 from app.services.alias_domains import get_alias_domain_map, expand_address
+from app.services import entity_values
 
 router = APIRouter()
 
@@ -471,6 +472,7 @@ def get_all_mailbox_stats(
     active_only: bool = True,  # Changed default to True
     hide_zero: bool = False,  # Filter out mailboxes with zero activity
     search: Optional[str] = None,
+    username: Optional[str] = Query(None, max_length=320, description="Only this mailbox: its address, whole, in any case and in either form of an IDN domain (the entity card's Open mailbox). Off by default"),
     date_range: str = Query("30days", description="Date range: today, 7days, 30days, 90days, custom"),
     start_date: Optional[str] = Query(None, description="Custom start date (YYYY-MM-DD) - required when date_range is 'custom'"),
     end_date: Optional[str] = Query(None, description="Custom end date (YYYY-MM-DD) - required when date_range is 'custom'"),
@@ -491,6 +493,7 @@ def get_all_mailbox_stats(
             active_only=active_only,
             hide_zero=hide_zero,
             search=search,
+            username=username,
             date_range=date_range,
             start_date=start_date,
             end_date=end_date,
@@ -535,6 +538,14 @@ def get_all_mailbox_stats(
                 )
             )
         
+        # One mailbox by its whole address, wherever the sort and the pages would put it
+        if isinstance(username, str) and username.strip():
+            try:
+                forms = entity_values.address_forms(entity_values.normalize_address(username)[0])
+            except entity_values.InvalidValue:
+                forms = [username.strip().lower()]
+            query = query.filter(func.lower(MailboxStatistics.username).in_(forms))
+
         # Get total count before pagination
         total_count = query.count()
         

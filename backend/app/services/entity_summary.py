@@ -137,8 +137,14 @@ def _like_suffix(column, domain: str):
     return func.lower(column).like(f"%@{escaped}", escape="\\")
 
 
-def _domain_match(column, domain: str):
+def domain_match(column, domain: str):
+    """The column holds an address on the domain (normalized): the part after its
+    last @ is the domain, in any case and in each form of an IDN. Also used by
+    the Messages and Security events filters, so a list shows what a card counts."""
     return or_(*[_like_suffix(column, form) for form in entity_values.domain_forms(domain)])
+
+
+_domain_match = domain_match
 
 
 # ---------------------------------------------------------------- IP by value
@@ -543,11 +549,17 @@ def _mailbox(db: Session, address: str) -> dict:
     forms = entity_values.address_forms(address)
     box = db.query(MailboxStatistics).filter(func.lower(MailboxStatistics.username).in_(forms)).first()
     alias = db.query(AliasStatistics).filter(func.lower(AliasStatistics.alias_address).in_(forms)).first()
+    # The mailbox an alias delivers to, only when it is a mailbox here: primary_mailbox
+    # is the alias's first target as mailcow lists it, which may be an outside address
+    target = None
+    if alias is not None and alias.primary_mailbox:
+        target = db.query(MailboxStatistics.username).filter(
+            func.lower(MailboxStatistics.username) == alias.primary_mailbox.strip().lower()).limit(1).scalar()
     return {
         "local": box is not None,
         "mailbox": {"username": box.username, "name": box.name, "domain": box.domain, "active": box.active} if box else None,
         "alias": {"address": alias.alias_address, "goto": alias.goto, "primary_mailbox": alias.primary_mailbox,
-                  "active": alias.active} if alias else None,
+                  "local_mailbox": target, "active": alias.active} if alias else None,
     }
 
 
