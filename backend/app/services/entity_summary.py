@@ -54,12 +54,21 @@ _FEATURE_NAMES = {
 _BAN_ACTIONS = ("ban", "banned")
 
 
-class Unavailable(Exception):
-    """A source that cannot answer for a reason a person can act on (its text)."""
+class _Answer(Exception):
+    """A source's fixed answer for the card. The card shows its reason, never
+    the exception's own text, so no error detail can reach the response."""
+
+    def __init__(self, reason: str):
+        super().__init__(reason)
+        self.reason = reason
 
 
-class Off(Exception):
-    """A source that is not set up (its text says what is missing): disabled, not failed."""
+class Unavailable(_Answer):
+    """A source that cannot answer for a reason a person can act on."""
+
+
+class Off(_Answer):
+    """A source that is not set up (its reason says what is missing): disabled, not failed."""
 
 
 # ---------------------------------------------------------------- range
@@ -112,10 +121,10 @@ def _run(db: Session, feature: Optional[str], what: str, read: Callable[[], dict
             if snapshot:
                 _rollback(db)
     except Off as e:
-        return {"state": "disabled", "reason": str(e)}
+        return {"state": "disabled", "reason": e.reason}
     except Unavailable as e:
         _rollback(db)
-        return {"state": "error", "reason": str(e)}
+        return {"state": "error", "reason": e.reason}
     except Exception:
         logger.exception("Could not read %s for the entity card", what)
         _rollback(db)
