@@ -387,11 +387,16 @@ function formatListTime(isoString) {
 
 // A "More" menu for a table row. It opens as a popover, so the table's own
 // scrolling cannot clip it; the toggle listener below puts it under its button.
-// small: false gives it a full-size button, beside other full-size ones (the entity card)
+// small: false gives it a full-size button, beside other full-size ones (the entity card).
+// icon: an icon button instead (the three dots of a search row), label naming it;
+// cls and attrs: more classes and attributes for that button (trusted markup)
 let uiMenuSeq = 0;
-function uiMenu(label, itemsHtml, { small = true } = {}) {
+function uiMenu(label, itemsHtml, { small = true, icon = '', cls = '', attrs = '' } = {}) {
     const id = `ui-menu-${++uiMenuSeq}`;
-    return `<button type="button" class="ui-btn${small ? ' ui-btn-sm' : ''}" popovertarget="${id}" aria-haspopup="menu">${escapeHtml(label)}</button>
+    const button = icon
+        ? `<button type="button" class="ui-icon-btn${cls ? ` ${cls}` : ''}" popovertarget="${id}" aria-haspopup="menu" aria-label="${escapeHtml(label)}" title="${escapeHtml(label)}"${attrs ? ` ${attrs}` : ''}>${icon}</button>`
+        : `<button type="button" class="ui-btn${small ? ' ui-btn-sm' : ''}${cls ? ` ${cls}` : ''}" popovertarget="${id}" aria-haspopup="menu"${attrs ? ` ${attrs}` : ''}>${escapeHtml(label)}</button>`;
+    return `${button}
         <div id="${id}" popover class="ui-menu" role="menu" onclick="if (event.target.closest('button')) this.hidePopover()">${itemsHtml}</div>`;
 }
 
@@ -755,10 +760,12 @@ function entityIsIp(value) {
     const halves = v.split('::');
     if (halves.length > 2) return false;
     const groups = halves.map(h => (h ? h.split(':') : []));
-    const parts = groups.flat();
-    // An IPv4 tail (::ffff:192.0.2.1) counts as two groups
-    const tail = parts.length && parts[parts.length - 1].includes('.') ? parts.pop() : null;
+    // An IPv4 tail (::ffff:192.0.2.1) is the address's last group, after the ::
+    // when there is one, and counts as two groups ('192.0.2.1::' is no address)
+    const last = groups[groups.length - 1];
+    const tail = last.length && last[last.length - 1].includes('.') ? last.pop() : null;
     if (tail !== null && !UI_ENTITY_IPV4.test(tail)) return false;
+    const parts = groups.flat();
     if (!parts.every(p => /^[0-9a-f]{1,4}$/i.test(p))) return false;
     const count = parts.length + (tail !== null ? 2 : 0);
     return halves.length === 2 ? count < 8 : count === 8;
@@ -1012,11 +1019,28 @@ function uiDialog({ id, title, size, body = '', foot = '', close = null, role = 
     return { backdrop, dialog, body: bodyEl, foot: footId ? document.getElementById(footId) : dialog.querySelector(':scope > .ui-dialog-foot') };
 }
 
+// The keys held down right now: a question tells a key pressed for it from one
+// that was already down when it opened (showConfirmModal)
+const uiKeysDown = new Set();
+if (typeof window !== 'undefined' && window && typeof window.addEventListener === 'function') {
+    window.addEventListener('keydown', e => uiKeysDown.add(e.key), true);
+    window.addEventListener('keyup', e => uiKeysDown.delete(e.key), true);
+    window.addEventListener('blur', () => uiKeysDown.clear());
+}
+
 /**
  * Show a styled confirmation modal (replaces native confirm()).
  * Returns a Promise<boolean>: true if confirmed, false if cancelled.
+ * A key held down when it opens never answers it: Enter or Space that repeats
+ * (a held key that opened it, such as Enter on a Ban button) is dropped, and so
+ * is the release of a key that went down before it. focusCancel starts on
+ * Cancel, for a question whose answer writes to mailcow.
  */
+// The open question's own close: a second question closes the first as cancelled
+// (its promise settles, its key guard and focus timer go) before it opens
+let confirmModalClose = null;
 function showConfirmModal({ title = 'Confirm', message = 'Are you sure?', confirmText = 'Confirm', cancelText = 'Cancel', confirmColor, isDangerous = false, focusCancel = false, noHistory = false } = {}) {
+    if (confirmModalClose) confirmModalClose(false);
     return new Promise((resolve) => {
         const existing = document.getElementById('app-confirm-modal');
         if (existing) existing.remove();
@@ -1041,16 +1065,46 @@ function showConfirmModal({ title = 'Confirm', message = 'Are you sure?', confir
         const cancelBtn = document.getElementById('app-confirm-cancel');
         const okBtn = document.getElementById('app-confirm-ok');
 
+        // Capture on the window comes before the page's own key handlers: a repeat
+        // of a held key presses no button, here or under the question
+        const held = new Set(uiKeysDown);
+        const guard = (e) => {
+            if (e.key !== 'Enter' && e.key !== ' ') return;
+            if (e.type === 'keyup') {
+                if (held.delete(e.key)) e.preventDefault();
+                return;
+            }
+            // A new press (not a repeat) of a key whose release was missed counts
+            if (!e.repeat) { held.delete(e.key); return; }
+            e.preventDefault();
+            e.stopImmediatePropagation();
+        };
+        window.addEventListener('keydown', guard, true);
+        window.addEventListener('keyup', guard, true);
+
+        let focusTimer = null;
+        let settled = false;
         function cleanup(result) {
+            if (settled) return;
+            settled = true;
+            if (confirmModalClose === cleanup) confirmModalClose = null;
+            clearTimeout(focusTimer);
+            window.removeEventListener('keydown', guard, true);
+            window.removeEventListener('keyup', guard, true);
             overlay.remove();
             document.body.style.overflow = overflowBefore;
             resolve(result);
         }
+        confirmModalClose = cleanup;
         // Escape (through the layers in router.js) and a click outside cancel
         overlay.addEventListener('click', (e) => { if (uiBackdropClick(e)) cleanup(false); });
         cancelBtn.addEventListener('click', () => cleanup(false));
         okBtn.addEventListener('click', () => cleanup(true));
-        setTimeout(() => (focusCancel ? cancelBtn : okBtn).focus(), 100);
+        // On Cancel at once, before the layers (router.js) would put it on the main
+        // button: a new Enter in the first moments cancels. The main button gets it
+        // after a moment, as before
+        if (focusCancel) cancelBtn.focus({ preventScroll: true });
+        else focusTimer = setTimeout(() => { if (!settled) okBtn.focus(); }, 100);
     });
 }
 
@@ -1203,6 +1257,18 @@ function uiConfirmLeave(target, { keep = false } = {}) {
     return uiUnsavedAsking;
 }
 
+// When a job runs and what it keeps, as Status > Jobs and the search write it
+function jobRunsText(job) {
+    return [
+        job.interval,
+        // A clock-time job's time as the setting writes it, in the app's zone
+        job.clock ? `${job.clock.weekday ? `Weekly, ${job.clock.weekday}` : 'Daily'} at ${formatClockAt(job.clock.hour, job.clock.minute)} (${job.clock.zone})` : job.schedule,
+        job.retention ? `keeps ${job.retention}` : '',
+        job.max_age ? `Max: ${job.max_age}` : '',
+        job.expire_after ? `Expire: ${job.expire_after}` : '',
+    ].filter(Boolean).join(', ');
+}
+
 function renderJobCard(name, jobKey, job) {
     if (!job) {
         return '';
@@ -1238,23 +1304,14 @@ function renderJobCard(name, jobKey, job) {
         }
     }
 
-    const runs = [
-        job.interval,
-        // A clock-time job's time as the setting writes it, in the app's zone
-        job.clock ? `${job.clock.weekday ? `Weekly, ${job.clock.weekday}` : 'Daily'} at ${formatClockAt(job.clock.hour, job.clock.minute)} (${job.clock.zone})` : job.schedule,
-        job.retention ? `keeps ${job.retention}` : '',
-        job.max_age ? `Max: ${job.max_age}` : '',
-        job.expire_after ? `Expire: ${job.expire_after}` : '',
-    ].filter(Boolean);
-
     // A healthy job shows a green dot and no tag; everything else says what it is
     const failed = !isDisabled && job.status === 'failed';
     const dot = isDisabled ? '' : failed ? ' ui-mdot-fail' : job.status === 'running' ? ' ui-mdot-info' : job.status === 'success' ? ' ui-mdot-ok' : '';
     return `
-        <div class="ui-jobrow${isDisabled ? ' is-off' : ''}${failed ? ' is-failed' : ''}">
+        <div class="ui-jobrow${isDisabled ? ' is-off' : ''}${failed ? ' is-failed' : ''}" data-job="${escapeHtml(jobKey)}">
             <i class="ui-mdot${dot}"></i>
             <span class="ui-jobrow-name"><b>${escapeHtml(name)}</b>${job.description ? `<small title="${escapeHtml(job.description)}">${escapeHtml(job.description)}</small>` : ''}${isDisabled && !isFeatureOff && job.disabled_reason ? `<small class="ui-text-warn">${escapeHtml(job.disabled_reason)}</small>` : ''}</span>
-            <span class="ui-jobrow-runs">${escapeHtml(runs.join(', ') || '-')}${job.pending_items !== undefined ? ` <small class="ui-text-warn">Pending: ${escapeHtml(String(job.pending_items))}</small>` : ''}</span>
+            <span class="ui-jobrow-runs">${escapeHtml(jobRunsText(job) || '-')}${job.pending_items !== undefined ? ` <small class="ui-text-warn">Pending: ${escapeHtml(String(job.pending_items))}</small>` : ''}</span>
             <span class="ui-jobrow-last" title="${job.last_run ? escapeHtml(formatTime(job.last_run)) : ''}">${job.last_run ? formatAgo(job.last_run) : 'Not run yet'}</span>
             <span class="ui-jobrow-tag">${job.status === 'success' && !isDisabled ? '' : statusBadge}</span>
             <span class="ui-jobrow-act">${!isDisabled ? `

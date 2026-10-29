@@ -1865,7 +1865,7 @@ function fail2banBare(entry) {
 
 async function unbanIP(ip, btnEl) {
     const ipWithMask = fail2banEntry(ip);
-    if (!await showConfirmModal({ title: 'Unban IP', message: 'Unban ' + ip + '?', confirmText: 'Unban' })) return;
+    if (!await showConfirmModal({ title: 'Unban IP', message: 'Unban ' + ip + '?', confirmText: 'Unban', focusCancel: true })) return;
     try {
         if (btnEl) {
             btnEl.disabled = true;
@@ -1906,7 +1906,7 @@ async function unbanIP(ip, btnEl) {
 
 async function banIP(ip, btnEl) {
     const ipWithMask = fail2banEntry(ip);
-    if (!await showConfirmModal({ title: 'Ban IP', message: `Are you sure you want to permanently ban ${ipWithMask}?\n\nThis will add the IP to the Fail2Ban denylist.`, confirmText: 'Ban', isDangerous: true })) return;
+    if (!await showConfirmModal({ title: 'Ban IP', message: `Are you sure you want to permanently ban ${ipWithMask}?\n\nThis will add the IP to the Fail2Ban denylist.`, confirmText: 'Ban', isDangerous: true, focusCancel: true })) return;
 
     if (btnEl) {
         btnEl.disabled = true;
@@ -1948,7 +1948,7 @@ async function banIP(ip, btnEl) {
 
 async function allowIP(ip, btnEl) {
     const ipWithMask = fail2banEntry(ip);
-    if (!await showConfirmModal({ title: 'Allow IP', message: `Add ${ipWithMask} to the Fail2Ban allowlist?\n\nFailed attempts from this address will never lead to a ban.`, confirmText: 'Allow' })) return;
+    if (!await showConfirmModal({ title: 'Allow IP', message: `Add ${ipWithMask} to the Fail2Ban allowlist?\n\nFailed attempts from this address will never lead to a ban.`, confirmText: 'Allow', focusCancel: true })) return;
     if (btnEl) {
         btnEl.disabled = true;
         btnEl.textContent = 'Allowing...';
@@ -6160,11 +6160,9 @@ function statusJobGroupToggled(el) {
     if (el.open) statusJobsOpen.add(el.dataset.group); else statusJobsOpen.delete(el.dataset.group);
 }
 
+// The Run button of a job (Status > Jobs, Needs attention): it shows the run starting
 async function triggerBackgroundJob(jobKey, buttonEl, jobName = null) {
     if (!buttonEl) return;
-
-    // Use jobName if provided, otherwise fallback to jobKey
-    const displayName = jobName || jobKey;
 
     // Disable button and show loading
     buttonEl.disabled = true;
@@ -6174,13 +6172,39 @@ async function triggerBackgroundJob(jobKey, buttonEl, jobName = null) {
     buttonEl.classList.add('opacity-50', 'cursor-not-allowed');
 
     try {
-        const response = await authenticatedFetch(`/api/settings/jobs/${jobKey}/run`, {
+        await runBackgroundJob(jobKey, jobName);
+    } finally {
+        // Re-enable button
+        buttonEl.disabled = false;
+        buttonEl.innerHTML = originalContent;
+        buttonEl.classList.remove('opacity-50', 'cursor-not-allowed');
+    }
+}
+
+// Run a job now (POST /api/settings/jobs/{job}/run), from any button or none. The
+// server checks the job can run (409 with the reason when it cannot) and is not
+// running already (409). Says how it went and resolves to 'started', 'running',
+// 'unavailable' or 'failed'
+async function runBackgroundJob(jobKey, jobName = null) {
+    // Use jobName if provided, otherwise fallback to jobKey
+    const displayName = jobName || jobKey;
+    try {
+        const response = await authenticatedFetch(`/api/settings/jobs/${encodeURIComponent(jobKey)}/run`, {
             method: 'POST'
         });
 
         if (!response.ok) {
-            const err = await response.json();
-            throw new Error(err.detail || `HTTP ${response.status}`);
+            const err = await response.json().catch(() => null);
+            const detail = uiApiErrorText(err, `HTTP ${response.status}`);
+            if (response.status === 409 && /already running/i.test(detail)) {
+                showToast(`Job "${displayName}" is already running`, 'warning');
+                return 'running';
+            }
+            if (response.status === 409) {
+                showToast(`Job "${displayName}" cannot run now. ${detail.replace(/^The job cannot run\.\s*/, '')}`.trim(), 'warning');
+                return 'unavailable';
+            }
+            throw new Error(detail);
         }
 
         showToast(`Job "${displayName}" started successfully`, 'success');
@@ -6189,19 +6213,11 @@ async function triggerBackgroundJob(jobKey, buttonEl, jobName = null) {
         setTimeout(() => {
             loadStatusExtended();
         }, 1000);
-
+        return 'started';
     } catch (error) {
-        if (error.message.includes('409')) {
-            showToast(`Job "${displayName}" is already running`, 'warning');
-        } else {
-            console.error(`Failed to trigger job ${jobKey}:`, error); // nosemgrep: javascript.lang.security.audit.unsafe-formatstring.unsafe-formatstring
-            showToast(`Failed to start job: ${error.message}`, 'error');
-        }
-    } finally {
-        // Re-enable button
-        buttonEl.disabled = false;
-        buttonEl.innerHTML = originalContent;
-        buttonEl.classList.remove('opacity-50', 'cursor-not-allowed');
+        console.error(`Failed to trigger job ${jobKey}:`, error); // nosemgrep: javascript.lang.security.audit.unsafe-formatstring.unsafe-formatstring
+        showToast(`Failed to start job: ${error.message}`, 'error');
+        return 'failed';
     }
 }
 

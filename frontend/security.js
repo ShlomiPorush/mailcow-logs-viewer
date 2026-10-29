@@ -925,7 +925,7 @@ async function securityAddToList(list, value, form) {
 
 async function securityRemoveFromList(list, entry, button) {
     const label = list === 'whitelist' ? 'allowlist' : 'denylist';
-    if (!await showConfirmModal({ title: `Remove from the ${label}`, message: `Remove ${entry} from the Fail2ban ${label}?`, confirmText: 'Remove' })) return;
+    if (!await showConfirmModal({ title: `Remove from the ${label}`, message: `Remove ${entry} from the Fail2ban ${label}?`, confirmText: 'Remove', focusCancel: true })) return;
     if (button) button.disabled = true;
     try {
         const res = await authenticatedFetch('/api/fail2ban/remove', {
@@ -952,7 +952,7 @@ async function securityRepairListEntry(list, entry, button) {
     const effect = list === 'whitelist'
         ? `Only ${old.address} stays exempt from Fail2ban; the rest of ${old.network} can be banned again.`
         : `Only ${old.address} stays banned; the rest of ${old.network} is no longer blocked.`;
-    if (!await showConfirmModal({ title: 'Repair the entry', message: `Replace ${entry} with ${single} on the ${label}?\n\n${effect}`, confirmText: 'Repair' })) return;
+    if (!await showConfirmModal({ title: 'Repair the entry', message: `Replace ${entry} with ${single} on the ${label}?\n\n${effect}`, confirmText: 'Repair', focusCancel: true })) return;
     if (button) button.disabled = true;
     try {
         const res = await authenticatedFetch('/api/fail2ban/repair', {
