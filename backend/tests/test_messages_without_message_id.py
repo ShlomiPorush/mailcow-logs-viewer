@@ -388,3 +388,32 @@ def test_an_existing_install_gets_the_index_and_keeps_its_lines(isolated_engine)
     _run(isolated_engine, revision.downgrade)
     assert revision.INDEX not in _indexes(isolated_engine)
     _run(isolated_engine, revision.downgrade)
+
+
+@pytest.mark.parametrize('path', ['/api/messages/without-message-id', '/api/messages/facets'])
+def test_time_ranges_named_all_or_out_of_range_are_skipped(api, path):
+    """all is the count of every time; a date the server cannot turn into a time is skipped, not an error."""
+    _ingest(*_message(_q(24), NOW))
+    since = [f'all:{(NOW + timedelta(days=1)).isoformat()}', 'last:9999-12-31', 'first:0001-01-01T00:00:00+01:00',
+             f'recent:{(NOW - timedelta(days=1)).isoformat()}']
+    response = api.get(path, params={'search': MARK, 'since': since})
+    assert response.status_code == 200, response.text
+    time = response.json()['time']
+    assert set(time) == {'all', 'recent'}
+    if path.endswith('without-message-id'):
+        assert time == {'all': 1, 'recent': 1}
+
+
+def test_a_geoip_fault_does_not_keep_the_message_from_opening(api, monkeypatch):
+    from app.services import geoip_service
+    monkeypatch.setattr(geoip_service, 'is_geoip_available', lambda: True)
+
+    def broken(ip):
+        raise FileNotFoundError('GeoLite2-City.mmdb')
+    monkeypatch.setattr(geoip_service, 'lookup_ip', broken)
+    _ingest(*_message(_q(25), NOW))
+    key = _by_queue(_list(api))[_q(25)]['correlation_key']
+    response = api.get(f'/api/message/{key}/details')
+    assert response.status_code == 200, response.text
+    client = response.json()['client']
+    assert client['ip'] == '192.0.2.40' and client['country_code'] is None

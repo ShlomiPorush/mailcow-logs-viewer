@@ -757,7 +757,7 @@ The top level also has the list fields (`queue_id`, `sender`, `recipient`, `subj
 | Parameter | Type | Default | Constraints and purpose |
 | --- | --- | --- | --- |
 | `search`, `sender`, `recipient`, `direction`, `status`, `user`, `ip`, `start_date`, `end_date` | as in `GET /api/messages` | Unset | Same filters as the message list |
-| `since` | array of strings | `[]` | Time ranges to count, as `name:ISO-start` (for example `today:2026-09-27T00:00:00Z`). Repeat the parameter for more ranges; up to 8 are read. `name` is 1 to 16 lower-case letters or digits; invalid entries are skipped. |
+| `since` | array of strings | `[]` | Time ranges to count, as `name:ISO-start` (for example `today:2026-09-27T00:00:00Z`). Repeat the parameter for more ranges; up to 8 are read. `name` is 1 to 16 lower-case letters or digits, not `all`; invalid entries, and dates out of range, are skipped. |
 
 Filter counts for the message search: `status` (`delivered`, `deferred`, `bounced`, `rejected`, `spam`, `discarded`) and `direction` (`inbound`, `outbound`, `internal`), each with an `all` count. Each count applies the other filters but not its own. With `since`, `time` holds an `all` count and one count per valid range; these ignore `start_date` and `end_date`. Counts are messages, not legs.
 

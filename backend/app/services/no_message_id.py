@@ -25,6 +25,7 @@ anchor, whose message-id field the parser found no ID in:
 A message is hidden when any stored line within the anchor's window names an
 excluded address (excluded_addresses), as the Messages list hides one.
 """
+import logging
 import re
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional
@@ -35,6 +36,8 @@ from sqlalchemy.orm import Session, aliased
 from ..models import NetfilterLog, PostfixLog
 from . import excluded_addresses
 from .message_recipients import listed_recipients, resolve_recipients, union_recipients, written_address
+
+logger = logging.getLogger(__name__)
 
 # Postfix keeps a message at most maximal_queue_lifetime, 5 days by default
 INSTANCE_SPAN = timedelta(days=6)
@@ -209,7 +212,11 @@ def located(who: Optional[dict]) -> Optional[dict]:
     if not who:
         return None
     from . import geoip_service
-    geo = geoip_service.lookup_ip(who["ip"]) if who.get("ip") and geoip_service.is_geoip_available() else {}
+    try:
+        geo = geoip_service.lookup_ip(who["ip"]) if who.get("ip") and geoip_service.is_geoip_available() else {}
+    except Exception as error:   # the place is extra: a GeoIP fault never keeps the message from opening
+        logger.debug(f"GeoIP lookup failed for a message without a Message-ID: {error}")
+        geo = {}
     return {**who, **{key: geo.get(key) for key in GEO_KEYS}}
 
 

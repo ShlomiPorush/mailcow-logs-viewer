@@ -338,6 +338,23 @@ def _count_messages(query):
     return query.session.query(func.count()).select_from(legs).filter(legs.c.leg_rank == 1).scalar() or 0
 
 
+def since_ranges(since) -> list:
+    """The time ranges a since parameter asks to count: (name, start) for at most
+    8 items written name:start. A name is 1 to 16 lower-case letters or digits and
+    not "all" (the count of every time); start is an instant or a day (its start
+    in the app's time zone). Any other item is skipped, also a date out of range."""
+    ranges = []
+    for item in since[:8]:
+        name, _, iso = item.partition(':')
+        if name == 'all' or not re.fullmatch(r'[a-z0-9]{1,16}', name):
+            continue
+        try:
+            ranges.append((name, range_bound(iso, end=False)))
+        except (ValueError, OverflowError):
+            continue
+    return ranges
+
+
 FACET_STATUSES = ("delivered", "deferred", "bounced", "rejected", "spam", "discarded")
 FACET_DIRECTIONS = ("inbound", "outbound", "internal")
 
@@ -389,15 +406,7 @@ def get_message_facets(
             undated = dict(search=search, sender=sender, recipient=recipient, user=user, ip=ip, exact=exact,
                            address=address, domain=domain, exact_ip=exact_ip)
             by_time = {"all": _count_messages(_filtered_messages_query(db, direction=direction, status=status, **undated))}
-            for item in since[:8]:
-                name, _, iso = item.partition(':')
-                if not re.fullmatch(r'[a-z0-9]{1,16}', name):
-                    continue
-                try:
-                    # An instant, or a date: the start of that day in the app's time zone
-                    start = range_bound(iso, end=False)
-                except ValueError:
-                    continue
+            for name, start in since_ranges(since):
                 by_time[name] = _count_messages(_filtered_messages_query(db, direction=direction, status=status, start_date=start, **undated))
             result["time"] = by_time
         return result
@@ -678,14 +687,7 @@ def get_messages_without_message_id(
         if since:
             # The Time facets of the Messages page, for this list
             by_time = {"all": no_message_id.count(db, search=filters["search"])}
-            for item in since[:8]:
-                name, _, iso = item.partition(":")
-                if not re.fullmatch(r"[a-z0-9]{1,16}", name):
-                    continue
-                try:
-                    start = range_bound(iso, end=False)
-                except ValueError:
-                    continue
+            for name, start in since_ranges(since):
                 by_time[name] = no_message_id.count(db, start=start, search=filters["search"])
             result["time"] = by_time
         return result
