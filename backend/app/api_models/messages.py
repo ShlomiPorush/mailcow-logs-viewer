@@ -98,6 +98,7 @@ class NoMessageIdListResponse(Fixed):
     total: int = Field(description="Messages matching the filters")
     data: List[NoMessageIdRow]
     next_cursor: Optional[str] = Field(description="Pass as `cursor` for the next page; null on the last page")
+    time: Optional[Dict[str, int]] = Field(None, description="With since: an all count and one count per valid range")
 
 
 class RelatedDelivery(Fixed):
@@ -186,6 +187,11 @@ class PostfixClient(Fixed):
     ip: Optional[str]
     host: Optional[str] = Field(description="The client's name as Postfix resolved it, `unknown` without one")
     user: Optional[str] = Field(description="The signed-in user, when the client logged in")
+    country_code: Optional[str] = Field(None, description="Where the address is (MaxMind GeoIP), null without GeoIP")
+    country_name: Optional[str] = None
+    city: Optional[str] = None
+    asn: Optional[str] = None
+    asn_org: Optional[str] = None
 
 
 class MessageDetailsResponse(Fixed):

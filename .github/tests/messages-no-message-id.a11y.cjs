@@ -52,7 +52,8 @@ function page() {
         authenticatedFetch = async url => {
             asked.push(url);
             const json = url.startsWith('/api/messages/without-message-id')
-                ? { total: noidTotal, data: noidTotal ? [${JSON.stringify(NOID)}] : [], next_cursor: null }
+                ? { total: noidTotal, data: noidTotal ? [${JSON.stringify(NOID)}] : [], next_cursor: null,
+                    ...(url.includes('since=') ? { time: { all: noidTotal + 4, today: 1, '7days': noidTotal } } : {}) }
                 : url.startsWith('/api/messages/facets') ? { status: { all: 1 }, direction: { all: 1 } }
                 : url.startsWith('/api/messages/new') ? { count: 0, watermark: 9 }
                 : { total: 1, data: [${JSON.stringify(ROW)}], next_cursor: null, watermark: 9 };
@@ -73,7 +74,7 @@ test('the summary line counts the messages without a Message-ID of the time rang
     await p.settle(); await p.settle();
     const link = p.$('#messages-noid');
     assert.ok(!link.classList.contains('hidden'));
-    assert.equal(link.textContent, '3 more without a Message-ID');
+    assert.equal(link.textContent, '+ 3 unlinked messages');
     const count = p.asked().find(url => url.startsWith('/api/messages/without-message-id'));
     assert.equal(params(count).get('limit'), '1');
     assert.equal(params(count).get('search'), 'scanner');
@@ -109,11 +110,15 @@ test('the link shows them in the list, with only the filters that apply, and bac
     assert.ok(list.every(url => url.startsWith('/api/messages/without-message-id')), list.join(', '));
     assert.equal(params(list[0]).get('search'), 'scanner');
     assert.equal(params(list[0]).get('sender'), null);
-    assert.equal(p.$('#messages-count').textContent, '3 messages without a Message-ID');
+    assert.equal(p.$('#messages-count').textContent, '3 unlinked messages');
     const row = p.$('.ui-msg-item[data-key="noid-41"]');
     assert.ok(row, 'the row is drawn by the Messages row');
     assert.match(row.textContent, /No subject/);
-    assert.equal(p.$('#messages-noid').textContent, 'Show all messages');
+    assert.equal(p.$('#messages-noid').textContent, 'Back to main list');
+    // The time presets count this list
+    const counts = Object.fromEntries([...p.w.document.querySelectorAll('.ui-facets .messages-date-preset-btn')]
+        .map(btn => [btn.dataset.preset, btn.querySelector('small').textContent]));
+    assert.equal(JSON.stringify(counts), JSON.stringify({ '': '7', today: '1', '7days': '3', '30days': '', '90days': '' }));
 
     // A filter the list ignores cannot come back through Apply
     p.$('#messages-filter-ip').value = '192.0.2.1';
@@ -130,7 +135,7 @@ test('the link shows them in the list, with only the filters that apply, and bac
     await p.settle(); await p.settle();
     assert.ok(!page_.classList.contains('is-noid'));
     assert.ok(p.asked().some(url => url.startsWith('/api/messages?')));
-    assert.equal(p.$('#messages-noid').textContent, '3 more without a Message-ID');
+    assert.equal(p.$('#messages-noid').textContent, '+ 3 unlinked messages');
 });
 
 test('the auto refresh counts them again, and a failed count keeps the last one', async () => {
@@ -143,12 +148,12 @@ test('the auto refresh counts them again, and a failed count keeps the last one'
     p.run('noidTotal = 1; messagesAtNewEdge = () => false');
     await p.w.smartRefreshMessages();
     await p.settle(); await p.settle();
-    assert.equal(p.$('#messages-noid').textContent, '1 more without a Message-ID');
+    assert.equal(p.$('#messages-noid').textContent, '+ 1 unlinked message');
     p.run(`const answer = authenticatedFetch;
         authenticatedFetch = async url => url.startsWith('/api/messages/without-message-id') ? { ok: false, status: 500, json: async () => ({}) } : answer(url);`);
     await p.w.smartRefreshMessages();
     await p.settle(); await p.settle();
-    assert.equal(p.$('#messages-noid').textContent, '1 more without a Message-ID');
+    assert.equal(p.$('#messages-noid').textContent, '+ 1 unlinked message');
 });
 
 test('the summary line with the link has no accessibility violations', async () => {
@@ -199,7 +204,7 @@ test('a redraw of the list by the auto refresh does not drop the count', async (
     await p.w.smartRefreshMessages();
     await new Promise(resolve => p.w.setTimeout(resolve, 60));
     await p.settle();
-    assert.equal(p.$('#messages-noid').textContent, '2 more without a Message-ID');
+    assert.equal(p.$('#messages-noid').textContent, '+ 2 unlinked messages');
 });
 
 test('the answer for a message opened before another one is not shown', async () => {
@@ -236,4 +241,33 @@ test('the answer for a message opened before another one is not shown', async ()
     await third;
     assert.doesNotMatch(w.document.getElementById('message-modal-content').textContent, /Failed to load/);
     assert.match(w.document.getElementById('message-modal-header').textContent, /fourth@example\.com/);
+});
+
+test('the reading pane shows where the client is and no Spam Analysis tab', async () => {
+    const dom = new JSDOM(`<!doctype html><html lang="en"><head><title>t</title></head><body>
+        <div id="message-modal" class="hidden"><div role="tablist"><button id="modal-tab-overview"></button><button id="modal-tab-spam"></button><button id="modal-tab-netfilter"></button></div>
+        <div id="message-modal-header"></div><div id="message-modal-body"><div id="message-modal-content"></div></div></div>
+        </body></html>`, { runScripts: 'dangerously', pretendToBeVisual: true, url: 'http://localhost/messages' });
+    const w = dom.window;
+    w.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} });
+    const run = source => { const s = w.document.createElement('script'); s.textContent = source; w.document.head.appendChild(s); };
+    [read('utils.js'), read('message-details.js')].forEach(run);
+    const details = (key, client) => ({ correlation_key: key, sender: 'scanner@example.com', recipient: 'office@example.com',
+        recipients: ['office@example.com'], recipient_count: 1, subject: null, final_status: 'delivered', is_complete: true,
+        first_seen: '2026-10-24T10:00:00Z', related_deliveries: [], rspamd: null, dovecot: null, postfix: [], postfix_by_recipient: {},
+        netfilter: [], client, queue_id_reused: false });
+    run(`window.disabledFeatures = []; var answer = null; authenticatedFetch = async () => ({ ok: true, json: async () => answer });
+        if (typeof getFlagUrl === "undefined") window.getFlagUrl = code => "/static/flags/" + code + ".png";`);
+    w.answer = details('noid-5', { ip: '192.0.2.40', host: 'unknown', user: 'scanner@example.com', country_code: 'NL',
+        country_name: 'Netherlands', city: 'Amsterdam', asn: 'AS64500', asn_org: 'Example Hosting B.V.' });
+    await w.viewMessageDetails('noid-5');
+    const content = w.document.getElementById('message-modal-content').textContent;
+    assert.match(content, /192\.0\.2\.40/);
+    assert.match(content, /Netherlands, Amsterdam/);
+    assert.match(content, /Example Hosting B\.V\./);
+    assert.equal(w.document.getElementById('modal-tab-spam').style.display, 'none');
+    // A scanned message keeps its tab
+    w.answer = { ...details('k1', null), message_id: '<m1@example.com>', rspamd: { score: 1, required_score: 15, action: 'no action', is_spam: false, symbols: {} } };
+    await w.viewMessageDetails('k1');
+    assert.equal(w.document.getElementById('modal-tab-spam').style.display, '');
 });

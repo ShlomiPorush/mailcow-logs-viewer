@@ -119,7 +119,7 @@ def test_an_empty_message_id_is_listed_from_its_postfix_lines(api):
     assert details.status_code == 200, details.text
     data = details.json()
     assert data['rspamd'] is None and data['dovecot'] is None and data['related_deliveries'] == []
-    assert data['client'] == {'ip': '192.0.2.40', 'host': 'unknown', 'user': SCANNER}
+    assert {k: data['client'][k] for k in ('ip', 'host', 'user')} == {'ip': '192.0.2.40', 'host': 'unknown', 'user': SCANNER}
     assert data['recipients'] == [OFFICE] and data['final_status'] == 'delivered'
     assert len(data['postfix']) == 5
 
@@ -137,7 +137,33 @@ def test_inbound_without_login_keeps_the_client_address(api):
     row = _by_queue(_list(api))[_q(6)]
     assert (row['ip'], row['user']) == ('192.0.2.7', None)
     details = api.get(f"/api/message/{row['correlation_key']}/details").json()
-    assert details['client'] == {'ip': '192.0.2.7', 'host': 'mx.example.org', 'user': None}
+    assert {k: details['client'][k] for k in ('ip', 'host', 'user')} == {'ip': '192.0.2.7', 'host': 'mx.example.org', 'user': None}
+
+
+def test_the_client_address_is_located_with_geoip(api, monkeypatch):
+    """A scanned message has its client's place from Rspamd; this one is looked up when opened."""
+    from app.services import geoip_service
+    monkeypatch.setattr(geoip_service, 'is_geoip_available', lambda: True)
+    monkeypatch.setattr(geoip_service, 'lookup_ip', lambda ip: {
+        'country_code': 'NL', 'country_name': 'Netherlands', 'city': 'Amsterdam', 'asn': 'AS64500',
+        'asn_org': 'Example Hosting B.V.'} if ip == '192.0.2.40' else {})
+    _ingest(*_message(_q(21), NOW))
+    key = _by_queue(_list(api))[_q(21)]['correlation_key']
+    client = api.get(f'/api/message/{key}/details').json()['client']
+    assert (client['country_code'], client['city'], client['asn_org']) == ('NL', 'Amsterdam', 'Example Hosting B.V.')
+    # Without GeoIP the place is unknown, not an error
+    monkeypatch.setattr(geoip_service, 'is_geoip_available', lambda: False)
+    assert api.get(f'/api/message/{key}/details').json()['client']['country_code'] is None
+
+
+def test_the_time_ranges_are_counted_for_this_list(api):
+    _ingest(*_message(_q(22), NOW), *_message(_q(23), NOW - timedelta(days=3)))
+    since = [f'recent:{(NOW - timedelta(days=1)).isoformat()}', f'week:{(NOW - timedelta(days=7)).isoformat()}', 'bad name:x']
+    body = api.get('/api/messages/without-message-id', params={'search': MARK, 'limit': 1, 'since': since,
+                                                                'start_date': NOW.isoformat()}).json()
+    # The search applies to the counts, the chosen range does not
+    assert body['time'] == {'all': 2, 'recent': 1, 'week': 2}
+    assert 'time' not in _list(api) or _list(api)['time'] is None
 
 
 def test_a_queue_id_used_again_close_by_shows_the_cleanup_line_only(api):

@@ -642,6 +642,8 @@ def get_messages_without_message_id(
     end_date: Optional[RangeEnd] = Query(None, description="Received at or before"),
     order: str = Query("desc", pattern="^(asc|desc)$", description="By time received: desc newest first, asc oldest first"),
     cursor: Optional[str] = Query(None, max_length=80, description="The next_cursor of the page before"),
+    since: List[str] = Query([], description="Time ranges to count as well, as in GET /api/messages/facets "
+                                             "(name:start); the search applies, start_date and end_date do not"),
     db: Session = Depends(get_db)
 ):
     """
@@ -668,11 +670,25 @@ def get_messages_without_message_id(
         rows = [no_message_id.summary(anchor, instances[anchor.id][1], instances[anchor.id][0], format_datetime_utc)
                 for anchor, _ in found]
         last = found[-1][0] if found else None
-        return {
+        result = {
             "total": total,
             "data": rows,
             "next_cursor": f"{last.time.isoformat()}|{last.id}" if more and last else None,
         }
+        if since:
+            # The Time facets of the Messages page, for this list
+            by_time = {"all": no_message_id.count(db, search=filters["search"])}
+            for item in since[:8]:
+                name, _, iso = item.partition(":")
+                if not re.fullmatch(r"[a-z0-9]{1,16}", name):
+                    continue
+                try:
+                    start = range_bound(iso, end=False)
+                except ValueError:
+                    continue
+                by_time[name] = no_message_id.count(db, start=start, search=filters["search"])
+            result["time"] = by_time
+        return result
     except Exception as e:
         logger.error(f"Error fetching messages without a Message-ID: {e}")
         raise internal_error(e)
@@ -691,7 +707,7 @@ def _no_message_id_details(db: Session, key: str) -> dict:
         if _postfix_line_identity(log) not in seen:
             seen.add(_postfix_line_identity(log))
             postfix_logs.append(log)
-    who = None if reused else no_message_id.client(postfix_logs)
+    who = None if reused else no_message_id.located(no_message_id.client(postfix_logs))
     recipients = no_message_id.recipients(postfix_logs)
     return {
         "correlation_key": row["correlation_key"],

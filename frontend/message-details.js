@@ -153,6 +153,9 @@ async function viewMessageDetails(correlationKey) {
         if (netfilterTab) {
             netfilterTab.style.display = window.disabledFeatures.includes('netfilter') ? 'none' : '';
         }
+        // A message without a Message-ID has no spam scan to show
+        const spamTab = document.getElementById('modal-tab-spam');
+        if (spamTab) spamTab.style.display = mdNoMessageId(data) ? 'none' : '';
 
         document.querySelectorAll('[id^="modal-tab-"]').forEach(btn => {
             btn.classList.remove('active');
@@ -1106,10 +1109,12 @@ function renderOverviewTab(content, data) {
     const clientIp = rspamd.ip || client.ip;
     const clientUser = rspamd.user || client.user;
     // Where the client address is from: flag, country and city, network owner
-    const geoNote = rspamd.country_code ? [
-        getFlagUrl(rspamd.country_code, '16x12') ? `<img src="${getFlagUrl(rspamd.country_code, '16x12')}" alt="" width="16" height="12" onerror="this.style.display='none'">` : '',
-        escapeHtml([rspamd.country_name, rspamd.city].filter(Boolean).join(', ')),
-        rspamd.asn_org ? `<span class="ui-muted">· ${escapeHtml(rspamd.asn_org)}</span>` : ''
+    // (from Rspamd, or for a message without a scan looked up when it is opened)
+    const place = rspamd.country_code ? rspamd : client;
+    const geoNote = place.country_code ? [
+        getFlagUrl(place.country_code, '16x12') ? `<img src="${getFlagUrl(place.country_code, '16x12')}" alt="" width="16" height="12" onerror="this.style.display='none'">` : '',
+        escapeHtml([place.country_name, place.city].filter(Boolean).join(', ')),
+        place.asn_org ? `<span class="ui-muted">· ${escapeHtml(place.asn_org)}</span>` : ''
     ].filter(Boolean).join(' ') : '';
     // Who sent it first; the IDs, which are only copied, last
     const identifiers = [
@@ -1118,7 +1123,7 @@ function renderOverviewTab(content, data) {
             clientUser && clientUser !== 'unknown' ? uiEntity('address', clientUser) : '<span class="ui-muted">Unknown user</span>', rspamd.has_auth ? 'Verified (MAILCOW_AUTH)' : '') : '',
         data.queue_id ? mdIdRow('Queue ID', `<span class="ui-mono">${copyableText(data.queue_id)}</span>`) : '',
         data.message_id ? mdIdRow('Message ID', `<span class="ui-mono">${copyableText(data.message_id)}</span>`) : '',
-        mdNoMessageId(data) ? mdIdRow('Message ID', '<span class="ui-muted">None</span>', 'The sender gave it no Message-ID, so it has no subject and no spam scan') : '',
+        mdNoMessageId(data) ? mdIdRow('Message ID', '<span class="ui-muted">Missing</span>', 'Without a Message-ID it could not be linked to its spam scan. Only what Postfix logged is shown') : '',
 
     ].join('');
 
@@ -1308,7 +1313,7 @@ function renderSpamTab(content, data) {
     if (!data.rspamd) {
         content.innerHTML = `
             <div class="ui-empty">
-                <b>${mdNoMessageId(data) ? 'No spam analysis: without a Message-ID, its spam scan cannot be found' : 'No spam analysis data available'}</b>
+                <b>No spam analysis data available</b>
             </div>
         `;
         return;

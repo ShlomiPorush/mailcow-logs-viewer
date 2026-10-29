@@ -200,6 +200,19 @@ def client(lines) -> Optional[dict]:
     return None
 
 
+GEO_KEYS = ("country_code", "country_name", "city", "asn", "asn_org")
+
+
+def located(who: Optional[dict]) -> Optional[dict]:
+    """The client with where its address is (MaxMind), as a scanned message has
+    it from Rspamd. Looked up when read, so the GeoIP database in use applies."""
+    if not who:
+        return None
+    from . import geoip_service
+    geo = geoip_service.lookup_ip(who["ip"]) if who.get("ip") and geoip_service.is_geoip_available() else {}
+    return {**who, **{key: geo.get(key) for key in GEO_KEYS}}
+
+
 def sender(lines) -> Optional[str]:
     """The envelope sender, from the qmgr "from=" line."""
     for line in lines:

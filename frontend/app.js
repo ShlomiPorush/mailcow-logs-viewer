@@ -1536,7 +1536,7 @@ function showMessagesFirstPage(container, data) {
 function setMessagesCount(total) {
     const countEl = document.getElementById('messages-count');
     if (countEl) countEl.textContent = total === null ? '' : messagesNoId
-        ? uiCountLabel(total || 0, 'message without a Message-ID', 'messages without a Message-ID')
+        ? uiCountLabel(total || 0, 'unlinked message', 'unlinked messages')
         : uiCountLabel(total || 0, 'message', 'messages');
 }
 
@@ -1677,8 +1677,8 @@ function renderMessagesNoId() {
     const link = document.getElementById('messages-noid');
     if (!link) return;
     const n = messagesNoIdCount;
-    link.textContent = messagesNoId ? 'Show all messages' : `${n} more without a Message-ID`;
-    link.title = messagesNoId ? '' : 'Messages that arrived without a Message-ID are not in this list. Show them';
+    link.textContent = messagesNoId ? 'Back to main list' : `+ ${uiCountLabel(n, 'unlinked message', 'unlinked messages')}`;
+    link.title = messagesNoId ? '' : 'Messages without a usable Message-ID could not be linked to their spam scan and are not in this list. Show them';
     link.classList.toggle('hidden', !messagesNoId && !n);
 }
 
@@ -5293,11 +5293,29 @@ async function loadMessageFacets(filters, gen = messagesGen) {
     if (timeButton) timeButton.classList.toggle('is-set', !!(filters.start_date || filters.end_date));
 }
 
-// Without a Message-ID: no outcome or direction to count, and the time counts are the list's
-function messagesNoIdFacets(filters) {
-    document.querySelectorAll('.messages-date-preset-btn small').forEach(small => { small.textContent = ''; });
+// Without a Message-ID: no outcome or direction to count; the time presets count this list
+async function messagesNoIdFacets(filters, gen = messagesGen) {
+    const presets = document.querySelectorAll('.messages-date-preset-btn');
+    const show = time => presets.forEach(btn => {
+        const count = time ? time[btn.dataset.preset || 'all'] : undefined;
+        let small = btn.querySelector('small');
+        if (!small) { small = document.createElement('small'); btn.appendChild(small); }
+        small.textContent = count === undefined ? '' : String(count);
+    });
+    // The whole list's counts do not stay while these come
+    show(null);
     const timeButton = document.getElementById('messages-time-pick');
     if (timeButton) timeButton.classList.toggle('is-set', !!(filters.start_date || filters.end_date));
+    const params = new URLSearchParams({ limit: 1 });
+    if (filters.search) params.append('search', filters.search);
+    for (const preset of ['today', '7days', '30days', '90days']) params.append('since', `${preset}:${messagesPresetStart(preset)}`);
+    try {
+        const response = await messagesFetch(`/api/messages/without-message-id?${params}`);
+        const data = response.ok ? await response.json() : null;
+        if (gen === messagesGen && messagesNoId && data) show(data.time);
+    } catch (error) {
+        if (error.name !== 'AbortError') console.warn('Failed to count messages without a Message-ID by time:', error);
+    }
 }
 
 // After the list renders: keep the open message marked, and on wide screens
@@ -5323,7 +5341,7 @@ async function loadMessages({ quiet = false, rows = 50, toEnd = false, applyIf =
     messagesFullLoad = true;
     if (!quiet) container.innerHTML = '<div class="ui-loading" role="status"><div class="loading"></div><p>Loading...</p></div>';
     const filters = currentFilters.messages || {};
-    if (messagesNoId) messagesNoIdFacets(filters);
+    if (messagesNoId) messagesNoIdFacets(filters, gen);
     else loadMessageFacets(filters, gen);
     updateMessagesFilterState();
     renderMessagesNoId();
