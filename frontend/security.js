@@ -443,7 +443,7 @@ function securityRow(a) {
         <div class="ui-sec-row${open ? ' is-open' : ''}" onclick="securityRowClick(event, '${escapeJsArg(a.ip)}')" role="button" tabindex="0"
              onkeydown="if ((event.key === 'Enter' || event.key === ' ') && event.target === this) { event.preventDefault(); securityToggleRow('${escapeJsArg(a.ip)}'); }" aria-expanded="${open}">
             <div class="ui-sec-main">
-                <div class="ui-sec-top">${securityPlaceFlag(a.countryCode, a.country)}<b class="ui-mono">${copyableText(a.ip)}</b>${securityAttempts(a)}${d.tag}${where ? `<small class="ui-muted ui-sec-where">${where}</small>` : ''}</div>
+                <div class="ui-sec-top">${securityPlaceFlag(a.countryCode, a.country)}<b class="ui-mono">${uiEntity('ip', a.ip, { mono: true })}</b>${securityAttempts(a)}${d.tag}${where ? `<small class="ui-muted ui-sec-where">${where}</small>` : ''}</div>
                 <p class="ui-sec-why">${d.why}</p>
             </div>
             <div class="ui-sec-acts">${d.acts}</div>
@@ -461,7 +461,7 @@ function renderSecuritySheet(addresses) {
     const d = securityDescribe(a);
     uiSheetShow('security-sheet', {
         label: a.ip,
-        head: `<div class="ui-sec-top"><b class="ui-mono">${copyableText(a.ip)}</b>${securityAttempts(a)}${d.tag}</div>`,
+        head: `<div class="ui-sec-top"><b class="ui-mono">${uiEntity('ip', a.ip, { mono: true })}</b>${securityAttempts(a)}${d.tag}</div>`,
         body: `<p class="ui-sec-why">${d.why}</p>${d.acts ? `<div class="ui-sec-acts">${d.acts}</div>` : ''}${securityDetail(a)}`,
         onClose: securityCloseSheet
     });
@@ -494,7 +494,7 @@ function securityDetail(a) {
                 ${fact('Failed logins', securityFailedText(a, lines))}
                 ${a.hits.length ? fact('Caught by', securityRuleTags(a.hits)) : ''}
             </div>
-            ${a.users.length ? `<div><h4>Accounts it tried</h4><div class="ui-chip-row">${a.users.map(u => `<span class="ui-sec-chip">${copyableText(u)}</span>`).join('')}</div></div>` : ''}
+            ${a.users.length ? `<div><h4>Accounts it tried</h4><div class="ui-chip-row">${a.users.map(u => `<span class="ui-sec-chip">${uiEntity('address', u)}</span>`).join('')}</div></div>` : ''}
             ${hitsText ? `<div><h4>What the rules said</h4>${hitsText}</div>` : ''}
             <div><h4>Raw log${Array.isArray(lines) && lines.length ? ` <span class="ui-muted">${lines.length} newest lines</span>` : ''}</h4>${raw}
                 <div class="ui-sec-more"><button type="button" class="ui-btn ui-btn-sm" onclick="securityOpenEvents('${escapeJsArg(a.ip)}')">All events of this address</button></div></div>
@@ -503,7 +503,7 @@ function securityDetail(a) {
 
 // A click on the row opens it; a click on a button, a link or copyable text inside does not
 function securityRowClick(event, ip) {
-    if (event.target.closest('button, a, input, .copyable, .ui-sec-detail') || uiRowHeld(event)) return;
+    if (event.target.closest('button, a, input, .copyable, .ui-ent, .ui-sec-detail') || uiRowHeld(event)) return;
     securityToggleRow(ip);
 }
 
@@ -635,7 +635,7 @@ function securityHistoryRows() {
     return rows.map(h => `
         <div class="ui-sec-row is-static">
             <div class="ui-sec-main">
-                <div class="ui-sec-top">${securityPlaceFlag(h.country_code, h.country_name)}<b class="ui-mono">${copyableText(h.ip)}</b>${protectionStatus(h)}<span class="ui-sec-by">${escapeHtml(securityRuleName(h.rule))}</span>
+                <div class="ui-sec-top">${securityPlaceFlag(h.country_code, h.country_name)}<b class="ui-mono">${uiEntity('ip', h.ip, { mono: true })}</b>${protectionStatus(h)}<span class="ui-sec-by">${escapeHtml(securityRuleName(h.rule))}</span>
                     <small class="ui-muted ui-sec-where">${h.country_name ? `${escapeHtml(h.country_name)} · ` : ''}${formatAgo(h.ended_at || h.last_seen)}</small></div>
                 <p class="ui-sec-why">${escapeHtml(h.reason || '')}</p>
             </div>
@@ -842,7 +842,7 @@ function renderSecurityLists() {
             <button type="submit" class="ui-btn">Add</button>
         </form>` : '';
     const row = (entry, note, action) => `
-        <div class="ui-sec-lrow"><b class="ui-mono">${copyableText(entry)}</b><span class="ui-sec-why">${note}</span><span class="ui-sec-acts">${action}</span></div>`;
+        <div class="ui-sec-lrow"><b class="ui-mono">${uiEntity('ip', entry, { mono: true })}</b><span class="ui-sec-why">${note}</span><span class="ui-sec-acts">${action}</span></div>`;
     // A single IPv6 address an earlier version wrote as a /32 network covers all of it
     const legacyRow = (list, entry) => {
         const old = fail2banLegacy.find(l => l.list === list && l.entry === entry);

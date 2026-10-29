@@ -223,7 +223,7 @@ test('the Logs tab lists the recipients, problems first, and shows one recipient
     assert.ok(ranks[0] < ranks[ranks.length - 1], 'a problem leads, a delivery trails');
     assert.doesNotMatch(timeline.split('id="log-timeline-entries"')[1], /a@example\.net/, 'the lines, the picker lists everyone');
     assert.match(timeline, /is-shared[\s\S]*All recipients/);
-    assert.match(h.element('md-rcpt-results').innerHTML, /aria-pressed="true" title="Show the logs of b@example\.net"/);
+    assert.match(h.element('md-rcpt-results').innerHTML, /aria-pressed="true" aria-label="[^"]+, show the logs of b@example\.net"/);
     // The same row again shows every recipient
     h.context.pickMessageRecipient(b, true);
     assert.match(h.element('md-timeline-slot').innerHTML, /5 entries/);
@@ -409,8 +409,10 @@ test('aliases and their mailboxes keep each delivery\'s own Dovecot verdict', as
         h.context.pickMessageRecipient(i);
         assert.deepEqual(timelineLines(h.element('md-timeline-slot').innerHTML), { all: 2, shared: 0 }, alias);
     }
-    // The address is copied with a click, as before
-    assert.match(row('team@example.com'), /copyToClipboard\('team@example\.com', event\)/);
+    // The address opens its card on a click and copies from the icon beside it
+    assert.match(row('team@example.com'), /<button type="button" class="ui-ent-btn" data-entity-kind="address" data-entity-value="team@example\.com"/);
+    assert.match(row('team@example.com'), /data-entity-copy="team@example\.com"/);
+    assert.doesNotMatch(row('team@example.com'), /onclick="copyToClipboard/);
 });
 
 test('a mailbox Rspamd named stays a recipient though an alias also reached it', async () => {
@@ -538,7 +540,10 @@ test('a relay tooltip fits the width it has, shows on a tap or the focus, and a 
     const hovered = host({ host: 'mx.example.net', ip: '192.0.2.9' }, 100, 100);
     h.context.mdRelayTipTap({ pointerType: 'mouse' }, hovered);
     assert.equal(clickOn(hovered, 'mouse'), false, 'a mouse click opens the row');
-    // A row fits its relay's tooltip when it takes the focus (after a resize too)
+    // A row fits its relay's tooltip when its button takes the focus (after a resize too);
+    // a click on the row, not on the tooltip, picks it
     await h.context.viewMessageDetails('example-key');
-    assert.match(h.context.renderRecipientRows(), /onfocus="mdRelayTip\(this\)" onclick="if \(!uiRowHeld\(event\) && !mdRelayTapped\(event\)\) pickMessageRecipient/);
+    const rows = h.context.renderRecipientRows();
+    assert.match(rows, /onfocus="mdRelayTip\(this\.parentElement\)" class="ui-row-open/);
+    assert.match(rows, /<div class="ui-md-rrow" title="[^"]*" onclick="if \(!uiRowHeld\(event\) && !mdRelayTapped\(event\)\) pickMessageRecipient/);
 });

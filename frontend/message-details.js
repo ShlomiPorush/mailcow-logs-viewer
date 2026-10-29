@@ -19,6 +19,9 @@ let messageModalHome = null;
 function messageReaderSlot() {
     if (typeof window.matchMedia !== 'function' || !window.matchMedia('(min-width: 1000px)').matches) return null;
     if (typeof currentTab === 'undefined' || currentTab !== 'messages') return null;
+    // A message opened from an entity card comes over it, not into the pane under it
+    const card = document.getElementById('entity-card');
+    if (card && !card.classList.contains('hidden')) return null;
     return document.getElementById('messages-reader');
 }
 
@@ -413,9 +416,9 @@ function renderRelatedDeliveries(data) {
             <div class="ui-md-legs hidden" id="delivery-journey-legs">
                 ${legs.map((leg, i) => `
                     <div class="ui-md-leg${leg.current ? ' is-current' : ''}"
-                        ${leg.current ? 'aria-current="true"' : `role="button" tabindex="0" data-row-open onclick="if (!uiRowHeld(event)) viewMessageDetails('${escapeJsArg(leg.correlation_key)}')"`}>
-                        <span class="ui-muted">${i + 1}.</span>
-                        <span class="ui-md-leg-who">${escapeHtml(leg.sender || '-')} =&gt; ${escapeHtml(leg.recipient || '-')}</span>
+                        ${leg.current ? 'aria-current="true"' : `onclick="if (!uiRowHeld(event)) viewMessageDetails('${escapeJsArg(leg.correlation_key)}')"`}>
+                        ${leg.current ? `<span class="ui-muted">${i + 1}.</span>` : `<button type="button" class="ui-row-open ui-muted" aria-label="Open delivery ${i + 1}: ${escapeHtml(leg.sender || '-')} to ${escapeHtml(leg.recipient || '-')}">${i + 1}.</button>`}
+                        <span class="ui-md-leg-who">${uiEntity('address', leg.sender || '-', { plain: true })} =&gt; ${uiEntity('address', leg.recipient || '-', { plain: true })}</span>
                         ${leg.current ? '<span class="ui-tag ui-tag-info">viewing</span>' : ''}
                         <span class="ui-md-leg-meta">
                             <span class="ui-mono ui-muted ui-md-leg-time">${formatTime(leg.first_seen)}</span>
@@ -833,8 +836,8 @@ function renderRecipientRows() {
         const sub = !r.last ? `<span>${r.status === 'none' ? 'No delivery logged yet' : 'No delivery attempt logged'}</span>`
             : `${host ? `<span class="ui-md-rrow-via">via ${renderRelay(r.relay, false)}</span>` : `<span>${escapeHtml(info.word)}</span>`}${r.delivered.length ? `<span>· to <bdi>${escapeHtml(r.delivered.join(', '))}</bdi></span>` : ''}${r.attempts > 1 ? `<span>· ${r.attempts} attempts</span>` : ''}${r.last.time ? `<span>· ${escapeHtml(formatTime(r.last.time))}</span>` : ''}`;
         return `
-            <div class="ui-md-rrow" role="button" tabindex="0" data-row-open data-md-focus="row-${index}" aria-pressed="${mdView.picked === index}" title="Show the logs of ${escapeHtml(r.address)}" onfocus="mdRelayTip(this)" onclick="if (!uiRowHeld(event) && !mdRelayTapped(event)) pickMessageRecipient(${index}, true)">
-                <span class="ui-md-rrow-addr">${copyableText(r.address)}</span>${uiTag(info.word, info.tone)}
+            <div class="ui-md-rrow" title="Show the logs of ${escapeHtml(r.address)}" onclick="if (!uiRowHeld(event) && !mdRelayTapped(event)) pickMessageRecipient(${index}, true)">
+                <span class="ui-md-rrow-addr">${uiEntity('address', r.address)}</span><button type="button" data-md-focus="row-${index}" aria-pressed="${mdView.picked === index}" aria-label="${escapeHtml(info.word)}, show the logs of ${escapeHtml(r.address)}" onfocus="mdRelayTip(this.parentElement)" class="ui-row-open ui-tag${info.tone ? ` ui-tag-${info.tone}` : ''}">${escapeHtml(info.word)}</button>
                 <span class="ui-md-rrow-sub">${sub}</span>
                 ${r.reason ? `<span class="ui-md-rrow-why ${info.tone && info.tone !== 'ok' ? `ui-text-${info.tone}` : 'ui-muted'}">${escapeHtml(r.reason)}</span>` : ''}
             </div>`;
@@ -894,8 +897,8 @@ function renderMessageHeader(data) {
     // Each status but Delivered, as a count that opens those recipients
     const tally = counted ? mdStatusList(all).filter(s => s.status !== 'sent') : [];
     const toHtml = many
-        ? `<div class="ui-md-to"><span class="ui-md-to-list">${all.slice(0, 12).map(r => `<bdi>${escapeHtml(r.address)}</bdi>`).join(', ')}</span><button type="button" class="ui-md-link" onclick="showMessageRecipients('')">All ${all.length} recipients</button></div>`
-        : copyableText(recipients[0] || '-');
+        ? `<div class="ui-md-to"><span class="ui-md-to-list">${all.slice(0, 12).map(r => uiEntity('address', r.address, { plain: true })).join(', ')}</span><button type="button" class="ui-md-link" onclick="showMessageRecipients('')">All ${all.length} recipients</button></div>`
+        : uiEntity('address', recipients[0] || '-');
     const facts = [];
     if (data.rspamd && data.rspamd.size) facts.push(formatSize(data.rspamd.size));
     if (data.direction) facts.push(data.direction);
@@ -912,7 +915,7 @@ function renderMessageHeader(data) {
     header.innerHTML = `
         <h2 class="ui-md-subject" dir="auto" title="${escapeHtml(hasSubject ? data.subject : 'No subject')}">${escapeHtml(hasSubject ? data.subject : 'No subject')}</h2>
         <div class="ui-md-who">
-            <span>From</span><div>${copyableText(data.sender || '-')}</div>
+            <span>From</span><div>${uiEntity('address', data.sender || '-')}</div>
             <span>${many ? `To (${all.length})` : 'To'}</span><div>${toHtml}</div>
             <span>When</span><div>${formatTime(data.first_seen)}</div>
         </div>
@@ -943,8 +946,8 @@ function buildDeliverySteps(data) {
             const ip = (message.match(/client=.*?\[([^\]]+)\]/) || [])[1];
             const user = (message.match(/sasl_username=(\S+)/) || [])[1];
             add(log.time, 'ok', ip ? `Received from ${ip}` : 'Received', `${program}${user ? `, authenticated as ${user}` : ''}`, {
-                titleHtml: ip ? `Received from ${copyableText(ip)}` : '',
-                detailHtml: `${escapeHtml(program)}${user ? `, authenticated as ${copyableText(user)}` : ''}`
+                titleHtml: ip ? `Received from ${uiEntity('ip', ip)}` : '',
+                detailHtml: `${escapeHtml(program)}${user ? `, authenticated as ${uiEntity('address', user)}` : ''}`
             });
         } else if (/cleanup/.test(program) && /message-id=/.test(message)) {
             const qid = log.queue_id || data.queue_id;
@@ -952,7 +955,7 @@ function buildDeliverySteps(data) {
         } else if (log.status) {
             const target = relayHost(log.relay) || log.recipient || '';
             const detail = `status=${log.status}${log.dsn ? ` (${log.dsn})` : ''}`;
-            if (log.status === 'sent') add(log.time, 'ok', target ? `Delivered to ${target}` : 'Delivered', detail, { titleHtml: target ? `Delivered to ${copyableText(target)}` : '' });
+            if (log.status === 'sent') add(log.time, 'ok', target ? `Delivered to ${target}` : 'Delivered', detail, { titleHtml: target ? `Delivered to ${uiEntity('address', target)}` : '' });
             else if (log.status === 'deferred') add(log.time, 'warn', target ? `Deferred for ${target}` : 'Deferred', detail);
             else if (log.status === 'bounced') add(log.time, 'fail', target ? `Bounced for ${target}` : 'Bounced', detail);
             else add(log.time, 'fail', `${log.status.charAt(0).toUpperCase()}${log.status.slice(1)}`, detail);
@@ -1037,9 +1040,9 @@ function renderOverviewTab(content, data) {
     ].filter(Boolean).join(' ') : '';
     // Who sent it first; the IDs, which are only copied, last
     const identifiers = [
-        rspamd.ip ? mdIdRow('Client IP', `<span class="ui-mono">${copyableText(rspamd.ip)}</span>`, geoNote) : '',
+        rspamd.ip ? mdIdRow('Client IP', `<span class="ui-mono">${uiEntity('ip', rspamd.ip, { mono: true })}</span>`, geoNote) : '',
         (rspamd.user && rspamd.user !== 'unknown') || rspamd.has_auth ? mdIdRow('Authenticated user',
-            rspamd.user && rspamd.user !== 'unknown' ? copyableText(rspamd.user) : '<span class="ui-muted">Unknown user</span>', rspamd.has_auth ? 'Verified (MAILCOW_AUTH)' : '') : '',
+            rspamd.user && rspamd.user !== 'unknown' ? uiEntity('address', rspamd.user) : '<span class="ui-muted">Unknown user</span>', rspamd.has_auth ? 'Verified (MAILCOW_AUTH)' : '') : '',
         data.queue_id ? mdIdRow('Queue ID', `<span class="ui-mono">${copyableText(data.queue_id)}</span>`) : '',
         data.message_id ? mdIdRow('Message ID', `<span class="ui-mono">${copyableText(data.message_id)}</span>`) : '',
 
@@ -1158,7 +1161,7 @@ function renderPostfixTab(content, data) {
                         <div class="ui-md-error">
                             ${err.recipient || err.count > 1 ? `
                                 <div class="ui-md-tags">
-                                    ${err.recipient ? `<b>${escapeHtml(err.recipient)}</b>` : ''}
+                                    ${err.recipient ? `<b>${uiEntity('address', err.recipient, { plain: true })}</b>` : ''}
                                     ${err.count > 1 ? `<span class="ui-tag ui-tag-fail">${err.count} attempts</span>` : ''}
                                 </div>
                             ` : ''}
@@ -1174,9 +1177,9 @@ function renderPostfixTab(content, data) {
     if (many) {
         // The Recipients list below names them all
     } else if (recipientsFromPostfix.size > 0) {
-        toFact = mdFact(`To (${recipientsFromPostfix.size})`, recipientsFromPostfix.size === 1 ? copyableText(Array.from(recipientsFromPostfix)[0]) : `${recipientsFromPostfix.size} recipients`);
+        toFact = mdFact(`To (${recipientsFromPostfix.size})`, recipientsFromPostfix.size === 1 ? uiEntity('address', Array.from(recipientsFromPostfix)[0]) : `${recipientsFromPostfix.size} recipients`);
     } else if (data.recipients && data.recipients.length > 0) {
-        toFact = mdFact(`To (${data.recipients.length})`, data.recipients.length === 1 ? copyableText(data.recipients[0]) : `${data.recipients.length} recipients`);
+        toFact = mdFact(`To (${data.recipients.length})`, data.recipients.length === 1 ? uiEntity('address', data.recipients[0]) : `${data.recipients.length} recipients`);
     }
 
     // A message to many names its server when all its recipients went through one;
@@ -1186,7 +1189,7 @@ function renderPostfixTab(content, data) {
     const stripFacts = [
         toFact,
         finalStatus && !many ? mdFact('Final Status', uiStatusTag(finalStatus)) : '',
-        clientIp ? mdFact('Client IP', `<span class="ui-mono">${copyableText(clientIp)}</span>`) : '',
+        clientIp ? mdFact('Client IP', `<span class="ui-mono">${uiEntity('ip', clientIp, { mono: true })}</span>`) : '',
         stripRelay ? mdFact('Relay', renderRelay(stripRelay)) : '',
     ].join('');
 
@@ -1312,10 +1315,10 @@ function renderNetfilterTab(content, data) {
                     <div class="ui-md-log">
                         <div class="ui-md-log-head">
                             <span class="ui-mono ui-muted">${formatTime(log.time)}</span>
-                            <b class="ui-mono">${copyableText(log.ip)}</b>
+                            <b class="ui-mono">${uiEntity('ip', log.ip, { mono: true })}</b>
                             <span class="ui-md-log-status">${uiActionTag(log.action)}</span>
                         </div>
-                        ${log.username ? `<p>User: ${copyableText(log.username)}</p>` : ''}
+                        ${log.username ? `<p>User: ${uiEntity('address', log.username)}</p>` : ''}
                         ${log.auth_method ? `<p class="ui-muted">Method: ${escapeHtml(log.auth_method)}</p>` : ''}
                         ${log.attempts_left !== null ? `<p class="ui-muted">Attempts remaining: ${escapeHtml(String(log.attempts_left))}</p>` : ''}
                         <p class="ui-md-log-msg">${escapeHtml(log.message)}</p>

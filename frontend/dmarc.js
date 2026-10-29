@@ -953,13 +953,13 @@ async function loadSourceDetails(domain, sourceIp, updateUrl = true, quiet = fal
                 <div><small>Addresses</small><b class="is-big">${ips.length}</b></div></div></div>
             <div class="ui-dm-card"><header>What receivers saw <span class="ui-count">${rows.length}</span></header>
             ${rows.length ? `<div class="ui-dm-mlist">${rows.map(e => dmarcMRow({
-                title: `<b class="ui-mono">${escapeHtml(e.ip)}</b>`,
+                title: `<b class="ui-mono">${uiEntity('ip', e.ip, { mono: true, plain: true })}</b>`,
                 count: uiCountLabel(e.volume || 0, 'message', 'messages'),
-                sub: `From <b>${escapeHtml(e.header_from || '-')}</b>${e.envelope_from ? ` · envelope ${escapeHtml(e.envelope_from)}` : ''}`,
+                sub: `From <b>${uiEntity('domain', e.header_from || '-', { plain: true })}</b>${e.envelope_from ? ` · envelope ${uiEntity('domain', e.envelope_from, { plain: true })}` : ''}`,
                 tags: `${e.spf_aligned ? dmarcTag('ok', 'SPF aligned') : dmarcTag('fail', `SPF ${e.spf_result || 'fail'}`)}${e.dkim_aligned ? dmarcTag('ok', 'DKIM aligned') : dmarcTag('fail', `DKIM ${e.dkim_result || 'fail'}`)}`,
                 note: e.reporter ? `Reported by ${escapeHtml(e.reporter)}` : '' })).join('')}</div>
             <table class="ui-dm-tbl ui-dm-tbl-wide"><thead><tr><th>Address</th><th>From</th><th class="ui-dm-hm">Envelope from</th><th class="r">Messages</th><th>SPF</th><th>DKIM</th><th class="ui-dm-hm">Reported by</th></tr></thead><tbody>
-            ${rows.map(e => `<tr><td class="ui-mono">${escapeHtml(e.ip)}</td><td>${escapeHtml(e.header_from || '-')}</td><td class="ui-dm-hm">${escapeHtml(e.envelope_from || '-')}</td><td class="r ui-num">${dmarcNum(e.volume)}</td>
+            ${rows.map(e => `<tr><td class="ui-mono">${uiEntity('ip', e.ip, { mono: true, plain: true })}</td><td>${uiEntity('domain', e.header_from || '-', { plain: true })}</td><td class="ui-dm-hm">${uiEntity('domain', e.envelope_from || '-', { plain: true })}</td><td class="r ui-num">${dmarcNum(e.volume)}</td>
                 <td>${e.spf_aligned ? dmarcTag('ok', 'Aligned') : dmarcTag('fail', e.spf_result || 'Fail')}</td><td>${e.dkim_aligned ? dmarcTag('ok', 'Aligned') : dmarcTag('fail', e.dkim_result || 'Fail')}</td>
                 <td class="ui-dm-hm ui-muted">${escapeHtml(e.reporter || '-')}</td></tr>`).join('')}</tbody></table>` : '<p class="ui-dm-empty">No details for this sender.</p>'}</div>`, quiet);
     } catch (error) {
@@ -998,13 +998,13 @@ async function loadReportDetails(domain, reportDate, updateUrl = true, quiet = f
             <div class="ui-dm-mlist">${(r.sources || []).map(s => dmarcMRow({
                 title: `<button type="button" class="ui-dm-link">${escapeHtml(sender(s))}</button>`,
                 count: uiCountLabel(s.volume || 0, 'message', 'messages'),
-                sub: `<span class="ui-mono">${escapeHtml(s.source_ip)}</span>${s.envelope_from ? ` · envelope ${escapeHtml(s.envelope_from)}` : ''}`,
+                sub: `<span class="ui-mono">${uiEntity('ip', s.source_ip, { mono: true, plain: true })}</span>${s.envelope_from ? ` · envelope ${uiEntity('domain', s.envelope_from, { plain: true })}` : ''}`,
                 tags: `${dmarcRateTag('DMARC', s.dmarc_pass_pct, s.volume)}${dmarcRateTag('SPF', s.spf_pass_pct, s.volume)}${dmarcRateTag('DKIM', s.dkim_pass_pct, s.volume)}`,
                 note: s.reporter ? `Reported by ${escapeHtml(s.reporter)}` : '',
                 action: `loadSourceDetails('${name}', '${escapeJsArg(s.source_ip)}')` })).join('')}</div>
             <table class="ui-dm-tbl ui-dm-tbl-wide"><thead><tr><th>Sender</th><th class="ui-dm-hm">Address</th><th class="ui-dm-hm">Envelope from</th><th class="r">Messages</th><th class="r">Passed DMARC</th><th class="r ui-dm-hm">SPF</th><th class="r ui-dm-hm">DKIM</th><th class="ui-dm-hm">Reported by</th></tr></thead><tbody>
             ${(r.sources || []).map(s => `<tr class="is-go" onclick="if (!uiRowHeld(event)) loadSourceDetails('${name}', '${escapeJsArg(s.source_ip)}')"><td><button type="button" class="ui-dm-link">${escapeHtml(sender(s))}</button></td>
-                <td class="ui-dm-hm ui-mono">${escapeHtml(s.source_ip)}</td><td class="ui-dm-hm">${escapeHtml(s.envelope_from || '-')}</td><td class="r ui-num">${dmarcNum(s.volume)}</td>
+                <td class="ui-dm-hm ui-mono">${uiEntity('ip', s.source_ip, { mono: true, plain: true })}</td><td class="ui-dm-hm">${uiEntity('domain', s.envelope_from || '-', { plain: true })}</td><td class="r ui-num">${dmarcNum(s.volume)}</td>
                 <td class="r">${dmarcRate(s.dmarc_pass_pct, s.volume)}</td><td class="r ui-dm-hm">${dmarcRate(s.spf_pass_pct, s.volume)}</td>
                 <td class="r ui-dm-hm">${dmarcRate(s.dkim_pass_pct, s.volume)}</td><td class="ui-dm-hm ui-muted">${escapeHtml(s.reporter || '-')}</td></tr>`).join('')}</tbody></table></div>
             <div class="ui-dm-card"><header>Other days</header><div class="ui-dm-body">${dmarcChart(x.overview.daily_stats || [], { h: 90 })}</div></div>`, quiet);

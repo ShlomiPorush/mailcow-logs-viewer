@@ -731,7 +731,7 @@ function renderSuppressionItem(s) {
     return `
         <div class="ui-tr${!s.active ? ' ui-row-off' : ''}">
             <div class="ui-td ui-q-who">
-                <div>${copyableText(displayEmail)}
+                <div>${uiEntity(isRegexDomain ? 'domain' : 'address', displayEmail)}
                     ${isRegexDomain ? `<span class="ui-tag ui-tag-info" title="${escapeHtml(s.email)}">Domain</span>` : ''}
                     ${!s.active ? uiTag('Inactive', '') : ''}
                     ${s.is_expired ? uiTag('Expired', 'fail') : ''}</div>
@@ -808,6 +808,7 @@ let blockDetailsState = null;
 
 function blockEventHtml(e) {
     const field = (label, value, mono) => value ? `<dt>${label}</dt><dd${mono ? ' class="ui-mono"' : ''}>${escapeHtml(String(value))}</dd>` : '';
+    const entityField = (label, value) => value ? `<dt>${label}</dt><dd>${uiEntity('address', String(value), { plain: true })}</dd>` : '';
     const outcome = BLOCK_OUTCOMES[e.outcome];
     const message = e.correlation_key
         ? (e.message_available
@@ -830,7 +831,7 @@ function blockEventHtml(e) {
             ${field('Message time', e.message_time ? formatTime(e.message_time) : null)}
             ${field('Reason', e.kind === 'before_upgrade' || !bounce ? e.reason : null)}
             ${field('Server reply', e.server_reply)}
-            ${field('From', e.sender)}${field('To', bounce ? e.recipient : null)}${field('Subject', e.subject)}
+            ${entityField('From', e.sender)}${entityField('To', bounce ? e.recipient : null)}${field('Subject', e.subject)}
             ${field('Notes', e.notes)}
             ${['added', 'enabled', 'expiry_changed'].includes(e.kind) ? field('Expires', e.expires_at ? formatTime(e.expires_at) : 'Never') : ''}
         </dl>

@@ -25,7 +25,7 @@
     <!-- Utility classes still used by the markup, compiled once
          (.github/scripts/build-utilities-css.sh); the design system comes last -->
     <link rel="stylesheet" href="/static/assets/css/utilities.css?v=2">
-    <link rel="stylesheet" href="/static/assets/css/ui.css?v=80">
+    <link rel="stylesheet" href="/static/assets/css/ui.css?v=82">
     <style>
         .tab-active {
             border-bottom: 2px solid #3b82f6;
@@ -1513,6 +1513,27 @@
             </div>
         </div>
 
+        <!-- Entity card: what is stored about one IP address, email address or
+             domain, opened from any value that shows one (entity-card.js). The
+             frame of #message-modal: header, pinned tabs and the open tab in one scroll -->
+        <div id="entity-card" class="hidden ui-dialog-backdrop" role="dialog" aria-labelledby="entity-card-title">
+            <div class="ui-dialog">
+                <div class="ui-dialog-head">
+                    <h3 id="entity-card-title">Details</h3>
+                    <button type="button" onclick="closeEntityCard()" class="ui-icon-btn" title="Close" aria-label="Close">
+                        <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                        </svg>
+                    </button>
+                </div>
+                <div id="entity-card-body" class="ui-dialog-body ui-md-body">
+                    <div id="entity-card-header" class="ui-md-header"></div>
+                    <div id="entity-card-tabs" class="ui-tabs" role="tablist" aria-label="Card sections"></div>
+                    <div id="entity-card-content" class="ui-md-content"></div>
+                </div>
+            </div>
+        </div>
+
         <!-- Changelog Modal -->
         <div id="changelog-modal" class="hidden ui-dialog-backdrop" role="dialog" aria-label="Changelog">
             <div class="ui-dialog ui-dialog-fit">
@@ -1549,27 +1570,28 @@
 
     <!-- JavaScript -->
     <script src="/static/session-guard.js?v=1"></script>
-    <script src="/static/utils.js?v=29"></script>
+    <script src="/static/utils.js?v=31"></script>
     <script src="/static/router.js?v=12"></script>
-    <script src="/static/app.js?v=91"></script>
-    <script src="/static/alert-activity.js?v=5"></script>
+    <script src="/static/app.js?v=93"></script>
+    <script src="/static/alert-activity.js?v=6"></script>
     <script src="/static/export.js?v=2"></script>
-    <script src="/static/message-details.js?v=20"></script>
-    <script src="/static/dmarc.js?v=23"></script>
+    <script src="/static/message-details.js?v=22"></script>
+    <script src="/static/entity-card.js?v=2"></script>
+    <script src="/static/dmarc.js?v=24"></script>
     <script src="/static/logs-viewer.js?v=6"></script>
     <script src="/static/settings.js?v=53"></script>
     <script src="/static/about.js?v=4"></script>
-    <script src="/static/domains.js?v=11"></script>
-    <script src="/static/mailbox-stats.js?v=11"></script>
-    <script src="/static/devices.js?v=8"></script>
-    <script src="/static/rate-limits.js?v=30"></script>
-    <script src="/static/smtp-abuse.js?v=7"></script>
+    <script src="/static/domains.js?v=12"></script>
+    <script src="/static/mailbox-stats.js?v=12"></script>
+    <script src="/static/devices.js?v=9"></script>
+    <script src="/static/rate-limits.js?v=31"></script>
+    <script src="/static/smtp-abuse.js?v=8"></script>
     <script src="/static/protection.js?v=3"></script>
-    <script src="/static/security.js?v=12"></script>
+    <script src="/static/security.js?v=13"></script>
     <script src="/static/search.js?v=14"></script>
     <script src="/static/notifications.js?v=10"></script>
     <script src="/static/agents.js?v=2"></script>
-    <script src="/static/spam_filter.js?v=23"></script>
+    <script src="/static/spam_filter.js?v=24"></script>
 
     <!-- DMARC fetch history -->
     <div id="dmarc-sync-history-modal" class="hidden ui-dialog-backdrop" role="dialog" aria-label="Fetch history">

@@ -407,7 +407,7 @@ function renderRateLimitSendersTable(senders) {
         return `
             <tr data-rl-sender="${escapeHtml((group.user || '').toLowerCase())}" class="ui-dtable-link" tabindex="0" data-row-open
                 onclick="if (!uiRowHeld(event)) selectRateLimitSender('${escapeJsArg(group.user)}')">
-                <td class="ui-dtable-wrap">${copyableText(group.user)}</td>
+                <td class="ui-dtable-wrap">${uiEntity('address', group.user)}</td>
                 <td>${uiTag(group.events, 'fail')}</td>
                 <td class="ui-nowrap">${uiTime(group.last_seen, formatAgo(group.last_seen), { title: formatTime(group.last_seen) })}</td>
                 <td class="hide-mobile">${renderRateLimitBadge(group.current_limit)}</td>
@@ -498,7 +498,7 @@ function renderRateLimitSenderDetail(group) {
         <div class="ui-rl-sender">
             <div>
                 <button type="button" onclick="backToRateLimitSenders()" class="ui-btn ui-btn-sm">← All senders</button>
-                <p class="ui-dtable-wrap"><b>${copyableText(group.user)}</b></p>
+                <p class="ui-dtable-wrap"><b>${uiEntity('address', group.user)}</b></p>
                 <p class="ui-muted">Last hit ${escapeHtml(formatTime(group.last_seen))}</p>
                 <div class="ui-chip-row">
                     ${renderRateLimitBadge(group.current_limit)}
@@ -613,7 +613,7 @@ function renderRateLimitEventRow(event) {
     return `
         <tr>
             <td class="ui-nowrap" data-sort="${Date.parse(event.time) || ''}"><span class="ui-phone-only">${escapeHtml(rateLimitShortTime(event.time))}</span><span class="ui-phone-hide">${escapeHtml(formatTime(event.time))}</span></td>
-            <td class="ui-dtable-wrap">${copyableText(event.rcpt)}</td>
+            <td class="ui-dtable-wrap">${uiEntity('address', event.rcpt)}</td>
             <td>${shortened ? `<span dir="auto">${escapeHtml(shortened)}</span>` : '<span class="ui-muted">No subject</span>'}</td>
             <td class="ui-mono ui-muted ui-nowrap hide-mobile">${copyableText(event.qid)}</td>
         </tr>
@@ -1059,7 +1059,7 @@ function renderRateLimitConfigRow(kind, name, value, frame, canWrite) {
     const row = `
         <tr data-rl-name="${escapeHtml(name.toLowerCase())}" data-rl-kind="${kind}" data-rl-limited="${value ? '1' : '0'}">
             <td class="hide-mobile">${uiTag(kind === 'domain' ? 'Domain' : 'Mailbox', '')}</td>
-            <td class="ui-dtable-wrap">${copyableText(name)}</td>
+            <td class="ui-dtable-wrap">${uiEntity(kind === 'domain' ? 'domain' : 'address', name)}</td>
             <td>${renderRateLimitBadge(value ? { value: value, frame: frame } : null)}</td>
             <td class="ui-td-end ui-nowrap">${action}</td>
         </tr>

@@ -40,6 +40,8 @@ function harness(appTimezone = 'UTC', { browserLocale } = {}) {
         document: { getElementById: element, addEventListener() {}, querySelector: () => null },
         escapeHtml: value => String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;'),
         escapeJsArg: value => value,
+        // An entity value (utils.js) as its text: these tests read the figures, not the buttons
+        uiEntity: (kind, value) => String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;'),
         uiCountLabel: (n, one, many) => `${n} ${n === 1 ? one : many}`,
         formatTime: value => value,
         authenticatedFetch: async () => ({ ok: false, status: 500 }),
