@@ -1,7 +1,9 @@
-// A local user's password in Settings > Users (users.js). The server requires 8 to 256
-// characters (backend services/passwords.py); Save stops the same, in the same words. The meter
-// shows the strength as guidance: an uppercase letter, a lowercase letter, a number and a symbol,
-// by Unicode category. Generate draws from crypto.getRandomValues, one of each kind at least.
+// A local user's password in Settings > Users (users.js). The server decides whether it can be
+// set (backend services/passwords.py: 8 to 256 characters, not a common password), and the
+// dialog asks it before Save. The meter shows the strength as guidance: an uppercase letter, a
+// lowercase letter, a number and a symbol, by Unicode category. Generate draws from
+// crypto.getRandomValues: readable letters and digits, and a few easy symbols inside, apart.
+// The username and email are checked as the server checks them.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -16,7 +18,6 @@ const crypto = { getRandomValues: array => { draws.count++; return webcrypto.get
 const context = vm.createContext({ escapeHtml: text => String(text), crypto, Uint32Array });
 vm.runInContext(fs.readFileSync(path.join(root, 'frontend/users.js'), 'utf8'), context);
 const check = password => JSON.parse(JSON.stringify(context.usersPasswordCheck(password)));
-const block = (password, required) => context.usersPasswordBlock(password, required);
 // Top-level constants are not properties of the context: read them in it
 const value = name => vm.runInContext(name, context);
 const server = fs.readFileSync(path.join(root, 'backend/app/services/passwords.py'), 'utf8');
@@ -50,36 +51,48 @@ test('each requirement is marked on its own', () => {
     assert.equal(check('Abcdefg²').met.digit, false);        // a superscript two is a symbol
 });
 
-test('Save stops only the length: under 8 characters, or over 256', () => {
-    assert.equal(block('', true), 'Use at least 8 characters.');
-    assert.equal(block('', false), '');                     // editing: an empty field keeps the password
-    assert.equal(block('Abcde1!', true), 'Use at least 8 characters.');
-    assert.equal(block('Abcde1!', false), 'Use at least 8 characters.');
-    // Weak, but long enough: saved
-    for (const password of ['abcdefgh', '12345678', 'ABCDEFGH']) assert.equal(block(password, true), '', password);
-    assert.equal(block('A1!' + 'b'.repeat(253), true), '');
-    assert.equal(block('A1!' + 'b'.repeat(254), true), 'Use at most 256 characters.');
+test('the meter counts characters (code points), not UTF-16 units', () => {
+    assert.equal(check('\u{1F600}'.repeat(7)).met.length, false);   // 14 units
+    assert.equal(check('\u{1F600}'.repeat(8)).met.length, true);
 });
 
-test('the length counts characters (code points), not UTF-16 units', () => {
-    assert.equal(block('\u{1F600}'.repeat(7), true), 'Use at least 8 characters.');   // 14 units
-    assert.equal(block('\u{1F600}'.repeat(8), true), '');
-    const password = '\u{1F600}'.repeat(126) + 'Ab1!x';                             // 131 characters, 257 units
-    assert.equal(password.length, 257);
-    assert.equal(block(password, true), '');
-});
-
-test('Generate makes the length asked, with one of each kind, from the four sets only', () => {
-    const sets = [...value('USERS_PASSWORD_SETS')];
-    for (const length of [12, 20, 64]) {
-        for (let i = 0; i < 50; i++) {
+test('Generate: readable letters and digits, a few easy symbols inside, one of each kind', () => {
+    const upper = value('USERS_PASSWORD_UPPER');
+    const lower = value('USERS_PASSWORD_LOWER');
+    const digits = value('USERS_PASSWORD_DIGITS');
+    const symbols = value('USERS_PASSWORD_SYMBOLS');
+    assert.equal(symbols, '!@#$%*-_');
+    for (const lookAlike of '0Oo1lI') assert.ok(!(upper + lower + digits).includes(lookAlike), lookAlike);
+    for (const length of [12, 13, 16, 20, 33, 64]) {
+        for (let i = 0; i < 100; i++) {
             const password = context.usersGeneratePassword(length);
-            assert.equal(password.length, length);
-            for (const set of sets) assert.ok([...password].some(c => set.includes(c)), `${password} lacks one of ${set}`);
-            assert.ok([...password].every(c => sets.some(set => set.includes(c))), password);
+            const chars = [...password];
+            assert.equal(chars.length, length);
+            assert.ok(!/[0Oo1lI]/.test(password), `${password} has a look-alike`);
+            for (const set of [upper, lower, digits]) assert.ok(chars.some(c => set.includes(c)), `${password} lacks one of ${set}`);
+            assert.ok(chars.every(c => (upper + lower + digits + symbols).includes(c)), password);
+            // About one symbol in 8 characters, one at least, never first or last
+            assert.equal(chars.filter(c => symbols.includes(c)).length, Math.max(1, Math.floor(length / 8)), password);
+            assert.ok(!symbols.includes(chars[0]) && !symbols.includes(chars[length - 1]), password);
+            assert.ok(!chars.some((c, i) => symbols.includes(c) && symbols.includes(chars[i + 1])), `${password}: two symbols side by side`);
             assert.equal(check(password).level >= 3, true, 'a generated password is Good or Strong');
         }
     }
+});
+
+test('the username and email are checked as the server checks them', () => {
+    const name = context.usersUsernameProblem;
+    const email = context.usersEmailProblem;
+    assert.equal(name(''), 'Enter a username.');
+    assert.equal(name('   '), 'Enter a username.');
+    for (const ok of ['alice', 'Alice', 'a.b_c-d@e', 'x'.repeat(64), ' bob ']) assert.equal(name(ok), '', ok);
+    for (const bad of ['al ice', 'alice!', 'x'.repeat(65), 'ålice']) assert.equal(name(bad), value('USERS_USERNAME_RULE'), bad);
+    const store = fs.readFileSync(path.join(root, 'backend/app/services/users_store.py'), 'utf8');
+    assert.ok(store.includes(`return "${value('USERS_USERNAME_RULE')}"`), 'the server\'s words');
+    assert.ok(store.includes('USERNAME_RE = re.compile(r"[a-z0-9._@-]{1,64}")'), 'the server\'s rule');
+    assert.equal(email(''), 'Enter the email address.');
+    for (const ok of ['carol@example.com', ' Carol@Example.com ']) assert.equal(email(ok), '', ok);
+    for (const bad of ['carol', '@example.com', 'carol@', 'a@b@example.com', 'carol @example.com']) assert.equal(email(bad), 'Enter one email address.', bad);
 });
 
 test('Generate draws from crypto.getRandomValues', () => {

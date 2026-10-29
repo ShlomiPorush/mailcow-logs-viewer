@@ -414,6 +414,8 @@ HUMAN_ENTRIES: List[Tuple[str, Need]] = [
       if (method, path) not in {("POST", "/api/dmarc/upload"), ("POST", "/api/suppressions/import"),
                                 ("GET", "/api/raw-logs/ws-token")}
       and not path.startswith(("/api/auth/", "/api/entities/"))),
+    # Checking a new user's password is managing users (the /api/users prefix says so too)
+    ("POST /api/users/password-check", _ADMIN),
     # Approving an agent is managing agents
     ("GET /oauth/authorize", _ADMIN), ("GET /oauth/consent", _ADMIN), ("GET /oauth/device", _ADMIN),
     # Agent sign-in, discovery and the MCP endpoint check their own credentials

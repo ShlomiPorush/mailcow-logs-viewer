@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 from ..api_models import Invalid, documented
 from ..api_models import users as m
 from ..database import get_db
-from ..services import users_store
+from ..services import passwords, users_store
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +49,10 @@ class UserChange(_Body):
     row_version: int = Field(description="The row_version the change was made on")
 
 
+class PasswordCheck(_Body):
+    password: str = Field(max_length=1024, description="The password to check; it is neither stored nor logged")
+
+
 class DefaultChange(_Body):
     value: Literal["admin", "operator", "viewer", "none"]
     version: int = Field(description="The version the change was made on")
@@ -75,6 +79,14 @@ def create_user(body: NewUser, db: Session = Depends(get_db)):
     return _run(users_store.create_user, db, kind=body.kind, username=body.username, email=body.email,
                 password=body.password, access_level=body.access, views=body.views, acts=body.acts,
                 disabled=body.disabled)
+
+
+@router.post("/password-check", responses=documented(m.PasswordChecked, errors={422: Invalid, 500: None}))
+def check_password(body: PasswordCheck):
+    """Whether a local user's password would be accepted as it is, by the same rule as adding a
+    user or setting a new password, so the dialog can say why before Save. Nothing is stored."""
+    problem = passwords.password_problem(body.password)
+    return {"ok": problem is None, "problem": problem}
 
 
 @router.put("/oauth2-default", responses=documented(m.OAuth2DefaultSaved, errors={409: None, 422: Invalid, 500: None}))

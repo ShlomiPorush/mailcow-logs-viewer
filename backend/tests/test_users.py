@@ -274,15 +274,42 @@ def test_a_password_under_8_characters_is_refused_on_create(people, password):
     assert r.status_code == 422 and r.json()["detail"] == SHORT_PASSWORD
 
 
-@pytest.mark.parametrize("password", ["abcdefgh", "12345678", "ABCDEFGH"])
+@pytest.mark.parametrize("password", ["qzxkvbnw", "73915846", "QZXKVBNW"])
 def test_8_characters_of_any_kind_are_enough_and_sign_in(people, password):
     admin = _admin()
     _add(admin, "alice", password=password)
     _sign_in("alice", password)
 
 
+COMMON_PASSWORD = "This password is too common. Choose another one."
+
+
+def test_a_common_password_is_refused_on_create(people):
+    r = _admin().post("/api/users", json={"kind": "local", "username": "alice", "password": "Password1", "access": "viewer"})
+    assert r.status_code == 422 and r.json()["detail"] == COMMON_PASSWORD
+
+
+@pytest.mark.parametrize("password, answer", [
+    ("short", {"ok": False, "problem": SHORT_PASSWORD}),
+    ("Password1", {"ok": False, "problem": COMMON_PASSWORD}),
+    ("A1!" + "b" * 254, {"ok": False, "problem": "Use at most 256 characters."}),
+    ("Kp7m-Rx4Tq9wZb2n", {"ok": True, "problem": None}),
+])
+def test_the_password_check_answers_as_create_and_reset_would(people, password, answer):
+    assert _admin().post("/api/users/password-check", json={"password": password}).json() == answer
+
+
+def test_the_password_check_is_for_admins_and_logs_no_password(people, caplog):
+    _add(_admin(), "alice", access="operator")
+    caplog.set_level(logging.DEBUG)
+    r = _sign_in("alice").post("/api/users/password-check", json={"password": "Kp7m-Rx4Tq9wZb2n"})
+    assert r.status_code == 403 and r.json() == {"detail": user_access.NOT_PERMITTED}
+    _admin().post("/api/users/password-check", json={"password": "Kp7m-Rx4Tq9wZb2n"})
+    assert "Kp7m-Rx4Tq9wZb2n" not in caplog.text
+
+
 @pytest.mark.parametrize("password, detail", [
-    ("abcdefg", SHORT_PASSWORD), ("A1!" + "b" * 254, "Use at most 256 characters.")])
+    ("abcdefg", SHORT_PASSWORD), ("A1!" + "b" * 254, "Use at most 256 characters."), ("Password1", COMMON_PASSWORD)])
 def test_a_password_reset_follows_the_same_rule(people, password, detail):
     admin = _admin()
     row = _add(admin, "alice")
@@ -932,7 +959,7 @@ def test_the_list_says_what_each_preset_and_user_gets(people):
 def test_agents_never_reach_the_users_api():
     from app.agent_access import scopes
     for method in ("GET", "POST", "PUT", "DELETE"):
-        for path in ("/api/users", "/api/users/{user_id}", "/api/users/oauth2-default"):
+        for path in ("/api/users", "/api/users/{user_id}", "/api/users/oauth2-default", "/api/users/password-check"):
             assert scopes.excluded_reason(method, path)
 
 

@@ -45,6 +45,8 @@ function page({ you, status, defaultAccess = 'admin' }) {
     [read('utils.js'), read('users.js')].forEach(run);
     const sent = [];
     w.authenticatedFetch = async (url, options) => {
+        // The password check stores nothing: answered, not counted as sent
+        if (url === '/api/users/password-check') return { ok: true, status: 200, json: async () => ({ ok: true, problem: null }) };
         sent.push({ url, method: options && options.method, body: options && options.body ? JSON.parse(options.body) : null });
         return { ok: true, status: 200, json: async () => ({ default_access: 'viewer', version: 2 }) };
     };

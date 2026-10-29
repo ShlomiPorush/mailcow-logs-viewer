@@ -90,7 +90,8 @@ def test_settings_and_what_agents_may_not_do_are_for_admins():
     for method, path in (("PUT", "/api/settings"), ("POST", "/api/settings/jobs/{job_name}/run"),
                          ("POST", "/api/settings/test/smtp"), ("POST", "/api/notifications/test"),
                          ("POST", "/api/settings/mailcow/rw-key/validate"), ("GET", "/api/status/container-logs"),
-                         ("GET", "/api/users"), ("PUT", "/api/users/oauth2-default")):
+                         ("GET", "/api/users"), ("PUT", "/api/users/oauth2-default"),
+                         ("POST", "/api/users/password-check")):
         assert user_access.need_for(method, path).kind == user_access.ADMIN_ONLY, path
 
 

@@ -86,6 +86,7 @@ const NOT_ACTIONS = {
     'session-guard.js sessionGuardSend': 'the session checks (status and activity), open to anyone signed in',
     'app.js testQuarantineRules': 'a dry run of the rules: POST /api/quarantine/rules/test is View on Quarantine',
     'spam_filter.js validateMapContent': 'checks a map: POST /api/rspamd/validate is View on Rspamd',
+    'users.js usersCheckPassword': 'checks a new password and stores nothing: POST /api/users/password-check, for admins like the dialog',
 };
 
 // Files whose page only an admin reaches; the menu leaves it out for anyone else

@@ -5,11 +5,13 @@ later change of the cost keeps every stored hash readable.
 """
 import base64
 import binascii
+import functools
 import hashlib
 import hmac
 import secrets
 import threading
-from typing import Optional
+from pathlib import Path
+from typing import FrozenSet, Optional
 
 N = 2 ** 15
 R = 8
@@ -23,20 +25,39 @@ MAX_LENGTH = 256
 # The same words in the Users dialog (frontend/users.js), which checks before it sends
 SHORT_PROBLEM = "Use at least 8 characters."
 LONG_PROBLEM = "Use at most 256 characters."
+COMMON_PROBLEM = "This password is too common. Choose another one."
+# SecLists' 10,000 most common passwords (MIT; source and checksum in resources/vendored.json)
+COMMON_FILE = Path(__file__).resolve().parent.parent / "resources" / "common_passwords.txt"
 
 _dummy: Optional[str] = None
 _dummy_lock = threading.Lock()
 
 
+@functools.lru_cache(maxsize=1)
+def common_passwords() -> FrozenSet[str]:
+    """The common-password list, read once, as compared: case folded, without surrounding spaces."""
+    with open(COMMON_FILE, encoding="utf-8") as f:
+        return frozenset(word for word in (line.strip().casefold() for line in f) if word)
+
+
+def is_common(password: str) -> bool:
+    words = common_passwords()
+    return password.casefold() in words or password.strip().casefold() in words
+
+
 def password_problem(password: str) -> Optional[str]:
-    """Why a local user's password cannot be set, or None. Checked before anything is hashed.
-    Only its length: 8 to 256 characters (the dialog shows how strong it is, as guidance).
-    The built-in admin's password (AUTH_PASSWORD) is not held to this.
+    """Why a local user's password cannot be set, or None. Checked before anything is hashed:
+    8 to 256 characters, and not one of the most common passwords (in any case, spaces around
+    it ignored). The dialog shows how strong it is as guidance, and asks this before Save
+    (POST /api/users/password-check). The built-in admin's password (AUTH_PASSWORD) is not
+    held to this.
     """
     if not isinstance(password, str) or len(password) < MIN_LENGTH:
         return SHORT_PROBLEM
     if len(password) > MAX_LENGTH:
         return LONG_PROBLEM
+    if is_common(password):
+        return COMMON_PROBLEM
     return None
 
 

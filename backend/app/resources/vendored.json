@@ -1,0 +1,14 @@
+{
+  "common_passwords.txt": {
+    "name": "SecLists 10k-most-common passwords",
+    "project": "https://github.com/danielmiessler/SecLists",
+    "commit": "913b327317496d062bcc7cace524aaad8a693be2",
+    "source": "https://raw.githubusercontent.com/danielmiessler/SecLists/913b327317496d062bcc7cace524aaad8a693be2/Passwords/Common-Credentials/10k-most-common.txt",
+    "license": "MIT",
+    "license_file": "common_passwords.LICENSE.txt",
+    "license_source": "https://raw.githubusercontent.com/danielmiessler/SecLists/913b327317496d062bcc7cace524aaad8a693be2/LICENSE",
+    "license_sha256": "3dbdc93d5f8829de0941744841730a09c106d0732e5ae0e98ca1d77be7ded66c",
+    "change": "None: the file as published",
+    "sha256": "68782d6a4a19a4768d5f15dd66bd534e7a33055cc755411e33f16d18c50fdcce"
+  }
+}

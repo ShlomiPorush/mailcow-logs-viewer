@@ -2372,8 +2372,7 @@ html body .ui-main .ui-set-choice-opt > input[type="radio"] { accent-color: var(
 .ui-pw-meter[data-level="1"] .ui-pw-label { color: var(--ui-fail-text); }
 .ui-pw-meter[data-level="2"] .ui-pw-label { color: var(--ui-warn-text); }
 .ui-pw-meter[data-level="3"] .ui-pw-label, .ui-pw-meter[data-level="4"] .ui-pw-label { color: var(--ui-ok-text); }
-.ui-pw-warn { margin: 0; color: var(--ui-warn-text); font-size: var(--ui-fs-sm); }
-.ui-pw-warn[data-tone="fail"] { color: var(--ui-fail-text); }
+.ui-field-problem { margin: 4px 0 0; color: var(--ui-fail-text); font-size: var(--ui-fs-sm); }
 /* The requirements on one line, wrapping on a phone: a check or a cross before each */
 .ui-pw-rules { display: flex; flex-wrap: wrap; gap: 2px 14px; margin: 0; padding: 0; list-style: none; font-size: var(--ui-fs-sm); color: var(--ui-muted); }
 .ui-pw-rules li { display: inline-flex; align-items: center; gap: 4px; }

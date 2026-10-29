@@ -72,6 +72,12 @@ class UsersOverview(Fixed):
     users: List[UserRow]
 
 
+class PasswordChecked(Fixed):
+    """Whether a local user's password would be accepted, by the rule adding or changing a user applies."""
+    ok: bool
+    problem: Optional[str] = Field(description="Why not, in words to show; null when ok")
+
+
 class UserDeleted(Fixed):
     deleted: int = Field(description="1")
 

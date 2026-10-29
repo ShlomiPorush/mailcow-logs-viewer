@@ -76,11 +76,14 @@ function usersPresetLines(level) {
     return lines;
 }
 
-// A local user's password: the server requires 8 to 256 characters (backend services/passwords.py).
-// The meter shows how strong it is as guidance: an uppercase letter, a lowercase letter, a number
-// and a symbol (by Unicode category; a symbol is anything but a letter or digit)
+// A local user's password: the server decides whether it can be set (backend services/passwords.py:
+// 8 to 256 characters, not one of the most common passwords), and the dialog asks it before Save
+// (POST /api/users/password-check). The meter shows how strong it is as guidance: an uppercase
+// letter, a lowercase letter, a number and a symbol (by Unicode category; a symbol is anything but
+// a letter or digit)
 const USERS_PASSWORD_SHORT = 'Use at least 8 characters.';
 const USERS_PASSWORD_LONG = 'Use at most 256 characters.';
+const USERS_PASSWORD_CHECKING = 'Checking the password. Try again in a moment.';
 const USERS_PASSWORD_RULES = [
     ['length', '8 or more characters', text => [...text].length >= 8],
     ['upper', 'An uppercase letter', text => /\p{Lu}/u.test(text)],
@@ -102,18 +105,12 @@ function usersPasswordCheck(password) {
     return { met, level };
 }
 
-// What Save stops before asking the server, in its words: the length only (in characters, as the
-// server counts them). required: adding, where a password must be given
-function usersPasswordBlock(password, required) {
-    const text = String(password || '');
-    if (!text) return required ? USERS_PASSWORD_SHORT : '';
-    const length = [...text].length;
-    return length < 8 ? USERS_PASSWORD_SHORT : length > 256 ? USERS_PASSWORD_LONG : '';
-}
-
-// The characters Generate draws from: one of each kind at least. Symbols that read plainly and
-// need no quoting when pasted
-const USERS_PASSWORD_SETS = ['ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz', '0123456789', '!#$%&*+-.:;=?@^_~'];
+// The characters Generate draws from: letters and digits that cannot be taken for one another
+// (no 0 O o 1 l I), and a few symbols that are easy to type
+const USERS_PASSWORD_UPPER = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+const USERS_PASSWORD_LOWER = 'abcdefghijkmnpqrstuvwxyz';
+const USERS_PASSWORD_DIGITS = '23456789';
+const USERS_PASSWORD_SYMBOLS = '!@#$%*-_';
 
 // A number from 0 to n - 1 from crypto.getRandomValues, each as likely: a draw from the top part
 // of the range that does not divide evenly by n is drawn again
@@ -126,21 +123,37 @@ function usersRandomIndex(n) {
     }
 }
 
-function usersGeneratePassword(length) {
-    const all = USERS_PASSWORD_SETS.join('');
-    const chars = USERS_PASSWORD_SETS.map(set => set[usersRandomIndex(set.length)]);
-    while (chars.length < length) chars.push(all[usersRandomIndex(all.length)]);
-    // Shuffled, so the guaranteed kinds are not always first
-    for (let i = chars.length - 1; i > 0; i--) {
+function usersShuffle(items) {
+    for (let i = items.length - 1; i > 0; i--) {
         const j = usersRandomIndex(i + 1);
-        [chars[i], chars[j]] = [chars[j], chars[i]];
+        [items[i], items[j]] = [items[j], items[i]];
     }
-    return chars.join('');
+    return items;
+}
+
+// Mostly letters and digits, so it reads and types easily: an uppercase letter, a lowercase
+// letter and a digit at least, and about one symbol in 8 characters (one at least), never first
+// or last and never two side by side
+function usersGeneratePassword(length) {
+    const pick = set => set[usersRandomIndex(set.length)];
+    const symbols = Math.max(1, Math.floor(length / 8));
+    const plain = USERS_PASSWORD_UPPER + USERS_PASSWORD_LOWER + USERS_PASSWORD_DIGITS;
+    const body = [pick(USERS_PASSWORD_UPPER), pick(USERS_PASSWORD_LOWER), pick(USERS_PASSWORD_DIGITS)];
+    while (body.length < length - symbols) body.push(pick(plain));
+    usersShuffle(body);
+    // The symbols' places: between the first character and the last, none next to another (drawn
+    // again until so, which keeps every such choice as likely)
+    let places;
+    do {
+        places = new Set(usersShuffle(Array.from({ length: length - 2 }, (_, i) => i + 1)).slice(0, symbols));
+    } while ([...places].some(at => places.has(at + 1)));
+    let next = 0;
+    return Array.from({ length }, (_, i) => (places.has(i) ? pick(USERS_PASSWORD_SYMBOLS) : body[next++])).join('');
 }
 
 // Under the password field: Generate with its length and Copy, then the meter: four segments,
-// the strength in words (read out as it changes), a line when it is weak but can be saved, and
-// the requirements marked as met or not, for the eye and for a screen reader
+// the strength in words and, when the server refuses the password, why (read out as they
+// change), and the requirements marked as met or not, for the eye and for a screen reader
 function usersPasswordMeterHtml(hidden) {
     return `<div class="ui-pw-tools">
         <button type="button" class="ui-btn ui-btn-sm" id="user-edit-pw-generate">Generate</button>
@@ -153,7 +166,7 @@ function usersPasswordMeterHtml(hidden) {
         <div class="ui-pw-bar" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
         <div id="user-edit-pw-status" aria-live="polite">
             <p class="ui-pw-label" id="user-edit-pw-label"></p>
-            <p class="ui-pw-warn hidden" id="user-edit-pw-warn"></p>
+            <p class="ui-field-problem hidden" id="user-edit-pw-problem"></p>
         </div>
         <ul class="ui-pw-rules" aria-label="Password requirements">
             ${USERS_PASSWORD_RULES.map(([id, label]) => `<li data-rule="${id}" data-met="false"><span class="ui-pw-mark" aria-hidden="true">✗</span>${escapeHtml(label)}<span class="ui-sr-only">, not met</span></li>`).join('')}
@@ -171,20 +184,97 @@ function usersShowPasswordMeter(modal, password, keepWhenEmpty) {
     const label = meter.querySelector('#user-edit-pw-label');
     const words = check.level ? `Password strength: ${USERS_STRENGTH[check.level]}` : '';
     if (label.textContent !== words) label.textContent = words;
-    // Weak but within 8 to 256 characters: said, and Save stays possible. Over 256: what Save says
-    const tooLong = usersPasswordBlock(password, false) === USERS_PASSWORD_LONG;
-    const note = tooLong ? USERS_PASSWORD_LONG : check.level === 1 && check.met.length ? 'This password is weak. You can still save it.' : '';
-    const warn = meter.querySelector('#user-edit-pw-warn');
-    if (warn.textContent !== note) warn.textContent = note;
-    warn.classList.toggle('hidden', !note);
-    if (tooLong) warn.dataset.tone = 'fail';
-    else delete warn.dataset.tone;
     meter.querySelectorAll('li[data-rule]').forEach(item => {
         const on = !!check.met[item.dataset.rule];
         item.dataset.met = String(on);
         item.querySelector('.ui-pw-mark').textContent = on ? '✓' : '✗';
         item.querySelector('.ui-sr-only').textContent = on ? ', met' : ', not met';
     });
+}
+
+// A line under a field that says what is wrong with it ('' hides it)
+function usersShowProblem(modal, id, text) {
+    const line = modal.querySelector(`#${id}`);
+    if (!line) return;
+    if (line.textContent !== text) line.textContent = text;
+    line.classList.toggle('hidden', !text);
+}
+
+// The server's answer on the password in the field: asked 300 ms after typing stops, and at once
+// after Generate or on Save. Only the answer for the latest value counts; while it is on its way
+// the password is not known to be fine. A failed request counts as fine: Save asks the server again
+let usersPwCheck = { seq: 0, value: '', answer: null, timer: null };
+
+function usersCheckPassword(modal, value, now) {
+    clearTimeout(usersPwCheck.timer);
+    const seq = ++usersPwCheck.seq;
+    usersPwCheck = { seq, value, answer: null, timer: null };
+    usersShowProblem(modal, 'user-edit-pw-problem', '');
+    usersValidate(modal);
+    if (!value) return Promise.resolve();
+    const ask = async () => {
+        let answer = { ok: true, problem: '' };
+        try {
+            const response = await authenticatedFetch('/api/users/password-check', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: value }) });
+            const data = response.ok ? await response.json().catch(() => null) : null;
+            // 422: longer than the request takes (1024 characters), so far too long
+            if (response.status === 422) answer = { ok: false, problem: USERS_PASSWORD_LONG };
+            else if (data && typeof data.ok === 'boolean') answer = { ok: data.ok, problem: data.ok ? '' : String(data.problem || '') };
+        } catch (e) { /* Save asks the server */ }
+        if (seq !== usersPwCheck.seq || !modal.isConnected) return;
+        usersPwCheck.answer = answer;
+        usersShowProblem(modal, 'user-edit-pw-problem', answer.problem);
+        usersValidate(modal);
+    };
+    if (now) return ask();
+    usersPwCheck.timer = setTimeout(ask, 300);
+    return Promise.resolve();
+}
+
+// A username or an email as the server takes them (users_store.py username_problem, email_problem)
+const USERS_USERNAME_RULE = 'A username has 1 to 64 characters: letters, digits and . _ @ -';
+function usersUsernameProblem(value) {
+    const norm = String(value || '').normalize('NFKC').toLowerCase().trim();
+    if (!norm) return 'Enter a username.';
+    return /^[a-z0-9._@-]{1,64}$/.test(norm) ? '' : USERS_USERNAME_RULE;
+}
+
+function usersEmailProblem(value) {
+    const norm = String(value || '').trim().normalize('NFKC').toLowerCase().trim();
+    if (!norm) return 'Enter the email address.';
+    const bad = norm.length > 320 || norm.split('@').length !== 2 || norm.startsWith('@') || norm.endsWith('@')
+        || /[\s\p{C}]/u.test(norm);
+    return bad ? 'Enter one email address.' : '';
+}
+
+// Why Add or Save cannot go yet, or '' when it can: a username or email the server takes, a
+// password the server said is fine (adding: required; editing: only when one is typed), and View
+// for at least one area in Custom. The button looks disabled (aria-disabled) meanwhile and says
+// why when pressed; the server checks everything again on Save
+function usersFormProblem(modal) {
+    const adding = !modal.dataset.version;
+    const kind = modal.querySelector('#user-edit-kind-value').value;
+    if (adding) {
+        const problem = kind === 'local' ? usersUsernameProblem(modal.querySelector('#user-edit-name')?.value)
+            : usersEmailProblem(modal.querySelector('#user-edit-email')?.value);
+        if (problem) return problem;
+    }
+    const field = modal.querySelector('#user-edit-pass');
+    if (kind === 'local' && field && (adding || field.value)) {
+        if (!field.value) return USERS_PASSWORD_SHORT;
+        if (usersPwCheck.value !== field.value || !usersPwCheck.answer) return USERS_PASSWORD_CHECKING;
+        if (!usersPwCheck.answer.ok) return usersPwCheck.answer.problem || USERS_PASSWORD_SHORT;
+    }
+    if (modal.querySelector('#user-edit-level-value').value === 'custom'
+        && !modal.querySelector('#user-edit-grid input[data-kind="view"]:checked')) return 'Select View for at least one area.';
+    return '';
+}
+
+function usersValidate(modal) {
+    const problem = usersFormProblem(modal);
+    modal.querySelector('#user-edit-save')?.setAttribute('aria-disabled', String(!!problem));
+    return problem;
 }
 
 // Generate fills the field as readable text (it shows again as dots once typed over), a new
@@ -195,15 +285,16 @@ function usersWirePassword(modal, keepWhenEmpty) {
     const length = modal.querySelector('#user-edit-pw-length');
     const copy = modal.querySelector('#user-edit-pw-copy');
     let generated = false;
-    const update = () => {
+    const update = now => {
         usersShowPasswordMeter(modal, field.value, keepWhenEmpty);
         copy.disabled = !field.value;
+        usersCheckPassword(modal, field.value, now);
     };
     const fill = () => {
         field.value = usersGeneratePassword(Number(length.value));
         field.type = 'text';
         generated = true;
-        update();
+        update(true);
     };
     modal.querySelector('#user-edit-pw-generate').addEventListener('click', fill);
     length.addEventListener('input', () => {
@@ -215,13 +306,30 @@ function usersWirePassword(modal, keepWhenEmpty) {
             generated = false;
             field.type = 'password';
         }
-        update();
+        update(false);
     });
     copy.addEventListener('click', event => copyToClipboard(field.value, event, 'Password'));
-    update();
+    update(false);
 }
 
-function usersPresetText(level) {    return `<ul class="ui-users-preset">${usersPresetLines(level).map(line => `<li>${escapeHtml(line)}</li>`).join('')}</ul>`;
+// The username and email say what is wrong once the field is left, and stop saying it as soon
+// as it is right; any change rechecks whether Add or Save can go
+function usersWireForm(modal) {
+    [['#user-edit-name', 'user-edit-name-problem', usersUsernameProblem], ['#user-edit-email', 'user-edit-email-problem', usersEmailProblem]]
+        .forEach(([selector, id, problemOf]) => {
+            const field = modal.querySelector(selector);
+            if (!field) return;
+            field.addEventListener('change', () => usersShowProblem(modal, id, field.value.trim() ? problemOf(field.value) : ''));
+            field.addEventListener('input', () => { if (!problemOf(field.value)) usersShowProblem(modal, id, ''); });
+        });
+    modal.addEventListener('input', () => usersValidate(modal));
+    modal.addEventListener('change', () => usersValidate(modal));
+    modal.addEventListener('click', () => usersValidate(modal));
+    usersValidate(modal);
+}
+
+function usersPresetText(level) {
+    return `<ul class="ui-users-preset">${usersPresetLines(level).map(line => `<li>${escapeHtml(line)}</li>`).join('')}</ul>`;
 }
 
 // Custom: each area by name, as an agent's access is shown (agents.js agentsAreaChips)
@@ -534,7 +642,8 @@ function editUser(userId) {
     const localFields = user && user.kind !== 'local' ? '' : `
         <div data-for="local" class="ui-form${kind === 'local' ? '' : ' hidden'}">
             ${user ? '' : `<label for="user-edit-name"><span class="ui-label">Username</span>
-                <input id="user-edit-name" class="ui-input" autocomplete="off" maxlength="64" spellcheck="false"></label>`}
+                <input id="user-edit-name" class="ui-input" autocomplete="off" maxlength="64" spellcheck="false" aria-describedby="user-edit-name-problem"></label>
+                <p class="ui-field-problem hidden" id="user-edit-name-problem" aria-live="polite"></p>`}
             <label for="user-edit-pass"><span class="ui-label">${user ? 'New password' : 'Password'}</span>
                 <input id="user-edit-pass" type="password" class="ui-input" autocomplete="new-password" placeholder="At least 8 characters" aria-describedby="user-edit-pw-status"></label>
             ${usersPasswordMeterHtml(!!user)}
@@ -544,7 +653,8 @@ function editUser(userId) {
     const oauthFields = user ? (user.kind === 'oauth2' ? `<p class="ui-set-desc">Signs in with ${escapeHtml(usersProvider())}.</p>` : '') : `
         <div data-for="oauth2" class="ui-form${kind === 'oauth2' ? '' : ' hidden'}">
             <label for="user-edit-email"><span class="ui-label">Email</span>
-                <input id="user-edit-email" type="email" class="ui-input" autocomplete="off" maxlength="320" placeholder="user@example.com"></label>
+                <input id="user-edit-email" type="email" class="ui-input" autocomplete="off" maxlength="320" placeholder="user@example.com" aria-describedby="user-edit-email-problem"></label>
+            <p class="ui-field-problem hidden" id="user-edit-email-problem" aria-live="polite"></p>
             <p class="ui-set-desc">The email address ${escapeHtml(usersProvider())} reports for this user.</p>
         </div>`;
     // The two choices are kept as values too, as the Settings segmented fields keep theirs,
@@ -578,7 +688,7 @@ function editUser(userId) {
         footClass: 'ui-agent-edit-foot',
         foot: `<p id="user-edit-error" class="ui-text-fail hidden" role="alert"></p>
             <button type="button" onclick="closeUserEditModal()" class="ui-btn">Cancel</button>
-            <button type="submit" form="user-edit-form" class="ui-btn ui-btn-primary">${user ? 'Save' : 'Add'}</button>`,
+            <button type="submit" form="user-edit-form" class="ui-btn ui-btn-primary" id="user-edit-save" aria-disabled="true">${user ? 'Save' : 'Add'}</button>`,
     });
     const press = (group, chosen) => group.querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', String(b === chosen)));
     const grid = modal.querySelector('#user-edit-grid');
@@ -616,6 +726,8 @@ function editUser(userId) {
     });
     // The password's strength while it is typed; editing shows it once something is typed
     usersWirePassword(modal, !!user);
+    // Add and Save look disabled until the form can be saved
+    usersWireForm(modal);
     uiGuardDialog(modal);
 }
 
@@ -638,7 +750,13 @@ async function saveUser(event, userId) {
     const level = modal.querySelector('#user-edit-level-value').value;
     const chosen = mode => [...modal.querySelectorAll(`#user-edit-grid input[data-kind="${mode}"]:checked`)].map(i => i.dataset.area);
     const custom = level === 'custom';
-    if (custom && !chosen('view').length) return say('Select View for at least one area.');
+    // A disabled-looking Add or Save says why; a password typed a moment ago is asked about now
+    let problem = usersFormProblem(modal);
+    if (problem === USERS_PASSWORD_CHECKING) {
+        await usersCheckPassword(modal, modal.querySelector('#user-edit-pass').value, true);
+        problem = usersFormProblem(modal);
+    }
+    if (problem) return say(problem);
     const disabled = modal.querySelector('#user-edit-disabled').checked;
     const password = modal.querySelector('#user-edit-pass')?.value || '';
     let url = '/api/users';
@@ -647,15 +765,11 @@ async function saveUser(event, userId) {
     if (userId == null) {
         const field = kind === 'local' ? modal.querySelector('#user-edit-name') : modal.querySelector('#user-edit-email');
         const name = (field ? field.value : '').trim();
-        if (!name) return say(kind === 'local' ? 'Enter a username.' : 'Enter the email address.');
-        // The rest of the rule is the server's: its answer shows in the error line
-        if (kind === 'local' && usersPasswordBlock(password, true)) return say(usersPasswordBlock(password, true));
         body = kind === 'local' ? { kind, username: name, password } : { kind, email: name };
     } else {
         url = `/api/users/${Number(userId)}`;
         method = 'PUT';
         body = { row_version: Number(modal.dataset.version) };
-        if (usersPasswordBlock(password, false)) return say(usersPasswordBlock(password, false));
         if (password) body.password = password;
     }
     Object.assign(body, { access: level, views: custom ? chosen('view') : [], acts: custom ? chosen('act') : [], disabled });
