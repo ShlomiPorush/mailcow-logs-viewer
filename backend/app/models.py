@@ -172,6 +172,11 @@ class MessageCorrelation(Base):
     
     sender = Column(String(255), index=True)
     recipient = Column(String(255), index=True)
+    # Rspamd records some recipients in a normalized form (ALIAS_RESOLVED: no
+    # Gmail dots, no +tag); `recipient` keeps that form for matching. This maps
+    # each such Rspamd address (lowercase) to the address Postfix delivered to,
+    # as the sender wrote it, for display and search (services/written_recipients.py)
+    written_recipients = Column(JSONB)
     subject = Column(Text)
     direction = Column(String(20))
     final_status = Column(String(50))

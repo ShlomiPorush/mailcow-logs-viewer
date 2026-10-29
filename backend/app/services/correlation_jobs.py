@@ -20,6 +20,7 @@ from ..correlation import (
     group_postfix_logs_by_queue,
     nearest_queue_chain,
 )
+from . import written_recipients
 
 logger = logging.getLogger(__name__)
 
@@ -258,6 +259,7 @@ def complete_incomplete_correlations(*, get_db_context, update_job_status, max_a
                 return
 
             completed_count = 0
+            completed = []
 
             for correlation in incomplete:
                 try:
@@ -314,6 +316,7 @@ def complete_incomplete_correlations(*, get_db_context, update_job_status, max_a
                     for plog in all_postfix:
                         plog.correlation_key = correlation.correlation_key
 
+                    completed.append(correlation)
                     completed_count += 1
 
                 except Exception as e:
@@ -321,6 +324,13 @@ def complete_incomplete_correlations(*, get_db_context, update_job_status, max_a
                     continue
 
             db.commit()
+
+            # Linked to their Postfix lines: the addresses Rspamd recorded
+            # normalized get the ones the sender wrote. Only after the link is
+            # committed: a delivery line stored meanwhile by the ingest is seen
+            # here, or the ingest sees the link (record_for_queues)
+            if sum(written_recipients.record(db, correlation) for correlation in completed):
+                db.commit()
 
             if completed_count > 0:
                 logger.info(f"[OK] Completed {completed_count} correlations")

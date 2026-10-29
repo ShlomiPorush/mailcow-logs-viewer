@@ -16,7 +16,7 @@ from .messages import (ADDRESS_DESCRIPTION, DOMAIN_DESCRIPTION, EXACT_DESCRIPTIO
                        _filtered_messages_query,
                        address_equals, message_sort_time, on_domain)
 from ..services.entity_values import spellings_of_typed_ip
-from ..services import excluded_addresses
+from ..services import excluded_addresses, written_recipients
 from ..services.csv_export import csv_download, csv_query_rows, get_csv_db
 from ..api_models import CsvFile, Invalid, documented
 
@@ -344,6 +344,7 @@ def export_messages_csv(
                                          address=address, domain=domain, exact_ip=exact_ip)
         query = query.options(load_only(
             MessageCorrelation.first_seen, MessageCorrelation.sender, MessageCorrelation.recipient,
+            MessageCorrelation.written_recipients,
             MessageCorrelation.subject, MessageCorrelation.direction, MessageCorrelation.final_status,
             MessageCorrelation.queue_id, MessageCorrelation.message_id,
             MessageCorrelation.rspamd_log_id, MessageCorrelation.is_complete,
@@ -361,7 +362,7 @@ def export_messages_csv(
                 yield {
                     "Time": _csv_time(msg.first_seen),
                     "Sender": msg.sender,
-                    "Recipient": msg.recipient,
+                    "Recipient": written_recipients.shown(msg.recipient, msg.written_recipients),
                     "Subject": msg.subject,
                     "Direction": msg.direction,
                     "Status": msg.final_status,

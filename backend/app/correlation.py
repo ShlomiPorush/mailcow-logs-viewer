@@ -460,10 +460,18 @@ def ensure_leg(
             logger.debug(f"Stub for {message_id[:50]} adopts queue chain {queue_id}")
             leg.queue_id = queue_id
 
+    # Linked to its Postfix lines: the addresses Rspamd recorded normalized
+    # get the ones the sender wrote. Only after the link is committed: a
+    # delivery line stored meanwhile by the ingest is seen here, or the
+    # ingest sees the link (written_recipients.record_for_queues)
+    from .services.written_recipients import record as record_written
+
     if leg:
         if rspamd_log:
             update_correlation_with_rspamd(db, leg, rspamd_log)
-        update_correlation_with_postfix_logs(db, leg, postfix_logs)
+        update_correlation_with_postfix_logs(db, leg, postfix_logs)  # commits
+        if record_written(db, leg, rspamd_log):
+            db.commit()
         return leg
 
     if rspamd_log:
@@ -479,6 +487,8 @@ def ensure_leg(
         for plog in postfix_logs:
             plog.correlation_key = leg.correlation_key
         db.commit()
+        if record_written(db, leg, rspamd_log):
+            db.commit()
     return leg
 
 

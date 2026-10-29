@@ -58,6 +58,13 @@ def any_listed(*addresses) -> bool:
     return any(is_listed(a) for a in addresses)
 
 
+def correlation_listed(correlation) -> bool:
+    """A delivery whose own sender or recipient is listed, in either form of
+    the recipient (written_recipients: the address the sender wrote)."""
+    written = correlation.written_recipients if isinstance(correlation.written_recipients, dict) else {}
+    return any_listed(correlation.sender, correlation.recipient, *written.values())
+
+
 # A delivery line's own fields come before "status="; what follows is the
 # receiving server's reply, which can say anything
 _STATUS = ' status='
@@ -90,12 +97,20 @@ def _column_listed(column, hidden):
     return and_(column.isnot(None), _norm(column).in_(hidden))
 
 
+def _written_listed(column, hidden):
+    # Only a JSON object holds written addresses; any other value (or NULL) names none
+    obj = case((func.jsonb_typeof(column) == 'object', column), else_=cast(literal('{}'), JSONB))
+    rows = func.jsonb_each_text(obj).table_valued('key', 'value').alias('written')
+    return exists(select(literal(1)).select_from(rows).where(_norm(rows.c.value).in_(hidden)))
+
+
 def correlation_visible(model=MessageCorrelation):
-    """Deliveries whose own sender and recipient are not listed."""
+    """Deliveries whose own sender and recipient (in either form) are not listed."""
     hidden = listed()
     if not hidden:
         return true()
-    return not_(or_(_column_listed(model.sender, hidden), _column_listed(model.recipient, hidden)))
+    return not_(or_(_column_listed(model.sender, hidden), _column_listed(model.recipient, hidden),
+                    _written_listed(model.written_recipients, hidden)))
 
 
 def _postfix_listed(model, hidden):
@@ -181,7 +196,7 @@ def visible_postfix_lines(lines: list) -> list:
 def delivery_hidden(correlation, lines: list) -> bool:
     """A delivery of a listed address: by its own sender or recipient, or by a
     listed line (such as orig_to) of its queue occurrence among `lines`."""
-    if any_listed(correlation.sender, correlation.recipient):
+    if correlation_listed(correlation):
         return True
     at = correlation.first_seen or correlation.created_at
     return bool(correlation.queue_id) and at is not None and any(
@@ -196,7 +211,7 @@ def hidden_deliveries(db, legs) -> set:
     hidden = listed()
     if not hidden:
         return set()
-    found = {leg.correlation_key for leg in legs if any_listed(leg.sender, leg.recipient)}
+    found = {leg.correlation_key for leg in legs if correlation_listed(leg)}
     queued = [leg for leg in legs if leg.correlation_key not in found and leg.queue_id
               and (leg.first_seen or leg.created_at) is not None]
     if queued:

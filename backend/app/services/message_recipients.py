@@ -29,7 +29,7 @@ from sqlalchemy import and_, case, literal_column, select
 
 from ..correlation import _PF_ADDR
 from ..models import PostfixLog
-from . import excluded_addresses
+from . import excluded_addresses, written_recipients
 
 # The written address of a delivery line, read only from the fixed start of
 # the line (an address or a reply cannot supply it), as correlation.py parses
@@ -128,7 +128,8 @@ def legs_recipients(db, legs, rspamd_logs: Optional[Dict[int, object]] = None) -
     found = {}
     for leg in legs:
         lines = deliveries[leg.correlation_key]
-        listed = listed_recipients(rspamd_logs.get(leg.rspamd_log_id), (to for to, _ in lines))
+        listed = written_recipients.shown_list(
+            listed_recipients(rspamd_logs.get(leg.rspamd_log_id), (to for to, _ in lines)), leg.written_recipients)
         found[leg.correlation_key] = resolve_recipients(listed, lines, leg.recipient)
     return found
 

@@ -73,6 +73,7 @@ def export_client(monkeypatch):
     row.attempts_left = row.size = row.bounce_count = row.hard_bounce_count = row.soft_bounce_count = 2
     row.is_spam = row.has_auth = row.is_complete = row.active = True
     row.recipients_smtp = ["user@example.com"]
+    row.written_recipients = None
     row.symbols = {"TEST": {}}
     row.expires_at = row.rspamd_log_id = None
     query = Mock()

@@ -48,7 +48,7 @@ from .routers.domains import check_domain_dns, store_dns_check_worker, init_serv
 from .routers.suppressions import auto_suppression_address, AUTOMATIC_SOURCES, RSPAMD_SOURCE
 from .services.dmarc_imap_service import sync_dmarc_reports_from_imap
 from .services.dmarc_notifications import send_dmarc_error_notification
-from .services import geoip_service, correlation_jobs, excluded_addresses
+from .services import geoip_service, correlation_jobs, excluded_addresses, written_recipients
 from .services.correlation_jobs import (
     TERMINAL_FINAL_STATUSES,
     PUSH_SKIP_FINAL_STATUSES,
@@ -999,9 +999,17 @@ def _store_postfix_page(logs):
             stored = add_rows(db, PostfixLog, [values for values, _ in new_rows], 'Postfix log line')
             page_status_queue_ids.update(
                 status_queue_id for (_, status_queue_id), ok in zip(new_rows, stored) if ok and status_queue_id)
+            # Queues with a new delivery line, whatever its outcome (a delivery to
+            # the spam folder too): it may name the address the sender wrote
+            delivery_queue_ids = {values['queue_id'] for (values, _), ok in zip(new_rows, stored)
+                                  if ok and values.get('queue_id') and values.get('recipient')}
 
             db.commit()
             seen_postfix.update(page_seen)
+
+            if delivery_queue_ids:
+                written_recipients.record_for_queues(db, delivery_queue_ids)
+                db.commit()
 
             # The outcome of these queues just changed. Refresh only those
             # correlations, so a delivery that lands after the correlation age
