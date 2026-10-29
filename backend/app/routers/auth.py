@@ -13,6 +13,7 @@ import time
 from collections import OrderedDict
 from fastapi import APIRouter, Request, Response, HTTPException, status
 from fastapi.responses import JSONResponse, RedirectResponse
+from starlette.concurrency import run_in_threadpool
 from typing import Optional
 
 from .. import auth as auth_module
@@ -33,6 +34,9 @@ from ..session import (
     get_session_secret_key,
 )
 from ..services.oauth2_client import oauth2_client, OAuth2ClientError
+from ..services import users_store
+from .. import user_access
+from ..agent_access.scopes import all_scopes
 from ..api_models import documented
 from ..api_models import auth as m
 
@@ -176,48 +180,78 @@ def verify_basic_auth():
     return {"verified": True}
 
 
-@router.post("/auth/session", responses=documented(m.BasicSession, errors={400: None, 401: None, 409: None, 503: None}))
+_SIGN_IN_CHANGED = "Sign-in settings changed while you were signing in. Sign in again."
+
+
+@router.post("/auth/session", responses=documented(m.BasicSession, errors={400: None, 401: None, 409: None, 429: None, 503: None}))
 def create_basic_auth_session(request: Request):
     """
-    Exchange verified Basic Auth credentials for a session cookie.
+    Exchange verified Basic Auth credentials for a session cookie: the
+    built-in admin's (AUTH_USERNAME), or a local user's (Settings > Users).
 
     The Authorization header is checked here on every call, through the same
     failure budget as everywhere else, also when the request carries a valid
     session cookie: a session never renews itself, only the password starts
     a new one with a new longest session. The password is never stored in
     the browser - the login form sends it once, here, and from then on the
-    HttpOnly session cookie authenticates every request.
+    HttpOnly session cookie authenticates every request. Local users sign in
+    only here, never with a Basic header on other calls.
     """
     if not settings.is_basic_auth_enabled:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Basic authentication is not enabled",
         )
-    if not auth_module._authenticate_basic_request(request):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect username or password",
-        )
+    client_ip = auth_module.sign_in_budget(request)
+    credentials = auth_module.basic_credentials(request)
+    wrong = HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Incorrect username or password")
+    if credentials is None:
+        raise wrong
+    username, password = credentials
+    if auth_module.verify_credentials(username, password):
+        auth_module.clear_sign_in_failures(client_ip)
+        return _new_session(request, {"username": username or settings.auth_username, "auth_method": "basic"},
+                            {"kind": "builtin"})
 
-    username = settings.auth_username
-    authorization = request.headers.get("Authorization", "")
-    if authorization.startswith("Basic "):
-        try:
-            decoded = base64.b64decode(authorization[6:]).decode("utf-8")
-            username = decoded.split(":", 1)[0] or username
-        except (binascii.Error, UnicodeDecodeError, ValueError):
-            pass
-
+    # Not the built-in admin: a local user, checked outside the failure counters' lock
     try:
-        session_id = create_session({"username": username, "auth_method": "basic"},
-                                    generation=_admitted_generation(request))
+        user = users_store.verify_sign_in(username, password)
+    except users_store.SignInBusy:
+        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=users_store.BUSY,
+                            headers={"Retry-After": "1"})
+    except Exception as e:
+        # Without the database no local user can be checked: refused like a wrong password, never let in
+        logger.error(f"Could not check a local user's sign-in: {e}")
+        user = None
+    if user is None:
+        auth_module.record_sign_in_failure(client_ip)
+        raise wrong
+    auth_module.clear_sign_in_failures(client_ip)
+    try:
+        version = users_store.current_auth_version(user["user_id"])
+    except Exception as e:
+        logger.error(f"Could not check a local user's sign-in: {e}")
+        raise HTTPException(status_code=503, detail="Sign-in is not available right now. Try again in a moment.",
+                            headers={"Retry-After": "5"})
+    if version != user["auth_version"]:
+        # Changed by an admin while the password was checked
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=_SIGN_IN_CHANGED)
+    response = _new_session(request, {"username": user["username"], "auth_method": "basic"},
+                            {"kind": "local", "user_id": user["user_id"], "auth_version": version})
+    try:
+        users_store.record_login(user["user_id"])
+    except Exception as e:
+        logger.warning(f"Could not record a local user's sign-in time: {e}")
+    return response
+
+
+def _new_session(request: Request, user_info: dict, principal: dict) -> JSONResponse:
+    try:
+        session_id = create_session(user_info, generation=_admitted_generation(request), principal=principal)
     except SessionRevokedError:
         # Sign-in changed after this login was let in, e.g. a new password:
         # a session now would outlive the change
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Sign-in settings changed while you were signing in. Sign in again.",
-        )
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=_SIGN_IN_CHANGED)
     except SessionCapacityError:
         raise HTTPException(
             status_code=503, detail="Login capacity reached. Try again later.",
@@ -295,7 +329,7 @@ async def oauth2_login(request: Request, next: Optional[str] = None):
         )
 
 
-@router.get("/auth/callback", status_code=302, response_class=RedirectResponse, responses=documented(None, status=302, description="Signed in: to the page the login started from, with the session cookie. Otherwise to /login?error=..., such as invalid_state, oauth2_error or session_capacity", errors={400: None}))
+@router.get("/auth/callback", status_code=302, response_class=RedirectResponse, responses=documented(None, status=302, description="Signed in: to the page the login started from, with the session cookie. Otherwise to /login?error=..., such as invalid_state, oauth2_error, session_capacity or no_access (an OAuth2 entry that is disabled, or a default of no access)", errors={400: None}))
 async def oauth2_callback(
     request: Request,
     code: str = None,
@@ -340,9 +374,18 @@ async def oauth2_callback(
         
         # Get user information
         user_info = await oauth2_client.get_user_info(access_token)
-        
+
+        # The person's access, before any session exists: an entry that is
+        # disabled, or a default of no access, signs nobody in
+        principal = user_access.oauth2_ref(user_info)
+        try:
+            await run_in_threadpool(user_access.still_resolves, principal)
+        except user_access.AccessEnded:
+            logger.warning("OAuth2 login refused: this person has no access to the app")
+            return _oauth_redirect("/login?error=no_access", state, request)
+
         # Create session, unless sign-in changed since the callback was let in
-        session_id = create_session(user_info, generation=_admitted_generation(request))
+        session_id = create_session(user_info, generation=_admitted_generation(request), principal=principal)
         
         # Create response with redirect
         response = _oauth_redirect(return_to, state, request)
@@ -425,6 +468,14 @@ def auth_status(request: Request):
     Returns current user info if authenticated, and for a session cookie how
     long the session has left. Reading it never counts as activity.
     """
+    # Who is asking and what they may do (user_access.py); everything while sign-in is off
+    principal = getattr(request.state, "principal", None)
+    who = {
+        "user_name": principal.name if principal is not None and settings.is_authentication_enabled else None,
+        "is_admin": bool(principal is not None and principal.is_admin),
+        "scopes": [s for s in all_scopes() if principal is not None
+                   and (principal.is_admin or s in principal.scopes)],
+    }
     # Session cookie (OAuth2 login, or Basic Auth exchanged for a session)
     session_data = get_session_from_request(request)
     limits = session_limits(request) if session_data else None
@@ -435,8 +486,9 @@ def auth_status(request: Request):
             "auth_type": user_info.get("auth_method", "oauth2"),
             "user": user_info,
             "session": limits,
+            **who,
         }
-    
+
     # Check Basic Auth (if enabled)
     if settings.is_basic_auth_enabled:
         authorization = request.headers.get("Authorization", "")
@@ -448,11 +500,13 @@ def auth_status(request: Request):
                 "auth_type": "basic",
                 "user": None,  # Basic Auth doesn't provide user info
                 "session": None,
+                **who,
             }
-    
+
     return {
         "authenticated": False,
         "auth_type": None,
         "user": None,
         "session": None,
+        **who,
     }

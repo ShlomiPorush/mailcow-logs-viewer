@@ -19,8 +19,9 @@ from ..database import get_db, get_db_context
 from ..models import PostfixLog, RspamdLog, NetfilterLog, MessageCorrelation
 from ..services.bounce_policy import cleanup_blocks
 from ..services import excluded_addresses, written_recipients
-from ..agent_access.context import agent_call
-from ..agent_access.scopes import read_scope
+from ..agent_access.scopes import READ
+from ..user_access import DEFAULT_ACCESS_KEY, DEFAULT_VERSION_KEY, caller_may
+from ..services import users_store
 from ..config import settings, EDITABLE_SETTING_KEYS, FEATURE_IDS, reload_settings, Settings
 from ..config import normalize_disabled_features
 from ..config import _get_field_annotations, build_settings, get_env_locked_keys, settings_reload_lock
@@ -368,6 +369,15 @@ _SESSION_BOUND_SETTING_KEYS = (
 )
 
 
+# The settings that decide whether an admin can still sign in (services/users_store.py)
+_ADMIN_SIGN_IN_KEYS = ("basic_auth_enabled", "auth_username", "auth_password", "oauth2_enabled")
+
+
+def _changes_admin_sign_in(allowed: Dict[str, Any], before: Settings) -> bool:
+    return any(key in allowed and (allowed[key] or "") != (getattr(before, key, None) or "")
+               for key in _ADMIN_SIGN_IN_KEYS)
+
+
 def _session_bound_values(source: Settings) -> tuple:
     """The sign-in values of the settings given: built from the database for
     the save, never the shared settings, which a reload elsewhere may have
@@ -410,12 +420,6 @@ def _get_field_defaults() -> Dict[str, Any]:
         else:
             defaults[key] = field_info.default
     return defaults
-
-
-def _may_read_messages(request: Request) -> bool:
-    """A person always may; an agent only with View for Messages."""
-    call = agent_call(request.scope) if request is not None else None
-    return call is None or read_scope("messages") in call.grant.scopes
 
 
 @router.get("/settings/info", responses=documented(m.SettingsInfoResponse, description="The information; when it could not be read, error and empty parts"))
@@ -469,10 +473,10 @@ def get_settings_info(request: Request = None, db: Session = Depends(get_db)):
         oldest_netfilter = db.query(func.min(NetfilterLog.time)).scalar()
         
         # Get recent incomplete correlations (for monitoring). They name
-        # senders and recipients: an agent gets them only with View for
-        # Messages, and nobody gets an excluded address's
+        # senders and recipients: an agent or a person gets them only with
+        # View for Messages, and nobody gets an excluded address's
         recent_incomplete = []
-        if _may_read_messages(request):
+        if caller_may(request, "messages", READ):
             recent_incomplete = db.query(MessageCorrelation).filter(
                 MessageCorrelation.is_complete == False,
                 excluded_addresses.correlation_visible(),
@@ -906,7 +910,7 @@ def get_editable_settings(db: Session = Depends(get_db)):
     }
 
 
-@router.put("/settings", responses=documented(m.SettingsSaveResponse, description="Saved; a body without an editable change saves nothing", errors={400: None, 403: None, 422: Invalid, 500: None, 503: None}))
+@router.put("/settings", responses=documented(m.SettingsSaveResponse, description="Saved; a body without an editable change saves nothing", errors={400: None, 403: None, 409: None, 422: Invalid, 500: None, 503: None}))
 def update_settings(body: Dict[str, Any], request: Request = None, response: Response = None,
                     db: Session = Depends(get_db)):
     """
@@ -918,6 +922,9 @@ def update_settings(body: Dict[str, Any], request: Request = None, response: Res
     import secrets as _secrets
     if not settings.edit_settings_via_ui_enabled:
         raise HTTPException(status_code=403, detail="Editing settings from UI is disabled. Set SETTINGS_EDIT_VIA_UI_ENABLED=true to enable.")
+    # Changed only under Users, with its own version, so a form opened before a change cannot undo it
+    if any(key in body for key in ("oauth2_default_access", DEFAULT_ACCESS_KEY, DEFAULT_VERSION_KEY)):
+        raise HTTPException(status_code=400, detail="The OAuth2 default access is changed under Users, not in Settings.")
     allowed = {k: v for k, v in body.items() if k in EDITABLE_SETTING_KEYS}
     if "disabled_features" in allowed:
         # An old name is saved as the features it stands for
@@ -1054,6 +1061,12 @@ def update_settings(body: Dict[str, Any], request: Request = None, response: Res
             # shared settings, which a request elsewhere may reload with older values
             before = build_settings(db)
             _validate_agent_access(allowed, before)
+            if _changes_admin_sign_in(allowed, before):
+                # Under the users' lock until the save below commits (services/users_store.py)
+                try:
+                    users_store.check_sign_in_settings(db, before, allowed)
+                except users_store.UserError as e:
+                    raise HTTPException(status_code=e.status, detail=e.detail)
             prev_sign_in = _session_bound_values(before)
             list_was_kept, switches_before = spam_list_kept(), _spam_list_switches()
             save_config_overrides_to_db(db, allowed)

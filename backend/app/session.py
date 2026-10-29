@@ -38,6 +38,8 @@ _auth_generation = 0
 # first; a session whose entry is gone is simply not signed in.
 SESSION_EXPIRED = "session_expired"
 SESSION_IDLE = "session_idle"
+# The person's account changed or no longer gives access (user_access.py)
+SESSION_ACCESS_CHANGED = "access_changed"
 _TOMBSTONE_SECONDS = 600
 _tombstones: "OrderedDict[str, Tuple[str, float]]" = OrderedDict()
 
@@ -210,7 +212,8 @@ _config.set_settings_publisher(_publish_settings)
 
 # ── Sessions ───────────────────────────────────────────────────────────────
 
-def create_session(user_info: Dict[str, Any], *, generation: int) -> str:
+def create_session(user_info: Dict[str, Any], *, generation: int,
+                   principal: Optional[Dict[str, Any]] = None) -> str:
     """
     Create a new session and return session ID
 
@@ -218,6 +221,8 @@ def create_session(user_info: Dict[str, Any], *, generation: int) -> str:
         user_info: User information from OAuth2 provider
         generation: auth_generation() when the request was admitted. A
             revocation since then refuses the session (SessionRevokedError).
+        principal: who signed in, as user_access.py resolves it on every
+            request; kept apart from user_info, which the provider fills.
 
     Returns:
         Session ID (signed)
@@ -241,6 +246,8 @@ def create_session(user_info: Dict[str, Any], *, generation: int) -> str:
             "active_at": now,
             "issued_hours": _longest_hours(),
         }
+        if principal is not None:
+            _session_store[session_id]["principal"] = principal
 
         # Sign the session ID
         serializer = get_serializer()
@@ -345,6 +352,28 @@ def session_key_from_request(request: Request) -> Optional[str]:
 def is_session_active(key: str) -> bool:
     """Whether the session with this server-side key exists and neither limit has ended it."""
     return _check(key).data is not None
+
+
+def session_by_key(key: Optional[str]) -> SessionState:
+    """The session with this server-side key, checked against both limits."""
+    return _check(key)
+
+
+def end_session(key: str, reason: str) -> None:
+    """End one session now, remembering why, like a limit does."""
+    with _session_lock:
+        if key in _session_store:
+            _end(key, reason, _now())
+
+
+def end_sessions_where(match: Callable[[Dict[str, Any]], bool], reason: str) -> int:
+    """End every session whose record matches, for example all of one user's."""
+    with _session_lock:
+        now = _now()
+        keys = [k for k, record in _session_store.items() if match(record)]
+        for key in keys:
+            _end(key, reason, now)
+        return len(keys)
 
 
 def get_session_from_request(request: Request) -> Optional[Dict[str, Any]]:

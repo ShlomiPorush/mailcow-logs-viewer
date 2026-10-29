@@ -41,7 +41,8 @@ class ErrorDetail(Fixed):
 class SessionEnded(Fixed):
     """A session cookie that a limit ended; the X-Session-End header carries the reason too."""
     detail: str = Field(description="What happened")
-    reason: str = Field(description="session_expired (the longest session) or session_idle (inactivity)")
+    reason: str = Field(description="session_expired (the longest session), session_idle (inactivity) or "
+                                    "access_changed (the person's account changed or no longer gives access)")
 
 
 # Not signed in: the route's own sentence, or a session a limit ended (the

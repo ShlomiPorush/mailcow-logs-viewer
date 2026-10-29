@@ -214,6 +214,39 @@ def _authenticate_basic_request(request: Request) -> bool:
         return True
 
 
+def basic_credentials(request: Request) -> Optional[tuple]:
+    """(username, password) from the Basic header, ("", "") when it cannot be read, None without one."""
+    authorization = request.headers.get("Authorization", "")
+    if not authorization.startswith("Basic "):
+        return None
+    try:
+        username, password = base64.b64decode(authorization[6:]).decode("utf-8").split(":", 1)
+    except (ValueError, UnicodeDecodeError):
+        return ("", "")
+    return username, password
+
+
+def sign_in_budget(request: Request) -> str:
+    """The client's failure counter for a login, or 429 when it is used up (same budget as every route)."""
+    with _auth_lock:
+        client_ip = _client_ip(request)
+        if _is_rate_limited(client_ip):
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Too many failed login attempts. Try again later.",
+                headers={"Retry-After": str(_AUTH_WINDOW_SECONDS)},
+            )
+        return client_ip
+
+
+def record_sign_in_failure(client_ip: str) -> None:
+    _record_auth_failure(client_ip)
+
+
+def clear_sign_in_failures(client_ip: str) -> None:
+    _clear_auth_failures(client_ip)
+
+
 def is_request_authenticated(request: Request) -> bool:
     """
     Check whether a request carries valid credentials (session cookie or

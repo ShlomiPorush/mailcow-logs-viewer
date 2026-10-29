@@ -20,6 +20,10 @@ from fastapi import APIRouter, Query, Path, Request, WebSocket, WebSocketDisconn
 from sqlalchemy import func, desc, asc, or_, cast, String
 from sqlalchemy.dialects.postgresql import JSONB
 
+from starlette.concurrency import run_in_threadpool
+
+from .. import user_access
+from ..agent_access.scopes import READ
 from ..database import get_db_context
 from ..config import settings
 from ..models import RawServiceLog
@@ -52,21 +56,38 @@ ws_router = APIRouter()
 # one) and the session generation at that time. It ends when that session is
 # deleted or expires (sign-out) or when every session is revoked (sign-in
 # settings changed), the same moments the HTTP API stops accepting the session.
-Authority = Tuple[Optional[str], int]
+# It also carries the person (user_access.Principal.ref(), None for the
+# built-in admin), whose View for Logs is checked again while it runs.
+Authority = Tuple[Optional[str], int, Optional[dict]]
 
 _ws_tokens: Dict[str, Tuple[float, Authority]] = {}  # token -> (expiry timestamp, authority)
 _WS_TOKEN_TTL = 30  # seconds
-# Close code for a stream whose session ended. The page reconnects on it: with
-# a valid session it gets a new token, otherwise the token request is refused
-# and the page goes to the login screen.
+# Close code for a stream whose session ended or whose person lost View for
+# Logs. The page reconnects on it: with a valid session and access it gets a
+# new token, otherwise the token request is refused.
 WS_SESSION_ENDED = 4001
+# A valid token whose person no longer has View for Logs
+WS_NOT_PERMITTED = 4403
+# How often an open stream checks the person's access again, at most
+WS_ACCESS_CHECK_SECONDS = 5
 
 
 def _authority_is_current(authority: Authority) -> bool:
-    session_key, generation = authority
+    session_key, generation = authority[0], authority[1]
     if generation != auth_generation():
         return False
     return session_key is None or is_session_active(session_key)
+
+
+def _person(authority: Authority) -> Optional[dict]:
+    return authority[2] if len(authority) > 2 else None
+
+
+async def _may_read_logs(authority: Authority) -> bool:
+    person = _person(authority)
+    if person is None:
+        return True
+    return await run_in_threadpool(user_access.still_permits, person, "logs", READ)
 
 
 def _cleanup_expired_tokens():
@@ -93,11 +114,13 @@ class LogStreamManager:
         self.connections: Dict[str, List[WebSocket]] = {}
         self._send_locks: Dict[WebSocket, asyncio.Lock] = {}
         self._authority: Dict[WebSocket, Authority] = {}
+        self._access_checked: Dict[WebSocket, float] = {}
 
     async def connect(self, websocket: WebSocket, service: str, authority: Optional[Authority] = None):
         await websocket.accept()
         self._send_locks[websocket] = asyncio.Lock()
-        self._authority[websocket] = authority or (None, auth_generation())
+        self._authority[websocket] = authority or (None, auth_generation(), None)
+        self._access_checked[websocket] = time.monotonic()
         self.connections.setdefault(service, []).append(websocket)
 
     async def disconnect(self, websocket: WebSocket, service: str):
@@ -106,6 +129,7 @@ class LogStreamManager:
             clients.remove(websocket)
         self._send_locks.pop(websocket, None)
         self._authority.pop(websocket, None)
+        self._access_checked.pop(websocket, None)
 
     def is_current(self, websocket: WebSocket) -> bool:
         authority = self._authority.get(websocket)
@@ -125,6 +149,7 @@ class LogStreamManager:
         if self._send_locks.pop(websocket, None) is None:
             return
         self._authority.pop(websocket, None)
+        self._access_checked.pop(websocket, None)
         for clients in self.connections.values():
             if websocket in clients:
                 clients.remove(websocket)
@@ -133,11 +158,25 @@ class LogStreamManager:
         except Exception:
             pass  # The peer may already be gone or unable to receive a close frame.
 
-    async def end_if_revoked(self, websocket: WebSocket) -> bool:
-        """Close the stream if its session ended. True when it was closed."""
-        if self.is_current(websocket):
+    async def _access_lost(self, websocket: WebSocket) -> bool:
+        """Whether the stream's person lost View for Logs, checked at most every few seconds."""
+        authority = self._authority.get(websocket)
+        if authority is None or _person(authority) is None:
             return False
-        logger.info("[WS] Closing a live log stream: its session ended")
+        now = time.monotonic()
+        if now - self._access_checked.get(websocket, 0.0) < WS_ACCESS_CHECK_SECONDS:
+            return False
+        self._access_checked[websocket] = now
+        return not await _may_read_logs(authority)
+
+    async def end_if_revoked(self, websocket: WebSocket) -> bool:
+        """Close the stream if its session ended or its person lost View for Logs. True when it was closed."""
+        if self.is_current(websocket):
+            if not await self._access_lost(websocket):
+                return False
+            logger.info("[WS] Closing a live log stream: its person no longer has View for Logs")
+        else:
+            logger.info("[WS] Closing a live log stream: its session ended")
         await self._drop(websocket, code=WS_SESSION_ENDED, reason="Session ended")
         return True
 
@@ -200,14 +239,15 @@ def _admitted_authority(request: Request) -> Optional[Authority]:
     ended, or a sign-in change, after the admission gets no stream."""
     admission = getattr(request.state, "auth_admission", None)
     generation = getattr(request.state, "auth_generation", None)
-    if not isinstance(generation, int) or generation != auth_generation():
+    principal = getattr(request.state, "principal", None)
+    if not isinstance(generation, int) or generation != auth_generation() or principal is None:
         return None
     if admission == ("open", None) or admission == ("basic", None):
-        return (None, generation)
+        return (None, generation, principal.ref())
     if isinstance(admission, tuple) and len(admission) == 2 and admission[0] == "session":
         key = admission[1]
         if isinstance(key, str) and is_session_active(key):
-            return (key, generation)
+            return (key, generation, principal.ref())
     return None
 
 
@@ -275,6 +315,14 @@ async def websocket_raw_logs(
                 "message": "Authentication required"
             })
             await websocket.close(code=4401, reason="Authentication required")
+            return
+
+        # The person may have lost View for Logs since the token was issued
+        if not await _may_read_logs(authority):
+            logger.info("[WS Auth] Live log stream refused: no View for Logs")
+            await websocket.accept()
+            await websocket.send_json({"type": "error", "message": user_access.NOT_PERMITTED})
+            await websocket.close(code=WS_NOT_PERMITTED, reason="No permission")
             return
     # ────────────────────────────────────────────────────────────────────
     

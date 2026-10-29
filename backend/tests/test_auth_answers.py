@@ -18,6 +18,7 @@ sf.StaticFiles.__init__ = lambda s, *a, **k: _orig_init(s, *a, **{**k, 'check_di
 from fastapi.testclient import TestClient  # noqa: E402
 
 from app import session as session_module  # noqa: E402
+from app.agent_access.scopes import all_scopes  # noqa: E402
 from app.config import settings  # noqa: E402
 from app.main import app  # noqa: E402
 from app.routers import auth  # noqa: E402
@@ -103,7 +104,9 @@ def test_provider_info_with_oauth2(provider):
 
 def test_status_signed_out(signed_out):
     r = _client().get('/api/auth/status')
-    assert r.status_code == 200 and r.json() == {'authenticated': False, 'auth_type': None, 'user': None, 'session': None}
+    # Sign-in off: whoever reaches the app may do everything, as before users existed
+    assert r.status_code == 200 and r.json() == {'authenticated': False, 'auth_type': None, 'user': None, 'session': None,
+                                                 'user_name': None, 'is_admin': True, 'scopes': list(all_scopes())}
 
 
 def test_status_with_basic_auth_and_with_a_session(basic):
@@ -128,9 +131,9 @@ def test_session_after_a_sign_in_change_during_the_login(basic, monkeypatch):
     """Sign-in settings change between the check of the password and the session."""
     real = session_module.create_session
 
-    def changed_meanwhile(user_info, *, generation):
+    def changed_meanwhile(user_info, *, generation, **kwargs):
         monkeypatch.setattr(session_module, '_auth_generation', session_module.auth_generation() + 1)
-        return real(user_info, generation=generation)
+        return real(user_info, generation=generation, **kwargs)
 
     monkeypatch.setattr(auth, 'create_session', changed_meanwhile)
     r = _client().post('/api/auth/session', headers={'Authorization': BASIC})
@@ -167,7 +170,7 @@ def test_login_when_discovery_fails(provider, monkeypatch):
     assert r.status_code == 500
 
 
-def test_login_and_callback(provider):
+def test_login_and_callback(provider, app_schema):
     client = _client()
     login = client.get('/api/auth/login', params={'next': '/messages'}, follow_redirects=False)
     assert login.status_code == 307 and login.content == b''
