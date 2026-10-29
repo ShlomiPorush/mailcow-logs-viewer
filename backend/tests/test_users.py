@@ -265,23 +265,24 @@ def test_usernames_are_unique_ignoring_case_and_width(people):
     assert r.status_code == 409
 
 
-WEAK_PASSWORD = "Use at least 8 characters with an uppercase letter, a lowercase letter, a number and a symbol."
+SHORT_PASSWORD = "Use at least 8 characters."
 
 
-@pytest.mark.parametrize("password", ["Abcde1!", "abcdef1!", "ABCDEF1!", "Abcdefg!", "Abcdefg1"])
-def test_a_password_missing_a_requirement_is_refused_on_create(people, password):
+@pytest.mark.parametrize("password", ["Abcde1!", "1234567", ""])
+def test_a_password_under_8_characters_is_refused_on_create(people, password):
     r = _admin().post("/api/users", json={"kind": "local", "username": "alice", "password": password, "access": "viewer"})
-    assert r.status_code == 422 and r.json()["detail"] == WEAK_PASSWORD
+    assert r.status_code == 422 and r.json()["detail"] == SHORT_PASSWORD
 
 
-def test_8_complex_characters_are_enough_and_sign_in(people):
+@pytest.mark.parametrize("password", ["abcdefgh", "12345678", "ABCDEFGH"])
+def test_8_characters_of_any_kind_are_enough_and_sign_in(people, password):
     admin = _admin()
-    _add(admin, "alice", password="Abcdef1!")
-    _sign_in("alice", "Abcdef1!")
+    _add(admin, "alice", password=password)
+    _sign_in("alice", password)
 
 
 @pytest.mark.parametrize("password, detail", [
-    ("abcdef1!", WEAK_PASSWORD), ("A1!" + "b" * 254, "Use at most 256 characters.")])
+    ("abcdefg", SHORT_PASSWORD), ("A1!" + "b" * 254, "Use at most 256 characters.")])
 def test_a_password_reset_follows_the_same_rule(people, password, detail):
     admin = _admin()
     row = _add(admin, "alice")
@@ -775,7 +776,8 @@ def test_a_default_change_on_an_older_version_is_refused(oauth2):
         "default_access": "viewer", "version": 1}
     r = admin.put("/api/users/oauth2-default", json={"value": "admin", "version": 0})
     assert r.status_code == 409
-    assert admin.get("/api/users").json()["oauth2"] == {"enabled": True, "default_access": "viewer", "version": 1}
+    assert admin.get("/api/users").json()["oauth2"] == {"enabled": True, "default_access": "viewer", "version": 1,
+                                                       "provider_name": settings.oauth2_provider_name}
 
 
 def test_a_settings_form_cannot_change_the_oauth2_default(oauth2, refused_saves_only):
@@ -921,7 +923,8 @@ def test_the_list_says_what_each_preset_and_user_gets(people):
     assert presets["operator"]["rspamd"] == "view" and presets["operator"]["outbound"] == "act"
     assert presets["viewer"]["outbound"] == "view" and presets["custom"] == {}
     assert data["builtin"] == {"username": ADMIN_NAME, "basic_auth_enabled": True}
-    assert data["oauth2"] == {"enabled": False, "default_access": "admin", "version": 0}
+    assert data["oauth2"] == {"enabled": False, "default_access": "admin", "version": 0,
+                              "provider_name": settings.oauth2_provider_name}
     (row,) = data["users"]
     assert row["areas"] == presets["operator"] and row["email"] is None and row["name_conflict"] is False
 
@@ -1460,3 +1463,20 @@ def test_a_settings_save_counts_the_reading_in_force_before_it(oauth2, monkeypat
     with get_db_context() as db:
         with pytest.raises(users_store.UserError):
             users_store.check_sign_in_settings(db, before, {"auth_username": "root"})
+
+
+def test_the_users_answer_says_who_asked(oauth2, monkeypatch):
+    monkeypatch.setattr(settings._inner, "oauth2_provider_name", "Example SSO")
+    admin = _admin()
+    answer = admin.get("/api/users").json()
+    assert answer["you"] == {"kind": "builtin", "user_id": None, "via_default": False}
+    assert answer["oauth2"]["provider_name"] == "Example SSO"
+    alice = _add(admin, "alice", access="admin")
+    assert _sign_in("alice").get("/api/users").json()["you"] == {"kind": "local", "user_id": alice["id"], "via_default": False}
+    carol = _add(admin, "carol@example.com", access="admin", kind="oauth2")
+    # Matched as the sign-in matches: the provider's email, normalized
+    assert _oauth2_client(" Carol@Example.com ").get("/api/users").json()["you"] == {
+        "kind": "oauth2", "user_id": carol["id"], "via_default": False}
+    # No entry, or an email the provider did not verify: the access for everyone else (Admin here)
+    for client in (_oauth2_client("dave@example.com"), _oauth2_client("carol@example.com", verified=False)):
+        assert client.get("/api/users").json()["you"] == {"kind": "oauth2", "user_id": None, "via_default": True}

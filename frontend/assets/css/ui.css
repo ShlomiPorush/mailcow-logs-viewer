@@ -2372,14 +2372,18 @@ html body .ui-main .ui-set-choice-opt > input[type="radio"] { accent-color: var(
 .ui-pw-meter[data-level="1"] .ui-pw-label { color: var(--ui-fail-text); }
 .ui-pw-meter[data-level="2"] .ui-pw-label { color: var(--ui-warn-text); }
 .ui-pw-meter[data-level="3"] .ui-pw-label, .ui-pw-meter[data-level="4"] .ui-pw-label { color: var(--ui-ok-text); }
-.ui-pw-rules { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 4px 12px; margin: 0; padding: 0;
-    list-style: none; font-size: var(--ui-fs-sm); color: var(--ui-muted); }
-.ui-pw-rules li { display: flex; align-items: center; gap: 6px; }
-.ui-pw-mark { display: inline-grid; place-items: center; flex: none; width: 14px; height: 14px; border: 1px solid var(--ui-line); border-radius: 3px;
-    font-size: 10px; font-weight: 800; line-height: 1; }
+.ui-pw-warn { margin: 0; color: var(--ui-warn-text); font-size: var(--ui-fs-sm); }
+/* The requirements on one line, wrapping on a phone: a check or a cross before each */
+.ui-pw-rules { display: flex; flex-wrap: wrap; gap: 2px 14px; margin: 0; padding: 0; list-style: none; font-size: var(--ui-fs-sm); color: var(--ui-muted); }
+.ui-pw-rules li { display: inline-flex; align-items: center; gap: 4px; }
+.ui-pw-mark { font-weight: 800; color: var(--ui-fail-text); }
 .ui-pw-rules li[data-met="true"] { color: var(--ui-ink); }
-.ui-pw-rules li[data-met="true"] .ui-pw-mark { border-color: var(--ui-ok); background: var(--ui-ok); color: var(--ui-bg); }
-.ui-pw-rules li[data-met="true"] .ui-pw-mark::before { content: '\2713'; }
+.ui-pw-rules li[data-met="true"] .ui-pw-mark { color: var(--ui-ok-text); }
+/* Generate, the length it draws (accented as the checkboxes are, .ui-check) and Copy */
+.ui-pw-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-top: 8px; }
+.ui-pw-length { display: inline-flex; align-items: center; gap: 8px; font-size: var(--ui-fs-sm); color: var(--ui-muted); }
+.ui-pw-range { width: 140px; accent-color: var(--ui-accent); }
+.ui-pw-length output { min-width: 2ch; color: var(--ui-ink); font-weight: 700; font-variant-numeric: tabular-nums; }
 /* Access (utils.js setAppAccess): a control that takes an action the signed-in person may not take,
    or an admin's control, is not offered; the server refuses the call anyway */
 .ui-no-act-status [data-acts~="status"], .ui-no-act-outbound [data-acts~="outbound"],

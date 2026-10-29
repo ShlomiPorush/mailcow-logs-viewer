@@ -8,7 +8,7 @@ changed; delete the user and add them again.
 import logging
 from typing import List, Literal, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
@@ -32,8 +32,7 @@ class NewUser(_Body):
     kind: Literal["local", "oauth2"]
     username: Optional[str] = Field(default=None, max_length=200, description="A local user's username")
     email: Optional[str] = Field(default=None, max_length=320, description="An OAuth2 entry's email address")
-    password: Optional[str] = Field(default=None, max_length=1024, description="A local user's password: 8 to 256 characters, with an uppercase letter, "
-                                                                                "a lowercase letter, a number and a symbol")
+    password: Optional[str] = Field(default=None, max_length=1024, description="A local user's password, 8 to 256 characters")
     access: Access
     views: List[str] = Field(default_factory=list, max_length=50, description="custom: the areas with View")
     acts: List[str] = Field(default_factory=list, max_length=50, description="custom: the areas with Act (includes View)")
@@ -46,7 +45,7 @@ class UserChange(_Body):
     acts: List[str] = Field(default_factory=list, max_length=50)
     disabled: bool
     password: Optional[str] = Field(default=None, max_length=1024, description="A new password for a local user, "
-                                                                               "with the same rules as a new user's; leave out to keep it")
+                                                                               "8 to 256 characters; leave out to keep it")
     row_version: int = Field(description="The row_version the change was made on")
 
 
@@ -63,9 +62,10 @@ def _run(fn, *args, **kwargs):
 
 
 @router.get("", responses=documented(m.UsersOverview, errors={500: None}))
-def list_users(db: Session = Depends(get_db)):
-    """Who can sign in and with what access, with the areas and presets to choose from."""
-    return users_store.overview(db)
+def list_users(request: Request, db: Session = Depends(get_db)):
+    """Who can sign in and with what access, with the areas and presets to choose from, and who
+    asked (you), so a change to one's own access can be confirmed first."""
+    return users_store.overview(db, getattr(request.state, "principal", None))
 
 
 @router.post("", status_code=201, responses=documented(m.UserRow, status=201, errors={409: None, 422: Invalid, 500: None}))

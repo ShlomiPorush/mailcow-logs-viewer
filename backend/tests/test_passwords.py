@@ -26,33 +26,24 @@ def test_a_non_ascii_password_round_trips():
     assert passwords.verify_password("pässwörd 日本語 ok", stored)
 
 
-WEAK = "Use at least 8 characters with an uppercase letter, a lowercase letter, a number and a symbol."
+SHORT = "Use at least 8 characters."
 
 
 @pytest.mark.parametrize("password", [
-    "Abcdef1!",                 # 8 characters, every kind once
-    "Abc def1",                 # a space is a symbol
-    "Ärger12€",                 # letters and a symbol outside ASCII
-    "Пароль1!",                 # Cyrillic upper and lower case letters
+    "abcdefgh",                 # 8 characters of one kind: only the length is required
+    "12345678",
+    "Abcdef1!",
+    "日本語のパスワード",           # 9 characters outside ASCII
+    "\U0001F600" * 8,           # 8 characters, each outside the BMP
     "A1!" + "b" * 253,          # 256 characters
 ])
-def test_a_complex_password_of_8_to_256_characters_is_accepted(password):
+def test_a_password_of_8_to_256_characters_is_accepted(password):
     assert passwords.password_problem(password) is None
 
 
-@pytest.mark.parametrize("password", [
-    "Abcde1!",                  # 7 characters
-    "abcdef1!",                 # no uppercase letter
-    "ABCDEF1!",                 # no lowercase letter
-    "Abcdefg!",                 # no number
-    "Abcdefg1",                 # no symbol
-    "Abcd日本12",                # letters without case are letters, not symbols
-    "Abcdefg²",                 # a superscript two is a symbol, not a number
-    "",
-    None,
-])
-def test_a_password_missing_a_requirement_is_refused_in_one_sentence(password):
-    assert passwords.password_problem(password) == WEAK
+@pytest.mark.parametrize("password", ["Abcde1!", "1234567", "", None])
+def test_a_password_under_8_characters_is_refused(password):
+    assert passwords.password_problem(password) == SHORT
 
 
 def test_a_password_over_256_characters_is_refused_before_hashing():

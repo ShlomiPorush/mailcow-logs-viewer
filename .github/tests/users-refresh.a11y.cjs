@@ -171,3 +171,21 @@ test('a late save answer does not undo a newer change a refresh already shows', 
     assert.equal(p.w.eval('JSON.stringify(toasts)'),
         JSON.stringify([['Someone else changed this access since. It is shown as it is now.', 'info']]));
 });
+
+test('the provider is called by its name, escaped, or OAuth2 when it has none; no Authentication button', async () => {
+    const p = page();
+    const data = overview([user(2, 'dana'), { ...user(3, null), kind: 'oauth2', username: null, email: 'carol@example.com' }]);
+    data.oauth2.provider_name = 'Auth<b>entik</b>';
+    p.w.served['GET /api/users'] = data;
+    await p.w.loadUsersPanel();
+    const text = p.$('#users-panel').textContent;
+    assert.ok(text.includes('Signs in with Auth<b>entik</b>'), 'the row names the provider as text');
+    assert.ok(text.includes('Everyone else who signs in with Auth<b>entik</b>'));
+    assert.ok(!p.$('#users-panel b b'), 'the name is not markup');
+    assert.ok(!text.includes('OAuth2'));
+    assert.ok(![...p.w.document.querySelectorAll('#users-panel button')].some(b => b.textContent.trim() === 'Authentication'));
+    data.oauth2.provider_name = '  ';
+    p.w.served['GET /api/users'] = data;
+    await p.w.loadUsersPanel();
+    assert.ok(p.$('#users-panel').textContent.includes('Everyone else who signs in with OAuth2'));
+});

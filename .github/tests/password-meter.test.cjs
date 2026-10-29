@@ -1,25 +1,30 @@
-// A local user's password in Settings > Users (users.js): the strength the meter shows, the
-// requirements it marks, and the words that block Save are the server's rule and words
-// (backend services/passwords.py): at least 8 characters with an uppercase letter, a lowercase
-// letter, a number and a symbol, by Unicode category; at most 256. Save stops only what every
-// browser reads alike (no password, over 256 characters); the rest is the server's to refuse.
+// A local user's password in Settings > Users (users.js). The server requires 8 to 256
+// characters (backend services/passwords.py); Save stops the same, in the same words. The meter
+// shows the strength as guidance: an uppercase letter, a lowercase letter, a number and a symbol,
+// by Unicode category. Generate draws from crypto.getRandomValues, one of each kind at least.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
+const { webcrypto } = require('node:crypto');
 const { test } = require('node:test');
 
 const root = path.join(__dirname, '../..');
-const context = vm.createContext({ escapeHtml: text => String(text) });
+// getRandomValues counted, so a test can see the generator uses it
+const draws = { count: 0 };
+const crypto = { getRandomValues: array => { draws.count++; return webcrypto.getRandomValues(array); } };
+const context = vm.createContext({ escapeHtml: text => String(text), crypto, Uint32Array });
 vm.runInContext(fs.readFileSync(path.join(root, 'frontend/users.js'), 'utf8'), context);
 const check = password => JSON.parse(JSON.stringify(context.usersPasswordCheck(password)));
+const block = (password, required) => context.usersPasswordBlock(password, required);
 // Top-level constants are not properties of the context: read them in it
 const value = name => vm.runInContext(name, context);
 const server = fs.readFileSync(path.join(root, 'backend/app/services/passwords.py'), 'utf8');
 
 test('the dialog uses the server\'s words and limits', () => {
-    assert.equal(value('USERS_PASSWORD_WEAK'), server.match(/^WEAK_PROBLEM = "([^"]+)"/m)[1]);
+    assert.equal(value('USERS_PASSWORD_SHORT'), server.match(/^SHORT_PROBLEM = "([^"]+)"/m)[1]);
     assert.equal(value('USERS_PASSWORD_LONG'), server.match(/^LONG_PROBLEM = "([^"]+)"/m)[1]);
+    assert.equal(value('USERS_PASSWORD_SHORT'), 'Use at least 8 characters.');
     assert.match(server, /^MIN_LENGTH = 8$/m);
     assert.match(server, /^MAX_LENGTH = 256$/m);
 });
@@ -41,35 +46,55 @@ test('each requirement is marked on its own', () => {
     assert.deepEqual(check('ABCDEFGH').met, { length: true, upper: true, lower: false, digit: false, symbol: false });
     assert.deepEqual(check('12345678 ').met, { length: true, upper: false, lower: false, digit: true, symbol: true });
     assert.deepEqual(check('Abcdef1!'), { met: { length: true, upper: true, lower: true, digit: true, symbol: true }, level: 2 });
-});
-
-test('letters and symbols are told apart as the server does (Unicode categories)', () => {
-    assert.equal(check('Ärger12€').level, 2);               // letters and a symbol outside ASCII
-    assert.equal(check('Пароль1!').level, 2);               // Cyrillic cases
     assert.equal(check('Abcd日本12').met.symbol, false);     // letters without case are letters
     assert.equal(check('Abcdefg²').met.digit, false);        // a superscript two is a symbol
-    assert.equal(check('Abcdefg²').met.symbol, true);
-    // Characters, not UTF-16 units: an astral letter counts once
-    assert.equal(check('\u{1D49C}bcde1!').met.length, false);
-    assert.equal(check('\u{1D49C}bcdef1!').level, 2);
 });
 
-const block = (password, required) => context.usersPasswordBlock(password, required);
-
-test('Save stops only a missing password when adding, and over 256 characters', () => {
-    assert.equal(block('', true), value('USERS_PASSWORD_WEAK'));
+test('Save stops only the length: under 8 characters, or over 256', () => {
+    assert.equal(block('', true), 'Use at least 8 characters.');
     assert.equal(block('', false), '');                     // editing: an empty field keeps the password
-    // A requirement unmet is the server's to refuse, in its words: not stopped here
-    for (const password of ['abc', 'abcdefgh', 'Abcdefgh1']) assert.equal(block(password, true), '', password);
+    assert.equal(block('Abcde1!', true), 'Use at least 8 characters.');
+    assert.equal(block('Abcde1!', false), 'Use at least 8 characters.');
+    // Weak, but long enough: saved
+    for (const password of ['abcdefgh', '12345678', 'ABCDEFGH']) assert.equal(block(password, true), '', password);
     assert.equal(block('A1!' + 'b'.repeat(253), true), '');
     assert.equal(block('A1!' + 'b'.repeat(254), true), 'Use at most 256 characters.');
-    assert.equal(block('A1!' + 'b'.repeat(254), false), 'Use at most 256 characters.');
 });
 
-test('the 256 counts characters (code points), not UTF-16 units', () => {
-    // 126 astral characters (252 units) and 5 more: 131 characters, 257 units
-    const password = '\u{1F600}'.repeat(126) + 'Ab1!x';
+test('the length counts characters (code points), not UTF-16 units', () => {
+    assert.equal(block('\u{1F600}'.repeat(7), true), 'Use at least 8 characters.');   // 14 units
+    assert.equal(block('\u{1F600}'.repeat(8), true), '');
+    const password = '\u{1F600}'.repeat(126) + 'Ab1!x';                             // 131 characters, 257 units
     assert.equal(password.length, 257);
     assert.equal(block(password, true), '');
-    assert.equal(block('\u{1F600}'.repeat(257), true), 'Use at most 256 characters.');
+});
+
+test('Generate makes the length asked, with one of each kind, from the four sets only', () => {
+    const sets = [...value('USERS_PASSWORD_SETS')];
+    for (const length of [12, 20, 64]) {
+        for (let i = 0; i < 50; i++) {
+            const password = context.usersGeneratePassword(length);
+            assert.equal(password.length, length);
+            for (const set of sets) assert.ok([...password].some(c => set.includes(c)), `${password} lacks one of ${set}`);
+            assert.ok([...password].every(c => sets.some(set => set.includes(c))), password);
+            assert.equal(check(password).level >= 3, true, 'a generated password is Good or Strong');
+        }
+    }
+});
+
+test('Generate draws from crypto.getRandomValues', () => {
+    const before = draws.count;
+    context.usersGeneratePassword(20);
+    // One draw per character and per swap of the shuffle at least
+    assert.ok(draws.count - before >= 39, `${draws.count - before} draws`);
+});
+
+test('a draw from the uneven top of the range is drawn again (no bias)', () => {
+    // n = 3: 2**32 is not a multiple of 3, so the highest value lies in the uneven top part
+    const values = [0xFFFFFFFF, 0xFFFFFFFE, 7];
+    const fixed = vm.createContext({ escapeHtml: String, Uint32Array, crypto: { getRandomValues: array => { array[0] = values.shift(); return array; } } });
+    vm.runInContext(fs.readFileSync(path.join(root, 'frontend/users.js'), 'utf8'), fixed);
+    // 0xFFFFFFFF is past the limit; 0xFFFFFFFE (4294967294) is the last value below it: 4294967294 % 3 = 2
+    assert.equal(fixed.usersRandomIndex(3), 2);
+    assert.deepEqual(values, [7]);
 });

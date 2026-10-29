@@ -1,8 +1,9 @@
-// The password strength meter of Settings > Users in a real DOM (jsdom): it follows what is
-// typed, says the strength in a polite live region, tells a screen reader which requirements
-// are met, waits for typing when editing (an empty field keeps the password). Save sends a
-// password that misses a requirement, and the server's answer shows in the dialog; only a
-// missing password when adding and over 256 characters are stopped before asking.
+// The password field of Settings > Users in a real DOM (jsdom): the meter follows what is typed,
+// says the strength in a polite live region, marks each requirement with a check or a cross and
+// tells a screen reader which are met, warns about a weak password that can still be saved, and
+// waits for typing when editing. Save stops only under 8 characters (as the server does).
+// Generate fills a readable password of the length chosen, draws a new one when the length
+// moves, shows dots again once typed over, and Copy copies what the field holds.
 // Set A11Y_MODULES to jsdom's node_modules to run it locally (see layers.a11y.cjs).
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -15,15 +16,16 @@ const axeSource = fs.readFileSync(require.resolve(path.join(modules, 'axe-core')
 
 const frontend = path.join(__dirname, '../../frontend');
 const read = name => fs.readFileSync(path.join(frontend, name), 'utf8');
-const WEAK = 'Use at least 8 characters with an uppercase letter, a lowercase letter, a number and a symbol.';
+const SHORT = 'Use at least 8 characters.';
 
 const DATA = {
     areas: [{ id: 'messages', label: 'Messages', view: 'Messages', act: '' }],
-    presets: ['admin', 'operator', 'viewer', 'custom'].map(id => ({ id, label: id, areas: {} })),
+    presets: ['admin', 'operator', 'viewer', 'custom'].map(id => ({ id, label: id, areas: id === 'admin' || id === 'custom' ? {} : { messages: 'view' } })),
     builtin: { username: 'admin', basic_auth_enabled: true },
-    oauth2: { enabled: false, default_access: 'admin', version: 0 },
-    users: [{ id: 2, kind: 'local', username: 'dana', email: null, access: 'viewer', areas: {}, disabled: false,
+    oauth2: { enabled: false, default_access: 'admin', version: 0, provider_name: '' },
+    users: [{ id: 2, kind: 'local', username: 'dana', email: null, access: 'viewer', areas: { messages: 'view' }, disabled: false,
         name_conflict: false, last_login_at: null, created_at: '2026-10-20T10:00:00Z', row_version: 1 }],
+    you: { kind: 'builtin', user_id: null, via_default: false },
 };
 
 function page() {
@@ -38,13 +40,15 @@ function page() {
     };
     [read('utils.js'), read('users.js')].forEach(run);
     const sent = [];
-    // The server refuses a password without an uppercase letter, as the real one does (its words)
+    const copied = [];
+    // The server refuses under 8 characters, as the real one does (its words)
     w.authenticatedFetch = async (url, options) => {
         sent.push({ url, options });
         const password = JSON.parse(options.body).password;
-        if (password && !/\p{Lu}/u.test(password)) return { ok: false, status: 422, json: async () => ({ detail: WEAK }) };
+        if (password !== undefined && [...password].length < 8) return { ok: false, status: 422, json: async () => ({ detail: SHORT }) };
         return { ok: true, status: 201, json: async () => ({ username: 'erin' }) };
     };
+    w.copyToClipboard = text => copied.push(text);
     w.loadUsersPanel = () => {};
     run(`usersData = ${JSON.stringify(DATA)};`);
     const $ = sel => w.document.querySelector(sel);
@@ -53,95 +57,105 @@ function page() {
         field.value = text;
         field.dispatchEvent(new w.Event('input', { bubbles: true }));
     };
-    const rules = () => [...w.document.querySelectorAll('#user-edit-pw-meter li')].map(li => [li.dataset.met, li.textContent.trim()]);
-    return { w, $, type, rules, sent };
+    const rules = () => [...w.document.querySelectorAll('#user-edit-pw-meter li')].map(li => li.textContent.trim());
+    const warned = () => !$('#user-edit-pw-warn').classList.contains('hidden');
+    return { w, $, type, rules, warned, sent, copied };
 }
 
-test('adding: the meter shows the requirements at once and follows what is typed', () => {
+test('typing: a check or a cross per requirement, read out as met or not, and the strength', () => {
     const p = page();
     p.w.editUser(null);
-    const meter = p.$('#user-edit-pw-meter');
-    assert.ok(!meter.classList.contains('hidden'));
     assert.equal(p.$('#user-edit-pass').placeholder, 'At least 8 characters');
-    // No limit in UTF-16 units: the 256 is counted in characters, as the server counts it
     assert.ok(!p.$('#user-edit-pass').hasAttribute('maxlength'));
     assert.equal(p.$('#user-edit-pw-label').getAttribute('aria-live'), 'polite');
-    assert.equal(p.$('#user-edit-pw-label').textContent, '');
-    assert.deepEqual(p.rules(), [
-        ['false', '8 or more characters, not met'], ['false', 'An uppercase letter, not met'],
-        ['false', 'A lowercase letter, not met'], ['false', 'A number, not met'], ['false', 'A symbol, not met'],
-    ]);
+    assert.equal(p.w.document.querySelectorAll('#user-edit-pw-meter input[type="checkbox"]').length, 0, 'marks, not checkboxes');
+    assert.deepEqual(p.rules(), ['✗8 or more characters, not met', '✗An uppercase letter, not met',
+        '✗A lowercase letter, not met', '✗A number, not met', '✗A symbol, not met']);
     p.type('abc1');
-    assert.equal(meter.dataset.level, '1');
     assert.equal(p.$('#user-edit-pw-label').textContent, 'Password strength: Weak');
-    assert.deepEqual(p.rules().map(r => r[1]), ['8 or more characters, not met', 'An uppercase letter, not met',
-        'A lowercase letter, met', 'A number, met', 'A symbol, not met']);
-    p.type('Abcdefgh1!');
-    assert.equal(p.$('#user-edit-pw-label').textContent, 'Password strength: Good');
-    assert.ok(p.rules().every(([met]) => met === 'true'));
+    assert.deepEqual(p.rules(), ['✗8 or more characters, not met', '✗An uppercase letter, not met',
+        '✓A lowercase letter, met', '✓A number, met', '✗A symbol, not met']);
     p.type('Correct Horse 7 Battery');
     assert.equal(p.$('#user-edit-pw-label').textContent, 'Password strength: Strong');
+    assert.ok(p.rules().every(r => r.startsWith('✓') && r.endsWith(', met')));
 });
 
-test('editing: the meter waits for typing, since an empty field keeps the password', () => {
-    const p = page();
-    p.w.editUser(2);
-    assert.ok(p.$('#user-edit-pw-meter').classList.contains('hidden'));
-    p.type('a');
-    assert.ok(!p.$('#user-edit-pw-meter').classList.contains('hidden'));
-    p.type('');
-    assert.ok(p.$('#user-edit-pw-meter').classList.contains('hidden'));
-});
-
-test('Save with a requirement unmet asks the server, and its words show in the dialog', async () => {
+test('a weak password of 8 or more says so, and is saved', async () => {
     const p = page();
     p.w.editUser(null);
     p.$('#user-edit-name').value = 'erin';
-    // No password at all: stopped here, with the same words
-    await p.w.saveUser({ preventDefault() {} }, null);
-    assert.equal(p.$('#user-edit-error').textContent, WEAK);
-    assert.equal(p.sent.length, 0);
+    p.type('abc');
+    assert.equal(p.warned(), false, 'too short to save: no "you can still save it"');
+    p.type('abcdefgh');
+    assert.equal(p.$('#user-edit-pw-label').textContent, 'Password strength: Weak');
+    assert.ok(p.warned());
+    assert.equal(p.$('#user-edit-pw-warn').textContent, 'This password is weak. You can still save it.');
+    p.type('Abcdef1!');
+    assert.equal(p.warned(), false, 'every requirement met: no warning');
     p.type('abcdefgh');
     await p.w.saveUser({ preventDefault() {} }, null);
     assert.equal(p.sent.length, 1);
-    assert.equal(p.$('#user-edit-error').textContent, WEAK);
-    assert.ok(p.$('#user-edit-modal'), 'the dialog stays open');
-    p.type('Abcdef1!');
-    await p.w.saveUser({ preventDefault() {} }, null);
-    assert.equal(p.sent.length, 2);
-    assert.equal(JSON.parse(p.sent[1].options.body).password, 'Abcdef1!');
+    assert.equal(JSON.parse(p.sent[0].options.body).password, 'abcdefgh');
 });
 
-test('over 256 characters is stopped; 131 characters in 257 UTF-16 units are not', async () => {
+test('Save stops a password under 8 characters, adding and editing, with the server\'s words', async () => {
     const p = page();
     p.w.editUser(null);
     p.$('#user-edit-name').value = 'erin';
-    p.type('A1!' + 'b'.repeat(254));
     await p.w.saveUser({ preventDefault() {} }, null);
-    assert.equal(p.$('#user-edit-error').textContent, 'Use at most 256 characters.');
+    assert.equal(p.$('#user-edit-error').textContent, SHORT);
+    p.type('Abcd1!x');
+    await p.w.saveUser({ preventDefault() {} }, null);
+    assert.equal(p.$('#user-edit-error').textContent, SHORT);
     assert.equal(p.sent.length, 0);
-    p.type('\u{1F600}'.repeat(126) + 'Ab1!x');
-    await p.w.saveUser({ preventDefault() {} }, null);
-    assert.equal(p.sent.length, 1);
-});
-
-test('editing: a weak new password gets the server\'s answer; an empty one keeps the password', async () => {
-    const p = page();
+    p.w.closeUserEditModal(true);
     p.w.editUser(2);
+    assert.ok(p.$('#user-edit-pw-meter').classList.contains('hidden'), 'editing: the meter waits for typing');
     p.type('short');
+    assert.ok(!p.$('#user-edit-pw-meter').classList.contains('hidden'));
     await p.w.saveUser({ preventDefault() {} }, 2);
-    assert.equal(p.sent.length, 1);
-    assert.equal(p.$('#user-edit-error').textContent, WEAK);
+    assert.equal(p.$('#user-edit-error').textContent, SHORT);
+    assert.equal(p.sent.length, 0);
     p.type('');
     await p.w.saveUser({ preventDefault() {} }, 2);
-    assert.equal(p.sent.length, 2);
-    assert.ok(!('password' in JSON.parse(p.sent[1].options.body)));
+    assert.equal(p.sent.length, 1);
+    assert.ok(!('password' in JSON.parse(p.sent[0].options.body)), 'an empty field keeps the password');
 });
 
-test('the dialog with the meter has no axe violations', async () => {
+test('Generate: a readable password of the length chosen, a new one when the length moves, dots once typed over', () => {
     const p = page();
     p.w.editUser(null);
-    p.type('Abc1');
+    const field = p.$('#user-edit-pass');
+    const length = p.$('#user-edit-pw-length');
+    assert.equal(p.$('#user-edit-pw-length-value').textContent, '20');
+    assert.equal(length.min, '12');
+    assert.equal(length.max, '64');
+    assert.ok(p.$('#user-edit-pw-copy').disabled, 'nothing to copy yet');
+    p.$('#user-edit-pw-generate').click();
+    assert.equal(field.type, 'text');
+    assert.equal(field.value.length, 20);
+    assert.equal(p.$('#user-edit-pw-label').textContent, 'Password strength: Strong');
+    const first = field.value;
+    length.value = '32';
+    length.dispatchEvent(new p.w.Event('input', { bubbles: true }));
+    assert.equal(p.$('#user-edit-pw-length-value').textContent, '32');
+    assert.equal(field.value.length, 32);
+    assert.notEqual(field.value, first);
+    p.$('#user-edit-pw-copy').click();
+    assert.deepEqual(p.copied, [field.value]);
+    p.type(field.value + 'x');
+    assert.equal(field.type, 'password', 'typed over: shown as dots again');
+    // Moving the length now does not replace what was typed
+    const typed = field.value;
+    length.value = '40';
+    length.dispatchEvent(new p.w.Event('input', { bubbles: true }));
+    assert.equal(field.value, typed);
+});
+
+test('the dialog with the meter and the generator has no axe violations', async () => {
+    const p = page();
+    p.w.editUser(null);
+    p.type('abcdefgh');
     const script = p.w.document.createElement('script');
     script.textContent = axeSource;
     p.w.document.head.appendChild(script);

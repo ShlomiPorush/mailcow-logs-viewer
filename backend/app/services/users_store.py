@@ -178,7 +178,20 @@ def row(user: User, env_name: Optional[str] = None) -> Dict[str, Any]:
     }
 
 
-def overview(db: Session) -> Dict[str, Any]:
+def you(db: Session, principal) -> Dict[str, Any]:
+    """Who is asking, so the page can warn before a change to their own access: the built-in
+    admin, a local user, or an OAuth2 person with their entry or (via_default) without one."""
+    if principal is None or principal.kind == "builtin":
+        return {"kind": "builtin", "user_id": None, "via_default": False}
+    if principal.kind == "local":
+        return {"kind": "local", "user_id": principal.user_id, "via_default": False}
+    entry = None
+    if principal.email and not principal.email_unverified:
+        entry = db.query(User.id).filter(User.kind == "oauth2", User.email_norm == principal.email).scalar()
+    return {"kind": "oauth2", "user_id": entry, "via_default": entry is None}
+
+
+def overview(db: Session, principal=None) -> Dict[str, Any]:
     env_name = env_admin_name()
     users = db.query(User).order_by(User.kind, func.coalesce(User.username_norm, User.email_norm), User.id).all()
     default = read_default(db)
@@ -188,8 +201,9 @@ def overview(db: Session) -> Dict[str, Any]:
                      "areas": access.area_choices(access.preset_scopes(level))} for level in access.ACCESS_LEVELS],
         "builtin": {"username": settings.auth_username, "basic_auth_enabled": settings.is_basic_auth_enabled},
         "oauth2": {"enabled": settings.is_oauth2_enabled, "default_access": default["value"],
-                   "version": default["version"]},
+                   "version": default["version"], "provider_name": settings.oauth2_provider_name or ""},
         "users": [row(u, env_name) for u in users],
+        "you": you(db, principal),
     }
 
 

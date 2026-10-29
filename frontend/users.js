@@ -76,10 +76,10 @@ function usersPresetLines(level) {
     return lines;
 }
 
-// A local user's password: the server's rule (backend services/passwords.py), shown while it is
-// typed. By Unicode category; a symbol is anything but a letter or digit. A browser may know
-// newer characters than the server, so the server decides: the meter only guides
-const USERS_PASSWORD_WEAK = 'Use at least 8 characters with an uppercase letter, a lowercase letter, a number and a symbol.';
+// A local user's password: the server requires 8 to 256 characters (backend services/passwords.py).
+// The meter shows how strong it is as guidance: an uppercase letter, a lowercase letter, a number
+// and a symbol (by Unicode category; a symbol is anything but a letter or digit)
+const USERS_PASSWORD_SHORT = 'Use at least 8 characters.';
 const USERS_PASSWORD_LONG = 'Use at most 256 characters.';
 const USERS_PASSWORD_RULES = [
     ['length', '8 or more characters', text => [...text].length >= 8],
@@ -102,22 +102,59 @@ function usersPasswordCheck(password) {
     return { met, level };
 }
 
-// What Save stops before asking the server, in its words: only what reads the same in every
-// browser, a missing password (required: adding) and more than 256 characters (code points)
+// What Save stops before asking the server, in its words: the length only (in characters, as the
+// server counts them). required: adding, where a password must be given
 function usersPasswordBlock(password, required) {
     const text = String(password || '');
-    if (!text) return required ? USERS_PASSWORD_WEAK : '';
-    return [...text].length > 256 ? USERS_PASSWORD_LONG : '';
+    if (!text) return required ? USERS_PASSWORD_SHORT : '';
+    const length = [...text].length;
+    return length < 8 ? USERS_PASSWORD_SHORT : length > 256 ? USERS_PASSWORD_LONG : '';
 }
 
-// The meter under the password field: four segments, the strength in words (read out as it
-// changes) and the requirements, each marked as met for the eye and for a screen reader
+// The characters Generate draws from: one of each kind at least. Symbols that read plainly and
+// need no quoting when pasted
+const USERS_PASSWORD_SETS = ['ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz', '0123456789', '!#$%&*+-.:;=?@^_~'];
+
+// A number from 0 to n - 1 from crypto.getRandomValues, each as likely: a draw from the top part
+// of the range that does not divide evenly by n is drawn again
+function usersRandomIndex(n) {
+    const limit = Math.floor(0x100000000 / n) * n;
+    const draw = new Uint32Array(1);
+    for (;;) {
+        crypto.getRandomValues(draw);
+        if (draw[0] < limit) return draw[0] % n;
+    }
+}
+
+function usersGeneratePassword(length) {
+    const all = USERS_PASSWORD_SETS.join('');
+    const chars = USERS_PASSWORD_SETS.map(set => set[usersRandomIndex(set.length)]);
+    while (chars.length < length) chars.push(all[usersRandomIndex(all.length)]);
+    // Shuffled, so the guaranteed kinds are not always first
+    for (let i = chars.length - 1; i > 0; i--) {
+        const j = usersRandomIndex(i + 1);
+        [chars[i], chars[j]] = [chars[j], chars[i]];
+    }
+    return chars.join('');
+}
+
+// Under the password field: Generate with its length and Copy, then the meter: four segments,
+// the strength in words (read out as it changes), a line when it is weak but can be saved, and
+// the requirements marked as met or not, for the eye and for a screen reader
 function usersPasswordMeterHtml(hidden) {
-    return `<div class="ui-pw-meter${hidden ? ' hidden' : ''}" id="user-edit-pw-meter" data-level="0">
+    return `<div class="ui-pw-tools">
+        <button type="button" class="ui-btn ui-btn-sm" id="user-edit-pw-generate">Generate</button>
+        <label class="ui-pw-length" for="user-edit-pw-length">Length
+            <input type="range" id="user-edit-pw-length" class="ui-pw-range" min="12" max="64" value="20">
+            <output id="user-edit-pw-length-value" for="user-edit-pw-length">20</output></label>
+        <button type="button" class="ui-btn ui-btn-sm" id="user-edit-pw-copy" aria-label="Copy the password" disabled>Copy</button>
+    </div>
+    <div class="ui-pw-meter${hidden ? ' hidden' : ''}" id="user-edit-pw-meter" data-level="0">
         <div class="ui-pw-bar" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
         <p class="ui-pw-label" id="user-edit-pw-label" aria-live="polite"></p>
+        <p class="ui-pw-warn hidden" id="user-edit-pw-warn">This password is weak. You can still save it.</p>
         <ul class="ui-pw-rules" aria-label="Password requirements">
-            ${USERS_PASSWORD_RULES.map(([id, label]) => `<li data-rule="${id}" data-met="false"><span class="ui-pw-mark" aria-hidden="true"></span>${escapeHtml(label)}<span class="ui-sr-only">, not met</span></li>`).join('')}
+            ${USERS_PASSWORD_RULES.map(([id, label]) => `<li data-rule="${id}" data-met="false"><span class="ui-pw-mark" aria-hidden="true">✗</span>${escapeHtml(label)}<span class="ui-sr-only">, not met</span></li>`).join('')}
         </ul>
     </div>`;
 }
@@ -132,11 +169,48 @@ function usersShowPasswordMeter(modal, password, keepWhenEmpty) {
     const label = meter.querySelector('#user-edit-pw-label');
     const words = check.level ? `Password strength: ${USERS_STRENGTH[check.level]}` : '';
     if (label.textContent !== words) label.textContent = words;
+    // Long enough to save, but weak: said, and Save stays possible
+    meter.querySelector('#user-edit-pw-warn').classList.toggle('hidden', !(check.level === 1 && check.met.length));
     meter.querySelectorAll('li[data-rule]').forEach(item => {
         const on = !!check.met[item.dataset.rule];
         item.dataset.met = String(on);
+        item.querySelector('.ui-pw-mark').textContent = on ? '✓' : '✗';
         item.querySelector('.ui-sr-only').textContent = on ? ', met' : ', not met';
     });
+}
+
+// Generate fills the field as readable text (it shows again as dots once typed over), a new
+// length draws a new one, and Copy takes what the field holds
+function usersWirePassword(modal, keepWhenEmpty) {
+    const field = modal.querySelector('#user-edit-pass');
+    if (!field) return;
+    const length = modal.querySelector('#user-edit-pw-length');
+    const copy = modal.querySelector('#user-edit-pw-copy');
+    let generated = false;
+    const update = () => {
+        usersShowPasswordMeter(modal, field.value, keepWhenEmpty);
+        copy.disabled = !field.value;
+    };
+    const fill = () => {
+        field.value = usersGeneratePassword(Number(length.value));
+        field.type = 'text';
+        generated = true;
+        update();
+    };
+    modal.querySelector('#user-edit-pw-generate').addEventListener('click', fill);
+    length.addEventListener('input', () => {
+        modal.querySelector('#user-edit-pw-length-value').textContent = length.value;
+        if (generated) fill();
+    });
+    field.addEventListener('input', () => {
+        if (generated) {
+            generated = false;
+            field.type = 'password';
+        }
+        update();
+    });
+    copy.addEventListener('click', event => copyToClipboard(field.value, event));
+    update();
 }
 
 function usersPresetText(level) {    return `<ul class="ui-users-preset">${usersPresetLines(level).map(line => `<li>${escapeHtml(line)}</li>`).join('')}</ul>`;
@@ -167,6 +241,99 @@ function usersWhen(iso) {
     return iso ? uiTime(iso, formatTime(iso, { seconds: false })) : '<span class="ui-muted">never</span>';
 }
 
+// The OAuth2 provider by the name set for it in Authentication (plain text: escape it for HTML)
+function usersProvider() {
+    const name = usersData && usersData.oauth2 && typeof usersData.oauth2.provider_name === 'string' ? usersData.oauth2.provider_name.trim() : '';
+    return name || 'OAuth2';
+}
+
+// Who is looking (GET /api/users you): the built-in admin, a local user or an OAuth2 person,
+// with their entry or, without one, the access for everyone else (via_default)
+function usersYou() {
+    return (usersData && usersData.you) || { kind: 'builtin', user_id: null, via_default: false };
+}
+
+function usersIsYou(user) {
+    const you = usersYou();
+    return !!user && you.user_id != null && you.kind === user.kind && you.user_id === user.id;
+}
+
+// An access as what it allows: Admin, and area -> view or act ('none': nothing)
+function usersAccessOf(level, areas) {
+    if (level === 'none') return { admin: false, areas: {} };
+    return { admin: level === 'admin', areas: level === 'custom' ? (areas || {}) : usersPresetAreas(level) };
+}
+
+// The person's own access now, as the server said when the page loaded (utils.js appAccess)
+function usersAccessNow() {
+    const areas = {};
+    (usersData.areas || []).forEach(a => {
+        if (a.act && userCan(a.id, 'write')) areas[a.id] = 'act';
+        else if (userCan(a.id)) areas[a.id] = 'view';
+    });
+    return { admin: userIsAdmin(), areas };
+}
+
+// What going from one access to another takes away, or null when nothing
+function usersLoss(before, after) {
+    const lost = { admin: before.admin && !after.admin, views: [], acts: [] };
+    (usersData.areas || []).forEach(a => {
+        const was = before.admin ? (a.act ? 'act' : 'view') : before.areas[a.id];
+        const will = after.admin ? (a.act ? 'act' : 'view') : after.areas[a.id];
+        if (was && !will) lost.views.push(a.label);
+        else if (was === 'act' && will !== 'act') lost.acts.push(a.label);
+    });
+    return lost.admin || lost.views.length || lost.acts.length ? lost : null;
+}
+
+function usersAnd(items) {
+    return items.length > 1 ? `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}` : items.join('');
+}
+
+function usersLossText(lost) {
+    const parts = [];
+    if (lost.admin) parts.push('Settings, Users and AI agents');
+    if (lost.views.length) parts.push(usersAnd(lost.views));
+    if (lost.acts.length) parts.push(`the actions you can take in ${usersAnd(lost.acts)}`);
+    // The parts already hold an "and" each: a comma before the last one keeps them apart
+    return `you will lose ${parts.length > 1 ? `${parts.slice(0, -1).join(', ')}, and ${parts[parts.length - 1]}` : parts[0]}`;
+}
+
+// The question to ask before a change to one's own access ({ message, confirmText }), or null
+// when the change takes nothing away from the person making it.
+// change: { kind: 'default', value } | { kind: 'edit', user, level, areas, disabled } | { kind: 'delete', user }
+function usersSelfWarning(change) {
+    const you = usersYou();
+    const provider = usersProvider();
+    const label = value => USERS_ACCESS_LABELS[value] || value;
+    if (change.kind === 'default') {
+        if (you.kind !== 'oauth2' || !you.via_default) return null;
+        const start = `You signed in with ${provider} and get the access for everyone else.`;
+        if (change.value === 'none') return { message: `${start} Changing it to No access signs you out at once.`, confirmText: 'Change my access' };
+        const lost = usersLoss(usersAccessNow(), usersAccessOf(change.value));
+        return lost ? { message: `${start} Changing it to ${label(change.value)} changes your own access too: ${usersLossText(lost)}.`, confirmText: 'Change my access' } : null;
+    }
+    if (!usersIsYou(change.user)) return null;
+    const local = change.user.kind === 'local';
+    const own = `This is your own ${local ? 'account' : 'entry'}.`;
+    if (change.kind === 'delete') {
+        if (local) return { message: `${own} Deleting it signs you out at once, and you can no longer sign in.`, confirmText: 'Delete my account' };
+        const value = usersData.oauth2.default_access;
+        if (value === 'none') return { message: `${own} Without it you cannot sign in, because users who are not on the list have no access.`, confirmText: 'Delete my account' };
+        const lost = usersLoss(usersAccessNow(), usersAccessOf(value));
+        return lost ? { message: `${own} Without it you get the access for everyone else (${label(value)}): ${usersLossText(lost)}.`, confirmText: 'Delete my account' } : null;
+    }
+    if (change.disabled && !change.user.disabled) return { message: `${own} Disabling sign-in signs you out at once.`, confirmText: 'Disable my sign-in' };
+    const lost = usersLoss(usersAccessNow(), usersAccessOf(change.level, change.areas));
+    if (!lost) return null;
+    return { message: `${own} ${local ? 'Changing its access signs you out at once, and' : 'Changing its access changes yours:'} ${usersLossText(lost)}.`, confirmText: 'Change my access' };
+}
+
+// The question for usersSelfWarning's answer; true to go on
+function usersAskSelf(warning) {
+    return showConfirmModal({ title: 'Your own access', message: warning.message, confirmText: warning.confirmText, isDangerous: true, focusCancel: true });
+}
+
 // The admin from .env: always there while Basic Auth is on, changed in Authentication (or in .env)
 function usersBuiltinRow() {
     const builtin = usersData.builtin;
@@ -176,12 +343,9 @@ function usersBuiltinRow() {
         <div class="ui-channel ui-agent" data-key="user-builtin">
             ${USERS_ICON_KEY}
             <div class="ui-q-who">
-                <div class="ui-agent-title"><b>${escapeHtml(builtin.username || '')}</b> ${uiTag('Admin', 'warn')} ${uiTag('Built-in', 'info')}</div>
+                <div class="ui-agent-title"><b>${escapeHtml(builtin.username || '')}</b> ${uiTag('Admin', 'warn')} ${uiTag('Built-in', 'info')}${usersYou().kind === 'builtin' && appAccess.name ? ' ' + uiTag('You', 'info') : ''}</div>
                 <small>The admin from <code>.env</code>. It always has full access and cannot be deleted. ${where}</small>
             </div>
-            ${form ? `<div class="ui-row-actions">
-                <button type="button" class="ui-btn ui-btn-sm" onclick="settingsShowTab('auth')">Authentication</button>
-            </div>` : ''}
         </div>`;
 }
 
@@ -190,13 +354,13 @@ function usersRow(user) {
     const blocked = user.disabled || user.name_conflict;
     const state = user.disabled ? ` ${uiTag('Sign-in disabled', 'fail')}` : user.name_conflict ? ` ${uiTag('Cannot sign in', 'fail')}` : '';
     const how = user.name_conflict ? 'It cannot sign in, because the built-in admin has the same name.'
-        : user.kind === 'oauth2' ? 'Signs in with OAuth2'
+        : user.kind === 'oauth2' ? `Signs in with ${escapeHtml(usersProvider())}`
             : `Signs in with a password · last signed in ${usersWhen(user.last_login_at)}`;
     return `
         <div class="ui-channel ui-agent${blocked ? ' is-off' : ''}" data-key="user-${id}">
             ${USERS_ICON_PERSON}
             <div class="ui-q-who">
-                <div class="ui-agent-title"><b>${escapeHtml(usersName(user))}</b>${state} ${usersAccessChips(user)}</div>
+                <div class="ui-agent-title"><b>${escapeHtml(usersName(user))}</b>${usersIsYou(user) ? ' ' + uiTag('You', 'info') : ''}${state} ${usersAccessChips(user)}</div>
                 <small>${how}</small>
             </div>
             <div class="ui-row-actions">
@@ -206,7 +370,7 @@ function usersRow(user) {
         </div>`;
 }
 
-// Everyone else OAuth2 signs in: one choice, applied at once
+// Everyone else the provider signs in: one choice, applied at once
 function usersDefaultPanel() {
     const oauth2 = usersData.oauth2;
     if (!oauth2.enabled) return '';
@@ -214,8 +378,8 @@ function usersDefaultPanel() {
     const note = value === 'none' ? 'Only users on the list can sign in.' : 'Applies at once, also to people who are signed in now.';
     return `
         <section class="ui-panel ui-set-channels ui-users-default" aria-labelledby="users-default-h" data-key="oauth2-default">
-            <div class="ui-list-head"><h4 class="ui-md-h" id="users-default-h">Everyone else who signs in with OAuth2</h4></div>
-            <p class="ui-set-desc">Users who sign in with OAuth2 and are not on the list above get this access. To give one user other access, add them by email.</p>
+            <div class="ui-list-head"><h4 class="ui-md-h" id="users-default-h">Everyone else who signs in with ${escapeHtml(usersProvider())}</h4></div>
+            <p class="ui-set-desc">Users who sign in with ${escapeHtml(usersProvider())} and are not on the list above get this access. To give one user other access, add them by email.</p>
             <div class="ui-sec-mode">
                 <div class="ui-seg" role="group" aria-labelledby="users-default-h">
                     ${['admin', 'operator', 'viewer', 'none'].map(level => `<button data-acts="admin" type="button" aria-pressed="${value === level}" onclick="setUsersDefault('${level}')">${USERS_ACCESS_LABELS[level]}</button>`).join('')}
@@ -273,6 +437,10 @@ async function setUsersDefault(value) {
     if (!uiMayAct('admin')) return;
     const oauth2 = usersData && usersData.oauth2;
     if (!oauth2 || oauth2.default_access === value) return;
+    // Signed in through the provider without an entry: this is the person's own access too
+    // Awaited only when there is a question, so a change without one starts at once
+    const self = usersSelfWarning({ kind: 'default', value });
+    if (self && !(await usersAskSelf(self))) return;
     // A refresh on its way now may have read the old value: it is dropped
     usersSeq++;
     try {
@@ -338,7 +506,7 @@ function editUser(userId) {
     const kindChoice = !user && kinds.length > 1 ? `
         <div><span class="ui-label" id="user-edit-kind-h">Signs in with</span>
             <div class="ui-seg" role="group" aria-labelledby="user-edit-kind-h" id="user-edit-kind">
-                ${kinds.map(k => `<button type="button" aria-pressed="${k === kind}" data-kind="${k}">${k === 'local' ? 'Password' : 'OAuth2'}</button>`).join('')}
+                ${kinds.map(k => `<button type="button" aria-pressed="${k === kind}" data-kind="${k}">${k === 'local' ? 'Password' : escapeHtml(usersProvider())}</button>`).join('')}
             </div>
         </div>` : '';
     const localFields = user && user.kind !== 'local' ? '' : `
@@ -351,11 +519,11 @@ function editUser(userId) {
             <p class="ui-set-desc">${user ? `Leave it empty to keep the current password. A new password signs ${escapeHtml(name)} out.`
                 : 'Give this password to the user. They sign in on the sign-in page with the username and this password.'}</p>
         </div>`;
-    const oauthFields = user ? (user.kind === 'oauth2' ? '<p class="ui-set-desc">Signs in with OAuth2.</p>' : '') : `
+    const oauthFields = user ? (user.kind === 'oauth2' ? `<p class="ui-set-desc">Signs in with ${escapeHtml(usersProvider())}.</p>` : '') : `
         <div data-for="oauth2" class="ui-form${kind === 'oauth2' ? '' : ' hidden'}">
             <label for="user-edit-email"><span class="ui-label">Email</span>
                 <input id="user-edit-email" type="email" class="ui-input" autocomplete="off" maxlength="320" placeholder="user@example.com"></label>
-            <p class="ui-set-desc">The email address your OAuth2 provider reports for this user.</p>
+            <p class="ui-set-desc">The email address ${escapeHtml(usersProvider())} reports for this user.</p>
         </div>`;
     // The two choices are kept as values too, as the Settings segmented fields keep theirs,
     // so the unsaved-changes guard (uiGuardDialog) sees them
@@ -425,11 +593,7 @@ function editUser(userId) {
         if (changed.dataset.kind === 'view' && !changed.checked && other) other.checked = false;
     });
     // The password's strength while it is typed; editing shows it once something is typed
-    const passwordField = modal.querySelector('#user-edit-pass');
-    if (passwordField) {
-        passwordField.addEventListener('input', () => usersShowPasswordMeter(modal, passwordField.value, !!user));
-        usersShowPasswordMeter(modal, '', !!user);
-    }
+    usersWirePassword(modal, !!user);
     uiGuardDialog(modal);
 }
 
@@ -473,6 +637,15 @@ async function saveUser(event, userId) {
         if (password) body.password = password;
     }
     Object.assign(body, { access: level, views: custom ? chosen('view') : [], acts: custom ? chosen('act') : [], disabled });
+    // One's own entry: asked first when the change takes something away from oneself
+    if (userId != null) {
+        const areas = {};
+        body.views.forEach(id => { areas[id] = 'view'; });
+        body.acts.forEach(id => { areas[id] = 'act'; });
+        const user = usersData.users.find(u => u.id === userId);
+        const self = usersSelfWarning({ kind: 'edit', user, level, areas, disabled });
+        if (self && !(await usersAskSelf(self))) return;
+    }
     try {
         // A refresh on its way now may have read the state before this change: it is dropped
         usersSeq++;
@@ -509,8 +682,11 @@ async function deleteUser(userId) {
         ? `Delete ${name}? They are signed out at once and can no longer sign in.`
         : oauth2.default_access === 'none'
             ? `Delete ${name}? They can no longer sign in, because users who are not on the list have no access.`
-            : `Delete ${name}? They can still sign in with OAuth2 and then get the access for everyone else (${USERS_ACCESS_LABELS[oauth2.default_access] || oauth2.default_access}). To block them, edit them and turn on Disable sign-in.`;
-    const confirmed = await showConfirmModal({ title: 'Delete user', message, confirmText: 'Delete', isDangerous: true });
+            : `Delete ${name}? They can still sign in with ${usersProvider()} and then get the access for everyone else (${USERS_ACCESS_LABELS[oauth2.default_access] || oauth2.default_access}). To block them, edit them and turn on Disable sign-in.`;
+    // One's own entry: what it means for oneself, in its place
+    const self = usersSelfWarning({ kind: 'delete', user });
+    const confirmed = await showConfirmModal({ title: 'Delete user', message: self ? self.message : message,
+        confirmText: self ? self.confirmText : 'Delete', isDangerous: true, focusCancel: !!self });
     if (!confirmed) return;
     try {
         usersSeq++;

@@ -34,6 +34,14 @@ class OAuth2Access(Fixed):
     enabled: bool = Field(description="Whether OAuth2 sign-in is on")
     default_access: str = Field(description="admin, operator, viewer or none (no access)")
     version: int = Field(description="Send it with a change, so a change made meanwhile is not undone")
+    provider_name: str = Field(description="The provider's name as set (OAUTH2_PROVIDER_NAME); empty when not set")
+
+
+class You(Fixed):
+    """Who asked: the built-in admin, a local user, or a person OAuth2 signed in."""
+    kind: str = Field(description="builtin, local or oauth2")
+    user_id: Optional[int] = Field(description="The local user's id, or the OAuth2 entry's for this email; null otherwise")
+    via_default: bool = Field(description="An OAuth2 person without an entry, who gets the access for everyone else")
 
 
 class UserRow(Fixed):
@@ -58,6 +66,7 @@ class UsersOverview(Fixed):
     presets: List[AccessPreset]
     builtin: BuiltinAdmin
     oauth2: OAuth2Access
+    you: You
     users: List[UserRow]
 
 
