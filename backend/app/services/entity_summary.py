@@ -36,7 +36,7 @@ from ..models import (AliasStatistics, BlacklistCheck, DMARCRecord, DMARCReport,
                       MailboxStatistics, MessageCorrelation, MonitoredHost, NetfilterLog, ProtectionHit,
                       RspamdLog, SpamSuppression)
 from ..utils import format_datetime_for_api as iso
-from . import entity_values, excluded_addresses, geoip_service, protection_rules, security_addresses
+from . import entity_values, excluded_addresses, geoip_service, protection_rules, security_addresses, written_recipients
 
 logger = logging.getLogger(__name__)
 
@@ -238,7 +238,8 @@ def _latest_messages(db: Session, condition, limit: int = ITEMS) -> List[dict]:
         legs.c.leg_rank == 1).order_by(desc(legs.c.sort_time), desc(legs.c.leg_id)).limit(limit).all()
     return [{
         "_at": m.first_seen, "correlation_key": m.correlation_key, "first_seen": iso(m.first_seen), "sender": m.sender,
-        "recipient": m.recipient, "subject": m.subject, "direction": m.direction, "final_status": m.final_status,
+        "recipient": written_recipients.shown(m.recipient, m.written_recipients), "subject": m.subject,
+        "direction": m.direction, "final_status": m.final_status,
     } for m in rows]
 
 
@@ -263,7 +264,9 @@ def _messages_of(db: Session, sender, recipient, start: datetime, end: datetime)
 
 def _address_columns(address: str):
     forms = entity_values.address_forms(address)
-    return (func.lower(MessageCorrelation.sender).in_(forms), func.lower(MessageCorrelation.recipient).in_(forms))
+    return (func.lower(MessageCorrelation.sender).in_(forms),
+            or_(func.lower(MessageCorrelation.recipient).in_(forms),
+                written_recipients.any_value(MessageCorrelation.written_recipients, lambda v: func.lower(v).in_(forms))))
 
 
 # ---------------------------------------------------------------- security (Netfilter)

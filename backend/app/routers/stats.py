@@ -10,7 +10,7 @@ from typing import Optional
 
 from ..database import get_db
 from ..models import PostfixLog, RspamdLog, NetfilterLog, MessageCorrelation
-from ..services import excluded_addresses
+from ..services import excluded_addresses, written_recipients
 
 from ..utils import format_datetime_for_api as format_datetime_utc
 from ..api_models import Invalid, documented
@@ -337,7 +337,7 @@ def get_recent_activity(
                 {
                     "time": format_datetime_utc(msg.last_seen),
                     "sender": msg.sender,
-                    "recipient": msg.recipient,
+                    "recipient": written_recipients.shown(msg.recipient, msg.written_recipients),
                     "subject": msg.subject,
                     "direction": msg.direction,
                     "status": msg.final_status,

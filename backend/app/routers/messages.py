@@ -15,7 +15,7 @@ from ..database import get_db
 from ..models import MessageCorrelation, PostfixLog, RspamdLog, NetfilterLog, RawServiceLog
 from ..config import settings
 from ..app_time import range_bound
-from ..services import entity_values, excluded_addresses
+from ..services import entity_values, excluded_addresses, written_recipients
 from ..services.message_recipients import (legs_recipients, listed_recipients, resolve_recipients,
                                            union_recipients, written_address)
 from ..services.dovecot_parser import dovecot_line_user, parse_dovecot_message
@@ -240,6 +240,7 @@ def _filtered_messages_query(db, search=None, sender=None, recipient=None, direc
         correlation_filters = or_(
             MessageCorrelation.sender.ilike(search_term),
             MessageCorrelation.recipient.ilike(search_term),
+            written_recipients.any_value(MessageCorrelation.written_recipients, lambda v: v.ilike(search_term)),
             MessageCorrelation.subject.ilike(search_term),
             MessageCorrelation.message_id.ilike(search_term),
             MessageCorrelation.queue_id.ilike(search_term)
@@ -264,12 +265,16 @@ def _filtered_messages_query(db, search=None, sender=None, recipient=None, direc
         query = query.filter(_address_match(MessageCorrelation.sender, sender, exact))
     
     if recipient:
-        query = query.filter(_address_match(MessageCorrelation.recipient, recipient, exact))
+        query = query.filter(or_(
+            _address_match(MessageCorrelation.recipient, recipient, exact),
+            written_recipients.any_value(MessageCorrelation.written_recipients, lambda v: _address_match(v, recipient, exact))))
 
     # A direct call (tests) may pass the Query default object: only text filters
     if isinstance(address, str) and address.strip():
         query = query.filter(or_(address_equals(MessageCorrelation.sender, address),
-                                 address_equals(MessageCorrelation.recipient, address)))
+                                 address_equals(MessageCorrelation.recipient, address),
+                                 written_recipients.any_value(MessageCorrelation.written_recipients,
+                                                              lambda v: address_equals(v, address))))
 
     if isinstance(domain, str) and domain.strip():
         query = query.filter(or_(on_domain(MessageCorrelation.sender, domain),
@@ -608,7 +613,7 @@ def get_unified_messages(
                 "message_id": msg.message_id,
                 "queue_id": msg.queue_id,
                 "sender": msg.sender,
-                "recipient": msg.recipient,
+                "recipient": written_recipients.shown(msg.recipient, msg.written_recipients),
                 "recipient_count": recipient_count,
                 "subject": msg.subject,
                 "direction": msg.direction,
@@ -779,7 +784,7 @@ def get_message_full_details(
         ).first()
         
         # A delivery to or from an excluded address is not shown in Messages
-        if not correlation or excluded_addresses.any_listed(correlation.sender, correlation.recipient):
+        if not correlation or excluded_addresses.correlation_listed(correlation):
             raise HTTPException(status_code=404, detail="Message not found")
 
         # Get Rspamd log
@@ -861,7 +866,7 @@ def get_message_full_details(
                 {
                     "correlation_key": leg.correlation_key,
                     "sender": leg.sender,
-                    "recipient": leg.recipient,
+                    "recipient": written_recipients.shown(leg.recipient, leg.written_recipients),
                     "direction": leg.direction,
                     "final_status": leg.final_status,
                     "first_seen": format_datetime_utc(leg.first_seen),
@@ -888,7 +893,8 @@ def get_message_full_details(
         # Get all recipients - from Rspamd (primary source) or from Postfix logs -
         # and count them as the dialog's header does, for the whole message (this
         # delivery's and its other deliveries'), which is what the Messages list shows
-        recipients = listed_recipients(rspamd_log, (log.recipient for log in postfix_logs))
+        recipients = written_recipients.shown_list(
+            listed_recipients(rspamd_log, (log.recipient for log in postfix_logs)), correlation.written_recipients)
         own = resolve_recipients(
             recipients, [(log.recipient, written_address(log.recipient, log.message)) for log in postfix_logs],
             correlation.recipient)
@@ -900,7 +906,7 @@ def get_message_full_details(
             "message_id": correlation.message_id,
             "queue_id": correlation.queue_id,
             "sender": correlation.sender,
-            "recipient": correlation.recipient,  # Primary recipient (for backwards compatibility)
+            "recipient": written_recipients.shown(correlation.recipient, correlation.written_recipients),  # Primary recipient
             "recipients": recipients,  # ALL recipients
             "recipient_count": recipient_count,
             "subject": subject,

@@ -18,7 +18,7 @@ from typing import Dict, Any, Optional
 from ..database import get_db, get_db_context
 from ..models import PostfixLog, RspamdLog, NetfilterLog, MessageCorrelation
 from ..services.bounce_policy import cleanup_blocks
-from ..services import excluded_addresses
+from ..services import excluded_addresses, written_recipients
 from ..agent_access.context import agent_call
 from ..agent_access.scopes import read_scope
 from ..config import settings, EDITABLE_SETTING_KEYS, FEATURE_IDS, reload_settings, Settings
@@ -847,7 +847,7 @@ def get_settings_info(request: Request = None, db: Session = Depends(get_db)):
                     "message_id": corr.message_id[:50] + "..." if corr.message_id and len(corr.message_id) > 50 else corr.message_id,
                     "queue_id": corr.queue_id,
                     "sender": corr.sender,
-                    "recipient": corr.recipient,
+                    "recipient": written_recipients.shown(corr.recipient, corr.written_recipients),
                     "created_at": format_datetime_utc(corr.created_at),
                     "age_minutes": round((datetime.now(timezone.utc) - corr.created_at.replace(tzinfo=timezone.utc)).total_seconds() / 60) if corr.created_at else None
                 }

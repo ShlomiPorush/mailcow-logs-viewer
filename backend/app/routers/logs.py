@@ -15,7 +15,7 @@ from ..database import get_db
 from ..models import PostfixLog, RspamdLog, NetfilterLog, MessageCorrelation
 from ..mailcow_api import MailcowShownError, mailcow_api
 from ..config import settings
-from ..services import entity_values, excluded_addresses, geoip_service, protection_rules, security_addresses
+from ..services import entity_values, excluded_addresses, geoip_service, protection_rules, security_addresses, written_recipients
 from .messages import address_equals, on_domain
 from ..services.security_addresses import netfilter_service  # noqa: F401  (tests import it from here)
 from ..app_time import as_utc
@@ -1448,7 +1448,7 @@ def get_message_details(
             MessageCorrelation.correlation_key == correlation_key
         ).first()
         
-        if not correlation or excluded_addresses.any_listed(correlation.sender, correlation.recipient):
+        if not correlation or excluded_addresses.correlation_listed(correlation):
             raise HTTPException(status_code=404, detail="Message not found")
         
         # Get Rspamd log
@@ -1483,7 +1483,7 @@ def get_message_details(
             "message_id": correlation.message_id,
             "queue_id": correlation.queue_id,
             "sender": correlation.sender,
-            "recipient": correlation.recipient,
+            "recipient": written_recipients.shown(correlation.recipient, correlation.written_recipients),
             "subject": correlation.subject,
             "direction": correlation.direction,
             "final_status": correlation.final_status,

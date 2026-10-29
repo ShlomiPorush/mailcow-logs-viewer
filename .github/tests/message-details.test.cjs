@@ -318,6 +318,18 @@ test('a delivery to an alias counts for the alias, not as another recipient', as
     assert.deepEqual(timelineLines(h2.element('md-timeline-slot').innerHTML), { all: 1, shared: 0 });
 });
 
+test('a recipient Rspamd recorded normalized arrives as written and is one recipient', async () => {
+    // The API replaces Rspamd's form (no dots, no +tag) with the address Postfix
+    // delivered to (written_recipients), so the list and the lines name the same address
+    const data = { ...message(), direction: 'outbound', recipient: 'Dana.Lee@example.com', recipients: ['Dana.Lee@example.com'],
+        postfix: [smtp(1, 'Dana.Lee@example.com', 'sent')] };
+    const h = harness(data);
+    await h.context.viewMessageDetails('example-key');
+    assert.doesNotMatch(h.element('message-modal-header').innerHTML, /recipients|To \(2\)/);
+    h.context.switchModalTab('postfix');
+    assert.doesNotMatch(h.element('message-modal-content').innerHTML, /id="md-rcpts"|Not logged/);
+});
+
 test('a message that expired in the queue expires the recipients still waiting', async () => {
     const data = { ...messageToMany(), final_status: 'expired', recipients: ['a@example.net', 'b@example.net', 'c@example.net'],
         postfix: [smtp(1, 'a@example.net', 'sent'), smtp(2, 'b@example.net', 'deferred'), smtp(3, 'b@example.net', 'deferred'),
