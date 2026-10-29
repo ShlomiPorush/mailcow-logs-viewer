@@ -61,7 +61,7 @@ test('the page loads its files with a version stamp, so an update is never serve
     const refs = [...html.matchAll(/(?:src|href)="(\/static\/[^"]+\.(?:css|js)[^"]*)"/g)].map(m => m[1]);
     assert.deepEqual(refs.sort(), [
         '/static/api-docs.js?v=1',
-        '/static/assets/css/ui.css?v=9',
+        '/static/assets/css/ui.css?v=10',
         '/static/assets/libs/scalar-api-reference.min.js?v=1',
         '/static/session-guard.js?v=3',
     ]);

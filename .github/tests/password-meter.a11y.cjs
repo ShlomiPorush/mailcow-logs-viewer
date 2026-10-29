@@ -3,7 +3,8 @@
 // tells a screen reader which are met, warns about a weak password that can still be saved, and
 // waits for typing when editing. Save stops only under 8 characters (as the server does).
 // Generate fills a readable password of the length chosen, draws a new one when the length
-// moves, shows dots again once typed over, and Copy copies what the field holds.
+// moves, shows dots again once typed over, and Copy copies what the field holds without showing it.
+// The length alone is not a change the discard question asks about.
 // Set A11Y_MODULES to jsdom's node_modules to run it locally (see layers.a11y.cjs).
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -41,6 +42,7 @@ function page() {
     [read('utils.js'), read('users.js')].forEach(run);
     const sent = [];
     const copied = [];
+    const toasts = [];
     // The server refuses under 8 characters, as the real one does (its words)
     w.authenticatedFetch = async (url, options) => {
         sent.push({ url, options });
@@ -48,7 +50,9 @@ function page() {
         if (password !== undefined && [...password].length < 8) return { ok: false, status: 422, json: async () => ({ detail: SHORT }) };
         return { ok: true, status: 201, json: async () => ({ username: 'erin' }) };
     };
-    w.copyToClipboard = text => copied.push(text);
+    // The real copy, with a clipboard that works, and the notices it shows
+    Object.defineProperty(w.navigator, 'clipboard', { value: { writeText: async text => { copied.push(text); } } });
+    w.showToast = message => toasts.push(message);
     w.loadUsersPanel = () => {};
     run(`usersData = ${JSON.stringify(DATA)};`);
     const $ = sel => w.document.querySelector(sel);
@@ -59,7 +63,7 @@ function page() {
     };
     const rules = () => [...w.document.querySelectorAll('#user-edit-pw-meter li')].map(li => li.textContent.trim());
     const warned = () => !$('#user-edit-pw-warn').classList.contains('hidden');
-    return { w, $, type, rules, warned, sent, copied };
+    return { w, $, type, rules, warned, sent, copied, toasts };
 }
 
 test('typing: a check or a cross per requirement, read out as met or not, and the strength', () => {
@@ -67,7 +71,11 @@ test('typing: a check or a cross per requirement, read out as met or not, and th
     p.w.editUser(null);
     assert.equal(p.$('#user-edit-pass').placeholder, 'At least 8 characters');
     assert.ok(!p.$('#user-edit-pass').hasAttribute('maxlength'));
-    assert.equal(p.$('#user-edit-pw-label').getAttribute('aria-live'), 'polite');
+    // The strength and the note under it are one live region, which describes the field
+    assert.equal(p.$('#user-edit-pw-status').getAttribute('aria-live'), 'polite');
+    assert.ok(p.$('#user-edit-pw-status').contains(p.$('#user-edit-pw-label')));
+    assert.ok(p.$('#user-edit-pw-status').contains(p.$('#user-edit-pw-warn')));
+    assert.equal(p.$('#user-edit-pass').getAttribute('aria-describedby'), 'user-edit-pw-status');
     assert.equal(p.w.document.querySelectorAll('#user-edit-pw-meter input[type="checkbox"]').length, 0, 'marks, not checkboxes');
     assert.deepEqual(p.rules(), ['✗8 or more characters, not met', '✗An uppercase letter, not met',
         '✗A lowercase letter, not met', '✗A number, not met', '✗A symbol, not met']);
@@ -90,8 +98,19 @@ test('a weak password of 8 or more says so, and is saved', async () => {
     assert.equal(p.$('#user-edit-pw-label').textContent, 'Password strength: Weak');
     assert.ok(p.warned());
     assert.equal(p.$('#user-edit-pw-warn').textContent, 'This password is weak. You can still save it.');
+    assert.equal(p.$('#user-edit-pw-status').textContent.replace(/\s+/g, ' ').trim(),
+        'Password strength: Weak This password is weak. You can still save it.', 'read out with the strength');
     p.type('Abcdef1!');
     assert.equal(p.warned(), false, 'every requirement met: no warning');
+    assert.equal(p.$('#user-edit-pw-warn').textContent, '', 'and nothing left to read out');
+    // Over 256 characters: not "you can still save it", but what Save says
+    p.type('a'.repeat(257));
+    assert.ok(p.warned());
+    assert.equal(p.$('#user-edit-pw-warn').textContent, 'Use at most 256 characters.');
+    assert.equal(p.$('#user-edit-pw-warn').dataset.tone, 'fail');
+    p.type('a'.repeat(256));
+    assert.equal(p.$('#user-edit-pw-warn').textContent, 'This password is weak. You can still save it.');
+    assert.equal(p.$('#user-edit-pw-warn').dataset.tone, undefined);
     p.type('abcdefgh');
     await p.w.saveUser({ preventDefault() {} }, null);
     assert.equal(p.sent.length, 1);
@@ -122,7 +141,7 @@ test('Save stops a password under 8 characters, adding and editing, with the ser
     assert.ok(!('password' in JSON.parse(p.sent[0].options.body)), 'an empty field keeps the password');
 });
 
-test('Generate: a readable password of the length chosen, a new one when the length moves, dots once typed over', () => {
+test('Generate: a readable password of the length chosen, a new one when the length moves, dots once typed over', async () => {
     const p = page();
     p.w.editUser(null);
     const field = p.$('#user-edit-pass');
@@ -142,7 +161,10 @@ test('Generate: a readable password of the length chosen, a new one when the len
     assert.equal(field.value.length, 32);
     assert.notEqual(field.value, first);
     p.$('#user-edit-pw-copy').click();
+    await new Promise(r => setTimeout(r, 0));
     assert.deepEqual(p.copied, [field.value]);
+    assert.deepEqual(p.toasts, ['Password copied']);
+    assert.ok(!p.toasts.some(t => t.includes(field.value)), 'the notice does not show the password');
     p.type(field.value + 'x');
     assert.equal(field.type, 'password', 'typed over: shown as dots again');
     // Moving the length now does not replace what was typed
@@ -150,6 +172,26 @@ test('Generate: a readable password of the length chosen, a new one when the len
     length.value = '40';
     length.dispatchEvent(new p.w.Event('input', { bubbles: true }));
     assert.equal(field.value, typed);
+});
+
+test('moving the length alone is not a change to discard; a generated password is', async () => {
+    const asked = [];
+    const p = page();
+    p.w.showConfirmModal = async options => { asked.push(options.title); return false; };
+    p.w.editUser(null);
+    const length = p.$('#user-edit-pw-length');
+    length.value = '40';
+    length.dispatchEvent(new p.w.Event('input', { bubbles: true }));
+    p.w.closeUserEditModal();
+    await new Promise(r => setTimeout(r, 0));
+    assert.deepEqual(asked, []);
+    assert.equal(p.$('#user-edit-modal'), null, 'closed without a question');
+    p.w.editUser(null);
+    p.$('#user-edit-pw-generate').click();
+    p.w.closeUserEditModal();
+    await new Promise(r => setTimeout(r, 0));
+    assert.deepEqual(asked, ['Discard your changes?']);
+    assert.ok(p.$('#user-edit-modal'), 'kept open: Keep editing');
 });
 
 test('the dialog with the meter and the generator has no axe violations', async () => {

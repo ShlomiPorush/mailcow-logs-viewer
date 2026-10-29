@@ -42,6 +42,8 @@ class You(Fixed):
     kind: str = Field(description="builtin, local or oauth2")
     user_id: Optional[int] = Field(description="The local user's id, or the OAuth2 entry's for this email; null otherwise")
     via_default: bool = Field(description="An OAuth2 person without an entry, who gets the access for everyone else")
+    email: Optional[str] = Field(description="An OAuth2 person's normalized email when it can match an entry "
+                                             "(not one left unverified); null otherwise")
 
 
 class UserRow(Fixed):

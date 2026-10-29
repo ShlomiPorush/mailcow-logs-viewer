@@ -180,15 +180,19 @@ def row(user: User, env_name: Optional[str] = None) -> Dict[str, Any]:
 
 def you(db: Session, principal) -> Dict[str, Any]:
     """Who is asking, so the page can warn before a change to their own access: the built-in
-    admin, a local user, or an OAuth2 person with their entry or (via_default) without one."""
+    admin, a local user, or an OAuth2 person with their entry or (via_default) without one. email is
+    the OAuth2 person's normalized email when it can match an entry (not one the provider left
+    unverified), so adding an entry for it can be confirmed too."""
     if principal is None or principal.kind == "builtin":
-        return {"kind": "builtin", "user_id": None, "via_default": False}
+        return {"kind": "builtin", "user_id": None, "via_default": False, "email": None}
     if principal.kind == "local":
-        return {"kind": "local", "user_id": principal.user_id, "via_default": False}
+        return {"kind": "local", "user_id": principal.user_id, "via_default": False, "email": None}
     entry = None
+    email = None
     if principal.email and not principal.email_unverified:
-        entry = db.query(User.id).filter(User.kind == "oauth2", User.email_norm == principal.email).scalar()
-    return {"kind": "oauth2", "user_id": entry, "via_default": entry is None}
+        email = principal.email
+        entry = db.query(User.id).filter(User.kind == "oauth2", User.email_norm == email).scalar()
+    return {"kind": "oauth2", "user_id": entry, "via_default": entry is None, "email": email}
 
 
 def overview(db: Session, principal=None) -> Dict[str, Any]:

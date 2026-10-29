@@ -789,7 +789,8 @@ function formatBytes(bytes) {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 }
 
-function copyToClipboard(text, event) {
+// label: a secret (a password) is copied without showing it: the notice says "<label> copied"
+function copyToClipboard(text, event, label) {
     if (event) {
         event.stopPropagation();
         event.preventDefault();
@@ -800,7 +801,7 @@ function copyToClipboard(text, event) {
         return;
     }
     navigator.clipboard.writeText(text).then(() => {
-        showToast('Copied: ' + text, 'success');
+        showToast(label ? `${label} copied` : 'Copied: ' + text, 'success');
         // Brief visual feedback on the icon
         if (event && event.currentTarget) {
             const icon = event.currentTarget.querySelector('.copy-icon');
@@ -1263,10 +1264,11 @@ function showChoiceModal({ title, message, choices, cancelText = 'Cancel' }) {
 // A dialog where something is typed asks before it drops what was changed:
 // Cancel, Close, Escape and Back all close it through uiCancelDialog. The
 // starting point is taken once the dialog shows its first values; a save closes
-// the dialog directly and asks nothing
+// the dialog directly and asks nothing. A control marked data-guard-skip (a setting for a tool
+// in the dialog, not a value it saves) is not counted
 const uiDialogStarts = new WeakMap();
 function uiFormValues(root) {
-    return JSON.stringify([...root.querySelectorAll('input, select, textarea')].map(el => {
+    return JSON.stringify([...root.querySelectorAll('input, select, textarea')].filter(el => !el.hasAttribute('data-guard-skip')).map(el => {
         if (el.type === 'checkbox' || el.type === 'radio') return el.checked;
         if (el.tagName === 'SELECT') return [...el.options].map(o => o.selected);
         return el.value;

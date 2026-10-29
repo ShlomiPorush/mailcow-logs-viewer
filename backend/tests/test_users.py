@@ -1469,14 +1469,18 @@ def test_the_users_answer_says_who_asked(oauth2, monkeypatch):
     monkeypatch.setattr(settings._inner, "oauth2_provider_name", "Example SSO")
     admin = _admin()
     answer = admin.get("/api/users").json()
-    assert answer["you"] == {"kind": "builtin", "user_id": None, "via_default": False}
+    assert answer["you"] == {"kind": "builtin", "user_id": None, "via_default": False, "email": None}
     assert answer["oauth2"]["provider_name"] == "Example SSO"
     alice = _add(admin, "alice", access="admin")
-    assert _sign_in("alice").get("/api/users").json()["you"] == {"kind": "local", "user_id": alice["id"], "via_default": False}
+    assert _sign_in("alice").get("/api/users").json()["you"] == {"kind": "local", "user_id": alice["id"], "via_default": False,
+                                                                 "email": None}
     carol = _add(admin, "carol@example.com", access="admin", kind="oauth2")
     # Matched as the sign-in matches: the provider's email, normalized
     assert _oauth2_client(" Carol@Example.com ").get("/api/users").json()["you"] == {
-        "kind": "oauth2", "user_id": carol["id"], "via_default": False}
-    # No entry, or an email the provider did not verify: the access for everyone else (Admin here)
-    for client in (_oauth2_client("dave@example.com"), _oauth2_client("carol@example.com", verified=False)):
-        assert client.get("/api/users").json()["you"] == {"kind": "oauth2", "user_id": None, "via_default": True}
+        "kind": "oauth2", "user_id": carol["id"], "via_default": False, "email": "carol@example.com"}
+    # No entry: the access for everyone else (Admin here), with the email an entry for it would match
+    assert _oauth2_client(" Dave@Example.com ").get("/api/users").json()["you"] == {
+        "kind": "oauth2", "user_id": None, "via_default": True, "email": "dave@example.com"}
+    # An email the provider did not verify matches no entry, so none is named
+    assert _oauth2_client("carol@example.com", verified=False).get("/api/users").json()["you"] == {
+        "kind": "oauth2", "user_id": None, "via_default": True, "email": None}

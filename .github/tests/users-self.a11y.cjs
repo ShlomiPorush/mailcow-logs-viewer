@@ -1,7 +1,8 @@
 // Settings > Users knows who is looking (GET /api/users you) and asks before a change that takes
 // something away from that person's own access: their own row has a You tag; editing their own
 // user to less access, disabling it or deleting it, and changing the access for everyone else
-// while they get it themselves (an OAuth2 sign-in without an entry), each ask first, in plain
+// while they get it themselves (an OAuth2 sign-in without an entry), and adding an OAuth2 entry
+// for one's own email with less access or sign-in disabled, each ask first, in plain
 // words, and send nothing on Cancel. A change that takes nothing away asks nothing.
 // Set A11Y_MODULES to jsdom's node_modules to run it locally (see layers.a11y.cjs).
 const assert = require('node:assert/strict');
@@ -175,4 +176,47 @@ test('deleting one\'s own OAuth2 entry says what the access for everyone else le
     await p.answer(false);
     await deleting;
     assert.equal(p.sent.length, 0);
+});
+
+test('adding an OAuth2 entry for one\'s own email with less access, or disabled, asks first', async () => {
+    const you = { kind: 'oauth2', user_id: null, via_default: true, email: 'dave@example.com' };
+    const p = page({ you, status: { ...ADMIN, user_name: 'dave@example.com' } });
+    const add = (email, level, disabled) => {
+        p.w.editUser(null);
+        p.$('#user-edit-kind [data-kind="oauth2"]').click();
+        p.$('#user-edit-email').value = email;
+        p.$(`#user-edit-level [data-level="${level}"]`).click();
+        p.$('#user-edit-disabled').checked = disabled;
+        return p.w.saveUser({ preventDefault() {} }, null);
+    };
+    // Compared as the server compares: spaces, case
+    const saving = add(' Dave@Example.COM ', 'viewer', false);
+    await p.tick();
+    assert.deepEqual(p.asked(), {
+        text: 'This is your own email address. Adding it gives you this access instead of yours now: you will lose Settings, Users and AI agents, and the actions you can take in Quarantine and Rspamd.',
+        ok: 'Change my access',
+    });
+    await p.answer(false);
+    await saving;
+    assert.equal(p.sent.length, 0);
+    assert.ok(p.$('#user-edit-modal'), 'the dialog stays open');
+    p.w.closeUserEditModal(true);
+    const disabling = add('dave@example.com', 'admin', true);
+    await p.tick();
+    assert.deepEqual(p.asked(), { text: 'This is your own email address. Adding it with sign-in disabled signs you out at once.', ok: 'Disable my sign-in' });
+    await p.answer(true);
+    await disabling;
+    assert.equal(p.sent.length, 1);
+    assert.equal(p.sent[0].body.email, 'dave@example.com');
+    // Someone else's email, or one's own as Admin: no question
+    for (const [email, level] of [['erin@example.com', 'viewer'], ['dave@example.com', 'admin']]) {
+        const q = page({ you, status: { ...ADMIN, user_name: 'dave@example.com' } });
+        q.w.editUser(null);
+        q.$('#user-edit-kind [data-kind="oauth2"]').click();
+        q.$('#user-edit-email').value = email;
+        q.$(`#user-edit-level [data-level="${level}"]`).click();
+        await q.w.saveUser({ preventDefault() {} }, null);
+        assert.equal(q.asked(), null);
+        assert.equal(q.sent.length, 1);
+    }
 });

@@ -145,14 +145,16 @@ function usersPasswordMeterHtml(hidden) {
     return `<div class="ui-pw-tools">
         <button type="button" class="ui-btn ui-btn-sm" id="user-edit-pw-generate">Generate</button>
         <label class="ui-pw-length" for="user-edit-pw-length">Length
-            <input type="range" id="user-edit-pw-length" class="ui-pw-range" min="12" max="64" value="20">
+            <input type="range" id="user-edit-pw-length" class="ui-pw-range" min="12" max="64" value="20" data-guard-skip>
             <output id="user-edit-pw-length-value" for="user-edit-pw-length">20</output></label>
         <button type="button" class="ui-btn ui-btn-sm" id="user-edit-pw-copy" aria-label="Copy the password" disabled>Copy</button>
     </div>
     <div class="ui-pw-meter${hidden ? ' hidden' : ''}" id="user-edit-pw-meter" data-level="0">
         <div class="ui-pw-bar" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
-        <p class="ui-pw-label" id="user-edit-pw-label" aria-live="polite"></p>
-        <p class="ui-pw-warn hidden" id="user-edit-pw-warn">This password is weak. You can still save it.</p>
+        <div id="user-edit-pw-status" aria-live="polite">
+            <p class="ui-pw-label" id="user-edit-pw-label"></p>
+            <p class="ui-pw-warn hidden" id="user-edit-pw-warn"></p>
+        </div>
         <ul class="ui-pw-rules" aria-label="Password requirements">
             ${USERS_PASSWORD_RULES.map(([id, label]) => `<li data-rule="${id}" data-met="false"><span class="ui-pw-mark" aria-hidden="true">✗</span>${escapeHtml(label)}<span class="ui-sr-only">, not met</span></li>`).join('')}
         </ul>
@@ -169,8 +171,14 @@ function usersShowPasswordMeter(modal, password, keepWhenEmpty) {
     const label = meter.querySelector('#user-edit-pw-label');
     const words = check.level ? `Password strength: ${USERS_STRENGTH[check.level]}` : '';
     if (label.textContent !== words) label.textContent = words;
-    // Long enough to save, but weak: said, and Save stays possible
-    meter.querySelector('#user-edit-pw-warn').classList.toggle('hidden', !(check.level === 1 && check.met.length));
+    // Weak but within 8 to 256 characters: said, and Save stays possible. Over 256: what Save says
+    const tooLong = usersPasswordBlock(password, false) === USERS_PASSWORD_LONG;
+    const note = tooLong ? USERS_PASSWORD_LONG : check.level === 1 && check.met.length ? 'This password is weak. You can still save it.' : '';
+    const warn = meter.querySelector('#user-edit-pw-warn');
+    if (warn.textContent !== note) warn.textContent = note;
+    warn.classList.toggle('hidden', !note);
+    if (tooLong) warn.dataset.tone = 'fail';
+    else delete warn.dataset.tone;
     meter.querySelectorAll('li[data-rule]').forEach(item => {
         const on = !!check.met[item.dataset.rule];
         item.dataset.met = String(on);
@@ -209,7 +217,7 @@ function usersWirePassword(modal, keepWhenEmpty) {
         }
         update();
     });
-    copy.addEventListener('click', event => copyToClipboard(field.value, event));
+    copy.addEventListener('click', event => copyToClipboard(field.value, event, 'Password'));
     update();
 }
 
@@ -250,7 +258,12 @@ function usersProvider() {
 // Who is looking (GET /api/users you): the built-in admin, a local user or an OAuth2 person,
 // with their entry or, without one, the access for everyone else (via_default)
 function usersYou() {
-    return (usersData && usersData.you) || { kind: 'builtin', user_id: null, via_default: false };
+    return (usersData && usersData.you) || { kind: 'builtin', user_id: null, via_default: false, email: null };
+}
+
+// An email as the server compares it (trimmed, NFKC, lower case); the server's check is the rule
+function usersNormEmail(value) {
+    return String(value || '').trim().normalize('NFKC').toLowerCase().trim();
 }
 
 function usersIsYou(user) {
@@ -301,7 +314,8 @@ function usersLossText(lost) {
 
 // The question to ask before a change to one's own access ({ message, confirmText }), or null
 // when the change takes nothing away from the person making it.
-// change: { kind: 'default', value } | { kind: 'edit', user, level, areas, disabled } | { kind: 'delete', user }
+// change: { kind: 'default', value } | { kind: 'add', email, level, areas, disabled }
+//       | { kind: 'edit', user, level, areas, disabled } | { kind: 'delete', user }
 function usersSelfWarning(change) {
     const you = usersYou();
     const provider = usersProvider();
@@ -312,6 +326,14 @@ function usersSelfWarning(change) {
         if (change.value === 'none') return { message: `${start} Changing it to No access signs you out at once.`, confirmText: 'Change my access' };
         const lost = usersLoss(usersAccessNow(), usersAccessOf(change.value));
         return lost ? { message: `${start} Changing it to ${label(change.value)} changes your own access too: ${usersLossText(lost)}.`, confirmText: 'Change my access' } : null;
+    }
+    if (change.kind === 'add') {
+        // An OAuth2 entry for one's own email: from then on it is one's access
+        if (you.kind !== 'oauth2' || !you.via_default || !you.email || usersNormEmail(change.email) !== you.email) return null;
+        const own = 'This is your own email address.';
+        if (change.disabled) return { message: `${own} Adding it with sign-in disabled signs you out at once.`, confirmText: 'Disable my sign-in' };
+        const lost = usersLoss(usersAccessNow(), usersAccessOf(change.level, change.areas));
+        return lost ? { message: `${own} Adding it gives you this access instead of yours now: ${usersLossText(lost)}.`, confirmText: 'Change my access' } : null;
     }
     if (!usersIsYou(change.user)) return null;
     const local = change.user.kind === 'local';
@@ -514,7 +536,7 @@ function editUser(userId) {
             ${user ? '' : `<label for="user-edit-name"><span class="ui-label">Username</span>
                 <input id="user-edit-name" class="ui-input" autocomplete="off" maxlength="64" spellcheck="false"></label>`}
             <label for="user-edit-pass"><span class="ui-label">${user ? 'New password' : 'Password'}</span>
-                <input id="user-edit-pass" type="password" class="ui-input" autocomplete="new-password" placeholder="At least 8 characters"></label>
+                <input id="user-edit-pass" type="password" class="ui-input" autocomplete="new-password" placeholder="At least 8 characters" aria-describedby="user-edit-pw-status"></label>
             ${usersPasswordMeterHtml(!!user)}
             <p class="ui-set-desc">${user ? `Leave it empty to keep the current password. A new password signs ${escapeHtml(name)} out.`
                 : 'Give this password to the user. They sign in on the sign-in page with the username and this password.'}</p>
@@ -637,15 +659,15 @@ async function saveUser(event, userId) {
         if (password) body.password = password;
     }
     Object.assign(body, { access: level, views: custom ? chosen('view') : [], acts: custom ? chosen('act') : [], disabled });
-    // One's own entry: asked first when the change takes something away from oneself
-    if (userId != null) {
-        const areas = {};
-        body.views.forEach(id => { areas[id] = 'view'; });
-        body.acts.forEach(id => { areas[id] = 'act'; });
-        const user = usersData.users.find(u => u.id === userId);
-        const self = usersSelfWarning({ kind: 'edit', user, level, areas, disabled });
-        if (self && !(await usersAskSelf(self))) return;
-    }
+    // One's own entry, or a new OAuth2 entry for one's own email: asked first when the change
+    // takes something away from oneself
+    const areas = {};
+    body.views.forEach(id => { areas[id] = 'view'; });
+    body.acts.forEach(id => { areas[id] = 'act'; });
+    const change = userId != null ? { kind: 'edit', user: usersData.users.find(u => u.id === userId), level, areas, disabled }
+        : body.kind === 'oauth2' ? { kind: 'add', email: body.email, level, areas, disabled } : null;
+    const self = change && usersSelfWarning(change);
+    if (self && !(await usersAskSelf(self))) return;
     try {
         // A refresh on its way now may have read the state before this change: it is dropped
         usersSeq++;

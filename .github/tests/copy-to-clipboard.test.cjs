@@ -42,3 +42,10 @@ test('a copy that works says what was copied', async () => {
     await settle();
     assert.deepEqual(toasts, [{ message: 'Copied: user@example.com', type: 'success' }]);
 });
+
+test('a secret copied with a label is not shown: the notice names it only', async () => {
+    const { context, toasts } = load({ clipboard: { writeText: () => Promise.resolve() } });
+    context.copyToClipboard('Secret-Pass-123!', undefined, 'Password');
+    await settle();
+    assert.deepEqual(toasts, [{ message: 'Password copied', type: 'success' }]);
+});
