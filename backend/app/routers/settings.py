@@ -432,7 +432,10 @@ def get_settings_info(request: Request = None, db: Session = Depends(get_db)):
     - Last import times for each log type
     - Background job statistics
     - Database statistics
+    The sign-in username, the alert mail and IMAP accounts and the editable
+    settings are Settings: only for a caller who may read Settings (an admin).
     """
+    with_settings = caller_may(request, "settings", READ)
     try:
         # Get last import times
         last_postfix = db.query(func.max(PostfixLog.created_at)).scalar()
@@ -517,7 +520,7 @@ def get_settings_info(request: Request = None, db: Session = Depends(get_db)):
                 "auth_enabled": settings.is_authentication_enabled,
                 "basic_auth_enabled": settings.is_basic_auth_enabled,
                 "oauth2_enabled": settings.is_oauth2_enabled,
-                "auth_username": settings.auth_username if settings.is_basic_auth_enabled else None,
+                "auth_username": settings.auth_username if settings.is_basic_auth_enabled and with_settings else None,
                 "oauth2_provider_name": settings.oauth2_provider_name if settings.is_oauth2_enabled else None,
                 "maxmind_status": get_maxmind_validation_status(db),  # Last validated result from DB, or None if never checked
                 "mailcow_rw_key_status": _credential_status(db, "mailcow_rw_key"),
@@ -820,20 +823,20 @@ def get_settings_info(request: Request = None, db: Session = Depends(get_db)):
             },
             "smtp_configuration": {
                 "enabled": settings.smtp_enabled,
-                "host": settings.smtp_host if settings.smtp_enabled else None,
-                "port": settings.smtp_port if settings.smtp_enabled else None,
-                "user": settings.smtp_user if settings.smtp_enabled else None,
-                "from_address": settings.smtp_from if settings.smtp_enabled else None,
+                "host": settings.smtp_host if settings.smtp_enabled and with_settings else None,
+                "port": settings.smtp_port if settings.smtp_enabled and with_settings else None,
+                "user": settings.smtp_user if settings.smtp_enabled and with_settings else None,
+                "from_address": settings.smtp_from if settings.smtp_enabled and with_settings else None,
                 "use_tls": settings.smtp_use_tls if settings.smtp_enabled else None,
-                "admin_email": settings.admin_email if settings.smtp_enabled else None,
+                "admin_email": settings.admin_email if settings.smtp_enabled and with_settings else None,
                 "configured": settings.notification_smtp_configured
             },
             "dmarc_configuration": {
                 "manual_upload_enabled": settings.dmarc_manual_upload_enabled,
                 "imap_sync_enabled": settings.dmarc_imap_enabled,
-                "imap_host": settings.dmarc_imap_host if settings.dmarc_imap_enabled else None,
-                "imap_user": settings.dmarc_imap_user if settings.dmarc_imap_enabled else None,
-                "imap_folder": settings.dmarc_imap_folder if settings.dmarc_imap_enabled else None,
+                "imap_host": settings.dmarc_imap_host if settings.dmarc_imap_enabled and with_settings else None,
+                "imap_user": settings.dmarc_imap_user if settings.dmarc_imap_enabled and with_settings else None,
+                "imap_folder": settings.dmarc_imap_folder if settings.dmarc_imap_enabled and with_settings else None,
                 "imap_delete_after": settings.dmarc_imap_delete_after if settings.dmarc_imap_enabled else None,
                 "imap_interval_minutes": round(settings.dmarc_imap_interval / 60, 1) if settings.dmarc_imap_enabled else None,
                 "smtp_configured": settings.notification_smtp_configured
@@ -869,7 +872,7 @@ def get_settings_info(request: Request = None, db: Session = Depends(get_db)):
         # Raw log services other pages read, collected whatever the Logs page settings are
         result["raw_logs_required"] = settings.raw_logs_required
         # When UI editing is enabled, include full editable config and migration status
-        if settings.edit_settings_via_ui_enabled:
+        if settings.edit_settings_via_ui_enabled and with_settings:
             result["editable_config"] = _effective_config_for_editable(settings)
             result["default_config"] = _get_field_defaults()
             result["settings_migrated"] = has_config_overrides_in_db(db)

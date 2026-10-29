@@ -30,6 +30,7 @@ from ..session import (
     set_session_cookie,
     clear_session_cookie,
     SESSION_COOKIE_NAME,
+    SESSION_ACCESS_CHANGED,
     is_secure_request,
     get_session_secret_key,
 )
@@ -220,9 +221,9 @@ def create_basic_auth_session(request: Request):
         raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=users_store.BUSY,
                             headers={"Retry-After": "1"})
     except Exception as e:
-        # Without the database no local user can be checked: refused like a wrong password, never let in
+        # Not counted as a failure: an outage must not lock the client out
         logger.error(f"Could not check a local user's sign-in: {e}")
-        user = None
+        raise _sign_in_unavailable()
     if user is None:
         auth_module.record_sign_in_failure(client_ip)
         raise wrong
@@ -231,8 +232,7 @@ def create_basic_auth_session(request: Request):
         version = users_store.current_auth_version(user["user_id"])
     except Exception as e:
         logger.error(f"Could not check a local user's sign-in: {e}")
-        raise HTTPException(status_code=503, detail="Sign-in is not available right now. Try again in a moment.",
-                            headers={"Retry-After": "5"})
+        raise _sign_in_unavailable()
     if version != user["auth_version"]:
         # Changed by an admin while the password was checked
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=_SIGN_IN_CHANGED)
@@ -243,6 +243,11 @@ def create_basic_auth_session(request: Request):
     except Exception as e:
         logger.warning(f"Could not record a local user's sign-in time: {e}")
     return response
+
+
+def _sign_in_unavailable() -> HTTPException:
+    return HTTPException(status_code=503, detail="Sign-in is not available right now. Try again in a moment.",
+                         headers={"Retry-After": "5"})
 
 
 def _new_session(request: Request, user_info: dict, principal: dict) -> JSONResponse:
@@ -443,7 +448,7 @@ def oauth2_logout_get():
     )
 
 
-@router.post("/auth/activity", responses=documented(m.SessionActivity, errors={401: None}))
+@router.post("/auth/activity", responses=documented(m.SessionActivity, errors={401: None, 503: None}))
 def session_activity(request: Request):
     """
     The person used the page (typed, clicked, scrolled or touched): restart
@@ -453,6 +458,12 @@ def session_activity(request: Request):
     session alive. Only the cookie's own session is touched, and a session
     that ended stays ended. Not for agents.
     """
+    if settings.is_authentication_enabled:
+        access = user_access.cookie_access(request)
+        if access == "ended":
+            return session_ended_response(SESSION_ACCESS_CHANGED)
+        if access == "unknown":
+            raise HTTPException(status_code=503, detail=user_access.NOT_AVAILABLE, headers={"Retry-After": "5"})
     limits, ended = record_activity(request)
     if limits is None:
         if ended:

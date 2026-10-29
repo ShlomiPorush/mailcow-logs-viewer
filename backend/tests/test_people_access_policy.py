@@ -14,20 +14,46 @@ from app.main import app  # noqa: E402
 from conftest import registered_routes  # noqa: E402
 
 
-def _routes():
+def _routes(application=app):
     out = set()
-    for route in registered_routes(app):
+    for route in registered_routes(application):
         methods = getattr(route, "methods", None)
         if methods:
-            out.update((m, route.path) for m in methods if m != "HEAD")
-        elif type(route).__name__ == "APIWebSocketRoute" or "WebSocket" in type(route).__name__:
+            out.update((m, route.path) for m in methods)
+        elif "WebSocket" in type(route).__name__:
             out.add(("WEBSOCKET", route.path))
     return out
 
 
+def _missing(application=app):
+    return sorted(r for r in _routes(application) if user_access.need_for(*r) is None)
+
+
 def test_every_route_has_a_rule_for_people():
-    missing = sorted(r for r in _routes() if user_access.need_for(*r) is None)
+    missing = _missing()
     assert not missing, f"add these to user_access.HUMAN_ENTRIES or agent_access/scopes.py POLICY: {missing}"
+
+
+def test_the_check_names_a_route_without_a_rule_whatever_its_kind():
+    from fastapi import FastAPI
+
+    probe = FastAPI()
+
+    def endpoint():
+        return {}
+
+    async def socket(websocket):
+        pass
+
+    probe.add_api_route("/api/probe-get", endpoint, methods=["GET"])
+    probe.add_api_route("/api/probe-head", endpoint, methods=["HEAD"])
+    probe.add_api_websocket_route("/ws/probe", socket)
+    # A HEAD route of a GET route that has a rule is covered by that rule
+    probe.add_api_route("/api/messages", endpoint, methods=["HEAD"])
+    found = _missing(probe)
+    assert ("GET", "/api/probe-get") in found and ("HEAD", "/api/probe-head") in found
+    assert ("WEBSOCKET", "/ws/probe") in found
+    assert ("HEAD", "/api/messages") not in found
 
 
 def test_no_rule_is_for_a_route_that_is_gone():
@@ -84,5 +110,19 @@ def test_uploads_and_the_live_log_token_belong_to_their_area():
     assert user_access.need_for("GET", "/api/raw-logs/ws-token").areas == (("logs", "read"),)
 
 
-def test_a_route_without_a_rule_is_refused():
-    assert user_access.need_for("GET", "/api/not-a-route") is None
+def test_a_route_without_a_rule_is_refused_even_for_an_admin(monkeypatch):
+    import pytest
+    from fastapi import Depends, FastAPI
+    from fastapi.testclient import TestClient
+    from app.config import settings
+
+    for key in ("auth_enabled", "basic_auth_enabled", "oauth2_enabled"):
+        monkeypatch.setattr(settings._inner, key, False)
+    probe = FastAPI(dependencies=[Depends(user_access.enforce_people_policy)])
+    probe.add_api_route("/api/probe", lambda: {"ran": True}, methods=["GET", "POST"])
+    client = TestClient(probe)
+    for method in ("GET", "POST"):
+        with pytest.raises(user_access.NotPermitted):
+            client.request(method, "/api/probe")
+
+

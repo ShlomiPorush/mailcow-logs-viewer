@@ -64,6 +64,8 @@ def people(app_schema, monkeypatch):
     monkeypatch.setattr(inner, "auth_password", ADMIN_PASSWORD)
     monkeypatch.setattr(inner, "raw_logs_services", "postfix")
     monkeypatch.setattr(raw_logs, "log_stream_manager", raw_logs.LogStreamManager())
+    # The guards read the sign-in settings as saved; here they are the test's settings
+    monkeypatch.setattr(users_store, "build_settings", lambda db: settings._inner)
     _wipe()
     session_module._session_store.clear()
     auth_module._auth_failures.clear()
@@ -450,7 +452,8 @@ def test_settings_info_shows_recent_messages_only_with_view_for_messages(people,
 
     def recorded(request, area, kind):
         answer = user_access.caller_may(request, area, kind)
-        seen.append((request.state.principal.name, area, answer))
+        if area == "messages":
+            seen.append((request.state.principal.name, area, answer))
         return answer
 
     monkeypatch.setattr(settings_router, "caller_may", recorded)
@@ -462,7 +465,7 @@ def test_settings_info_shows_recent_messages_only_with_view_for_messages(people,
     assert seen == [("status-only", "messages", False), ("with-messages", "messages", True)]
 
 
-def test_caller_may_answers_for_people_and_agents():
+def test_caller_may_answers_for_people_and_agents(monkeypatch):
     from types import SimpleNamespace
     from app.agent_access.context import SCOPE_KEY, AgentCall
     viewer = user_access.Principal("local", False, user_access.preset_scopes("viewer"), "v")
@@ -475,6 +478,11 @@ def test_caller_may_answers_for_people_and_agents():
     assert user_access.caller_may(agent, "status", "read")
     assert not user_access.caller_may(agent, "messages", "read")
     nobody = SimpleNamespace(scope={}, state=SimpleNamespace())
+    for key in ("auth_enabled", "basic_auth_enabled", "oauth2_enabled"):
+        monkeypatch.setattr(settings._inner, key, False)
+    # Sign-in off: the built-in admin; on, a request nobody was resolved for gets nothing
+    assert user_access.caller_may(nobody, "messages", "read")
+    monkeypatch.setattr(settings._inner, "basic_auth_enabled", True)
     assert not user_access.caller_may(nobody, "messages", "read")
 
 
@@ -539,7 +547,7 @@ def test_a_change_applies_even_to_a_session_the_store_still_holds(people, monkey
     admin = _admin()
     row = _add(admin)
     client = _sign_in()
-    monkeypatch.setattr(users_store, "_end_local_sessions", lambda user_id: None)
+    monkeypatch.setattr(users_store, "_end_local_sessions", lambda user_id, below=None: None)
     assert _change(admin, row, access="custom", views=["logs"]).status_code == 200
     _ended(client.get("/api/messages"))
 
@@ -558,7 +566,7 @@ def test_signing_out_works_after_the_access_ended(people, monkeypatch):
     row = _add(admin)
     client = _sign_in()
     # The session is still in the store, but no longer gives access
-    monkeypatch.setattr(users_store, "_end_local_sessions", lambda user_id: None)
+    monkeypatch.setattr(users_store, "_end_local_sessions", lambda user_id, below=None: None)
     assert _change(admin, row, disabled=True).status_code == 200
     r = client.post("/api/auth/logout", follow_redirects=False)
     assert r.status_code == 302 and r.headers["location"] == "/login"
@@ -1013,3 +1021,271 @@ def test_each_change_a_person_asks_for_is_logged_whatever_the_log_level(people):
     assert "Action by admin: POST /api/users answered 201" in lines.lines
     assert "Action by alice: POST /api/quarantine/rules answered 403" in lines.lines
     assert not any("/api/messages" in line for line in lines.lines)
+
+
+# ── Turning sign-in on, and the saved sign-in under the lock ───────────────
+
+def _sign_in_off():
+    return settings._inner.model_copy(update={"basic_auth_enabled": False, "oauth2_enabled": False,
+                                              "auth_enabled": False})
+
+
+@pytest.mark.parametrize("default", ["none", "viewer"])
+def test_turning_oauth2_on_from_sign_in_off_needs_an_admin(people, default):
+    """With sign-in off everyone is an admin, so turning it on must leave one who can sign in."""
+    from app.database import get_db_context
+    _store_default(default)
+    with get_db_context() as db:
+        with pytest.raises(users_store.UserError) as refused:
+            users_store.check_sign_in_settings(db, _sign_in_off(), {"oauth2_enabled": True})
+    assert refused.value.status == 409
+    with get_db_context() as db:
+        users_store.create_user(db, kind="oauth2", username=None, email="carol@example.com", password=None,
+                                access_level="admin", views=(), acts=(), disabled=False)
+    with get_db_context() as db:
+        users_store.check_sign_in_settings(db, _sign_in_off(), {"oauth2_enabled": True})
+
+
+def test_turning_basic_auth_on_with_a_password_from_sign_in_off_passes(people):
+    from app.database import get_db_context
+    _store_default("none")
+    with get_db_context() as db:
+        users_store.check_sign_in_settings(db, _sign_in_off(), {"basic_auth_enabled": True,
+                                                                "auth_password": "a long admin password"})
+    with get_db_context() as db:
+        with pytest.raises(users_store.UserError):
+            users_store.check_sign_in_settings(db, _sign_in_off(), {"basic_auth_enabled": True, "auth_password": ""})
+
+
+def test_a_user_write_counts_the_saved_sign_in_not_the_one_in_memory(oauth2, monkeypatch):
+    """A Settings save turned Basic Auth off and committed; the shared settings are not reloaded yet."""
+    admin = _admin()
+    row = _add(admin, "carol@example.com", "admin", kind="oauth2")
+    _set_default(admin, "viewer")
+    saved = settings._inner.model_copy(update={"basic_auth_enabled": False})
+    monkeypatch.setattr(users_store, "build_settings", lambda db: saved)
+    assert settings.is_basic_auth_enabled
+    r = _change(admin, row, access="operator")
+    assert r.status_code == 409 and r.json()["detail"] == users_store.NO_ADMIN_LEFT
+
+
+def test_a_local_user_cannot_take_the_saved_admin_name(people, monkeypatch):
+    saved = settings._inner.model_copy(update={"auth_username": "root"})
+    monkeypatch.setattr(users_store, "build_settings", lambda db: saved)
+    r = _admin().post("/api/users", json={"kind": "local", "username": "Root", "password": PASSWORD,
+                                          "access": "viewer"})
+    assert r.status_code == 409
+
+
+# ── A sign-in that read the new version keeps its session ──────────────────
+
+def test_a_sign_in_after_a_password_reset_keeps_its_session(people, monkeypatch):
+    admin = _admin()
+    row = _add(admin)
+    old = _sign_in()
+    real = users_store._end_local_sessions
+    late = {}
+
+    def sign_in_meanwhile(user_id, below=None):
+        # Between the commit and ending the old sessions, the user signs in with the new password
+        late["client"] = _sign_in("alice", "another long password")
+        real(user_id, below)
+
+    monkeypatch.setattr(users_store, "_end_local_sessions", sign_in_meanwhile)
+    assert _change(admin, row, password="another long password").status_code == 200
+    _ended(old.get("/api/messages"))
+    assert late["client"].get("/api/messages").status_code == 200
+
+
+def test_ending_sessions_below_a_version_keeps_newer_ones(people):
+    def session_with(version):
+        return session_module.create_session({"username": "alice", "auth_method": "basic"},
+                                             generation=session_module.auth_generation(),
+                                             principal={"kind": "local", "user_id": 7, "auth_version": version})
+    older, newer = session_with(1), session_with(2)
+    users_store._end_local_sessions(7, below=2)
+    assert session_module.get_session(older) is None and session_module.get_session(newer) is not None
+    users_store._end_local_sessions(7)
+    assert session_module.get_session(newer) is None
+
+
+# ── Sign-in during a database outage ───────────────────────────────────────
+
+def test_a_database_failure_while_checking_a_local_user_is_503_and_not_counted(people, monkeypatch):
+    def broken(username, password):
+        raise RuntimeError("database down")
+
+    monkeypatch.setattr(users_store, "verify_sign_in", broken)
+    for _ in range(auth_module._AUTH_MAX_FAILURES + 1):
+        r = _client().post("/api/auth/session", headers=_basic("alice", PASSWORD))
+        assert r.status_code == 503
+        assert r.json()["detail"] == "Sign-in is not available right now. Try again in a moment."
+    assert not auth_module._auth_failures
+    _admin()
+
+
+# ── Public routes count a session only while it gives access ───────────────
+
+def test_info_details_end_with_the_persons_access(oauth2):
+    admin = _admin()
+    dave = _oauth2_client("dave@example.com")
+    assert "version" in dave.get("/api/info").json()
+    _set_default(admin, "none")
+    info = dave.get("/api/info").json()
+    assert "version" not in info and info["app_title"] and info["oauth2_enabled"] is True
+    _ended(dave.get("/api/messages"))
+
+
+def test_activity_ends_with_the_persons_access(oauth2):
+    admin = _admin()
+    dave = _oauth2_client("dave@example.com")
+    assert dave.post("/api/auth/activity").status_code == 200
+    _set_default(admin, "none")
+    _ended(dave.post("/api/auth/activity"))
+
+
+# ── Answers that hold another area's data ──────────────────────────────────
+
+@pytest.fixture
+def stored():
+    """Rows a test adds, deleted afterwards (children first)."""
+    from app.database import get_db_context
+    added = []
+
+    def add(row):
+        with get_db_context() as db:
+            db.add(row)
+            db.flush()
+            db.expunge(row)
+        added.append(row)
+        return row
+
+    yield add
+    with get_db_context() as db:
+        for row in reversed(added):
+            db.query(type(row)).filter(type(row).id == row.id).delete(synchronize_session=False)
+
+
+def _person(admin, name, views=(), acts=()):
+    _add(admin, name, access="custom", views=views, acts=acts)
+    return _sign_in(name)
+
+
+def test_message_details_show_netfilter_events_only_with_view_for_security(people, stored):
+    from datetime import datetime
+    from app.models import MessageCorrelation, NetfilterLog, RspamdLog
+    now = datetime.utcnow()
+    rspamd = stored(RspamdLog(time=now, ip="192.0.2.10", score=1.0, required_score=15.0, action="no action",
+                              symbols={}, is_spam=False, direction="inbound", sender_smtp="alice@example.com",
+                              recipients_smtp=["bob@example.com"], subject="Hello"))
+    stored(MessageCorrelation(correlation_key="users-test-details", rspamd_log_id=rspamd.id,
+                              sender="alice@example.com", recipient="bob@example.com", subject="Hello",
+                              direction="inbound", first_seen=now, last_seen=now))
+    stored(NetfilterLog(time=now, ip="192.0.2.10", username="bob@example.com", message="authentication failed"))
+    admin = _admin()
+    messages_only = _person(admin, "messages-only", views=("messages",))
+    both = _person(admin, "both", views=("messages", "security"))
+    details = messages_only.get("/api/message/users-test-details/details")
+    assert details.status_code == 200 and details.json()["netfilter"] == []
+    assert details.json()["subject"] == "Hello"
+    assert [e["ip"] for e in both.get("/api/message/users-test-details/details").json()["netfilter"]] == ["192.0.2.10"]
+
+
+@pytest.mark.no_contract(reason="stubs messages._no_message_id_details, which builds the answer")
+def test_a_message_without_a_message_id_shows_netfilter_events_only_with_view_for_security(people, monkeypatch):
+    from app.routers import messages as messages_router
+    asked = []
+
+    def details(db, key, with_security=True):
+        asked.append(with_security)
+        raise messages_router.HTTPException(status_code=404, detail="Message not found")
+
+    monkeypatch.setattr(messages_router, "_no_message_id_details", details)
+    monkeypatch.setattr(messages_router.no_message_id, "is_key", lambda key: True)
+    admin = _admin()
+    _person(admin, "messages-only", views=("messages",)).get("/api/message/noid-x/details")
+    _person(admin, "both", views=("messages", "security")).get("/api/message/noid-x/details")
+    assert asked == [False, True]
+
+
+def test_alert_activity_shows_the_mail_around_it_only_with_view_for_messages(people, stored, monkeypatch):
+    from datetime import datetime
+    from app.models import SecurityAlert
+    from app.routers import security_alerts
+    now = datetime.utcnow()
+    alert = stored(SecurityAlert(alert_type="volume_spike", severity="warning", title="Sending spike",
+                                 subject="alice@example.com", detail="120 messages", created_at=now))
+    monkeypatch.setattr(security_alerts, "_events",
+                        lambda db, a, start, end: [(now, "bob@example.com", "delivered", "Hello")])
+    admin = _admin()
+    path = f"/api/security-alerts/{alert.id}/activity"
+    security_only = _person(admin, "security-only", views=("security",)).get(path)
+    assert security_only.status_code == 200
+    around = security_only.json()["around"]
+    assert (around["subjects"], around["recipient_domains"], around["results"], around["total"]) == ([], [], [], 1)
+    both = _person(admin, "both", views=("security", "messages")).get(path)
+    assert both.json()["around"]["subjects"] == [{"name": "Hello", "count": 1}]
+
+
+def test_top_blocked_addresses_need_view_for_security(people, stored):
+    from datetime import datetime
+    from app.models import NetfilterLog
+    stored(NetfilterLog(time=datetime.utcnow(), ip="192.0.2.20", message="banned"))
+    admin = _admin()
+    assert _person(admin, "status-only", views=("status",)).get("/api/stats/top-blocked-ips").json() == {
+        "blocked_ips": []}
+    ips = _person(admin, "both", views=("status", "security")).get("/api/stats/top-blocked-ips").json()["blocked_ips"]
+    assert "192.0.2.20" in [row["ip"] for row in ips]
+
+
+def test_rate_limit_events_show_the_refused_mail_only_with_view_for_messages(people, stored):
+    from datetime import datetime
+    from app.models import RawServiceLog
+    stored(RawServiceLog(service="ratelimited", time=datetime.utcnow(), message_hash="users-test-rl",
+                         raw_data={"user": "alice@example.com", "rcpt": "bob@example.com",
+                                   "header_subject": "Hello", "qid": "Q1"}))
+    admin = _admin()
+    for client, shown in ((_person(admin, "mailboxes-only", views=("mailboxes",)), False),
+                          (_person(admin, "both", views=("mailboxes", "messages")), True)):
+        event = client.get("/api/rate-limits/events").json()["events"][0]
+        assert (event["subject"], event["rcpt"]) == (("Hello", "bob@example.com") if shown else ("", ""))
+        history = client.get("/api/rate-limits/sender-events", params={"user": "alice@example.com"}).json()
+        assert history["events"][0]["subject"] == ("Hello" if shown else "")
+
+
+def test_suppression_evidence_shows_the_message_only_with_view_for_messages(people, stored):
+    from app.models import SpamSuppression, SuppressionEvent
+    suppression = stored(SpamSuppression(email="bob@example.com", reason="hard_bounce", type="email", active=True))
+    stored(SuppressionEvent(suppression_id=suppression.id, kind="blocked", outcome="blocked", reason="550 no such user",
+                            sender="alice@example.com", recipient="bob@example.com", subject="Hello",
+                            log_lines=[{"time": "2026-10-29T10:00:00Z", "program": "postfix/smtp",
+                                       "message": "status=bounced"}]))
+    admin = _admin()
+    outbound_only = _person(admin, "outbound-only", views=("outbound",))
+    event = outbound_only.get(f"/api/suppressions/{suppression.id}/events").json()["events"][0]
+    assert (event["sender"], event["subject"], event["log_lines"]) == (None, None, [])
+    assert event["recipient"] == "bob@example.com" and event["reason"] == "550 no such user"
+    both = _person(admin, "both", views=("outbound", "messages"))
+    assert both.get(f"/api/suppressions/{suppression.id}/events").json()["events"][0]["subject"] == "Hello"
+
+
+def test_settings_info_keeps_settings_and_accounts_for_admins(people, monkeypatch):
+    inner = settings._inner
+    for key, value in (("smtp_enabled", True), ("smtp_host", "smtp.example.com"), ("smtp_user", "alerts@example.com"),
+                       ("smtp_from", "alerts@example.com"), ("admin_email", "admin@example.com"),
+                       ("dmarc_imap_enabled", True), ("dmarc_imap_host", "imap.example.com"),
+                       ("dmarc_imap_user", "reports@example.com"), ("edit_settings_via_ui_enabled", True)):
+        monkeypatch.setattr(inner, key, value)
+    admin = _admin()
+    viewer = _person(admin, "status-only", views=("status",)).get("/api/settings/info").json()
+    assert "editable_config" not in viewer and "default_config" not in viewer
+    assert viewer["configuration"]["auth_username"] is None
+    hidden = ("host", "port", "user", "from_address", "admin_email")
+    assert {k: viewer["smtp_configuration"][k] for k in hidden} == dict.fromkeys(hidden)
+    assert viewer["smtp_configuration"]["enabled"] is True
+    assert (viewer["dmarc_configuration"]["imap_host"], viewer["dmarc_configuration"]["imap_user"]) == (None, None)
+    assert "import_status" in viewer and "background_jobs" in viewer
+    full = admin.get("/api/settings/info").json()
+    assert full["smtp_configuration"]["host"] == "smtp.example.com" and "editable_config" in full
+    assert full["dmarc_configuration"]["imap_user"] == "reports@example.com"
+    assert full["configuration"]["auth_username"] == ADMIN_NAME

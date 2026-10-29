@@ -4,7 +4,7 @@ Combines Postfix and Rspamd logs into a single view
 FIXED: All timestamps now sent with proper UTC timezone ('Z' suffix)
 """
 import logging
-from fastapi import APIRouter, Depends, Query, HTTPException
+from fastapi import APIRouter, Depends, Query, HTTPException, Request
 from sqlalchemy.orm import Session, aliased
 from sqlalchemy import or_, and_, desc, exists, func, select, tuple_, literal
 from datetime import datetime, timedelta, timezone
@@ -24,6 +24,8 @@ from ..api_models import Invalid, documented
 from ..api_models.messages import (MessageDetailsResponse, MessageFacetsResponse, MessageListResponse,
                                    NewMessagesResponse, NoMessageIdListResponse)
 from ..services import no_message_id
+from ..agent_access.scopes import READ
+from ..user_access import caller_may
 
 logger = logging.getLogger(__name__)
 
@@ -701,7 +703,7 @@ def get_messages_without_message_id(
         raise internal_error(e)
 
 
-def _no_message_id_details(db: Session, key: str) -> dict:
+def _no_message_id_details(db: Session, key: str, with_security: bool = True) -> dict:
     """The details of a message without a Message-ID (a noid- key), from its Postfix lines."""
     found = no_message_id.find(db, key)
     if not found:
@@ -758,7 +760,7 @@ def _no_message_id_details(db: Session, key: str) -> dict:
                 "attempts_left": log.attempts_left,
                 "message": log.message,
             }
-            for log in no_message_id.netfilter_events(db, anchor, who)
+            for log in (no_message_id.netfilter_events(db, anchor, who) if with_security else [])
         ],
         "client": who,
         "queue_id_reused": bool(reused),
@@ -768,16 +770,19 @@ def _no_message_id_details(db: Session, key: str) -> dict:
 @router.get("/message/{correlation_key}/details", responses=documented(MessageDetailsResponse, errors={404: None, 500: None}))
 def get_message_full_details(
     correlation_key: str,
+    request: Request = None,
     db: Session = Depends(get_db)
 ):
     """
     Get complete message details with all related logs
     Including Postfix, Rspamd, and Netfilter logs. A noid- key (GET /api/messages/without-message-id)
     opens a message without a Message-ID: its Postfix lines only, rspamd and dovecot null.
+    The Netfilter events belong to Security: empty for a caller without View for Security.
     """
+    with_security = caller_may(request, "security", READ)
     try:
         if no_message_id.is_key(correlation_key):
-            return _no_message_id_details(db, correlation_key)
+            return _no_message_id_details(db, correlation_key, with_security)
         # Get correlation
         correlation = db.query(MessageCorrelation).filter(
             MessageCorrelation.correlation_key == correlation_key
@@ -836,7 +841,7 @@ def get_message_full_details(
         # within 1 hour of this message"; unrelated events from days earlier
         # were confusing
         netfilter_logs = []
-        if rspamd_log and rspamd_log.ip and rspamd_log.time:
+        if with_security and rspamd_log and rspamd_log.ip and rspamd_log.time:
             window = timedelta(hours=1)
             netfilter_logs = db.query(NetfilterLog).filter(
                 NetfilterLog.ip == rspamd_log.ip,

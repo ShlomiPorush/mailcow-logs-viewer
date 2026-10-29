@@ -305,6 +305,27 @@ async def request_principal(connection: HTTPConnection) -> Optional[Principal]:
         raise HTTPException(status_code=503, detail=NOT_AVAILABLE, headers={"Retry-After": "5"})
 
 
+def cookie_access(request) -> str:
+    """For routes the middleware lets in without a session check (/api/info, /api/auth/activity):
+    "none" without a valid session cookie, "ok" while it gives access, "ended" when it no longer
+    does (the session is ended here), "unknown" when the database cannot say."""
+    state = sessions.session_state(request)
+    if state.data is None:
+        return "none"
+    ref = session_ref(state.data)
+    if ref.get("kind") == "builtin":
+        return "ok"
+    try:
+        _resolve_now(ref, None)
+        return "ok"
+    except AccessEnded:
+        sessions.end_session(state.key, sessions.SESSION_ACCESS_CHANGED)
+        return "ended"
+    except Exception as e:
+        logger.error(f"Could not check a person's access: {e}")
+        return "unknown"
+
+
 def caller_may(request, area: str, kind: str) -> bool:
     """Whether the caller, an agent or a person, may do this; for a handler that filters its answer by caller."""
     if request is None:
@@ -313,7 +334,10 @@ def caller_may(request, area: str, kind: str) -> bool:
     if call is not None:
         return policy.allows(call.grant.scopes, policy.Rule(area, kind))
     principal = getattr(request.state, "principal", None)
-    return principal is not None and principal.may(area, kind)
+    if principal is None:
+        # Sign-in off: whoever asks is the built-in admin
+        return not settings.is_authentication_enabled
+    return principal.may(area, kind)
 
 
 # ── What each route needs ──────────────────────────────────────────────────

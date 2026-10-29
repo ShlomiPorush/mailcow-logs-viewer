@@ -9,7 +9,7 @@ from collections import Counter
 from datetime import datetime, timedelta
 from typing import List, Optional
 
-from fastapi import APIRouter, Body, Depends, Query, HTTPException
+from fastapi import APIRouter, Body, Depends, Query, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import func, update
 from sqlalchemy.orm import Session
@@ -19,6 +19,8 @@ from ..models import SecurityAlert, MessageCorrelation, NetfilterLog, SMTPAbuseA
 from ..config import settings
 from ..correlation import authenticated_submissions, submitting_mailbox
 from ..services import excluded_addresses
+from ..agent_access.scopes import READ
+from ..user_access import caller_may
 from ..utils import internal_error, format_datetime_for_api as format_datetime_utc
 from ..api_models import Invalid, documented
 from ..api_models import security as m
@@ -216,14 +218,16 @@ def _top(counter: Counter, limit: int = 6) -> list:
 
 
 @router.get("/security-alerts/{alert_id}/activity", responses=documented(m.AlertActivityResponse, errors={404: None, 422: Invalid, 500: None}))
-def alert_activity(alert_id: int, db: Session = Depends(get_db)):
+def alert_activity(alert_id: int, request: Request = None, db: Session = Depends(get_db)):
     """
     The history behind an alert: counts per 15 minutes from the baseline period
     before it to two hours after, and what happened around it (from the check
     window before the alert to an hour after): recipient domains, delivery
     results and subjects for a volume spike or an SMTP block; source addresses, countries and
-    networks for an auth failure burst.
+    networks for an auth failure burst. Recipient domains, results and subjects
+    are mail from Messages: empty for a caller without View for Messages.
     """
+    with_messages = caller_may(request, "messages", READ)
     try:
         alert = db.query(SecurityAlert).filter(SecurityAlert.id == alert_id).first()
         if not alert:
@@ -257,7 +261,9 @@ def alert_activity(alert_id: int, db: Session = Depends(get_db)):
 
         around_from, around_to = at - timedelta(minutes=window or UNKNOWN_WINDOW_MINUTES), at + timedelta(hours=1)
         near = [row for row in rows if row[0] and around_from <= row[0] <= around_to]
-        if alert.alert_type in SENT_MAIL_ALERTS:
+        if alert.alert_type in SENT_MAIL_ALERTS and not with_messages:
+            around = {'recipient_domains': [], 'results': [], 'subjects': []}
+        elif alert.alert_type in SENT_MAIL_ALERTS:
             around = {
                 'recipient_domains': _top(Counter((r[1] or '?').split('@')[-1].lower() for r in near)),
                 'results': _top(Counter((r[2] or 'unknown') for r in near)),

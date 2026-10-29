@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session
 
 from .. import session as sessions
 from .. import user_access as access
-from ..config import get_env_locked_keys, settings
+from ..config import build_settings, get_env_locked_keys, settings
 from ..models import SystemSetting, User
 from ..utils import format_datetime_for_api
 from . import passwords
@@ -114,6 +114,12 @@ def sign_in_now(source=None) -> SignIn:
                   bool(source.is_oauth2_enabled))
 
 
+def stored_sign_in(db: Session) -> SignIn:
+    """Sign-in as saved, read under the lock: a Settings save releases the lock
+    when it commits, before the shared settings are reloaded."""
+    return sign_in_now(build_settings(db))
+
+
 def usable_admins(db: Session, sign_in: SignIn, default: str) -> int:
     """How many admins can sign in by a method that is on (a default of Admin counts as one)."""
     count = 0
@@ -183,10 +189,13 @@ def overview(db: Session) -> Dict[str, Any]:
 
 # ── Changes ────────────────────────────────────────────────────────────────
 
-def _end_local_sessions(user_id: int) -> None:
+def _end_local_sessions(user_id: int, below: Optional[int] = None) -> None:
+    """End the user's sessions; with `below`, only those signed in before auth_version became it
+    (a sign-in that already read the new version keeps its session)."""
     sessions.end_sessions_where(
         lambda record: (record.get("principal") or {}).get("kind") == "local"
-        and (record.get("principal") or {}).get("user_id") == user_id,
+        and (record.get("principal") or {}).get("user_id") == user_id
+        and (below is None or (record.get("principal") or {}).get("auth_version", 0) < below),
         sessions.SESSION_ACCESS_CHANGED)
 
 
@@ -221,10 +230,10 @@ def create_user(db: Session, *, kind: str, username: Optional[str], email: Optio
         user = User(kind="oauth2", email=(email or "").strip(), email_norm=norm, access=access_level, scopes=scopes,
                     disabled=disabled, created_at=now, updated_at=now)
     lock(db)
-    if kind == "local" and norm == env_admin_name():
+    sign_in = stored_sign_in(db)
+    if kind == "local" and norm == sign_in.env_name:
         db.rollback()
         raise UserError(409, "This is the built-in admin's username. Choose another one.")
-    sign_in = sign_in_now()
     default = read_default(db)["value"]
     before = usable_admins(db, sign_in, default)
     db.add(user)
@@ -260,7 +269,7 @@ def update_user(db: Session, user_id: int, *, access_level: str, views, acts, di
     if new_hash is not None and user.kind != "local":
         db.rollback()
         raise UserError(422, "An OAuth2 entry has no password here; the provider checks it.")
-    sign_in = sign_in_now()
+    sign_in = stored_sign_in(db)
     default = read_default(db)["value"]
     before = usable_admins(db, sign_in, default)
     ends_sessions = (new_hash is not None or user.access != access_level
@@ -280,7 +289,7 @@ def update_user(db: Session, user_id: int, *, access_level: str, views, acts, di
     db.commit()
     db.refresh(user)
     if ends_sessions and user.kind == "local":
-        _end_local_sessions(user.id)
+        _end_local_sessions(user.id, below=user.auth_version)
     if user.kind == "oauth2" and user.disabled:
         _end_oauth2_sessions(user.email_norm)
     return row(user)
@@ -293,7 +302,7 @@ def delete_user(db: Session, user_id: int) -> None:
         db.rollback()
         raise UserError(404, NOT_FOUND)
     kind, email_norm = user.kind, user.email_norm
-    sign_in = sign_in_now()
+    sign_in = stored_sign_in(db)
     default = read_default(db)["value"]
     before = usable_admins(db, sign_in, default)
     db.delete(user)
@@ -311,7 +320,7 @@ def set_default(db: Session, value: str, version: int) -> Dict[str, Any]:
     if current["version"] != version:
         db.rollback()
         raise UserError(409, STALE_DEFAULT)
-    sign_in = sign_in_now()
+    sign_in = stored_sign_in(db)
     before = usable_admins(db, sign_in, current["value"])
     _write_key(db, access.DEFAULT_ACCESS_KEY, value)
     _write_key(db, access.DEFAULT_VERSION_KEY, str(version + 1))
@@ -343,7 +352,7 @@ def check_sign_in_settings(db: Session, before, allowed: Dict[str, Any]) -> None
         raise UserError(400, "A local user has this username. Choose another username for the built-in admin.")
     default = read_default(db)["value"]
     if (sign_in_after.enabled and usable_admins(db, sign_in_after, default) == 0
-            and usable_admins(db, sign_in_before, default) > 0):
+            and (not sign_in_before.enabled or usable_admins(db, sign_in_before, default) > 0)):
         db.rollback()
         raise UserError(409, NO_ADMIN_LEFT)
 

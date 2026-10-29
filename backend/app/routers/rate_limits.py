@@ -20,7 +20,7 @@ import time
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import and_, func
 from sqlalchemy.orm import Session
@@ -29,6 +29,8 @@ from ..config import get_cached_active_domains, settings
 from ..database import SessionLocal, get_db
 from ..mailcow_api import MailcowAPIError, MailcowShownError, mailcow_api
 from ..models import MailboxStatistics, RawServiceLog
+from ..agent_access.scopes import READ
+from ..user_access import caller_may
 from ..utils import format_datetime_for_api, internal_error
 from ..api_models import Invalid, documented
 from ..api_models import security as m
@@ -313,6 +315,7 @@ def _offered_windows() -> List[int]:
 @router.get("/events", responses=documented(m.RateLimitEventsResponse, errors={422: Invalid, 500: None}))
 def get_rate_limit_events(
     hours: int = Query(168, ge=1, le=8760),
+    request: Request = None,
     db: Session = Depends(get_db)
 ):
     """Every sender that hit a rate limit in the kept history (grouped), plus
@@ -325,7 +328,10 @@ def get_rate_limit_events(
     with a long history gives exact numbers.
 
     Reads only the collected `ratelimited` log, so this never waits on mailcow.
+    A refused message's recipient and subject are mail from Messages: empty for
+    a caller without View for Messages.
     """
+    with_messages = caller_may(request, "messages", READ)
     offered = _offered_windows()
     if hours > offered[-1]:
         hours = offered[-1]
@@ -371,8 +377,8 @@ def get_rate_limit_events(
         data = row.raw_data if isinstance(row.raw_data, dict) else {}
         return data, {
             'time': format_datetime_for_api(row.time),
-            'rcpt': data.get('rcpt') or '',
-            'subject': data.get('header_subject') or '',
+            'rcpt': (data.get('rcpt') or '') if with_messages else '',
+            'subject': (data.get('header_subject') or '') if with_messages else '',
             'qid': data.get('qid') or '',
             'rl_hash': (data.get('rl_hash') or '').strip(),
         }
@@ -444,15 +450,18 @@ def get_rate_limit_events(
 @router.get("/sender-events", responses=documented(m.SenderEventsResponse, errors={400: None, 500: None}))
 def get_sender_events(
     user: str = Query('', description="The sender address to read the history of"),
+    request: Request = None,
     db: Session = Depends(get_db)
 ):
     """One sender's full collected history of refused messages, newest first.
+    Recipient and subject are empty for a caller without View for Messages.
 
     /events carries only the newest few rows per sender - enough to paint the
     detail view the moment it opens. This is the rest of it: the page mirrors
     reality, so an open sender shows everything that was collected about them,
     not a sample of it.
     """
+    with_messages = caller_may(request, "messages", READ)
     address = (user or '').strip().lower()
     if not address:
         raise HTTPException(status_code=400, detail="A sender address is required")
@@ -479,8 +488,8 @@ def get_sender_events(
         data = row.raw_data if isinstance(row.raw_data, dict) else {}
         events.append({
             'time': format_datetime_for_api(row.time),
-            'rcpt': data.get('rcpt') or '',
-            'subject': data.get('header_subject') or '',
+            'rcpt': (data.get('rcpt') or '') if with_messages else '',
+            'subject': (data.get('header_subject') or '') if with_messages else '',
             'qid': data.get('qid') or '',
             'rl_hash': (data.get('rl_hash') or '').strip(),
         })

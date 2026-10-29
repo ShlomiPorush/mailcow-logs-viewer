@@ -585,7 +585,10 @@ async def app_info(request: Request):
         "oauth2_enabled": settings.is_oauth2_enabled,
     }
 
-    if is_request_authenticated(request):
+    # A session counts only while the person still has access (user_access.py)
+    from starlette.concurrency import run_in_threadpool
+    cookie = "none" if not settings.is_authentication_enabled else await run_in_threadpool(user_access.cookie_access, request)
+    if cookie == "ok" or (cookie == "none" and is_request_authenticated(request)):
         info.update({
             "version": __version__,
             "mailcow_url": settings.mailcow_url,
