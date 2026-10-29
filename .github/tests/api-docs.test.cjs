@@ -63,7 +63,7 @@ test('the page loads its files with a version stamp, so an update is never serve
         '/static/api-docs.js?v=1',
         '/static/assets/css/ui.css?v=7',
         '/static/assets/libs/scalar-api-reference.min.js?v=1',
-        '/static/session-guard.js?v=2',
+        '/static/session-guard.js?v=3',
     ]);
     // Configured by api-docs.js only. The bundle also starts a reference of its
     // own, with Scalar's defaults (its fonts, its hosted client, its proxy), on

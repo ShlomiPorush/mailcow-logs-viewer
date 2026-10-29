@@ -214,20 +214,16 @@ function setDmarcBreadcrumb(type, data = {}) {
 // LOADING AND ROUTES
 // =============================================================================
 
+// Whether reports can be uploaded, from the page's own area (View on DMARC & TLS is enough)
 async function loadDmarcSettings() {
-    // Part of Status; without View there the upload stays hidden (the server refuses the read)
-    if (!userCan('status')) {
-        dmarcConfiguration = null;
-        return;
-    }
     try {
-        const response = await authenticatedFetch('/api/settings/info');
+        const response = await authenticatedFetch('/api/dmarc/reports/config');
         if (!response.ok) {
             dmarcConfiguration = null;
             return;
         }
         const data = await response.json();
-        dmarcConfiguration = data.dmarc_configuration || {};
+        dmarcConfiguration = { manual_upload_enabled: data.manual_upload_enabled === true };
     } catch (error) {
         console.error('Error loading DMARC settings:', error);
         dmarcConfiguration = null;

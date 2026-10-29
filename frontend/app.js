@@ -156,7 +156,8 @@ async function authenticatedFetch(url, options = {}) {
         }
         // A call the person's access does not cover: said once for a burst, and the
         // menu and controls follow the access the server has now
-        if (response.status === 403 && !ownNotPermitted) noteNotPermitted(response);
+        // Awaited, so the caller's own error comes after it and is not shown over it (utils.js uiToastSuppressed)
+        if (response.status === 403 && !ownNotPermitted) await noteNotPermitted(response);
 
         // The timer stays to the end of the body (reading it is part of the request);
         // after that its abort does nothing
@@ -386,7 +387,7 @@ function applyPageAccess() {
     if (logout) logout.title = appAccess.name ? `Logout (${appAccess.name})` : 'Logout';
 }
 
-// After a refused call: the menu and the controls follow the access the server has now
+// After a refused call: the access the server has now; other than the page's, the page reloads into it
 let accessRefreshAt = 0;
 async function refreshAppAccess() {
     if (Date.now() - accessRefreshAt < 10000) return;
@@ -394,10 +395,7 @@ async function refreshAppAccess() {
     try {
         const response = await fetch('/api/auth/status', { credentials: 'include' });
         if (!response.ok) return;
-        const status = await response.json();
-        if (!status.authenticated) return;
-        setAppAccess(status);
-        applyPageAccess();
+        appAccessCheck(await response.json());
     } catch (e) {
         // The next refused call tries again
     }
@@ -1299,12 +1297,13 @@ function pageRefreshRetry(route) {
     if (pageRefreshState.route === route) pageRefreshState.at = 0;
 }
 
-// The open page's refresher, now. Nothing for a page that is off, while a
-// message dialog covers the page, or while the last run is still on its way
+// The open page's refresher, now. Nothing for a page that is off or that the person
+// cannot view (it shows the locked note), while a message dialog covers the page, or
+// while the last run is still on its way
 async function pageRefreshNow() {
     const route = currentTab;
     const refresher = pageRefreshers[route];
-    if (!refresher || refresher.busy || pageIsOff(route)) return;
+    if (!refresher || refresher.busy || pageIsOff(route) || !userCanView(route)) return;
     const modal = document.getElementById('message-modal');
     if (modal && !modal.classList.contains('hidden') && !modal.classList.contains('ui-docked')) return;
     refresher.busy = true;
@@ -1371,7 +1370,11 @@ registerPageRefresh('status', 30000, async () => {
 });
 // The maps list (never a map open in the editor)
 registerPageRefresh('rspamd', 60000, () => refreshRspamdMaps());
-registerPageRefresh('settings', 30000, () => smartRefreshSettings());
+// Settings > Users refreshes on its own (users.js): the form keeps the rest still while it is open
+registerPageRefresh('settings', 30000, async () => {
+    await smartRefreshSettings();
+    if (typeof refreshUsersPanel === 'function') await refreshUsersPanel();
+});
 // DNS is checked every six hours and mailcow is asked for the domains on each read
 registerPageRefresh('domains', 5 * 60 * 1000, () => refreshDomains());
 // The server keeps the DMARC lists for five minutes, and clears them when reports come in or go

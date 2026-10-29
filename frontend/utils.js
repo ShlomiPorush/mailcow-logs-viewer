@@ -214,13 +214,37 @@ const appAccess = { admin: true, scopes: new Set(), name: '' };
 // person may not (ui.css); the function it calls starts with uiMayAct(area)
 const ACCESS_ACT_AREAS = ['status', 'outbound', 'quarantine', 'security', 'rspamd', 'dmarc', 'domains', 'mailboxes'];
 
+// The access the page was drawn with (the first status read): a later status that says
+// otherwise reloads the page, so every part of it follows the new access (appAccessCheck)
+let appAccessLoaded = null;
+let appAccessReloading = false;
+
+function appAccessKey(status) {
+    const scopes = status && Array.isArray(status.scopes) ? [...status.scopes].sort() : [];
+    return JSON.stringify([!status || status.is_admin !== false, scopes]);
+}
+
 function setAppAccess(status) {
+    if (appAccessLoaded === null) appAccessLoaded = appAccessKey(status);
     appAccess.admin = !status || status.is_admin !== false;
     appAccess.scopes = new Set(status && Array.isArray(status.scopes) ? status.scopes : []);
     appAccess.name = status && typeof status.user_name === 'string' ? status.user_name : '';
     const root = document.documentElement;
     ACCESS_ACT_AREAS.forEach(area => root.classList.toggle(`ui-no-act-${area}`, !userCan(area, 'write')));
     root.classList.toggle('ui-no-admin', !appAccess.admin);
+}
+
+// A status read while the page is open (the session check, a refused call): true when the
+// access is no longer the one the page was drawn with; the page then reloads into it, once
+function appAccessCheck(status) {
+    if (appAccessLoaded === null || !status || status.authenticated !== true) return false;
+    if (appAccessKey(status) === appAccessLoaded) return false;
+    if (!appAccessReloading) {
+        appAccessReloading = true;
+        showToast('Your access changed.', 'info');
+        setTimeout(() => location.reload(), 1500);
+    }
+    return true;
 }
 
 function userIsAdmin() {
@@ -235,13 +259,21 @@ function userCan(area, kind = 'read') {
 }
 
 const UI_NOT_PERMITTED = 'You do not have permission for this.';
-let uiNotPermittedAt = 0;
+let uiNotPermittedAt = 0;       // the last time it was said
+let uiNotPermittedSeenAt = 0;   // the last refusal, said or not
 
 // Said once for a burst of refused calls, not once per call
 function uiNotPermitted() {
+    uiNotPermittedSeenAt = Date.now();
     if (Date.now() - uiNotPermittedAt < 10000) return;
     uiNotPermittedAt = Date.now();
     showToast(UI_NOT_PERMITTED, 'error');
+}
+
+// Right after a refusal it is the one message: the error the caller adds ("HTTP 403",
+// "Could not ...") is not shown over it (showToast)
+function uiToastSuppressed(message, type) {
+    return type === 'error' && message !== UI_NOT_PERMITTED && Date.now() - uiNotPermittedSeenAt < 3000;
 }
 
 // The first check of every function that sends a change: a way in that showed no
@@ -944,6 +976,7 @@ function uiEntitySelecting(event, entity) {
 // keeps it until closed). One toast at a time: a new one replaces the last, and
 // the keyboard's place moves with it if it was in the one replaced.
 function showToast(message, type = 'info', options = {}) {
+    if (uiToastSuppressed(message, type)) return;
     // Remove existing toast if any
     const existingToast = document.getElementById('toast-notification');
     const focusWasInIt = !!existingToast && existingToast.contains(document.activeElement);

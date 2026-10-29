@@ -26,7 +26,7 @@ async function loadUsersPanel() {
         renderUsersPanel();
     } catch (e) {
         console.error('Users error:', e);
-        panel.innerHTML = '<section class="ui-panel ui-set-channels"><p class="ui-empty ui-text-fail">Could not load users. Reload this page to try again.</p></section>';
+        uiReplaceKeepingFocus(panel, '<section class="ui-panel ui-set-channels"><p class="ui-empty ui-text-fail">Could not load users. Reload this page to try again.</p></section>');
     }
 }
 
@@ -155,11 +155,34 @@ function usersDefaultPanel() {
 function renderUsersPanel() {
     const panel = document.getElementById('users-panel');
     if (!panel || !usersData) return;
+    // Through the same drawing as the refresh, so what it remembers as shown stays true
+    uiReplaceKeepingFocus(panel, usersPanelHtml());
+}
+
+// Read again with the Settings refresh (app.js): drawn again only when it changed, keeping the
+// focus and the scroll, and never while a dialog or a question of the section is open
+async function refreshUsersPanel() {
+    const panel = document.getElementById('users-panel');
+    const busy = () => !!document.querySelector('.ui-dialog-backdrop:not(.hidden)');
+    if (!panel || !usersData || !panel.getClientRects().length || busy()) return;
+    try {
+        const response = await authenticatedFetch('/api/users', { timeout: PAGE_REFRESH_TIMEOUT });
+        if (!response.ok) return;
+        const data = await response.json();
+        if (busy() || JSON.stringify(data) === JSON.stringify(usersData)) return;
+        usersData = data;
+        uiReplaceKeepingFocus(panel, usersPanelHtml());
+    } catch (e) {
+        // The next refresh tries again
+    }
+}
+
+function usersPanelHtml() {
     const users = usersData.users || [];
     const builtin = usersData.builtin.basic_auth_enabled ? usersBuiltinRow() : '';
     const count = users.length + (builtin ? 1 : 0);
     const signInOff = !usersData.builtin.basic_auth_enabled && !usersData.oauth2.enabled;
-    panel.innerHTML = `
+    return `
         <section class="ui-panel ui-set-channels" aria-labelledby="users-list-h">
             <div class="ui-list-head">
                 <h4 class="ui-md-h" id="users-list-h">${uiCountLabel(count, 'user', 'users')}</h4>
@@ -247,10 +270,12 @@ function editUser(userId) {
                 <input id="user-edit-email" type="email" class="ui-input" autocomplete="off" maxlength="320" placeholder="user@example.com"></label>
             <p class="ui-set-desc">The email address your OAuth2 provider reports for this user.</p>
         </div>`;
+    // The two choices are kept as values too, as the Settings segmented fields keep theirs,
+    // so the unsaved-changes guard (uiGuardDialog) sees them
     const { backdrop: modal } = uiDialog({
         id: 'user-edit-modal', title: user ? `Edit ${name}` : 'Add user', titleId: 'user-edit-h', size: 'md', close: closeUserEditModal,
         // The version of the user this dialog shows: a save after a change made meanwhile is refused
-        dataset: { version: user ? String(user.row_version) : '', kind },
+        dataset: { version: user ? String(user.row_version) : '' },
         bodyClass: 'ui-form ui-agent-edit',
         form: { id: 'user-edit-form', onsubmit: `saveUser(event, ${user ? Number(user.id) : 'null'})` },
         body: `
@@ -258,6 +283,8 @@ function editUser(userId) {
                 <label class="ui-sec-inline"><input type="checkbox" class="ui-check" id="user-edit-disabled" ${user && user.disabled ? 'checked' : ''}> Disable sign-in</label>
                 <p class="ui-set-desc">Blocks this user without deleting them, and signs them out at once.</p>
             </div>
+            <input type="hidden" id="user-edit-kind-value" value="${kind}">
+            <input type="hidden" id="user-edit-level-value" value="${level}">
             ${kindChoice}
             ${localFields}
             ${oauthFields}
@@ -282,7 +309,8 @@ function editUser(userId) {
         const button = event.target.closest('button[data-level]');
         if (!button) return;
         const chosen = button.dataset.level;
-        const was = modal.querySelector('#user-edit-level [aria-pressed="true"]').dataset.level;
+        const was = modal.querySelector('#user-edit-level-value').value;
+        modal.querySelector('#user-edit-level-value').value = chosen;
         press(button.parentElement, button);
         modal.querySelector('#user-edit-level-text').innerHTML = usersPresetText(chosen);
         grid.classList.toggle('hidden', chosen !== 'custom');
@@ -298,7 +326,7 @@ function editUser(userId) {
         const button = event.target.closest('button[data-kind]');
         if (!button) return;
         press(button.parentElement, button);
-        modal.dataset.kind = button.dataset.kind;
+        modal.querySelector('#user-edit-kind-value').value = button.dataset.kind;
         modal.querySelectorAll('[data-for]').forEach(el => el.classList.toggle('hidden', el.dataset.for !== button.dataset.kind));
     });
     // Take action includes View: ticking it ticks View, and clearing View clears it
@@ -327,8 +355,8 @@ async function saveUser(event, userId) {
     const modal = document.getElementById('user-edit-modal');
     const error = document.getElementById('user-edit-error');
     const say = text => { error.textContent = text; error.classList.remove('hidden'); };
-    const kind = modal.dataset.kind;
-    const level = modal.querySelector('#user-edit-level [aria-pressed="true"]').dataset.level;
+    const kind = modal.querySelector('#user-edit-kind-value').value;
+    const level = modal.querySelector('#user-edit-level-value').value;
     const chosen = mode => [...modal.querySelectorAll(`#user-edit-grid input[data-kind="${mode}"]:checked`)].map(i => i.dataset.area);
     const custom = level === 'custom';
     if (custom && !chosen('view').length) return say('Select View for at least one area.');

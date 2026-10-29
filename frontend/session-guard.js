@@ -190,6 +190,8 @@ async function sessionGuardSend(url, method) {
         clearTimeout(timer);
     }
     if (body && body.authenticated === false) return { seq, kind: 'ended', reason: sessionGuardReason(body.reason) };
+    // Access changed while the page was open: the app's pages reload into it (utils.js)
+    if (url === '/api/auth/status' && typeof appAccessCheck === 'function') appAccessCheck(body);
     return { seq, kind: 'ok', session: sessionGuardSessionOf(body) };
 }
 

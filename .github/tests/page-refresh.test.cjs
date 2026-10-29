@@ -82,6 +82,20 @@ test('a tick runs the open page only when its cadence is due', () => {
     assert.equal(p.run('refreshRuns'), 1);
 });
 
+test('a page the person cannot view is not refreshed, like a page that is off', () => {
+    const p = load();
+    // Security's refresher, counted; the page is open by its address with View on Messages only
+    p.run(`var securityRuns = 0; registerPageRefresh('netfilter', 30000, () => { securityRuns++; });
+        setAppAccess({ is_admin: false, scopes: ['messages:read'] }); currentTab = 'netfilter';`);
+    ago(p, 60000);
+    p.run('pageRefreshTick()');
+    p.run('pageRefreshNow()');
+    assert.equal(p.run('securityRuns'), 0);
+    p.run(`setAppAccess({ is_admin: false, scopes: ['security:read'] })`);
+    p.run('pageRefreshNow()');
+    assert.equal(p.run('securityRuns'), 1);
+});
+
 test('a run on its way is not started again', () => {
     const p = load();
     ago(p, 60000);
