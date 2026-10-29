@@ -102,10 +102,12 @@ class SignIn:
     password: bool
     env_name: str
     oauth2: bool
+    # Sign-in is on by one of the two readings that stored_sign_in combines
+    on: bool = False
 
     @property
     def enabled(self) -> bool:
-        return self.basic or self.oauth2
+        return self.basic or self.oauth2 or self.on
 
 
 def sign_in_now(source=None) -> SignIn:
@@ -115,9 +117,12 @@ def sign_in_now(source=None) -> SignIn:
 
 
 def stored_sign_in(db: Session) -> SignIn:
-    """Sign-in as saved, read under the lock: a Settings save releases the lock
-    when it commits, before the shared settings are reloaded."""
-    return sign_in_now(build_settings(db))
+    """Sign-in as the guards count it under the lock: a method counts only when it is on both as
+    saved and as in force. A Settings save releases the lock when it commits, before the shared
+    settings are reloaded, and a failed reload keeps the old ones in force."""
+    saved, now = sign_in_now(build_settings(db)), sign_in_now()
+    return SignIn(saved.basic and now.basic, saved.password and now.password, saved.env_name,
+                  saved.oauth2 and now.oauth2, on=saved.enabled or now.enabled)
 
 
 def usable_admins(db: Session, sign_in: SignIn, default: str) -> int:
@@ -199,13 +204,6 @@ def _end_local_sessions(user_id: int, below: Optional[int] = None) -> None:
         sessions.SESSION_ACCESS_CHANGED)
 
 
-def _end_oauth2_sessions(email_norm: str) -> None:
-    sessions.end_sessions_where(
-        lambda record: access.session_ref(record).get("kind") == "oauth2"
-        and access.session_ref(record).get("email") == email_norm,
-        sessions.SESSION_ACCESS_CHANGED)
-
-
 def create_user(db: Session, *, kind: str, username: Optional[str], email: Optional[str],
                 password: Optional[str], access_level: str, views, acts, disabled: bool) -> Dict[str, Any]:
     scopes = _scopes_from(access_level, views, acts)
@@ -231,7 +229,7 @@ def create_user(db: Session, *, kind: str, username: Optional[str], email: Optio
                     disabled=disabled, created_at=now, updated_at=now)
     lock(db)
     sign_in = stored_sign_in(db)
-    if kind == "local" and norm == sign_in.env_name:
+    if kind == "local" and norm in (sign_in.env_name, env_admin_name()):
         db.rollback()
         raise UserError(409, "This is the built-in admin's username. Choose another one.")
     default = read_default(db)["value"]
@@ -290,8 +288,6 @@ def update_user(db: Session, user_id: int, *, access_level: str, views, acts, di
     db.refresh(user)
     if ends_sessions and user.kind == "local":
         _end_local_sessions(user.id, below=user.auth_version)
-    if user.kind == "oauth2" and user.disabled:
-        _end_oauth2_sessions(user.email_norm)
     return row(user)
 
 
@@ -301,7 +297,7 @@ def delete_user(db: Session, user_id: int) -> None:
     if user is None:
         db.rollback()
         raise UserError(404, NOT_FOUND)
-    kind, email_norm = user.kind, user.email_norm
+    kind = user.kind
     sign_in = stored_sign_in(db)
     default = read_default(db)["value"]
     before = usable_admins(db, sign_in, default)
@@ -310,8 +306,6 @@ def delete_user(db: Session, user_id: int) -> None:
     db.commit()
     if kind == "local":
         _end_local_sessions(user_id)
-    elif default == access.NONE:
-        _end_oauth2_sessions(email_norm)
 
 
 def set_default(db: Session, value: str, version: int) -> Dict[str, Any]:

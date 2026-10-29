@@ -1289,3 +1289,93 @@ def test_settings_info_keeps_settings_and_accounts_for_admins(people, monkeypatc
     assert full["smtp_configuration"]["host"] == "smtp.example.com" and "editable_config" in full
     assert full["dmarc_configuration"]["imap_user"] == "reports@example.com"
     assert full["configuration"]["auth_username"] == ADMIN_NAME
+
+
+# ── Round 2: saved and in-force sign-in, IMAP account, job errors, OAuth2 streams ──
+
+def test_an_admin_counts_only_when_usable_both_as_saved_and_in_force(oauth2, monkeypatch):
+    """A save turned Basic Auth on with a password and committed, but its reload failed: Basic is
+    still off in force, so the built-in admin cannot sign in and does not count."""
+    from app.database import get_db_context
+    monkeypatch.setattr(settings._inner, "basic_auth_enabled", False)
+    _store_default("none")
+    with get_db_context() as db:
+        row = users_store.create_user(db, kind="oauth2", username=None, email="carol@example.com", password=None,
+                                      access_level="admin", views=(), acts=(), disabled=False)
+    saved = settings._inner.model_copy(update={"basic_auth_enabled": True})
+    monkeypatch.setattr(users_store, "build_settings", lambda db: saved)
+    with get_db_context() as db:
+        with pytest.raises(users_store.UserError) as refused:
+            users_store.update_user(db, row["id"], access_level="viewer", views=(), acts=(), disabled=False,
+                                    password=None, row_version=row["row_version"])
+    assert refused.value.status == 409 and refused.value.detail == users_store.NO_ADMIN_LEFT
+
+
+def test_a_local_user_cannot_take_the_in_force_admin_name_either(people, monkeypatch):
+    saved = settings._inner.model_copy(update={"auth_username": "root"})
+    monkeypatch.setattr(users_store, "build_settings", lambda db: saved)
+    admin = _admin()
+    for name in ("root", ADMIN_NAME):
+        r = admin.post("/api/users", json={"kind": "local", "username": name, "password": PASSWORD,
+                                           "access": "viewer"})
+        assert r.status_code == 409, name
+
+
+def test_imap_status_shows_the_account_only_to_who_may_read_settings(people, monkeypatch):
+    for key, value in (("dmarc_imap_enabled", True), ("dmarc_imap_host", "imap.example.com"),
+                       ("dmarc_imap_user", "reports@example.com"), ("dmarc_imap_folder", "DMARC")):
+        monkeypatch.setattr(settings._inner, key, value)
+    admin = _admin()
+    viewer = _person(admin, "dmarc-only", views=("dmarc",)).get("/api/dmarc/imap/status").json()
+    assert viewer["enabled"] is True
+    assert {k: viewer["configuration"][k] for k in ("host", "port", "user", "folder")} == dict.fromkeys(
+        ("host", "port", "user", "folder"))
+    assert viewer["configuration"]["interval_minutes"] is not None
+    full = admin.get("/api/dmarc/imap/status").json()["configuration"]
+    assert (full["host"], full["user"], full["folder"]) == ("imap.example.com", "reports@example.com", "DMARC")
+
+
+LEAKY_ERROR = "IMAP connection refused by imap.example.com:993 for reports@example.com"
+
+
+def test_job_errors_name_no_settings_for_who_may_not_read_them(people, stored, monkeypatch):
+    from datetime import datetime
+    from app import raw_logs_worker, scheduler
+    from app.models import DMARCSync
+    monkeypatch.setattr(settings._inner, "dmarc_imap_enabled", True)
+    monkeypatch.setitem(scheduler.job_status, "dmarc_imap_sync",
+                        {"status": "failed", "last_run": datetime.utcnow(), "error": LEAKY_ERROR})
+    raw_job = next(iter(raw_logs_worker.raw_logs_job_status))
+    monkeypatch.setitem(raw_logs_worker.raw_logs_job_status, raw_job,
+                        {**raw_logs_worker.raw_logs_job_status[raw_job], "error": LEAKY_ERROR})
+    stored(DMARCSync(sync_type="auto", status="failed", started_at=datetime.utcnow(), error_message=LEAKY_ERROR))
+    admin = _admin()
+    person = _person(admin, "no-settings", views=("status", "dmarc", "logs"))
+    answers = {
+        "info": lambda c: c.get("/api/settings/info").json()["background_jobs"]["dmarc_imap_sync"]["error"],
+        "imap status": lambda c: c.get("/api/dmarc/imap/status").json()["latest_sync"]["error_message"],
+        "imap history": lambda c: c.get("/api/dmarc/imap/history").json()["data"][0]["error_message"],
+        "raw logs": lambda c: c.get("/api/raw-logs/worker-status").json()["jobs"][raw_job]["error"],
+    }
+    for name, read in answers.items():
+        assert read(person) == "The last run failed.", name
+        assert read(admin) == LEAKY_ERROR, name
+
+
+def test_a_disabled_oauth2_entry_is_refused_on_its_next_request_and_its_stream_closes(oauth2, monkeypatch):
+    monkeypatch.setattr(raw_logs, "WS_ACCESS_CHECK_SECONDS", 0)
+    admin = _admin()
+    row = _add(admin, "carol@example.com", access="custom", views=("logs", "messages"), kind="oauth2")
+    carol = _oauth2_client("carol@example.com")
+    stream = _oauth2_client("carol@example.com")
+    token = stream.get("/api/raw-logs/ws-token").json()["token"]
+    with stream.websocket_connect(f"/ws/raw-logs?token={token}", headers={"Origin": APP}) as ws:
+        assert ws.receive_json()["type"] == "connected"
+        assert _change(admin, row, disabled=True).status_code == 200
+        # Nothing ends the sessions at once; each is refused when it is next used
+        assert len(session_module._session_store) == 3
+        ws.portal.call(raw_logs.log_stream_manager.broadcast, "postfix", [{"message": "after"}])
+        with pytest.raises(WebSocketDisconnect) as closed:
+            ws.receive_json()
+    assert closed.value.code == raw_logs.WS_SESSION_ENDED
+    _ended(carol.get("/api/messages"))

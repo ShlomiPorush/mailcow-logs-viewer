@@ -340,6 +340,17 @@ def caller_may(request, area: str, kind: str) -> bool:
     return principal.may(area, kind)
 
 
+FAILED_RUN = "The last run failed."
+
+
+def job_error(request, error):
+    """A background job's error as recorded, for a caller who may read Settings; a plain
+    sentence for anyone else, since an error can name a host or an account from the settings."""
+    if not error or caller_may(request, SETTINGS_AREA, policy.READ):
+        return error
+    return FAILED_RUN
+
+
 # ── What each route needs ──────────────────────────────────────────────────
 
 PUBLIC = "public"        # checks its own credentials, or needs none

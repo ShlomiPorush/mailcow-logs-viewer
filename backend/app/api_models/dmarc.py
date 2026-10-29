@@ -532,7 +532,8 @@ class TlsDetails(Fixed):
 # ---------------------------------------------------------------- IMAP import
 
 class ImapConfiguration(Fixed):
-    """All null while the import is off. The password is never returned."""
+    """All null while the import is off. The password is never returned; host, port, user and folder are
+    null for a caller who may not read Settings."""
     host: Optional[str]
     port: Optional[int]
     user: Optional[str]

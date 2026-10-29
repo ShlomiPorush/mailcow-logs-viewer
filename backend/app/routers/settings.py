@@ -20,7 +20,7 @@ from ..models import PostfixLog, RspamdLog, NetfilterLog, MessageCorrelation
 from ..services.bounce_policy import cleanup_blocks
 from ..services import excluded_addresses, written_recipients
 from ..agent_access.scopes import READ
-from ..user_access import DEFAULT_ACCESS_KEY, DEFAULT_VERSION_KEY, caller_may
+from ..user_access import DEFAULT_ACCESS_KEY, DEFAULT_VERSION_KEY, caller_may, job_error
 from ..services import users_store
 from ..config import settings, EDITABLE_SETTING_KEYS, FEATURE_IDS, reload_settings, Settings
 from ..config import normalize_disabled_features
@@ -863,6 +863,8 @@ def get_settings_info(request: Request = None, db: Session = Depends(get_db)):
         }
         # A job that cannot run says why, and where to change it
         for key, job in result.get("background_jobs", {}).items():
+            if "error" in job:
+                job["error"] = job_error(request, job["error"])
             off = None if job.get("feature_disabled") else _job_off_reason(key)
             if off:
                 job["disabled_reason"], job["settings_section"] = off

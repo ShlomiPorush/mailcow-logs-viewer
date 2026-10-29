@@ -124,5 +124,3 @@ def test_a_route_without_a_rule_is_refused_even_for_an_admin(monkeypatch):
     for method in ("GET", "POST"):
         with pytest.raises(user_access.NotPermitted):
             client.request(method, "/api/probe")
-
-

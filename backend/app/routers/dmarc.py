@@ -7,7 +7,7 @@ import hashlib
 import json
 from typing import Annotated, List, Optional, Union
 from datetime import datetime, timedelta, timezone
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, BackgroundTasks, Query
+from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File, BackgroundTasks, Query
 from sqlalchemy.orm import Session, load_only
 from sqlalchemy import func, and_, or_, case, literal, cast, Float
 
@@ -24,6 +24,8 @@ from ..services.dmarc_cache import (
     clear_dmarc_cache
 )
 from ..config import settings, get_cached_active_domains
+from ..agent_access.scopes import READ
+from ..user_access import caller_may, job_error
 from ..scheduler import update_job_status
 from .domains import get_cached_dns_check, check_dmarc_record, check_tls_rpt_record, parse_dmarc_record_tags, _public_cached_dns_result
 from ..utils import internal_error, format_datetime_for_api
@@ -1677,10 +1679,13 @@ def get_tls_report_details(
 # =============================================================================
 
 @router.get("/dmarc/imap/status", response_model=None, responses=documented(m.ImapStatus, errors={500: None}))
-def get_imap_status(db: Session = Depends(get_db)):
+def get_imap_status(request: Request = None, db: Session = Depends(get_db)):
     """
-    Get IMAP sync configuration and status
+    Get IMAP sync configuration and status. The account (host, port, user,
+    folder) and the raw error are Settings: null and a plain sentence for a
+    caller who may not read Settings.
     """
+    account = settings.dmarc_imap_enabled and caller_may(request, "settings", READ)
     try:
         # Get latest sync
         latest_sync = db.query(DMARCSync).order_by(
@@ -1700,10 +1705,10 @@ def get_imap_status(db: Session = Depends(get_db)):
         return {
             'enabled': settings.dmarc_imap_enabled,
             'configuration': {
-                'host': settings.dmarc_imap_host if settings.dmarc_imap_enabled else None,
-                'port': settings.dmarc_imap_port if settings.dmarc_imap_enabled else None,
-                'user': settings.dmarc_imap_user if settings.dmarc_imap_enabled else None,
-                'folder': settings.dmarc_imap_folder if settings.dmarc_imap_enabled else None,
+                'host': settings.dmarc_imap_host if account else None,
+                'port': settings.dmarc_imap_port if account else None,
+                'user': settings.dmarc_imap_user if account else None,
+                'folder': settings.dmarc_imap_folder if account else None,
                 'delete_after': settings.dmarc_imap_delete_after if settings.dmarc_imap_enabled else None,
                 'interval_seconds': settings.dmarc_imap_interval if settings.dmarc_imap_enabled else None,
                 'interval_minutes': round(settings.dmarc_imap_interval / 60, 1) if settings.dmarc_imap_enabled else None
@@ -1719,7 +1724,7 @@ def get_imap_status(db: Session = Depends(get_db)):
                 'reports_created': latest_sync.reports_created,
                 'reports_duplicate': latest_sync.reports_duplicate,
                 'reports_failed': latest_sync.reports_failed,
-                'error_message': latest_sync.error_message
+                'error_message': job_error(request, latest_sync.error_message)
             } if latest_sync else None,
             'stats_24h': {
                 'total_syncs': len(recent_syncs),
@@ -1800,10 +1805,12 @@ def trigger_manual_sync(background_tasks: BackgroundTasks):
 def get_sync_history(
     limit: int = Query(20, ge=1, le=500),
     page: int = Query(1, ge=1),
+    request: Request = None,
     db: Session = Depends(get_db)
 ):
     """
-    Get history of IMAP sync operations
+    Get history of IMAP sync operations. A run's error is a plain sentence for
+    a caller who may not read Settings.
     """
     try:
         # Get total count
@@ -1832,7 +1839,7 @@ def get_sync_history(
                     'reports_created': sync.reports_created,
                     'reports_duplicate': sync.reports_duplicate,
                     'reports_failed': sync.reports_failed,
-                    'error_message': sync.error_message,
+                    'error_message': job_error(request, sync.error_message),
                     'failed_emails': sync.failed_emails
                 }
                 for sync in syncs

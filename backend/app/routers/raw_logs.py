@@ -424,11 +424,12 @@ def get_services():
 
 
 @router.get("/raw-logs/worker-status", responses=documented(m.RawLogsWorkerStatus))
-def get_worker_status():
+def get_worker_status(request: Request = None):
     """Worker health check - last fetch time, stats, errors"""
     # A copy with the run times as UTC with Z; the worker's own record stays as it is
     status = {
-        name: {**job, "last_run": format_datetime_for_api(job.get("last_run"))}
+        name: {**job, "last_run": format_datetime_for_api(job.get("last_run")),
+               **({"error": user_access.job_error(request, job["error"])} if "error" in job else {})}
         for name, job in get_raw_logs_job_status().items()
     }
     return {
