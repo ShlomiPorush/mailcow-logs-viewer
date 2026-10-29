@@ -18,8 +18,11 @@ const { JSDOM } = require(path.join(modules, 'jsdom'));
 
 const frontend = path.join(__dirname, '../../frontend');
 const read = name => fs.readFileSync(path.join(frontend, name), 'utf8');
-// The page as index.html has it, without its scripts (they are run below, in order)
-const BODY = read('index.html').split('<body')[1].replace(/^[^>]*>/, '').split('</body>')[0].replace(/<script[\s\S]*?<\/script>/g, '');
+// The page as index.html has it, without its scripts (they are run below, in order).
+// Parsed, not cut with a regex, so CodeQL sees no HTML sanitizing.
+const PAGE = new JSDOM(read('index.html')).window.document;
+PAGE.querySelectorAll('script').forEach(el => el.remove());
+const BODY = PAGE.body.innerHTML;
 // The page's own scripts, in its order (session-guard.js, which signs out, aside)
 const SCRIPTS = [...read('index.html').matchAll(/src="\/static\/([a-z_-]+\.js)/g)].map(m => m[1]).filter(name => name !== 'session-guard.js');
 
