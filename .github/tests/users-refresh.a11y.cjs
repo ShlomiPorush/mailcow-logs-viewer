@@ -92,3 +92,62 @@ test('an answer read before a change made here does not draw the old state', asy
     assert.equal(pressed.textContent.trim(), 'Viewer');
     assert.equal(p.w.eval('usersData.oauth2.version'), 2);
 });
+
+test('refresh starts, save starts, refresh ends, save ends: the screen shows the save', async () => {
+    const p = page();
+    p.w.served['GET /api/users'] = overview([user(2, 'dana')], 'admin', 1);
+    await p.w.loadUsersPanel();
+    let endRefresh, endSave;
+    p.w.served['GET /api/users'] = () => new Promise(resolve => { endRefresh = () => resolve(overview([user(2, 'dana')], 'admin', 1)); });
+    p.w.served['PUT /api/users/oauth2-default'] = () => new Promise(resolve => { endSave = () => resolve({ default_access: 'viewer', version: 2 }); });
+    const refreshing = p.w.refreshUsersPanel();
+    const saving = p.w.setUsersDefault('viewer');
+    endRefresh();
+    await refreshing;
+    endSave();
+    await saving;
+    assert.equal(p.$('.ui-users-default .ui-seg [aria-pressed="true"]').textContent.trim(), 'Viewer');
+    assert.equal(p.w.eval('usersData.oauth2.version'), 2);
+});
+
+test('save starts, a refresh starts and ends first with the old state, save ends: the screen shows the save', async () => {
+    const p = page();
+    p.w.served['GET /api/users'] = overview([user(2, 'dana')], 'admin', 1);
+    await p.w.loadUsersPanel();
+    let endSave;
+    p.w.served['PUT /api/users/oauth2-default'] = () => new Promise(resolve => { endSave = () => resolve({ default_access: 'viewer', version: 2 }); });
+    const saving = p.w.setUsersDefault('viewer');
+    // Read before the save was stored: the old access, with a new user someone else added
+    p.w.served['GET /api/users'] = overview([user(2, 'dana'), user(6, 'eve')], 'admin', 1);
+    await p.w.refreshUsersPanel();
+    endSave();
+    await saving;
+    assert.equal(p.$('.ui-users-default .ui-seg [aria-pressed="true"]').textContent.trim(), 'Viewer');
+    assert.equal(p.w.eval('usersData.oauth2.version'), 2);
+    assert.ok(p.$('[data-key="user-6"]'), 'what the refresh brought stays');
+});
+
+test('an older load that fails late does not wipe the list a newer load drew', async () => {
+    const p = page();
+    let fail;
+    p.w.served['GET /api/users'] = () => new Promise((resolve, reject) => { fail = () => reject(new Error('network')); });
+    const older = p.w.loadUsersPanel();
+    p.w.served['GET /api/users'] = overview([user(2, 'dana')]);
+    await p.w.loadUsersPanel();
+    fail();
+    await older;
+    assert.ok(p.$('[data-key="user-2"]'), 'the list stays');
+    assert.ok(!p.$('#users-panel .ui-text-fail'), 'no error shown');
+});
+
+test('after a failed load the next refresh draws the list, also when nothing changed', async () => {
+    const p = page();
+    p.w.served['GET /api/users'] = overview([user(2, 'dana')]);
+    await p.w.loadUsersPanel();
+    p.w.served['GET /api/users'] = () => Promise.reject(new Error('network'));
+    await p.w.loadUsersPanel();
+    assert.ok(p.$('#users-panel .ui-text-fail'), 'the error is shown');
+    p.w.served['GET /api/users'] = overview([user(2, 'dana')]);
+    await p.w.refreshUsersPanel();
+    assert.ok(p.$('[data-key="user-2"]'), 'the list is back');
+});

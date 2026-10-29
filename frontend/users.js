@@ -12,6 +12,8 @@ let usersData = null;
 // Bumped by every load and every change made here: an answer read before a newer one
 // started (a refresh that overlaps a save) is dropped instead of drawing the old state
 let usersSeq = 0;
+// The section shows the error of a load that failed: the next answer draws, also an unchanged one
+let usersFailed = false;
 
 const USERS_ACCESS_LABELS = { admin: 'Admin', operator: 'Operator', viewer: 'Viewer', custom: 'Custom', none: 'No access' };
 const USERS_ACCESS_TONES = { admin: 'warn', operator: 'info', viewer: '' };
@@ -31,7 +33,10 @@ async function loadUsersPanel() {
         usersData = data;
         renderUsersPanel();
     } catch (e) {
+        // A newer load or change has drawn the section since: this failure is old news
+        if (seq !== usersSeq) return;
         console.error('Users error:', e);
+        usersFailed = true;
         uiReplaceKeepingFocus(panel, '<section class="ui-panel ui-set-channels"><p class="ui-empty ui-text-fail">Could not load users. Reload this page to try again.</p></section>');
     }
 }
@@ -161,6 +166,7 @@ function usersDefaultPanel() {
 function renderUsersPanel() {
     const panel = document.getElementById('users-panel');
     if (!panel || !usersData) return;
+    usersFailed = false;
     // Through the same drawing as the refresh, so what it remembers as shown stays true
     uiReplaceKeepingFocus(panel, usersPanelHtml());
 }
@@ -170,15 +176,15 @@ function renderUsersPanel() {
 async function refreshUsersPanel() {
     const panel = document.getElementById('users-panel');
     const busy = () => !!document.querySelector('.ui-dialog-backdrop:not(.hidden)');
-    if (!panel || !usersData || !panel.getClientRects().length || busy()) return;
+    if (!panel || !panel.getClientRects().length || busy()) return;
     const seq = ++usersSeq;
     try {
         const response = await authenticatedFetch('/api/users', { timeout: PAGE_REFRESH_TIMEOUT });
         if (!response.ok) return;
         const data = await response.json();
-        if (seq !== usersSeq || busy() || JSON.stringify(data) === JSON.stringify(usersData)) return;
+        if (seq !== usersSeq || busy() || (!usersFailed && JSON.stringify(data) === JSON.stringify(usersData))) return;
         usersData = data;
-        uiReplaceKeepingFocus(panel, usersPanelHtml());
+        renderUsersPanel();
     } catch (e) {
         // The next refresh tries again
     }
@@ -203,9 +209,10 @@ function usersPanelHtml() {
 
 async function setUsersDefault(value) {
     if (!uiMayAct('admin')) return;
-    usersSeq++;
     const oauth2 = usersData && usersData.oauth2;
     if (!oauth2 || oauth2.default_access === value) return;
+    // A refresh on its way now may have read the old value: it is dropped
+    usersSeq++;
     try {
         const response = await authenticatedFetch('/api/users/oauth2-default', {
             method: 'PUT',
@@ -219,10 +226,11 @@ async function setUsersDefault(value) {
             if (response.status === 409) loadUsersPanel();
             return;
         }
-        // A refresh that started while this was saved may have read the old value: dropped
+        // Onto the list as it is now (a refresh may have replaced it meanwhile); one that
+        // started during the save and is still on its way is dropped
         usersSeq++;
-        oauth2.default_access = body.default_access || value;
-        oauth2.version = body.version;
+        usersData.oauth2.default_access = body.default_access || value;
+        usersData.oauth2.version = body.version;
         renderUsersPanel();
         showToast(value === 'none' ? 'Only users on the list can sign in now' : 'Access changed', 'success');
     } catch (e) {
@@ -362,7 +370,6 @@ function closeUserEditModal(saved = false) {
 async function saveUser(event, userId) {
     event.preventDefault();
     if (!uiMayAct('admin')) return;
-    usersSeq++;
     const modal = document.getElementById('user-edit-modal');
     const error = document.getElementById('user-edit-error');
     const say = text => { error.textContent = text; error.classList.remove('hidden'); };
@@ -389,6 +396,8 @@ async function saveUser(event, userId) {
     }
     Object.assign(body, { access: level, views: custom ? chosen('view') : [], acts: custom ? chosen('act') : [], disabled });
     try {
+        // A refresh on its way now may have read the state before this change: it is dropped
+        usersSeq++;
         const response = await authenticatedFetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
         if (!response.ok) {
             const answer = await response.json().catch(() => ({}));
@@ -413,7 +422,6 @@ async function saveUser(event, userId) {
 
 async function deleteUser(userId) {
     if (!uiMayAct('admin')) return;
-    usersSeq++;
     const user = (usersData?.users || []).find(u => u.id === userId);
     if (!user) return;
     const name = usersName(user);
@@ -427,6 +435,7 @@ async function deleteUser(userId) {
     const confirmed = await showConfirmModal({ title: 'Delete user', message, confirmText: 'Delete', isDangerous: true });
     if (!confirmed) return;
     try {
+        usersSeq++;
         const response = await authenticatedFetch(`/api/users/${Number(userId)}`, { method: 'DELETE' });
         if (!response.ok && response.status !== 404) {
             const answer = await response.json().catch(() => ({}));

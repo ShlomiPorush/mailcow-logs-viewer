@@ -1,7 +1,7 @@
 // The signed-in person's access as the page follows it (issue #544): a status read
 // while the page is open (the session check, a refused call) that gives other access
-// than the page was drawn with reloads the page once; and a refused call (403 for lack
-// of access) is said by one message, not followed by the caller's own error.
+// than the page was drawn with reloads the page once; a refused call (403 for lack of
+// access) is said by the shared message, and words already on screen are not shown twice.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -34,16 +34,19 @@ function element() {
 
 function load({ fetch } = {}) {
     const toasts = [];
+    const shown = [];
     const reloads = [];
     const timers = [];
     const elements = {};
     const own = {
         hidden: false,
         documentElement: element(),
-        body: { appendChild: el => toasts.push(el.innerHTML.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim()) },
+        body: { appendChild: el => { shown.push(el); toasts.push(el.innerHTML.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim()); } },
         createElement: () => element(),
-        // Each id its own element, except the toast: each one here is a new toast
-        getElementById: id => (id === 'toast-notification' ? null : (elements[id] = elements[id] || element())),
+        // Each id its own element; the toast is the one on screen, while it is there
+        getElementById: id => (id === 'toast-notification'
+            ? shown.filter(el => el.isConnected && el.id === id).pop() || null
+            : (elements[id] = elements[id] || element())),
         querySelectorAll: () => [],
         querySelector: () => null,
         addEventListener() {},
@@ -100,8 +103,9 @@ test('a reload the person cancels (unsaved changes) is asked again by the next c
     p.run(`appAccessCheck(${other})`);
     p.flush(1500);
     assert.equal(p.reloads.length, 1);
-    // A few seconds on, the next check asks again, once
+    // A few seconds on (the first toast has faded by then), the next check asks again, once
     p.flush(5000);
+    p.run(`document.getElementById('toast-notification').remove()`);
     p.run(`appAccessCheck(${other})`);
     p.flush(1500);
     assert.equal(p.reloads.length, 2);
@@ -138,42 +142,49 @@ function refusing(detail) {
         : { ok: false, status: 403, headers: { get: () => null }, json: async () => ({ detail }), clone() { return { json: async () => ({ detail }) }; } };
 }
 
-test('a call refused for lack of access shows one message, not the caller\'s error as well', async () => {
+test('a refused call whose caller repeats the server\'s words shows one message', async () => {
     const p = load({ fetch: refusing('You do not have permission for this.') });
-    // The common caller: it shows its own error when the answer is not ok
+    // The caller passes the server's detail through (users.js deleteUser)
     await p.run(`(async () => {
-        const response = await authenticatedFetch('/api/status/containers/x/ignore', { method: 'PUT' });
-        if (!response.ok) showToast('HTTP ' + response.status, 'error');
+        const response = await authenticatedFetch('/api/users/1', { method: 'DELETE' });
+        const body = await response.json();
+        if (!response.ok) showToast(body.detail, 'error');
     })()`);
     assert.deepEqual(p.toasts.filter(t => t), ['✗ You do not have permission for this.']);
 });
 
-test('a refusal and an unrelated error at the same time show both', async () => {
+test('the same words twice show once while on screen, and again once gone', () => {
+    const p = load();
+    p.run(`showToast('Saved', 'success'); showToast('Saved', 'success')`);
+    assert.deepEqual(p.toasts, ['✓ Saved']);
+    p.run(`document.getElementById('toast-notification').remove(); showToast('Saved', 'success')`);
+    assert.deepEqual(p.toasts, ['✓ Saved', '✓ Saved']);
+});
+
+test('a refusal and an unrelated error show both, also one that names 403', async () => {
     const p = load({ fetch: refusing('You do not have permission for this.') });
     await p.run(`(async () => {
         const refused = authenticatedFetch('/api/status/containers/x/ignore', { method: 'PUT' });
         // Another request fails meanwhile, for its own reason
-        showToast('Could not reach the server. Check your connection and try again.', 'error');
-        const response = await refused;
-        if (!response.ok) showToast('HTTP ' + response.status, 'error');
+        showToast('The proxy answered 403. Check its settings and try again.', 'error');
+        await refused;
         // Later, an error of its own: shown
         showToast('Could not save the user. Try again.', 'error');
     })()`);
     assert.deepEqual(p.toasts.filter(t => t), [
-        '✗ Could not reach the server. Check your connection and try again.',
+        '✗ The proxy answered 403. Check its settings and try again.',
         '✗ You do not have permission for this.',
         '✗ Could not save the user. Try again.',
     ]);
 });
 
-test('the caller\'s error that repeats the server\'s sentence is left out too', async () => {
+test('a caller\'s own words after a refusal are shown after the shared message', async () => {
     const p = load({ fetch: refusing('You do not have permission for this.') });
     await p.run(`(async () => {
-        const response = await authenticatedFetch('/api/users/1', { method: 'DELETE' });
-        const body = await response.json();
-        showToast('Could not delete the user: ' + body.detail, 'error');
+        const response = await authenticatedFetch('/api/status/containers/x/ignore', { method: 'PUT' });
+        if (!response.ok) showToast('HTTP ' + response.status, 'error');
     })()`);
-    assert.deepEqual(p.toasts.filter(t => t), ['✗ You do not have permission for this.']);
+    assert.deepEqual(p.toasts.filter(t => t), ['✗ You do not have permission for this.', '✗ HTTP 403']);
 });
 
 test('another 403 keeps the caller\'s own message', async () => {

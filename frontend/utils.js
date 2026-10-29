@@ -264,31 +264,12 @@ function userCan(area, kind = 'read') {
 
 const UI_NOT_PERMITTED = 'You do not have permission for this.';
 let uiNotPermittedAt = 0;      // the last time it was said
-let uiRefusalsPending = 0;     // refused calls whose caller has not shown its own error yet
 
 // Said once for a burst of refused calls, not once per call
 function uiNotPermitted() {
     if (Date.now() - uiNotPermittedAt < 10000) return;
     uiNotPermittedAt = Date.now();
     showToast(UI_NOT_PERMITTED, 'error');
-}
-
-// A call the server refused for lack of access (app.js authenticatedFetch): said once, and
-// its caller's own error about it is left out (uiToastSuppressed)
-function uiNoteRefusal() {
-    uiRefusalsPending++;
-    uiNotPermitted();
-}
-
-// The caller's error about a refused call names the status ("HTTP 403") or repeats the
-// server's sentence; that one is not shown over the shared message. Any other error is
-// (a failed connection, another refusal's own words)
-function uiToastSuppressed(message, type) {
-    if (type !== 'error' || !uiRefusalsPending || message === UI_NOT_PERMITTED) return false;
-    const text = String(message);
-    if (!/\b403\b/.test(text) && !text.includes(UI_NOT_PERMITTED)) return false;
-    uiRefusalsPending--;
-    return true;
 }
 
 // The first check of every function that sends a change: a way in that showed no
@@ -991,9 +972,10 @@ function uiEntitySelecting(event, entity) {
 // keeps it until closed). One toast at a time: a new one replaces the last, and
 // the keyboard's place moves with it if it was in the one replaced.
 function showToast(message, type = 'info', options = {}) {
-    if (uiToastSuppressed(message, type)) return;
-    // Remove existing toast if any
+    // Remove existing toast if any; the same words already on screen are not shown twice
+    // (a refused call said by the shared message and again by its caller with the server's words)
     const existingToast = document.getElementById('toast-notification');
+    if (existingToast && !options.action && existingToast.dataset.message === String(message) && existingToast.style.opacity !== '0') return;
     const focusWasInIt = !!existingToast && existingToast.contains(document.activeElement);
     if (existingToast) {
         existingToast.remove();
@@ -1009,6 +991,7 @@ function showToast(message, type = 'info', options = {}) {
 
     const toast = document.createElement('div');
     toast.id = 'toast-notification';
+    toast.dataset.message = String(message);
     toast.className = `ui-toast ui-toast-${kind}`;
     toast.setAttribute('role', kind === 'error' ? 'alert' : 'status');
     toast.innerHTML = `
