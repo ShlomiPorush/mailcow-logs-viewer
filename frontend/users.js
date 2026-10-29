@@ -229,8 +229,12 @@ async function setUsersDefault(value) {
         // Onto the list as it is now (a refresh may have replaced it meanwhile); one that
         // started during the save and is still on its way is dropped
         usersSeq++;
-        usersData.oauth2.default_access = body.default_access || value;
-        usersData.oauth2.version = body.version;
+        // A newer version already shown (another admin changed it since) stays
+        const current = usersData.oauth2;
+        if (Number(body.version) >= Number(current.version)) {
+            current.default_access = body.default_access || value;
+            current.version = body.version;
+        }
         renderUsersPanel();
         showToast(value === 'none' ? 'Only users on the list can sign in now' : 'Access changed', 'success');
     } catch (e) {

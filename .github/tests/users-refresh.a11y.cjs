@@ -151,3 +151,19 @@ test('after a failed load the next refresh draws the list, also when nothing cha
     await p.w.refreshUsersPanel();
     assert.ok(p.$('[data-key="user-2"]'), 'the list is back');
 });
+
+test('a late save answer does not undo a newer change a refresh already shows', async () => {
+    const p = page();
+    p.w.served['GET /api/users'] = overview([user(2, 'dana')], 'admin', 1);
+    await p.w.loadUsersPanel();
+    let endSave;
+    p.w.served['PUT /api/users/oauth2-default'] = () => new Promise(resolve => { endSave = () => resolve({ default_access: 'viewer', version: 2 }); });
+    const saving = p.w.setUsersDefault('viewer');
+    // Another admin changed it again meanwhile; the refresh shows that (version 3)
+    p.w.served['GET /api/users'] = overview([user(2, 'dana')], 'operator', 3);
+    await p.w.refreshUsersPanel();
+    endSave();
+    await saving;
+    assert.equal(p.$('.ui-users-default .ui-seg [aria-pressed="true"]').textContent.trim(), 'Operator');
+    assert.equal(p.w.eval('usersData.oauth2.version'), 3);
+});

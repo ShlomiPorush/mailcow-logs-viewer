@@ -24,7 +24,7 @@ function stub() {
 function element() {
     const classes = new Set();
     return {
-        innerHTML: '', textContent: '', style: {}, dataset: {}, parentElement: null, isConnected: true,
+        innerHTML: '', textContent: '', style: {}, dataset: {}, parentElement: null, isConnected: true, offsetHeight: 50,
         classList: { add: c => classes.add(c), remove: c => classes.delete(c), contains: c => classes.has(c), toggle() {} },
         setAttribute() {}, removeAttribute() {}, addEventListener() {}, matches: () => false, contains: () => false,
         querySelector: () => ({ addEventListener() {}, focus() {}, setAttribute() {} }), querySelectorAll: () => [],
@@ -44,7 +44,7 @@ function load({ fetch } = {}) {
         body: { appendChild: el => { shown.push(el); toasts.push(el.innerHTML.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim()); } },
         createElement: () => element(),
         // Each id its own element; the toast is the one on screen, while it is there
-        getElementById: id => (id === 'toast-notification'
+        getElementById: id => (id.startsWith('toast-')
             ? shown.filter(el => el.isConnected && el.id === id).pop() || null
             : (elements[id] = elements[id] || element())),
         querySelectorAll: () => [],
@@ -62,6 +62,7 @@ function load({ fetch } = {}) {
         // Timers wait in a queue; the test runs the ones of a given delay (flush)
         setTimeout: (fn, ms) => { timers.push({ fn, ms }); return timers.length; }, clearTimeout() {}, setInterval() {}, requestAnimationFrame() {},
         MutationObserver: function () { return { observe() {} }; }, appTimezone: 'UTC', fetch,
+        getComputedStyle: () => ({ bottom: '18px' }),
     });
     for (const file of ['utils.js', 'router.js', 'app.js']) vm.runInContext(fs.readFileSync(path.join(frontend, file), 'utf8'), context);
     // Runs the waiting timers of this delay (and what they start, when it has the same delay)
@@ -70,7 +71,10 @@ function load({ fetch } = {}) {
             if (timers[i].ms === ms && !timers[i].done) { timers[i].done = true; timers[i].fn(); }
         }
     };
-    return { run: code => vm.runInContext(code, context), toasts, reloads, flush };
+    // What is on screen now, in the order shown, with each toast's id and its place from the bottom
+    const visible = () => shown.filter(el => el.isConnected).map(el => ({ id: el.id, bottom: el.style.bottom || '',
+        text: el.innerHTML.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim() }));
+    return { run: code => vm.runInContext(code, context), toasts, reloads, flush, visible };
 }
 
 const VIEWER = { authenticated: true, is_admin: false, scopes: ['status:read', 'messages:read'] };
@@ -151,6 +155,7 @@ test('a refused call whose caller repeats the server\'s words shows one message'
         if (!response.ok) showToast(body.detail, 'error');
     })()`);
     assert.deepEqual(p.toasts.filter(t => t), ['✗ You do not have permission for this.']);
+    assert.deepEqual(p.visible().map(t => t.text), ['✗ You do not have permission for this.']);
 });
 
 test('the same words twice show once while on screen, and again once gone', () => {
@@ -176,15 +181,30 @@ test('a refusal and an unrelated error show both, also one that names 403', asyn
         '✗ You do not have permission for this.',
         '✗ Could not save the user. Try again.',
     ]);
+    // On screen: the refusal, and the latest error under it
+    assert.deepEqual(p.visible().map(t => t.text), ['✗ You do not have permission for this.', '✗ Could not save the user. Try again.']);
 });
 
-test('a caller\'s own words after a refusal are shown after the shared message', async () => {
+test('a caller\'s own words after a refusal show under it, and the refusal stays on screen', async () => {
     const p = load({ fetch: refusing('You do not have permission for this.') });
     await p.run(`(async () => {
         const response = await authenticatedFetch('/api/status/containers/x/ignore', { method: 'PUT' });
-        if (!response.ok) showToast('HTTP ' + response.status, 'error');
+        if (!response.ok) showToast('Could not change the container: HTTP ' + response.status, 'error');
     })()`);
-    assert.deepEqual(p.toasts.filter(t => t), ['✗ You do not have permission for this.', '✗ HTTP 403']);
+    // Both on screen, the refusal first, lifted above the caller's toast (18 + 50 + 8)
+    assert.deepEqual(p.visible(), [
+        { id: 'toast-refusal', bottom: '76px', text: '✗ You do not have permission for this.' },
+        { id: 'toast-notification', bottom: '', text: '✗ Could not change the container: HTTP 403' },
+    ]);
+    // The next toast replaces the caller's one; the refusal still stays, as itself only once
+    p.run(`showToast('Could not save the user. Try again.', 'error'); showToast('You do not have permission for this.', 'error')`);
+    assert.deepEqual(p.visible().map(t => [t.id, t.text]), [
+        ['toast-refusal', '✗ You do not have permission for this.'],
+        ['toast-notification', '✗ Could not save the user. Try again.'],
+    ]);
+    // Once the refusal is gone, toasts replace each other as before
+    p.run(`document.getElementById('toast-refusal').remove(); showToast('Saved', 'success'); showToast('Done', 'success')`);
+    assert.deepEqual(p.visible().map(t => t.text), ['✓ Done']);
 });
 
 test('another 403 keeps the caller\'s own message', async () => {

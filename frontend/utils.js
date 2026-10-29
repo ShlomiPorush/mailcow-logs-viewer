@@ -970,14 +970,20 @@ function uiEntitySelecting(event, entity) {
 // options.action: { label, ariaLabel, onAction } a button that runs onAction and
 // closes the toast (Undo, Retry); options.duration: how long it stays (ms; Infinity
 // keeps it until closed). One toast at a time: a new one replaces the last, and
-// the keyboard's place moves with it if it was in the one replaced.
+// the keyboard's place moves with it if it was in the one replaced. The refusal for lack
+// of access is the exception: what its caller says next shows under it, and it stays.
 function showToast(message, type = 'info', options = {}) {
     // Remove existing toast if any; the same words already on screen are not shown twice
     // (a refused call said by the shared message and again by its caller with the server's words)
     const existingToast = document.getElementById('toast-notification');
-    if (existingToast && !options.action && existingToast.dataset.message === String(message) && existingToast.style.opacity !== '0') return;
+    const heldToast = document.getElementById('toast-refusal');
+    const onScreen = el => !!el && el.style.opacity !== '0';
+    if (!options.action && [existingToast, heldToast].some(el => onScreen(el) && el.dataset.message === String(message))) return;
     const focusWasInIt = !!existingToast && existingToast.contains(document.activeElement);
-    if (existingToast) {
+    if (existingToast && !heldToast && onScreen(existingToast) && existingToast.dataset.message === UI_NOT_PERMITTED) {
+        // The refusal stays on screen, above the caller's own words
+        existingToast.id = 'toast-refusal';
+    } else if (existingToast) {
         existingToast.remove();
     }
 
@@ -1020,6 +1026,9 @@ function showToast(message, type = 'info', options = {}) {
     }
 
     document.body.appendChild(toast);
+    // A refusal kept on screen sits just above this toast, whatever its height
+    const held = document.getElementById('toast-refusal');
+    if (held) held.style.bottom = `${parseFloat(getComputedStyle(toast).bottom) + toast.offsetHeight + 8}px`;
     if (options.duration === Infinity) {
         if (focusWasInIt) toast.querySelector('button').focus({ preventScroll: true });
         return;
