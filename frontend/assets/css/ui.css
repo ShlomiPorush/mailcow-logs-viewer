@@ -2357,6 +2357,19 @@ html body .ui-main .ui-set-choice-opt > input[type="radio"] { accent-color: var(
 @media (max-width: 640px) {
     .ui-agent-log li { grid-template-columns: 1fr; gap: 2px; }
 }
+/* Settings > Users (users.js): the agent rows and edit dialog; what an access level gives, as a short list */
+.ui-users-preset { display: grid; gap: 2px; margin: 6px 0 0; padding-inline-start: 18px; list-style: disc; color: var(--ui-muted); font-size: var(--ui-fs-sm); }
+.ui-users-default .ui-set-desc { margin: 4px 0 10px; }
+
+/* Access (utils.js setAppAccess): a control that takes an action the signed-in person may not take,
+   or an admin's control, is not offered; the server refuses the call anyway */
+.ui-no-act-status [data-acts~="status"], .ui-no-act-outbound [data-acts~="outbound"],
+.ui-no-act-quarantine [data-acts~="quarantine"], .ui-no-act-security [data-acts~="security"],
+.ui-no-act-rspamd [data-acts~="rspamd"], .ui-no-act-dmarc [data-acts~="dmarc"],
+.ui-no-act-domains [data-acts~="domains"], .ui-no-act-mailboxes [data-acts~="mailboxes"],
+.ui-no-admin [data-acts~="admin"] { display: none !important; }
+/* A page the person cannot view leaves the menu (app.js applyPageAccess) */
+.ui-no-view { display: none !important; }
 .ui-form-split { padding-top: 14px; border-top: 1px solid var(--ui-line); gap: 10px; }
 .ui-form-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .ui-dialog.ui-dialog-md { width: min(680px, 100%); }

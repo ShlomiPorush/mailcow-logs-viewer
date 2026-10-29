@@ -123,8 +123,9 @@ async function loginReasonOf(response) {
 // timeout (ms, for the pages' own refreshes): a request that has not answered by
 // then, its body included, is aborted, so it neither holds the next refresh nor
 // answers after it
+// ownNotPermitted: the caller words a refusal (403) itself, so the shared notice stays away
 async function authenticatedFetch(url, options = {}) {
-    const { timeout, ...rest } = options;
+    const { timeout, ownNotPermitted, ...rest } = options;
     const headers = {
         ...rest.headers,
     };
@@ -153,6 +154,9 @@ async function authenticatedFetch(url, options = {}) {
             redirectToLogin(await loginReasonOf(response));
             throw new Error('Authentication required');
         }
+        // A call the person's access does not cover: said once for a burst, and the
+        // menu and controls follow the access the server has now
+        if (response.status === 403 && !ownNotPermitted) noteNotPermitted(response);
 
         // The timer stays to the end of the body (reading it is part of the request);
         // after that its abort does nothing
@@ -160,6 +164,19 @@ async function authenticatedFetch(url, options = {}) {
     } catch (error) {
         clearTimeout(timer);
         throw error;
+    }
+}
+
+// Other 403s (a write from another site's page) keep their own message
+async function noteNotPermitted(response) {
+    try {
+        const body = await response.clone().json();
+        if (body && body.detail === UI_NOT_PERMITTED) {
+            uiNotPermitted();
+            refreshAppAccess();
+        }
+    } catch (e) {
+        // Not the access answer
     }
 }
 
@@ -224,6 +241,8 @@ async function checkAuthentication() {
             if (statusData.authenticated) {
                 const logoutBtn = document.getElementById('logout-btn');
                 if (logoutBtn) logoutBtn.classList.remove('hidden');
+                // What this person may view and do, for the menu and the controls
+                setAppAccess(statusData);
                 return true;
             }
             reason = statusData.reason;
@@ -317,6 +336,73 @@ function pageIsOff(page) {
     return isFeatureDisabled(page);
 }
 
+// The area each page shows (backend agent_access/scopes.py): a page the signed-in
+// person cannot view leaves the menu, and its address says so instead of showing it
+const PAGE_AREAS = {
+    dashboard: 'status', messages: 'messages', netfilter: 'security', outbound: 'outbound', quarantine: 'quarantine',
+    rspamd: 'rspamd', status: 'status', domains: 'domains', dmarc: 'dmarc', 'mailbox-stats': 'mailboxes',
+    // About reads the Status routes (the app's health, its version)
+    devices: 'mailboxes', logs: 'logs', settings: 'admin', about: 'status',
+};
+const MENU_ORDER = ['dashboard', 'messages', 'outbound', 'quarantine', 'netfilter', 'rspamd', 'dmarc', 'status',
+    'domains', 'mailbox-stats', 'devices', 'logs', 'settings', 'about'];
+
+function userCanView(page) {
+    const area = PAGE_AREAS[page];
+    return !area || userCan(area);
+}
+
+// Where the app opens: the Dashboard, or the first page of the menu the person can view
+function landingPage() {
+    return MENU_ORDER.find(page => userCanView(page) && !pageIsOff(page)) || '';
+}
+
+// Whether a menu entry is shown: its feature is on and its page may be viewed
+function navEntryShown(btn) {
+    return btn.style.display !== 'none' && !btn.classList.contains('ui-no-view');
+}
+
+// The menu, the phone tab bar and the More sheet keep the pages the person can view;
+// the server card and the sidebar tools that open Status or the app's log follow
+function applyPageAccess() {
+    for (const page of Object.keys(PAGE_AREAS)) {
+        for (const id of [`tab-${page}`, `mobile-tab-${page}`, `tabbar-${page}`]) {
+            const el = document.getElementById(id);
+            if (el) el.classList.toggle('ui-no-view', !userCanView(page));
+        }
+    }
+    document.querySelectorAll('.ui-server').forEach(el => el.classList.toggle('ui-no-view', !userCan('status')));
+    document.getElementById('suppression-open-map')?.classList.toggle('ui-no-view', !userCan('rspamd'));
+    document.querySelectorAll('[data-nav-group]').forEach(group => {
+        group.classList.toggle('ui-no-view', ![...group.querySelectorAll('button')].some(navEntryShown));
+    });
+    const line = document.getElementById('ui-user-line');
+    const name = document.getElementById('ui-user-name');
+    if (line && name) {
+        name.textContent = appAccess.name;
+        line.classList.toggle('hidden', !appAccess.name);
+    }
+    const logout = document.getElementById('logout-btn');
+    if (logout) logout.title = appAccess.name ? `Logout (${appAccess.name})` : 'Logout';
+}
+
+// After a refused call: the menu and the controls follow the access the server has now
+let accessRefreshAt = 0;
+async function refreshAppAccess() {
+    if (Date.now() - accessRefreshAt < 10000) return;
+    accessRefreshAt = Date.now();
+    try {
+        const response = await fetch('/api/auth/status', { credentials: 'include' });
+        if (!response.ok) return;
+        const status = await response.json();
+        if (!status.authenticated) return;
+        setAppAccess(status);
+        applyPageAccess();
+    } catch (e) {
+        // The next refused call tries again
+    }
+}
+
 // Hide the tabs of features that are off; a page with one tab left shows no tab bar
 function applyTabFeatures(page) {
     const prefix = `${page}-tab-btn-`;
@@ -369,7 +455,7 @@ function applyFeatureToggles() {
 
     // A navigation group whose pages are all off loses its heading too
     document.querySelectorAll('[data-nav-group]').forEach(group => {
-        const visible = [...group.querySelectorAll('button')].some(btn => btn.style.display !== 'none');
+        const visible = [...group.querySelectorAll('button')].some(navEntryShown);
         group.style.display = visible ? '' : 'none';
     });
     
@@ -530,6 +616,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         console.log('Authentication required - showing login modal');
         return;
     }
+    // The menu holds only the pages this person can view
+    applyPageAccess();
 
     // Check if all required elements exist
     const requiredElements = [
@@ -912,7 +1000,8 @@ function startNavCounters() {
 
 async function loadNavCounters() {
     navCountersAt = Date.now();
-    const off = feature => (window.disabledFeatures || []).includes(feature);
+    // A counter of a feature that is off, or of an area the person cannot view, is not read
+    const off = (feature, area) => (window.disabledFeatures || []).includes(feature) || !userCan(area);
     const get = async url => {
         try {
             const res = await authenticatedFetch(url);
@@ -922,13 +1011,13 @@ async function loadNavCounters() {
         }
     };
     const [dashboard, queue, quarantine, insights, summary, blacklist, info] = await Promise.all([
-        off('netfilter') ? null : get('/api/logs/netfilter/overview'),
-        off('queue') ? null : get('/api/queue'),
-        off('quarantine') ? null : get('/api/quarantine'),
-        off('dmarc') ? null : get('/api/dmarc/insights'),
-        get('/api/status/summary'),
-        off('blacklist') ? null : get('/api/blacklist/summary'),
-        get('/api/settings/info'),
+        off('netfilter', 'security') ? null : get('/api/logs/netfilter/overview'),
+        off('queue', 'outbound') ? null : get('/api/queue'),
+        off('quarantine', 'quarantine') ? null : get('/api/quarantine'),
+        off('dmarc', 'dmarc') ? null : get('/api/dmarc/insights'),
+        off('', 'status') ? null : get('/api/status/summary'),
+        off('blacklist', 'status') ? null : get('/api/blacklist/summary'),
+        off('', 'status') ? null : get('/api/settings/info'),
     ]);
 
     const failedLogins = dashboard ? dashboard.failed_logins || 0 : 0;
@@ -969,6 +1058,8 @@ async function loadNavCounters() {
 }
 
 async function loadMailcowConnectionStatus() {
+    // The server card and these checks are part of Status
+    if (!userCan('status')) return;
     try {
         const response = await authenticatedFetch('/api/status/mailcow-connection');
         if (!response.ok) return;
@@ -1012,6 +1103,7 @@ async function loadMailcowConnectionStatus() {
 }
 
 async function loadAppVersionStatus() {
+    if (!userCan('status')) return;
     try {
         const response = await authenticatedFetch('/api/status/app-version');
         if (!response.ok) return;
@@ -1104,6 +1196,7 @@ function showMarkdownModal(title, markdownContent) {
 }
 
 async function loadMailcowVersionStatus() {
+    if (!userCan('status')) return;
     try {
         const response = await authenticatedFetch('/api/status/version');
         if (!response.ok) return;
@@ -1893,8 +1986,9 @@ function renderNetfilterData(data) {
         });
     }
 
-    // Without a Read-Write key the Ban and Unban buttons are not offered; say so
-    const lockedNote = mailcowRwConfigured ? '' : `<div class="ui-list-note">${uiLocked('Ban and Unban are locked', `Banning or unbanning an IP from this list ${UI_RW_KEY_TEXT}`)}</div>`;
+    // Without a Read-Write key the Ban and Unban buttons are not offered; say so to whoever may use them
+    const mayBan = mailcowRwConfigured && userCan('security', 'write');
+    const lockedNote = mailcowRwConfigured || !userCan('security', 'write') ? '' : `<div class="ui-list-note">${uiLocked('Ban and Unban are locked', `Banning or unbanning an IP from this list ${UI_RW_KEY_TEXT}`)}</div>`;
 
     const tabCount = document.getElementById('security-tab-n-events');
     if (tabCount) {
@@ -1912,9 +2006,9 @@ function renderNetfilterData(data) {
                 // Check if IP is in the blacklist (with or without /32, or /128)
                 const ipInBlacklist = log.ip && fail2banBlacklist.some(entry => entry === log.ip || entry === fail2banEntry(log.ip));
                 // Show unban if: banned OR already in blacklist
-                const showUnban = mailcowRwConfigured && log.ip && (isBan || ipInBlacklist);
+                const showUnban = mayBan && log.ip && (isBan || ipInBlacklist);
                 // Show ban if: warning/unban AND NOT already in blacklist
-                const showBan = mailcowRwConfigured && log.ip && isWarningOrUnban && !ipInBlacklist;
+                const showBan = mayBan && log.ip && isWarningOrUnban && !ipInBlacklist;
                 const flagUrl = log.country_code ? getFlagUrl(log.country_code, '16x12') : '';
                 const place = [log.country_name, log.city].filter(Boolean).join(', ');
                 const org = log.asn_org ? ` (${log.asn_org})` : '';
@@ -1928,8 +2022,8 @@ function renderNetfilterData(data) {
                     <span>${uiActionTag(log.action)}</span>
                     <span class="ui-ev-where" title="${escapeHtml(place + org)}">${flagUrl ? `<img src="${flagUrl}" alt="" width="16" height="12" onerror="this.style.display='none'">` : ''}${escapeHtml(place || '-')}</span>
                     <span class="ui-st-acts">
-                        ${showUnban ? `<button onclick="unbanIP('${escapeJsArg(log.ip)}', this)" class="ui-btn ui-btn-sm" title="Unban ${escapeHtml(log.ip)}">Unban</button>` : ''}
-                        ${showBan ? `<button onclick="banIP('${escapeJsArg(log.ip)}', this)" class="ui-btn ui-btn-sm ui-btn-danger" title="Put ${escapeHtml(fail2banEntry(log.ip))} on the denylist; it stays until removed">Ban permanently</button>` : ''}
+                        ${showUnban ? `<button data-acts="security" onclick="unbanIP('${escapeJsArg(log.ip)}', this)" class="ui-btn ui-btn-sm" title="Unban ${escapeHtml(log.ip)}">Unban</button>` : ''}
+                        ${showBan ? `<button data-acts="security" onclick="banIP('${escapeJsArg(log.ip)}', this)" class="ui-btn ui-btn-sm ui-btn-danger" title="Put ${escapeHtml(fail2banEntry(log.ip))} on the denylist; it stays until removed">Ban permanently</button>` : ''}
                         <button type="button" class="ui-icon-btn ui-icon-btn-sm ui-ev-toggle" aria-expanded="false" aria-controls="ev-detail-${index}" title="Show the log line" onclick="toggleEventDetail(this)"><svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg></button>
                     </span>
                     <div class="ui-ev-detail" id="ev-detail-${index}" hidden>
@@ -1963,6 +2057,7 @@ function fail2banBare(entry) {
 }
 
 async function unbanIP(ip, btnEl) {
+    if (!uiMayAct('security')) return;
     const ipWithMask = fail2banEntry(ip);
     if (!await showConfirmModal({ title: 'Unban IP', message: 'Unban ' + ip + '?', confirmText: 'Unban', focusCancel: true })) return;
     try {
@@ -2004,6 +2099,7 @@ async function unbanIP(ip, btnEl) {
 }
 
 async function banIP(ip, btnEl) {
+    if (!uiMayAct('security')) return;
     const ipWithMask = fail2banEntry(ip);
     if (!await showConfirmModal({ title: 'Ban IP', message: `Are you sure you want to permanently ban ${ipWithMask}?\n\nThis will add the IP to the Fail2Ban denylist.`, confirmText: 'Ban', isDangerous: true, focusCancel: true })) return;
 
@@ -2046,6 +2142,7 @@ async function banIP(ip, btnEl) {
 }
 
 async function allowIP(ip, btnEl) {
+    if (!uiMayAct('security')) return;
     const ipWithMask = fail2banEntry(ip);
     if (!await showConfirmModal({ title: 'Allow IP', message: `Add ${ipWithMask} to the Fail2Ban allowlist?\n\nFailed attempts from this address will never lead to a ban.`, confirmText: 'Allow', focusCancel: true })) return;
     if (btnEl) {
@@ -2246,6 +2343,19 @@ async function smartRefreshSettings() {
 function switchTab(tab, params = {}) {
     console.log('Switching to tab:', tab, 'params:', params);
 
+    // The Dashboard is where the app opens: without it, the first page the person can view
+    if (tab === 'dashboard' && !userCanView('dashboard') && landingPage()) {
+        tab = landingPage();
+        params = {};
+        if (typeof buildPath === 'function') routerReplace({ route: tab, params }, buildPath(tab, params));
+    }
+
+    // A page the person's access does not cover: said plainly instead of the page
+    if (!userCanView(tab)) {
+        showNoAccessPage(tab);
+        return;
+    }
+
     // Block disabled features - show a "Feature Disabled" page.
     // Exception: the Mailbox Stats page also hosts Rate Limits, so it stays
     // open while that feature is on, even with Mailbox Stats itself off.
@@ -2398,6 +2508,31 @@ function switchTab(tab, params = {}) {
     queueDocumentTitle();
 }
 
+// A page the person cannot view, opened by its address: the page stays as it is
+// (access can come back with a new sign-in), another container says so
+function showNoAccessPage(tab) {
+    currentTab = tab;
+    if (typeof disconnectLogWebSocket === 'function') disconnectLogWebSocket();
+    document.querySelectorAll('[id^="tab-"], [id^="tabbar-"]').forEach(btn => btn.removeAttribute('aria-current'));
+    document.querySelectorAll('.tab-content').forEach(c => c.classList.add('hidden'));
+    // The phone's title and the More sheet name the page asked for
+    if (typeof updateMobileMenuActiveState === 'function') updateMobileMenuActiveState(tab);
+    if (typeof updateCurrentTabLabel === 'function') updateCurrentTabLabel(tab);
+    placeTopbar(null);
+    const page = document.getElementById('content-no-access');
+    if (page) {
+        const landing = landingPage();
+        const go = landing && landing !== tab
+            ? `<button type="button" onclick="navigateTo('${landing}')" class="ui-btn ui-btn-primary">Go to ${escapeHtml(TAB_LABELS[landing] || landing)}</button>` : '';
+        page.innerHTML = `
+            <div class="ui-disabled-page">
+                ${uiLocked('You do not have permission to view this page.', 'Ask an administrator if you need it.', go)}
+            </div>`;
+        page.classList.remove('hidden');
+    }
+    queueDocumentTitle();
+}
+
 // =============================================================================
 // DASHBOARD
 // =============================================================================
@@ -2483,7 +2618,8 @@ function attentionRead(url) {
 function loadDashboardSecurityAlerts({ force = true } = {}) {
     const s = attention.alerts;
     return attentionLoad(s, force, async () => {
-        const read = await attentionRead('/api/security-alerts?acknowledged=false&limit=20');
+        // Alerts are part of Security: without View there, none to show
+        const read = userCan('security') ? await attentionRead('/api/security-alerts?acknowledged=false&limit=20') : { alerts: [] };
         const data = read === ATTENTION_FAILED ? null : read;
         return () => {
             s.at = Date.now();
@@ -2535,7 +2671,7 @@ function attentionAlertRows(where) {
                 </div>
                 <div class="ui-alert-acts">
                     <button type="button" onclick="${first} openAlertActivity(${id})" class="ui-btn ui-btn-sm" title="What happened before and around this alert">Show activity</button>
-                    <button type="button" onclick="acknowledgeSecurityAlert(${id})" class="ui-btn ui-btn-sm" title="Dismiss">Dismiss</button>
+                    <button type="button" onclick="acknowledgeSecurityAlert(${id})" class="ui-btn ui-btn-sm" title="Dismiss" data-acts="security">Dismiss</button>
                 </div>
             </div>`;
     }).join('');
@@ -2659,8 +2795,11 @@ function uiReplaceKeepingFocus(container, html) {
 function attentionCheckItems(key, data) {
     if (!data) return [];
     if (key === 'connection') {
-        return data.connected === false ? [{ tone: 'fail', title: 'mailcow is not reachable', detail: 'The mailcow API did not answer, so logs and server data may be out of date.',
-            action: 'Open settings', onclick: "navigateTo('settings')", go: ['settings'] }] : [];
+        if (data.connected !== false) return [];
+        const item = { tone: 'fail', title: 'mailcow is not reachable', detail: 'The mailcow API did not answer, so logs and server data may be out of date.' };
+        // Only an admin can change the connection; anyone else sees it on Status
+        return [userIsAdmin() ? { ...item, action: 'Open settings', onclick: "navigateTo('settings')", go: ['settings'] }
+            : { ...item, action: 'Open status', onclick: "navigateTo('status')", go: ['status'] }];
     }
     if (key === 'blocklist') {
         if (data.status !== 'listed') return [];
@@ -2724,16 +2863,17 @@ function attentionCheckItems(key, data) {
 function loadDashboardAttention({ force = true } = {}) {
     const s = attention.checks;
     return attentionLoad(s, force, async () => {
-        const off = feature => (window.disabledFeatures || []).includes(feature);
+        // A check of a feature that is off, or of an area the person cannot view, is not read
+        const off = (feature, area) => (window.disabledFeatures || []).includes(feature) || !userCan(area);
         const get = attentionRead;
         const [blocklistRead, summary, dmarc, appVersion, mailcowVersion, connection, fail2ban] = await Promise.all([
-            off('blacklist') ? null : get('/api/blacklist/summary'),
-            get('/api/status/summary'),
-            off('dmarc') ? null : get('/api/dmarc/insights'),
-            get('/api/status/app-version'),
-            get('/api/status/version'),
-            get('/api/status/mailcow-connection'),
-            off('netfilter') ? null : get('/api/fail2ban'),
+            off('blacklist', 'status') ? null : get('/api/blacklist/summary'),
+            off('', 'status') ? null : get('/api/status/summary'),
+            off('dmarc', 'dmarc') ? null : get('/api/dmarc/insights'),
+            off('', 'status') ? null : get('/api/status/app-version'),
+            off('', 'status') ? null : get('/api/status/version'),
+            off('', 'status') ? null : get('/api/status/mailcow-connection'),
+            off('netfilter', 'security') ? null : get('/api/fail2ban'),
         ]);
         const answered = data => data && data !== ATTENTION_FAILED;
         const blocklist = answered(blocklistRead) && blocklistRead.status === 'error' ? ATTENTION_FAILED : blocklistRead;
@@ -2811,7 +2951,7 @@ function attnWindowOpen(bell) {
     attnWindow = null;
     const phone = window.matchMedia('(max-width: 760px)').matches;
     const head = `<h2 id="attn-win-title" class="ui-attn-win-title">Needs attention <span id="attn-win-count" class="ui-count"></span></h2>
-        <button type="button" id="attn-win-dismiss-all" class="ui-btn ui-btn-sm is-off" onclick="acknowledgeAllSecurityAlerts()"></button>`;
+        <button type="button" id="attn-win-dismiss-all" class="ui-btn ui-btn-sm is-off" onclick="acknowledgeAllSecurityAlerts()" data-acts="security"></button>`;
     const list = `<div id="attn-win-checks"></div><div id="attn-win-alerts" class="hidden"></div><p id="attn-win-state" class="ui-dash-clear hidden"></p>`;
     const foot = `<div class="ui-attn-win-foot"><button type="button" class="ui-link-row ui-attn-win-go" onclick="attnBellGo(['dashboard'])">Open the Dashboard</button></div>`;
     uiLayerOpener(bell);
@@ -3356,7 +3496,8 @@ function openMailFlowHourMessages() {
 // Dismissing acts at once; the answer's receipt lets Undo re-open exactly what it
 // changed, for 10 seconds (longer while the pointer or the focus is on the toast)
 async function acknowledgeSecurityAlert(alertId) {
-    const alert = dashboardAlerts.get(Number(alertId)) || (typeof alertActivity !== 'undefined' && alertActivity && Number(alertActivity.alert.id) === Number(alertId) ? alertActivity.alert : null);
+    if (!uiMayAct('security')) return;
+    const alert =dashboardAlerts.get(Number(alertId)) || (typeof alertActivity !== 'undefined' && alertActivity && Number(alertActivity.alert.id) === Number(alertId) ? alertActivity.alert : null);
     // Its title, with the mailbox or username when the title does not already name it
     const name = !alert ? 'the alert' : alert.subject && !String(alert.title).includes(alert.subject) ? `${alert.title}: ${alert.subject}` : alert.title;
     try {
@@ -3372,6 +3513,7 @@ async function acknowledgeSecurityAlert(alertId) {
 }
 
 async function acknowledgeAllSecurityAlerts() {
+    if (!uiMayAct('security')) return;
     const ids = dashboardOpenAlertIds.slice();
     if (!ids.length) return;
     try {
@@ -3403,6 +3545,7 @@ function offerAlertsRefresh(message) {
 
 // Re-open what a dismissal changed. A failure says so and offers Retry until closed.
 async function undoAlertDismissal(receipt, undoName) {
+    if (!uiMayAct('security')) return;
     try {
         const res = await authenticatedFetch(`/api/security-alerts/acknowledgements/${encodeURIComponent(receipt)}/undo`, { method: 'POST' });
         if (!res.ok) throw new Error(`the server answered ${res.status}`);
@@ -3474,7 +3617,8 @@ function setDashKpi(id, value, tone, note) {
 async function loadDashboardSecurity() {
     const panel = document.getElementById('dashboard-security-panel');
     if (!panel) return;
-    if (isFeatureDisabled('netfilter')) {
+    // Its lists are Security's: without View there the card is not shown
+    if (isFeatureDisabled('netfilter') || !userCan('security')) {
         panel.classList.add('hidden');
         return;
     }
@@ -3891,9 +4035,11 @@ function drawQueueRows() {
         return;
     }
 
-    const canAct = mailcowRwConfigured;
+    // Actions need the Read-Write key and Take action on Outbound; the key's note is for whoever may act
+    const mayAct = userCan('outbound', 'write');
+    const canAct = mailcowRwConfigured && mayAct;
 
-    const lockedNote = canAct ? '' : `<div class="ui-list-note">${uiLocked('Queue actions are locked', `Retry, hold, release, delete and flush ${UI_RW_KEY_TEXT}`)}</div>`;
+    const lockedNote = canAct || !mayAct ? '' : `<div class="ui-list-note">${uiLocked('Queue actions are locked', `Retry, hold, release, delete and flush ${UI_RW_KEY_TEXT}`)}</div>`;
     const cols = canAct
         ? '--ui-cols: 20px minmax(200px, 1.6fr) 84px minmax(240px, 2.8fr) 70px 318px; --ui-table-min: 1000px'
         : '--ui-cols: minmax(200px, 1.6fr) 84px minmax(240px, 2.8fr) 70px 104px; --ui-table-min: 740px';
@@ -3930,7 +4076,7 @@ function drawQueueRows() {
                 });
                 const responses = recipients.filter(r => r.response);
                 const queued = new Date(item.arrival_time * 1000).toISOString();
-                const suppress = !queueSuppressOn ? '' : recipients.length === 1
+                const suppress = !queueSuppressOn || !mayAct ? '' : recipients.length === 1
                     ? `<button onclick="showAddSuppressionModal('${escapeJsArg(recipients[0].email)}', '${escapeJsArg(qid)}')" title="Suppress ${escapeHtml(recipients[0].email)}" class="ui-btn ui-btn-sm">Suppress</button>`
                     : uiMenu('Suppress', recipients.map(r => `<button type="button" role="menuitem" onclick="showAddSuppressionModal('${escapeJsArg(r.email)}', '${escapeJsArg(qid)}')">${escapeHtml(r.email)}</button>`).join(''));
                 return `
@@ -4048,6 +4194,7 @@ async function queueDeleteAll() {
 }
 
 async function queueAction(action, itemIds) {
+    if (!uiMayAct('outbound')) return;
     queueActing++;
     document.querySelectorAll('.queue-action-btn, .queue-checkbox, #queue-flush-all-btn, #queue-delete-all-btn, #queue-select-all-btn, #queue-bulk-retry-btn, #queue-bulk-delete-btn')
         .forEach(el => { el.disabled = true; el.style.opacity = '0.5'; });
@@ -4078,6 +4225,7 @@ async function queueAction(action, itemIds) {
 }
 
 async function queueDeleteRequest(itemIds) {
+    if (!uiMayAct('outbound')) return;
     queueActing++;
     document.querySelectorAll('.queue-action-btn, .queue-checkbox, #queue-flush-all-btn, #queue-delete-all-btn, #queue-select-all-btn, #queue-bulk-retry-btn, #queue-bulk-delete-btn')
         .forEach(el => { el.disabled = true; el.style.opacity = '0.5'; });
@@ -4189,10 +4337,12 @@ function drawQuarantineRows(data) {
         return;
     }
 
-    const canAct = mailcowRwConfigured;
+    // Actions need the Read-Write key and Take action on Quarantine; the key's note is for whoever may act
+    const mayAct = userCan('quarantine', 'write');
+    const canAct = mailcowRwConfigured && mayAct;
     const items = data.data;
 
-    const lockedNote = canAct ? '' : `<div class="ui-list-note">${uiLocked('Quarantine actions are locked', `Release, delete, spam learning and the auto-rules ${UI_RW_KEY_TEXT}`)}</div>`;
+    const lockedNote = canAct || !mayAct ? '' : `<div class="ui-list-note">${uiLocked('Quarantine actions are locked', `Release, delete, spam learning and the auto-rules ${UI_RW_KEY_TEXT}`)}</div>`;
     const cols = canAct
         ? '--ui-cols: 20px minmax(200px, 2fr) minmax(150px, 1.3fr) minmax(120px, 1fr) 56px 64px 336px; --ui-table-min: 1080px'
         : '--ui-cols: minmax(200px, 2fr) minmax(150px, 1.3fr) minmax(120px, 1fr) 56px 64px 76px; --ui-table-min: 760px';
@@ -4347,6 +4497,7 @@ async function quarantineDeleteAll() {
 }
 
 async function quarantineAction(action, itemIds) {
+    if (!uiMayAct('quarantine')) return;
     const allBtns = '.quarantine-action-btn, .quarantine-checkbox, #quarantine-bulk-release-btn, #quarantine-bulk-delete-btn, #quarantine-bulk-learnham-btn, #quarantine-bulk-learnspam-btn, #quarantine-select-all-btn, #quarantine-release-all-btn, #quarantine-delete-all-btn';
     document.querySelectorAll(allBtns).forEach(el => { el.disabled = true; el.style.opacity = '0.5'; });
     quarantineActing++;
@@ -4454,7 +4605,8 @@ function renderQuarantineDetailContent(data, itemId) {
     // text_html is already converted to plain text by mailcow, so fall back to it.
     const plainText = (data.text_plain || '').trim();
     const textContent = (plainText && plainText !== '-') ? data.text_plain : (data.text_html || '');
-    const canAct = mailcowRwConfigured;
+    const mayAct = userCan('quarantine', 'write');
+    const canAct = mailcowRwConfigured && mayAct;
 
     content.innerHTML = `
         <div class="ui-qd">
@@ -4501,6 +4653,9 @@ function renderQuarantineDetailContent(data, itemId) {
             <button onclick="closeQuarantineDetails(); quarantineDelete('${escapeJsArg(itemId)}')" class="ui-btn ui-btn-danger">Delete</button>
             <button onclick="closeQuarantineDetails(); quarantineRelease('${escapeJsArg(itemId)}')" class="ui-btn ui-btn-primary">Release</button>
         `;
+    } else if (footer && !mayAct) {
+        footer.className = 'hidden';
+        footer.innerHTML = '';
     } else if (footer) {
         // The list's locked note sits behind the dialog: say it here too
         footer.className = 'ui-dialog-foot ui-dialog-foot-note';
@@ -4619,11 +4774,11 @@ async function loadQuarantineRules({ quiet = false } = {}) {
                     <small>Hits: ${escapeHtml(String(rule.hit_count))}${rule.last_hit_at ? ' · Last: ' + formatTime(rule.last_hit_at) : ''}${rule.notes ? ' · ' + escapeHtml(rule.notes) : ''}</small>
                 </div>
                 <span class="ui-td ui-td-end ui-row-actions">
-                    ${repair ? `<button onclick="repairQuarantineRule(${Number(rule.id)})" title="${escapeHtml(`Look for "${repair.text}" instead`)}" class="ui-btn ui-btn-sm">Repair</button>` : ''}
+                    ${repair ? `<button onclick="repairQuarantineRule(${Number(rule.id)})" title="${escapeHtml(`Look for "${repair.text}" instead`)}" class="ui-btn ui-btn-sm" data-acts="quarantine">Repair</button>` : ''}
                     <button onclick="toggleQuarantineRule(${Number(rule.id)})" title="${rule.enabled ? 'Click to disable this rule' : 'Click to enable this rule'}"
-                        class="ui-btn ui-btn-sm${rule.enabled ? ' ui-btn-on' : ''}">${rule.enabled ? 'Enabled' : 'Disabled'}</button>
-                    <button onclick="showEditQuarantineRuleModal(${Number(rule.id)})" title="Edit" class="ui-btn ui-btn-sm">Edit</button>
-                    <button onclick="deleteQuarantineRule(${Number(rule.id)}, '${escapeJsArg(rule.name)}')" title="Delete" class="ui-btn ui-btn-sm ui-btn-danger">Delete</button>
+                        class="ui-btn ui-btn-sm${rule.enabled ? ' ui-btn-on' : ''}" data-acts="quarantine">${rule.enabled ? 'Enabled' : 'Disabled'}</button>
+                    <button onclick="showEditQuarantineRuleModal(${Number(rule.id)})" title="Edit" class="ui-btn ui-btn-sm" data-acts="quarantine">Edit</button>
+                    <button onclick="deleteQuarantineRule(${Number(rule.id)}, '${escapeJsArg(rule.name)}')" title="Delete" class="ui-btn ui-btn-sm ui-btn-danger" data-acts="quarantine">Delete</button>
                 </span>
             </div>`;
         }).join('')}</div>`);
@@ -4818,6 +4973,7 @@ async function saveQuarantineRule(ruleId) {
 
 // Create (ruleId null) or update a rule, then draw the list again
 async function _submitQuarantineRule(ruleId, body, doneMessage) {
+    if (!uiMayAct('quarantine')) return;
     try {
         const isEdit = ruleId !== null;
         const url = isEdit ? `/api/quarantine/rules/${ruleId}` : '/api/quarantine/rules';
@@ -4853,6 +5009,7 @@ async function repairQuarantineRule(ruleId) {
 }
 
 async function deleteQuarantineRule(ruleId, ruleName) {
+    if (!uiMayAct('quarantine')) return;
     if (!await showConfirmModal({ title: 'Delete Rule', message: `Delete rule "${ruleName}"?`, confirmText: 'Delete', isDangerous: true })) return;
     
     try {
@@ -4867,6 +5024,7 @@ async function deleteQuarantineRule(ruleId, ruleName) {
 }
 
 async function toggleQuarantineRule(ruleId) {
+    if (!uiMayAct('quarantine')) return;
     try {
         const res = await authenticatedFetch(`/api/quarantine/rules/${ruleId}/toggle`, { method: 'POST' });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -5486,20 +5644,20 @@ function renderStatusAttention() {
     for (const c of statusState.containers || []) {
         if (c.ignored || c.running) continue;
         items.push({ tone: 'fail', title: `${c.name} is stopped`, detail: `State: ${c.state}. It is not running, so what it does is off until it starts again.`,
-            actions: `<button type="button" class="ui-btn ui-btn-sm" onclick="setContainerIgnored('${escapeJsArg(c.container)}', true)" title="Stop counting and alerting on ${escapeHtml(c.name)}">Ignore</button>` });
+            actions: `<button type="button" class="ui-btn ui-btn-sm" onclick="setContainerIgnored('${escapeJsArg(c.container)}', true)" title="Stop counting and alerting on ${escapeHtml(c.name)}" data-acts="status">Ignore</button>` });
     }
     const blOff = (window.disabledFeatures || []).includes('blacklist');
     for (const host of blOff ? [] : (statusState.blocklists || [])) {
         for (const r of (host.results || []).filter(x => x.listed && !x.ignored)) {
             items.push({ tone: 'fail', title: `${host.hostname} is on ${r.name}`,
                 detail: `${host.source || 'system'}, listed on ${host.listed_count || 1} of ${host.total_blacklists || '?'} lists. Mail to some providers may bounce.`,
-                actions: `${blocklistLookupLink(r, 'Look up')}<button type="button" class="ui-btn ui-btn-sm" onclick="setBlocklistIgnored('${escapeJsArg(r.zone)}', true)" title="Keep checking ${escapeHtml(r.name)} but never count or alert on it">Ignore this list</button>` });
+                actions: `${blocklistLookupLink(r, 'Look up')}<button type="button" class="ui-btn ui-btn-sm" onclick="setBlocklistIgnored('${escapeJsArg(r.zone)}', true)" title="Keep checking ${escapeHtml(r.name)} but never count or alert on it" data-acts="status">Ignore this list</button>` });
         }
     }
     for (const job of statusState.jobs || []) {
         if (!job.failed) continue;
         items.push({ tone: 'warn', title: `${job.name} failed`, detail: job.error || 'The last run did not finish.',
-            actions: `<button type="button" class="ui-btn ui-btn-sm" onclick="triggerBackgroundJob('${escapeJsArg(job.key)}', this, '${escapeJsArg(job.name)}')">Run now</button>` });
+            actions: `<button type="button" class="ui-btn ui-btn-sm" onclick="triggerBackgroundJob('${escapeJsArg(job.key)}', this, '${escapeJsArg(job.name)}')" data-acts="admin">Run now</button>` });
     }
     const loaded = statusState.containers && statusState.jobs;
     if (count) count.textContent = items.length ? String(items.length) : '';
@@ -5560,7 +5718,7 @@ async function loadStatusAppVersion() {
         setStatusKpi('status-kpi-version', data.current_version || '-');
         if (note) {
             note.innerHTML = data.update_available
-                ? `<button type="button" class="ui-link-row ui-text-info" onclick="navigateTo('settings')">Update ${escapeHtml(data.latest_version)} available</button>`
+                ? `<button data-acts="admin" type="button" class="ui-link-row ui-text-info" onclick="navigateTo('settings')">Update ${escapeHtml(data.latest_version)} available</button>`
                 : 'Up to date';
         }
     } catch (error) {
@@ -5570,6 +5728,7 @@ async function loadStatusAppVersion() {
 }
 
 async function setContainerIgnored(container, ignored) {
+    if (!uiMayAct('status')) return;
     try {
         const res = await authenticatedFetch(`/api/status/containers/${encodeURIComponent(container)}/ignore`, {
             method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ignored })
@@ -5637,8 +5796,8 @@ async function loadStatusContainers() {
                 const arg = escapeJsArg(c.container);
                 // A stopped container can be ignored; an ignored one can be counted again
                 const action = c.ignored
-                    ? `<button type="button" class="ui-btn ui-btn-sm" onclick="setContainerIgnored('${arg}', false)">Stop ignoring</button>`
-                    : (up ? '' : `<button type="button" class="ui-btn ui-btn-sm" onclick="setContainerIgnored('${arg}', true)" title="Stop counting and alerting on ${escapeHtml(c.name)}">Ignore</button>`);
+                    ? `<button type="button" class="ui-btn ui-btn-sm" onclick="setContainerIgnored('${arg}', false)" data-acts="status">Stop ignoring</button>`
+                    : (up ? '' : `<button type="button" class="ui-btn ui-btn-sm" onclick="setContainerIgnored('${arg}', true)" title="Stop counting and alerting on ${escapeHtml(c.name)}" data-acts="status">Ignore</button>`);
                 const state = c.ignored ? 'ignored' : (up ? (since ? `up ${since}` : 'running') : String(c.state || 'unknown'));
                 return `
                 <div class="ui-ctr${c.ignored ? ' is-ignored' : (up ? '' : ' is-down')}" title="${escapeHtml(c.ignored ? 'Ignored: shown here but never counted or alerted' : (c.started_at ? `Started ${formatTime(c.started_at)}` : 'Start time unknown'))}">
@@ -5800,6 +5959,7 @@ function checkHost(hostname) {
 let blacklistCheckBtnIdle = null;
 
 async function checkBlacklists(force = false, host = null) {
+    if (!uiMayAct('status')) return;
     const btn = document.getElementById('blacklist-check-btn');
     const container = document.getElementById('status-blacklist');
 
@@ -6021,7 +6181,7 @@ function renderBlacklistStatus(data) {
         ? `<a href="${escapeHtml(r.info_url)}" target="_blank" rel="noopener noreferrer" class="ui-bl-link" title="Look up on ${escapeHtml(r.name)}" aria-label="Look up on ${escapeHtml(r.name)}"><svg width="12" height="12" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path></svg></a>`
         : '';
     const ignoreToggle = r => r.zone && r.zone !== 'unknown'
-        ? `<button type="button" class="ui-bl-ign" onclick="setBlocklistIgnored('${escapeJsArg(r.zone)}', ${!r.ignored})" title="${r.ignored ? 'Count and alert on this list again' : 'Keep checking this list but never count or alert on it'}">${r.ignored ? 'Stop ignoring' : 'Ignore'}</button>`
+        ? `<button type="button" class="ui-bl-ign" data-acts="status" onclick="setBlocklistIgnored('${escapeJsArg(r.zone)}', ${!r.ignored})" title="${r.ignored ? 'Count and alert on this list again' : 'Keep checking this list but never count or alert on it'}">${r.ignored ? 'Stop ignoring' : 'Ignore'}</button>`
         : '';
 
     if (!statusHold(container)) container.innerHTML = `
@@ -6045,13 +6205,13 @@ function renderBlacklistStatus(data) {
                     ${result}
                     <span class="ui-st-host-tools">
                         ${host.checked_at ? uiTime(host.checked_at, `checked ${formatAgo(host.checked_at)}`, { title: formatTime(host.checked_at), cls: 'ui-muted' }) : '<span class="ui-muted">never checked</span>'}
-                        <button onclick="checkHost('${escapeJsArg(host.hostname)}')" class="ui-btn ui-btn-sm" title="Run Check for this Host">Check now</button>
+                        <button onclick="checkHost('${escapeJsArg(host.hostname)}')" class="ui-btn ui-btn-sm" title="Run Check for this Host" data-acts="status">Check now</button>
                     </span>
                 </div>
                 ${listedOn.map(r => `
                 <div class="ui-st-listing">
                     <div><b>${escapeHtml(r.name)}</b><small>${escapeHtml(r.response ? `Answer ${r.response}` : 'Listed')}</small></div>
-                    <span class="ui-st-acts">${blocklistLookupLink(r, 'Look up')}<button type="button" class="ui-btn ui-btn-sm" onclick="setBlocklistIgnored('${escapeJsArg(r.zone)}', true)">Ignore list</button></span>
+                    <span class="ui-st-acts">${blocklistLookupLink(r, 'Look up')}<button type="button" class="ui-btn ui-btn-sm" onclick="setBlocklistIgnored('${escapeJsArg(r.zone)}', true)" data-acts="status">Ignore list</button></span>
                 </div>`).join('')}
                 ${host.has_data && others.length ? `
                 <details id="${hostId}" class="ui-bl-all"${openStates[hostId] ? ' open' : ''}>
@@ -6072,7 +6232,7 @@ function renderBlacklistStatus(data) {
                 ${[...ignoredLists].map(([zone, name]) => `
                 <div class="ui-st-listing">
                     <div><b>${escapeHtml(name)}</b><small>Checked and shown, never counted or alerted, for every address</small></div>
-                    <span class="ui-st-acts"><button type="button" class="ui-btn ui-btn-sm" onclick="setBlocklistIgnored('${escapeJsArg(zone)}', false)">Stop ignoring</button></span>
+                    <span class="ui-st-acts"><button type="button" class="ui-btn ui-btn-sm" onclick="setBlocklistIgnored('${escapeJsArg(zone)}', false)" data-acts="status">Stop ignoring</button></span>
                 </div>`).join('')}
             </section>` : ''}
         </div>
@@ -6082,6 +6242,7 @@ function renderBlacklistStatus(data) {
 }
 
 async function setBlocklistIgnored(zone, ignored) {
+    if (!uiMayAct('status')) return;
     try {
         const res = await authenticatedFetch(`/api/blacklist/lists/${encodeURIComponent(zone)}/ignore`, {
             method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ignored })
@@ -6321,6 +6482,7 @@ async function triggerBackgroundJob(jobKey, buttonEl, jobName = null) {
 // running already (409). Says how it went and resolves to 'started', 'running',
 // 'unavailable' or 'failed'
 async function runBackgroundJob(jobKey, jobName = null) {
+    if (!uiMayAct('admin')) return;
     // Use jobName if provided, otherwise fallback to jobKey
     const displayName = jobName || jobKey;
     try {

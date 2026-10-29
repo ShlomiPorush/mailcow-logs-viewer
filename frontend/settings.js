@@ -1035,6 +1035,10 @@ var SETTINGS_EDIT_TABS = [
         ]
     },
     {
+        // Managed outside the form (users.js), so it has no fields of its own
+        id: 'users', label: 'Users', description: 'Who may sign in to this app, and what each user may see and do.', groups: []
+    },
+    {
         id: 'agents', label: 'Agents', description: 'Allow AI agents, such as Claude Code and Codex, to access and use this app.', groups: [
             { label: 'Access', keys: ['agent_access_enabled', 'agent_access_url', 'agent_access_max_days'] }
         ]
@@ -1135,7 +1139,7 @@ var SETTINGS_TAB_GROUPS = [
     { label: 'General', tabs: ['features', 'application'] },
     { label: 'mailcow', tabs: ['mailcow', 'fetch', 'correlation', 'logs'] },
     { label: 'Alerts', tabs: ['notifications', 'smtp'] },
-    { label: 'Security', tabs: ['auth', 'agents', 'anomaly', 'smtp_abuse'] },
+    { label: 'Security', tabs: ['auth', 'users', 'agents', 'anomaly', 'smtp_abuse'] },
     { label: 'Data', tabs: ['domains', 'dmarc', 'dmarc_imap', 'maxmind', 'blacklist', 'outbound', 'quarantine', 'devices', 'other'] }
 ];
 
@@ -1710,7 +1714,7 @@ function renderSettings(content, data) {
             filteredTabs.forEach(function (t) { tabById[t.id] = t; });
             const isTabVisible = function (tab) {
                 if (!tab) return false;
-                if (tab.id === 'maxmind') return true;
+                if (tab.id === 'maxmind' || tab.id === 'users') return true;
                 return (tab.groups || [])
                     .flatMap(function (g) { return g.keys; })
                     .some(function (k) { return data.editable_config[k] !== undefined; });
@@ -1771,7 +1775,7 @@ function renderSettings(content, data) {
                 const allKeysInTab = (tab.groups || []).flatMap(function (g) { return g.keys; });
                 const keysInTab = allKeysInTab.filter(function (k) { return data.editable_config[k] !== undefined; });
                 // Show tab if it has keys OR if it's maxmind tab (which shows status)
-                if (keysInTab.length === 0 && tab.id !== 'maxmind') return;
+                if (keysInTab.length === 0 && tab.id !== 'maxmind' && tab.id !== 'users') return;
                 // The visible panel is the one matching the active sidebar item
                 const hidden = ' hidden';
                 const desc = '<h2 class="ui-set-title">' + escapeHtml(tab.label) + '</h2>' + (tab.description ? '<p class="ui-set-tabdesc">' + escapeHtml(tab.description) + '</p>' : '');
@@ -1875,6 +1879,7 @@ function renderSettings(content, data) {
                 </form>
                 <!-- Connected agents (agents.js) under the Agents section. Outside the form:
                      its buttons act at once, and the fieldset above is disabled until migration -->
+                <div class="hidden" data-tab-extra="users"><div id="users-panel" class="ui-agent-sections"></div></div>
                 <div class="hidden" data-tab-extra="agents"><div id="agents-panel" class="ui-agent-sections"></div></div>
             </div>
         </div>
@@ -1905,11 +1910,15 @@ function renderSettings(content, data) {
             </section>
         </div>
 
-        <!-- Connected agents (agents.js): managed here even while editing settings is off -->
+        <!-- Users (users.js) and connected agents (agents.js): managed here even while editing settings is off -->
+        <div id="users-panel" class="ui-agent-sections"></div>
         <div id="agents-panel" class="ui-agent-sections"></div>
         ` : ''}
     `;
 
+    if (typeof loadUsersPanel === 'function') {
+        loadUsersPanel();
+    }
     if (typeof loadAgentsPanel === 'function') {
         loadAgentsPanel();
     }

@@ -57,6 +57,8 @@ test('the blocklist button reads Check all now again after a check', async () =>
         authenticatedFetch: async () => ({ ok: true, json: async () => ({}) }),
         loadBlacklistStatus: async () => {},
         console: { error() {} },
+        // Full access, as for the built-in admin (utils.js)
+        uiMayAct: () => true,
     });
     vm.runInContext(slice(app, 'function checkHost(hostname)', 'async function loadBlacklistStatus'), context);
 

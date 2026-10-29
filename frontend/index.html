@@ -25,7 +25,7 @@
     <!-- Utility classes still used by the markup, compiled once
          (.github/scripts/build-utilities-css.sh); the design system comes last -->
     <link rel="stylesheet" href="/static/assets/css/utilities.css?v=2">
-    <link rel="stylesheet" href="/static/assets/css/ui.css?v=85">
+    <link rel="stylesheet" href="/static/assets/css/ui.css?v=86">
     <style>
         .tab-active {
             border-bottom: 2px solid #3b82f6;
@@ -491,6 +491,7 @@
                                 </path>
                             </svg>
                         </button></div>
+                <div id="ui-user-line" class="ui-side-line hidden"><span>Signed in as <b id="ui-user-name"></b></span></div>
                 <div id="ui-utilities" class="ui-utilities">
                     <button id="theme-toggle" onclick="toggleDarkMode()" class="ui-icon-btn" title="Switch theme" aria-label="Switch theme">
                             <svg id="theme-toggle-dark-icon" class="w-5 h-5 hidden" fill="currentColor"
@@ -513,7 +514,7 @@
                                 <path
                                     d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z" />
                             </svg><span class="hidden">GitHub</span></a>
-                    <button onclick="loadContainerLogs()" class="ui-icon-btn" title="View Container Logs" aria-label="View Container Logs"><svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <button onclick="loadContainerLogs()" class="ui-icon-btn" title="View Container Logs" aria-label="View Container Logs" data-acts="admin"><svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                                     d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z">
                                 </path>
@@ -565,7 +566,7 @@
             <div class="ui-nav-group" data-nav-group>
                 <button onclick="navigateToMobile('settings')" id="mobile-tab-settings" class="mobile-menu-item"><svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"> <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"> </path> <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path> </svg><span class="ui-nav-label">Settings</span></button>
                 <!-- The phone's way to the container log (the sidebar tools are hidden there) -->
-                <button onclick="closeMobileMenu(); loadContainerLogs()" id="mobile-container-logs" class="mobile-menu-item"><svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg><span class="ui-nav-label">Container log</span></button>
+                <button onclick="closeMobileMenu(); loadContainerLogs()" id="mobile-container-logs" class="mobile-menu-item" data-acts="admin"><svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg><span class="ui-nav-label">Container log</span></button>
                 <a href="/docs" target="_blank" rel="noopener" onclick="closeMobileMenu()" id="mobile-api-docs-link" class="mobile-menu-item"><svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"></path></svg><span class="ui-nav-label">API reference</span></a>
                 <a href="https://shlomiporush.github.io/mailcow-logs-viewer/" target="_blank" rel="noopener noreferrer" onclick="closeMobileMenu()" id="mobile-docs-site-link" class="mobile-menu-item"><svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"></path></svg><span class="ui-nav-label">Documentation</span></a>
                 <button onclick="navigateToMobile('about')" id="mobile-tab-about" class="mobile-menu-item"><svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg><span class="ui-nav-label">About</span></button>
@@ -585,7 +586,7 @@
                     <svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
                     <div><b>Authentication is off</b>
                         <p>Anyone who can open this page can see all mail logs and change settings.</p></div>
-                    <button type="button" class="ui-btn ui-btn-sm" onclick="navigateTo('settings', { sub: 'auth' })">Set up sign-in</button>
+                    <button data-acts="admin" type="button" class="ui-btn ui-btn-sm" onclick="navigateTo('settings', { sub: 'auth' })">Set up sign-in</button>
                     <button type="button" class="ui-icon-btn" onclick="dismissAuthOffBanner()" title="Dismiss" aria-label="Dismiss">
                         <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
                     </button>
@@ -605,7 +606,7 @@
                         <!-- Needs attention: server checks and the security alerts (anomaly detection) -->
                         <section class="ui-panel" id="dashboard-attention-panel">
                             <div class="ui-panel-head">Needs attention <span id="dashboard-attention-count" class="ui-count"></span>
-                                <button type="button" id="dashboard-dismiss-all" onclick="acknowledgeAllSecurityAlerts()" class="is-off ui-btn ui-btn-sm ui-head-actions" aria-label="Dismiss all alerts">Dismiss all<span class="ui-attn-wide">&nbsp;alerts</span></button></div>
+                                <button type="button" id="dashboard-dismiss-all" onclick="acknowledgeAllSecurityAlerts()" class="is-off ui-btn ui-btn-sm ui-head-actions" aria-label="Dismiss all alerts" data-acts="security">Dismiss all<span class="ui-attn-wide">&nbsp;alerts</span></button></div>
                             <!-- As tall as its items up to a cap; past it they scroll inside -->
                             <div id="dashboard-attention-scroll" class="ui-attn-scroll" role="region" aria-label="Needs attention" tabindex="0">
                                 <div id="dashboard-attention"></div>
@@ -854,12 +855,12 @@
                     <div id="security-cards" class="ui-sec-cards"></div>
                     <section class="ui-panel ui-sec-alerts">
                         <span><b>Email alerts</b> <span class="ui-muted">The rules' emails, and a mailbox stopped for outgoing spam, go to the destinations that receive the Security topic.</span></span>
-                        <button type="button" class="ui-btn ui-btn-sm" onclick="navigateTo('settings', { sub: 'notifications' })">Notifications</button>
+                        <button data-acts="admin" type="button" class="ui-btn ui-btn-sm" onclick="navigateTo('settings', { sub: 'notifications' })">Notifications</button>
                     </section>
                     <div class="ui-savebar hidden" id="security-savebar" role="region" aria-label="Unsaved changes">
                         <span class="ui-savebar-count" aria-live="polite"></span>
-                        <button type="button" class="ui-btn ui-savebar-discard" onclick="discardSecuritySettings()">Discard</button>
-                        <button type="button" class="ui-btn ui-savebar-save" onclick="saveSecuritySettings()">Save changes</button>
+                        <button type="button" class="ui-btn ui-savebar-discard" onclick="discardSecuritySettings()" data-acts="security">Discard</button>
+                        <button type="button" class="ui-btn ui-savebar-save" onclick="saveSecuritySettings()" data-acts="security">Save changes</button>
                     </div>
                 </div>
             </div>
@@ -918,7 +919,7 @@
                                     onkeypress="if(event.key==='Enter') loadSuppressions(1)">
                             </label>
                             <span class="ui-toolbar-gap"></span>
-                            <button onclick="showAddSuppressionModal()" class="ui-btn ui-btn-primary">Add Suppression</button>
+                            <button onclick="showAddSuppressionModal()" class="ui-btn ui-btn-primary" data-acts="outbound">Add Suppression</button>
                             <div class="ui-more-wrap">
                                 <!-- A popover menu like the row menus (uiMenu): a choice closes it -->
                                 <button id="suppression-more-btn" type="button" onclick="toggleSuppressionMoreMenu()" class="ui-btn" title="More" aria-label="More"
@@ -927,9 +928,9 @@
                                     <button type="button" role="menuitem" onclick="exportSuppressions()">Export CSV</button>
                                     <!-- The map the list is written to; gone while the Rspamd page is off -->
                                     <button type="button" role="menuitem" id="suppression-open-map" onclick="openRspamdMap('global_rcpt_blacklist.map')">Open in Rspamd</button>
-                                    <button type="button" role="menuitem" onclick="document.getElementById('suppression-import-file').click()">Import CSV</button>
+                                    <button type="button" role="menuitem" onclick="document.getElementById('suppression-import-file').click()" data-acts="outbound">Import CSV</button>
                                 </div>
-                                <input type="file" id="suppression-import-file" accept=".csv" class="hidden" onchange="importSuppressions(event)" aria-label="CSV file to import">
+                                <input type="file" id="suppression-import-file" accept=".csv" class="hidden" onchange="importSuppressions(event)" aria-label="CSV file to import" data-acts="outbound">
                             </div>
                         </div>
                         <div class="ui-fbar-pickers">
@@ -997,7 +998,7 @@
                         </div>
                     <div class="ui-collapse-body ui-rules-body">
                         <div class="ui-toolbar">
-                                <button onclick="showAddQuarantineRuleModal()"
+                                <button onclick="showAddQuarantineRuleModal()" data-acts="quarantine"
                                     class="ui-btn ui-btn-sm ui-btn-primary">
                                     <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
@@ -1107,7 +1108,7 @@
                                     </svg>
                                 </button>
                             <span id="status-blacklist-summary" class="ui-count"></span>
-                            <button onclick="checkBlacklists(true)" id="blacklist-check-btn" class="ui-btn ui-btn-sm ui-head-actions"><svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>Check all now</button>
+                            <button onclick="checkBlacklists(true)" id="blacklist-check-btn" class="ui-btn ui-btn-sm ui-head-actions" data-acts="status"><svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>Check all now</button>
                         </div>
                         <div id="status-blacklist"><div class="ui-loading" role="status"><div class="loading"></div><p>Loading...</p></div></div>
                     </section>
@@ -1139,7 +1140,7 @@
                         <p class="ui-muted" id="domains-summary">Domains and their DNS records</p>
                     </div>
                     <div id="dns-check-info" class="ui-head-tools">
-                        <button type="button" id="check-all-dns-btn" onclick="checkAllDomainsDNS()" class="ui-btn ui-btn-primary ui-head-primary">
+                        <button type="button" id="check-all-dns-btn" onclick="checkAllDomainsDNS()" class="ui-btn ui-btn-primary ui-head-primary" data-acts="domains">
                             <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
                             Check Now
                         </button>
@@ -1164,15 +1165,15 @@
                     </div>
                     <div id="dmarc-header-actions" class="ui-head-tools">
                         <button type="button" id="dmarc-manage-btn" class="hidden ui-btn" onclick="showReportsManagementModal()">Manage Reports</button>
-                        <label id="dmarc-upload-btn" class="hidden ui-btn ui-head-icon" tabindex="0" role="button" aria-label="Upload Report" title="Upload Report"
+                        <label id="dmarc-upload-btn" class="hidden ui-btn ui-head-icon" tabindex="0" role="button" aria-label="Upload Report" title="Upload Report" data-acts="dmarc"
                             onkeydown="if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); document.getElementById('dmarc-file-input').click(); }">
                             <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path></svg>
                             <span class="ui-head-icon-text">Upload Report</span>
                             <input type="file" id="dmarc-file-input" class="hidden" accept=".xml,.gz,.zip,.json"
-                                onchange="uploadDmarcReport(event)">
+                                onchange="uploadDmarcReport(event)" data-acts="dmarc">
                         </label>
                         <div id="dmarc-sync-container" class="hidden ui-dmarc-sync">
-                            <button type="button" id="dmarc-sync-btn" onclick="triggerDmarcSync()" class="ui-btn ui-btn-primary ui-head-primary">
+                            <button type="button" id="dmarc-sync-btn" onclick="triggerDmarcSync()" class="ui-btn ui-btn-primary ui-head-primary" data-acts="dmarc">
                                 <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
                                 <span id="dmarc-sync-btn-text">Fetch reports</span>
                             </button>
@@ -1480,6 +1481,9 @@
                 <!-- Content -->
                 <div id="settings-content" class="hidden ui-settings ui-scroll"></div>
             </div>
+
+            <!-- A page the signed-in person may not view, opened by its address (app.js showNoAccessPage) -->
+            <div id="content-no-access" class="tab-content hidden ui-page"></div>
         </div>
 
         <!-- Message details: a dialog over any page, or docked as the reading
@@ -1570,29 +1574,30 @@
     </div>
 
     <!-- JavaScript -->
-    <script src="/static/session-guard.js?v=1"></script>
-    <script src="/static/utils.js?v=36"></script>
+    <script src="/static/session-guard.js?v=2"></script>
+    <script src="/static/utils.js?v=37"></script>
     <script src="/static/router.js?v=12"></script>
-    <script src="/static/app.js?v=99"></script>
+    <script src="/static/app.js?v=100"></script>
     <script src="/static/alert-activity.js?v=6"></script>
     <script src="/static/export.js?v=2"></script>
     <script src="/static/message-details.js?v=25"></script>
-    <script src="/static/entity-card.js?v=4"></script>
-    <script src="/static/dmarc.js?v=24"></script>
-    <script src="/static/logs-viewer.js?v=6"></script>
-    <script src="/static/settings.js?v=53"></script>
-    <script src="/static/about.js?v=4"></script>
-    <script src="/static/domains.js?v=12"></script>
+    <script src="/static/entity-card.js?v=5"></script>
+    <script src="/static/dmarc.js?v=25"></script>
+    <script src="/static/logs-viewer.js?v=7"></script>
+    <script src="/static/settings.js?v=54"></script>
+    <script src="/static/about.js?v=5"></script>
+    <script src="/static/domains.js?v=13"></script>
     <script src="/static/mailbox-stats.js?v=15"></script>
     <script src="/static/devices.js?v=9"></script>
-    <script src="/static/rate-limits.js?v=31"></script>
-    <script src="/static/smtp-abuse.js?v=8"></script>
-    <script src="/static/protection.js?v=3"></script>
-    <script src="/static/security.js?v=16"></script>
-    <script src="/static/search.js?v=18"></script>
+    <script src="/static/rate-limits.js?v=32"></script>
+    <script src="/static/smtp-abuse.js?v=9"></script>
+    <script src="/static/protection.js?v=4"></script>
+    <script src="/static/security.js?v=17"></script>
+    <script src="/static/search.js?v=19"></script>
     <script src="/static/notifications.js?v=10"></script>
     <script src="/static/agents.js?v=2"></script>
-    <script src="/static/spam_filter.js?v=25"></script>
+    <script src="/static/users.js?v=1"></script>
+    <script src="/static/spam_filter.js?v=26"></script>
 
     <!-- DMARC fetch history -->
     <div id="dmarc-sync-history-modal" class="hidden ui-dialog-backdrop" role="dialog" aria-label="Fetch history">
@@ -1619,7 +1624,7 @@
             <div id="alert-activity-content" class="ui-dialog-body"></div>
             <!-- The actions stay at the bottom of the window while its content scrolls -->
             <div class="ui-dialog-foot" id="alert-activity-foot">
-                <button type="button" id="alert-activity-dismiss" class="hidden ui-btn" title="Dismiss the alert">Dismiss</button>
+                <button type="button" id="alert-activity-dismiss" class="hidden ui-btn" title="Dismiss the alert" data-acts="security">Dismiss</button>
                 <span id="alert-activity-open" class="ui-aa-open"></span>
             </div>
         </div>

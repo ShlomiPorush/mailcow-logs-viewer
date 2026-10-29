@@ -243,7 +243,7 @@ function renderDomainDnsSection(domain) {
         <div class="ui-list-head">
             <h4 class="ui-md-h">DNS Security Records</h4>
             <span class="ui-muted ui-head-actions" title="${dns.checked_at ? escapeHtml(formatTime(dns.checked_at)) : ''}">${dns.checked_at ? `Updated ${formatAgo(dns.checked_at)}` : 'Not checked yet'}</span>
-            <button data-domain="${escapeHtml(domain.domain_name)}"
+            <button data-domain="${escapeHtml(domain.domain_name)}" data-acts="domains"
                 onclick="event.stopPropagation(); checkSingleDomainDNS(this.dataset.domain)"
                 class="ui-btn ui-btn-sm" title="Check DNS for this domain">Check</button>
         </div>
@@ -422,6 +422,7 @@ function renderDNSCheck(type, check) {
 let dnsCheckInProgress = false;
 
 async function checkAllDomainsDNS() {
+    if (!uiMayAct('domains')) return;
     if (dnsCheckInProgress) {
         showToast('DNS check already in progress', 'warning');
         return;
@@ -459,6 +460,7 @@ async function checkAllDomainsDNS() {
 }
 
 async function checkSingleDomainDNS(domainName) {
+    if (!uiMayAct('domains')) return;
     if (dnsCheckInProgress) {
         showToast('DNS check already in progress', 'warning');
         return;

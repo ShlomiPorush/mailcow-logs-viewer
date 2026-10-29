@@ -215,6 +215,11 @@ function setDmarcBreadcrumb(type, data = {}) {
 // =============================================================================
 
 async function loadDmarcSettings() {
+    // Part of Status; without View there the upload stays hidden (the server refuses the read)
+    if (!userCan('status')) {
+        dmarcConfiguration = null;
+        return;
+    }
     try {
         const response = await authenticatedFetch('/api/settings/info');
         if (!response.ok) {
@@ -334,7 +339,9 @@ function renderDmarcHome(quiet = false) {
     if (!view) return;
     const domains = dmarcState.domains || [];
     if (!domains.length) {
-        dmarcShow(`<div class="ui-dm-card"><p class="ui-dm-empty">No reports yet. They arrive from the report mailbox, or upload one with Upload Report.</p></div>`, quiet);
+        // Upload is offered only to whoever may take action on DMARC & TLS
+        const upload = userCan('dmarc', 'write') ? ', or upload one with Upload Report' : '';
+        dmarcShow(`<div class="ui-dm-card"><p class="ui-dm-empty">No reports yet. They arrive from the report mailbox${upload}.</p></div>`, quiet);
         return;
     }
     const total = domains.reduce((s, d) => s + ((d.stats_30d || {}).total_messages || 0), 0);
@@ -1070,6 +1077,7 @@ function dmarcUpdateManageButton(domains) {
 // =============================================================================
 
 async function uploadDmarcReport(event) {
+    if (!uiMayAct('dmarc')) return;
     const file = event.target.files[0];
     if (!file) return;
 
@@ -1155,7 +1163,7 @@ function updateDmarcControls() {
             syncBtn.title = 'Fetching reports needs IMAP set up in Settings';
         }
         lastSyncInfo.innerHTML = `<span class="ui-muted">Not set up</span>
-            <button type="button" onclick="navigateTo('settings', { sub: 'dmarc_imap' })" class="ui-link-row ui-link">Set up IMAP</button>`;
+            <button data-acts="admin" type="button" onclick="navigateTo('settings', { sub: 'dmarc_imap' })" class="ui-link-row ui-link">Set up IMAP</button>`;
     } else if (dmarcImapStatus && dmarcImapStatus.enabled) {
         syncContainer.classList.remove('hidden');
         if (syncBtn && syncBtn.title === 'Fetching reports needs IMAP set up in Settings') {
@@ -1184,6 +1192,7 @@ function updateDmarcControls() {
 }
 
 async function triggerDmarcSync() {
+    if (!uiMayAct('dmarc')) return;
     const btn = document.getElementById('dmarc-sync-btn');
     const btnText = document.getElementById('dmarc-sync-btn-text');
 
@@ -1340,7 +1349,8 @@ async function loadReportsDomains() {
         const data = await response.json();
         if (request !== reportsManagementState.domainsRequest) return;
         reportsManagementState.domains = data.domains || [];
-        reportsManagementState.allowDelete = !!data.allow_delete;
+        // Deleting needs the setting and Take action on DMARC & TLS
+        reportsManagementState.allowDelete = !!data.allow_delete && userCan('dmarc', 'write');
         renderReportsDomains();
     } catch (error) {
         if (request !== reportsManagementState.domainsRequest) return;
@@ -1360,8 +1370,8 @@ function renderReportsDomains() {
     const day = ts => ts ? formatDay(ts * 1000) : '-';
     content.innerHTML = `
         <h4 class="ui-md-h">Reports by domain</h4>
-        ${allowDelete ? '' : `<div class="ui-list-note ui-flush">${uiLocked('Deleting reports is off', 'Turn on report deletion in Settings, DMARC.',
-            `<button type="button" class="ui-btn ui-btn-sm" onclick="closeReportsManagementModal(); navigateTo('settings', { sub: 'dmarc' })">Open Settings</button>`)}</div>`}
+        ${allowDelete || !userCan('dmarc', 'write') ? '' : `<div class="ui-list-note ui-flush">${uiLocked('Deleting reports is off', 'Turn on report deletion in Settings, DMARC.',
+            `<button data-acts="admin" type="button" class="ui-btn ui-btn-sm" onclick="closeReportsManagementModal(); navigateTo('settings', { sub: 'dmarc' })">Open Settings</button>`)}</div>`}
         <div id="dmarc-reports-domains-table" class="ui-table ui-stack" data-sort-icon="off" style="--ui-cols: minmax(180px, 2fr) 110px 110px minmax(110px, 1fr)${allowDelete ? ' 100px' : ''}; --ui-table-min: ${allowDelete ? 640 : 540}px">
             <div class="ui-tr ui-tr-head"><span data-sort-kind="text">Domain</span><span class="ui-td-end" data-sort-kind="number">DMARC reports</span><span class="ui-td-end" data-sort-kind="number">TLS reports</span><span data-sort-kind="date">Last report</span>${allowDelete ? '<span class="ui-td-end">Actions</span>' : ''}</div>
             ${domains.map(d => `
@@ -1370,7 +1380,7 @@ function renderReportsDomains() {
                 <span class="ui-td ui-td-end" data-sort="${Number(d.dmarc_reports)}"><small class="ui-sec-unit">DMARC </small>${escapeHtml(String(d.dmarc_reports))}</span>
                 <span class="ui-td ui-td-end" data-sort="${Number(d.tls_reports)}"><small class="ui-sec-unit">TLS </small>${escapeHtml(String(d.tls_reports))}</span>
                 <span class="ui-td" data-sort="${Number(d.last_report) || ''}"><small class="ui-sec-unit">Last report </small>${day(d.last_report)}</span>
-                ${allowDelete ? `<span class="ui-td ui-td-end ui-row-actions"><button onclick="deleteDomainReports('${escapeJsArg(d.domain)}')" class="ui-btn ui-btn-sm ui-btn-danger" title="Delete all reports of this domain">Delete all</button></span>` : ''}
+                ${allowDelete ? `<span class="ui-td ui-td-end ui-row-actions"><button data-acts="dmarc" onclick="deleteDomainReports('${escapeJsArg(d.domain)}')" class="ui-btn ui-btn-sm ui-btn-danger" title="Delete all reports of this domain">Delete all</button></span>` : ''}
             </div>`).join('')}
         </div>
     `;
@@ -1379,6 +1389,7 @@ function renderReportsDomains() {
 const reportsCount = (n, type) => `${Number(n)} ${type} report${Number(n) === 1 ? '' : 's'}`;
 
 async function deleteDomainReports(domain) {
+    if (!uiMayAct('dmarc')) return;
     const row = reportsManagementState.domains.find(d => d.domain === domain);
     if (!row) return;
     if (!await showConfirmModal({
@@ -1447,7 +1458,7 @@ async function loadReportsManagementPage(page) {
         if (request !== reportsManagementState.request) return;
         settled();
         reportsManagementState.page = data.page;
-        renderReportsManagementTable(data.reports || [], data.allow_delete, data);
+        renderReportsManagementTable(data.reports || [], data.allow_delete && userCan('dmarc', 'write'), data);
 
     } catch (error) {
         if (request !== reportsManagementState.request) return;
@@ -1509,7 +1520,7 @@ function renderReportsManagementTable(reports, allowDelete, { total, page, total
                 <span class="ui-td${report.shared_report_id ? ' ui-td-wrap' : ''}">${escapeHtml(report.org_name || '-')}${report.shared_report_id ?' <span class="ui-tag ui-tag-warn" title="Another report has the same report ID and different content.">Shared report ID</span>' : ''}</span>
                 <span class="ui-td ui-td-end"><small class="ui-sec-unit">Records </small>${escapeHtml(String(report.record_count))}</span>
                 <span class="ui-td">${day(report.begin_date)} - ${day(report.end_date)}</span>
-                ${allowDelete ? `<span class="ui-td ui-td-end ui-row-actions"><button onclick="deleteReport('${escapeJsArg(report.type)}', ${Number(report.id)}, '${escapeJsArg(report.domain)}')" class="ui-btn ui-btn-sm ui-btn-danger" title="Delete report">Delete</button></span>` : ''}
+                ${allowDelete ? `<span class="ui-td ui-td-end ui-row-actions"><button data-acts="dmarc" onclick="deleteReport('${escapeJsArg(report.type)}', ${Number(report.id)}, '${escapeJsArg(report.domain)}')" class="ui-btn ui-btn-sm ui-btn-danger" title="Delete report">Delete</button></span>` : ''}
             </div>`).join('')}
         </div>
         ${pagination}
@@ -1517,6 +1528,7 @@ function renderReportsManagementTable(reports, allowDelete, { total, page, total
 }
 
 async function deleteReport(reportType, reportId, domain) {
+    if (!uiMayAct('dmarc')) return;
     if (!await showConfirmModal({ title: 'Delete Report', message: `Are you sure you want to delete this ${reportType.toUpperCase()} report for ${domain}?\n\nThis action cannot be undone.`, confirmText: 'Delete', isDangerous: true })) {
         return;
     }

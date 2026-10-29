@@ -783,7 +783,12 @@ async function connectLogWebSocket(serviceId) {
         
         // Fetch a one-time auth token via the authenticated REST API
         try {
-            const tokenResp = await authenticatedFetch('/api/raw-logs/ws-token');
+            const tokenResp = await authenticatedFetch('/api/raw-logs/ws-token', { ownNotPermitted: true });
+            // No View for Logs (any more): no stream, and no retry
+            if (tokenResp.status === 403) {
+                logsNotPermitted();
+                return;
+            }
             if (tokenResp.ok) {
                 const tokenData = await tokenResp.json();
                 if (tokenData.token) {
@@ -855,6 +860,12 @@ async function connectLogWebSocket(serviceId) {
             logsState.isConnected = false;
             updateWsIndicator(false);
             
+            // The person has no View for Logs: say so, and do not reconnect
+            if (event.code === 4403) {
+                logsNotPermitted();
+                return;
+            }
+
             // Don't reconnect on authentication failure
             if (event.code === 4401 || logsState._authFailed) {
                 console.warn('[LOGS WS] Authentication failed - not reconnecting');
@@ -882,6 +893,20 @@ async function connectLogWebSocket(serviceId) {
         console.error('[LOGS WS] Connection error:', error);
         updateWsIndicator(false);
     }
+}
+
+const LOGS_NOT_PERMITTED = 'You do not have permission to view live logs.';
+
+// The stream stopped for good: the status line and a notice say why
+function logsNotPermitted() {
+    updateWsIndicator(false);
+    const status = document.getElementById('logs-ws-status');
+    if (status) {
+        status.textContent = 'No permission';
+        status.title = LOGS_NOT_PERMITTED;
+    }
+    showToast(LOGS_NOT_PERMITTED, 'error');
+    if (typeof refreshAppAccess === 'function') refreshAppAccess();
 }
 
 function disconnectLogWebSocket() {

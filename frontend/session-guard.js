@@ -20,7 +20,8 @@
 // =============================================================================
 
 // The reasons the server gives for a session it ended; any other value is ignored
-const SESSION_GUARD_REASONS = ['session_idle', 'session_expired'];
+// access_changed: the person's account changed or no longer gives access (the server ends the session)
+const SESSION_GUARD_REASONS = ['session_idle', 'session_expired', 'access_changed'];
 const SESSION_GUARD_REPORT_EVERY = 30000;   // activity reports, at most one per 30 s
 const SESSION_GUARD_POLL_EVERY = 60000;     // the regular status check
 const SESSION_GUARD_ASK_BEFORE = 60000;     // "Are you still there?" a minute before

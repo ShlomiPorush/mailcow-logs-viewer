@@ -21,6 +21,8 @@ test('the DMARC page reads the upload setting again on each visit', async () => 
         updateDmarcControls: () => seen.push(context.dmarcConfiguration.manual_upload_enabled),
         dmarcState: { domains: [] },
         console: { error() {} },
+        // Full access, as for the built-in admin (utils.js)
+        userCan: () => true,
     });
     vm.runInContext('var dmarcConfiguration = null;', context);
     vm.runInContext(source.slice(start, end), context);

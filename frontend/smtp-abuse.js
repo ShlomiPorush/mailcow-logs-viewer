@@ -70,7 +70,9 @@ function renderSmtpAbusePanel() {
     if (!smtpAbuseStatus) { panel.innerHTML = '<div class="ui-loading" role="status"><div class="loading"></div><p>Loading...</p></div>'; return; }
 
     const status = smtpAbuseStatus;
-    const locked = !status.enabled || !status.rw_key_configured;
+    // Stopping a mailbox and the whitelist are Security actions; without them the panel only reads
+    const mayAct = userCan('security', 'write');
+    const locked = !status.enabled || !status.rw_key_configured || !mayAct;
     const filter = (document.getElementById('smtp-abuse-whitelist-filter')?.value || '').toLowerCase();
     const filteredWhitelist = smtpAbuseWhitelist.filter(item => item.email.toLowerCase().includes(filter));
 
@@ -96,8 +98,8 @@ function renderSmtpAbusePanel() {
             }</td>
             <td class="ui-td-end ui-nowrap">${
                 locked ? '' : (item.blocked_by_protection || item.smtp_access === false
-                    ? `<button type="button" onclick="smtpAbuseAction('${escapeJsArg(item.email)}', 'unblock')" class="ui-btn ui-btn-sm ui-btn-primary">Re-enable SMTP</button>`
-                    : `<button type="button" onclick="smtpAbuseAction('${escapeJsArg(item.email)}', 'block')" class="ui-btn ui-btn-sm ui-btn-danger">Disable SMTP</button>`)
+                    ? `<button data-acts="security" type="button" onclick="smtpAbuseAction('${escapeJsArg(item.email)}', 'unblock')" class="ui-btn ui-btn-sm ui-btn-primary">Re-enable SMTP</button>`
+                    : `<button data-acts="security" type="button" onclick="smtpAbuseAction('${escapeJsArg(item.email)}', 'block')" class="ui-btn ui-btn-sm ui-btn-danger">Disable SMTP</button>`)
             }</td>
         </tr>`;
 
@@ -145,7 +147,7 @@ function renderSmtpAbusePanel() {
             </div>
 
             <div class="ui-sa-block ui-sa-whitelist">
-                <form onsubmit="event.preventDefault(); saveSmtpAbuseWhitelist()" class="ui-form">
+                <form data-acts="security" onsubmit="event.preventDefault(); saveSmtpAbuseWhitelist()" class="ui-form">
                     <div class="ui-list-head">
                         <div>
                             <label for="smtp-abuse-whitelist-textarea" class="ui-md-h">Whitelist</label>
@@ -165,7 +167,7 @@ function renderSmtpAbusePanel() {
                         filteredWhitelist.map(item => `
                         <li>
                             <span class="ui-mono ui-dtable-wrap">${uiEntity('address', item.email, { mono: true, plain: true })}</span>
-                            ${locked ? '' : `<button type="button" onclick="removeSmtpAbuseWhitelist('${escapeJsArg(item.email)}')" class="ui-btn ui-btn-sm ui-btn-danger">Remove</button>`}
+                            ${locked ? '' : `<button data-acts="security" type="button" onclick="removeSmtpAbuseWhitelist('${escapeJsArg(item.email)}')" class="ui-btn ui-btn-sm ui-btn-danger">Remove</button>`}
                         </li>`).join('') || '<li class="ui-muted">No matching entries</li>'
                     }</ul>
                 </div>` : ''}
@@ -173,7 +175,7 @@ function renderSmtpAbusePanel() {
         </div>`;
     securityUpdateSaveBar();
 
-    if (locked) {
+    if (locked && mayAct) {
         // The locked area says what is missing; the activity below stays readable. The
         // card's own switch turns the protection on, so only the key leads to Settings.
         const note = !status.rw_key_configured
@@ -184,6 +186,7 @@ function renderSmtpAbusePanel() {
 }
 
 async function smtpAbuseAction(email, action) {
+    if (!uiMayAct('security')) return;
     const verb = action === 'block' ? 'Disable SMTP for' : 'Re-enable SMTP for';
     const confirmed = await showConfirmModal({
         title: action === 'block' ? 'Disable SMTP' : 'Re-enable SMTP',
@@ -227,6 +230,7 @@ function onSmtpAbuseWhitelistInput(text) {
 }
 
 async function saveSmtpAbuseWhitelist(quiet = false) {
+    if (!uiMayAct('security')) return;
     const emails = smtpAbuseWhitelistLines(smtpAbuseWhitelistDraft ?? smtpAbuseWhitelistSavedText());
     try {
         const response = await authenticatedFetch('/api/smtp-abuse/whitelist', {
@@ -250,6 +254,7 @@ async function saveSmtpAbuseWhitelist(quiet = false) {
 }
 
 async function removeSmtpAbuseWhitelist(email) {
+    if (!uiMayAct('security')) return;
     try {
         const response = await authenticatedFetch(
             `/api/smtp-abuse/whitelist/${encodeURIComponent(email)}`, { method: 'DELETE' });

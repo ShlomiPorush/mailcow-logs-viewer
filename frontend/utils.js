@@ -192,14 +192,65 @@ function uiActionTag(action) {
 const UI_LOCK_ICON = '<svg class="ui-locked-icon" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2"></rect><path d="M8 11V7a4 4 0 0 1 8 0v4"></path></svg>';
 
 function uiLocked(title, textHtml, action = 'settings') {
+    // Settings is an admin's: anyone else gets the note without the way there
     const button = action === 'settings'
-        ? `<button type="button" class="ui-btn ui-btn-sm" onclick="navigateTo('settings')">Open Settings</button>`
+        ? `<button type="button" class="ui-btn ui-btn-sm" onclick="navigateTo('settings')" data-acts="admin">Open Settings</button>`
         : (action || '');
     return `<div class="ui-locked">${UI_LOCK_ICON}<div><b>${escapeHtml(title)}</b><p>${textHtml}</p></div>${button}</div>`;
 }
 
 // The Read-Write key sentence used by every locked area that needs it
 const UI_RW_KEY_TEXT = 'needs a <strong>Read-Write API key</strong> (<code>MAILCOW_API_KEY_RW</code>). Configure it in Settings → Mailcow → Connection.';
+
+// What the signed-in person may view and do, from GET /api/auth/status: area:read
+// (View) and area:write (Take action) per area, and whether they are an admin
+// (Settings, users, agents, background jobs). Until it is read, and while sign-in
+// is off, everything: the server checks every call anyway, so this only keeps the
+// page from offering what the server would refuse.
+const appAccess = { admin: true, scopes: new Set(), name: '' };
+
+// The areas with actions. A control that takes an action in one carries
+// data-acts="<area>" ("admin" for an admin's control) and is hidden while the
+// person may not (ui.css); the function it calls starts with uiMayAct(area)
+const ACCESS_ACT_AREAS = ['status', 'outbound', 'quarantine', 'security', 'rspamd', 'dmarc', 'domains', 'mailboxes'];
+
+function setAppAccess(status) {
+    appAccess.admin = !status || status.is_admin !== false;
+    appAccess.scopes = new Set(status && Array.isArray(status.scopes) ? status.scopes : []);
+    appAccess.name = status && typeof status.user_name === 'string' ? status.user_name : '';
+    const root = document.documentElement;
+    ACCESS_ACT_AREAS.forEach(area => root.classList.toggle(`ui-no-act-${area}`, !userCan(area, 'write')));
+    root.classList.toggle('ui-no-admin', !appAccess.admin);
+}
+
+function userIsAdmin() {
+    return appAccess.admin;
+}
+
+// kind: 'read' (View) or 'write' (Take action); area 'admin' is the admin's own
+function userCan(area, kind = 'read') {
+    if (appAccess.admin) return true;
+    if (area === 'admin' || area === 'settings') return false;
+    return appAccess.scopes.has(`${area}:${kind}`);
+}
+
+const UI_NOT_PERMITTED = 'You do not have permission for this.';
+let uiNotPermittedAt = 0;
+
+// Said once for a burst of refused calls, not once per call
+function uiNotPermitted() {
+    if (Date.now() - uiNotPermittedAt < 10000) return;
+    uiNotPermittedAt = Date.now();
+    showToast(UI_NOT_PERMITTED, 'error');
+}
+
+// The first check of every function that sends a change: a way in that showed no
+// control (a keyboard shortcut, a page left open) says so instead of calling
+function uiMayAct(area) {
+    if (userCan(area, 'write')) return true;
+    uiNotPermitted();
+    return false;
+}
 
 // The floating save bar every editable page uses, shown only with unsaved changes.
 // Place it inside the page or tab it saves: a hidden page hides its bar too.
@@ -813,10 +864,22 @@ function entityKindOf(value) {
 // options.mono writes it in the mono font; options.label shows other text than
 // the value (the value still opens and copies); options.fit splits an address
 // into its local part and its domain, for uiFitAddresses
+// The areas each card reads (backend user_access.py, /api/entities): it opens for a
+// person with View on every one of them; anyone else gets the value to copy
+const ENTITY_CARD_AREAS = {
+    ip: ['messages', 'security', 'mailboxes', 'dmarc', 'status'],
+    address: ['messages', 'security', 'mailboxes', 'outbound'],
+    domain: ['messages', 'security', 'mailboxes', 'dmarc', 'outbound', 'domains'],
+};
+
+function userCanOpenEntity(kind) {
+    return (ENTITY_CARD_AREAS[kind] || []).every(area => userCan(area));
+}
+
 function uiEntity(kind, value, { mono = false, cls = '', plain = false, label = '', fit = false } = {}) {
     const text = value === null || value === undefined ? '' : String(value).trim();
     const found = entityKindOf(text);
-    if (!found || (kind !== 'auto' && kind !== found)) {
+    if (!found || (kind !== 'auto' && kind !== found) || !userCanOpenEntity(found)) {
         if (plain || !text || text === '-') return escapeHtml(text || '-');
         return copyableText(text, [mono ? 'ui-mono' : '', cls].filter(Boolean).join(' '));
     }
@@ -1331,9 +1394,9 @@ function renderJobCard(name, jobKey, job) {
             <span class="ui-jobrow-tag">${job.status === 'success' && !isDisabled ? '' : statusBadge}</span>
             <span class="ui-jobrow-act">${!isDisabled ? `
                 <button onclick="triggerBackgroundJob('${escapeJsArg(jobKey)}', this, '${escapeJsArg(name)}')"
-                    class="ui-btn ui-btn-sm" ${isRunning ? 'disabled' : ''} title="${isRunning ? 'Job is running' : 'Run this job now'}">Run</button>`
+                    class="ui-btn ui-btn-sm" ${isRunning ? 'disabled' : ''} title="${isRunning ? 'Job is running' : 'Run this job now'}" data-acts="admin">Run</button>`
                 : !isFeatureOff && job.settings_section ? `
-                <button onclick="navigateTo('settings', { sub: '${escapeJsArg(job.settings_section)}' })" class="ui-btn ui-btn-sm"
+                <button onclick="navigateTo('settings', { sub: '${escapeJsArg(job.settings_section)}' })" class="ui-btn ui-btn-sm" data-acts="admin"
                     title="${escapeHtml(job.disabled_reason || '')}">Settings</button>` : ''}</span>
             ${job.error ? `<p class="ui-job-error ui-mono">${escapeHtml(job.error)}</p>` : ''}
         </div>

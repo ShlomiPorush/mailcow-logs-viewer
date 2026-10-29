@@ -63,7 +63,7 @@ async function loadRspamdMaps() {
         if (!data.configured) {
             container.innerHTML = uiLocked('Rspamd Not Configured',
                 escapeHtml(data.message || 'Set RSPAMD_PASSWORD in Settings to enable Rspamd map management.'),
-                `<button type="button" class="ui-btn ui-btn-sm" onclick="navigateTo('settings')">Go to Settings</button>`);
+                `<button data-acts="admin" type="button" class="ui-btn ui-btn-sm" onclick="navigateTo('settings')">Go to Settings</button>`);
             return;
         }
         
@@ -157,7 +157,8 @@ function renderRspamdMapsList(maps, rwKeyConfigured) {
         `;
     }
 
-    if (!rwKeyConfigured) {
+    // The key's note is for whoever may edit the maps
+    if (!rwKeyConfigured && userCan('rspamd', 'write')) {
         html = `<div class="ui-list-note ui-flush">${uiLocked('Read-Only Mode', RSPAMD_MAPS_READONLY_TEXT)}</div>` + html;
     }
 
@@ -187,7 +188,9 @@ async function openMapEditor(filename) {
 
         const data = await response.json();
         const meta = data.metadata || {};
-        const canSave = rspamdMapsCanSave;
+        // Saving needs the Read-Write key and Take action on Rspamd; without the latter the map is only read
+        const mayEdit = userCan('rspamd', 'write');
+        const canSave = rspamdMapsCanSave && mayEdit;
         mapEditorSaved = data.content || '';
         mapEditorHash = data.content_hash || null;
 
@@ -252,7 +255,7 @@ async function openMapEditor(filename) {
                         </div>` : ''}
                     </div>
                     ${canSave ? uiSaveBar('map-savebar', { save: `saveMapContent('${escapeJsArg(filename)}')`, discard: `openMapEditor('${escapeJsArg(filename)}')` }) : ''}
-                    ${canSave ? '' : uiLocked('Read-Only Mode', RSPAMD_MAPS_READONLY_TEXT)}
+                    ${canSave || !mayEdit ? '' : uiLocked('Read-Only Mode', RSPAMD_MAPS_READONLY_TEXT)}
                 </div>
             </section>
         `;
@@ -362,6 +365,7 @@ async function saveMapContent(filename) {
 }
 
 async function saveMapContentOnce(filename) {
+    if (!uiMayAct('rspamd')) return;
     // What is saved and the map it was edited from, taken together before
     // anything waits; a save from an editor opened again since is dropped
     const opened = mapEditorOpened;
@@ -466,7 +470,8 @@ function suppressionSyncLocked() {
 
 function updateSuppressionSyncLock() {
     // Locked only matters while the list is synced with Rspamd
-    const locked = suppressionSyncLocked() && !(suppressionRspamdState && !suppressionRspamdState.sync_on);
+    // Said to whoever may change the list: anyone else cannot act on it
+    const locked = suppressionSyncLocked() && !(suppressionRspamdState && !suppressionRspamdState.sync_on) && userCan('outbound', 'write');
     const note = document.getElementById('suppression-rw-note');
     if (note) {
         note.innerHTML = locked ? `<div class="ui-list-note ui-flush">${uiLocked('Syncing to Rspamd is locked',
@@ -500,7 +505,7 @@ function suppressionShowOff(off) {
     offNote.classList.toggle('hidden', !off);
     offNote.innerHTML = off ? `<div class="ui-list-note ui-flush">${uiLocked('No suppression list',
         "Sync with Rspamd is off. Turn it on in Settings to load and manage this app's blocks.",
-        `<button type="button" class="ui-btn ui-btn-sm" onclick="navigateTo('settings', { sub: 'outbound' })">Settings</button>`)}</div>` : '';
+        `<button data-acts="admin" type="button" class="ui-btn ui-btn-sm" onclick="navigateTo('settings', { sub: 'outbound' })">Settings</button>`)}</div>` : '';
 }
 
 async function loadSuppressionSyncNote() {
@@ -523,7 +528,7 @@ async function loadSuppressionSyncNote() {
     suppressionShowOff(!state.sync_on);
     // Turned on since the list was last asked for (or not known then): it loads now
     if (state.sync_on && wasOn === false) loadSuppressions();
-    const settingsButton = `<button type="button" class="ui-btn ui-btn-sm" onclick="navigateTo('settings', { sub: 'outbound' })">Settings</button>`;
+    const settingsButton = `<button data-acts="admin" type="button" class="ui-btn ui-btn-sm" onclick="navigateTo('settings', { sub: 'outbound' })">Settings</button>`;
     if (!state.sync_on) {
         note.innerHTML = '';
         return;
@@ -744,9 +749,9 @@ function renderSuppressionItem(s) {
             <span class="ui-td"><small class="ui-sec-unit">Added </small>${uiTime(s.created_at, formatAgo(s.created_at), { title: formatTime(s.created_at) })}</span>
             <span class="ui-td ui-td-end ui-row-actions">
                 <button onclick="showBlockDetails(${Number(s.id)})" class="ui-btn ui-btn-sm">Block details</button>
-                <button onclick="showEditSuppressionModalById(${Number(s.id)})" class="ui-btn ui-btn-sm" title="Edit suppression">Edit</button>
-                <button onclick="toggleSuppression(${Number(s.id)}, ${!s.active})" class="ui-btn ui-btn-sm" title="${s.active ? 'Deactivate' : 'Reactivate'}">${s.active ? 'Disable' : 'Enable'}</button>
-                <button onclick="deleteSuppression(${Number(s.id)}, '${escapeJsArg(s.email)}')" class="ui-btn ui-btn-sm ui-btn-danger" title="Delete permanently">Delete</button>
+                <button onclick="showEditSuppressionModalById(${Number(s.id)})" class="ui-btn ui-btn-sm" title="Edit suppression" data-acts="outbound">Edit</button>
+                <button onclick="toggleSuppression(${Number(s.id)}, ${!s.active})" class="ui-btn ui-btn-sm" data-acts="outbound" title="${s.active ? 'Deactivate' : 'Reactivate'}">${s.active ? 'Disable' : 'Enable'}</button>
+                <button onclick="deleteSuppression(${Number(s.id)}, '${escapeJsArg(s.email)}')" class="ui-btn ui-btn-sm ui-btn-danger" title="Delete permanently" data-acts="outbound">Delete</button>
             </span>
         </div>
     `;
@@ -927,7 +932,7 @@ function showAddSuppressionModal(prefillEmail, queueId, { notes = 'Added from qu
         </div>
     `, `
         <button onclick="uiCancelDialog('add-suppression-modal')" class="ui-btn">Cancel</button>
-        <button onclick="createSuppression()" class="ui-btn ui-btn-primary">Add Suppression</button>
+        <button data-acts="outbound" onclick="createSuppression()" class="ui-btn ui-btn-primary">Add Suppression</button>
     `);
 
     // Pre-fill email if provided (e.g., from queue page)
@@ -973,6 +978,7 @@ function toggleCreateExpiryField() {
 }
 
 async function createSuppression() {
+    if (!uiMayAct('outbound')) return;
     let email = document.getElementById('new-suppression-email').value.trim();
     const type = document.getElementById('new-suppression-type').value;
     const reason = document.getElementById('new-suppression-reason').value;
@@ -1083,7 +1089,7 @@ function showEditSuppressionModal(s) {
         </div>
     `, `
         <button onclick="uiCancelDialog('edit-suppression-modal')" class="ui-btn">Cancel</button>
-        <button onclick="saveEditSuppression(${Number(s.id)})" class="ui-btn ui-btn-primary">Save Changes</button>
+        <button data-acts="outbound" onclick="saveEditSuppression(${Number(s.id)})" class="ui-btn ui-btn-primary">Save Changes</button>
     `);
     uiGuardDialog(document.getElementById('edit-suppression-modal'));
 }
@@ -1111,6 +1117,7 @@ function extendExpiryBy(days) {
 }
 
 async function saveEditSuppression(id) {
+    if (!uiMayAct('outbound')) return;
     const notes = document.getElementById('edit-suppression-notes')?.value.trim() || null;
     const permanent = document.getElementById('edit-suppression-permanent')?.checked ?? true;
     
@@ -1150,6 +1157,7 @@ async function saveEditSuppression(id) {
 }
 
 async function toggleSuppression(id, newActive) {
+    if (!uiMayAct('outbound')) return;
     try {
         const response = await authenticatedFetch(`/api/suppressions/${id}`, {
             method: 'PUT',
@@ -1170,6 +1178,7 @@ async function toggleSuppression(id, newActive) {
 }
 
 async function deleteSuppression(id, email) {
+    if (!uiMayAct('outbound')) return;
     if (!await showConfirmModal({ title: 'Delete Suppression', message: `Delete suppression for ${email}? This cannot be undone.`, confirmText: 'Delete', isDangerous: true })) return;
     
     try {
@@ -1199,6 +1208,7 @@ function suppressionListChangeText(changed) {
 // After a change on the page, while the list is synced with Rspamd: what
 // mailcow changed comes in first, then the change is written
 async function autoSyncToRspamd() {
+    if (!uiMayAct('outbound')) return;
     // Asked every time: the server skips it at once while the sync is off,
     // and a state read before the sync was turned on may be out of date
     try {
@@ -1226,6 +1236,7 @@ function exportSuppressions() {
 }
 
 async function importSuppressions(event) {
+    if (!uiMayAct('outbound')) return;
     const file = event.target.files[0];
     if (!file) return;
     

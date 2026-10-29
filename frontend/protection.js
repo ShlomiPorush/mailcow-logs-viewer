@@ -215,6 +215,7 @@ function removeProtectionCountry(code) {
 }
 
 async function saveProtectionRules(quiet = false) {
+    if (!uiMayAct('security')) return;
     try {
         const res = await authenticatedFetch('/api/protection/rules', {
             method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ rules: protectionRules })
@@ -234,6 +235,7 @@ async function saveProtectionRules(quiet = false) {
 }
 
 async function protectionHitAction(id, action, button, done) {
+    if (!uiMayAct('security')) return;
     if (button) button.disabled = true;
     try {
         const res = await authenticatedFetch(`/api/protection/hits/${id}/${action}`, { method: 'POST' });

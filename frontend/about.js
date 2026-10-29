@@ -49,7 +49,7 @@ function aboutHealthCards(info, mailcow, rw, health) {
             <small>${detail}</small>
             ${actions ? `<div class="ui-chip-row">${actions}</div>` : ''}
         </div>`;
-    const settingsBtn = section => `<button type="button" class="ui-btn ui-btn-sm" onclick="navigateTo('settings', { sub: '${section}' })">Settings</button>`;
+    const settingsBtn = section => `<button data-acts="admin" type="button" class="ui-btn ui-btn-sm" onclick="navigateTo('settings', { sub: '${section}' })">Settings</button>`;
     const mono = text => `<span class="ui-mono">${escapeHtml(text)}</span>`;
     const config = info.configuration || {};
     const smtp = info.smtp_configuration || {};
@@ -90,12 +90,12 @@ function aboutHealthCards(info, mailcow, rw, health) {
     cards.push(card('Email alerts (SMTP)', smtpOn ? 'ok' : '', smtpOn ? 'Configured' : 'Not set up',
         smtpOn ? `Alerts and the weekly summary are sent through ${mono(`${smtp.host || ''}${smtp.port ? `:${smtp.port}` : ''}`)}.`
             : 'Set it up to get alerts and the weekly summary by email.',
-        (smtpOn ? '<button type="button" class="ui-btn ui-btn-sm" onclick="testSmtpConnection()">Test SMTP</button>' : '') + settingsBtn('smtp')));
+        (smtpOn ? '<button type="button" class="ui-btn ui-btn-sm" onclick="testSmtpConnection()" data-acts="admin">Test SMTP</button>' : '') + settingsBtn('smtp')));
 
     cards.push(card('Report mailbox (IMAP)', imap.imap_sync_enabled ? 'ok' : '', imap.imap_sync_enabled ? 'Collecting' : 'Not set up',
         imap.imap_sync_enabled ? `DMARC and TLS reports are collected from ${mono(imap.imap_host || '')}.`
             : 'Reports arrive only when you upload them. Connect a mailbox to collect them automatically.',
-        (imap.imap_sync_enabled ? '<button type="button" class="ui-btn ui-btn-sm" onclick="testImapConnection()">Test IMAP</button>' : '') + settingsBtn('dmarc_imap')));
+        (imap.imap_sync_enabled ? '<button type="button" class="ui-btn ui-btn-sm" onclick="testImapConnection()" data-acts="admin">Test IMAP</button>' : '') + settingsBtn('dmarc_imap')));
 
     let geoTone = '', geoValue = 'Not set up', geoDetail = 'Add a free MaxMind license key to see where IP addresses come from.';
     if (geoip.enabled) {

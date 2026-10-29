@@ -15,7 +15,7 @@
     
     <style>.hidden{display:none}</style>
     <link rel="stylesheet" href="/static/assets/css/utilities.css?v=1">
-    <link rel="stylesheet" href="/static/assets/css/ui.css?v=28">
+    <link rel="stylesheet" href="/static/assets/css/ui.css?v=29">
     <style>
         .loading {
             border: 3px solid var(--ui-line);
@@ -173,12 +173,21 @@
         // Nothing about them is kept in the browser: the cookie the backend
         // sets is HttpOnly, so no script on the page (or injected into it) can
         // read it, and there is no password in sessionStorage to steal.
+        // Basic credentials as RFC 7617 sends them: UTF-8, then Base64 (btoa alone throws on a
+        // character outside Latin-1 and garbles the rest)
+        function basicCredentials(username, password) {
+            const bytes = new TextEncoder().encode(`${username}:${password}`);
+            let binary = '';
+            bytes.forEach(b => { binary += String.fromCharCode(b); });
+            return btoa(binary);
+        }
+
         async function startSession(username, password) {
             const response = await fetch('/api/auth/session', {
                 method: 'POST',
                 credentials: 'include',
                 headers: {
-                    'Authorization': `Basic ${btoa(`${username}:${password}`)}`
+                    'Authorization': `Basic ${basicCredentials(username, password)}`
                 }
             });
             return response;
@@ -300,6 +309,9 @@
                         case 'sign_in_changed':
                             errorMessage = 'Sign-in settings just changed. Please sign in again.';
                             break;
+                        case 'no_access':
+                            errorMessage = 'Your account has no access to this app. Ask an administrator.';
+                            break;
                         case 'server_error':
                             errorMessage = 'Server error during authentication. Please try again.';
                             break;
@@ -325,6 +337,9 @@
                     break;
                 case 'session_expired':
                     message = 'Your session reached its maximum length. Sign in again to continue.';
+                    break;
+                case 'access_changed':
+                    message = 'Your access changed. Sign in again.';
                     break;
             }
             if (message) {
