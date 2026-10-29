@@ -224,4 +224,16 @@ test('the answer for a message opened before another one is not shown', async ()
     const header = w.document.getElementById('message-modal-header').textContent;
     assert.match(header, /second@example\.com/);
     assert.doesNotMatch(header, /first@example\.com/);
+
+    // A late failure of the first one does not replace the second either
+    run(`authenticatedFetch = url => new Promise(resolve => { release[url.split('/')[3]] = status => resolve({ ok: status === 200,
+        status, statusText: 'Internal Server Error', json: async () => (${JSON.stringify(details('noid-4', 'fourth@example.com'))}) }); });`);
+    const third = w.viewMessageDetails('noid-3');
+    const fourth = w.viewMessageDetails('noid-4');
+    w.release['noid-4'](200);
+    await fourth;
+    w.release['noid-3'](500);
+    await third;
+    assert.doesNotMatch(w.document.getElementById('message-modal-content').textContent, /Failed to load/);
+    assert.match(w.document.getElementById('message-modal-header').textContent, /fourth@example\.com/);
 });

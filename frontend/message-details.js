@@ -166,6 +166,8 @@ async function viewMessageDetails(correlationKey) {
 
         renderModalTab('overview', data);
     } catch (error) {
+        // A failure of a message no longer open says nothing about the one shown
+        if (window.openMessageKey !== correlationKey) return;
         console.error('Failed to load message details:', error);
         content.innerHTML = `<p class="ui-empty ui-text-fail">Failed to load message details: ${escapeHtml(error.message)}</p>`;
     }
