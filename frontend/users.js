@@ -77,7 +77,8 @@ function usersPresetLines(level) {
 }
 
 // A local user's password: the server's rule (backend services/passwords.py), shown while it is
-// typed. By Unicode category, as the server checks it; a symbol is anything but a letter or digit
+// typed. By Unicode category; a symbol is anything but a letter or digit. A browser may know
+// newer characters than the server, so the server decides: the meter only guides
 const USERS_PASSWORD_WEAK = 'Use at least 8 characters with an uppercase letter, a lowercase letter, a number and a symbol.';
 const USERS_PASSWORD_LONG = 'Use at most 256 characters.';
 const USERS_PASSWORD_RULES = [
@@ -90,8 +91,7 @@ const USERS_PASSWORD_RULES = [
 const USERS_STRENGTH = ['', 'Weak', 'Fair', 'Good', 'Strong'];
 
 // What a password meets, and its strength: 0 empty; Weak (1) until every rule is met; then by
-// length, Fair (2) for 8 or 9 characters, Good (3) for 10 to 13, Strong (4) for 14 or more.
-// problem: the server's words when it would refuse the password, else ''
+// length, Fair (2) for 8 or 9 characters, Good (3) for 10 to 13, Strong (4) for 14 or more
 function usersPasswordCheck(password) {
     const text = String(password || '');
     const met = {};
@@ -99,8 +99,15 @@ function usersPasswordCheck(password) {
     const length = [...text].length;
     const complete = Object.values(met).every(Boolean);
     const level = !text ? 0 : !complete ? 1 : length >= 14 ? 4 : length >= 10 ? 3 : 2;
-    const problem = length > 256 ? USERS_PASSWORD_LONG : complete ? '' : USERS_PASSWORD_WEAK;
-    return { met, level, problem };
+    return { met, level };
+}
+
+// What Save stops before asking the server, in its words: only what reads the same in every
+// browser, a missing password (required: adding) and more than 256 characters (code points)
+function usersPasswordBlock(password, required) {
+    const text = String(password || '');
+    if (!text) return required ? USERS_PASSWORD_WEAK : '';
+    return [...text].length > 256 ? USERS_PASSWORD_LONG : '';
 }
 
 // The meter under the password field: four segments, the strength in words (read out as it
@@ -339,7 +346,7 @@ function editUser(userId) {
             ${user ? '' : `<label for="user-edit-name"><span class="ui-label">Username</span>
                 <input id="user-edit-name" class="ui-input" autocomplete="off" maxlength="64" spellcheck="false"></label>`}
             <label for="user-edit-pass"><span class="ui-label">${user ? 'New password' : 'Password'}</span>
-                <input id="user-edit-pass" type="password" class="ui-input" autocomplete="new-password" maxlength="256" placeholder="At least 8 characters"></label>
+                <input id="user-edit-pass" type="password" class="ui-input" autocomplete="new-password" placeholder="At least 8 characters"></label>
             ${usersPasswordMeterHtml(!!user)}
             <p class="ui-set-desc">${user ? `Leave it empty to keep the current password. A new password signs ${escapeHtml(name)} out.`
                 : 'Give this password to the user. They sign in on the sign-in page with the username and this password.'}</p>
@@ -455,14 +462,14 @@ async function saveUser(event, userId) {
         const field = kind === 'local' ? modal.querySelector('#user-edit-name') : modal.querySelector('#user-edit-email');
         const name = (field ? field.value : '').trim();
         if (!name) return say(kind === 'local' ? 'Enter a username.' : 'Enter the email address.');
-        // The server's rule and words; the server checks again
-        if (kind === 'local' && usersPasswordCheck(password).problem) return say(usersPasswordCheck(password).problem);
+        // The rest of the rule is the server's: its answer shows in the error line
+        if (kind === 'local' && usersPasswordBlock(password, true)) return say(usersPasswordBlock(password, true));
         body = kind === 'local' ? { kind, username: name, password } : { kind, email: name };
     } else {
         url = `/api/users/${Number(userId)}`;
         method = 'PUT';
         body = { row_version: Number(modal.dataset.version) };
-        if (password && usersPasswordCheck(password).problem) return say(usersPasswordCheck(password).problem);
+        if (usersPasswordBlock(password, false)) return say(usersPasswordBlock(password, false));
         if (password) body.password = password;
     }
     Object.assign(body, { access: level, views: custom ? chosen('view') : [], acts: custom ? chosen('act') : [], disabled });

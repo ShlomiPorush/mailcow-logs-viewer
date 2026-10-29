@@ -1,7 +1,8 @@
 // A local user's password in Settings > Users (users.js): the strength the meter shows, the
 // requirements it marks, and the words that block Save are the server's rule and words
 // (backend services/passwords.py): at least 8 characters with an uppercase letter, a lowercase
-// letter, a number and a symbol, by Unicode category; at most 256.
+// letter, a number and a symbol, by Unicode category; at most 256. Save stops only what every
+// browser reads alike (no password, over 256 characters); the rest is the server's to refuse.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -35,17 +36,16 @@ test('the strength: none when empty, Weak until every requirement is met, then b
 });
 
 test('each requirement is marked on its own', () => {
-    assert.deepEqual(check(''), { met: { length: false, upper: false, lower: false, digit: false, symbol: false }, level: 0,
-        problem: 'Use at least 8 characters with an uppercase letter, a lowercase letter, a number and a symbol.' });
+    assert.deepEqual(check(''), { met: { length: false, upper: false, lower: false, digit: false, symbol: false }, level: 0 });
     assert.deepEqual(check('abc').met, { length: false, upper: false, lower: true, digit: false, symbol: false });
     assert.deepEqual(check('ABCDEFGH').met, { length: true, upper: true, lower: false, digit: false, symbol: false });
     assert.deepEqual(check('12345678 ').met, { length: true, upper: false, lower: false, digit: true, symbol: true });
-    assert.deepEqual(check('Abcdef1!'), { met: { length: true, upper: true, lower: true, digit: true, symbol: true }, level: 2, problem: '' });
+    assert.deepEqual(check('Abcdef1!'), { met: { length: true, upper: true, lower: true, digit: true, symbol: true }, level: 2 });
 });
 
 test('letters and symbols are told apart as the server does (Unicode categories)', () => {
-    assert.equal(check('Ärger12€').problem, '');            // letters and a symbol outside ASCII
-    assert.equal(check('Пароль1!').problem, '');            // Cyrillic cases
+    assert.equal(check('Ärger12€').level, 2);               // letters and a symbol outside ASCII
+    assert.equal(check('Пароль1!').level, 2);               // Cyrillic cases
     assert.equal(check('Abcd日本12').met.symbol, false);     // letters without case are letters
     assert.equal(check('Abcdefg²').met.digit, false);        // a superscript two is a symbol
     assert.equal(check('Abcdefg²').met.symbol, true);
@@ -54,7 +54,22 @@ test('letters and symbols are told apart as the server does (Unicode categories)
     assert.equal(check('\u{1D49C}bcdef1!').level, 2);
 });
 
-test('over 256 characters says so', () => {
-    assert.equal(check('A1!' + 'b'.repeat(253)).problem, '');
-    assert.equal(check('A1!' + 'b'.repeat(254)).problem, 'Use at most 256 characters.');
+const block = (password, required) => context.usersPasswordBlock(password, required);
+
+test('Save stops only a missing password when adding, and over 256 characters', () => {
+    assert.equal(block('', true), value('USERS_PASSWORD_WEAK'));
+    assert.equal(block('', false), '');                     // editing: an empty field keeps the password
+    // A requirement unmet is the server's to refuse, in its words: not stopped here
+    for (const password of ['abc', 'abcdefgh', 'Abcdefgh1']) assert.equal(block(password, true), '', password);
+    assert.equal(block('A1!' + 'b'.repeat(253), true), '');
+    assert.equal(block('A1!' + 'b'.repeat(254), true), 'Use at most 256 characters.');
+    assert.equal(block('A1!' + 'b'.repeat(254), false), 'Use at most 256 characters.');
+});
+
+test('the 256 counts characters (code points), not UTF-16 units', () => {
+    // 126 astral characters (252 units) and 5 more: 131 characters, 257 units
+    const password = '\u{1F600}'.repeat(126) + 'Ab1!x';
+    assert.equal(password.length, 257);
+    assert.equal(block(password, true), '');
+    assert.equal(block('\u{1F600}'.repeat(257), true), 'Use at most 256 characters.');
 });

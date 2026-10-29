@@ -1,7 +1,8 @@
 // The password strength meter of Settings > Users in a real DOM (jsdom): it follows what is
 // typed, says the strength in a polite live region, tells a screen reader which requirements
-// are met, waits for typing when editing (an empty field keeps the password), and Save is
-// blocked with the server's words until the password meets the rule.
+// are met, waits for typing when editing (an empty field keeps the password). Save sends a
+// password that misses a requirement, and the server's answer shows in the dialog; only a
+// missing password when adding and over 256 characters are stopped before asking.
 // Set A11Y_MODULES to jsdom's node_modules to run it locally (see layers.a11y.cjs).
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -37,8 +38,11 @@ function page() {
     };
     [read('utils.js'), read('users.js')].forEach(run);
     const sent = [];
+    // The server refuses a password without an uppercase letter, as the real one does (its words)
     w.authenticatedFetch = async (url, options) => {
         sent.push({ url, options });
+        const password = JSON.parse(options.body).password;
+        if (password && !/\p{Lu}/u.test(password)) return { ok: false, status: 422, json: async () => ({ detail: WEAK }) };
         return { ok: true, status: 201, json: async () => ({ username: 'erin' }) };
     };
     w.loadUsersPanel = () => {};
@@ -59,6 +63,8 @@ test('adding: the meter shows the requirements at once and follows what is typed
     const meter = p.$('#user-edit-pw-meter');
     assert.ok(!meter.classList.contains('hidden'));
     assert.equal(p.$('#user-edit-pass').placeholder, 'At least 8 characters');
+    // No limit in UTF-16 units: the 256 is counted in characters, as the server counts it
+    assert.ok(!p.$('#user-edit-pass').hasAttribute('maxlength'));
     assert.equal(p.$('#user-edit-pw-label').getAttribute('aria-live'), 'polite');
     assert.equal(p.$('#user-edit-pw-label').textContent, '');
     assert.deepEqual(p.rules(), [
@@ -87,31 +93,49 @@ test('editing: the meter waits for typing, since an empty field keeps the passwo
     assert.ok(p.$('#user-edit-pw-meter').classList.contains('hidden'));
 });
 
-test('Save is blocked with the server\'s words until the rule is met', async () => {
+test('Save with a requirement unmet asks the server, and its words show in the dialog', async () => {
     const p = page();
     p.w.editUser(null);
     p.$('#user-edit-name').value = 'erin';
-    p.type('abcdefgh');
+    // No password at all: stopped here, with the same words
     await p.w.saveUser({ preventDefault() {} }, null);
     assert.equal(p.$('#user-edit-error').textContent, WEAK);
     assert.equal(p.sent.length, 0);
-    p.type('Abcdef1!');
+    p.type('abcdefgh');
     await p.w.saveUser({ preventDefault() {} }, null);
     assert.equal(p.sent.length, 1);
-    assert.equal(JSON.parse(p.sent[0].options.body).password, 'Abcdef1!');
+    assert.equal(p.$('#user-edit-error').textContent, WEAK);
+    assert.ok(p.$('#user-edit-modal'), 'the dialog stays open');
+    p.type('Abcdef1!');
+    await p.w.saveUser({ preventDefault() {} }, null);
+    assert.equal(p.sent.length, 2);
+    assert.equal(JSON.parse(p.sent[1].options.body).password, 'Abcdef1!');
 });
 
-test('editing with a weak new password is blocked; an empty one keeps the password', async () => {
+test('over 256 characters is stopped; 131 characters in 257 UTF-16 units are not', async () => {
+    const p = page();
+    p.w.editUser(null);
+    p.$('#user-edit-name').value = 'erin';
+    p.type('A1!' + 'b'.repeat(254));
+    await p.w.saveUser({ preventDefault() {} }, null);
+    assert.equal(p.$('#user-edit-error').textContent, 'Use at most 256 characters.');
+    assert.equal(p.sent.length, 0);
+    p.type('\u{1F600}'.repeat(126) + 'Ab1!x');
+    await p.w.saveUser({ preventDefault() {} }, null);
+    assert.equal(p.sent.length, 1);
+});
+
+test('editing: a weak new password gets the server\'s answer; an empty one keeps the password', async () => {
     const p = page();
     p.w.editUser(2);
     p.type('short');
     await p.w.saveUser({ preventDefault() {} }, 2);
+    assert.equal(p.sent.length, 1);
     assert.equal(p.$('#user-edit-error').textContent, WEAK);
-    assert.equal(p.sent.length, 0);
     p.type('');
     await p.w.saveUser({ preventDefault() {} }, 2);
-    assert.equal(p.sent.length, 1);
-    assert.ok(!('password' in JSON.parse(p.sent[0].options.body)));
+    assert.equal(p.sent.length, 2);
+    assert.ok(!('password' in JSON.parse(p.sent[1].options.body)));
 });
 
 test('the dialog with the meter has no axe violations', async () => {
