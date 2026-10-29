@@ -3,7 +3,8 @@
 // dialog asks it before Save. The meter shows the strength as guidance: an uppercase letter, a
 // lowercase letter, a number and a symbol, by Unicode category. Generate draws from
 // crypto.getRandomValues: readable letters and digits, and a few easy symbols inside, apart.
-// The username and email are checked as the server checks them.
+// The username and email: the dialog stops only what is missing or too long; the server decides
+// the rest, so the dialog never refuses what the server takes.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -80,19 +81,22 @@ test('Generate: readable letters and digits, a few easy symbols inside, one of e
     }
 });
 
-test('the username and email are checked as the server checks them', () => {
+test('the username and email: only missing or too long is stopped here, the server decides the rest', () => {
     const name = context.usersUsernameProblem;
     const email = context.usersEmailProblem;
     assert.equal(name(''), 'Enter a username.');
     assert.equal(name('   '), 'Enter a username.');
-    for (const ok of ['alice', 'Alice', 'a.b_c-d@e', 'x'.repeat(64), ' bob ']) assert.equal(name(ok), '', ok);
-    for (const bad of ['al ice', 'alice!', 'x'.repeat(65), 'ålice']) assert.equal(name(bad), value('USERS_USERNAME_RULE'), bad);
+    // The server folds case (groß becomes gross) and decides which characters it takes
+    for (const ok of ['alice', 'Alice', 'groß', 'ﬁona', 'al ice', 'x'.repeat(64), '\u{1F600}'.repeat(64), ' bob ']) assert.equal(name(ok), '', ok);
+    assert.equal(name('x'.repeat(65)), value('USERS_USERNAME_RULE'));
     const store = fs.readFileSync(path.join(root, 'backend/app/services/users_store.py'), 'utf8');
     assert.ok(store.includes(`return "${value('USERS_USERNAME_RULE')}"`), 'the server\'s words');
-    assert.ok(store.includes('USERNAME_RE = re.compile(r"[a-z0-9._@-]{1,64}")'), 'the server\'s rule');
     assert.equal(email(''), 'Enter the email address.');
-    for (const ok of ['carol@example.com', ' Carol@Example.com ']) assert.equal(email(ok), '', ok);
-    for (const bad of ['carol', '@example.com', 'carol@', 'a@b@example.com', 'carol @example.com']) assert.equal(email(bad), 'Enter one email address.', bad);
+    assert.equal(email('  '), 'Enter the email address.');
+    // Without the field, anything typed passes here; with it, the browser's own email check counts
+    assert.equal(email('carol'), '');
+    assert.equal(email('carol', { validity: { typeMismatch: true } }), 'Enter one email address.');
+    assert.equal(email('carol@example.com', { validity: { typeMismatch: false } }), '');
 });
 
 test('Generate draws from crypto.getRandomValues', () => {

@@ -37,8 +37,9 @@ const DATA = {
 const problemOf = password => [...password].length < 8 ? SHORT : [...password].length > 256 ? 'Use at most 256 characters.'
     : ['password1'].includes(password.trim().toLowerCase()) ? COMMON : null;
 
-// hold: password checks wait until released, so a test can answer them out of order
-function page({ hold = false } = {}) {
+// hold: password checks wait until released, so a test can answer them out of order.
+// fail: the first checks fail this way ('throw', '500' or 'malformed'), failCount of them
+function page({ hold = false, fail = null, failCount = 1 } = {}) {
     const dom = new JSDOM('<!doctype html><html lang="en"><head><title>t</title></head><body><div id="users-panel"></div></body></html>',
         { runScripts: 'dangerously', pretendToBeVisual: true, url: 'https://logs.example.com/settings/users',
           beforeParse: win => { win.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} }); } });
@@ -56,6 +57,12 @@ function page({ hold = false } = {}) {
     w.authenticatedFetch = async (url, options) => {
         const body = JSON.parse(options.body);
         if (url === '/api/users/password-check') {
+            if (fail && checks.filter(c => c.failed).length < failCount) {
+                checks.push({ password: body.password, failed: true });
+                if (fail === 'throw') throw new TypeError('Failed to fetch');
+                if (fail === '500') return { ok: false, status: 500, json: async () => ({ detail: 'An error occurred' }) };
+                return { ok: true, status: 200, json: async () => ({ fine: true }) };
+            }
             const problem = problemOf(body.password);
             const answer = { ok: true, status: 200, json: async () => ({ ok: !problem, problem }) };
             if (!hold) { checks.push({ password: body.password }); return answer; }
@@ -161,8 +168,8 @@ test('Add looks disabled until the form can be saved, and says why when pressed'
     view.checked = true;
     view.dispatchEvent(new p.w.Event('change', { bubbles: true }));
     assert.equal(p.disabled(), false);
-    // A username the server would refuse: said once the field is left
-    p.input('#user-edit-name', 'er in');
+    // A username too long: said once the field is left
+    p.input('#user-edit-name', 'x'.repeat(65));
     assert.ok(p.disabled());
     p.$('#user-edit-name').dispatchEvent(new p.w.Event('change', { bubbles: true }));
     assert.equal(p.$('#user-edit-name-problem').textContent, 'A username has 1 to 64 characters: letters, digits and . _ @ -');
@@ -210,6 +217,84 @@ test('a stale answer that says no does not block the password now in the field',
     await tick();
     assert.equal(p.problem(), '', 'the common-password answer was for the old value');
     assert.equal(p.disabled(), false);
+});
+
+test('a username or email the server takes is not refused here: groß leaves Add enabled', async () => {
+    const p = page();
+    p.w.editUser(null);
+    p.input('#user-edit-name', 'groß');
+    p.type(GOOD);
+    await settle();
+    assert.equal(p.disabled(), false);
+    p.$('#user-edit-name').dispatchEvent(new p.w.Event('change', { bubbles: true }));
+    assert.ok(p.$('#user-edit-name-problem').classList.contains('hidden'));
+    await p.w.saveUser({ preventDefault() {} }, null);
+    assert.equal(JSON.parse(p.sent[0].options.body).username, 'groß');
+});
+
+test('a password check that fails is not a pass: said, Add stays disabled, and Save asks again', async () => {
+    for (const fail of ['throw', '500', 'malformed']) {
+        const p = page({ fail });
+        p.w.editUser(null);
+        p.input('#user-edit-name', 'erin');
+        p.type('Password1');
+        await settle();
+        assert.equal(p.problem(), 'Could not check the password. Try again.', fail);
+        assert.ok(p.disabled(), fail);
+        // Save asks at once: the server answers now, and its answer counts
+        await p.w.saveUser({ preventDefault() {} }, null);
+        assert.equal(p.$('#user-edit-error').textContent, COMMON, fail);
+        assert.equal(p.problem(), COMMON, fail);
+        assert.equal(p.sent.length, 0, fail);
+    }
+});
+
+test('a failed check is tried once more after 3 seconds, not in a loop; typing asks again', async () => {
+    const p = page({ fail: '500', failCount: 2 });
+    p.w.editUser(null);
+    p.input('#user-edit-name', 'erin');
+    p.type(GOOD);
+    await settle();
+    assert.equal(p.checks.length, 1);
+    assert.ok(p.disabled());
+    await new Promise(r => setTimeout(r, 3200));
+    assert.equal(p.checks.length, 2, 'one more try');
+    assert.equal(p.problem(), 'Could not check the password. Try again.');
+    await new Promise(r => setTimeout(r, 3500));
+    assert.equal(p.checks.length, 2, 'and no more on its own');
+    p.type(GOOD + 'x');
+    await settle();
+    assert.equal(p.checks.length, 3);
+    assert.equal(p.disabled(), false, 'the server answered this time');
+});
+
+test('a change made while Save waits for the check is what is sent', async () => {
+    const p = page({ hold: true });
+    p.w.editUser(null);
+    p.input('#user-edit-name', 'erin');
+    p.$('#user-edit-level [data-level="admin"]').click();
+    p.type(GOOD);
+    const saving = p.w.saveUser({ preventDefault() {} }, null);
+    assert.deepEqual(p.checks.map(c => c.password), [GOOD], 'asked at once on Save');
+    p.$('#user-edit-level [data-level="viewer"]').click();
+    p.checks[0].release();
+    await saving;
+    assert.equal(p.sent.length, 1);
+    assert.equal(JSON.parse(p.sent[0].options.body).access, 'viewer');
+});
+
+test('the email field: empty or not an email address keeps Add disabled', async () => {
+    const p = page();
+    p.w.editUser(null);
+    p.w.document.getElementById('user-edit-kind-value').value = 'oauth2';
+    assert.ok(p.disabled());
+    p.input('#user-edit-email', 'carol');
+    assert.ok(p.disabled(), 'the browser says it is not an email address');
+    p.$('#user-edit-email').dispatchEvent(new p.w.Event('change', { bubbles: true }));
+    assert.equal(p.$('#user-edit-email-problem').textContent, 'Enter one email address.');
+    p.input('#user-edit-email', 'carol@example.com');
+    assert.equal(p.disabled(), false);
+    assert.ok(p.$('#user-edit-email-problem').classList.contains('hidden'));
 });
 
 test('Save right after typing waits for the check, then sends', async () => {
@@ -306,7 +391,7 @@ test('moving the length alone is not a change to discard; a generated password i
 test('the dialog with the meter, the generator and a refused password has no axe violations', async () => {
     const p = page();
     p.w.editUser(null);
-    p.input('#user-edit-name', 'er in');
+    p.input('#user-edit-name', 'x'.repeat(65));
     p.$('#user-edit-name').dispatchEvent(new p.w.Event('change', { bubbles: true }));
     p.type('Password1');
     await settle();

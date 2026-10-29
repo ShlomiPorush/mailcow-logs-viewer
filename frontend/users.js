@@ -84,6 +84,7 @@ function usersPresetLines(level) {
 const USERS_PASSWORD_SHORT = 'Use at least 8 characters.';
 const USERS_PASSWORD_LONG = 'Use at most 256 characters.';
 const USERS_PASSWORD_CHECKING = 'Checking the password. Try again in a moment.';
+const USERS_PASSWORD_UNCHECKED = 'Could not check the password. Try again.';
 const USERS_PASSWORD_RULES = [
     ['length', '8 or more characters', text => [...text].length >= 8],
     ['upper', 'An uppercase letter', text => /\p{Lu}/u.test(text)],
@@ -202,10 +203,12 @@ function usersShowProblem(modal, id, text) {
 
 // The server's answer on the password in the field: asked 300 ms after typing stops, and at once
 // after Generate or on Save. Only the answer for the latest value counts; while it is on its way
-// the password is not known to be fine. A failed request counts as fine: Save asks the server again
+// the password is not known to be fine. A check that fails (no connection, a server error, an
+// answer it cannot read) leaves it not known to be fine either: it says so, asks once more after
+// 3 seconds, and again on the next change or on Save
 let usersPwCheck = { seq: 0, value: '', answer: null, timer: null };
 
-function usersCheckPassword(modal, value, now) {
+function usersCheckPassword(modal, value, now, retry = true) {
     clearTimeout(usersPwCheck.timer);
     const seq = ++usersPwCheck.seq;
     usersPwCheck = { seq, value, answer: null, timer: null };
@@ -213,39 +216,47 @@ function usersCheckPassword(modal, value, now) {
     usersValidate(modal);
     if (!value) return Promise.resolve();
     const ask = async () => {
-        let answer = { ok: true, problem: '' };
+        let answer = { ok: false, failed: true, problem: USERS_PASSWORD_UNCHECKED };
         try {
             const response = await authenticatedFetch('/api/users/password-check', {
                 method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: value }) });
             const data = response.ok ? await response.json().catch(() => null) : null;
             // 422: longer than the request takes (1024 characters), so far too long
             if (response.status === 422) answer = { ok: false, problem: USERS_PASSWORD_LONG };
-            else if (data && typeof data.ok === 'boolean') answer = { ok: data.ok, problem: data.ok ? '' : String(data.problem || '') };
-        } catch (e) { /* Save asks the server */ }
+            else if (data && typeof data.ok === 'boolean' && (data.ok || typeof data.problem === 'string')) {
+                answer = { ok: data.ok, problem: data.ok ? '' : data.problem };
+            }
+        } catch (e) { /* not known: said below */ }
         if (seq !== usersPwCheck.seq || !modal.isConnected) return;
         usersPwCheck.answer = answer;
         usersShowProblem(modal, 'user-edit-pw-problem', answer.problem);
         usersValidate(modal);
+        // One more try a little later, not a loop: after that, the next change or Save asks again
+        if (answer.failed && retry) {
+            usersPwCheck.timer = setTimeout(() => {
+                if (usersPwCheck.seq === seq && modal.isConnected) usersCheckPassword(modal, value, true, false);
+            }, 3000);
+        }
     };
     if (now) return ask();
     usersPwCheck.timer = setTimeout(ask, 300);
     return Promise.resolve();
 }
 
-// A username or an email as the server takes them (users_store.py username_problem, email_problem)
+// A username or an email: only what is plainly missing or too long is stopped here, so the dialog
+// never refuses what the server takes; the server's rule decides the rest (users_store.py
+// username_problem, email_problem) and its answer shows in the dialog on Save
 const USERS_USERNAME_RULE = 'A username has 1 to 64 characters: letters, digits and . _ @ -';
 function usersUsernameProblem(value) {
-    const norm = String(value || '').normalize('NFKC').toLowerCase().trim();
-    if (!norm) return 'Enter a username.';
-    return /^[a-z0-9._@-]{1,64}$/.test(norm) ? '' : USERS_USERNAME_RULE;
+    const name = String(value || '').trim();
+    if (!name) return 'Enter a username.';
+    return [...name].length > 64 ? USERS_USERNAME_RULE : '';
 }
 
-function usersEmailProblem(value) {
-    const norm = String(value || '').trim().normalize('NFKC').toLowerCase().trim();
-    if (!norm) return 'Enter the email address.';
-    const bad = norm.length > 320 || norm.split('@').length !== 2 || norm.startsWith('@') || norm.endsWith('@')
-        || /[\s\p{C}]/u.test(norm);
-    return bad ? 'Enter one email address.' : '';
+// field: the email input, whose own check (type=email) says when it is not an email address
+function usersEmailProblem(value, field) {
+    if (!String(value || '').trim()) return 'Enter the email address.';
+    return field && field.validity && field.validity.typeMismatch ? 'Enter one email address.' : '';
 }
 
 // Why Add or Save cannot go yet, or '' when it can: a username or email the server takes, a
@@ -256,15 +267,16 @@ function usersFormProblem(modal) {
     const adding = !modal.dataset.version;
     const kind = modal.querySelector('#user-edit-kind-value').value;
     if (adding) {
+        const email = modal.querySelector('#user-edit-email');
         const problem = kind === 'local' ? usersUsernameProblem(modal.querySelector('#user-edit-name')?.value)
-            : usersEmailProblem(modal.querySelector('#user-edit-email')?.value);
+            : usersEmailProblem(email?.value, email);
         if (problem) return problem;
     }
     const field = modal.querySelector('#user-edit-pass');
     if (kind === 'local' && field && (adding || field.value)) {
         if (!field.value) return USERS_PASSWORD_SHORT;
         if (usersPwCheck.value !== field.value || !usersPwCheck.answer) return USERS_PASSWORD_CHECKING;
-        if (!usersPwCheck.answer.ok) return usersPwCheck.answer.problem || USERS_PASSWORD_SHORT;
+        if (!usersPwCheck.answer.ok) return usersPwCheck.answer.problem || USERS_PASSWORD_UNCHECKED;
     }
     if (modal.querySelector('#user-edit-level-value').value === 'custom'
         && !modal.querySelector('#user-edit-grid input[data-kind="view"]:checked')) return 'Select View for at least one area.';
@@ -319,8 +331,8 @@ function usersWireForm(modal) {
         .forEach(([selector, id, problemOf]) => {
             const field = modal.querySelector(selector);
             if (!field) return;
-            field.addEventListener('change', () => usersShowProblem(modal, id, field.value.trim() ? problemOf(field.value) : ''));
-            field.addEventListener('input', () => { if (!problemOf(field.value)) usersShowProblem(modal, id, ''); });
+            field.addEventListener('change', () => usersShowProblem(modal, id, field.value.trim() ? problemOf(field.value, field) : ''));
+            field.addEventListener('input', () => { if (!problemOf(field.value, field)) usersShowProblem(modal, id, ''); });
         });
     modal.addEventListener('input', () => usersValidate(modal));
     modal.addEventListener('change', () => usersValidate(modal));
@@ -746,17 +758,20 @@ async function saveUser(event, userId) {
     const modal = document.getElementById('user-edit-modal');
     const error = document.getElementById('user-edit-error');
     const say = text => { error.textContent = text; error.classList.remove('hidden'); };
+    // A disabled-looking Add or Save says why; a password typed a moment ago, or one the check
+    // could not answer for, is asked about now
+    let problem = usersFormProblem(modal);
+    if (problem === USERS_PASSWORD_CHECKING || problem === USERS_PASSWORD_UNCHECKED) {
+        await usersCheckPassword(modal, modal.querySelector('#user-edit-pass').value, true);
+        if (!modal.isConnected) return;
+        problem = usersFormProblem(modal);
+    }
+    if (problem) return say(problem);
+    // Read after the wait: the form as it is now, the same form just checked
     const kind = modal.querySelector('#user-edit-kind-value').value;
     const level = modal.querySelector('#user-edit-level-value').value;
     const chosen = mode => [...modal.querySelectorAll(`#user-edit-grid input[data-kind="${mode}"]:checked`)].map(i => i.dataset.area);
     const custom = level === 'custom';
-    // A disabled-looking Add or Save says why; a password typed a moment ago is asked about now
-    let problem = usersFormProblem(modal);
-    if (problem === USERS_PASSWORD_CHECKING) {
-        await usersCheckPassword(modal, modal.querySelector('#user-edit-pass').value, true);
-        problem = usersFormProblem(modal);
-    }
-    if (problem) return say(problem);
     const disabled = modal.querySelector('#user-edit-disabled').checked;
     const password = modal.querySelector('#user-edit-pass')?.value || '';
     let url = '/api/users';
