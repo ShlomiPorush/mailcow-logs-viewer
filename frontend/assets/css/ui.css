@@ -677,6 +677,9 @@
 .ui-msg-filters .ui-filters-actions { grid-column: 1 / -1; display: flex; gap: 8px; }
 .ui-msg-clear { margin-inline-start: 8px; color: var(--ui-ink); font-size: 12.5px; text-decoration: underline; }
 .ui-msg-clear.hidden { display: none; }
+/* Messages without a Message-ID (app.js showMessagesWithoutId): the outcome, direction,
+   other filters and the export do not apply to that list */
+.ui-msgs-page.is-noid [data-noid-hide] { display: none !important; }
 .ui-search { display: flex; align-items: center; gap: 8px; height: var(--ui-ctl-h); padding: 0 12px; border-radius: var(--ui-radius-sm);
     border: 1px solid var(--ui-line); background: var(--ui-bg); color: var(--ui-muted); }
 .ui-search:focus-within { border-color: var(--ui-accent); }

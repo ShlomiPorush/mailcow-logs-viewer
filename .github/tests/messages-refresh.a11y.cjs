@@ -57,8 +57,10 @@ test('a list longer than one request is read page by page from its first waterma
     const p = page();
     await p.w.loadMessages({ rows: 620, quiet: true });
     assert.equal(p.$$('.ui-msg-item').length, 620);
-    assert.equal(p.w.asked.length, 2);
-    const second = new URL(p.w.asked[1], 'http://localhost').searchParams;
+    // The list's requests (the count of messages without a Message-ID is asked apart)
+    const list = p.w.asked.filter(url => url.startsWith('/api/messages?'));
+    assert.equal(list.length, 2);
+    const second = new URL(list[1], 'http://localhost').searchParams;
     assert.equal(second.get('limit'), '120');
     assert.equal(second.get('upto_id'), '900');
     assert.ok(second.get('cursor'));

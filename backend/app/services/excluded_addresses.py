@@ -104,6 +104,11 @@ def _postfix_listed(model, hidden):
                *[fields.contains(f'orig_to=<{a}>', autoescape=True) for a in hidden])
 
 
+def postfix_listed(model, hidden):
+    """The Postfix line names one of these listed addresses (sender, recipient or orig_to)."""
+    return _postfix_listed(model, hidden)
+
+
 def postfix_line_visible(model=PostfixLog):
     """Postfix lines that are not listed and not in a listed line's queue occurrence."""
     hidden = listed()

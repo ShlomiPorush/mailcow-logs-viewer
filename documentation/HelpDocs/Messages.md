@@ -21,6 +21,8 @@ Messages appear newest first by first-seen time, in batches of 50. Each row repr
 
 The list updates by itself, with every filter. At the top of the list, new messages appear there. Further down, the list stays where it is and **N new messages** appears at the top; select it to go to them. Oldest first, new messages go at the end of the list, and the button appears there. A time preset such as **Today** always runs up to now. A custom range stays as you chose it.
 
+**N more without a Message-ID** appears under the search when messages in the chosen time range arrived without a usable Message-ID, as some scanners send them. The app links logs by Message-ID, so these messages are not in the list. Select it to list them from their Postfix lines: they have no subject, direction or spam score, and only the time range and search apply. **Outcome unknown** means Postfix gave the same queue ID to another message close in time, so only the line that queued it is shown. **Show all messages** returns to the full list.
+
 ## Message details
 
 ![Message details window on the Logs tab for a deferred message](../../images/docs/message-details-logs-light.webp#gh-light-mode-only)
@@ -77,7 +79,7 @@ Text cells starting with `=`, `+`, `-` or `@` get a leading apostrophe so a spre
 - **No Spam Analysis.** Quarantine releases, for example, are delivered again without a new scan.
 - **No country for the client IP.** MaxMind GeoIP is not configured, or the address has no known location.
 - **Failed to load messages.** The app's database did not answer. Check **View Container Logs**.
-- **An expected message is absent.** It may be older than **Retention Days**, or involve an address in **Blacklist Emails**.
+- **An expected message is absent.** It may be older than **Retention Days**, involve an address in **Blacklist Emails**, or have arrived without a Message-ID (**N more without a Message-ID**).
 
 ## How a message is put together
 

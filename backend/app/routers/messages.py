@@ -22,7 +22,8 @@ from ..services.dovecot_parser import dovecot_line_user, parse_dovecot_message
 from ..utils import internal_error, format_datetime_for_api as format_datetime_utc, RangeStart, RangeEnd
 from ..api_models import Invalid, documented
 from ..api_models.messages import (MessageDetailsResponse, MessageFacetsResponse, MessageListResponse,
-                                   NewMessagesResponse)
+                                   NewMessagesResponse, NoMessageIdListResponse)
+from ..services import no_message_id
 
 logger = logging.getLogger(__name__)
 
@@ -631,6 +632,116 @@ def get_unified_messages(
         raise internal_error(e)
 
 
+@router.get("/messages/without-message-id",
+            responses=documented(NoMessageIdListResponse, errors={422: Invalid, 500: None}))
+def get_messages_without_message_id(
+    limit: int = Query(50, ge=1, le=500, description="Items per page"),
+    search: Optional[str] = Query(None, max_length=320, description="Part of an address, the queue id, or the "
+                                                                    "client's name, IP or user"),
+    start_date: Optional[RangeStart] = Query(None, description="Received at or after"),
+    end_date: Optional[RangeEnd] = Query(None, description="Received at or before"),
+    order: str = Query("desc", pattern="^(asc|desc)$", description="By time received: desc newest first, asc oldest first"),
+    cursor: Optional[str] = Query(None, max_length=80, description="The next_cursor of the page before"),
+    db: Session = Depends(get_db)
+):
+    """
+    Messages whose header held no usable Message-ID (an empty one, or none), described from their
+    Postfix lines. The Messages list joins Postfix and Rspamd by Message-ID, so these are not in it:
+    they have no subject and no spam score. Open one with GET /api/message/{correlation_key}/details.
+    A message to or from an excluded address is left out. The total of a first page with limit=1 is
+    how many there are.
+    """
+    after = None
+    if isinstance(cursor, str) and cursor:   # a direct call (tests) leaves the Query default
+        try:
+            at, anchor = cursor.rsplit("|", 1)
+            after = (datetime.fromisoformat(at), int(anchor))
+        except ValueError:
+            raise HTTPException(status_code=422, detail="Invalid cursor")
+    filters = dict(start=start_date if isinstance(start_date, datetime) else None,
+                   end=end_date if isinstance(end_date, datetime) else None,
+                   search=search if isinstance(search, str) else None)
+    try:
+        total = no_message_id.count(db, **filters)
+        found, more = no_message_id.page(db, limit=limit, order=order, cursor=after, **filters)
+        lines = no_message_id.instance_lines(db, found)
+        rows = [no_message_id.summary(anchor, reused, lines[anchor.id], format_datetime_utc)
+                for anchor, reused in found]
+        last = found[-1][0] if found else None
+        return {
+            "total": total,
+            "data": rows,
+            "next_cursor": f"{last.time.isoformat()}|{last.id}" if more and last else None,
+        }
+    except Exception as e:
+        logger.error(f"Error fetching messages without a Message-ID: {e}")
+        raise internal_error(e)
+
+
+def _no_message_id_details(db: Session, key: str) -> dict:
+    """The details of a message without a Message-ID (a noid- key), from its Postfix lines."""
+    found = no_message_id.find(db, key)
+    if not found:
+        raise HTTPException(status_code=404, detail="Message not found")
+    anchor, reused = found
+    lines = no_message_id.instance_lines(db, [(anchor, reused)])[anchor.id]
+    row = no_message_id.summary(anchor, reused, lines, format_datetime_utc)
+    seen, postfix_logs = set(), []
+    for log in lines:
+        if _postfix_line_identity(log) not in seen:
+            seen.add(_postfix_line_identity(log))
+            postfix_logs.append(log)
+    who = None if reused else no_message_id.client(postfix_logs)
+    recipients = no_message_id.recipients(postfix_logs)
+    return {
+        "correlation_key": row["correlation_key"],
+        "message_id": None,
+        "queue_id": anchor.queue_id,
+        "sender": row["sender"],
+        "recipient": row["recipient"],
+        "recipients": recipients,
+        "recipient_count": len(recipients),
+        "subject": None,
+        "direction": None,
+        "final_status": row["final_status"],
+        "is_complete": row["is_complete"],
+        "first_seen": row["first_seen"],
+        "last_seen": row["last_seen"],
+        "related_deliveries": [],
+        "rspamd": None,
+        "dovecot": None,
+        "postfix_by_recipient": _group_postfix_by_recipient(postfix_logs),
+        "postfix": [
+            {
+                "time": format_datetime_utc(log.time),
+                "program": log.program,
+                "priority": log.priority,
+                "message": log.message,
+                "status": log.status,
+                "relay": log.relay,
+                "delay": log.delay,
+                "dsn": log.dsn,
+                "recipient": log.recipient,
+            }
+            for log in postfix_logs
+        ],
+        "netfilter": [
+            {
+                "time": format_datetime_utc(log.time),
+                "ip": log.ip,
+                "username": log.username,
+                "auth_method": log.auth_method,
+                "action": log.action,
+                "attempts_left": log.attempts_left,
+                "message": log.message,
+            }
+            for log in no_message_id.netfilter_events(db, anchor, who)
+        ],
+        "client": who,
+        "queue_id_reused": bool(reused),
+    }
+
+
 @router.get("/message/{correlation_key}/details", responses=documented(MessageDetailsResponse, errors={404: None, 500: None}))
 def get_message_full_details(
     correlation_key: str,
@@ -638,9 +749,12 @@ def get_message_full_details(
 ):
     """
     Get complete message details with all related logs
-    Including Postfix, Rspamd, and Netfilter logs
+    Including Postfix, Rspamd, and Netfilter logs. A noid- key (GET /api/messages/without-message-id)
+    opens a message without a Message-ID: its Postfix lines only, rspamd and dovecot null.
     """
     try:
+        if no_message_id.is_key(correlation_key):
+            return _no_message_id_details(db, correlation_key)
         # Get correlation
         correlation = db.query(MessageCorrelation).filter(
             MessageCorrelation.correlation_key == correlation_key

@@ -1304,7 +1304,8 @@ function hasDataChanged(newData, cacheKey) {
 async function smartRefreshMessages() {
     const filters = currentFilters.messages || {};
     const busy = () => messagesFullLoad || messagesPaging.loading;
-    if (messagesRefreshing || busy()) return;
+    if (messagesNoId || messagesRefreshing || busy()) return;
+    refreshMessagesNoId();
     // No list is shown (its load failed): load it again
     if (!lastDataCache.messages) return loadMessages();
 
@@ -1532,7 +1533,9 @@ function showMessagesFirstPage(container, data) {
 
 function setMessagesCount(total) {
     const countEl = document.getElementById('messages-count');
-    if (countEl) countEl.textContent = total === null ? '' : uiCountLabel(total || 0, 'message', 'messages');
+    if (countEl) countEl.textContent = total === null ? '' : messagesNoId
+        ? uiCountLabel(total || 0, 'message without a Message-ID', 'messages without a Message-ID')
+        : uiCountLabel(total || 0, 'message', 'messages');
 }
 
 // ---------- Messages list: the next page loads as the end scrolls into view ----------
@@ -1620,10 +1623,87 @@ function clearMessagesExact() {
     applyMessagesFilters();
 }
 
+// ---------- Messages without a Message-ID ----------
+// The list joins a message's Postfix lines and its Rspamd scan by the
+// Message-ID, so a message whose header had none usable (a scanner that sends
+// an empty one) is not in it. A link in the summary line counts those of the
+// time range and search shown, and switches the list to them: the same rows
+// and reading pane, from their Postfix lines (GET /api/messages/without-message-id).
+// There the outcome, direction and the other filters do not apply and are
+// hidden, and the list does not refresh by itself.
+let messagesNoId = false;
+let messagesNoIdCount = 0;
+const MESSAGES_NOID_KEYS = ['search', 'start_date', 'end_date'];
+
+function messagesListUrl(params) {
+    return `${messagesNoId ? '/api/messages/without-message-id' : '/api/messages'}?${params}`;
+}
+
+function showMessagesWithoutId(on) {
+    messagesNoId = !!on;
+    if (messagesNoId) {
+        // Only the time range and the search stay: no filter the list ignores may look in use
+        ['sender', 'recipient', 'user', 'ip', 'direction', 'status'].forEach(name => {
+            const field = document.getElementById(`messages-filter-${name}`);
+            if (field) field.value = '';
+        });
+        messagesExact = null;
+        toggleMessagesFilters(false);
+        const kept = currentFilters.messages || {};
+        currentFilters.messages = Object.fromEntries(['search', 'date_range', 'start_date', 'end_date']
+            .filter(key => kept[key]).map(key => [key, kept[key]]));
+    }
+    const page = document.getElementById('content-messages');
+    if (page) page.classList.toggle('is-noid', messagesNoId);
+    // The open message belongs to the other list: the reading pane starts again with the new one
+    const modal = document.getElementById('message-modal');
+    if (modal && !modal.classList.contains('hidden') && typeof closeMessageModal === 'function') closeMessageModal();
+    currentPage.messages = 1;
+    loadMessages();
+}
+
+function renderMessagesNoId() {
+    const link = document.getElementById('messages-noid');
+    if (!link) return;
+    const n = messagesNoIdCount;
+    link.textContent = messagesNoId ? 'Show all messages' : `${n} more without a Message-ID`;
+    link.title = messagesNoId ? '' : 'Messages that arrived without a Message-ID are not in this list. Show them';
+    link.classList.toggle('hidden', !messagesNoId && !n);
+}
+
+// How many there are for the time range and search shown. A failed count keeps the last one
+async function refreshMessagesNoId(gen = messagesGen) {
+    if (messagesNoId) return renderMessagesNoId();
+    const filters = messagesRangeFilters(currentFilters.messages || {});
+    const params = new URLSearchParams({ limit: 1 });
+    for (const key of MESSAGES_NOID_KEYS) {
+        if (filters[key]) params.append(key, filters[key]);
+    }
+    try {
+        const response = await messagesFetch(`/api/messages/without-message-id?${params}`, PAGE_REFRESH_TIMEOUT);
+        if (!response.ok) return;
+        const data = await response.json();
+        if (gen !== messagesGen || messagesNoId) return;
+        messagesNoIdCount = data.total || 0;
+        renderMessagesNoId();
+    } catch (error) {
+        if (error.name !== 'AbortError') console.warn('Failed to count messages without a Message-ID:', error);
+    }
+}
+
 // The list's query; with a cursor, the page that starts after it, holding only
 // what the first page's watermark (upto) held
 function messagesQueryParams(cursor = null, limit = 50, upto = null) {
     const filters = messagesRangeFilters(currentFilters.messages || {});
+    if (messagesNoId) {
+        const params = new URLSearchParams({ limit });
+        for (const key of MESSAGES_NOID_KEYS) {
+            if (filters[key]) params.append(key, filters[key]);
+        }
+        if (messagesOrder === 'asc') params.append('order', 'asc');
+        if (cursor) params.append('cursor', cursor);
+        return params;
+    }
     const params = new URLSearchParams({ page: 1, limit });
     for (const key of MESSAGES_FILTER_KEYS) {
         if (filters[key]) params.append(key, filters[key]);
@@ -1700,7 +1780,7 @@ async function loadMoreMessages(retry = false) {
     messagesPaging.loading = true;
     const gen = messagesGen;
     try {
-        const response = await messagesFetch(`/api/messages?${messagesQueryParams(messagesPaging.cursor, 50, messagesNew.watermark)}`);
+        const response = await messagesFetch(messagesListUrl(messagesQueryParams(messagesPaging.cursor, 50, messagesNew.watermark)));
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const data = await response.json();
         // The list was loaded again meanwhile: this page is not part of it
@@ -4908,6 +4988,11 @@ function applyMessagesFilters() {
         start_date: document.getElementById('messages-start-date').value,
         end_date: document.getElementById('messages-end-date').value
     });
+    if (messagesNoId) {
+        const kept = currentFilters.messages;
+        currentFilters.messages = Object.fromEntries(['search', 'date_range', 'start_date', 'end_date']
+            .filter(key => kept[key]).map(key => [key, kept[key]]));
+    }
     currentPage.messages = 1;
     loadMessages();
 }
@@ -5189,6 +5274,13 @@ async function loadMessageFacets(filters, gen = messagesGen) {
     if (timeButton) timeButton.classList.toggle('is-set', !!(filters.start_date || filters.end_date));
 }
 
+// Without a Message-ID: no outcome or direction to count, and the time counts are the list's
+function messagesNoIdFacets(filters) {
+    document.querySelectorAll('.messages-date-preset-btn small').forEach(small => { small.textContent = ''; });
+    const timeButton = document.getElementById('messages-time-pick');
+    if (timeButton) timeButton.classList.toggle('is-set', !!(filters.start_date || filters.end_date));
+}
+
 // After the list renders: keep the open message marked, and on wide screens
 // show the first message in the reading pane, as a mail client does.
 function afterMessagesRendered(data) {
@@ -5212,19 +5304,21 @@ async function loadMessages({ quiet = false, rows = 50, toEnd = false, applyIf =
     messagesFullLoad = true;
     if (!quiet) container.innerHTML = '<div class="ui-loading" role="status"><div class="loading"></div><p>Loading...</p></div>';
     const filters = currentFilters.messages || {};
-    loadMessageFacets(filters, gen);
+    if (messagesNoId) messagesNoIdFacets(filters);
+    else loadMessageFacets(filters, gen);
     updateMessagesFilterState();
+    renderMessagesNoId();
     // The list grows as it scrolls, so a new load always starts at the top
     if (!quiet) container.scrollTop = 0;
     try {
         const timeout = quiet ? PAGE_REFRESH_TIMEOUT : 0;
-        const response = await messagesFetch(`/api/messages?${messagesQueryParams(null, Math.min(500, rows))}`, timeout);
+        const response = await messagesFetch(messagesListUrl(messagesQueryParams(null, Math.min(500, rows))), timeout);
         if (!response.ok) {
             throw new Error(`HTTP ${response.status}: ${response.statusText}`);
         }
         const data = await response.json();
         while (data.next_cursor && (data.data || []).length < rows && gen === messagesGen) {
-            const next = await messagesFetch(`/api/messages?${messagesQueryParams(data.next_cursor, Math.min(500, rows - data.data.length), data.watermark)}`, timeout);
+            const next = await messagesFetch(messagesListUrl(messagesQueryParams(data.next_cursor, Math.min(500, rows - data.data.length), data.watermark)), timeout);
             if (!next.ok) throw new Error(`HTTP ${next.status}: ${next.statusText}`);
             const page = await next.json();
             data.data = data.data.concat(page.data || []);
@@ -5247,6 +5341,7 @@ async function loadMessages({ quiet = false, rows = 50, toEnd = false, applyIf =
         if (quiet) uiKeepFocus(container, 'data-key', () => showMessagesFirstPage(container, data));
         else showMessagesFirstPage(container, data);
         afterMessagesRendered(data);
+        refreshMessagesNoId(gen);
         if (toEnd) messagesScrollToEnd(container);
     } catch (error) {
         // A newer load is on its way or shown (this one may have been aborted for it)

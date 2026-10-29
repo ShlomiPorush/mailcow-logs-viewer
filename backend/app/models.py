@@ -6,7 +6,7 @@ SIMPLIFIED VERSION:
 - Removed old generate_correlation_key function
 - Correlation key is now SHA256 of Message-ID
 """
-from sqlalchemy import Column, Integer, BigInteger, String, Float, DateTime, Boolean, Text, Index, JSON, UniqueConstraint, ForeignKey, func, Uuid
+from sqlalchemy import Column, Integer, BigInteger, String, Float, DateTime, Boolean, Text, Index, JSON, UniqueConstraint, ForeignKey, func, text, Uuid
 from sqlalchemy.dialects.postgresql import JSONB
 from datetime import datetime
 
@@ -43,6 +43,9 @@ class PostfixLog(Base):
         Index('idx_postfix_sender_recipient', 'sender', 'recipient'),
         Index('idx_postfix_correlation', 'correlation_key'),
         Index('idx_postfix_message_id', 'message_id'),
+        # The cleanup lines without a usable Message-ID (services/no_message_id.py, alembic 0026)
+        Index('idx_postfix_cleanup_no_message_id', 'time',
+              postgresql_where=text("message_id IS NULL AND program LIKE '%/cleanup'")),
         UniqueConstraint('time', 'program', 'queue_id', 'message', name='uq_postfix_log'),
     )
     

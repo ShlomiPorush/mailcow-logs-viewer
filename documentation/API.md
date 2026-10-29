@@ -746,6 +746,8 @@ The top level also has the list fields (`queue_id`, `sender`, `recipient`, `subj
 
 **`related_deliveries`:** the other legs of the same Message-ID, ordered by `first_seen`; empty for most messages. A forward, a Sieve redirect or another re-submission delivers the message again through its own Postfix queue chain, with its own sender, recipient, direction, status and `correlation_key`. The first leg keeps the key SHA256 of `msgid:<message-id>`, so older links still resolve; another leg is keyed by SHA256 of `msgid:<message-id>:queue:<queue-id>`.
 
+**A `noid-` key** (from `GET /api/messages/without-message-id`) opens a message without a Message-ID from its Postfix lines: `rspamd` and `dovecot` are null, `related_deliveries` is empty, `client` holds the `ip`, `host` and `user` of its Postfix `client=` line, `netfilter` covers that IP, and `queue_id_reused` is as in the list. For other keys `client` and `queue_id_reused` are null. A `noid-` key that no longer stands for such a message returns 404.
+
 **`dovecot`:** the outcome of the final LMTP hop. `status` is `stored`, `discarded`, `rejected`, `forwarded` or `failed`; `mailbox` is the folder; `detail` holds the reject reason, forward target or storage error; `logs` lists the matching raw Dovecot lines while raw log retention keeps them. Null without Dovecot information.
 
 ---
@@ -769,6 +771,32 @@ Filter counts for the message search: `status` (`delivered`, `deferred`, `bounce
 | `search`, `sender`, `recipient`, `direction`, `status`, `user`, `ip`, `start_date`, `end_date` | as in `GET /api/messages` | Unset | Same filters as the message list |
 
 How many messages matching the filters came after the list was read: `{ "count": 3, "watermark": 51234 }`. A message is new when a leg matching the filters was stored after `after_id` and no leg with its Message-ID was stored before. A status change or another delivery of a message already there is not new. `watermark` is the newest leg now.
+
+---
+
+### GET /api/messages/without-message-id
+
+| Parameter | Type | Default | Constraints and purpose |
+| --- | --- | --- | --- |
+| `limit` | integer | `50` | Items per page, 1 to 500 |
+| `search` | string | Unset | Part of an address, the queue ID, or the client's name, IP or user, ignoring case |
+| `start_date`, `end_date` | as in `GET /api/messages` | Unset | When Postfix received the message |
+| `order` | string | `desc` | `desc` newest first, `asc` oldest first |
+| `cursor` | string | Unset | The `next_cursor` of the page before |
+
+Messages whose header held no usable Message-ID (an empty one, `<>`, or none), described from their Postfix lines. `GET /api/messages` links Postfix and Rspamd by Message-ID, so these messages are not in it. A row has the fields of a `GET /api/messages` row: `subject`, `direction`, `spam_score` and `is_spam` are null, `user` and `ip` come from the Postfix `client=` line, and `correlation_key` is `noid-<number>`. Open it with `GET /api/message/{correlation_key}/details`. A message to or from an address in **Blacklist Emails** is left out. `total` counts every match; `limit=1` gives the count alone.
+
+**`queue_id_reused`:** Postfix gave the same queue ID to another message within 6 days. The row then shows only the line that queued it: `sender`, `recipient` and `final_status` are null and `recipient_count` is 0, because the other lines cannot be told apart.
+
+```json
+{
+  "total": 1,
+  "data": [
+    {"correlation_key": "noid-123456", "message_id": null, "queue_id": "4B7C26E0443", "sender": "scanner@example.com", "recipient": "office@example.com", "recipient_count": 1, "subject": null, "direction": null, "final_status": "delivered", "is_complete": true, "first_seen": "2026-10-28T10:00:00Z", "last_seen": "2026-10-28T10:00:02Z", "dovecot_status": null, "dovecot_mailbox": null, "deliveries": 1, "spam_score": null, "is_spam": null, "user": "scanner@example.com", "ip": "192.0.2.40", "queue_id_reused": false}
+  ],
+  "next_cursor": null
+}
+```
 
 ---
 

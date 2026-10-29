@@ -82,6 +82,24 @@ class MessageListResponse(Fixed):
                                        "and as after_id to GET /api/messages/new")
 
 
+QUEUE_ID_REUSED = ("Postfix gave this queue id to another message within 6 days, so only the message's cleanup "
+                   "line is shown: no sender, recipients or outcome can be told apart")
+
+
+class NoMessageIdRow(MessageRow):
+    """A message without a usable Message-ID, described from its Postfix lines. correlation_key is
+    noid-<id>: open it with GET /api/message/{correlation_key}/details. No subject, direction or spam
+    score; user and ip come from the Postfix smtpd line."""
+    queue_id_reused: bool = Field(description=QUEUE_ID_REUSED)
+
+
+class NoMessageIdListResponse(Fixed):
+    """A page of messages without a usable Message-ID, by the time Postfix received them."""
+    total: int = Field(description="Messages matching the filters")
+    data: List[NoMessageIdRow]
+    next_cursor: Optional[str] = Field(description="Pass as `cursor` for the next page; null on the last page")
+
+
 class RelatedDelivery(Fixed):
     """Another delivery leg of the same Message-ID, such as a forward."""
     correlation_key: str
@@ -163,6 +181,13 @@ class NetfilterEvent(Fixed):
     message: Optional[str]
 
 
+class PostfixClient(Fixed):
+    """The client that handed a message to Postfix, from its smtpd "client=" line."""
+    ip: Optional[str]
+    host: Optional[str] = Field(description="The client's name as Postfix resolved it, `unknown` without one")
+    user: Optional[str] = Field(description="The signed-in user, when the client logged in")
+
+
 class MessageDetailsResponse(Fixed):
     """One delivery leg with its Postfix, Rspamd, Dovecot and Netfilter logs."""
     correlation_key: str
@@ -191,3 +216,8 @@ class MessageDetailsResponse(Fixed):
         description="The Postfix lines by recipient; lines that belong to no recipient are under `_system`")
     postfix: List[PostfixLineWithRecipient]
     netfilter: List[NetfilterEvent] = Field(description="At most 100 events, newest first")
+    client: Optional[PostfixClient] = Field(
+        None, description="For a message without a Message-ID (a noid- key): who handed it to Postfix, from the "
+                          "smtpd line. Null otherwise; a scanned message has these in `rspamd`")
+    queue_id_reused: Optional[bool] = Field(
+        None, description="For a message without a Message-ID (a noid- key): " + QUEUE_ID_REUSED + ". Null otherwise")

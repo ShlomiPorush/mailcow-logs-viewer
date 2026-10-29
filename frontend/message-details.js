@@ -938,6 +938,8 @@ function messageVerdict(data) {
         case 'discarded': return { tone: '', text: 'Discarded by a Sieve rule' };
         case 'expired': return { tone: '', text: 'Expired in the queue' };
         default:
+            // A message without a Message-ID whose queue ID Postfix gave another message close by
+            if (data.queue_id_reused) return { tone: 'info', text: 'Outcome unknown: Postfix gave its queue ID to another message too' };
             return data.is_complete === false ? { tone: 'info', text: 'In progress, waiting for Postfix logs' } : { tone: 'info', text: 'Linked' };
     }
 }
@@ -1095,6 +1097,10 @@ function renderOverviewTab(content, data) {
         : (data.recipients || []);
 
     const rspamd = data.rspamd || {};
+    // A message without a Message-ID has no scan: its client is the one Postfix logged
+    const client = data.client || {};
+    const clientIp = rspamd.ip || client.ip;
+    const clientUser = rspamd.user || client.user;
     // Where the client address is from: flag, country and city, network owner
     const geoNote = rspamd.country_code ? [
         getFlagUrl(rspamd.country_code, '16x12') ? `<img src="${getFlagUrl(rspamd.country_code, '16x12')}" alt="" width="16" height="12" onerror="this.style.display='none'">` : '',
@@ -1103,11 +1109,12 @@ function renderOverviewTab(content, data) {
     ].filter(Boolean).join(' ') : '';
     // Who sent it first; the IDs, which are only copied, last
     const identifiers = [
-        rspamd.ip ? mdIdRow('Client IP', `<span class="ui-mono">${uiEntity('ip', rspamd.ip, { mono: true })}</span>`, geoNote) : '',
-        (rspamd.user && rspamd.user !== 'unknown') || rspamd.has_auth ? mdIdRow('Authenticated user',
-            rspamd.user && rspamd.user !== 'unknown' ? uiEntity('address', rspamd.user) : '<span class="ui-muted">Unknown user</span>', rspamd.has_auth ? 'Verified (MAILCOW_AUTH)' : '') : '',
+        clientIp ? mdIdRow('Client IP', `<span class="ui-mono">${uiEntity('ip', clientIp, { mono: true })}</span>`, geoNote) : '',
+        (clientUser && clientUser !== 'unknown') || rspamd.has_auth ? mdIdRow('Authenticated user',
+            clientUser && clientUser !== 'unknown' ? uiEntity('address', clientUser) : '<span class="ui-muted">Unknown user</span>', rspamd.has_auth ? 'Verified (MAILCOW_AUTH)' : '') : '',
         data.queue_id ? mdIdRow('Queue ID', `<span class="ui-mono">${copyableText(data.queue_id)}</span>`) : '',
         data.message_id ? mdIdRow('Message ID', `<span class="ui-mono">${copyableText(data.message_id)}</span>`) : '',
+        mdNoMessageId(data) ? mdIdRow('Message ID', '<span class="ui-muted">None</span>', 'The sender gave it no Message-ID, so it has no subject and no spam scan') : '',
 
     ].join('');
 
@@ -1288,11 +1295,16 @@ function toggleAccordion(id) {
     }
 }
 
+// A message without a Message-ID (GET /api/messages/without-message-id), opened by its noid- key
+function mdNoMessageId(data) {
+    return String(data.correlation_key || '').startsWith('noid-');
+}
+
 function renderSpamTab(content, data) {
     if (!data.rspamd) {
         content.innerHTML = `
             <div class="ui-empty">
-                <b>No spam analysis data available</b>
+                <b>${mdNoMessageId(data) ? 'No spam analysis: without a Message-ID, its spam scan cannot be found' : 'No spam analysis data available'}</b>
             </div>
         `;
         return;
