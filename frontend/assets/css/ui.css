@@ -2360,7 +2360,26 @@ html body .ui-main .ui-set-choice-opt > input[type="radio"] { accent-color: var(
 /* Settings > Users (users.js): the agent rows and edit dialog; what an access level gives, as a short list */
 .ui-users-preset { display: grid; gap: 2px; margin: 6px 0 0; padding-inline-start: 18px; list-style: disc; color: var(--ui-muted); font-size: var(--ui-fs-sm); }
 .ui-users-default .ui-set-desc { margin: 4px 0 10px; }
-
+/* Settings > Users: the password's strength while it is typed (users.js), in the status tones and
+   squared like the tags; Weak one segment, Fair two, Good three, Strong four */
+.ui-pw-meter { display: grid; gap: 6px; margin-top: 8px; }
+.ui-pw-bar { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
+.ui-pw-bar i { height: 6px; border-radius: 3px; background: var(--ui-line); }
+.ui-pw-meter[data-level="1"] .ui-pw-bar i:nth-child(-n+1) { background: var(--ui-fail); }
+.ui-pw-meter[data-level="2"] .ui-pw-bar i:nth-child(-n+2) { background: var(--ui-warn); }
+.ui-pw-meter[data-level="3"] .ui-pw-bar i:nth-child(-n+3), .ui-pw-meter[data-level="4"] .ui-pw-bar i { background: var(--ui-ok); }
+.ui-pw-label { min-height: 1.4em; margin: 0; font-size: var(--ui-fs-sm); font-weight: 700; }
+.ui-pw-meter[data-level="1"] .ui-pw-label { color: var(--ui-fail-text); }
+.ui-pw-meter[data-level="2"] .ui-pw-label { color: var(--ui-warn-text); }
+.ui-pw-meter[data-level="3"] .ui-pw-label, .ui-pw-meter[data-level="4"] .ui-pw-label { color: var(--ui-ok-text); }
+.ui-pw-rules { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 4px 12px; margin: 0; padding: 0;
+    list-style: none; font-size: var(--ui-fs-sm); color: var(--ui-muted); }
+.ui-pw-rules li { display: flex; align-items: center; gap: 6px; }
+.ui-pw-mark { display: inline-grid; place-items: center; flex: none; width: 14px; height: 14px; border: 1px solid var(--ui-line); border-radius: 3px;
+    font-size: 10px; font-weight: 800; line-height: 1; }
+.ui-pw-rules li[data-met="true"] { color: var(--ui-ink); }
+.ui-pw-rules li[data-met="true"] .ui-pw-mark { border-color: var(--ui-ok); background: var(--ui-ok); color: var(--ui-bg); }
+.ui-pw-rules li[data-met="true"] .ui-pw-mark::before { content: '\2713'; }
 /* Access (utils.js setAppAccess): a control that takes an action the signed-in person may not take,
    or an admin's control, is not offered; the server refuses the call anyway */
 .ui-no-act-status [data-acts~="status"], .ui-no-act-outbound [data-acts~="outbound"],

@@ -76,8 +76,63 @@ function usersPresetLines(level) {
     return lines;
 }
 
-function usersPresetText(level) {
-    return `<ul class="ui-users-preset">${usersPresetLines(level).map(line => `<li>${escapeHtml(line)}</li>`).join('')}</ul>`;
+// A local user's password: the server's rule (backend services/passwords.py), shown while it is
+// typed. By Unicode category, as the server checks it; a symbol is anything but a letter or digit
+const USERS_PASSWORD_WEAK = 'Use at least 8 characters with an uppercase letter, a lowercase letter, a number and a symbol.';
+const USERS_PASSWORD_LONG = 'Use at most 256 characters.';
+const USERS_PASSWORD_RULES = [
+    ['length', '8 or more characters', text => [...text].length >= 8],
+    ['upper', 'An uppercase letter', text => /\p{Lu}/u.test(text)],
+    ['lower', 'A lowercase letter', text => /\p{Ll}/u.test(text)],
+    ['digit', 'A number', text => /\p{Nd}/u.test(text)],
+    ['symbol', 'A symbol', text => /[^\p{L}\p{Nd}]/u.test(text)],
+];
+const USERS_STRENGTH = ['', 'Weak', 'Fair', 'Good', 'Strong'];
+
+// What a password meets, and its strength: 0 empty; Weak (1) until every rule is met; then by
+// length, Fair (2) for 8 or 9 characters, Good (3) for 10 to 13, Strong (4) for 14 or more.
+// problem: the server's words when it would refuse the password, else ''
+function usersPasswordCheck(password) {
+    const text = String(password || '');
+    const met = {};
+    USERS_PASSWORD_RULES.forEach(([id, , test]) => { met[id] = test(text); });
+    const length = [...text].length;
+    const complete = Object.values(met).every(Boolean);
+    const level = !text ? 0 : !complete ? 1 : length >= 14 ? 4 : length >= 10 ? 3 : 2;
+    const problem = length > 256 ? USERS_PASSWORD_LONG : complete ? '' : USERS_PASSWORD_WEAK;
+    return { met, level, problem };
+}
+
+// The meter under the password field: four segments, the strength in words (read out as it
+// changes) and the requirements, each marked as met for the eye and for a screen reader
+function usersPasswordMeterHtml(hidden) {
+    return `<div class="ui-pw-meter${hidden ? ' hidden' : ''}" id="user-edit-pw-meter" data-level="0">
+        <div class="ui-pw-bar" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+        <p class="ui-pw-label" id="user-edit-pw-label" aria-live="polite"></p>
+        <ul class="ui-pw-rules" aria-label="Password requirements">
+            ${USERS_PASSWORD_RULES.map(([id, label]) => `<li data-rule="${id}" data-met="false"><span class="ui-pw-mark" aria-hidden="true"></span>${escapeHtml(label)}<span class="ui-sr-only">, not met</span></li>`).join('')}
+        </ul>
+    </div>`;
+}
+
+// keepWhenEmpty: editing, where an empty field keeps the password, so the meter waits for typing
+function usersShowPasswordMeter(modal, password, keepWhenEmpty) {
+    const meter = modal.querySelector('#user-edit-pw-meter');
+    if (!meter) return;
+    const check = usersPasswordCheck(password);
+    meter.classList.toggle('hidden', keepWhenEmpty && !password);
+    meter.dataset.level = String(check.level);
+    const label = meter.querySelector('#user-edit-pw-label');
+    const words = check.level ? `Password strength: ${USERS_STRENGTH[check.level]}` : '';
+    if (label.textContent !== words) label.textContent = words;
+    meter.querySelectorAll('li[data-rule]').forEach(item => {
+        const on = !!check.met[item.dataset.rule];
+        item.dataset.met = String(on);
+        item.querySelector('.ui-sr-only').textContent = on ? ', met' : ', not met';
+    });
+}
+
+function usersPresetText(level) {    return `<ul class="ui-users-preset">${usersPresetLines(level).map(line => `<li>${escapeHtml(line)}</li>`).join('')}</ul>`;
 }
 
 // Custom: each area by name, as an agent's access is shown (agents.js agentsAreaChips)
@@ -284,7 +339,8 @@ function editUser(userId) {
             ${user ? '' : `<label for="user-edit-name"><span class="ui-label">Username</span>
                 <input id="user-edit-name" class="ui-input" autocomplete="off" maxlength="64" spellcheck="false"></label>`}
             <label for="user-edit-pass"><span class="ui-label">${user ? 'New password' : 'Password'}</span>
-                <input id="user-edit-pass" type="password" class="ui-input" autocomplete="new-password" maxlength="256" placeholder="At least 12 characters"></label>
+                <input id="user-edit-pass" type="password" class="ui-input" autocomplete="new-password" maxlength="256" placeholder="At least 8 characters"></label>
+            ${usersPasswordMeterHtml(!!user)}
             <p class="ui-set-desc">${user ? `Leave it empty to keep the current password. A new password signs ${escapeHtml(name)} out.`
                 : 'Give this password to the user. They sign in on the sign-in page with the username and this password.'}</p>
         </div>`;
@@ -361,6 +417,12 @@ function editUser(userId) {
         if (changed.dataset.kind === 'act' && changed.checked && other) other.checked = true;
         if (changed.dataset.kind === 'view' && !changed.checked && other) other.checked = false;
     });
+    // The password's strength while it is typed; editing shows it once something is typed
+    const passwordField = modal.querySelector('#user-edit-pass');
+    if (passwordField) {
+        passwordField.addEventListener('input', () => usersShowPasswordMeter(modal, passwordField.value, !!user));
+        usersShowPasswordMeter(modal, '', !!user);
+    }
     uiGuardDialog(modal);
 }
 
@@ -393,11 +455,14 @@ async function saveUser(event, userId) {
         const field = kind === 'local' ? modal.querySelector('#user-edit-name') : modal.querySelector('#user-edit-email');
         const name = (field ? field.value : '').trim();
         if (!name) return say(kind === 'local' ? 'Enter a username.' : 'Enter the email address.');
+        // The server's rule and words; the server checks again
+        if (kind === 'local' && usersPasswordCheck(password).problem) return say(usersPasswordCheck(password).problem);
         body = kind === 'local' ? { kind, username: name, password } : { kind, email: name };
     } else {
         url = `/api/users/${Number(userId)}`;
         method = 'PUT';
         body = { row_version: Number(modal.dataset.version) };
+        if (password && usersPasswordCheck(password).problem) return say(usersPasswordCheck(password).problem);
         if (password) body.password = password;
     }
     Object.assign(body, { access: level, views: custom ? chosen('view') : [], acts: custom ? chosen('act') : [], disabled });

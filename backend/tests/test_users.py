@@ -37,7 +37,7 @@ from app.services import users_store  # noqa: E402
 
 ADMIN_NAME = "admin"
 ADMIN_PASSWORD = "correct horse battery staple"
-PASSWORD = "a long enough password"
+PASSWORD = "A long enough passw0rd"
 APP = "http://testserver"
 
 
@@ -210,8 +210,8 @@ def test_at_most_two_password_checks_run_at_once(people):
 
 def test_a_non_ascii_password_signs_in(people):
     admin = _admin()
-    _add(admin, password="pässwört 日本 été ok")
-    _sign_in("alice", "pässwört 日本 été ok")
+    _add(admin, password="Pässwört 日本 été 0k")
+    _sign_in("alice", "Pässwört 日本 été 0k")
 
 
 def test_a_local_user_cannot_use_a_basic_header_on_the_api(people):
@@ -265,9 +265,30 @@ def test_usernames_are_unique_ignoring_case_and_width(people):
     assert r.status_code == 409
 
 
-def test_a_short_password_is_refused(people):
-    r = _admin().post("/api/users", json={"kind": "local", "username": "alice", "password": "short", "access": "viewer"})
-    assert r.status_code == 422 and "12 to 256" in r.json()["detail"]
+WEAK_PASSWORD = "Use at least 8 characters with an uppercase letter, a lowercase letter, a number and a symbol."
+
+
+@pytest.mark.parametrize("password", ["Abcde1!", "abcdef1!", "ABCDEF1!", "Abcdefg!", "Abcdefg1"])
+def test_a_password_missing_a_requirement_is_refused_on_create(people, password):
+    r = _admin().post("/api/users", json={"kind": "local", "username": "alice", "password": password, "access": "viewer"})
+    assert r.status_code == 422 and r.json()["detail"] == WEAK_PASSWORD
+
+
+def test_8_complex_characters_are_enough_and_sign_in(people):
+    admin = _admin()
+    _add(admin, "alice", password="Abcdef1!")
+    _sign_in("alice", "Abcdef1!")
+
+
+@pytest.mark.parametrize("password, detail", [
+    ("abcdef1!", WEAK_PASSWORD), ("A1!" + "b" * 254, "Use at most 256 characters.")])
+def test_a_password_reset_follows_the_same_rule(people, password, detail):
+    admin = _admin()
+    row = _add(admin, "alice")
+    r = _change(admin, row, password=password)
+    assert r.status_code == 422 and r.json()["detail"] == detail
+    # The old password still works
+    _sign_in("alice", PASSWORD)
 
 
 def test_a_local_user_cannot_take_the_built_in_admins_name(people):
@@ -531,7 +552,7 @@ def _ended(response):
     assert response.json()["reason"] == "access_changed" and response.headers["x-session-end"] == "access_changed"
 
 
-@pytest.mark.parametrize("change", [{"access": "operator"}, {"disabled": True}, {"password": "another long password"}])
+@pytest.mark.parametrize("change", [{"access": "operator"}, {"disabled": True}, {"password": "Another l0ng password"}])
 def test_a_change_ends_the_users_sessions(people, change):
     admin = _admin()
     row = _add(admin)
@@ -576,9 +597,9 @@ def test_signing_out_works_after_the_access_ended(people, monkeypatch):
 def test_a_new_password_replaces_the_old_one(people):
     admin = _admin()
     row = _add(admin)
-    assert _change(admin, row, password="another long password").status_code == 200
+    assert _change(admin, row, password="Another l0ng password").status_code == 200
     _sign_in("alice", PASSWORD, expect=401)
-    _sign_in("alice", "another long password")
+    _sign_in("alice", "Another l0ng password")
 
 
 def test_kind_name_and_email_cannot_be_changed(people):
@@ -1088,11 +1109,11 @@ def test_a_sign_in_after_a_password_reset_keeps_its_session(people, monkeypatch)
 
     def sign_in_meanwhile(user_id, below=None):
         # Between the commit and ending the old sessions, the user signs in with the new password
-        late["client"] = _sign_in("alice", "another long password")
+        late["client"] = _sign_in("alice", "Another l0ng password")
         real(user_id, below)
 
     monkeypatch.setattr(users_store, "_end_local_sessions", sign_in_meanwhile)
-    assert _change(admin, row, password="another long password").status_code == 200
+    assert _change(admin, row, password="Another l0ng password").status_code == 200
     _ended(old.get("/api/messages"))
     assert late["client"].get("/api/messages").status_code == 200
 

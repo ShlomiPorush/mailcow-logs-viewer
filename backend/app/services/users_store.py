@@ -214,7 +214,7 @@ def create_user(db: Session, *, kind: str, username: Optional[str], email: Optio
             raise UserError(422, "A local user has a username, not an email address.")
         name = (username or "").strip()
         norm = access.normalize_username(name)
-        problem = username_problem(norm) or passwords.length_problem(password or "")
+        problem = username_problem(norm) or passwords.password_problem(password or "")
         if problem:
             raise UserError(422, problem)
         user = User(kind="local", username=name, username_norm=norm, password_hash=passwords.hash_password(password),
@@ -253,7 +253,7 @@ def update_user(db: Session, user_id: int, *, access_level: str, views, acts, di
     scopes = _scopes_from(access_level, views, acts)
     new_hash = None
     if password is not None:
-        problem = passwords.length_problem(password)
+        problem = passwords.password_problem(password)
         if problem:
             raise UserError(422, problem)
         new_hash = passwords.hash_password(password)
