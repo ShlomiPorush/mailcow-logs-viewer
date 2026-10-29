@@ -159,3 +159,69 @@ test('the summary line with the link has no accessibility violations', async () 
     const result = await p.w.axe.run(p.$('.ui-msg-summary'), { rules: { 'color-contrast': { enabled: false }, region: { enabled: false } } });
     assert.deepEqual(Array.from(result.violations, v => `${v.id}: ${v.nodes.map(n => n.target).join(', ')}`), []);
 });
+
+test('opening Messages with filters from elsewhere shows the whole list again', async () => {
+    const p = page();
+    await p.w.loadMessages();
+    await p.settle(); await p.settle();
+    p.$('#messages-noid').click();
+    await p.settle(); await p.settle();
+    assert.ok(p.$('#content-messages').classList.contains('is-noid'));
+    // An entity card's Show messages, from the Messages page or another page
+    p.asked().length = 0;
+    p.w.navigateToMessagesWithFilter({ address: 'boss@example.com' });
+    await new Promise(resolve => p.w.setTimeout(resolve, 150));
+    await p.settle(); await p.settle();
+    assert.ok(!p.$('#content-messages').classList.contains('is-noid'));
+    const list = p.asked().filter(url => url.startsWith('/api/messages?'));
+    assert.ok(list.length, 'the whole list is asked');
+    assert.equal(params(list[list.length - 1]).get('address'), 'boss@example.com');
+    // And a time range opened from the dashboard
+    p.$('#messages-noid').click();
+    await p.settle(); await p.settle();
+    p.w.openMessagesRange({ start: '2026-10-24T10:00:00Z', endInclusive: '2026-10-24T10:59:59Z' });
+    await p.settle(); await p.settle();
+    assert.ok(!p.$('#content-messages').classList.contains('is-noid'));
+});
+
+test('a redraw of the list by the auto refresh does not drop the count', async () => {
+    const p = page();
+    p.run('noidTotal = 0');
+    await p.w.loadMessages();
+    await p.settle(); await p.settle();
+    // New mail redraws the list at its top while the count is on its way
+    p.run(`noidTotal = 2; messagesAtNewEdge = () => true; lastDataCache.messages = { stale: true };
+        const answer = authenticatedFetch;
+        authenticatedFetch = async (url, options) => {
+            if (url.startsWith('/api/messages/without-message-id')) await new Promise(resolve => setTimeout(resolve, 30));
+            return answer(url, options);
+        };`);
+    await p.w.smartRefreshMessages();
+    await new Promise(resolve => p.w.setTimeout(resolve, 60));
+    await p.settle();
+    assert.equal(p.$('#messages-noid').textContent, '2 more without a Message-ID');
+});
+
+test('the answer for a message opened before another one is not shown', async () => {
+    const dom = new JSDOM(`<!doctype html><html lang="en"><head><title>t</title></head><body>
+        <div id="message-modal" class="hidden"><div id="message-modal-header"></div><div id="message-modal-body"><div id="message-modal-content"></div></div></div>
+        </body></html>`, { runScripts: 'dangerously', pretendToBeVisual: true, url: 'http://localhost/messages' });
+    const w = dom.window;
+    w.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} });
+    const run = source => { const s = w.document.createElement('script'); s.textContent = source; w.document.head.appendChild(s); };
+    [read('utils.js'), read('message-details.js')].forEach(run);
+    run(`window.disabledFeatures = []; var release = {};
+        authenticatedFetch = url => new Promise(resolve => { release[url.split('/')[3]] = data => resolve({ ok: true, json: async () => data }); });`);
+    const details = (key, sender) => ({ correlation_key: key, sender, recipient: 'office@example.com', recipients: ['office@example.com'],
+        recipient_count: 1, subject: null, final_status: 'delivered', is_complete: true, first_seen: '2026-10-24T10:00:00Z',
+        related_deliveries: [], rspamd: null, dovecot: null, postfix: [], postfix_by_recipient: {}, netfilter: [], client: null, queue_id_reused: false });
+    const first = w.viewMessageDetails('noid-1');
+    const second = w.viewMessageDetails('noid-2');
+    w.release['noid-2'](details('noid-2', 'second@example.com'));
+    await second;
+    w.release['noid-1'](details('noid-1', 'first@example.com'));
+    await first;
+    const header = w.document.getElementById('message-modal-header').textContent;
+    assert.match(header, /second@example\.com/);
+    assert.doesNotMatch(header, /first@example\.com/);
+});

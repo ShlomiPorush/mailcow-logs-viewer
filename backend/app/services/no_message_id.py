@@ -97,12 +97,16 @@ def _visible(anchor):
 
 
 def _search(anchor, reused, text: str):
-    term = f"%{text}%"
+    # The text as written: "_" and "%" in an address are not wildcards
+    term = "%" + text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+
+    def has(column):
+        return column.ilike(term, escape="\\")
     line = aliased(PostfixLog)
     # The address, the queue id, and the client's name, address and user (the client line's text)
-    match = or_(line.sender.ilike(term), line.recipient.ilike(term),
-                and_(line.message.op("~")(_CLIENT_LINE_RE), line.message.ilike(term)))
-    return or_(anchor.queue_id.ilike(term), exists().where(_in_instance(line, anchor, reused), match).correlate_except(line))
+    match = or_(has(line.sender), has(line.recipient),
+                and_(line.message.op("~")(_CLIENT_LINE_RE), has(line.message)))
+    return or_(has(anchor.queue_id), exists().where(_in_instance(line, anchor, reused), match).correlate_except(line))
 
 
 def anchors_query(db: Session, *, start=None, end=None, search: Optional[str] = None):
@@ -146,24 +150,32 @@ def page(db: Session, *, limit: int, order: str = "desc", cursor=None, **filters
     return found[:limit], len(found) > limit
 
 
-def instance_lines(db: Session, anchors) -> Dict[int, List[PostfixLog]]:
-    """The lines of each anchor's message, by anchor id, read in one query."""
-    result = {anchor.id: [anchor] for anchor, _ in anchors}
-    open_ = [(anchor, reused) for anchor, reused in anchors if not reused]
+def instance_lines(db: Session, anchors) -> Dict[int, tuple]:
+    """The lines of each anchor's message and whether its queue id was used
+    again, by anchor id, from one query. The lines that query reads also say
+    again whether the id was reused: a message stored since the anchors were
+    chosen must not lend this one its lines."""
+    result = {anchor.id: ([anchor], True) for anchor, reused in anchors if reused}
+    open_ = [anchor for anchor, reused in anchors if not reused]
     if not open_:
         return result
-    queues = {anchor.queue_id for anchor, _ in open_}
-    low = min(anchor.time for anchor, _ in open_) - CLIENT_LEAD
-    high = max(anchor.time for anchor, _ in open_) + INSTANCE_SPAN
+    queues = {anchor.queue_id for anchor in open_}
+    low = min(anchor.time for anchor in open_) - INSTANCE_SPAN
+    high = max(anchor.time for anchor in open_) + INSTANCE_SPAN
     lines = db.query(PostfixLog).filter(PostfixLog.queue_id.in_(queues), PostfixLog.time >= low,
                                         PostfixLog.time <= high).all()
     client = re.compile(_CLIENT_LINE_RE)
-    for anchor, _ in open_:
-        own = [line for line in lines
-               if line.id != anchor.id and line.queue_id == anchor.queue_id
-               and anchor.time - CLIENT_LEAD <= line.time <= anchor.time + INSTANCE_SPAN
+    marker = re.compile(_ANCHOR_RE)
+    for anchor in open_:
+        same = [line for line in lines if line.id != anchor.id and line.queue_id == anchor.queue_id]
+        if any((line.program or "").endswith("/cleanup") and marker.match(line.message or "")
+               and abs(line.time - anchor.time) <= INSTANCE_SPAN for line in same):
+            result[anchor.id] = ([anchor], True)
+            continue
+        own = [line for line in same
+               if anchor.time - CLIENT_LEAD <= line.time <= anchor.time + INSTANCE_SPAN
                and (line.time >= anchor.time or client.match(line.message or ''))]
-        result[anchor.id] = sorted([anchor] + own, key=lambda line: (line.time, line.id))
+        result[anchor.id] = (sorted([anchor] + own, key=lambda line: (line.time, line.id)), False)
     return result
 
 

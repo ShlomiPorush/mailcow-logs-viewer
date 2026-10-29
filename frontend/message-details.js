@@ -130,6 +130,8 @@ async function viewMessageDetails(correlationKey) {
         }
 
         const data = await response.json();
+        // Another message was opened meanwhile, or the pane was closed: this answer is not shown
+        if (window.openMessageKey !== correlationKey) return;
         console.log('Message details loaded:', data);
 
         currentModalData = data;

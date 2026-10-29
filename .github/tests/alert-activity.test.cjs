@@ -241,7 +241,7 @@ test('Messages can be opened filtered by the authenticated user', () => {
     const fields = {};
     const context = vm.createContext({
         document: { getElementById: id => fields[id] || (fields[id] = { value: 'old' }) },
-        navigateTo() { return Promise.resolve(true); }, setTimeout() {},
+        navigateTo() { return Promise.resolve(true); }, setTimeout() {}, leaveMessagesWithoutId() {},
     });
     vm.runInContext(code, context);
     vm.runInContext("navigateToMessagesWithFilter({ email: 'user@example.com', filterType: 'user' })", context);

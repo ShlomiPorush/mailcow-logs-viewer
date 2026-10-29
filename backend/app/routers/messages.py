@@ -664,9 +664,9 @@ def get_messages_without_message_id(
     try:
         total = no_message_id.count(db, **filters)
         found, more = no_message_id.page(db, limit=limit, order=order, cursor=after, **filters)
-        lines = no_message_id.instance_lines(db, found)
-        rows = [no_message_id.summary(anchor, reused, lines[anchor.id], format_datetime_utc)
-                for anchor, reused in found]
+        instances = no_message_id.instance_lines(db, found)
+        rows = [no_message_id.summary(anchor, instances[anchor.id][1], instances[anchor.id][0], format_datetime_utc)
+                for anchor, _ in found]
         last = found[-1][0] if found else None
         return {
             "total": total,
@@ -684,7 +684,7 @@ def _no_message_id_details(db: Session, key: str) -> dict:
     if not found:
         raise HTTPException(status_code=404, detail="Message not found")
     anchor, reused = found
-    lines = no_message_id.instance_lines(db, [(anchor, reused)])[anchor.id]
+    lines, reused = no_message_id.instance_lines(db, [(anchor, reused)])[anchor.id]
     row = no_message_id.summary(anchor, reused, lines, format_datetime_utc)
     seen, postfix_logs = set(), []
     for log in lines:

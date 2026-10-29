@@ -67,6 +67,7 @@ function harness(filters, appTimezone = 'Europe/Berlin') {
         loadMessageFacets: () => { calls.facets++; },
         messagesNoId: false,   // the whole list, not the messages without a Message-ID
         refreshMessagesNoId: () => {},
+        leaveMessagesWithoutId: () => {},
     });
     vm.runInContext(zoneHelpers, context);
     vm.runInContext([

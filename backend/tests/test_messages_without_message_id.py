@@ -231,6 +231,29 @@ def test_search_finds_the_client_and_the_queue_id(api):
     assert body['total'] == 0 and body['data'] == []
 
 
+def test_search_reads_wildcards_as_written(api):
+    _ingest(*_message(_q(18), NOW, sender=f'salesXops-{MARK}@example.test'),
+            *_message(_q(19), NOW, sender=f'sales_ops-{MARK}@example.test'))
+    assert set(_by_queue(_list(api, search=f'sales_ops-{MARK}'))) == {_q(19)}
+    assert _list(api, search=f'%{MARK}nothing')['total'] == 0
+
+
+def test_a_message_stored_after_the_anchors_were_chosen_lends_no_lines(api):
+    """The lines are read after the anchors: they say again whether the queue
+    id was used close by, so a message stored in between is not mixed in."""
+    from app.database import get_db_context
+    from app.models import PostfixLog
+    from app.services import no_message_id
+    _ingest(*_message(_q(20), NOW))
+    with get_db_context() as db:
+        found, _ = no_message_id.page(db, limit=50, search=_q(20))
+        assert [(anchor.queue_id, reused) for anchor, reused in found] == [(_q(20), False)]
+        # Another message with this queue id arrives now
+        _ingest(*_message(_q(20), NOW + timedelta(minutes=3), to=f'later-{MARK}@example.test'))
+        lines, reused = no_message_id.instance_lines(db, found)[found[0][0].id]
+        assert reused is True and [line.id for line in lines] == [found[0][0].id]
+
+
 def test_keys_that_are_not_such_a_message_are_not_found(api):
     _ingest(*_message(_q(16), NOW))
     from app.database import get_db_context

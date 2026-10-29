@@ -26,6 +26,8 @@
  * @returns {Promise<boolean>} whether the Messages page opened
  */
 function navigateToMessagesWithFilter(options) {
+    // The filters asked for apply to the whole list
+    leaveMessagesWithoutId();
     // Clear existing filters first
     const filterSearch = document.getElementById('messages-filter-search');
     const filterSender = document.getElementById('messages-filter-sender');
@@ -1662,6 +1664,15 @@ function showMessagesWithoutId(on) {
     loadMessages();
 }
 
+// Back to the whole list without loading it (the caller loads it with its filters)
+function leaveMessagesWithoutId() {
+    if (!messagesNoId) return;
+    messagesNoId = false;
+    const page = document.getElementById('content-messages');
+    if (page) page.classList.remove('is-noid');
+    renderMessagesNoId();
+}
+
 function renderMessagesNoId() {
     const link = document.getElementById('messages-noid');
     if (!link) return;
@@ -1671,19 +1682,24 @@ function renderMessagesNoId() {
     link.classList.toggle('hidden', !messagesNoId && !n);
 }
 
-// How many there are for the time range and search shown. A failed count keeps the last one
-async function refreshMessagesNoId(gen = messagesGen) {
+// How many there are for the time range and search shown. A failed count keeps the last one.
+// Not one of the list's requests: a redraw of the list does not abort it. Its answer counts
+// only while the filters it was asked for are still the latest asked
+let messagesNoIdAsked = '';
+async function refreshMessagesNoId() {
     if (messagesNoId) return renderMessagesNoId();
     const filters = messagesRangeFilters(currentFilters.messages || {});
     const params = new URLSearchParams({ limit: 1 });
     for (const key of MESSAGES_NOID_KEYS) {
         if (filters[key]) params.append(key, filters[key]);
     }
+    const asked = params.toString();
+    messagesNoIdAsked = asked;
     try {
-        const response = await messagesFetch(`/api/messages/without-message-id?${params}`, PAGE_REFRESH_TIMEOUT);
+        const response = await authenticatedFetch(`/api/messages/without-message-id?${asked}`, { timeout: PAGE_REFRESH_TIMEOUT });
         if (!response.ok) return;
         const data = await response.json();
-        if (gen !== messagesGen || messagesNoId) return;
+        if (messagesNoId || asked !== messagesNoIdAsked) return;
         messagesNoIdCount = data.total || 0;
         renderMessagesNoId();
     } catch (error) {
@@ -2327,6 +2343,8 @@ function switchTab(tab, params = {}) {
             loadDashboard();
             break;
         case 'messages':
+            // Coming back to the page shows the whole list again
+            leaveMessagesWithoutId();
             loadMessages();
             break;
         case 'netfilter':
@@ -3308,6 +3326,7 @@ function messagesShowRange(start, endInclusive, label = '') {
 // keeps them until another range is applied). endInclusive: the last moment
 // in it, as the Messages page's end is inclusive.
 function openMessagesRange({ start, endInclusive, user = '', label = '' }) {
+    leaveMessagesWithoutId();
     ['search', 'sender', 'recipient', 'user', 'ip', 'direction', 'status'].forEach(key => {
         const el = document.getElementById(`messages-filter-${key}`);
         if (el) el.value = '';
@@ -5341,7 +5360,7 @@ async function loadMessages({ quiet = false, rows = 50, toEnd = false, applyIf =
         if (quiet) uiKeepFocus(container, 'data-key', () => showMessagesFirstPage(container, data));
         else showMessagesFirstPage(container, data);
         afterMessagesRendered(data);
-        refreshMessagesNoId(gen);
+        refreshMessagesNoId();
         if (toEnd) messagesScrollToEnd(container);
     } catch (error) {
         // A newer load is on its way or shown (this one may have been aborted for it)
