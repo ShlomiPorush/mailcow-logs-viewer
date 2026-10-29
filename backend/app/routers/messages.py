@@ -15,7 +15,7 @@ from ..database import get_db
 from ..models import MessageCorrelation, PostfixLog, RspamdLog, NetfilterLog, RawServiceLog
 from ..config import settings
 from ..app_time import range_bound
-from ..services import excluded_addresses
+from ..services import entity_values, excluded_addresses
 from ..services.dovecot_parser import dovecot_line_user, parse_dovecot_message
 from ..utils import internal_error, format_datetime_for_api as format_datetime_utc, RangeStart, RangeEnd
 from ..api_models import Invalid, documented
@@ -155,13 +155,44 @@ def message_sort_time():
     return func.coalesce(MessageCorrelation.first_seen, MessageCorrelation.created_at, literal(datetime(1970, 1, 1)))
 
 
+EXACT_DESCRIPTION = ("Match sender, recipient, user and ip exactly (an address in any case, the IP as written "
+                     "canonically) instead of as a part. Off by default")
+
+
+def _address_match(column, value: str, exact: bool):
+    """A sender, recipient or user filter: a part of it (case-insensitive, as
+    always), or with exact the whole address in any case. lower(column) is
+    indexed on the deliveries (idx_correlation_sender_lower and _recipient_lower)."""
+    if not exact:
+        return column.ilike(f"%{value}%")
+    try:
+        forms = entity_values.address_forms(entity_values.normalize_address(value)[0])
+    except entity_values.InvalidValue:
+        forms = [value.strip().lower()]
+    return func.lower(column).in_(forms)
+
+
+def _ip_match(column, value: str, exact: bool):
+    """An ip filter on RspamdLog.ip: a part of it, or with exact the address,
+    typed in any spelling, in the spellings a stored address can have
+    (entity_values.ip_spellings: an IPv4 client seen over IPv6 too)."""
+    if not exact:
+        return column.ilike(f"%{value}%")
+    return column.in_(entity_values.spellings_of_typed_ip(value))
+
+
 def _filtered_messages_query(db, search=None, sender=None, recipient=None, direction=None, status=None,
-                             user=None, ip=None, start_date=None, end_date=None):
-    """The message legs matching the Messages filters. Shared by the list and
-    its facet counts, so a count always equals what the list shows for it."""
+                             user=None, ip=None, start_date=None, end_date=None, exact=False, base=None):
+    """The message legs matching the Messages filters. Shared by the list, its
+    facet counts, the new-mail count and the CSV export, so a count always
+    equals what the list shows for it. With exact, sender, recipient, user and
+    ip match whole values (the entity card's "Show messages"). base is the
+    query to filter (the export's, with its own columns), else the deliveries."""
+    # A direct call (tests) may pass the Query default object: only True turns it on
+    exact = exact is True
     # Excluded addresses, here in the query, so pages, totals and facet
     # counts leave them out alike (no page comes out empty)
-    query = db.query(MessageCorrelation).filter(excluded_addresses.correlation_visible())
+    query = (base if base is not None else db.query(MessageCorrelation)).filter(excluded_addresses.correlation_visible())
 
     # Apply filters
     if search:
@@ -191,10 +222,10 @@ def _filtered_messages_query(db, search=None, sender=None, recipient=None, direc
         )
     
     if sender:
-        query = query.filter(MessageCorrelation.sender.ilike(f"%{sender}%"))
+        query = query.filter(_address_match(MessageCorrelation.sender, sender, exact))
     
     if recipient:
-        query = query.filter(MessageCorrelation.recipient.ilike(f"%{recipient}%"))
+        query = query.filter(_address_match(MessageCorrelation.recipient, recipient, exact))
     
     if direction:
         query = query.filter(MessageCorrelation.direction == direction)
@@ -233,7 +264,7 @@ def _filtered_messages_query(db, search=None, sender=None, recipient=None, direc
             )
             has_rspamd_join = True
         # outerjoin works fine for filtering, no need to change it
-        query = query.filter(RspamdLog.user.ilike(f"%{user}%"))
+        query = query.filter(_address_match(RspamdLog.user, user, exact))
     
     # Filter by IP (need to join with Rspamd if not already joined)
     if ip:
@@ -242,7 +273,7 @@ def _filtered_messages_query(db, search=None, sender=None, recipient=None, direc
                 RspamdLog,
                 MessageCorrelation.rspamd_log_id == RspamdLog.id
             )
-        query = query.filter(RspamdLog.ip.ilike(f"%{ip}%"))
+        query = query.filter(_ip_match(RspamdLog.ip, ip, exact))
     return query
 
 
@@ -275,6 +306,7 @@ def get_message_facets(
     start_date: Optional[RangeStart] = Query(None),
     end_date: Optional[RangeEnd] = Query(None),
     since: List[str] = Query([], description="Time ranges to count, as name:start, an ISO instant or a YYYY-MM-DD day (e.g. today:2026-09-27T00:00:00Z)"),
+    exact: bool = Query(False, description=EXACT_DESCRIPTION),
     db: Session = Depends(get_db)
 ):
     """
@@ -288,7 +320,7 @@ def get_message_facets(
     """
     try:
         common = dict(search=search, sender=sender, recipient=recipient, user=user, ip=ip,
-                      start_date=start_date, end_date=end_date)
+                      start_date=start_date, end_date=end_date, exact=exact)
         by_status = {
             value: _count_messages(_filtered_messages_query(db, direction=direction, status=value, **common))
             for value in FACET_STATUSES
@@ -302,7 +334,7 @@ def get_message_facets(
             "direction": {"all": _count_messages(_filtered_messages_query(db, status=status, **common)), **by_direction},
         }
         if since:
-            undated = dict(search=search, sender=sender, recipient=recipient, user=user, ip=ip)
+            undated = dict(search=search, sender=sender, recipient=recipient, user=user, ip=ip, exact=exact)
             by_time = {"all": _count_messages(_filtered_messages_query(db, direction=direction, status=status, **undated))}
             for item in since[:8]:
                 name, _, iso = item.partition(':')
@@ -338,6 +370,7 @@ def count_new_messages(
     ip: Optional[str] = Query(None),
     start_date: Optional[RangeStart] = Query(None),
     end_date: Optional[RangeEnd] = Query(None),
+    exact: bool = Query(False, description=EXACT_DESCRIPTION),
     db: Session = Depends(get_db)
 ):
     """
@@ -347,7 +380,8 @@ def count_new_messages(
     got another delivery, is not new. Returns the count and the watermark now.
     """
     try:
-        query = _filtered_messages_query(db, search, sender, recipient, direction, status, user, ip, start_date, end_date)
+        query = _filtered_messages_query(db, search, sender, recipient, direction, status, user, ip, start_date, end_date,
+                                         exact=exact)
         fresh = query.filter(MessageCorrelation.id > after_id).with_entities(
             MessageCorrelation.message_id.label("message_id"),
             message_group_key().label("group_key"),
@@ -382,6 +416,7 @@ def get_unified_messages(
     order: str = Query("desc", pattern="^(asc|desc)$", description="By time first seen: desc newest first, asc oldest first"),
     cursor: Optional[str] = Query(None, max_length=80, description="The next_cursor of the page before: the messages after it, instead of a page number"),
     upto_id: Optional[int] = Query(None, ge=0, description="The watermark of the list's first page: the next pages hold only what it held"),
+    exact: bool = Query(False, description=EXACT_DESCRIPTION),
     db: Session = Depends(get_db)
 ):
     """
@@ -403,7 +438,8 @@ def get_unified_messages(
         # Its next pages pass the first page's watermark, so paging adds no new mail either
         # A direct call (tests) leaves the Query default, which is no watermark
         watermark = upto_id if isinstance(upto_id, int) else messages_watermark(db)
-        query = _filtered_messages_query(db, search, sender, recipient, direction, status, user, ip, start_date, end_date)
+        query = _filtered_messages_query(db, search, sender, recipient, direction, status, user, ip, start_date, end_date,
+                                         exact=exact)
         query = query.filter(MessageCorrelation.id <= watermark)
 
         # One row per message, not one per delivery leg (issue #36). The filters

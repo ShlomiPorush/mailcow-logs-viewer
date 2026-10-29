@@ -187,8 +187,13 @@ def test_every_api_route_is_decided_once():
 def test_people_only_routes_are_never_offered():
     for key in [("PUT", "/api/settings"), ("POST", "/api/settings/jobs/{job_name}/run"),
                 ("GET", "/api/raw-logs/ws-token"), ("POST", "/api/auth/session"),
-                ("POST", "/api/notifications/channels"), ("POST", "/api/dmarc/upload")]:
+                ("POST", "/api/notifications/channels"), ("POST", "/api/dmarc/upload"),
+                # The entity card gathers several areas in one answer (owner decision: no agent access)
+                ("GET", "/api/entities/ip"), ("GET", "/api/entities/address"), ("GET", "/api/entities/domain")]:
         assert scopes.excluded_reason(*key), key
+    for method, path in _api_routes():
+        if path.startswith("/api/entities"):
+            assert scopes.excluded_reason(method, path), (method, path)
     for method, path in _api_routes():
         if path.startswith("/api/agents"):
             assert scopes.excluded_reason(method, path)
@@ -728,6 +733,13 @@ def test_permissions_are_checked_on_the_route_the_app_picks(live_agents):
         assert _tool(client, token, "read_api", {"path": path})["isError"], path
     rows = client.get(f"/api/agents/{client.get('/api/agents').json()['agents'][0]['id']}/activity").json()["activity"]
     assert any(r["event"] == "denied" for r in rows)
+
+
+def test_entity_cards_are_refused_with_every_view(live_agents):
+    client, _, tokens = _connect(views=tuple(a.id for a in scopes.AREAS))
+    for path in ("/api/entities/ip", "/api/entities/address", "/api/entities/domain"):
+        result = _tool(client, tokens["access_token"], "read_api", {"path": path})
+        assert result["isError"] and "Not available to agents" in result["content"][0]["text"], (path, result)
 
 
 def test_perform_action_with_act(live_agents):

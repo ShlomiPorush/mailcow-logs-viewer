@@ -3,7 +3,7 @@ API endpoints for exporting logs to CSV
 """
 import logging
 from fastapi import APIRouter, Depends, Query, HTTPException, Request
-from sqlalchemy.orm import Session, load_only
+from sqlalchemy.orm import Session, aliased, load_only
 from sqlalchemy import or_, and_, desc, func
 from datetime import datetime
 from typing import Optional
@@ -12,7 +12,8 @@ from ..models import PostfixLog, RspamdLog, NetfilterLog, MessageCorrelation
 from ..app_time import local_now, to_local
 from ..config import settings
 from ..utils import internal_error, RangeStart, RangeEnd
-from .messages import message_sort_time
+from .messages import EXACT_DESCRIPTION, _filtered_messages_query, message_sort_time
+from ..services.entity_values import spellings_of_typed_ip
 from ..services import excluded_addresses
 from ..services.csv_export import csv_download, csv_query_rows, get_csv_db
 from ..api_models import CsvFile, Invalid, documented
@@ -214,6 +215,7 @@ def export_netfilter_csv(
     request: Request,
     search: Optional[str] = Query(None),
     ip: Optional[str] = Query(None),
+    exact_ip: bool = Query(False, description="Match the IP exactly instead of as a part, as the Events list does"),
     username: Optional[str] = Query(None),
     action: Optional[str] = Query(None),
     country_code: Optional[str] = Query(None),
@@ -242,7 +244,9 @@ def export_netfilter_csv(
                 )
             )
         
-        if ip:
+        if ip and exact_ip is True:
+            query = query.filter(NetfilterLog.ip.in_(spellings_of_typed_ip(ip)))
+        elif ip:
             query = query.filter(NetfilterLog.ip.ilike(f"%{ip}%"))
         
         if username:
@@ -308,66 +312,29 @@ def export_messages_csv(
     start_date: Optional[RangeStart] = Query(None),
     end_date: Optional[RangeEnd] = Query(None),
     order: str = Query("desc", pattern="^(asc|desc)$"),
+    exact: bool = Query(False, description=EXACT_DESCRIPTION),
     db: Session = Depends(get_csv_db)
 ):
     """
     Export Messages (correlations) to CSV
     """
     try:
-        query = db.query(MessageCorrelation, RspamdLog).outerjoin(
-            RspamdLog, MessageCorrelation.rspamd_log_id == RspamdLog.id,
-        ).options(load_only(
+        # The Rspamd columns of each row come through a join of their own: the
+        # filters may join RspamdLog themselves (inner, to filter on it)
+        scan = aliased(RspamdLog)
+        query = db.query(MessageCorrelation, scan).outerjoin(
+            scan, MessageCorrelation.rspamd_log_id == scan.id,
+        )
+        # The very filters of the Messages list (messages.py), excluded
+        # addresses and the exact mode included, so the file holds what the list shows
+        query = _filtered_messages_query(db, search, sender, recipient, direction, status, user, ip,
+                                         start_date, end_date, exact=exact, base=query)
+        query = query.options(load_only(
             MessageCorrelation.first_seen, MessageCorrelation.sender, MessageCorrelation.recipient,
             MessageCorrelation.subject, MessageCorrelation.direction, MessageCorrelation.final_status,
             MessageCorrelation.queue_id, MessageCorrelation.message_id,
             MessageCorrelation.rspamd_log_id, MessageCorrelation.is_complete,
-        ), load_only(RspamdLog.id, RspamdLog.score, RspamdLog.is_spam, RspamdLog.user, RspamdLog.ip))
-
-        # The filters mean what they mean in the Messages list (messages.py),
-        # excluded addresses included
-        query = query.filter(excluded_addresses.correlation_visible())
-
-        # Apply filters
-        if search:
-            search_term = f"%{search}%"
-            query = query.filter(
-                or_(
-                    MessageCorrelation.sender.ilike(search_term),
-                    MessageCorrelation.recipient.ilike(search_term),
-                    MessageCorrelation.subject.ilike(search_term),
-                    MessageCorrelation.message_id.ilike(search_term),
-                    MessageCorrelation.queue_id.ilike(search_term),
-                    RspamdLog.ip.ilike(search_term),
-                    RspamdLog.user.ilike(search_term)
-                )
-            )
-        
-        if sender:
-            query = query.filter(MessageCorrelation.sender.ilike(f"%{sender}%"))
-        
-        if recipient:
-            query = query.filter(MessageCorrelation.recipient.ilike(f"%{recipient}%"))
-        
-        if direction:
-            query = query.filter(MessageCorrelation.direction == direction)
-        
-        if status == 'spam':
-            # Spam is the final status or Rspamd's verdict
-            query = query.filter(or_(MessageCorrelation.final_status == 'spam', RspamdLog.is_spam == True))  # noqa: E712
-        elif status:
-            query = query.filter(MessageCorrelation.final_status == status)
-
-        if start_date:
-            query = query.filter(MessageCorrelation.first_seen >= start_date)
-
-        if end_date:
-            query = query.filter(MessageCorrelation.first_seen <= end_date)
-
-        # Filtering the joined columns excludes messages without a matching log.
-        if user:
-            query = query.filter(RspamdLog.user.ilike(f"%{user}%"))
-        if ip:
-            query = query.filter(RspamdLog.ip.ilike(f"%{ip}%"))
+        ), load_only(scan.id, scan.score, scan.is_spam, scan.user, scan.ip))
 
         # In the list's order (newest first, or oldest first), so the row limit keeps the same messages
         # By the same time the list sorts by (a delivery with no first-seen time by when it was stored)
