@@ -3,6 +3,7 @@ Background scheduler
 """
 import logging
 import asyncio
+import hashlib
 import threading
 from contextlib import asynccontextmanager
 import re
@@ -861,6 +862,21 @@ def _postfix_entry_time(log_entry) -> datetime:
     return datetime.fromtimestamp(int(log_entry.get('time', 0)), tz=timezone.utc).replace(tzinfo=None)
 
 
+def _postfix_line_key(time_val: int, program: Optional[str], queue_id: Optional[str],
+                      message: Optional[str]) -> str:
+    """
+    The identity of one Postfix line, for the duplicate cache and the check
+    against stored rows: the fields of uq_postfix_log, with the whole message
+    as a digest so the cache holds a short key per line.
+
+    The whole message counts. Lines of one queue in the same second often
+    share a long start, such as two deliveries to one mailbox through two
+    long aliases that differ only in orig_to.
+    """
+    digest = hashlib.blake2b((message or '').encode('utf-8', 'surrogatepass'), digest_size=16).hexdigest()
+    return f"{int(time_val)}|{program or ''}|{queue_id or ''}|{digest}"
+
+
 def _store_postfix_page(logs):
     """Process one page with a session and duplicate cache owned by the worker.
 
@@ -917,24 +933,25 @@ def _store_postfix_page(logs):
                 ).all()
                 for row in existing_rows:
                     dt = row.time.replace(tzinfo=timezone.utc) if row.time.tzinfo is None else row.time
-                    time_val = int(dt.timestamp())
-                    db_key = f"{time_val}|{row.program or ''}|{row.queue_id or ''}|{row.message or ''}"
-                    existing_in_db.add(db_key)
+                    existing_in_db.add(_postfix_line_key(
+                        int(dt.timestamp()), row.program, row.queue_id, row.message))
 
             # (values, queue id whose outcome changed or None) per new line
             new_rows = []
             for log_entry in logs:
                 try:
-                    time_str = str(log_entry.get('time', ''))
+                    time_val = int(log_entry.get('time', 0))
                     message = log_entry.get('message', '')
-                    unique_id = f"{time_str}:{message[:100]}"
+                    parsed = parse_postfix_message(message)
+                    queue_id = parsed.get('queue_id')
+                    # From the values as stored: an over-long program or queue
+                    # id is cut to its column, and the key must match that row
+                    as_stored = _fit_columns(PostfixLog, dict(program=log_entry.get('program'), queue_id=queue_id))
+                    unique_id = _postfix_line_key(time_val, as_stored['program'], as_stored['queue_id'], message)
 
                     if unique_id in seen_postfix or unique_id in page_seen:
                         page_skipped += 1
                         continue
-
-                    parsed = parse_postfix_message(message)
-                    queue_id = parsed.get('queue_id')
 
                     if _postfix_entry_listed(parsed, message) or excluded_addresses.queue_was_listed(
                             queue_id, _postfix_entry_time(log_entry)):
@@ -943,15 +960,10 @@ def _store_postfix_page(logs):
                         continue
 
                     # Parse timestamp with timezone
-                    timestamp = datetime.fromtimestamp(
-                        int(log_entry.get('time', 0)),
-                        tz=timezone.utc
-                    )
+                    timestamp = datetime.fromtimestamp(time_val, tz=timezone.utc)
 
                     # Check if already exists in DB (pre-checked batch query)
-                    time_val = int(log_entry.get('time', 0))
-                    db_key = f"{time_val}|{log_entry.get('program', '')}|{queue_id or ''}|{message}"
-                    if db_key in existing_in_db:
+                    if unique_id in existing_in_db:
                         page_seen.add(unique_id)
                         page_skipped += 1
                         continue
