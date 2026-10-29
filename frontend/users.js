@@ -231,12 +231,14 @@ async function setUsersDefault(value) {
         usersSeq++;
         // A newer version already shown (another admin changed it since) stays
         const current = usersData.oauth2;
-        if (Number(body.version) >= Number(current.version)) {
+        const latest = Number(body.version) >= Number(current.version);
+        if (latest) {
             current.default_access = body.default_access || value;
             current.version = body.version;
         }
         renderUsersPanel();
-        showToast(value === 'none' ? 'Only users on the list can sign in now' : 'Access changed', 'success');
+        if (latest) showToast(value === 'none' ? 'Only users on the list can sign in now' : 'Access changed', 'success');
+        else showToast('Someone else changed this access since. It is shown as it is now.', 'info');
     } catch (e) {
         showToast('Could not change the access. Check your connection and try again.', 'error');
     }

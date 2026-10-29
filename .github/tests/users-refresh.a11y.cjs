@@ -162,8 +162,12 @@ test('a late save answer does not undo a newer change a refresh already shows', 
     // Another admin changed it again meanwhile; the refresh shows that (version 3)
     p.w.served['GET /api/users'] = overview([user(2, 'dana')], 'operator', 3);
     await p.w.refreshUsersPanel();
+    p.run('var toasts = []; showToast = (message, type) => toasts.push([message, type]);');
     endSave();
     await saving;
     assert.equal(p.$('.ui-users-default .ui-seg [aria-pressed="true"]').textContent.trim(), 'Operator');
     assert.equal(p.w.eval('usersData.oauth2.version'), 3);
+    // No success message for a state that is no longer true
+    assert.equal(p.w.eval('JSON.stringify(toasts)'),
+        JSON.stringify([['Someone else changed this access since. It is shown as it is now.', 'info']]));
 });
