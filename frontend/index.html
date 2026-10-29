@@ -668,10 +668,10 @@
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
                                 </svg>
                             </button></h1>
-                        <h3>Outcome</h3>
-                        <div id="messages-facet-status" class="ui-fct-list"></div>
-                        <h3>Direction</h3>
-                        <div id="messages-facet-direction" class="ui-fct-list"></div>
+                        <h3 data-noid-hide>Outcome</h3>
+                        <div id="messages-facet-status" class="ui-fct-list" data-noid-hide></div>
+                        <h3 data-noid-hide>Direction</h3>
+                        <div id="messages-facet-direction" class="ui-fct-list" data-noid-hide></div>
                         <h3>Time</h3>
                         <div class="ui-fct-list">
                             <button type="button" onclick="selectMessagesDatePreset('')" data-preset="" class="messages-date-preset-btn ui-fct" aria-pressed="true"><span>All Time</span></button>
@@ -695,7 +695,7 @@
                                 <input type="hidden" id="messages-end-date" value="">
                             </div>
                         </div>
-                        <button onclick="exportCSV('messages')" class="ui-btn ui-btn-sm ui-fct-export">Export CSV</button>
+                        <button onclick="exportCSV('messages')" class="ui-btn ui-btn-sm ui-fct-export" data-noid-hide>Export CSV</button>
                     </aside>
 
                     <!-- The list -->
@@ -705,8 +705,8 @@
                                 <input type="text" id="messages-filter-search" placeholder="Search (sender, recipient, subject, IP, user)..." aria-label="Search" onkeypress="if(event.key==='Enter') applyMessagesFilters()">
                             </label>
                             <span id="messages-sort" class="ui-msg-sort"></span>
-                            <button type="button" id="messages-filters-btn" class="ui-icon-btn ui-msg-filter-btn" aria-expanded="false" aria-controls="messages-more-filters" title="Filter by sender, recipient, user or IP" onclick="toggleMessagesFilters()"><svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"></path></svg><span id="messages-filters-n" class="ui-msg-filter-n hidden"></span></button>
-                            <div id="messages-more-filters" class="ui-msg-filters hidden">
+                            <button type="button" id="messages-filters-btn" data-noid-hide class="ui-icon-btn ui-msg-filter-btn" aria-expanded="false" aria-controls="messages-more-filters" title="Filter by sender, recipient, user or IP" onclick="toggleMessagesFilters()"><svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"></path></svg><span id="messages-filters-n" class="ui-msg-filter-n hidden"></span></button>
+                            <div id="messages-more-filters" class="ui-msg-filters hidden" data-noid-hide>
                                 <input type="text" id="messages-filter-sender" class="ui-input" placeholder="Sender" aria-label="Sender" onkeypress="if(event.key==='Enter') applyMessagesFilters()">
                                 <input type="text" id="messages-filter-recipient" class="ui-input" placeholder="Recipient" aria-label="Recipient" onkeypress="if(event.key==='Enter') applyMessagesFilters()">
                                 <input type="text" id="messages-filter-user" class="ui-input" placeholder="Authenticated User" aria-label="Authenticated User" onkeypress="if(event.key==='Enter') applyMessagesFilters()">
@@ -736,14 +736,14 @@
                             </div>
                             <!-- Where the facets are hidden (below 1280px): outcome, direction and time as buttons that open their choices -->
                             <div id="messages-pickers" class="ui-msg-pickers">
-                                <span class="ui-popover-host ui-msg-range-host ui-picker" id="messages-status-host" data-picker="messages-status">
+                                <span class="ui-popover-host ui-msg-range-host ui-picker" id="messages-status-host" data-picker="messages-status" data-noid-hide>
                                     <button type="button" id="messages-status-pick" class="ui-msg-range ui-picker-btn" aria-haspopup="listbox" aria-expanded="false" aria-controls="messages-status-panel"><span class="ui-picker-name">Outcome:</span> <span id="messages-status-value">All</span></button>
                                     <span id="messages-status-panel" class="ui-popover ui-msg-time-panel ui-picker-panel hidden" role="listbox" aria-label="Outcome">
                                         <span class="ui-label" aria-hidden="true">Outcome</span>
                                         <span id="messages-status-options" class="ui-fct-list"></span>
                                     </span>
                                 </span>
-                                <span class="ui-popover-host ui-msg-range-host ui-picker" id="messages-direction-host" data-picker="messages-direction">
+                                <span class="ui-popover-host ui-msg-range-host ui-picker" id="messages-direction-host" data-picker="messages-direction" data-noid-hide>
                                     <button type="button" id="messages-direction-pick" class="ui-msg-range ui-picker-btn" aria-haspopup="listbox" aria-expanded="false" aria-controls="messages-direction-panel"><span class="ui-picker-name">Direction:</span> <span id="messages-direction-value">Any</span></button>
                                     <span id="messages-direction-panel" class="ui-popover ui-msg-time-panel ui-picker-panel hidden" role="listbox" aria-label="Direction">
                                         <span class="ui-label" aria-hidden="true">Direction</span>
@@ -772,7 +772,8 @@
                                 </span>
                             </div>
                             <p class="ui-msg-summary"><span id="messages-count"></span><span id="messages-exact"></span>
-                                <button type="button" id="messages-clear-filters" class="ui-link-row ui-msg-clear hidden" onclick="clearMessagesFilters()">Clear filters</button></p>
+                                <button type="button" id="messages-clear-filters" class="ui-link-row ui-msg-clear hidden" onclick="clearMessagesFilters()">Clear filters</button>
+                                <button type="button" id="messages-noid" class="ui-link-row ui-msg-clear hidden" onclick="showMessagesWithoutId(!messagesNoId)"></button></p>
                         </div>
                         <div id="messages-logs" class="ui-msg-items">
                             <div class="ui-loading" role="status"><div class="loading"></div><p>Loading...</p></div>

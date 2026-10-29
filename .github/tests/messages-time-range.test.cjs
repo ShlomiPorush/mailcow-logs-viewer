@@ -65,6 +65,9 @@ function harness(filters, appTimezone = 'Europe/Berlin') {
         messagesFetch: url => context.authenticatedFetch(url),   // the list's requests, as the page makes them
         messagesNewGeneration: () => ++context.messagesGen,
         loadMessageFacets: () => { calls.facets++; },
+        messagesNoId: false,   // the whole list, not the messages without a Message-ID
+        refreshMessagesNoId: () => {},
+        leaveMessagesWithoutId: () => {},
     });
     vm.runInContext(zoneHelpers, context);
     vm.runInContext([

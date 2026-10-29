@@ -38,7 +38,7 @@ Then restart Postfix from the mailcow directory:
 docker compose restart postfix-mailcow
 ```
 
-Postfix also adds a missing `From`, `To` or `Date` header.
+Postfix also adds a missing `From`, `To` or `Date` header. It keeps a Message-ID header that is present but empty, as some scanners send it; Messages lists such messages apart, under **+ N unlinked messages**.
 
 ## 3. Download the files
 
