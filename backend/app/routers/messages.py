@@ -16,6 +16,8 @@ from ..models import MessageCorrelation, PostfixLog, RspamdLog, NetfilterLog, Ra
 from ..config import settings
 from ..app_time import range_bound
 from ..services import entity_values, excluded_addresses
+from ..services.message_recipients import (legs_recipients, listed_recipients, resolve_recipients,
+                                           union_recipients, written_address)
 from ..services.dovecot_parser import dovecot_line_user, parse_dovecot_message
 from ..utils import internal_error, format_datetime_for_api as format_datetime_utc, RangeStart, RangeEnd
 from ..api_models import Invalid, documented
@@ -114,7 +116,7 @@ def _group_postfix_by_recipient(postfix_logs) -> dict:
     
     for log in postfix_logs:
         # Create a unique key for deduplication
-        msg_key = f"{log.time}:{log.message[:100] if log.message else ''}"
+        msg_key = f"{log.time}:{log.message or ''}"
         if msg_key in seen_messages:
             continue
         seen_messages.add(msg_key)
@@ -217,7 +219,9 @@ def _filtered_messages_query(db, search=None, sender=None, recipient=None, direc
     exact = exact is True
     exact_ip = exact_ip is True
     # Excluded addresses, here in the query, so pages, totals and facet
-    # counts leave them out alike (no page comes out empty)
+    # counts leave them out alike (no page comes out empty). A leg an address
+    # of its queue hides (orig_to) is checked per page in the list instead:
+    # nothing here may read the Postfix lines, which every count would pay for
     query = (base if base is not None else db.query(MessageCorrelation)).filter(excluded_addresses.correlation_visible())
 
     # Apply filters
@@ -531,36 +535,63 @@ def get_unified_messages(
         found = found[:limit]
         messages = [msg for msg, _ in found]
 
-        # How many deliveries the message has in total, which is what the row
-        # reports - not only the legs the current filters matched
+        # A message is one email however many times it passed through the server:
+        # its recipients are those of all its legs, and its deliveries are those
+        # legs - the ones the details list as its journey. The legs, their Rspamd
+        # logs and their Postfix lines are read for the whole page at once, never per row
         message_ids = {msg.message_id for msg in messages if msg.message_id}
-        leg_counts = {}
+        legs_of = {}
         if message_ids:
-            leg_counts = dict(
-                db.query(
-                    MessageCorrelation.message_id,
-                    func.count(MessageCorrelation.id)
-                ).filter(
-                    MessageCorrelation.message_id.in_(message_ids)
-                ).group_by(MessageCorrelation.message_id).all()
-            )
+            for leg in db.query(MessageCorrelation).filter(
+                MessageCorrelation.message_id.in_(message_ids), excluded_addresses.correlation_visible()
+            ).all():
+                legs_of.setdefault(leg.message_id, []).append(leg)
+
+        # A leg an excluded address reaches through a line of its queue (an alias in
+        # orig_to) is hidden, as the details hide it. The filters only check a leg's
+        # own addresses: checking every leg's Postfix lines there would slow every
+        # count, while such a leg only lives until the cleanup deletes it (a change
+        # of the list asks for a cleanup pass). So it is checked for this page only:
+        # a row whose leg is hidden stands for the first visible leg of its message
+        # the filters match, in the list's order, or is left off the page - the
+        # total still counts it until the cleanup runs
+        page_legs = {leg.correlation_key: leg for leg in messages}
+        page_legs.update({leg.correlation_key: leg for legs in legs_of.values() for leg in legs})
+        hidden = excluded_addresses.hidden_deliveries(db, list(page_legs.values()))
+        if any(msg.correlation_key in hidden for msg in messages):
+            stale = {msg.message_id for msg in messages if msg.correlation_key in hidden and msg.message_id}
+            visible = {}
+            if stale:
+                for leg in query.filter(MessageCorrelation.message_id.in_(stale)).order_by(
+                        message_sort_time().asc(), MessageCorrelation.id.asc()).all():
+                    if leg.correlation_key not in hidden:
+                        visible.setdefault(leg.message_id, leg)
+            messages = [msg if msg.correlation_key not in hidden else visible.get(msg.message_id)
+                        for msg in messages]
+            messages = [msg for msg in messages if msg is not None]
+        row_legs = {msg.correlation_key: [msg] + [leg for leg in legs_of.get(msg.message_id, [])
+                                                  if leg.correlation_key != msg.correlation_key
+                                                  and leg.correlation_key not in hidden]
+                    for msg in messages}
+        all_legs = list({leg.correlation_key: leg for legs in row_legs.values() for leg in legs}.values())
+        rspamd_ids = {leg.rspamd_log_id for leg in all_legs if leg.rspamd_log_id}
+        rspamd_logs = {row.id: row for row in db.query(RspamdLog).filter(
+            RspamdLog.id.in_(list(rspamd_ids))).all()} if rspamd_ids else {}
+        recipients = legs_recipients(db, all_legs, rspamd_logs)
 
         # Build the response (hidden addresses are already left out by the query)
         result_messages = []
         for msg in messages:
-            # Get Rspamd log for additional info
-            rspamd_log = None
-            if msg.rspamd_log_id:
-                rspamd_log = db.query(RspamdLog).filter(
-                    RspamdLog.id == msg.rspamd_log_id
-                ).first()
-            
+            rspamd_log = rspamd_logs.get(msg.rspamd_log_id)
+            recipient_count = len(union_recipients(recipients[leg.correlation_key]
+                                                   for leg in row_legs[msg.correlation_key]))
             result_messages.append({
                 "correlation_key": msg.correlation_key,
                 "message_id": msg.message_id,
                 "queue_id": msg.queue_id,
                 "sender": msg.sender,
                 "recipient": msg.recipient,
+                "recipient_count": recipient_count,
                 "subject": msg.subject,
                 "direction": msg.direction,
                 "final_status": msg.final_status,
@@ -569,7 +600,7 @@ def get_unified_messages(
                 "last_seen": format_datetime_utc(msg.last_seen),
                 "dovecot_status": msg.dovecot_status,
                 "dovecot_mailbox": msg.dovecot_mailbox,
-                "deliveries": leg_counts.get(msg.message_id, 1),
+                "deliveries": len(row_legs[msg.correlation_key]),
                 "spam_score": rspamd_log.score if rspamd_log else None,
                 "is_spam": rspamd_log.is_spam if rspamd_log else None,
                 "user": rspamd_log.user if rspamd_log else None,
@@ -638,14 +669,24 @@ def get_message_full_details(
         seen_messages = set()
         deduplicated_postfix_logs = []
         for log in postfix_logs:
-            # Create unique key: time + first 100 chars of message
-            msg_key = f"{log.time}:{log.message[:100] if log.message else ''}"
+            # The whole line: two lines can share their start and differ later
+            # (two long aliases delivered to one mailbox in the same second)
+            msg_key = f"{log.time}:{log.message or ''}"
             if msg_key not in seen_messages:
                 seen_messages.add(msg_key)
                 deduplicated_postfix_logs.append(log)
         if excluded_addresses.delivery_hidden(correlation, deduplicated_postfix_logs):
             raise HTTPException(status_code=404, detail="Message not found")
         postfix_logs = excluded_addresses.visible_postfix_lines(deduplicated_postfix_logs)
+        if not correlation.queue_id and postfix_logs and excluded_addresses.listed():
+            # Lines linked by id are not all of their queue occurrence: which of them
+            # are visible is asked of the database, as the Messages list asks it, so
+            # the rows shown and the count the list shows are the same
+            visible = {line_id for (line_id,) in db.query(PostfixLog.id).filter(
+                PostfixLog.id.in_([log.id for log in postfix_logs]),
+                excluded_addresses.postfix_line_visible_among(
+                    list({log.queue_id for log in postfix_logs if log.queue_id}))).all()}
+            postfix_logs = [log for log in postfix_logs if log.id in visible]
         
         # Get Netfilter logs by IP from Rspamd, limited to ±1 hour around the
         # message (issue #68) - the Security tab explicitly promises "events
@@ -666,12 +707,18 @@ def get_message_full_details(
         # on its own and the detail view links them.
         related_deliveries = []
         other_legs = []
+        other_recipients = {}
         if correlation.message_id:
             other_legs = db.query(MessageCorrelation).filter(
                 MessageCorrelation.message_id == correlation.message_id,
                 MessageCorrelation.correlation_key != correlation.correlation_key
             ).order_by(MessageCorrelation.first_seen).all()
-            other_legs = [leg for leg in other_legs if not excluded_addresses.any_listed(leg.sender, leg.recipient)]
+            # Not a delivery to or from an excluded address: opening it would answer 404
+            hidden = excluded_addresses.hidden_deliveries(db, other_legs)
+            other_legs = [leg for leg in other_legs if leg.correlation_key not in hidden]
+            # Their recipients, read as the Messages list reads them (grouped queries)
+            if other_legs:
+                other_recipients = legs_recipients(db, other_legs)
             related_deliveries = [
                 {
                     "correlation_key": leg.correlation_key,
@@ -683,6 +730,7 @@ def get_message_full_details(
                     "queue_id": leg.queue_id,
                     "dovecot_status": leg.dovecot_status,
                     "dovecot_mailbox": leg.dovecot_mailbox,
+                    "recipients": other_recipients[leg.correlation_key],
                 }
                 for leg in other_legs
             ]
@@ -699,19 +747,15 @@ def get_message_full_details(
             db, correlation, single_leg=not related_deliveries
         )
 
-        # Get all recipients - from Rspamd (primary source) or from Postfix logs
-        recipients = []
-        if rspamd_log and rspamd_log.recipients_smtp:
-            recipients = excluded_addresses.visible_recipients(rspamd_log.recipients_smtp)
-        
-        # If no recipients from Rspamd, collect unique recipients from Postfix logs
-        if not recipients:
-            seen_recipients = set()
-            for log in postfix_logs:
-                if log.recipient and log.recipient not in seen_recipients:
-                    recipients.append(log.recipient)
-                    seen_recipients.add(log.recipient)
-        
+        # Get all recipients - from Rspamd (primary source) or from Postfix logs -
+        # and count them as the dialog's header does, for the whole message (this
+        # delivery's and its other deliveries'), which is what the Messages list shows
+        recipients = listed_recipients(rspamd_log, (log.recipient for log in postfix_logs))
+        own = resolve_recipients(
+            recipients, [(log.recipient, written_address(log.recipient, log.message)) for log in postfix_logs],
+            correlation.recipient)
+        recipient_count = len(union_recipients([own] + [other_recipients[leg.correlation_key] for leg in other_legs]))
+
         # Build response
         return {
             "correlation_key": correlation.correlation_key,
@@ -720,7 +764,7 @@ def get_message_full_details(
             "sender": correlation.sender,
             "recipient": correlation.recipient,  # Primary recipient (for backwards compatibility)
             "recipients": recipients,  # ALL recipients
-            "recipient_count": len(recipients),
+            "recipient_count": recipient_count,
             "subject": subject,
             "direction": correlation.direction,
             "final_status": correlation.final_status,

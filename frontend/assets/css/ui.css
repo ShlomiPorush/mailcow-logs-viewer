@@ -697,6 +697,11 @@
 .ui-msg-col .ui-msg-l3 { margin-top: 0; gap: 4px 8px; }
 .ui-msg-col .ui-msg-l3 .ui-tag { margin-inline-end: 0; }
 .ui-msg-to { max-width: 16ch; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+/* "to a@example.com +2": the address keeps its ellipsis, the count stays whole beside it */
+.ui-msg-rcpt { display: inline-flex; align-items: center; gap: 5px; min-width: 0; max-width: 100%; }
+.ui-msg-rcpt .ui-msg-to { min-width: 0; }
+/* The neutral tag (.ui-tag), quieter: a size smaller and less bold, like .ui-tag-dir */
+.ui-tag.ui-rcpt-more { flex: none; margin: 0; padding: 0 5px; font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .ui-msg-more { margin: 0; padding: 14px var(--ui-pad-x) 22px; color: var(--ui-muted); font-size: var(--ui-fs-sm); text-align: center; }
 .ui-msg-more:empty { padding: 0; }
 /* New messages: a button over the list at the edge where new mail lands (sticky, so it stays in view), as on the Logs page */
@@ -2921,6 +2926,9 @@ html .markdown-body .markdown-alert-caution .markdown-alert-title { color: var(-
 .ui-gs-ic { grid-row: 1 / span 2; display: grid; place-items: center; color: var(--ui-muted); }
 .ui-gs-item b { font-weight: 600; font-size: 13.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ui-gs-item small { grid-column: 2; color: var(--ui-muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* A line with a tag after it (a message's "+2"): the text is cut short, the tag stays whole */
+.ui-gs-item small.ui-gs-sub { display: flex; align-items: center; gap: 5px; }
+.ui-gs-sub > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .ui-gs-at { grid-row: 1 / span 2; grid-column: 3; color: var(--ui-muted); font-size: 12px; white-space: nowrap; }
 .ui-gs-item mark { background: color-mix(in srgb, var(--ui-warn) 22%, transparent); color: inherit; border-radius: 3px; padding: 0 1px; }
 .ui-gs-more { display: flex; justify-content: space-between; align-items: center; gap: 12px; width: 100%; margin: 4px 0 8px; padding: 10px 12px;

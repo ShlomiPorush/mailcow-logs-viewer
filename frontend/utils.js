@@ -1336,13 +1336,17 @@ function renderMailboxFolderHint(msg) {
     return `<span>Folder: ${escapeHtml(folder)}</span>`;
 }
 
-// A message that was delivered more than once - forwarded, copied or released
-// from quarantine - is one row in the list (issue #36). Shown as a plain
-// metadata entry; the dialog shows the deliveries as a journey.
-function renderDeliveriesChip(msg) {
-    const deliveries = msg.deliveries || 1;
-    if (deliveries < 2) return '';
-    return `<span>Deliveries: ${escapeHtml(String(deliveries))}</span>`;
+// A message to several people names its first recipient and how many more,
+// "to a@example.com +2". The count is a quiet tag beside the address that is
+// never cut short; a screen reader hears "and 2 more recipients". A message
+// delivered more than once (a forward, a copy sent on) is one row (issue #36)
+// and counts the recipients of every delivery; the dialog shows the
+// deliveries as a journey.
+function renderRecipientMore(msg) {
+    const more = (Number(msg.recipient_count) || 0) - 1;
+    if (more < 1) return '';
+    const said = `and ${more} more ${more === 1 ? 'recipient' : 'recipients'}`;
+    return `<span class="ui-tag ui-rcpt-more" title="${said}"><span aria-hidden="true">+${more}</span><span class="ui-sr-only"> ${said}</span></span>`;
 }
 
 // =============================================================================
