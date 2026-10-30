@@ -6,7 +6,7 @@ SIMPLIFIED VERSION:
 - Removed old generate_correlation_key function
 - Correlation key is now SHA256 of Message-ID
 """
-from sqlalchemy import Column, Integer, BigInteger, String, Float, DateTime, Boolean, Text, Index, JSON, UniqueConstraint, ForeignKey, func, text, Uuid
+from sqlalchemy import Column, Integer, BigInteger, String, Float, DateTime, Boolean, Text, Index, JSON, UniqueConstraint, ForeignKey, CheckConstraint, func, text, Uuid
 from sqlalchemy.dialects.postgresql import JSONB
 from datetime import datetime
 
@@ -1083,3 +1083,43 @@ class AgentAudit(Base):
     http_status = Column(Integer)
     outcome = Column(String(10))                              # ok | error | accepted | denied
     detail = Column(String(300))
+
+
+class User(Base):
+    """A person who signs in with their own access (routers/users.py).
+
+    A local user signs in with a username and password on the login form. An
+    OAuth2 entry gives the person the provider signs in with that email its
+    own access, instead of the OAuth2 default. The built-in admin (AUTH_USERNAME)
+    is not stored here.
+    """
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True)
+    kind = Column(String(10), nullable=False)                 # 'local' | 'oauth2'
+    username = Column(String(64))                             # as typed, shown in the list
+    username_norm = Column(String(64))
+    email = Column(String(320))
+    email_norm = Column(String(320))
+    password_hash = Column(String(255))
+    access = Column(String(10), nullable=False)               # 'admin' | 'operator' | 'viewer' | 'custom'
+    scopes = Column(Text, nullable=False, default="")         # space separated, used only for custom
+    disabled = Column(Boolean, nullable=False, default=False, server_default=text("false"))
+    # Advances on every change that ends the user's sessions: password, access, disabled
+    auth_version = Column(Integer, nullable=False, default=1, server_default=text("1"))
+    # Advances on every edit, so an edit made on an older copy is refused
+    row_version = Column(Integer, nullable=False, default=1, server_default=text("1"))
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    last_login_at = Column(DateTime)
+
+    __table_args__ = (
+        CheckConstraint("kind IN ('local', 'oauth2')", name="ck_users_kind"),
+        CheckConstraint("access IN ('admin', 'operator', 'viewer', 'custom')", name="ck_users_access"),
+        CheckConstraint("kind <> 'local' OR (username_norm IS NOT NULL AND password_hash IS NOT NULL "
+                        "AND email IS NULL AND email_norm IS NULL)", name="ck_users_local"),
+        CheckConstraint("kind <> 'oauth2' OR (email_norm IS NOT NULL AND password_hash IS NULL)",
+                        name="ck_users_oauth2"),
+        Index("ux_users_local_username", "username_norm", unique=True, postgresql_where=text("kind = 'local'")),
+        Index("ux_users_oauth2_email", "email_norm", unique=True, postgresql_where=text("kind = 'oauth2'")),
+    )

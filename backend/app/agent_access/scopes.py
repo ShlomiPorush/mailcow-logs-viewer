@@ -255,11 +255,15 @@ EXCLUDED: Dict[Tuple[str, str], str] = {
 # Managing agents is for people, whatever the method (consent.py registers these)
 AGENTS_API_PREFIX = "/api/agents"
 _MANAGE = "managing agents is for people"
+USERS_API_PREFIX = "/api/users"
+_USERS = "managing who can sign in is for people"
 
 
 def excluded_reason(method: str, path: str) -> Optional[str]:
     if path == AGENTS_API_PREFIX or path.startswith(AGENTS_API_PREFIX + "/"):
         return _MANAGE
+    if path == USERS_API_PREFIX or path.startswith(USERS_API_PREFIX + "/"):
+        return _USERS
     return EXCLUDED.get((method, path))
 
 

@@ -1,5 +1,5 @@
 """What the sign-in calls return (routers/auth.py)."""
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from pydantic import Field
 
@@ -44,6 +44,11 @@ class AuthStatus(Fixed):
     session: Optional[SessionLimits] = Field(description="The session cookie's limits. Null for Basic Auth without "
                                                          "a session, while sign-in is off and when not signed in. "
                                                          "Reading it never counts as activity")
+    user_name: Optional[str] = Field(description="Who is signed in: the username or the OAuth2 email. Null while "
+                                                 "sign-in is off or when the sign-in does not name anyone")
+    is_admin: bool = Field(description="Whether this person is an admin (always while sign-in is off)")
+    scopes: List[str] = Field(description="What this person may do, as area:read and area:write, in menu order; "
+                                          "an admin has every scope")
 
 
 class SessionActivity(Fixed):

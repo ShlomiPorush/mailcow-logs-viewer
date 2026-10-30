@@ -41,6 +41,8 @@ def store(monkeypatch):
     monkeypatch.setattr(ss, "get_config_overrides_from_db", lambda db, types_: {
         k: ss._deserialize_value(ss._serialize_value(v), k, types_[k]) for k, v in data.items()})
     monkeypatch.setattr(settings_router, "save_config_overrides_to_db", lambda db, values: data.update(values))
+    # The last-admin and username checks read the users table (test_users.py covers them)
+    monkeypatch.setattr(settings_router.users_store, "check_sign_in_settings", lambda db, before, allowed: None)
     monkeypatch.setattr(settings_router, "has_config_overrides_in_db", lambda db: bool(data))
     monkeypatch.setattr(settings_router, "cleanup_disabled_feature_data", lambda db: None)
     monkeypatch.setattr(settings_router, "reschedule_interval_jobs", lambda: None)
@@ -202,14 +204,14 @@ def test_a_reload_elsewhere_cannot_bring_the_old_password_back(store, monkeypatc
 def test_a_login_let_in_before_a_password_change_gets_no_session(monkeypatch):
     """The old password is accepted, then the change lands while the login
     waits for a worker. Its session would outlive the change."""
-    check = auth_module._authenticate_basic_request
+    check = auth_module.verify_credentials
 
-    def accept_then_change(request):
-        accepted = check(request)
+    def accept_then_change(username, password):
+        accepted = check(username, password)
         session.revoke_all_sessions()
         return accepted
 
-    monkeypatch.setattr(auth_module, "_authenticate_basic_request", accept_then_change)
+    monkeypatch.setattr(auth_module, "verify_credentials", accept_then_change)
     client = TestClient(app)
     response = client.post("/api/auth/session", headers=basic())
     assert response.status_code == 409

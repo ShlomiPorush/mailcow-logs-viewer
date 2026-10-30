@@ -67,6 +67,23 @@ def module_clock(monkeypatch):
     return apply
 
 
+@pytest.fixture
+def app_schema():
+    """The app's tables in the test database, as the app's start creates them.
+
+    For a test whose request resolves a person's access (an OAuth2 sign-in or
+    session, a local user): that reads the users and system_settings tables.
+    """
+    from sqlalchemy import text
+    from app.database import engine, init_db
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+    except Exception:
+        pytest.skip("PostgreSQL not available")
+    init_db()
+
+
 @pytest.fixture(autouse=True)
 def local_domains_loaded(monkeypatch):
     """The automatic suppression jobs wait until every domain of this mailcow is

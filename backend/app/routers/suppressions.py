@@ -12,7 +12,7 @@ import io
 import re
 import logging
 from datetime import datetime, timedelta, timezone
-from fastapi import APIRouter, HTTPException, Depends, Query, UploadFile, File
+from fastapi import APIRouter, HTTPException, Depends, Query, Request, UploadFile, File
 from pydantic import BaseModel, field_validator
 from typing import Optional, List, Union
 from sqlalchemy.orm import Session, load_only
@@ -25,6 +25,8 @@ from ..models import MessageCorrelation, SpamSuppression, SuppressionEvent
 from ..mailcow_api import mailcow_api, MailcowAPIError, MailcowRwKeyError
 from ..services.rspamd_map_lock import MapBusyError, map_write_lock
 from ..services import excluded_addresses
+from ..agent_access.scopes import READ
+from ..user_access import caller_may
 from ..services.suppression_events import add_event, disabled_by_hand, postfix_lines
 from ..services.suppression_rows_lock import lock_suppression_rows
 from ..utils import internal_error, format_datetime_for_api
@@ -642,10 +644,14 @@ EVENTS_PAGE = 20
 
 
 @router.get("/suppressions/{suppression_id}/events", responses=documented(m.SuppressionEvents, errors={404: None, 422: Invalid, 500: None}))
-def get_suppression_events(suppression_id: int, page: int = Query(1, ge=1), db: Session = Depends(get_db)):
+def get_suppression_events(suppression_id: int, page: int = Query(1, ge=1), request: Request = None,
+                           db: Session = Depends(get_db)):
     """Block details: what happened to this address, newest first, with the
     evidence copied at the time. message_available says whether the linked
-    message is still on the Messages page right now."""
+    message is still on the Messages page right now. The message itself
+    (sender, subject, ids, Postfix lines) is left out for a caller without
+    View for Messages."""
+    with_messages = caller_may(request, "messages", READ)
     suppression = db.query(SpamSuppression).filter(SpamSuppression.id == suppression_id).first()
     if not suppression:
         raise HTTPException(status_code=404, detail="Suppression not found")
@@ -669,7 +675,7 @@ def get_suppression_events(suppression_id: int, page: int = Query(1, ge=1), db: 
         }
         # Evidence copied before an address was excluded: the event still says
         # what happened to the block, not what the message was
-        if excluded_addresses.any_listed(e.sender, e.recipient) or any(
+        if not with_messages or excluded_addresses.any_listed(e.sender, e.recipient) or any(
                 excluded_addresses.postfix_text_listed(line.get('message'))
                 for line in (e.log_lines or []) if isinstance(line, dict)):
             row.update(sender=None, subject=None, queue_id=None, message_id=None, log_lines=[],

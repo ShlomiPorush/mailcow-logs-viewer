@@ -48,12 +48,14 @@ from .routers import (
     notifications as notifications_router,
     rate_limits as rate_limits_router,
     entities as entities_router,
+    users as users_router,
 )
 from .migrations import run_migrations
 from .agent_access import consent as agent_consent, live as agent_live, mcp as agent_mcp, oauth as agent_oauth
 from .agent_access import skill as agent_skill
 from .agent_access.dispatch import enforce_agent_policy
-from .auth import BasicAuthMiddleware, safe_return_path
+from .auth import BasicAuthMiddleware, _login_redirect, safe_return_path, session_ended_response
+from . import user_access
 from .origin_guard import SameOriginGuardMiddleware
 from .session import get_session_from_request
 from .services.auth_cleanup import auth_store_maintenance
@@ -146,6 +148,22 @@ def log_agent_access_state() -> None:
         logger.error(f"Could not compare the sign-in settings for agent access: {e}")
 
 
+def log_user_name_conflicts() -> None:
+    """A local user named like the built-in admin (AUTH_USERNAME changed in the environment):
+    the built-in admin wins, and that user cannot sign in until renamed or removed."""
+    if not settings.is_basic_auth_enabled:
+        return
+    try:
+        from .database import get_db_context
+        from .services.users_store import name_conflicts
+        with get_db_context() as db:
+            for name in name_conflicts(db):
+                logger.warning(f"The local user '{name}' has the built-in admin's username (AUTH_USERNAME) and "
+                               "cannot sign in. Delete that user, or choose another AUTH_USERNAME.")
+    except Exception as e:
+        logger.error(f"Could not compare local users with AUTH_USERNAME: {e}")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifecycle management"""
@@ -195,6 +213,7 @@ async def lifespan(app: FastAPI):
     
     log_authentication_state()
     log_agent_access_state()
+    log_user_name_conflicts()
 
     # Every clock in the app follows this zone; an unknown TZ is logged here, by name, and UTC is used
     logger.info(f"Time zone: {app_tz().key}")
@@ -269,7 +288,9 @@ app = FastAPI(
         "With sign-in on, every call except /api/health, /api/info and the sign-in calls needs a session or Basic "
         "credentials, and answers 401 without them. A call with a session that a limit ended answers 401 with "
         "{detail, reason} and the reason in the X-Session-End header: session_expired (the longest session) or "
-        "session_idle (inactivity). A write sent from another site's page answers 403. "
+        "session_idle (inactivity) or access_changed (the person's account changed or no longer gives access). "
+        "A write sent from another site's page answers 403, and so does a call the signed-in person's access does "
+        "not cover, with {detail}. When the person's access cannot be checked, a call answers 503. "
         "With Basic auth on but no password set, those calls answer 500 with a sentence in plain text. "
         "An agent's call with a bearer token may also be refused or cut short by the agent gateway, which answers "
         "{error, message}."
@@ -281,8 +302,9 @@ app = FastAPI(
     docs_url=None,
     redoc_url=None,
     # An agent's call (agent_access/dispatch.py) may run a route only when its
-    # grant covers it; for every other request this does nothing
-    dependencies=[Depends(enforce_agent_policy)],
+    # grant covers it, and a person's request only when their access covers it
+    # (user_access.py); each leaves the other's requests alone
+    dependencies=[Depends(enforce_agent_policy), Depends(user_access.enforce_people_policy)],
 )
 
 _generate_openapi = app.openapi
@@ -298,6 +320,9 @@ def _openapi_with_agent_calls():
 
 
 app.openapi = _openapi_with_agent_calls
+
+# Inside the sign-in middleware: one log line per change a person asked for
+app.add_middleware(user_access.ActionLogMiddleware)
 
 # Add Basic Auth Middleware FIRST (innermost)
 # This ensures ALL requests are authenticated when enabled
@@ -444,6 +469,7 @@ app.include_router(protection_router.router, prefix="/api", tags=["Protection Ru
 app.include_router(notifications_router.router, prefix="/api", tags=["Notifications"])
 app.include_router(rate_limits_router.router, prefix="/api", tags=["Rate Limits"])
 app.include_router(entities_router.router, prefix="/api", tags=["Entities"])
+app.include_router(users_router.router, prefix="/api")
 app.include_router(agent_consent.router, prefix="/api")
 
 # Agent access: OAuth discovery, sign-in and the MCP endpoint live outside /api
@@ -559,7 +585,10 @@ async def app_info(request: Request):
         "oauth2_enabled": settings.is_oauth2_enabled,
     }
 
-    if is_request_authenticated(request):
+    # A session counts only while the person still has access (user_access.py)
+    from starlette.concurrency import run_in_threadpool
+    cookie = "none" if not settings.is_authentication_enabled else await run_in_threadpool(user_access.cookie_access, request)
+    if cookie == "ok" or (cookie == "none" and is_request_authenticated(request)):
         info.update({
             "version": __version__,
             "mailcow_url": settings.mailcow_url,
@@ -577,6 +606,22 @@ async def app_info(request: Request):
         })
 
     return info
+
+
+@app.exception_handler(user_access.SessionEnded)
+async def session_ended_handler(request: Request, exc: user_access.SessionEnded):
+    """The person's account changed or no longer gives access: answered like a session a limit ended"""
+    if request.url.path.startswith("/api/"):
+        return session_ended_response(exc.reason)
+    return _login_redirect(request, exc.reason)
+
+
+@app.exception_handler(user_access.NotPermitted)
+async def not_permitted_handler(request: Request, exc: user_access.NotPermitted):
+    """The signed-in person's access does not cover the route"""
+    if request.url.path.startswith("/api/"):
+        return JSONResponse(status_code=403, content={"detail": user_access.NOT_PERMITTED})
+    return agent_oauth.error_page("No permission", "Only an admin can connect agents to this app.", 403)
 
 
 @app.exception_handler(MailcowAPIError)

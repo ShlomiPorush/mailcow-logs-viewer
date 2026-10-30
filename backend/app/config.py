@@ -1406,6 +1406,13 @@ def setup_logging():
     
     root.setLevel(getattr(logging, settings.log_level))
     
+    # Who changed what (user_access.py): written whatever LOG_LEVEL says, through
+    # the same console and file handlers, so the app log page shows it too
+    actions = logging.getLogger("mlv.actions")
+    actions.handlers = list(root.handlers)
+    actions.setLevel(logging.INFO)
+    actions.propagate = False
+
     # Set levels for third-party libraries
     logging.getLogger('httpx').setLevel(logging.ERROR)
     logging.getLogger('httpcore').setLevel(logging.ERROR)

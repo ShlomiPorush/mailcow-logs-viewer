@@ -91,7 +91,7 @@ class InfoConfiguration(Fixed):
     auth_enabled: bool
     basic_auth_enabled: bool
     oauth2_enabled: bool
-    auth_username: Optional[str] = Field(description="null unless Basic Auth is on")
+    auth_username: Optional[str] = Field(description="null unless Basic Auth is on and the caller may read Settings")
     oauth2_provider_name: Optional[str] = Field(description="null unless OAuth2 is on")
     maxmind_status: Optional[CheckResult] = Field(description="The last license check; null when never checked")
     mailcow_rw_key_status: Optional[CheckResult] = Field(description="null when not checked since the key or "
@@ -188,7 +188,8 @@ class BackgroundJobs(Fixed):
 
 
 class SmtpConfiguration(Fixed):
-    """The values after `enabled` are null while SMTP is off, except `configured`."""
+    """The values after `enabled` are null while SMTP is off, except `configured`; host, port, user,
+    from_address and admin_email are null for a caller who may not read Settings."""
     enabled: bool
     host: Optional[str]
     port: Optional[int]
@@ -200,7 +201,8 @@ class SmtpConfiguration(Fixed):
 
 
 class DmarcConfiguration(Fixed):
-    """The imap_* values are null while the IMAP import is off."""
+    """The imap_* values are null while the IMAP import is off; host, user and folder are null for a
+    caller who may not read Settings."""
     manual_upload_enabled: bool
     imap_sync_enabled: bool
     imap_host: Optional[str]
@@ -240,7 +242,7 @@ class SettingsInfo(Fixed):
         description="The 5 newest, without excluded addresses; empty for an AI agent without View for Messages")
     raw_logs_required: Dict[str, List[str]] = Field(description="Raw log services other pages read, with those "
                                                                 "pages; they are always collected")
-    editable_config: Dict[str, Any] = Field(None, description="While UI editing is on. " + SETTINGS)
+    editable_config: Dict[str, Any] = Field(None, description="While UI editing is on, for a caller who may read Settings. " + SETTINGS)
     default_config: Dict[str, Any] = Field(None, description="While UI editing is on: the defaults, by the same "
                                                              "keys; null for a required setting, empty for a "
                                                              "secret")

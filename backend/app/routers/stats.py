@@ -2,7 +2,7 @@
 API endpoints for statistics and dashboard data
 """
 import logging
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.orm import Session
 from sqlalchemy import func, and_, cast, Integer
 from datetime import datetime, timedelta, timezone
@@ -11,6 +11,8 @@ from typing import Optional
 from ..database import get_db
 from ..models import PostfixLog, RspamdLog, NetfilterLog, MessageCorrelation
 from ..services import excluded_addresses, written_recipients
+from ..agent_access.scopes import READ
+from ..user_access import caller_may
 
 from ..utils import format_datetime_for_api as format_datetime_utc
 from ..api_models import Invalid, documented
@@ -284,11 +286,15 @@ def get_top_spam_triggers(
 @router.get("/stats/top-blocked-ips", responses=documented(m.BlockedIpsResponse, errors={422: Invalid}))
 def get_top_blocked_ips(
     limit: int = Query(10, ge=1, le=500),
+    request: Request = None,
     db: Session = Depends(get_db)
 ):
     """
-    Get top blocked/warned IP addresses
+    Get top blocked/warned IP addresses. They come from Security's Netfilter
+    events: empty for a caller without View for Security.
     """
+    if not caller_may(request, "security", READ):
+        return {"blocked_ips": []}
     try:
         cutoff = datetime.utcnow() - timedelta(days=7)
         
