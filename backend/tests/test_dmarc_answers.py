@@ -203,6 +203,15 @@ def test_insights_with_and_without_a_domain(client, rows, monkeypatch):
     assert DOMAIN in [i['domain'] for i in client.get('/api/dmarc/insights').json()['insights']]
 
 
+def test_reports_config_says_whether_upload_is_on(client, monkeypatch):
+    # The DMARC page offers Upload Report from this answer, which needs View on DMARC & TLS only
+    for on in (True, False):
+        monkeypatch.setattr(settings._inner, 'dmarc_manual_upload_enabled', on)
+        assert client.get('/api/dmarc/reports/config').json()['manual_upload_enabled'] is on
+    from app.agent_access import scopes
+    assert scopes.POLICY[('GET', '/api/dmarc/reports/config')] == scopes.Rule('dmarc', scopes.READ)
+
+
 def test_report_lists(client, rows):
     assert client.get('/api/dmarc/reports/config').status_code == 200
     legacy = client.get(f'/api/dmarc/reports/all?search={MARK}').json()

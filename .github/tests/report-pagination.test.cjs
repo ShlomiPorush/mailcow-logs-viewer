@@ -49,6 +49,8 @@ function harness({ allowDelete = true, confirm = true } = {}) {
         dmarcUpdateManageButton: () => { calls.manageButton++; },
         loadDmarcDomains: async () => { calls.domainsList++; },
         appTimezone: 'UTC',
+        // Full access, as for the built-in admin (utils.js)
+        userCan: () => true, uiMayAct: () => true,
     });
     vm.runInContext(zoneHelpers, context);
     vm.runInContext(source.slice(start, end), context);

@@ -178,7 +178,24 @@ def row(user: User, env_name: Optional[str] = None) -> Dict[str, Any]:
     }
 
 
-def overview(db: Session) -> Dict[str, Any]:
+def you(db: Session, principal) -> Dict[str, Any]:
+    """Who is asking, so the page can warn before a change to their own access: the built-in
+    admin, a local user, or an OAuth2 person with their entry or (via_default) without one. email is
+    the OAuth2 person's normalized email when it can match an entry (not one the provider left
+    unverified), so adding an entry for it can be confirmed too."""
+    if principal is None or principal.kind == "builtin":
+        return {"kind": "builtin", "user_id": None, "via_default": False, "email": None}
+    if principal.kind == "local":
+        return {"kind": "local", "user_id": principal.user_id, "via_default": False, "email": None}
+    entry = None
+    email = None
+    if principal.email and not principal.email_unverified:
+        email = principal.email
+        entry = db.query(User.id).filter(User.kind == "oauth2", User.email_norm == email).scalar()
+    return {"kind": "oauth2", "user_id": entry, "via_default": entry is None, "email": email}
+
+
+def overview(db: Session, principal=None) -> Dict[str, Any]:
     env_name = env_admin_name()
     users = db.query(User).order_by(User.kind, func.coalesce(User.username_norm, User.email_norm), User.id).all()
     default = read_default(db)
@@ -188,8 +205,9 @@ def overview(db: Session) -> Dict[str, Any]:
                      "areas": access.area_choices(access.preset_scopes(level))} for level in access.ACCESS_LEVELS],
         "builtin": {"username": settings.auth_username, "basic_auth_enabled": settings.is_basic_auth_enabled},
         "oauth2": {"enabled": settings.is_oauth2_enabled, "default_access": default["value"],
-                   "version": default["version"]},
+                   "version": default["version"], "provider_name": settings.oauth2_provider_name or ""},
         "users": [row(u, env_name) for u in users],
+        "you": you(db, principal),
     }
 
 
@@ -214,7 +232,7 @@ def create_user(db: Session, *, kind: str, username: Optional[str], email: Optio
             raise UserError(422, "A local user has a username, not an email address.")
         name = (username or "").strip()
         norm = access.normalize_username(name)
-        problem = username_problem(norm) or passwords.length_problem(password or "")
+        problem = username_problem(norm) or passwords.password_problem(password or "")
         if problem:
             raise UserError(422, problem)
         user = User(kind="local", username=name, username_norm=norm, password_hash=passwords.hash_password(password),
@@ -253,7 +271,7 @@ def update_user(db: Session, user_id: int, *, access_level: str, views, acts, di
     scopes = _scopes_from(access_level, views, acts)
     new_hash = None
     if password is not None:
-        problem = passwords.length_problem(password)
+        problem = passwords.password_problem(password)
         if problem:
             raise UserError(422, problem)
         new_hash = passwords.hash_password(password)

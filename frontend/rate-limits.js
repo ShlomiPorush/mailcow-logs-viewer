@@ -206,7 +206,8 @@ const RATE_LIMIT_RESET_LOCKED = `<button type="button" class="ui-btn ui-btn-sm" 
 // Settings shows when the Read-Write key is missing
 function renderRateLimitReadOnlyNotice() {
     const data = rateLimitConfigData || {};
-    if (data.rw_key_configured !== false) return '';
+    // The key's note is for whoever may set limits
+    if (data.rw_key_configured !== false || !userCan('mailboxes', 'write')) return '';
     return `<div class="ui-list-note">${uiLocked('Editing rate limits is locked', `Editing ${UI_RW_KEY_TEXT}`)}</div>`;
 }
 
@@ -392,18 +393,18 @@ function renderRateLimitSendersCard() {
 
 
 function renderRateLimitSendersTable(senders) {
-    const canWrite = !rateLimitConfigData || rateLimitConfigData.rw_key_configured !== false;
+    const canWrite = (!rateLimitConfigData || rateLimitConfigData.rw_key_configured !== false) && userCan('mailboxes', 'write');
 
     const rows = senders.map(group => {
         const resetButton = !group.last_rl_hash ? ''
             : canWrite ? `
-                <button type="button"
+                <button data-acts="mailboxes" type="button"
                     onclick="event.stopPropagation(); resetRateLimitCounter('${escapeJsArg(group.user)}', '${escapeJsArg(group.last_rl_hash)}')"
                     class="ui-btn ui-btn-sm ui-btn-primary">
                     Reset counter
                 </button>
             `
-            : RATE_LIMIT_RESET_LOCKED;
+            : userCan('mailboxes', 'write') ? RATE_LIMIT_RESET_LOCKED : '';
         return `
             <tr data-rl-sender="${escapeHtml((group.user || '').toLowerCase())}" class="ui-dtable-link" tabindex="0" data-row-open
                 onclick="if (!uiRowHeld(event)) selectRateLimitSender('${escapeJsArg(group.user)}')">
@@ -478,17 +479,17 @@ function filterRateLimitSenders(query) {
 function renderRateLimitSenderDetail(group) {
     if (!group) return '';
 
-    const canWrite = !rateLimitConfigData || rateLimitConfigData.rw_key_configured !== false;
+    const canWrite = (!rateLimitConfigData || rateLimitConfigData.rw_key_configured !== false) && userCan('mailboxes', 'write');
 
     const resetButton = !group.last_rl_hash ? ''
         : canWrite ? `
-            <button type="button"
+            <button data-acts="mailboxes" type="button"
                 onclick="resetRateLimitCounter('${escapeJsArg(group.user)}', '${escapeJsArg(group.last_rl_hash)}')"
                 class="ui-btn ui-btn-sm ui-btn-primary">
                 Reset counter
             </button>
         `
-        : RATE_LIMIT_RESET_LOCKED;
+        : userCan('mailboxes', 'write') ? RATE_LIMIT_RESET_LOCKED : '';
 
     const resetBadge = group.last_reset
         ? uiTag(`Reset ${formatTime(group.last_reset)}`, 'ok')
@@ -622,6 +623,7 @@ function renderRateLimitEventRow(event) {
 
 
 async function resetRateLimitCounter(user, rlHash) {
+    if (!uiMayAct('mailboxes')) return;
     rateLimitsGen++;
     const confirmed = await showConfirmModal({
         title: 'Reset rate limit counter',
@@ -666,7 +668,8 @@ function renderRateLimitConfigCard() {
     if (!container) return;
 
     const data = rateLimitConfigData || {};
-    const canWrite = data.rw_key_configured !== false;
+    // Setting limits needs the Read-Write key and Take action on Mailboxes
+    const canWrite = data.rw_key_configured !== false && userCan('mailboxes', 'write');
 
     // Domains first: the broader cap explains the mailboxes underneath it
     const rows = (data.domains || []).map(domain => renderRateLimitConfigRow(
@@ -859,7 +862,7 @@ function renderRateLimitBulkPanel() {
                 <select id="rate-limit-bulk-frame" onchange="setRateLimitBulkFrame(this.value)" class="ui-select ui-select-auto">
                     ${frames}
                 </select>
-                <button type="button" data-rl-bulk-apply onclick="applyRateLimitBulk()" ${nothing ? 'disabled' : ''}
+                <button data-acts="mailboxes" type="button" data-rl-bulk-apply onclick="applyRateLimitBulk()" ${nothing ? 'disabled' : ''}
                     class="${RATE_LIMIT_SAVE_BUTTON}">
                     Apply
                 </button>
@@ -942,6 +945,7 @@ function closeRateLimitBulkPanel() {
 
 
 async function applyRateLimitBulk() {
+    if (!uiMayAct('mailboxes')) return;
     rateLimitsGen++;
     const targets = rateLimitFilteredTargets();
     if (!targets.mailboxes.length && !targets.domains.length) return;
@@ -1145,6 +1149,7 @@ async function removeRateLimit(kind, name) {
 
 
 async function submitRateLimit(kind, name, value, frame) {
+    if (!uiMayAct('mailboxes')) return;
     rateLimitsGen++;
     const url = kind === 'mailbox' ? '/api/rate-limits/mailbox' : '/api/rate-limits/domain';
     const payload = kind === 'mailbox'

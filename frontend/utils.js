@@ -192,14 +192,93 @@ function uiActionTag(action) {
 const UI_LOCK_ICON = '<svg class="ui-locked-icon" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2"></rect><path d="M8 11V7a4 4 0 0 1 8 0v4"></path></svg>';
 
 function uiLocked(title, textHtml, action = 'settings') {
+    // Settings is an admin's: anyone else gets the note without the way there
     const button = action === 'settings'
-        ? `<button type="button" class="ui-btn ui-btn-sm" onclick="navigateTo('settings')">Open Settings</button>`
+        ? `<button type="button" class="ui-btn ui-btn-sm" onclick="navigateTo('settings')" data-acts="admin">Open Settings</button>`
         : (action || '');
     return `<div class="ui-locked">${UI_LOCK_ICON}<div><b>${escapeHtml(title)}</b><p>${textHtml}</p></div>${button}</div>`;
 }
 
 // The Read-Write key sentence used by every locked area that needs it
 const UI_RW_KEY_TEXT = 'needs a <strong>Read-Write API key</strong> (<code>MAILCOW_API_KEY_RW</code>). Configure it in Settings → Mailcow → Connection.';
+
+// What the signed-in person may view and do, from GET /api/auth/status: area:read
+// (View) and area:write (Take action) per area, and whether they are an admin
+// (Settings, users, agents, background jobs). Until it is read, and while sign-in
+// is off, everything: the server checks every call anyway, so this only keeps the
+// page from offering what the server would refuse.
+const appAccess = { admin: true, scopes: new Set(), name: '' };
+
+// The areas with actions. A control that takes an action in one carries
+// data-acts="<area>" ("admin" for an admin's control) and is hidden while the
+// person may not (ui.css); the function it calls starts with uiMayAct(area)
+const ACCESS_ACT_AREAS = ['status', 'outbound', 'quarantine', 'security', 'rspamd', 'dmarc', 'domains', 'mailboxes'];
+
+// The access the page was drawn with (the first status read): a later status that says
+// otherwise reloads the page, so every part of it follows the new access (appAccessCheck)
+let appAccessLoaded = null;
+let appAccessReloading = false;
+
+function appAccessKey(status) {
+    const scopes = status && Array.isArray(status.scopes) ? [...status.scopes].sort() : [];
+    return JSON.stringify([!status || status.is_admin !== false, scopes]);
+}
+
+function setAppAccess(status) {
+    if (appAccessLoaded === null) appAccessLoaded = appAccessKey(status);
+    appAccess.admin = !status || status.is_admin !== false;
+    appAccess.scopes = new Set(status && Array.isArray(status.scopes) ? status.scopes : []);
+    appAccess.name = status && typeof status.user_name === 'string' ? status.user_name : '';
+    const root = document.documentElement;
+    ACCESS_ACT_AREAS.forEach(area => root.classList.toggle(`ui-no-act-${area}`, !userCan(area, 'write')));
+    root.classList.toggle('ui-no-admin', !appAccess.admin);
+}
+
+// A status read while the page is open (the session check, a refused call): true when the
+// access is no longer the one the page was drawn with; the page then reloads into it, once
+function appAccessCheck(status) {
+    if (appAccessLoaded === null || !status || status.authenticated !== true) return false;
+    if (appAccessKey(status) === appAccessLoaded) return false;
+    if (!appAccessReloading) {
+        appAccessReloading = true;
+        showToast('Your access changed.', 'info');
+        setTimeout(() => {
+            location.reload();
+            // Still here: the person chose to stay with unsaved changes. The next check asks again
+            setTimeout(() => { appAccessReloading = false; }, 5000);
+        }, 1500);
+    }
+    return true;
+}
+
+function userIsAdmin() {
+    return appAccess.admin;
+}
+
+// kind: 'read' (View) or 'write' (Take action); area 'admin' is the admin's own
+function userCan(area, kind = 'read') {
+    if (appAccess.admin) return true;
+    if (area === 'admin' || area === 'settings') return false;
+    return appAccess.scopes.has(`${area}:${kind}`);
+}
+
+const UI_NOT_PERMITTED = 'You do not have permission for this.';
+let uiNotPermittedAt = 0;      // the last time it was said
+
+// Said once for a burst of refused calls, not once per call
+function uiNotPermitted() {
+    if (Date.now() - uiNotPermittedAt < 10000) return;
+    uiNotPermittedAt = Date.now();
+    showToast(UI_NOT_PERMITTED, 'error');
+}
+
+// The first check of every function that sends a change: a way in that showed no
+// control (a keyboard shortcut, a page left open) says so instead of calling
+function uiMayAct(area) {
+    if (userCan(area, 'write')) return true;
+    uiNotPermitted();
+    return false;
+}
 
 // The floating save bar every editable page uses, shown only with unsaved changes.
 // Place it inside the page or tab it saves: a hidden page hides its bar too.
@@ -710,7 +789,8 @@ function formatBytes(bytes) {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 }
 
-function copyToClipboard(text, event) {
+// label: a secret (a password) is copied without showing it: the notice says "<label> copied"
+function copyToClipboard(text, event, label) {
     if (event) {
         event.stopPropagation();
         event.preventDefault();
@@ -721,7 +801,7 @@ function copyToClipboard(text, event) {
         return;
     }
     navigator.clipboard.writeText(text).then(() => {
-        showToast('Copied: ' + text, 'success');
+        showToast(label ? `${label} copied` : 'Copied: ' + text, 'success');
         // Brief visual feedback on the icon
         if (event && event.currentTarget) {
             const icon = event.currentTarget.querySelector('.copy-icon');
@@ -813,10 +893,22 @@ function entityKindOf(value) {
 // options.mono writes it in the mono font; options.label shows other text than
 // the value (the value still opens and copies); options.fit splits an address
 // into its local part and its domain, for uiFitAddresses
+// The areas each card reads (backend user_access.py, /api/entities): it opens for a
+// person with View on every one of them; anyone else gets the value to copy
+const ENTITY_CARD_AREAS = {
+    ip: ['messages', 'security', 'mailboxes', 'dmarc', 'status'],
+    address: ['messages', 'security', 'mailboxes', 'outbound'],
+    domain: ['messages', 'security', 'mailboxes', 'dmarc', 'outbound', 'domains'],
+};
+
+function userCanOpenEntity(kind) {
+    return (ENTITY_CARD_AREAS[kind] || []).every(area => userCan(area));
+}
+
 function uiEntity(kind, value, { mono = false, cls = '', plain = false, label = '', fit = false } = {}) {
     const text = value === null || value === undefined ? '' : String(value).trim();
     const found = entityKindOf(text);
-    if (!found || (kind !== 'auto' && kind !== found)) {
+    if (!found || (kind !== 'auto' && kind !== found) || !userCanOpenEntity(found)) {
         if (plain || !text || text === '-') return escapeHtml(text || '-');
         return copyableText(text, [mono ? 'ui-mono' : '', cls].filter(Boolean).join(' '));
     }
@@ -879,12 +971,20 @@ function uiEntitySelecting(event, entity) {
 // options.action: { label, ariaLabel, onAction } a button that runs onAction and
 // closes the toast (Undo, Retry); options.duration: how long it stays (ms; Infinity
 // keeps it until closed). One toast at a time: a new one replaces the last, and
-// the keyboard's place moves with it if it was in the one replaced.
+// the keyboard's place moves with it if it was in the one replaced. The refusal for lack
+// of access is the exception: what its caller says next shows under it, and it stays.
 function showToast(message, type = 'info', options = {}) {
-    // Remove existing toast if any
+    // Remove existing toast if any; the same words already on screen are not shown twice
+    // (a refused call said by the shared message and again by its caller with the server's words)
     const existingToast = document.getElementById('toast-notification');
+    const heldToast = document.getElementById('toast-refusal');
+    const onScreen = el => !!el && el.style.opacity !== '0';
+    if (!options.action && [existingToast, heldToast].some(el => onScreen(el) && el.dataset.message === String(message))) return;
     const focusWasInIt = !!existingToast && existingToast.contains(document.activeElement);
-    if (existingToast) {
+    if (existingToast && !heldToast && onScreen(existingToast) && existingToast.dataset.message === UI_NOT_PERMITTED) {
+        // The refusal stays on screen, above the caller's own words
+        existingToast.id = 'toast-refusal';
+    } else if (existingToast) {
         existingToast.remove();
     }
 
@@ -898,6 +998,7 @@ function showToast(message, type = 'info', options = {}) {
 
     const toast = document.createElement('div');
     toast.id = 'toast-notification';
+    toast.dataset.message = String(message);
     toast.className = `ui-toast ui-toast-${kind}`;
     toast.setAttribute('role', kind === 'error' ? 'alert' : 'status');
     toast.innerHTML = `
@@ -926,6 +1027,9 @@ function showToast(message, type = 'info', options = {}) {
     }
 
     document.body.appendChild(toast);
+    // A refusal kept on screen sits just above this toast, whatever its height
+    const held = document.getElementById('toast-refusal');
+    if (held) held.style.bottom = `${parseFloat(getComputedStyle(toast).bottom) + toast.offsetHeight + 8}px`;
     if (options.duration === Infinity) {
         if (focusWasInIt) toast.querySelector('button').focus({ preventScroll: true });
         return;
@@ -1160,10 +1264,11 @@ function showChoiceModal({ title, message, choices, cancelText = 'Cancel' }) {
 // A dialog where something is typed asks before it drops what was changed:
 // Cancel, Close, Escape and Back all close it through uiCancelDialog. The
 // starting point is taken once the dialog shows its first values; a save closes
-// the dialog directly and asks nothing
+// the dialog directly and asks nothing. A control marked data-guard-skip (a setting for a tool
+// in the dialog, not a value it saves) is not counted
 const uiDialogStarts = new WeakMap();
 function uiFormValues(root) {
-    return JSON.stringify([...root.querySelectorAll('input, select, textarea')].map(el => {
+    return JSON.stringify([...root.querySelectorAll('input, select, textarea')].filter(el => !el.hasAttribute('data-guard-skip')).map(el => {
         if (el.type === 'checkbox' || el.type === 'radio') return el.checked;
         if (el.tagName === 'SELECT') return [...el.options].map(o => o.selected);
         return el.value;
@@ -1331,9 +1436,9 @@ function renderJobCard(name, jobKey, job) {
             <span class="ui-jobrow-tag">${job.status === 'success' && !isDisabled ? '' : statusBadge}</span>
             <span class="ui-jobrow-act">${!isDisabled ? `
                 <button onclick="triggerBackgroundJob('${escapeJsArg(jobKey)}', this, '${escapeJsArg(name)}')"
-                    class="ui-btn ui-btn-sm" ${isRunning ? 'disabled' : ''} title="${isRunning ? 'Job is running' : 'Run this job now'}">Run</button>`
+                    class="ui-btn ui-btn-sm" ${isRunning ? 'disabled' : ''} title="${isRunning ? 'Job is running' : 'Run this job now'}" data-acts="admin">Run</button>`
                 : !isFeatureOff && job.settings_section ? `
-                <button onclick="navigateTo('settings', { sub: '${escapeJsArg(job.settings_section)}' })" class="ui-btn ui-btn-sm"
+                <button onclick="navigateTo('settings', { sub: '${escapeJsArg(job.settings_section)}' })" class="ui-btn ui-btn-sm" data-acts="admin"
                     title="${escapeHtml(job.disabled_reason || '')}">Settings</button>` : ''}</span>
             ${job.error ? `<p class="ui-job-error ui-mono">${escapeHtml(job.error)}</p>` : ''}
         </div>

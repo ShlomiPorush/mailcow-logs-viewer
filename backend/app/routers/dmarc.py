@@ -87,10 +87,12 @@ def get_dmarc_insights(
 @router.get("/dmarc/reports/config", response_model=None, responses=documented(m.ReportsConfig))
 def get_reports_management_config():
     """
-    Get reports management configuration
+    Get reports management configuration: deleting and uploading reports. The DMARC
+    page reads it with View on DMARC & TLS alone (no Status View needed).
     """
     return {
-        "allow_delete": settings.dmarc_allow_report_delete
+        "allow_delete": settings.dmarc_allow_report_delete,
+        "manual_upload_enabled": settings.dmarc_manual_upload_enabled,
     }
 
 

@@ -334,14 +334,14 @@ function securityDescribe(a) {
         return {
             tag: `${uiTag('Allowlisted', 'ok')}${listedBy}`,
             why: `${attemptsText}. On the allowlist, so it is never banned.`,
-            acts: rw && a.listedAs ? `<button ${B} onclick="securityRemoveFromList('whitelist', '${escapeJsArg(a.listedAs)}', this)" title="Remove ${escapeHtml(a.listedAs)} from the allowlist">Remove from allowlist</button>` : ''
+            acts: rw && a.listedAs ? `<button data-acts="security" ${B} onclick="securityRemoveFromList('whitelist', '${escapeJsArg(a.listedAs)}', this)" title="Remove ${escapeHtml(a.listedAs)} from the allowlist">Remove from allowlist</button>` : ''
         };
     }
     if (a.state === 'deny') {
         return {
             tag: `${uiTag('Denylisted', 'fail')}${listedBy}`,
             why: `${attemptsText}. On the denylist: <b>banned until removed</b>.`,
-            acts: rw && a.listedAs ? `<button ${B} onclick="securityRemoveFromList('blacklist', '${escapeJsArg(a.listedAs)}', this)" title="Remove ${escapeHtml(a.listedAs)} from the denylist">Remove from denylist</button>` : ''
+            acts: rw && a.listedAs ? `<button data-acts="security" ${B} onclick="securityRemoveFromList('blacklist', '${escapeJsArg(a.listedAs)}', this)" title="Remove ${escapeHtml(a.listedAs)} from the denylist">Remove from denylist</button>` : ''
         };
     }
     if (a.state === 'banned' && hit && hit.status === 'banned') {
@@ -360,7 +360,7 @@ function securityDescribe(a) {
             tag: `${uiTag('Banned', 'fail')}<span class="ui-sec-by">by Fail2ban</span>${uiTag(size, 'warn')}`,
             why: `${range}<b>${a.f2b.banned_until ? `${escapeHtml(a.f2b.banned_until)} left` : 'Banned now'}</b>, then Fail2ban lets them try again.${a.f2b.queued_for_unban ? ' Unbanning...' : ''}`,
             // Banning a whole network for good is not offered in one click
-            acts: rw && !a.f2b.queued_for_unban ? `<button ${B} onclick="unbanIP('${escapeJsArg(a.ip)}', this)" title="Unban ${escapeHtml(a.ip)}">Unban</button>` : ''
+            acts: rw && !a.f2b.queued_for_unban ? `<button data-acts="security" ${B} onclick="unbanIP('${escapeJsArg(a.ip)}', this)" title="Unban ${escapeHtml(a.ip)}">Unban</button>` : ''
         };
     }
     if (a.state === 'banned' && a.bannedThrough) {
@@ -368,8 +368,8 @@ function securityDescribe(a) {
         return {
             tag: `${uiTag('Banned', 'fail')}<span class="ui-sec-by">through ${escapeHtml(a.bannedThrough)}</span>`,
             why: `${tries}Blocked with its whole network: <b>${a.f2b.banned_until ? `${escapeHtml(a.f2b.banned_until)} left` : 'banned now'}</b>. Unban lifts the whole network.${a.f2b.queued_for_unban ? ' Unbanning...' : ''}`,
-            acts: rw && !a.f2b.queued_for_unban ? `<button ${B} onclick="unbanIP('${escapeJsArg(a.bannedThrough)}', this)" title="Unban ${escapeHtml(a.bannedThrough)}">Unban</button>
-                <button type="button" class="ui-btn ui-btn-sm ui-btn-danger" onclick="banIP('${ipArg}', this)" title="Put it on the denylist">Ban permanently</button>` : ''
+            acts: rw && !a.f2b.queued_for_unban ? `<button data-acts="security" ${B} onclick="unbanIP('${escapeJsArg(a.bannedThrough)}', this)" title="Unban ${escapeHtml(a.bannedThrough)}">Unban</button>
+                <button data-acts="security" type="button" class="ui-btn ui-btn-sm ui-btn-danger" onclick="banIP('${ipArg}', this)" title="Put it on the denylist">Ban permanently</button>` : ''
         };
     }
     if (a.state === 'banned') {
@@ -377,8 +377,8 @@ function securityDescribe(a) {
         return {
             tag: `${uiTag('Banned', 'fail')}<span class="ui-sec-by">by Fail2ban</span>`,
             why: `${tries}<b>${a.f2b.banned_until ? `${escapeHtml(a.f2b.banned_until)} left` : 'Banned now'}</b>, then Fail2ban lets it try again.${a.f2b.queued_for_unban ? ' Unbanning...' : ''}`,
-            acts: rw && !a.f2b.queued_for_unban ? `<button ${B} onclick="unbanIP('${escapeJsArg(fail2banBare(a.f2b.network || a.ip))}', this)" title="Unban ${escapeHtml(fail2banBare(a.f2b.network || a.ip))}">Unban</button>
-                <button type="button" class="ui-btn ui-btn-sm ui-btn-danger" onclick="banIP('${ipArg}', this)" title="Put it on the denylist">Ban permanently</button>` : ''
+            acts: rw && !a.f2b.queued_for_unban ? `<button data-acts="security" ${B} onclick="unbanIP('${escapeJsArg(fail2banBare(a.f2b.network || a.ip))}', this)" title="Unban ${escapeHtml(fail2banBare(a.f2b.network || a.ip))}">Unban</button>
+                <button data-acts="security" type="button" class="ui-btn ui-btn-sm ui-btn-danger" onclick="banIP('${ipArg}', this)" title="Put it on the denylist">Ban permanently</button>` : ''
         };
     }
     if (a.state === 'review' && hit.status === 'alert') {
@@ -408,8 +408,8 @@ function securityDescribe(a) {
     return {
         tag: '',
         why: `${attemptsText}.${policy}`,
-        acts: rw && known ? `<button type="button" class="ui-btn ui-btn-sm ui-btn-danger" onclick="banIP('${ipArg}', this)" title="Put ${escapeHtml(fail2banEntry(a.ip))} on the denylist; it stays until removed">Ban permanently</button>
-            <button ${B} onclick="allowIP('${ipArg}', this)" title="Never ban ${escapeHtml(fail2banEntry(a.ip))}">Allow</button>` : ''
+        acts: rw && known ? `<button data-acts="security" type="button" class="ui-btn ui-btn-sm ui-btn-danger" onclick="banIP('${ipArg}', this)" title="Put ${escapeHtml(fail2banEntry(a.ip))} on the denylist; it stays until removed">Ban permanently</button>
+            <button data-acts="security" ${B} onclick="allowIP('${ipArg}', this)" title="Never ban ${escapeHtml(fail2banEntry(a.ip))}">Allow</button>` : ''
     };
 }
 
@@ -426,6 +426,8 @@ function securityPlaceFlag(code, country) {
 
 function securityRow(a) {
     const d = securityDescribe(a);
+    // Its actions are Security's: without Take action there, none
+    if (!userCan('security', 'write')) d.acts = '';
     const open = securityOpenRow === a.ip;
     const where = a.country || a.last ? `${a.country ? escapeHtml(a.country) : ''}${a.country && a.last ? ' · ' : ''}${a.last ? formatAgo(a.last) : ''}` : '';
     // A network has no log lines of its own: its row does not open
@@ -459,6 +461,7 @@ function renderSecuritySheet(addresses) {
         return;
     }
     const d = securityDescribe(a);
+    if (!userCan('security', 'write')) d.acts = '';
     uiSheetShow('security-sheet', {
         label: a.ip,
         head: `<div class="ui-sec-top"><b class="ui-mono">${uiEntity('ip', a.ip, { mono: true })}</b>${securityAttempts(a)}${d.tag}</div>`,
@@ -695,7 +698,7 @@ function renderSecurityOverview() {
         return `<button type="button" aria-pressed="${securityFilter === key}" onclick="setSecurityFilter('${key}')">${label}${n === null || n === undefined ? '' : ` <b>${Number(n).toLocaleString()}</b>`}</button>`;
     }).join('');
     const list = page ? page.items : [];
-    const rwNote = !mailcowRwConfigured && securityFilter !== 'history'
+    const rwNote = !mailcowRwConfigured && securityFilter !== 'history' && userCan('security', 'write')
         ? `<div class="ui-list-note">${uiLocked('Ban, Allow and Unban are locked', `Changing Fail2ban from this list ${UI_RW_KEY_TEXT}`)}</div>` : '';
     const f2bDown = fail2banLoadError || (page && page.fail2ban_known === false);
     const f2bNote = f2bDown && securityFilter !== 'history'
@@ -854,7 +857,9 @@ function renderSecurityLists() {
         box.innerHTML = '<div class="ui-loading" role="status"><div class="loading"></div><p>Loading...</p></div>';
         return;
     }
-    const rw = mailcowRwConfigured;
+    // Changing the lists needs the Read-Write key and Take action on Security; the key's note is for whoever may act
+    const mayAct = userCan('security', 'write');
+    const rw = mailcowRwConfigured && mayAct;
     const tried = ip => {
         const s = securityOverview && securityOverview.sources.find(src => src.ip === securityBare(ip));
         return s ? s.failed_logins : 0;
@@ -874,15 +879,15 @@ function renderSecurityLists() {
         if (!old) return '';
         const effect = list === 'whitelist' ? `Exempts the whole ${escapeHtml(old.network)} network from Fail2ban.` : `Blocks the whole ${escapeHtml(old.network)} network.`;
         return row(entry, `${uiTag('Whole network', 'warn')} ${effect} An earlier version wrote this single address as a network.`,
-            rw ? `<button type="button" class="ui-btn ui-btn-sm" onclick="securityRepairListEntry('${list}', '${escapeJsArg(entry)}', this)" title="Replace it with ${escapeHtml(old.address)}/128">Repair</button>
-                <button type="button" class="ui-btn ui-btn-sm" onclick="securityRemoveFromList('${list}', '${escapeJsArg(entry)}', this)">Remove</button>` : '');
+            rw ? `<button data-acts="security" type="button" class="ui-btn ui-btn-sm" onclick="securityRepairListEntry('${list}', '${escapeJsArg(entry)}', this)" title="Replace it with ${escapeHtml(old.address)}/128">Repair</button>
+                <button data-acts="security" type="button" class="ui-btn ui-btn-sm" onclick="securityRemoveFromList('${list}', '${escapeJsArg(entry)}', this)">Remove</button>` : '');
     };
     const allowRows = fail2banWhitelist.map(entry => {
         const legacy = legacyRow('whitelist', entry);
         if (legacy) return legacy;
         const n = tried(entry);
         return row(entry, n ? `Failed ${Number(n).toLocaleString()} login${n === 1 ? '' : 's'} in the last 24 hours, never banned` : '',
-            rw ? `<button type="button" class="ui-btn ui-btn-sm" onclick="securityRemoveFromList('whitelist', '${escapeJsArg(entry)}', this)">Remove</button>` : '');
+            rw ? `<button data-acts="security" type="button" class="ui-btn ui-btn-sm" onclick="securityRemoveFromList('whitelist', '${escapeJsArg(entry)}', this)">Remove</button>` : '');
     }).join('');
     const denyRows = fail2banBlacklist.map(entry => {
         const legacy = legacyRow('blacklist', entry);
@@ -894,10 +899,10 @@ function renderSecurityLists() {
         }
         const n = tried(entry);
         return row(entry, `Added by hand${n ? `, still tried ${Number(n).toLocaleString()} time${n === 1 ? '' : 's'} in the last 24 hours` : ''}`,
-            rw ? `<button type="button" class="ui-btn ui-btn-sm" onclick="securityRemoveFromList('blacklist', '${escapeJsArg(entry)}', this)">Remove</button>` : '');
+            rw ? `<button data-acts="security" type="button" class="ui-btn ui-btn-sm" onclick="securityRemoveFromList('blacklist', '${escapeJsArg(entry)}', this)">Remove</button>` : '');
     }).join('');
     box.innerHTML = `
-        ${rw ? '' : `<div class="ui-list-note ui-flush">${uiLocked('The lists are read-only here', `Changing the allowlist and the denylist ${UI_RW_KEY_TEXT}`)}</div>`}
+        ${rw || !mayAct ? '' : `<div class="ui-list-note ui-flush">${uiLocked('The lists are read-only here', `Changing the allowlist and the denylist ${UI_RW_KEY_TEXT}`)}</div>`}
         <div class="ui-sec-lists">
             <section class="ui-panel">
                 <div class="ui-panel-head">Allowlist <span class="ui-count">${fail2banWhitelist.length}</span></div>
@@ -924,6 +929,7 @@ async function securityAddToList(list, value, form) {
 }
 
 async function securityRemoveFromList(list, entry, button) {
+    if (!uiMayAct('security')) return;
     const label = list === 'whitelist' ? 'allowlist' : 'denylist';
     if (!await showConfirmModal({ title: `Remove from the ${label}`, message: `Remove ${entry} from the Fail2ban ${label}?`, confirmText: 'Remove', focusCancel: true })) return;
     if (button) button.disabled = true;
@@ -945,6 +951,7 @@ async function securityRemoveFromList(list, entry, button) {
 // Replaces an entry an earlier version wrote as a /32 network with the single
 // address it was meant to be, in one edit of mailcow's list
 async function securityRepairListEntry(list, entry, button) {
+    if (!uiMayAct('security')) return;
     const old = fail2banLegacy.find(l => l.list === list && l.entry === entry);
     if (!old) return;
     const single = `${old.address}/128`;
@@ -992,6 +999,12 @@ function securityAppSettingsEditable() {
 }
 
 async function loadSecurityAppSettings() {
+    // The app settings are an admin's; anyone else reads Outgoing spam from its status
+    if (!userIsAdmin()) {
+        securityAppSettings = null;
+        renderSecuritySettings();
+        return;
+    }
     try {
         const res = await authenticatedFetch('/api/settings');
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -1073,7 +1086,11 @@ function securityF2bChanges() {
 
 function securityAbuseValue(key) {
     if (key in securityAbuseDraft) return securityAbuseDraft[key];
-    return securityAppSettings ? securityAppSettings.configuration[key] : undefined;
+    if (securityAppSettings) return securityAppSettings.configuration[key];
+    // Without the app settings (an admin's), what the Outgoing spam status says
+    const field = { smtp_abuse_enabled: 'enabled', smtp_abuse_threshold: 'threshold', smtp_abuse_window_minutes: 'window_minutes',
+        smtp_abuse_unblock_grace_minutes: 'unblock_grace_minutes', smtp_abuse_revoke_app_passwords: 'revoke_app_passwords' }[key];
+    return field && typeof smtpAbuseStatus !== 'undefined' && smtpAbuseStatus ? smtpAbuseStatus[field] : undefined;
 }
 
 function securityAbuseChanges() {
@@ -1132,6 +1149,7 @@ async function saveSecuritySettings() {
 }
 
 async function saveSecurityF2b() {
+    if (!uiMayAct('security')) return;
     const values = securityF2bValues();
     try {
         const res = await authenticatedFetch('/api/fail2ban/policy', {
@@ -1151,6 +1169,7 @@ async function saveSecurityF2b() {
 }
 
 async function saveSecurityAbuse() {
+    if (!uiMayAct('admin')) return;
     const body = Object.fromEntries(securityAbuseChanges().map(k => [k, securityAbuseDraft[k]]));
     try {
         const res = await authenticatedFetch('/api/settings', {
@@ -1230,7 +1249,7 @@ function securityF2bSentence(edit) {
 
 function securityAbuseSentence(edit) {
     const val = key => securityAbuseValue(key);
-    if (!securityAppSettings) return 'Stops a mailbox from sending when it suddenly sends far more than usual.';
+    if (!securityAppSettings && !(typeof smtpAbuseStatus !== 'undefined' && smtpAbuseStatus)) return 'Stops a mailbox from sending when it suddenly sends far more than usual.';
     const editable = securityAppSettingsEditable();
     const locked = key => !editable || (securityAppSettings.env_locked_keys || []).includes(key);
     if (!edit) {
@@ -1247,7 +1266,7 @@ function securityCardBody(key) {
     const R = protectionRules;
     if (key === 'fail2ban') {
         const v = securityF2bValues();
-        const off = mailcowRwConfigured ? '' : 'disabled';
+        const off = mailcowRwConfigured && userCan('security', 'write') ? '' : 'disabled';
         return `
             <div class="ui-sec-fields">
                 <label class="ui-sec-field"><span>Ban the network, IPv4<small>Prefix length; ${escapeHtml(String(v.netban_ipv4))} bans ${Number(v.netban_ipv4) === 32 ? 'just the address' : 'the whole network'}</small></span>
@@ -1264,7 +1283,7 @@ function securityCardBody(key) {
         return `
             ${securityAppSettings && !securityAppSettings.settings_edit_via_ui_enabled ? uiLocked('Editing settings is off', 'These values come from the environment and are shown read-only. To change them here, set <code>SETTINGS_EDIT_VIA_UI_ENABLED=true</code> in <code>.env</code> and run <code>docker compose up -d</code>. A restart does not read <code>.env</code> again.') : ''}
             ${securityAppSettings && securityAppSettings.settings_edit_via_ui_enabled && !securityAppSettings.settings_migrated
-                ? uiLocked('Settings are not migrated yet', 'These values are read-only until the configuration is copied into the database: click <strong>Migrate Settings from ENV</strong> on the Settings page.', `<button type="button" class="ui-btn ui-btn-sm" onclick="navigateTo('settings')">Open Settings</button>`) : ''}
+                ? uiLocked('Settings are not migrated yet', 'These values are read-only until the configuration is copied into the database: click <strong>Migrate Settings from ENV</strong> on the Settings page.', `<button data-acts="admin" type="button" class="ui-btn ui-btn-sm" onclick="navigateTo('settings')">Open Settings</button>`) : ''}
             <div class="ui-sec-fields">
                 <label class="ui-sec-field"><span>Revoke its app passwords<small>When a mailbox is stopped, its app passwords stop working too</small></span>
                     <span><input type="checkbox" class="ui-check" ${revoke ? 'checked' : ''} ${!editable || envLocked('smtp_abuse_revoke_app_passwords') ? 'disabled' : ''} onchange="setSecurityAbuse('smtp_abuse_revoke_app_passwords', this.checked)"> On</span></label>
@@ -1324,7 +1343,11 @@ function securityCardBody(key) {
 }
 
 function securityCardHtml(key) {
-    const open = securityCard === key;
+    // Without Take action on Security a card shows what is set and does not open for editing;
+    // Outgoing spam opens for its list of stopped mailboxes, its settings stay an admin's
+    const mayAct = userCan('security', 'write');
+    const canOpen = mayAct || key === 'abuse';
+    const open = canOpen && securityCard === key;
     const isRule = !!SECURITY_RULE_NAMES[key];
     const name = isRule ? SECURITY_RULE_NAMES[key] : key === 'fail2ban' ? 'Fail2ban' : 'Outgoing spam';
     let on = true, toggle = '', status = '', locked = '', sentence = '', caught = '';
@@ -1340,7 +1363,7 @@ function securityCardHtml(key) {
             && !(securityAppSettings.env_locked_keys || []).includes('smtp_abuse_enabled');
         on = !!enabled;
         toggle = securityToggle(name, on, !editable, `setSecurityAbuse('smtp_abuse_enabled', this.checked)`, editable ? ''
-            : securityAppSettings && securityAppSettings.settings_edit_via_ui_enabled && !securityAppSettings.settings_migrated ? 'Settings are not migrated yet' : 'Editing settings is off');
+            : !userIsAdmin() ? 'Only an admin can change this' : securityAppSettings && securityAppSettings.settings_edit_via_ui_enabled && !securityAppSettings.settings_migrated ? 'Settings are not migrated yet' : 'Editing settings is off');
         status = `${!on ? '' : mailcowRwConfigured ? uiTag('Stops mailboxes', 'fail') : uiTag('Needs a Read-Write key', '')}<span class="ui-tag ui-tag-warn ui-tab-tag" title="This feature is new - please report any issues on GitHub">Beta</span>
             <button type="button" onclick="event.stopPropagation(); showHelpModal('Abuse_Protection', 'Outgoing spam')" class="ui-icon-btn ui-help-btn" title="Help - Outgoing spam" aria-label="Help - Outgoing spam"><svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg></button>`;
         sentence = securityAbuseSentence(open);
@@ -1350,14 +1373,15 @@ function securityCardHtml(key) {
         const r = protectionRules[key];
         const needsGeo = key === 'country' && !protectionCaps.geoip;
         on = r.enabled && !needsGeo;
-        toggle = securityToggle(name, on, needsGeo, `setProtectionRule('${key}', 'enabled', this.checked)`, needsGeo ? 'Needs MaxMind GeoIP' : '');
+        toggle = securityToggle(name, on, needsGeo || !mayAct, `setProtectionRule('${key}', 'enabled', this.checked)`,
+            needsGeo ? 'Needs MaxMind GeoIP' : !mayAct ? 'You do not have permission to change this' : '');
         // The switch says on or off; the tag says what an enabled rule does
         status = needsGeo ? uiTag('Needs MaxMind GeoIP', '') : !r.enabled ? '' : key === 'breach' ? uiTag('Alerts', 'warn')
             : r.mode === 'enforce' && protectionCaps.can_ban ? uiTag('Bans', 'fail') : uiTag('Watching', 'warn');
         if (needsGeo) locked = uiLocked('Needs GeoIP', 'This rule knows the country of an address only with the MaxMind GeoIP databases.');
         sentence = securityRuleSentence(key, open);
     }
-    return securityCardShell(key, name, open, `${status}${caught}`, toggle, locked, `<p class="ui-sec-sent">${sentence}</p>`, open ? securityCardBody(key) : '', on);
+    return securityCardShell(key, name, open, `${status}${caught}`, toggle, locked, `<p class="ui-sec-sent">${sentence}</p>`, open ? securityCardBody(key) : '', on, canOpen);
 }
 
 // The On/Off switch of a card; a click on it does not open the card
@@ -1367,13 +1391,16 @@ function securityToggle(name, on, disabled, action, why) {
         <span class="ui-sec-switch-track" aria-hidden="true"></span></label>`;
 }
 
-function securityCardShell(key, name, open, status, toggle, locked, sentence, body, on = true) {
+function securityCardShell(key, name, open, status, toggle, locked, sentence, body, on = true, canOpen = userCan('security', 'write') || key === 'abuse') {
     return `
-        <article class="ui-sec-card${open ? ' is-open' : ''}${on ? '' : ' is-off'}" id="security-card-${key}" tabindex="-1" aria-label="${escapeHtml(name)}" ${open ? '' : `onclick="if (!uiRowHeld(event)) securityOpenCard('${key}')"`}>
+        <article class="ui-sec-card${open ? ' is-open' : ''}${on ? '' : ' is-off'}" id="security-card-${key}" tabindex="-1" aria-label="${escapeHtml(name)}" ${open || !canOpen ? '' : `onclick="if (!uiRowHeld(event)) securityOpenCard('${key}')"`}>
             <div class="ui-sec-card-head">${toggle || '<span class="ui-sec-switch-space"></span>'}<span class="ui-sec-card-name"><h3>${escapeHtml(name)}</h3>${status}</span>
                 <span class="ui-sec-card-act">${open
                     ? `<button type="button" class="ui-btn ui-btn-sm" onclick="event.stopPropagation(); securityOpenCard(null)">Done</button>`
-                    : `<button type="button" class="ui-btn ui-btn-sm" aria-label="Edit ${escapeHtml(name)}">Edit</button>`}</span></div>
+                    : !canOpen ? ''
+                    // Without Take action a card opens only to read (Outgoing spam's stopped mailboxes)
+                    : userCan('security', 'write') ? `<button type="button" class="ui-btn ui-btn-sm" aria-label="Edit ${escapeHtml(name)}">Edit</button>`
+                    : `<button type="button" class="ui-btn ui-btn-sm" aria-label="Open ${escapeHtml(name)}">Open</button>`}</span></div>
             ${locked}
             ${sentence}
             ${body}

@@ -14,8 +14,9 @@ test('the DMARC page reads the upload setting again on each visit', async () => 
     const seen = [];
     const context = vm.createContext({
         authenticatedFetch: async url => {
-            assert.equal(url, '/api/settings/info');
-            return { ok: true, json: async () => ({ dmarc_configuration: { ...server } }) };
+            // The DMARC route, so View on DMARC & TLS alone shows Upload Report
+            assert.equal(url, '/api/dmarc/reports/config');
+            return { ok: true, json: async () => ({ allow_delete: false, ...server }) };
         },
         loadDmarcImapStatus: async () => {},
         updateDmarcControls: () => seen.push(context.dmarcConfiguration.manual_upload_enabled),

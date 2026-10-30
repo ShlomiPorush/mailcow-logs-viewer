@@ -37,7 +37,7 @@ from app.services import users_store  # noqa: E402
 
 ADMIN_NAME = "admin"
 ADMIN_PASSWORD = "correct horse battery staple"
-PASSWORD = "a long enough password"
+PASSWORD = "A long enough passw0rd"
 APP = "http://testserver"
 
 
@@ -210,8 +210,8 @@ def test_at_most_two_password_checks_run_at_once(people):
 
 def test_a_non_ascii_password_signs_in(people):
     admin = _admin()
-    _add(admin, password="pässwört 日本 été ok")
-    _sign_in("alice", "pässwört 日本 été ok")
+    _add(admin, password="Pässwört 日本 été 0k")
+    _sign_in("alice", "Pässwört 日本 été 0k")
 
 
 def test_a_local_user_cannot_use_a_basic_header_on_the_api(people):
@@ -265,9 +265,58 @@ def test_usernames_are_unique_ignoring_case_and_width(people):
     assert r.status_code == 409
 
 
-def test_a_short_password_is_refused(people):
-    r = _admin().post("/api/users", json={"kind": "local", "username": "alice", "password": "short", "access": "viewer"})
-    assert r.status_code == 422 and "12 to 256" in r.json()["detail"]
+SHORT_PASSWORD = "Use at least 8 characters."
+
+
+@pytest.mark.parametrize("password", ["Abcde1!", "1234567", ""])
+def test_a_password_under_8_characters_is_refused_on_create(people, password):
+    r = _admin().post("/api/users", json={"kind": "local", "username": "alice", "password": password, "access": "viewer"})
+    assert r.status_code == 422 and r.json()["detail"] == SHORT_PASSWORD
+
+
+@pytest.mark.parametrize("password", ["qzxkvbnw", "73915846", "QZXKVBNW"])
+def test_8_characters_of_any_kind_are_enough_and_sign_in(people, password):
+    admin = _admin()
+    _add(admin, "alice", password=password)
+    _sign_in("alice", password)
+
+
+COMMON_PASSWORD = "This password is too common. Choose another one."
+
+
+def test_a_common_password_is_refused_on_create(people):
+    r = _admin().post("/api/users", json={"kind": "local", "username": "alice", "password": "Password1", "access": "viewer"})
+    assert r.status_code == 422 and r.json()["detail"] == COMMON_PASSWORD
+
+
+@pytest.mark.parametrize("password, answer", [
+    ("short", {"ok": False, "problem": SHORT_PASSWORD}),
+    ("Password1", {"ok": False, "problem": COMMON_PASSWORD}),
+    ("A1!" + "b" * 254, {"ok": False, "problem": "Use at most 256 characters."}),
+    ("Kp7m-Rx4Tq9wZb2n", {"ok": True, "problem": None}),
+])
+def test_the_password_check_answers_as_create_and_reset_would(people, password, answer):
+    assert _admin().post("/api/users/password-check", json={"password": password}).json() == answer
+
+
+def test_the_password_check_is_for_admins_and_logs_no_password(people, caplog):
+    _add(_admin(), "alice", access="operator")
+    caplog.set_level(logging.DEBUG)
+    r = _sign_in("alice").post("/api/users/password-check", json={"password": "Kp7m-Rx4Tq9wZb2n"})
+    assert r.status_code == 403 and r.json() == {"detail": user_access.NOT_PERMITTED}
+    _admin().post("/api/users/password-check", json={"password": "Kp7m-Rx4Tq9wZb2n"})
+    assert "Kp7m-Rx4Tq9wZb2n" not in caplog.text
+
+
+@pytest.mark.parametrize("password, detail", [
+    ("abcdefg", SHORT_PASSWORD), ("A1!" + "b" * 254, "Use at most 256 characters."), ("Password1", COMMON_PASSWORD)])
+def test_a_password_reset_follows_the_same_rule(people, password, detail):
+    admin = _admin()
+    row = _add(admin, "alice")
+    r = _change(admin, row, password=password)
+    assert r.status_code == 422 and r.json()["detail"] == detail
+    # The old password still works
+    _sign_in("alice", PASSWORD)
 
 
 def test_a_local_user_cannot_take_the_built_in_admins_name(people):
@@ -531,7 +580,7 @@ def _ended(response):
     assert response.json()["reason"] == "access_changed" and response.headers["x-session-end"] == "access_changed"
 
 
-@pytest.mark.parametrize("change", [{"access": "operator"}, {"disabled": True}, {"password": "another long password"}])
+@pytest.mark.parametrize("change", [{"access": "operator"}, {"disabled": True}, {"password": "Another l0ng password"}])
 def test_a_change_ends_the_users_sessions(people, change):
     admin = _admin()
     row = _add(admin)
@@ -576,9 +625,9 @@ def test_signing_out_works_after_the_access_ended(people, monkeypatch):
 def test_a_new_password_replaces_the_old_one(people):
     admin = _admin()
     row = _add(admin)
-    assert _change(admin, row, password="another long password").status_code == 200
+    assert _change(admin, row, password="Another l0ng password").status_code == 200
     _sign_in("alice", PASSWORD, expect=401)
-    _sign_in("alice", "another long password")
+    _sign_in("alice", "Another l0ng password")
 
 
 def test_kind_name_and_email_cannot_be_changed(people):
@@ -754,7 +803,8 @@ def test_a_default_change_on_an_older_version_is_refused(oauth2):
         "default_access": "viewer", "version": 1}
     r = admin.put("/api/users/oauth2-default", json={"value": "admin", "version": 0})
     assert r.status_code == 409
-    assert admin.get("/api/users").json()["oauth2"] == {"enabled": True, "default_access": "viewer", "version": 1}
+    assert admin.get("/api/users").json()["oauth2"] == {"enabled": True, "default_access": "viewer", "version": 1,
+                                                       "provider_name": settings.oauth2_provider_name}
 
 
 def test_a_settings_form_cannot_change_the_oauth2_default(oauth2, refused_saves_only):
@@ -900,7 +950,8 @@ def test_the_list_says_what_each_preset_and_user_gets(people):
     assert presets["operator"]["rspamd"] == "view" and presets["operator"]["outbound"] == "act"
     assert presets["viewer"]["outbound"] == "view" and presets["custom"] == {}
     assert data["builtin"] == {"username": ADMIN_NAME, "basic_auth_enabled": True}
-    assert data["oauth2"] == {"enabled": False, "default_access": "admin", "version": 0}
+    assert data["oauth2"] == {"enabled": False, "default_access": "admin", "version": 0,
+                              "provider_name": settings.oauth2_provider_name}
     (row,) = data["users"]
     assert row["areas"] == presets["operator"] and row["email"] is None and row["name_conflict"] is False
 
@@ -908,7 +959,7 @@ def test_the_list_says_what_each_preset_and_user_gets(people):
 def test_agents_never_reach_the_users_api():
     from app.agent_access import scopes
     for method in ("GET", "POST", "PUT", "DELETE"):
-        for path in ("/api/users", "/api/users/{user_id}", "/api/users/oauth2-default"):
+        for path in ("/api/users", "/api/users/{user_id}", "/api/users/oauth2-default", "/api/users/password-check"):
             assert scopes.excluded_reason(method, path)
 
 
@@ -1088,11 +1139,11 @@ def test_a_sign_in_after_a_password_reset_keeps_its_session(people, monkeypatch)
 
     def sign_in_meanwhile(user_id, below=None):
         # Between the commit and ending the old sessions, the user signs in with the new password
-        late["client"] = _sign_in("alice", "another long password")
+        late["client"] = _sign_in("alice", "Another l0ng password")
         real(user_id, below)
 
     monkeypatch.setattr(users_store, "_end_local_sessions", sign_in_meanwhile)
-    assert _change(admin, row, password="another long password").status_code == 200
+    assert _change(admin, row, password="Another l0ng password").status_code == 200
     _ended(old.get("/api/messages"))
     assert late["client"].get("/api/messages").status_code == 200
 
@@ -1439,3 +1490,24 @@ def test_a_settings_save_counts_the_reading_in_force_before_it(oauth2, monkeypat
     with get_db_context() as db:
         with pytest.raises(users_store.UserError):
             users_store.check_sign_in_settings(db, before, {"auth_username": "root"})
+
+
+def test_the_users_answer_says_who_asked(oauth2, monkeypatch):
+    monkeypatch.setattr(settings._inner, "oauth2_provider_name", "Example SSO")
+    admin = _admin()
+    answer = admin.get("/api/users").json()
+    assert answer["you"] == {"kind": "builtin", "user_id": None, "via_default": False, "email": None}
+    assert answer["oauth2"]["provider_name"] == "Example SSO"
+    alice = _add(admin, "alice", access="admin")
+    assert _sign_in("alice").get("/api/users").json()["you"] == {"kind": "local", "user_id": alice["id"], "via_default": False,
+                                                                 "email": None}
+    carol = _add(admin, "carol@example.com", access="admin", kind="oauth2")
+    # Matched as the sign-in matches: the provider's email, normalized
+    assert _oauth2_client(" Carol@Example.com ").get("/api/users").json()["you"] == {
+        "kind": "oauth2", "user_id": carol["id"], "via_default": False, "email": "carol@example.com"}
+    # No entry: the access for everyone else (Admin here), with the email an entry for it would match
+    assert _oauth2_client(" Dave@Example.com ").get("/api/users").json()["you"] == {
+        "kind": "oauth2", "user_id": None, "via_default": True, "email": "dave@example.com"}
+    # An email the provider did not verify matches no entry, so none is named
+    assert _oauth2_client("carol@example.com", verified=False).get("/api/users").json()["you"] == {
+        "kind": "oauth2", "user_id": None, "via_default": True, "email": None}

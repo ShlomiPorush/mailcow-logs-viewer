@@ -38,6 +38,8 @@ const ENTITY_TIMELINE_GROUP = {
 
 function openEntityCard(kind, value, { from = null } = {}) {
     if (!UI_ENTITY_KINDS.includes(kind) || !value) return;
+    // The card reads several areas; the person needs View on each
+    if (!userCanOpenEntity(kind)) { uiNotPermitted(); return; }
     const card = document.getElementById('entity-card');
     if (!card) return;
     entityRblStop();
@@ -419,11 +421,12 @@ function entityCanAct(data, act) {
         case 'messages': return on('messages');
         case 'security': return on('security');
         // A list that could not be read leaves both: the ban state reads as not known
-        case 'ban': return data.kind === 'ip' && on('lists') && entityRw() && !(entityOk(lists) && lists.denylisted_as);
-        case 'allow': return data.kind === 'ip' && on('lists') && entityRw() && !(entityOk(lists) && lists.allowlisted_as);
-        case 'rbl': return data.kind === 'ip' && entityOk(src('rbl'));
+        // Ban, Allow, Check now and Add to Suppressions change something: the person's access decides too
+        case 'ban': return data.kind === 'ip' && on('lists') && entityRw() && userCan('security', 'write') && !(entityOk(lists) && lists.denylisted_as);
+        case 'allow': return data.kind === 'ip' && on('lists') && entityRw() && userCan('security', 'write') && !(entityOk(lists) && lists.allowlisted_as);
+        case 'rbl': return data.kind === 'ip' && entityOk(src('rbl')) && userCan('status', 'write');
         // Not on the list yet; an entry there, active or ended, is changed on the Suppressions page
-        case 'suppress': return data.kind === 'address' && entityOk(src('suppression')) && !src('suppression').entry;
+        case 'suppress': return data.kind === 'address' && entityOk(src('suppression')) && !src('suppression').entry && userCan('outbound', 'write');
         // A mailbox here, or an alias that delivers to one: Mailbox Stats shows the mailbox
         case 'mailbox': return data.kind === 'address' && !!entityMailboxOf(data);
         default: return false;
@@ -452,9 +455,9 @@ function entityCardActionsHtml(data) {
     const items = buttons.filter(b => !b.stays).map(b => item(b.act, true)).join('');
     // More holds only what a phone folds away, so only a phone shows it
     const more = items ? `<span class="ui-ent-more-phone">${uiMenu('More', items, { small: false })}</span>` : '';
-    const locked = data.kind === 'ip' && entitySrc(data, 'lists').state !== 'disabled' && !entityRw()
+    const locked = data.kind === 'ip' && entitySrc(data, 'lists').state !== 'disabled' && !entityRw() && userCan('security', 'write')
         ? `<div class="ui-list-note ui-flush">${uiLocked('Ban and Allow are locked', `Banning or allowing this address from here ${UI_RW_KEY_TEXT}`,
-            '<button type="button" class="ui-btn ui-btn-sm" onclick="entityCardSettings()">Open Settings</button>')}</div>` : '';
+            '<button type="button" class="ui-btn ui-btn-sm" onclick="entityCardSettings()" data-acts="admin">Open Settings</button>')}</div>` : '';
     return `<div class="ui-ent-acts" id="entity-card-actions"><span id="entity-card-watch" hidden></span>${buttons.map(button).join('')}${more}</div>${locked}`;
 }
 
@@ -576,6 +579,7 @@ function entityRblRedraw(whole = false) {
 // page's check does; the tile shows the stored result after it. One check at a
 // time: the progress is one for the whole app
 async function entityCardCheckRbl() {
+    if (!uiMayAct('status')) return;
     const data = entityCardState && entityCardState.data;
     if (!data || data.kind !== 'ip' || entityRblCheck) return;
     const value = data.value;

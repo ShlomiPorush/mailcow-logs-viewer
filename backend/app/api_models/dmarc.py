@@ -61,6 +61,8 @@ class AllInsights(Fixed):
 
 class ReportsConfig(Fixed):
     allow_delete: bool = Field(description="From DMARC_ALLOW_REPORT_DELETE")
+    manual_upload_enabled: bool = Field(description="From DMARC_MANUAL_UPLOAD_ENABLED: whether POST /api/dmarc/upload "
+                                                    "accepts a report")
 
 
 class ReportSummary(Fixed):

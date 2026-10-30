@@ -1648,7 +1648,7 @@ Protocol background and what to do with the results are in [DMARC & TLS](HelpDoc
 
 ### GET /api/dmarc/reports/config
 
-`{ "allow_delete": false }`, from `DMARC_ALLOW_REPORT_DELETE` (off by default).
+`{ "allow_delete": false, "manual_upload_enabled": true }`: `allow_delete` from `DMARC_ALLOW_REPORT_DELETE` (off by default), `manual_upload_enabled` from `DMARC_MANUAL_UPLOAD_ENABLED`.
 
 ---
 

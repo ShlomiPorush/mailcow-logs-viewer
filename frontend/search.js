@@ -13,15 +13,16 @@
 // row, Enter opens it (an entity's card, a job on Status > Jobs), Right moves into
 // the row's buttons and Left or Escape back to the field.
 
+// area: what the signed-in person needs View on to search it (Settings is an admin's)
 const GS_CATEGORIES = [
     { id: 'pages', label: 'Pages' },
-    { id: 'settings', label: 'Settings' },
-    { id: 'jobs', label: 'Background jobs', feature: null },
-    { id: 'messages', label: 'Messages', feature: null },
-    { id: 'domains', label: 'Domains', feature: 'domains' },
-    { id: 'mailboxes', label: 'Mailboxes', feature: 'mailbox-stats' },
-    { id: 'suppressions', label: 'Suppressions', feature: 'suppressions' },
-    { id: 'addresses', label: 'IP addresses', feature: 'netfilter' }
+    { id: 'settings', label: 'Settings', area: 'admin' },
+    { id: 'jobs', label: 'Background jobs', feature: null, area: 'status' },
+    { id: 'messages', label: 'Messages', feature: null, area: 'messages' },
+    { id: 'domains', label: 'Domains', feature: 'domains', area: 'domains' },
+    { id: 'mailboxes', label: 'Mailboxes', feature: 'mailbox-stats', area: 'mailboxes' },
+    { id: 'suppressions', label: 'Suppressions', feature: 'suppressions', area: 'outbound' },
+    { id: 'addresses', label: 'IP addresses', feature: 'netfilter', area: 'security' }
 ];
 // Results a category's tab lists, and how many of them All shows
 const GS_LIMIT = 10;
@@ -71,6 +72,7 @@ let gsJobsAt = 0;
 function gsEl(id) { return document.getElementById(id); }
 
 function gsOff(category) {
+    if (category.area && !userCan(category.area)) return true;
     // A setting result opens its field, which only the edit form has
     if (category.id === 'settings' && window.settingsEditable === false) return true;
     return !!(category.feature && window.disabledFeatures && window.disabledFeatures.includes(category.feature));
@@ -90,7 +92,7 @@ function gsMark(text, q) {
 }
 
 function gsVisible(el) {
-    return !!el && el.style.display !== 'none' && !el.classList.contains('hidden');
+    return !!el && el.style.display !== 'none' && !el.classList.contains('hidden') && !el.classList.contains('ui-no-view');
 }
 
 // ----------------------------------------------------------------- the indexes
@@ -120,7 +122,7 @@ function gsSearchPages(q) {
 }
 
 function gsSearchSettings(q) {
-    if (typeof settingsSearchIndex !== 'function') return [];
+    if (typeof settingsSearchIndex !== 'function' || !userIsAdmin()) return [];
     // Names that hold the text first, then the ones only their key holds
     const found = settingsSearchIndex().filter(s => gsMatch(s.label, q) || gsMatch(s.key, q));
     return [...found.filter(s => gsMatch(s.label, q)), ...found.filter(s => !gsMatch(s.label, q))]
@@ -253,6 +255,8 @@ const GS_IP_ACTIVITY = [
 // way. The value comes back as
 // the server writes it (IPv6 compressed, an IPv4 mapped into IPv6 as IPv4)
 async function gsTypedIp(ip, signal) {
+    // The card's areas; without View on all of them nothing is read
+    if (!userCanOpenEntity('ip')) return { value: ip, sub: 'Not in these results' };
     let data = null;
     try {
         data = await gsJson(`/api/entities/ip?value=${encodeURIComponent(ip)}`, signal);
@@ -279,7 +283,7 @@ async function gsTypedIp(ip, signal) {
 // title: what the row shows, when it is not the value (the address as typed)
 function gsEntityItem(kind, value, { sub = '', at = '', open = null, title = '' } = {}) {
     const text = String(value || '').trim();
-    if (entityKindOf(text) !== kind) return { title: title || text, sub, at, open: open || (() => {}) };
+    if (entityKindOf(text) !== kind || !userCanOpenEntity(kind)) return { title: title || text, sub, at, open: open || (() => {}) };
     return { title: title || text, sub, at, entity: { kind, value: text }, hint: 'card', keep: 'entity-card',
         open: () => openEntityCard(kind, text, { from: gsOpener() }) };
 }
@@ -421,10 +425,11 @@ const gsRw = () => typeof mailcowRwConfigured !== 'undefined' && !!mailcowRwConf
 function gsActs(item) {
     if (item.entity) {
         const acts = [{ act: 'card' }];
-        if (item.entity.kind === 'ip' && gsRw()) acts.push({ act: 'ban' }, { act: 'allow' });
+        if (item.entity.kind === 'ip' && gsRw() && userCan('security', 'write')) acts.push({ act: 'ban' }, { act: 'allow' });
         return acts;
     }
-    if (item.job && !item.job.off) return [{ act: 'run', disabled: item.job.running }];
+    // Running a job by hand is an admin's
+    if (item.job && !item.job.off && userIsAdmin()) return [{ act: 'run', disabled: item.job.running }];
     return [];
 }
 
