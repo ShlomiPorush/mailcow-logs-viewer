@@ -10,7 +10,7 @@ import hmac
 import secrets
 import threading
 from pathlib import Path
-from typing import FrozenSet, Optional, Set, Tuple
+from typing import FrozenSet, Optional
 
 N = 2 ** 15
 R = 8
@@ -29,88 +29,33 @@ COMMON_PROBLEM = "This password is too common. Choose another one."
 # them (MIT; source, commit and checksum in resources/vendored.json). Read from the image: a check
 # never goes to the network
 COMMON_FILE = Path(__file__).resolve().parent.parent / "resources" / "ncsc_100k_passwords.txt"
-# A core left after cutting digits and symbols off the ends is compared only when this long
-# ("abc123" is judged as it is)
-MIN_BASE = 4
-# Digits and symbols cut from each end: at every place within this many of the run's outer end
-# and of its end next to the word
-MAX_CUT = 8
-# Characters that are written for one another all read as one: P@ssw0rd, Pa$$w0rd, W1ll1ams
-_CANON = str.maketrans({"l": "i", "1": "i", "!": "i", "|": "i", "0": "o", "@": "a", "4": "a", "3": "e",
-                        "$": "s", "5": "s", "7": "t"})
 
 _dummy: Optional[str] = None
 _dummy_lock = threading.Lock()
-_lists: Optional[Tuple[FrozenSet[str], FrozenSet[str]]] = None
-_lists_lock = threading.Lock()
-
-
-def canon(word: str) -> str:
-    """word as compared: case folded, each look-alike group read as one character."""
-    return word.casefold().translate(_CANON)
-
-
-def _load() -> Tuple[FrozenSet[str], FrozenSet[str]]:
-    """The list as published (case folded, trimmed) and in canonical form, read once from disk."""
-    global _lists
-    if _lists is None:
-        with _lists_lock:
-            if _lists is None:
-                with open(COMMON_FILE, encoding="utf-8") as f:
-                    words = frozenset(w for w in (line.strip().casefold() for line in f) if w)
-                _lists = (words, frozenset(canon(w) for w in words))
-    return _lists
+_common: Optional[FrozenSet[str]] = None
+_common_lock = threading.Lock()
 
 
 def common_passwords() -> FrozenSet[str]:
-    return _load()[0]
-
-
-def _count(chars, take) -> int:
-    """How many characters from the start of chars take() is true for."""
-    count = 0
-    for c in chars:
-        if not take(c):
-            break
-        count += 1
-    return count
-
-
-def _not_letter(c: str) -> bool:
-    return not c.isalpha()
-
-
-def _cuts(length: int) -> Set[int]:
-    """Where a run of digits and symbols this long may be cut, counted from its outer end: every
-    place among its first 8 characters and among its last 8, next to the word. Padding of any
-    length is cut away whole, and a look-alike next to the word may stay as part of it
-    ("123@dm1n456!" and "111111111@dm1n" both give "@dm1n"). At most 18 places."""
-    return set(range(min(length, MAX_CUT) + 1)) | set(range(max(0, length - MAX_CUT), length + 1))
-
-
-def common_forms(password: str) -> Set[str]:
-    """What a password is compared as, each in canonical form: itself, and every core left by
-    cutting digits and symbols off the start and the end at the places _cuts gives, when the
-    core has 4 or more characters. At most 324 forms (18 places at each end)."""
-    word = password.strip()
-    forms = {canon(word)}
-    for start in _cuts(_count(word, _not_letter)):
-        for cut in _cuts(_count(reversed(word), _not_letter)):
-            core = word[start:len(word) - cut]
-            if len(core) >= MIN_BASE:
-                forms.add(canon(core))
-    return forms
+    """The list's entries, case folded, read once from disk."""
+    global _common
+    if _common is None:
+        with _common_lock:
+            if _common is None:
+                with open(COMMON_FILE, encoding="utf-8") as f:
+                    _common = frozenset(w for w in (line.rstrip("\n").casefold() for line in f) if w)
+    return _common
 
 
 def is_common(password: str) -> bool:
-    return not _load()[1].isdisjoint(common_forms(password))
+    """Whether the password is on the list, as it is; only the letter case is ignored."""
+    return password.casefold() in common_passwords()
 
 
 def password_problem(password: str) -> Optional[str]:
     """Why a local user's password cannot be set, or None. Checked before anything is hashed:
-    8 to 256 characters, and not one of the most common passwords, also when written in another
-    case, with look-alike digits and symbols, or with digits and symbols added around a common
-    word (common_forms, compared in canonical form). The dialog shows how strong it is as guidance, and asks this before Save
+    8 to 256 characters, and not on the list of the most common passwords (in any letter case).
+    The dialog shows how strong it is as guidance, and asks this before Save
     (POST /api/users/password-check). The built-in admin's password (AUTH_PASSWORD) is not held
     to this.
     """

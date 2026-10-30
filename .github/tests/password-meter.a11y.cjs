@@ -299,26 +299,26 @@ test('the email field: empty or not an email address keeps Add disabled', async 
     assert.ok(p.$('#user-edit-email-problem').classList.contains('hidden'));
 });
 
-test('a generated password the server refuses is replaced without a word', async () => {
-    const p = page({ refuse: 2 });
+test('a generated password the server refuses says so, as a typed one does', async () => {
+    const p = page({ refuse: 1 });
     p.w.editUser(null);
     p.input('#user-edit-name', 'erin');
-    // Everything the refusal line ever says, while it happens
-    const said = [];
-    new p.w.MutationObserver(() => { const text = p.$('#user-edit-pw-problem').textContent; if (text) said.push(text); })
-        .observe(p.$('#user-edit-pw-status'), { childList: true, subtree: true, characterData: true });
     p.$('#user-edit-pw-generate').click();
-    for (let i = 0; i < 10; i++) await tick();
-    assert.equal(p.checks.length, 3, 'two refused, the third accepted');
-    assert.equal(new Set(p.checks.map(c => c.password)).size, 3, 'a new password each time');
-    assert.equal(p.$('#user-edit-pass').value, p.checks[2].password);
-    assert.equal(p.$('#user-edit-pass').type, 'text');
-    assert.deepEqual(said, [], 'never shown or read out');
+    for (let i = 0; i < 5; i++) await tick();
+    assert.equal(p.checks.length, 1, 'no new password drawn by itself');
+    assert.equal(p.$('#user-edit-pass').value, p.checks[0].password);
+    assert.equal(p.problem(), COMMON);
+    assert.ok(p.disabled());
+    assert.ok(p.$('#user-edit-pw-copy').disabled);
+    // Generate again: a new one, accepted
+    p.$('#user-edit-pw-generate').click();
+    for (let i = 0; i < 5; i++) await tick();
+    assert.equal(p.checks.length, 2);
     assert.equal(p.problem(), '');
     assert.equal(p.disabled(), false);
 });
 
-test('Copy waits for the server to accept the password, so what is copied is what is saved', async () => {
+test('Copy waits for the server to accept the password, so what is copied can be saved', async () => {
     const p = page({ hold: true });
     p.w.editUser(null);
     p.input('#user-edit-name', 'erin');
@@ -328,17 +328,19 @@ test('Copy waits for the server to accept the password, so what is copied is wha
     copy.click();
     await tick();
     assert.deepEqual(p.copied, []);
-    // Refused: replaced at once, and the new one is pending again
+    // Refused: Copy stays off
     p.checks[0].release({ ok: false, problem: COMMON });
-    for (let i = 0; i < 5; i++) await tick();
-    assert.equal(p.checks.length, 2);
-    assert.ok(copy.disabled, 'still pending after the swap');
+    await tick();
+    assert.ok(copy.disabled, 'refused');
+    // A new one, pending, then accepted
+    p.$('#user-edit-pw-generate').click();
+    assert.ok(copy.disabled, 'pending again');
     p.checks[1].release();
     await tick();
     assert.equal(copy.disabled, false);
     copy.click();
     await tick();
-    assert.deepEqual(p.copied, [p.checks[1].password], 'the final password');
+    assert.deepEqual(p.copied, [p.checks[1].password], 'the accepted password');
     assert.equal(p.$('#user-edit-pass').value, p.checks[1].password);
     // A typed password follows the same rule
     p.type('Typed-Pass-4u');
@@ -347,17 +349,6 @@ test('Copy waits for the server to accept the password, so what is copied is wha
     p.checks[2].release();
     await tick();
     assert.equal(copy.disabled, false);
-});
-
-test('Generate stops after 5 refused tries and then says why', async () => {
-    const p = page({ refuse: 99 });
-    p.w.editUser(null);
-    p.input('#user-edit-name', 'erin');
-    p.$('#user-edit-pw-generate').click();
-    for (let i = 0; i < 20; i++) await tick();
-    assert.equal(p.checks.length, 5);
-    assert.equal(p.problem(), COMMON);
-    assert.ok(p.disabled());
 });
 
 test('Save right after typing waits for the check, then sends', async () => {
