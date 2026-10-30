@@ -2,8 +2,7 @@
 
 The app can ask for a username and password (Basic authentication), send users to an identity provider (OAuth2/OIDC), or offer both. You set this up in **Settings** > **Authentication** or with environment variables.
 
-> [!WARNING]
-> Everyone who signs in can see everything and use every action the app's mailcow API keys allow. The app has no user roles and no list of allowed OAuth2 users, so limit who can use the app at your identity provider.
+What each person may see and do is set in **Settings** > **Users**. See [Users](#users).
 
 ## Basic authentication
 
@@ -17,7 +16,7 @@ AUTH_PASSWORD=replace-with-a-long-random-password
 
 To set it up in the app instead, fill in **Auth Username** and **Auth Password** in **Settings** > **Authentication**, turn on **Basic Auth Enabled** and save. The app asks you to type the username and password again, so you cannot lock yourself out with a typo, and it does not let you clear the password while Basic authentication is on.
 
-Scripts and API clients can send an `Authorization: Basic` header with every request instead of signing in.
+This is the built-in admin. It always has full access and cannot be removed in the app. Scripts and API clients can send its username and password in an `Authorization: Basic` header with every request instead of signing in. Users added in **Settings** > **Users** sign in on the login page only.
 
 ![Login page](../images/docs/authentication-login-light.webp#gh-light-mode-only)
 ![Login page](../images/docs/authentication-login-dark.webp#gh-dark-mode-only)
@@ -137,6 +136,17 @@ OAUTH2_SCOPES=openid profile email
 
 Use your own tenant ID. Do not use the shared multi-tenant address unless you limit who can use the client some other way.
 
+## Users
+
+**Settings** > **Users** lists everyone who may sign in, starting with the built-in admin. Only admins see it.
+
+- **Add user** with a password adds someone who signs in on the login page. The password needs at least 8 characters and must not be on the list of the 100,000 most common passwords ([NCSC](https://www.ncsc.gov.uk/blog-post/passwords-passwords-everywhere)). **Generate** creates one.
+- **Add user** with your provider adds someone who signs in with OAuth2, by the email address the provider reports for them. The app trusts that address, so your provider must not let people choose an address they do not own. An address the provider marks as not verified never matches.
+- Access is **Admin** (everything), **Operator** (every page and action except editing Rspamd maps), **Viewer** (every page, no actions) or **Custom** (view or act per area). Only admins see Settings, Users and AI agents, and only admins can connect an agent.
+- **Everyone else who signs in with** your provider sets the access of people your provider lets in who are not on the list. It is **Admin** until you change it, which is how the app behaved before users existed. **No access** lets in only the people on the list.
+- A change applies at once, also to people who are signed in. A new password, other access or **Disable sign-in** signs a password user out. Before a change that lowers your own access, the app asks.
+- A change that would leave no admin who can sign in is refused.
+
 ## Sessions and signing out
 
 Both sign-in methods give the browser a cookie named `session_id` (`HttpOnly`, `SameSite=Lax`). The cookie is marked `Secure` when the request came over HTTPS, directly or through a proxy that sends `X-Forwarded-Proto: https`. Use HTTPS for anything outside a private network.
@@ -168,5 +178,6 @@ If you lock yourself out:
 | The provider button fails at once | The issuer URL (the app adds `/.well-known/openid-configuration`), network access from the app to the provider, and the provider's certificate. The reason is in the app's log. |
 | The provider rejects the callback | The callback URL must be identical at the provider and in `OAUTH2_REDIRECT_URI`: scheme, host, port and path. |
 | "Invalid authentication state" | Start the login again in the same browser and finish it within 10 minutes. |
+| "Your account has no access to this app" | Your email has an entry with sign-in disabled in **Settings** > **Users**, or the access for everyone else is **No access**. An admin can change it. |
 | "Login capacity reached" | Sign out unused sessions or wait for them to expire, or raise **Session Max Entries**. |
 | Everyone gets "Too many login attempts" at once | The app sees the proxy's address instead of the visitor's. Check `FORWARDED_ALLOW_IPS` in [Reverse proxy](Reverse_Proxy.md). |
