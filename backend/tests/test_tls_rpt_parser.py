@@ -2,12 +2,15 @@
 import gzip
 import json
 
+import pytest
+
 from app.services.tls_rpt_parser import (
     is_tls_rpt_json,
     parse_iso_datetime,
     parse_tls_rpt_file,
     parse_tls_rpt_json,
 )
+from app.services.report_identity import ReportLimitError
 
 VALID_REPORT = {
     "organization-name": "Google Inc.",
@@ -61,9 +64,10 @@ def test_invalid_json_returns_none():
     assert parse_tls_rpt_json("not json {") is None
 
 
-def test_gzip_bomb_returns_none():
+def test_gzip_bomb_is_rejected_as_over_the_limit():
     bomb = gzip.compress(b"\x00" * (60 * 1024 * 1024))
-    assert parse_tls_rpt_file(bomb, "bomb.json.gz") is None
+    with pytest.raises(ReportLimitError):
+        parse_tls_rpt_file(bomb, "bomb.json.gz")
 
 
 def test_parse_iso_datetime_z_suffix():

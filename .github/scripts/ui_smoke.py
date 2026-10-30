@@ -10,7 +10,9 @@ detail views of the seeded data (smoke_seed.py) and fails on:
     exist at runtime, including handlers rendered from API data,
   - an API call to a path the backend does not serve (checked against
     /openapi.json, because the SPA catch-all answers unknown paths with 200),
-  - an API response of 404 or any 5xx that is not listed in EXPECTED_ERRORS.
+  - an API response of 404 or any 5xx that is not listed in EXPECTED_ERRORS,
+  - an API answer that does not match what /openapi.json says the operation
+    returns (operations that document nothing yet are counted as skipped).
 
 Buttons that act (run, save, delete, ban, release) are never clicked.
 
@@ -24,6 +26,7 @@ import sys
 import urllib.request
 from urllib.parse import urlparse
 
+from jsonschema import Draft202012Validator
 from playwright.sync_api import sync_playwright
 
 BASE = sys.argv[1].rstrip('/') if len(sys.argv) > 1 else 'http://localhost:8080'
@@ -47,11 +50,13 @@ SAFE_SELECTORS = '.settings-edit-tab'
 
 # API errors that are the correct answer in the smoke environment, where
 # mailcow is an unreachable placeholder. Each entry: (method, path regex, status, reason).
+# A read from mailcow that fails answers 502 (Bad Gateway); Fail2ban answers 503.
 MAILCOW_DOWN = 'reads from mailcow, which is an unreachable placeholder in the smoke test'
 EXPECTED_ERRORS = [
-    ('GET', r'^/api/status/(version|containers|mailcow-info|storage)$', 500, MAILCOW_DOWN),
-    ('GET', r'^/api/(fail2ban|queue|quarantine)$', 500, MAILCOW_DOWN),
-    ('GET', r'^/api/domains/all$', 500, MAILCOW_DOWN),
+    ('GET', r'^/api/status/(version|containers|mailcow-info|storage)$', 502, MAILCOW_DOWN),
+    ('GET', r'^/api/(queue|quarantine)$', 502, MAILCOW_DOWN),
+    ('GET', r'^/api/fail2ban$', 503, MAILCOW_DOWN),
+    ('GET', r'^/api/domains/all$', 502, MAILCOW_DOWN),
 ]
 
 MAX_CLICKS_PER_PAGE = 60
@@ -116,11 +121,12 @@ def fetch(path):
         return r.read().decode('utf-8')
 
 
-def route_matchers():
-    """Regexes for every path the backend serves, from its OpenAPI schema."""
-    spec = json.loads(fetch('/openapi.json'))
+def route_matchers(spec):
+    """(regex, path template) for every path the backend serves, from its OpenAPI schema.
+    Templates with fewer parameters come first, so /api/messages/new is not taken
+    for a /api/messages/{id}."""
     out = []
-    for p in spec['paths']:
+    for p in sorted(spec['paths'], key=lambda t: t.count('{')):
         parts = []
         for seg in p.strip('/').split('/'):
             if re.fullmatch(r'\{[^}]+:path\}', seg):
@@ -129,8 +135,70 @@ def route_matchers():
                 parts.append('[^/]+')
             else:
                 parts.append(re.escape(seg))
-        out.append(re.compile('^/' + '/'.join(parts) + '/?$'))
+        out.append((re.compile('^/' + '/'.join(parts) + '/?$'), p))
     return out
+
+
+# Answered by the auth middleware or the origin guard for any call; a route
+# documents them only when it gives them itself (backend/tests/contract.py)
+APP_WIDE_STATUSES = {401, 403, 429}
+
+
+def documented_schema(schema):
+    """Whether a schema says anything: FastAPI's default ({}) and any-object do not."""
+    if not schema:
+        return False
+    return not (schema.get('type') == 'object' and not schema.get('properties')
+                and schema.get('additionalProperties', True) in (True, {}))
+
+
+def is_documented(operation):
+    """Whether an operation says what it returns: a body schema, or a 3xx/204 without a body."""
+    for code, response in (operation.get('responses') or {}).items():
+        if code[:1] not in '23':
+            continue
+        content = response.get('content')
+        if not content:
+            if code[:1] == '3' or code == '204':
+                return True
+        elif any(documented_schema(media.get('schema') or {}) for media in content.values()):
+            return True
+    return False
+
+
+def check_answer(spec, operation, status, content_type, body):
+    """An answer against its operation's documentation, as tests/contract.py checks it.
+    Returns (outcome, reason): 'checked', 'skipped' (with why) or 'mismatch' (with what).
+    body is None when the browser could not read it."""
+    if not is_documented(operation):
+        return 'skipped', 'documents nothing yet'
+    response = (operation.get('responses') or {}).get(str(status))
+    if status == 500 and not (content_type or '').startswith('application/json'):
+        return 'skipped', 'HTTP 500 from sign-in set up without a password'
+    if response is None:
+        if status in APP_WIDE_STATUSES:
+            return 'skipped', f'HTTP {status} from sign-in or the origin guard'
+        return 'mismatch', f'HTTP {status}, a status its documentation does not list'
+    content = response.get('content') or {}
+    if not content:
+        return ('checked', None) if not body else ('mismatch', f'HTTP {status} with a body, documented without one')
+    if body is None:
+        return 'skipped', 'the browser could not read the body'
+    media = (content_type or '').split(';')[0].strip()
+    if media not in content:
+        return 'mismatch', f'HTTP {status} as {media or "no type"}, documented as {", ".join(content)}'
+    schema = content[media].get('schema') or {}
+    if media != 'application/json':
+        return 'checked', None
+    try:
+        data = json.loads(body)
+    except ValueError:
+        return 'mismatch', f'HTTP {status} with a body that is not JSON'
+    errors = list(Draft202012Validator({**schema, 'components': spec.get('components', {})}).iter_errors(data))
+    if not errors:
+        return 'checked', None
+    return 'mismatch', f'HTTP {status} does not match its documentation: ' + '; '.join(
+        f"{'/'.join(str(p) for p in e.absolute_path) or '(top)'}: {e.message[:200]}" for e in errors[:3])
 
 
 def spa_routes():
@@ -146,10 +214,59 @@ def expected(method, path, status):
     return any(m == method and re.search(rx, path) and s == status for m, rx, s, _ in EXPECTED_ERRORS)
 
 
+# The API reference (/docs) runs the vendored Scalar bundle, which can talk to
+# scalar.com in several ways that frontend/api-docs.js turns off. Only a real
+# browser shows whether a new bundle still honours that, so run this pass
+# after every Scalar update.
+SCALAR_FEATURES = ['Open API Client', 'Ask AI', 'Generate MCP', 'Connect MCP', 'Generate SDK',
+                   'Developer Tools', 'Share', 'Register', 'Deploy']
+# "Powered by Scalar": plain links that carry nothing about this server
+SCALAR_CREDITS = {'https://scalar.com/?utm_source=powered-by&utm_medium=api-reference', 'https://www.scalar.com/'}
+
+
+def check_api_docs(browser):
+    problems, outside = [], set()
+    context = browser.new_context(viewport={'width': 1440, 'height': 900})
+    context.on('request', lambda r: urlparse(r.url).scheme in ('http', 'https')
+               and not r.url.startswith(BASE + '/') and outside.add(r.url))
+    page = context.new_page()
+
+    def check_page(step):
+        for href in page.eval_on_selector_all('a[href]', 'as => as.map(a => a.href)'):
+            host = (urlparse(href).hostname or '').rstrip('.')
+            if (host == 'scalar.com' or host.endswith('.scalar.com')) and href not in SCALAR_CREDITS:
+                problems.append(f'{step}: link to {href}')
+        text = page.evaluate('document.body.innerText')
+        problems.extend(f"{step}: Scalar's '{t}' is shown" for t in SCALAR_FEATURES if t in text)
+
+    page.goto(f'{BASE}/docs', wait_until='networkidle', timeout=60000)
+    page.wait_for_selector("a[href*='GET/api/health']", state='attached', timeout=30000)
+    # A second reference means the bundle started one of its own, with Scalar's defaults
+    if page.locator('.darklight-reference').count() != 1:
+        problems.append('more than one reference on the page')
+    check_page('reference')
+
+    page.goto(f'{BASE}/docs#GET/api/health', wait_until='networkidle')
+    page.locator("section[id$='GET/api/health']").get_by_role('button', name='Test Request').first.click()
+    page.get_by_role('button', name='Send').first.click()
+    page.wait_for_load_state('networkidle')
+    page.wait_for_timeout(500)
+    check_page('Test Request')
+    if '200 OK' not in page.locator('[role=dialog]').first.inner_text():
+        problems.append('Test Request on GET /api/health did not show 200 OK')
+
+    problems.extend(f'request outside the app: {u}' for u in sorted(outside))
+    context.close()
+    print(f'  docs: {"problems found" if problems else "Scalar stays on this server, Test Request works"}')
+    return problems
+
+
 def main():
-    routes = route_matchers()
+    spec = json.loads(fetch('/openapi.json'))
+    routes = route_matchers(spec)
     pages = spa_routes()
     failures, warnings = [], []
+    checked, skipped = set(), {}
 
     with sync_playwright() as pw:
         browser = pw.chromium.launch()
@@ -168,11 +285,29 @@ def main():
             if not u.path.startswith('/api/'):
                 return
             method = resp.request.method
-            if not any(rx.match(u.path) for rx in routes):
+            template = next((t for rx, t in routes if rx.match(u.path)), None)
+            if template is None:
                 fail(f'{method} {u.path}: the backend has no such route')
-            elif resp.status == 404 or resp.status >= 500:
+                return
+            if resp.status == 404 or resp.status >= 500:
                 if not expected(method, u.path, resp.status):
                     fail(f'{method} {u.path}: HTTP {resp.status}')
+            operation = (spec['paths'].get(template) or {}).get(method.lower())
+            if not operation:
+                return
+            try:
+                body = resp.body()
+            except Exception:   # a redirect or an aborted request: nothing to read
+                body = None if resp.status < 300 or resp.status >= 400 else b''
+            outcome, reason = check_answer(spec, operation, resp.status, resp.headers.get('content-type', ''), body)
+            name = f'{method} {template}'
+            if outcome == 'checked':
+                checked.add(name)
+            elif outcome == 'skipped':
+                skipped.setdefault(name, reason)
+            else:
+                checked.add(name)
+                fail(f'{method} {u.path}: {reason}')
         page.on('response', on_response)
 
         def check_handlers():
@@ -202,8 +337,15 @@ def main():
             print(f'  {route}: loaded, {len(clicked)} controls clicked'
                   + (f", opened: {', '.join(opened)}" if opened else ''))
 
+        where['page'] = 'docs'
+        for problem in check_api_docs(browser):
+            fail(problem)
         browser.close()
 
+    unchecked = {name: why for name, why in skipped.items() if name not in checked}
+    print(f'\n  answers checked against /openapi.json: {len(checked)} operations; not checked: {len(unchecked)}')
+    for name, why in sorted(unchecked.items()):
+        print(f'    not checked: {name} ({why})')
     for w in dict.fromkeys(warnings):
         print(f'  warning {w}')
     if failures:

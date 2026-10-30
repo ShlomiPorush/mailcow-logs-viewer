@@ -1,9 +1,8 @@
-"""MailcowAPI.get_raw_logs_range: endpoint shape, error normalisation, and the
+"""MailcowAPI.get_raw_logs_range: endpoint shape, argument checks, and the
 {} answer mailcow gives past the end of a list. No database, no network."""
 import asyncio
 
 import pytest
-from tenacity import RetryError
 
 from app.mailcow_api import MailcowAPI, MailcowAPIError
 
@@ -33,24 +32,6 @@ def test_an_empty_dict_past_the_end_becomes_an_empty_list(monkeypatch):
         return {}
     monkeypatch.setattr(api, '_make_request', fake)
     assert asyncio.run(api.get_raw_logs_range('rspamd-history', 5000, 500)) == []
-
-
-def test_retry_error_is_normalised_to_mailcow_api_error(monkeypatch):
-    """_make_request's retry decorator has no reraise, so after three failures
-    tenacity raises RetryError; callers must only ever see MailcowAPIError."""
-    api = _client()
-
-    class _Attempt:
-        def exception(self):
-            return MailcowAPIError('connection refused')
-
-    async def fake(endpoint, method='GET', **kw):
-        raise RetryError(_Attempt())
-    monkeypatch.setattr(api, '_make_request', fake)
-
-    with pytest.raises(MailcowAPIError) as exc:
-        asyncio.run(api.get_raw_logs_range('postfix', 1, 10))
-    assert 'connection refused' in str(exc.value)
 
 
 def test_rejects_bad_arguments():

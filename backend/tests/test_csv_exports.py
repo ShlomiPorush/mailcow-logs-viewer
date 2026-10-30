@@ -73,6 +73,7 @@ def export_client(monkeypatch):
     row.attempts_left = row.size = row.bounce_count = row.hard_bounce_count = row.soft_bounce_count = 2
     row.is_spam = row.has_auth = row.is_complete = row.active = True
     row.recipients_smtp = ["user@example.com"]
+    row.written_recipients = None
     row.symbols = {"TEST": {}}
     row.expires_at = row.rspamd_log_id = None
     query = Mock()
@@ -164,7 +165,7 @@ def test_head_requires_authentication(export_client, monkeypatch, path, attribut
     assert client.head(path, auth=credentials).status_code == 200
     assert client.post("/api/auth/session", auth=credentials).status_code == 200
     assert client.head(path).status_code == 200
-    client.get("/api/auth/logout")
+    client.post("/api/auth/logout")
 
 
 @pytest.mark.parametrize("path,attribute,column", ROUTES)
@@ -210,7 +211,7 @@ def test_suppression_export_import_preserves_addresses_and_notes(export_client, 
     result = client.post("/api/suppressions/import", files={"file": ("roundtrip.csv", response.content)})
     assert result.status_code == 200
     assert result.json() == {"imported": 1, "skipped": 0, "errors": []}
-    saved = db.add.call_args.args[0]
+    saved = next(call.args[0] for call in db.add.call_args_list if type(call.args[0]).__name__ == "SpamSuppression")
     assert saved.email == email
     assert saved.notes == notes
     assert saved.type == "email"
@@ -273,3 +274,38 @@ def test_downloads_identify_utf8_and_preserve_multilingual_text(export_client, p
         result = client.post("/api/suppressions/import", files={"file": ("unicode.csv", response.content)})
         assert result.json()["imported"] == 1
         assert export_client[2].add.call_args.args[0].notes == text
+
+
+TIME_COLUMNS = [
+    ("/api/export/postfix/csv", "Time"),
+    ("/api/export/rspamd/csv", "Time"),
+    ("/api/export/netfilter/csv", "Time"),
+    ("/api/export/messages/csv", "Time"),
+    ("/api/suppressions/export", "created_at"),
+    ("/api/suppressions/export", "expires_at"),
+]
+
+
+@pytest.mark.parametrize("path,column", TIME_COLUMNS)
+def test_csv_times_are_in_the_app_time_zone_with_their_offset(export_client, monkeypatch, path, column):
+    """Time columns were naive UTC with no marker; a spreadsheet read them as local time."""
+    client, row, _, _ = export_client
+    monkeypatch.setattr(settings._inner, "tz", "Europe/Berlin")
+    row.time = row.first_seen = row.created_at = datetime(2026, 1, 15, 12, 0)
+    row.expires_at = datetime(2026, 7, 15, 12, 0)
+    expected = "2026-07-15 14:00:00+02:00" if column == "expires_at" else "2026-01-15 13:00:00+01:00"
+    assert download(client, path)[0][column] == expected
+
+
+@pytest.mark.parametrize("path", [route[0] for route in ROUTES[:4]])
+def test_csv_file_names_use_the_date_in_the_app_time_zone(export_client, monkeypatch, path):
+    """Two zones 26 hours apart are never on the same date, so at least one of
+    them differs from the container's date at any moment."""
+    from zoneinfo import ZoneInfo
+    client, _, _, _ = export_client
+    for zone in ("Etc/GMT-14", "Etc/GMT+12"):
+        monkeypatch.setattr(settings._inner, "tz", zone)
+        response = client.get(path)
+        assert response.status_code == 200
+        day = datetime.now(ZoneInfo(zone)).strftime("%Y%m%d")
+        assert f"_{day}_" in response.headers["content-disposition"], zone

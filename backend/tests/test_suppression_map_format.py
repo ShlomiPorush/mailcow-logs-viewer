@@ -15,11 +15,11 @@ sf.StaticFiles.__init__ = lambda s, *a, **k: _orig_init(s, *a, **{**k, 'check_di
 MARK = uuid.uuid4().hex[:8]
 
 
-def format_entry(email):
+def format_entry(email, **kwargs):
     # Imported lazily so the fail-then-pass run against the pre-fix code can
     # still collect this module (the function did not exist there)
     from app.routers.suppressions import format_suppression_map_entry
-    return format_suppression_map_entry(email)
+    return format_suppression_map_entry(email, **kwargs)
 
 
 def _rspamd_match(map_line: str, recipient: str) -> bool:
@@ -51,16 +51,22 @@ def test_regex_metacharacters_in_an_address_are_escaped():
 
 
 def test_a_legacy_domain_pattern_gets_its_anchors():
-    line = format_entry(r'/.+@example\.com/i')
-    assert line == r'/^.+@example\.com$/i'
+    line = format_entry(r'/.+@example\.com/i', allow_regex=True)
+    assert line == r'/^(?:.+@example\.com)$/i'
     assert _rspamd_match(line, 'user@example.com')
     assert not _rspamd_match(line, 'user@example.com.evil.net')
     assert not _rspamd_match(line, 'user@notexample.com.x')
 
 
-def test_an_already_anchored_pattern_is_left_alone():
-    line = format_entry(r'/^.+@example\.com$/i')
-    assert line == r'/^.+@example\.com$/i'
+def test_an_already_anchored_pattern_is_not_anchored_twice():
+    line = format_entry(r'/^.+@example\.com$/i', allow_regex=True)
+    assert line == r'/^(?:.+@example\.com)$/i'
+
+
+def test_a_regex_shaped_value_is_a_literal_unless_regex_is_allowed():
+    line = format_entry(r'/.+@example\.com/i')
+    assert line == r'/^/\.\+@example\\\.com/i$/i'
+    assert not _rspamd_match(line, 'user@example.com')
 
 
 # ---- the sync writes the anchored form (fails on the old code) ----

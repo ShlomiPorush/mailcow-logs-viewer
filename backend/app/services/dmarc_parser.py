@@ -1,6 +1,6 @@
 """
 DMARC Report Parser
-Handles parsing of DMARC aggregate reports in XML format (GZ or ZIP compressed)
+Handles parsing of DMARC aggregate reports in XML format (plain, GZ or ZIP compressed)
 """
 import ipaddress
 import re
@@ -16,6 +16,15 @@ from .safe_decompress import (
     MAX_COMPRESSED_BYTES,
     gzip_decompress_limited,
     zip_read_limited,
+)
+from .report_identity import (
+    MAX_REPORT_ITEMS,
+    MAX_STORED_COUNT,
+    REPORT_TOO_LARGE,
+    ReportLimitError,
+    ReportRejectedError,
+    dmarc_record_key,
+    zip_report_member,
 )
 
 logger = logging.getLogger(__name__)
@@ -42,11 +51,12 @@ def is_valid_domain_name(value) -> bool:
 
 def parse_dmarc_file(file_content: bytes, filename: str) -> Optional[Dict[str, Any]]:
     """
-    Parse DMARC report from compressed file (GZ or ZIP)
+    Parse DMARC report from a file: plain XML, GZ or ZIP
     
     Args:
-        file_content: Raw bytes of the compressed file
-        filename: Original filename (to determine compression type)
+        file_content: Raw bytes of the file
+        filename: Original filename (for logging; the content decides the
+            format, since senders name their files freely)
         
     Returns:
         Parsed DMARC data or None if parsing failed
@@ -54,25 +64,28 @@ def parse_dmarc_file(file_content: bytes, filename: str) -> Optional[Dict[str, A
     try:
         if len(file_content) > MAX_COMPRESSED_BYTES:
             logger.error(f"DMARC file {filename} exceeds compressed size limit, rejecting")
-            return None
+            raise ReportLimitError(REPORT_TOO_LARGE)
 
         # Determine file type and extract XML
         xml_content = None
 
-        if filename.endswith('.gz'):
+        if file_content[:2] == b'\x1f\x8b':
             # Gzip compressed
             xml_content = gzip_decompress_limited(file_content, source=filename)
 
-        elif filename.endswith('.zip'):
+        elif file_content[:4] == b'PK\x03\x04':
             # ZIP compressed (Google uses this)
             with zipfile.ZipFile(BytesIO(file_content)) as z:
-                # Get first XML file in zip
-                xml_files = [name for name in z.namelist() if name.endswith('.xml')]
-                if xml_files:
-                    xml_content = zip_read_limited(z, xml_files[0], source=filename)
+                # The one XML report in the ZIP
+                xml_file = zip_report_member(z, '.xml')
+                if xml_file:
+                    xml_content = zip_read_limited(z, xml_file, source=filename)
                 else:
                     logger.error(f"No XML file found in ZIP: {filename}")
                     return None
+        elif file_content.lstrip(b'\xef\xbb\xbf \t\r\n')[:1] == b'<':
+            # Plain XML, within the size limit checked above
+            xml_content = file_content
         else:
             logger.error(f"Unsupported file format: {filename}")
             return None
@@ -82,11 +95,15 @@ def parse_dmarc_file(file_content: bytes, filename: str) -> Optional[Dict[str, A
             return None
         
         # Parse XML
-        return parse_dmarc_xml(xml_content.decode('utf-8'), xml_content.decode('utf-8'))
+        return parse_dmarc_xml(xml_content.decode('utf-8-sig'))
 
     except DecompressionLimitError as e:
+        # A limit: nothing from the email or upload is imported
         logger.error(f"Rejected oversized DMARC file {filename}: {e}")
-        return None
+        raise ReportLimitError(REPORT_TOO_LARGE) from e
+    except ReportRejectedError:
+        # The caller says why; a limit rejects the whole email or upload
+        raise
     except Exception as e:
         logger.error(f"Error parsing DMARC file {filename}: {e}")
         return None
@@ -143,16 +160,16 @@ DMARC_NAMESPACES = [
 ]
 
 
-def parse_dmarc_xml(xml_string: str, raw_xml: str) -> Dict[str, Any]:
+def parse_dmarc_xml(xml_string: str) -> Dict[str, Any]:
     """
     Parse DMARC XML content
     
     Args:
         xml_string: XML content as string
-        raw_xml: Original raw XML for storage
         
     Returns:
-        Dictionary with parsed DMARC data
+        Dictionary with parsed DMARC data. The original XML is not kept:
+        nothing reads it, and storing it multiplied the size of every report.
     """
     try:
         # defusedxml blocks entity-expansion attacks (billion laughs / quadratic blowup)
@@ -201,13 +218,25 @@ def parse_dmarc_xml(xml_string: str, raw_xml: str) -> Dict[str, Any]:
         # Remove None values
         policy_published = {k: v for k, v in policy_published.items() if v is not None}
         
-        # Parse records
-        records = []
+        # Parse records. Identical records are one record with their counts
+        # added up, as aggregate reports mean them, so repeating a record
+        # cannot multiply the rows one small report stores.
+        merged = {}
         for record_elem in find_all_elements(root, 'record', DMARC_NAMESPACES):
             record_data = parse_dmarc_record(record_elem)
-            if record_data:
-                records.append(record_data)
-        
+            if not record_data:
+                continue
+            key = dmarc_record_key(record_data)
+            if key in merged:
+                merged[key]['count'] += record_data['count']
+            elif len(merged) >= MAX_REPORT_ITEMS:
+                raise ReportLimitError(f"The report has more than {MAX_REPORT_ITEMS:,} records.")
+            else:
+                merged[key] = record_data
+            if not 0 <= merged[key]['count'] <= MAX_STORED_COUNT:
+                raise ValueError("A record count is out of range")
+        records = list(merged.values())
+
         return {
             'report_id': report_id,
             'org_name': org_name,
@@ -218,7 +247,6 @@ def parse_dmarc_xml(xml_string: str, raw_xml: str) -> Dict[str, Any]:
             'end_date': end_date,
             'policy_published': policy_published,
             'records': records,
-            'raw_xml': raw_xml
         }
         
     except Exception as e:

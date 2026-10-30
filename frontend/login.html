@@ -2,7 +2,7 @@
 <html lang="en" class="h-full">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, interactive-widget=resizes-content">
     <title>Login - mailcow Logs Viewer</title>
     
     <!-- App icons -->
@@ -13,19 +13,13 @@
     <link rel="apple-touch-icon" sizes="180x180" href="/static/assets/icons/apple-touch-icon.png">
     <meta name="theme-color" content="#0f172a">
     
-    <script src="/static/assets/libs/tailwindcss.min.js"></script>
-    <script>
-        tailwind.config = {
-            darkMode: 'class',
-            theme: {
-                extend: {}
-            }
-        }
-    </script>
+    <style>.hidden{display:none}</style>
+    <link rel="stylesheet" href="/static/assets/css/utilities.css?v=3">
+    <link rel="stylesheet" href="/static/assets/css/ui.css?v=33">
     <style>
         .loading {
-            border: 3px solid #f3f4f6;
-            border-top: 3px solid #3b82f6;
+            border: 3px solid var(--ui-line);
+            border-top: 3px solid var(--ui-accent);
             border-radius: 50%;
             width: 40px;
             height: 40px;
@@ -37,24 +31,29 @@
         }
     </style>
 </head>
-<body class="h-full bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
-    <div class="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full p-8 mx-4">
-        <div class="text-center mb-6">
-            <img id="app-logo" src="" alt="" class="w-16 h-16 mx-auto mb-4 hidden object-contain">
-            <img id="default-logo" src="/static/assets/icons/app-icon.svg" alt="" class="w-16 h-16 mx-auto mb-4">
-            <h1 id="app-title" class="text-2xl font-bold text-gray-900 dark:text-white mb-2">mailcow Logs Viewer</h1>
-            <p class="text-gray-600 dark:text-gray-400">Please enter your credentials to continue</p>
+<body class="ui-login">
+    <div class="ui-panel ui-login-card">
+        <div class="ui-login-head">
+            <img id="app-logo" src="" alt="" class="ui-login-logo hidden">
+            <img id="default-logo" src="/static/assets/icons/app-icon.svg" alt="" class="ui-login-logo">
+            <h1 id="app-title" class="ui-h1">mailcow Logs Viewer</h1>
+            <p class="ui-muted">Please enter your credentials to continue</p>
         </div>
         
+        <!-- Why the last session ended (?reason=), above both sign-in methods -->
+        <div id="login-notice" class="hidden ui-banner ui-banner-warn ui-login-notice" role="status">
+            <span id="login-notice-text"></span>
+        </div>
+
         <!-- OAuth2 Login Section -->
-        <div id="oauth2-section" class="hidden mb-6">
+        <div id="oauth2-section" class="hidden ui-login-oauth">
             <button 
                 type="button"
                 id="oauth2-login-btn"
                 onclick="handleOAuth2Login()"
-                class="w-full px-4 py-2 bg-blue-600 hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600 text-white rounded-lg transition font-medium focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 flex items-center justify-center"
+                class="ui-btn ui-btn-primary ui-btn-block"
             >
-                <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path>
                 </svg>
                 <span id="oauth2-login-text">Login with <span id="oauth2-provider-name">OAuth2</span></span>
@@ -62,23 +61,23 @@
         </div>
         
         <!-- OR Separator (only shown when both OAuth2 and Basic Auth are available) -->
-        <div id="auth-separator" class="hidden relative my-4">
-            <div class="absolute inset-0 flex items-center">
-                <div class="w-full border-t border-gray-300 dark:border-gray-600"></div>
+        <div id="auth-separator" class="hidden ui-login-or">
+            <div class="ui-login-or-rule">
+                <div class="ui-login-or-line"></div>
             </div>
-            <div class="relative flex justify-center text-sm">
-                <span class="px-2 bg-white dark:bg-gray-800 text-gray-500 dark:text-gray-400">OR</span>
+            <div class="ui-login-or-text">
+                <span>OR</span>
             </div>
         </div>
         
         <!-- Basic Auth Login Form -->
-        <form id="login-form" onsubmit="handleLogin(event)" class="space-y-4">
-            <div id="login-error" class="hidden bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 px-4 py-3 rounded-lg text-sm">
+        <form id="login-form" onsubmit="handleLogin(event)" class="ui-login-form">
+            <div id="login-error" class="hidden ui-banner ui-banner-fail" role="alert">
                 <span id="login-error-text"></span>
             </div>
             
             <div>
-                <label for="login-username" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                <label for="login-username" class="ui-label">
                     Username
                 </label>
                 <input 
@@ -86,34 +85,42 @@
                     id="login-username" 
                     required
                     autocomplete="username"
-                    class="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    class="ui-input"
                     placeholder="Enter username"
                     autofocus
                 >
             </div>
             
             <div>
-                <label for="login-password" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                <label for="login-password" class="ui-label">
                     Password
                 </label>
+                <div class="ui-pass">
                 <input 
                     type="password" 
                     id="login-password" 
                     required
                     autocomplete="current-password"
-                    class="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    class="ui-input"
                     placeholder="Enter password"
+                    aria-describedby="login-caps"
                 >
+                <button type="button" id="login-show-password" class="ui-pass-toggle" aria-label="Show password" aria-pressed="false" title="Show password" onclick="togglePasswordShown()">
+                    <svg class="ui-pass-show" width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+                    <svg class="ui-pass-hide" width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21"/></svg>
+                </button>
+                </div>
+                <p id="login-caps" class="ui-caps hidden">Caps Lock is on</p>
             </div>
             
             <button 
                 type="submit" 
                 id="login-submit"
-                class="w-full px-4 py-2 bg-blue-600 hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600 text-white rounded-lg transition font-medium focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+                class="ui-btn ui-btn-primary ui-btn-block"
             >
                 <span id="login-submit-text">Sign In</span>
                 <span id="login-submit-loading" class="hidden">
-                    <svg class="inline-block w-4 h-4 animate-spin mr-2" fill="none" viewBox="0 0 24 24">
+                    <svg class="ui-spin" width="16" height="16" fill="none" viewBox="0 0 24 24">
                         <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
                         <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                     </svg>
@@ -138,17 +145,49 @@
         
         // Initialize dark mode immediately
         initDarkMode();
+
+        // The page asked for before signing in (?next=), checked the same way as
+        // the server's safe_return_path: only a local path, never another site.
+        // What is returned is rebuilt from the parsed address on this site's
+        // origin, never the value as given.
+        function safeReturnPath(value) {
+            if (!value || value.length > 2048 || !value.startsWith('/') || value.startsWith('//')
+                || /[\\\x00-\x1f\x7f]/.test(value)) return '/';
+            let url;
+            try {
+                url = new URL(value, window.location.origin);
+            } catch (e) {
+                return '/';
+            }
+            if (url.origin !== window.location.origin) return '/';
+            if (url.pathname === '/login' || /^\/(login|api|static)\//.test(url.pathname)) return '/';
+            // Checked again as rebuilt: removing dot segments turns /.//host into
+            // //host, which the browser reads as another site
+            const path = url.pathname + url.search + url.hash;
+            if (path.startsWith('//') || path.includes('\\')) return '/';
+            return path;
+        }
+        const returnTo = safeReturnPath(new URLSearchParams(window.location.search).get('next'));
         
         // The credentials are used once, here, to obtain a session cookie.
         // Nothing about them is kept in the browser: the cookie the backend
         // sets is HttpOnly, so no script on the page (or injected into it) can
         // read it, and there is no password in sessionStorage to steal.
+        // Basic credentials as RFC 7617 sends them: UTF-8, then Base64 (btoa alone throws on a
+        // character outside Latin-1 and garbles the rest)
+        function basicCredentials(username, password) {
+            const bytes = new TextEncoder().encode(`${username}:${password}`);
+            let binary = '';
+            bytes.forEach(b => { binary += String.fromCharCode(b); });
+            return btoa(binary);
+        }
+
         async function startSession(username, password) {
             const response = await fetch('/api/auth/session', {
                 method: 'POST',
                 credentials: 'include',
                 headers: {
-                    'Authorization': `Basic ${btoa(`${username}:${password}`)}`
+                    'Authorization': `Basic ${basicCredentials(username, password)}`
                 }
             });
             return response;
@@ -177,15 +216,17 @@
                 const response = await startSession(username, password);
                 if (response.ok) {
                     // Success - redirect to main app using replace to avoid loop
-                    window.location.replace('/');
+                    window.location.replace(returnTo);
                 } else {
                     const message = response.status === 429
                         ? 'Too many login attempts. Please try again later.'
                         : response.status === 503
                             ? 'Login capacity reached. Please try again later.'
-                            : response.status === 401
-                                ? 'Invalid username or password'
-                                : 'Unable to sign in. Please try again later.';
+                            : response.status === 409
+                                ? 'Sign-in settings just changed. Please sign in again.'
+                                : response.status === 401
+                                    ? 'Invalid username or password'
+                                    : 'Unable to sign in. Please try again later.';
                     const error = new Error(message);
                     error.loginResponse = true;
                     throw error;
@@ -211,9 +252,33 @@
             }
         }
 
+        // The password in plain text while the button is pressed
+        function togglePasswordShown() {
+            const field = document.getElementById('login-password');
+            const button = document.getElementById('login-show-password');
+            const shown = field.type === 'password';
+            field.type = shown ? 'text' : 'password';
+            button.setAttribute('aria-pressed', String(shown));
+            button.title = shown ? 'Hide password' : 'Show password';
+            field.focus();
+        }
+
+        // A note under the password while Caps Lock is on. Only key and mouse
+        // events know the key's state; leaving the field hides the note
+        function showCapsLock(event) {
+            if (typeof event.getModifierState !== 'function') return;
+            document.getElementById('login-caps').classList.toggle('hidden', !event.getModifierState('CapsLock'));
+        }
+        (function watchCapsLock() {
+            const field = document.getElementById('login-password');
+            if (!field) return;
+            ['keydown', 'keyup', 'mousedown'].forEach(type => field.addEventListener(type, showCapsLock));
+            field.addEventListener('blur', () => document.getElementById('login-caps').classList.add('hidden'));
+        })();
+
         // OAuth2 login handler
         function handleOAuth2Login() {
-            window.location.href = '/api/auth/login';
+            window.location.href = '/api/auth/login' + (returnTo !== '/' ? `?next=${encodeURIComponent(returnTo)}` : '');
         }
         
         // Check for OAuth2 callback errors
@@ -241,6 +306,12 @@
                         case 'session_capacity':
                             errorMessage = 'Login capacity reached. Please try again later.';
                             break;
+                        case 'sign_in_changed':
+                            errorMessage = 'Sign-in settings just changed. Please sign in again.';
+                            break;
+                        case 'no_access':
+                            errorMessage = 'Your account has no access to this app. Ask an administrator.';
+                            break;
                         case 'server_error':
                             errorMessage = 'Server error during authentication. Please try again.';
                             break;
@@ -253,9 +324,37 @@
             }
         }
         
+        // Why the last session ended (?reason=, from session-guard.js and the
+        // server). Only known reasons are shown, never the value as given; the
+        // reason leaves the address, ?next= stays
+        function showSignOutReason() {
+            const urlParams = new URLSearchParams(window.location.search);
+            if (!urlParams.has('reason')) return;
+            let message = '';
+            switch (urlParams.get('reason')) {
+                case 'session_idle':
+                    message = 'You were signed out because there was no activity. Sign in again to continue.';
+                    break;
+                case 'session_expired':
+                    message = 'Your session reached its maximum length. Sign in again to continue.';
+                    break;
+                case 'access_changed':
+                    message = 'Your access changed. Sign in again.';
+                    break;
+            }
+            if (message) {
+                document.getElementById('login-notice-text').textContent = message;
+                document.getElementById('login-notice').classList.remove('hidden');
+            }
+            urlParams.delete('reason');
+            const rest = urlParams.toString();
+            window.history.replaceState({}, document.title, window.location.pathname + (rest ? `?${rest}` : ''));
+        }
+
         // Load app title and configure login options on page load
         document.addEventListener('DOMContentLoaded', async () => {
             // Check for errors first
+            showSignOutReason();
             checkForErrors();
             
             // First check if authentication is enabled
@@ -265,7 +364,7 @@
                     const infoData = await infoResponse.json();
                     // If authentication is disabled, redirect to main app
                     if (!infoData.auth_enabled) {
-                        window.location.replace('/');
+                        window.location.replace(returnTo);
                         return;
                     }
                 }
@@ -327,7 +426,7 @@
                 if (statusResponse.ok) {
                     const statusData = await statusResponse.json();
                     if (statusData.authenticated) {
-                        window.location.replace('/');
+                        window.location.replace(returnTo);
                         return;
                     }
                 }

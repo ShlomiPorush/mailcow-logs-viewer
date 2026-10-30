@@ -274,7 +274,7 @@ def test_only_dane_ee_records_match():
 def test_certificate_probe_is_cached(monkeypatch):
     calls = []
 
-    def fake_sync(host):
+    def fake_sync(host, deadline):
         calls.append(host)
         if host == 'down.example.test':
             raise dane.CertificateUnavailable('connection refused')

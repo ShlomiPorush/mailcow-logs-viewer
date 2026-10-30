@@ -1,8 +1,11 @@
 """
 API endpoints for log retrieval and search
 """
+import ipaddress
+import math
 import logging
 from fastapi import APIRouter, Depends, Query, HTTPException, Request
+from starlette.concurrency import run_in_threadpool
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, and_, desc, func
 from datetime import datetime, timedelta, timezone
@@ -10,17 +13,26 @@ from typing import List, Optional
 
 from ..database import get_db
 from ..models import PostfixLog, RspamdLog, NetfilterLog, MessageCorrelation
-from ..mailcow_api import mailcow_api
+from ..mailcow_api import MailcowShownError, mailcow_api
 from ..config import settings
-from ..services import geoip_service
-from ..utils import internal_error, format_datetime_for_api as format_datetime_utc
+from ..services import entity_values, excluded_addresses, geoip_service, protection_rules, security_addresses, written_recipients
+from .messages import address_equals, on_domain
+from ..services.security_addresses import netfilter_service  # noqa: F401  (tests import it from here)
+from ..app_time import as_utc
+from ..utils import internal_error, format_datetime_for_api as format_datetime_utc, RangeStart, RangeEnd
+from ..api_models import Invalid, documented
+from ..api_models import logs as m
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+# A change sent to mailcow: a bad request, mailcow refusing or not answering
+MAILCOW_WRITE = {400: None, 500: None, 502: None, 503: None}
+MAILCOW_ITEMS = {400: None, 500: None, 502: None}
 
-@router.get("/logs/postfix/by-queue/{queue_id}")
+
+@router.get("/logs/postfix/by-queue/{queue_id}", responses=documented(m.PostfixByQueueResponse, errors={404: None, 500: None}))
 def get_postfix_logs_by_queue(
     queue_id: str,
     db: Session = Depends(get_db)
@@ -29,10 +41,10 @@ def get_postfix_logs_by_queue(
     Get all Postfix logs for a specific Queue ID with linked Rspamd data
     """
     try:
-        logs = db.query(PostfixLog).filter(
+        logs = excluded_addresses.visible_postfix_lines(db.query(PostfixLog).filter(
             PostfixLog.queue_id == queue_id
-        ).order_by(PostfixLog.time).all()
-        
+        ).order_by(PostfixLog.time).all())
+
         if not logs:
             raise HTTPException(status_code=404, detail="No logs found for this Queue ID")
         
@@ -69,7 +81,7 @@ def get_postfix_logs_by_queue(
             "logs": [
                 {
                     "id": log.id,
-                    "time": log.time.isoformat(),
+                    "time": format_datetime_utc(log.time),
                     "program": log.program,
                     "priority": log.priority,
                     "message": log.message,
@@ -92,7 +104,7 @@ def get_postfix_logs_by_queue(
         raise internal_error(e)
 
 
-@router.get("/logs/postfix")
+@router.get("/logs/postfix", responses=documented(m.PostfixLogsResponse, errors={422: Invalid, 500: None}))
 def get_postfix_logs(
     page: int = Query(1, ge=1, description="Page number"),
     limit: int = Query(50, ge=1, le=500, description="Items per page"),
@@ -101,8 +113,8 @@ def get_postfix_logs(
     recipient: Optional[str] = Query(None, description="Filter by recipient"),
     status: Optional[str] = Query(None, description="Filter by status"),
     queue_id: Optional[str] = Query(None, description="Filter by queue ID"),
-    start_date: Optional[datetime] = Query(None, description="Start date"),
-    end_date: Optional[datetime] = Query(None, description="End date"),
+    start_date: Optional[RangeStart] = Query(None, description="Start date"),
+    end_date: Optional[RangeEnd] = Query(None, description="End date"),
     db: Session = Depends(get_db)
 ):
     """
@@ -112,12 +124,16 @@ def get_postfix_logs(
     try:
         from sqlalchemy.sql import case
         
-        # First, filter out logs without queue_id
+        # First, filter out logs without queue_id, and the lines of messages
+        # of excluded addresses (here, and again below where a page's queues
+        # are read in full)
+        visible = excluded_addresses.postfix_line_visible()
         base_query = db.query(PostfixLog).filter(
             and_(
                 PostfixLog.queue_id.isnot(None),
                 PostfixLog.queue_id != ''
-            )
+            ),
+            visible,
         )
         
         # Apply filters to base query
@@ -171,7 +187,7 @@ def get_postfix_logs(
         logs_by_queue = {}
         if page_queue_ids:
             for log in db.query(PostfixLog).filter(
-                PostfixLog.queue_id.in_(page_queue_ids)
+                PostfixLog.queue_id.in_(page_queue_ids), visible
             ).order_by(PostfixLog.time).all():
                 logs_by_queue.setdefault(log.queue_id, []).append(log)
 
@@ -224,7 +240,7 @@ def get_postfix_logs(
 
         # Convert time to ISO format
         for result in results:
-            result["time"] = result["time"].isoformat()
+            result["time"] = format_datetime_utc(result["time"])
 
         return {
             "total": total,
@@ -238,7 +254,7 @@ def get_postfix_logs(
         raise internal_error(e)
 
 
-@router.get("/logs/rspamd")
+@router.get("/logs/rspamd", responses=documented(m.RspamdLogsResponse, errors={422: Invalid, 500: None}))
 def get_rspamd_logs(
     page: int = Query(1, ge=1),
     limit: int = Query(50, ge=1, le=500),
@@ -249,16 +265,17 @@ def get_rspamd_logs(
     max_score: Optional[float] = Query(None),
     action: Optional[str] = Query(None),
     is_spam: Optional[bool] = Query(None),
-    start_date: Optional[datetime] = Query(None),
-    end_date: Optional[datetime] = Query(None),
+    start_date: Optional[RangeStart] = Query(None),
+    end_date: Optional[RangeEnd] = Query(None),
     db: Session = Depends(get_db)
 ):
     """
     Get Rspamd logs with filtering and pagination
     """
     try:
-        query = db.query(RspamdLog)
-        
+        # Not an excluded address's mail, as in Messages
+        query = db.query(RspamdLog).filter(excluded_addresses.rspamd_visible())
+
         # Apply filters
         if search:
             search_term = f"%{search}%"
@@ -269,19 +286,19 @@ def get_rspamd_logs(
                     RspamdLog.message_id.ilike(search_term)
                 )
             )
-        
+
         if sender:
             query = query.filter(RspamdLog.sender_smtp.ilike(f"%{sender}%"))
-        
+
         if direction:
             query = query.filter(RspamdLog.direction == direction)
-        
+
         if min_score is not None:
             query = query.filter(RspamdLog.score >= min_score)
-        
+
         if max_score is not None:
             query = query.filter(RspamdLog.score <= max_score)
-        
+
         if action:
             query = query.filter(RspamdLog.action == action)
         
@@ -309,7 +326,7 @@ def get_rspamd_logs(
             "data": [
                 {
                     "id": log.id,
-                    "time": log.time.isoformat(),
+                    "time": format_datetime_utc(log.time),
                     "message_id": log.message_id,
                     "subject": log.subject,
                     "size": log.size,
@@ -334,7 +351,7 @@ def get_rspamd_logs(
         raise internal_error(e)
 
 
-@router.get("/logs/netfilter/countries")
+@router.get("/logs/netfilter/countries", responses=documented(List[m.NetfilterCountry], description="The countries in the Netfilter logs; empty when they cannot be read"))
 def get_netfilter_countries(db: Session = Depends(get_db)):
     """
     Get distinct country codes from netfilter logs for the filter dropdown
@@ -353,14 +370,26 @@ def get_netfilter_countries(db: Session = Depends(get_db)):
         return []
 
 
-@router.get("/logs/netfilter/stats/by-country")
+def _netfilter_since(db: Session, cutoff: datetime) -> Optional[str]:
+    """The oldest netfilter line kept, when it is newer than the period's start."""
+    oldest = db.query(func.min(NetfilterLog.time)).scalar()
+    if oldest is None:
+        return None
+    if oldest.tzinfo is None:
+        oldest = oldest.replace(tzinfo=timezone.utc)
+    return format_datetime_utc(oldest) if oldest > cutoff else None
+
+
+@router.get("/logs/netfilter/stats/by-country", responses=documented(m.ByCountryResponse, errors={422: Invalid, 500: None}))
 def get_netfilter_stats_by_country(
     days: int = Query(30, ge=1, le=365, description="Number of days to look back"),
     db: Session = Depends(get_db)
 ):
     """
-    Get netfilter event counts grouped by country and action type.
-    Returns data suitable for a stacked bar chart.
+    Netfilter counts by country: attempts (lines where netfilter matched a rule,
+    as on the Security page; the "N more attempts" line after each is not
+    counted again), bans and unbans, and the addresses that tried. `since` is
+    the oldest line kept, when the logs are shorter than the period.
     """
     try:
         import re
@@ -372,10 +401,12 @@ def get_netfilter_stats_by_country(
             NetfilterLog.country_name,
             NetfilterLog.action,
             NetfilterLog.message,
-            NetfilterLog.ip
+            NetfilterLog.ip,
+            NetfilterLog.rule_id
         ).filter(
             NetfilterLog.time >= cutoff
         ).all()
+        addresses = {}
 
         # Aggregate into per-country structure
         countries = {}
@@ -424,8 +455,10 @@ def get_netfilter_stats_by_country(
                 countries[code]["ban"] += 1
             elif action == 'unban':
                 countries[code]["unban"] += 1
-            elif action == 'warning':
+            elif action == 'warning' and row.rule_id is not None:
                 countries[code]["warning"] += 1
+                if row.ip:
+                    addresses.setdefault(code, set()).add(row.ip)
             # Skip 'info' and 'other' - not interesting for chart
             else:
                 continue
@@ -433,12 +466,15 @@ def get_netfilter_stats_by_country(
 
         # Remove countries with 0 total after filtering
         countries = {k: v for k, v in countries.items() if v["total"] > 0}
+        for code, country in countries.items():
+            country["addresses"] = len(addresses.get(code, ()))
 
         # Sort by total descending, take top 10
-        sorted_countries = sorted(countries.values(), key=lambda x: x["total"], reverse=True)[:10]
+        sorted_countries = sorted(countries.values(), key=lambda x: (x["warning"], x["total"]), reverse=True)[:10]
         
         return {
             "days": days,
+            "since": _netfilter_since(db, cutoff),
             "data": sorted_countries
         }
     except Exception as e:
@@ -446,17 +482,54 @@ def get_netfilter_stats_by_country(
         raise internal_error(e)
 
 
-@router.get("/logs/netfilter")
+@router.get("/logs/netfilter/stats/by-network", responses=documented(m.ByNetworkResponse, errors={422: Invalid, 500: None}))
+def get_netfilter_stats_by_network(
+    days: int = Query(30, ge=1, le=365, description="Number of days to look back"),
+    db: Session = Depends(get_db)
+):
+    """
+    The networks (by ASN) that attempts came from, most attempts first.
+    An attempt is a line where netfilter matched a rule, as on the overview.
+    """
+    try:
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+        rows = db.query(
+            NetfilterLog.asn,
+            func.max(NetfilterLog.asn_org),
+            func.count(NetfilterLog.id),
+            func.count(func.distinct(NetfilterLog.ip)),
+        ).filter(
+            NetfilterLog.time >= cutoff,
+            NetfilterLog.rule_id.isnot(None),
+            NetfilterLog.asn.isnot(None),
+        ).group_by(NetfilterLog.asn).order_by(desc(func.count(NetfilterLog.id))).limit(8).all()
+        return {
+            "days": days,
+            "since": _netfilter_since(db, cutoff),
+            "data": [
+                {"asn": asn, "asn_org": org or asn, "attempts": attempts, "addresses": addresses}
+                for asn, org, attempts, addresses in rows
+            ]
+        }
+    except Exception as e:
+        logger.error(f"Error fetching netfilter stats by network: {e}")
+        raise internal_error(e)
+
+
+@router.get("/logs/netfilter", responses=documented(m.NetfilterLogsResponse, errors={422: Invalid, 500: None}))
 def get_netfilter_logs(
     page: int = Query(1, ge=1),
     limit: int = Query(50, ge=1, le=500),
     search: Optional[str] = Query(None),
     ip: Optional[str] = Query(None),
+    exact_ip: bool = Query(False, description="Match the IP exactly instead of as a part"),
     username: Optional[str] = Query(None),
+    exact_username: bool = Query(False, description="Match the user name as a whole address in any case instead of as a part"),
+    username_domain: Optional[str] = Query(None, max_length=260, description="Lines whose user name is an address on this domain (the part after the last @)"),
     action: Optional[str] = Query(None),
     country_code: Optional[str] = Query(None, description="Filter by country code (e.g., US, IL)"),
-    start_date: Optional[datetime] = Query(None),
-    end_date: Optional[datetime] = Query(None),
+    start_date: Optional[RangeStart] = Query(None),
+    end_date: Optional[RangeEnd] = Query(None),
     db: Session = Depends(get_db)
 ):
     """
@@ -476,12 +549,21 @@ def get_netfilter_logs(
                 )
             )
         
-        if ip:
+        if ip and exact_ip is True:
+            # The address in any spelling a stored line can hold (entity_values.ip_spellings)
+            query = query.filter(NetfilterLog.ip.in_(entity_values.spellings_of_typed_ip(ip)))
+        elif ip:
             query = query.filter(NetfilterLog.ip.ilike(f"%{ip}%"))
         
-        if username:
+        if username and exact_username is True:
+            # The whole address in any case, as the entity card counts it
+            query = query.filter(address_equals(NetfilterLog.username, username))
+        elif username:
             query = query.filter(NetfilterLog.username.ilike(f"%{username}%"))
-        
+
+        if isinstance(username_domain, str) and username_domain.strip():
+            query = query.filter(NetfilterLog.username.isnot(None), on_domain(NetfilterLog.username, username_domain))
+
         if action:
             # Backward compatibility: 'ban' filter should also include legacy 'banned' values
             if action == 'ban':
@@ -541,7 +623,107 @@ def get_netfilter_logs(
         raise internal_error(e)
 
 
-@router.get("/fail2ban")
+@router.get("/logs/netfilter/overview", responses=documented(m.NetfilterOverviewResponse, errors={422: Invalid, 500: None}))
+def get_netfilter_overview(
+    hours: int = Query(24, ge=1, le=168),
+    db: Session = Depends(get_db)
+):
+    """
+    Attempts against the server over the last hours, grouped by source address.
+
+    Only lines where netfilter matched a rule count as an attempt; the
+    "N more attempts ... until banned" lines that follow each one are not
+    counted again. Ban and unban lines give the last Fail2ban action per address.
+    """
+    try:
+        sources, totals = security_addresses.netfilter_sources(db, hours)
+        attempts_total, failed_logins = totals["attempts"], totals["failed_logins"]
+        latest = [{
+            "time": format_datetime_utc(row.time), "ip": row.ip, "username": row.username,
+            "service": security_addresses.netfilter_service(row.message)[0],
+            "country_code": row.country_code, "country_name": row.country_name,
+        } for row in totals["latest"]]
+
+        ordered = sorted(
+            (e for e in sources.values() if e["attempts"] > 0),
+            key=lambda e: (e["attempts"], e["last_seen"]), reverse=True
+        )
+        for entry in ordered:
+            entry["last_seen"] = format_datetime_utc(entry["last_seen"])
+
+        return {
+            "hours": hours,
+            "attempts": attempts_total,
+            "failed_logins": failed_logins,
+            "source_count": len(ordered),
+            "sources": ordered[:50],
+            "latest": latest,
+        }
+    except Exception as e:
+        logger.error(f"Error building netfilter overview: {e}")
+        raise internal_error(e)
+
+
+def _security_item(a: dict) -> dict:
+    return {
+        "ip": a["ip"], "state": a["state"], "tries": a["tries"], "attempts": a["attempts"],
+        "users": a["users"], "services": a["services"], "hits": a["hits"],
+        "country": a["country"], "country_code": a["country_code"], "city": a["city"], "org": a["org"],
+        "last_seen": format_datetime_utc(a["last"]), "f2b": a["f2b"], "listed_as": a["listed_as"],
+        # A Fail2ban network ban: its size on the network's row, the network on an address's
+        "network_size": a.get("network_size"), "network_range": a.get("network_range"),
+        "banned_through": a.get("banned_through"),
+    }
+
+
+async def _security_addresses(db: Session, hours: int):
+    found = security_addresses.cached(hours)
+    if found is None:
+        f2b = await mailcow_api.get_fail2ban()
+        # An error answer is no answer: its missing lists are not empty ones
+        if not security_addresses.fail2ban_answered(f2b):
+            f2b = None
+        addresses = await run_in_threadpool(security_addresses.collect, db, f2b, None, hours)
+        security_addresses.remember(addresses, f2b is not None, hours)
+        found = (addresses, f2b is not None)
+    return found
+
+
+@router.get("/security/addresses", responses=documented(m.SecurityAddressesResponse, errors={422: Invalid, 500: None}))
+async def get_security_addresses(
+    list_name: str = Query("review", alias="list", pattern="^(review|banned)$"),
+    country: Optional[str] = Query(None, max_length=100),
+    after: Optional[str] = Query(None, max_length=200),
+    limit: int = Query(50, ge=1, le=200),
+    q: Optional[str] = Query(None, max_length=100),
+    network: Optional[str] = Query(None, max_length=200),
+    days: int = Query(1, ge=1, le=365, description="The period: addresses that tried in the last days"),
+    db: Session = Depends(get_db)
+):
+    """
+    One page of the Security page's To review or Banned list, newest activity
+    first, with the real count of both lists (for the country or network, when
+    one is given). `after` is the `next` cursor of the page before. `q` keeps the
+    addresses that contain it. `days` is the period. `countries` and `networks`
+    are counted from the same addresses (every one of the period, whatever is
+    picked), and `since` is the oldest log line kept when the logs are shorter.
+    """
+    try:
+        hours = days * 24
+        addresses, fail2ban_known = await _security_addresses(db, hours)
+        result = security_addresses.page(addresses, list_name, country or None, after, limit, (q or '').strip() or None, network or None)
+        result["days"] = days
+        result["countries"], result["networks"] = security_addresses.panels(addresses)
+        result["since"] = _netfilter_since(db, datetime.now(timezone.utc) - timedelta(hours=hours))
+        result["items"] = [_security_item(a) for a in result["items"]]
+        result["fail2ban_known"] = fail2ban_known
+        return result
+    except Exception as e:
+        logger.error(f"Error building the security address list: {e}")
+        raise internal_error(e)
+
+
+@router.get("/fail2ban", responses=documented(m.Fail2banResponse, errors={500: None, 503: None}))
 async def get_fail2ban():
     """
     Get Fail2Ban configuration from mailcow (real-time)
@@ -552,7 +734,8 @@ async def get_fail2ban():
         if data is None:
             raise HTTPException(status_code=503, detail="Could not fetch Fail2Ban configuration from mailcow")
         
-        return data
+        # Single IPv6 addresses an earlier version wrote as /32 networks
+        return {**data, "legacy_entries": security_addresses.legacy_entries(data)}
     except HTTPException:
         raise
     except Exception as e:
@@ -560,7 +743,7 @@ async def get_fail2ban():
         raise internal_error(e)
 
 
-@router.get("/rw-status")
+@router.get("/rw-status", responses=documented(m.RwStatusResponse))
 def get_rw_status():
     """
     Check if the Read-Write API key is configured.
@@ -569,16 +752,44 @@ def get_rw_status():
     return {"rw_configured": mailcow_api.has_rw_key}
 
 
-@router.post("/fail2ban")
+_FAIL2BAN_LISTS = ("blacklist", "whitelist")
+_LISTS_CHANGED = ("The Fail2ban allowlist or denylist is not the one sent: it changed since it was read, or the "
+                  "request tried to change it. Read the settings again, and change the lists with "
+                  "/api/fail2ban/ban, /api/fail2ban/allow or /api/fail2ban/remove.")
+
+
+def _list_entries(value) -> set:
+    if isinstance(value, list):
+        value = ",".join(str(v) for v in value)
+    return set(_split_ip_list(value if isinstance(value, str) else str(value)))
+
+
+@router.post("/fail2ban", responses=documented(m.ActionResult, errors={400: None, 409: m.ListsChanged, 500: None, 502: None, 503: None}))
 async def edit_fail2ban(request: Request):
     """
-    Update Fail2Ban configuration on mailcow (requires Read-Write API key)
+    Update Fail2Ban configuration on mailcow (requires Read-Write API key).
+
+    Takes the object GET /api/fail2ban returns, but never changes the
+    allowlist or denylist: they are read fresh under the lock, so a ban a
+    protection rule wrote meanwhile is kept. Lists sent with the settings
+    must be the current ones, or the request is refused with 409.
     """
     try:
         body = await request.json()
-        attrs = body.get("attr", body)
-        
-        result = await mailcow_api.edit_fail2ban(attrs)
+        attrs = body.get("attr", body) if isinstance(body, dict) else None
+        if not isinstance(attrs, dict):
+            raise HTTPException(status_code=400, detail="Send the Fail2ban settings as an object")
+
+        async with protection_rules.fail2ban_lock:
+            current = await mailcow_api.get_fail2ban()
+            if current is None:
+                raise HTTPException(status_code=503, detail="Could not fetch current Fail2Ban settings")
+            lists = {name: _split_ip_list(current.get(name, "")) for name in _FAIL2BAN_LISTS}
+            if any(name in attrs and _list_entries(attrs[name]) != set(lists[name]) for name in _FAIL2BAN_LISTS):
+                raise HTTPException(status_code=409, detail={"code": "lists_changed", "message": _LISTS_CHANGED})
+            settings_only = {key: value for key, value in attrs.items() if key not in _FAIL2BAN_LISTS}
+            result = await mailcow_api.edit_fail2ban(protection_rules.fail2ban_attrs(
+                {**current, **settings_only}, lists["blacklist"], lists["whitelist"]))
         
         # mailcow returns a list with status objects
         if isinstance(result, list) and len(result) > 0:
@@ -597,100 +808,211 @@ async def edit_fail2ban(request: Request):
         raise internal_error(e)
 
 
-@router.post("/fail2ban/unban")
+# The Fail2ban policy fields and their allowed range, as mailcow's own form takes them
+_FAIL2BAN_POLICY = {
+    "ban_time": (60, None), "max_ban_time": (60, None), "max_attempts": (1, None),
+    "retry_window": (1, None), "netban_ipv4": (8, 32), "netban_ipv6": (8, 128),
+}
+
+
+@router.post("/fail2ban/policy", responses=documented(m.ActionResult, errors=MAILCOW_WRITE))
+async def edit_fail2ban_policy(request: Request):
+    """
+    Change how Fail2ban bans (times, attempts, network size) without touching the
+    allowlist and denylist: they are read fresh right before writing, so an address
+    added meanwhile in mailcow or by a protection rule is kept. Requires the
+    Read-Write API key.
+    """
+    try:
+        body = await request.json()
+        policy = {}
+        for key, (low, high) in _FAIL2BAN_POLICY.items():
+            try:
+                value = int(body[key])
+            except (KeyError, TypeError, ValueError):
+                raise HTTPException(status_code=400, detail=f"'{key}' must be a whole number")
+            if value < low or (high is not None and value > high):
+                raise HTTPException(status_code=400, detail=f"'{key}' must be between {low} and {high}" if high else f"'{key}' must be at least {low}")
+            policy[key] = str(value)
+        if int(policy["max_ban_time"]) < int(policy["ban_time"]):
+            raise HTTPException(status_code=400, detail="The longest ban cannot be shorter than the first ban")
+        policy["ban_time_increment"] = "1" if body.get("ban_time_increment") in (True, 1, "1") else "0"
+
+        async with protection_rules.fail2ban_lock:
+            current = await mailcow_api.get_fail2ban()
+            if current is None:
+                raise HTTPException(status_code=503, detail="Could not fetch current Fail2Ban settings")
+            attrs = {**policy,
+                     "blacklist": ",".join(_split_ip_list(current.get("blacklist", ""))),
+                     "whitelist": ",".join(_split_ip_list(current.get("whitelist", ""))),
+                     "manage_external": _manage_external(current)}
+            result = await mailcow_api.edit_fail2ban(attrs)
+        if isinstance(result, list) and result and result[0].get("type") != "success":
+            return {"status": "error", "msg": result[0].get("msg", "Update failed")}
+        logger.info("Fail2ban policy changed: %s", policy)
+        return {"status": "success", "msg": "Fail2ban policy saved"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating the Fail2Ban policy: {e}")
+        raise internal_error(e)
+
+@router.post("/fail2ban/unban", responses=documented(m.ActionResult, errors={400: None, 502: None, 503: None}))
 async def unban_fail2ban(request: Request):
     """
     Unban an IP address from Fail2Ban on mailcow (requires Read-Write API key)
     """
     try:
         body = await request.json()
-        ip = body.get("ip")
-        if not ip:
+        ip = body.get("ip") if isinstance(body, dict) else None
+        if not ip or not isinstance(ip, str):
             raise HTTPException(status_code=400, detail="Missing 'ip' field")
         
-        result = await mailcow_api.unban_fail2ban(ip)
+        current = await mailcow_api.get_fail2ban()
+        if current is None:
+            raise HTTPException(status_code=503, detail="Could not fetch current Fail2Ban settings")
+        # mailcow answers success to any unban and its netfilter skips one it has no
+        # ban for, so only an address Fail2ban banned now is sent, as the ban it is
+        networks = _bans_covering(ip, current.get("active_bans"))
+        if not networks:
+            if any(_same_entry(entry, ip) for entry in _split_ip_list(current.get("blacklist", ""))):
+                return {"status": "error", "msg": f"{security_addresses._bare(ip)} is on the denylist. Remove it from the denylist to lift the ban."}
+            return {"status": "error", "msg": f"{security_addresses._bare(ip)} is not banned by Fail2ban now"}
+
+        result = await mailcow_api.unban_fail2ban(networks)
         
         # mailcow returns a list with status objects
         if isinstance(result, list) and len(result) > 0:
             first = result[0]
-            if first.get("type") == "success":
-                return {"status": "success", "msg": first.get("msg", f"IP {ip} unbanned")}
-            else:
+            if first.get("type") != "success":
                 return {"status": "error", "msg": first.get("msg", "Unban failed")}
         
-        return {"status": "success", "msg": f"IP {ip} unbanned", "raw": result}
+        return {"status": "success", "msg": f"{', '.join(networks)} unbanned", "networks": networks}
         
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error unbanning IP from Fail2Ban: {e}")
+        if isinstance(e, MailcowShownError):
+            raise internal_error(e)
         raise HTTPException(status_code=502, detail="mailcow did not accept the unban. Check the Read-Write API key and try again.")
 
 
-@router.post("/fail2ban/ban")
+def _bans_covering(ip: str, active_bans) -> List[str]:
+    """The Fail2ban bans that hold the address, by the network mailcow keys them
+    with: with netban_ipv4 24, 198.51.100.7 is banned as 198.51.100.0/24."""
+    try:
+        target = ipaddress.ip_network(ip.strip(), strict=False)
+    except ValueError:
+        return []
+    networks = []
+    for ban in active_bans or []:
+        key = ban.get("network") if isinstance(ban, dict) else None
+        try:
+            net = ipaddress.ip_network(key or "", strict=False)
+        except ValueError:
+            continue
+        if net.version == target.version and target.subnet_of(net) and key not in networks:
+            networks.append(key)
+    # A network is lifted only by its own ban: a wider one around it holds
+    # addresses outside it, also when the network's own ban has ended meanwhile
+    if target.num_addresses > 1:
+        return [key for key in networks if ipaddress.ip_network(key, strict=False) == target]
+    return networks
+
+
+def _split_ip_list(value) -> List[str]:
+    """mailcow returns the Fail2ban lists comma or newline separated."""
+    return [e.strip() for e in (value or '').replace('\n', ',').split(',') if e.strip()]
+
+
+def _manage_external(current: dict) -> str:
+    """mailcow's 'firewall managed outside mailcow' switch, as an edit must resend it."""
+    return "1" if current.get("manage_external") in (True, 1, "1") else "0"
+
+
+def _same_entry(a: str, b: str) -> bool:
+    """1.2.3.4 and 1.2.3.4/32 (or 2001:db8::1 and 2001:db8::1/128) are the same list
+    entry; an IPv6 address with /32 is a whole network. Entries are compared as the
+    networks mailcow reads them; a hostname by its text."""
+    try:
+        return ipaddress.ip_network(a.strip(), strict=False) == ipaddress.ip_network(b.strip(), strict=False)
+    except ValueError:
+        return security_addresses._bare(a) == security_addresses._bare(b)
+
+
+async def _add_to_fail2ban_list(ip: str, list_name: str, remove: bool = False) -> dict:
+    """Add an address to the Fail2ban blacklist or whitelist, or remove it, keeping every
+    other setting. The lists are read fresh right before writing, so a change made in
+    mailcow meanwhile is not overwritten."""
+    async with protection_rules.fail2ban_lock:
+        return await _change_fail2ban_list(ip, list_name, remove)
+
+
+async def _change_fail2ban_list(ip: str, list_name: str, remove: bool) -> dict:
+    current = await mailcow_api.get_fail2ban()
+    if current is None:
+        raise HTTPException(status_code=503, detail="Could not fetch current Fail2Ban settings")
+
+    lists = {name: _split_ip_list(current.get(name, "")) for name in ("blacklist", "whitelist")}
+    label = "denylist" if list_name == "blacklist" else "allowlist"
+    if remove:
+        kept = [entry for entry in lists[list_name] if not _same_entry(entry, ip)]
+        if len(kept) == len(lists[list_name]):
+            return {"status": "success", "msg": f"IP {ip} is not in the {label}"}
+        lists[list_name] = kept
+    elif any(_same_entry(entry, ip) for entry in lists[list_name]):
+        return {"status": "success", "msg": f"IP {ip} is already in the {label}", "already": True}
+    else:
+        lists[list_name].append(ip)
+
+    # ban_time_increment must be "1" or "0" as string
+    bti = current.get("ban_time_increment", 1)
+    attrs = {
+        "ban_time": str(current.get("ban_time", "86400")),
+        "ban_time_increment": "1" if bti in (True, 1, "1") else "0",
+        "blacklist": ",".join(lists["blacklist"]),
+        "max_attempts": str(current.get("max_attempts", "5")),
+        "max_ban_time": str(current.get("max_ban_time", "86400")),
+        "netban_ipv4": str(current.get("netban_ipv4", "24")),
+        "netban_ipv6": str(current.get("netban_ipv6", "64")),
+        "retry_window": str(current.get("retry_window", "600")),
+        "whitelist": ",".join(lists["whitelist"]),
+        # mailcow turns this off on any edit that leaves it out
+        "manage_external": _manage_external(current),
+    }
+
+    logger.info(f"{'Removing' if remove else 'Adding'} IP {ip} {'from' if remove else 'to'} the Fail2Ban {label}")
+    result = await mailcow_api.edit_fail2ban(attrs)
+    if isinstance(result, list) and len(result) > 0:
+        first = result[0]
+        if first.get("type") != "success":
+            return {"status": "error", "msg": first.get("msg", "Update failed")}
+    return {"status": "success", "msg": f"IP {ip} {'removed from' if remove else 'added to'} {label}"}
+
+
+async def _ip_from_body(request: Request) -> str:
+    """The one address or network to add to a Fail2ban list. mailcow keeps each
+    list as comma or newline separated text, so a value with a comma, a line
+    break or a space in it would add several entries: it is refused."""
+    body = await request.json()
+    ip = body.get("ip") if isinstance(body, dict) else None
+    if ip is None or ip == "":
+        raise HTTPException(status_code=400, detail="Missing 'ip' field")
+    problem = entity_values.fail2ban_entry_problem(ip)
+    if problem:
+        raise HTTPException(status_code=400, detail=problem)
+    return ip
+
+
+@router.post("/fail2ban/ban", responses=documented(m.ActionResult, errors=MAILCOW_WRITE))
 async def ban_fail2ban(request: Request):
     """
     Ban an IP address in Fail2Ban on mailcow by adding it to the blacklist.
-    Fetches current settings, appends IP to blacklist, and saves back.
     Requires Read-Write API key.
     """
     try:
-        body = await request.json()
-        ip = body.get("ip")
-        if not ip:
-            raise HTTPException(status_code=400, detail="Missing 'ip' field")
-        
-        # Get current fail2ban settings to read the existing blacklist
-        current = await mailcow_api.get_fail2ban()
-        if current is None:
-            raise HTTPException(status_code=503, detail="Could not fetch current Fail2Ban settings")
-        
-        # Parse current blacklist (may be comma or newline separated from GET API)
-        current_blacklist = current.get("blacklist", "")
-        # Normalize: split by both commas and newlines
-        blacklist_entries = [e.strip() for e in current_blacklist.replace('\n', ',').split(",") if e.strip()] if current_blacklist else []
-        
-        # Check if IP is already in the blacklist
-        if ip in blacklist_entries:
-            return {"status": "success", "msg": f"IP {ip} is already in the blacklist"}
-        
-        # Add IP to blacklist
-        blacklist_entries.append(ip)
-        new_blacklist = ",".join(blacklist_entries)
-        
-        # Normalize whitelist the same way
-        current_whitelist = current.get("whitelist", "")
-        whitelist_normalized = ",".join([e.strip() for e in current_whitelist.replace('\n', ',').split(",") if e.strip()]) if current_whitelist else ""
-        
-        # Build full attribute set (required by mailcow API - ALL params must be sent)
-        # ban_time_increment must be "1" or "0" as string
-        bti = current.get("ban_time_increment", 1)
-        bti_str = "1" if bti in (True, 1, "1") else "0"
-        
-        attrs = {
-            "ban_time": str(current.get("ban_time", "86400")),
-            "ban_time_increment": bti_str,
-            "blacklist": new_blacklist,
-            "max_attempts": str(current.get("max_attempts", "5")),
-            "max_ban_time": str(current.get("max_ban_time", "86400")),
-            "netban_ipv4": str(current.get("netban_ipv4", "24")),
-            "netban_ipv6": str(current.get("netban_ipv6", "64")),
-            "retry_window": str(current.get("retry_window", "600")),
-            "whitelist": whitelist_normalized
-        }
-        
-        logger.info(f"Banning IP {ip} - sending attrs: {attrs}")
-        result = await mailcow_api.edit_fail2ban(attrs)
-        
-        if isinstance(result, list) and len(result) > 0:
-            first = result[0]
-            if first.get("type") == "success":
-                return {"status": "success", "msg": f"IP {ip} added to blacklist"}
-            else:
-                return {"status": "error", "msg": first.get("msg", "Ban failed")}
-        
-        return {"status": "success", "msg": f"IP {ip} added to blacklist", "raw": result}
-        
+        return await _add_to_fail2ban_list(await _ip_from_body(request), "blacklist")
     except HTTPException:
         raise
     except Exception as e:
@@ -698,7 +1020,96 @@ async def ban_fail2ban(request: Request):
         raise internal_error(e)
 
 
-@router.get("/geoip/{ip}")
+@router.post("/fail2ban/allow", responses=documented(m.ActionResult, errors=MAILCOW_WRITE))
+async def allow_fail2ban(request: Request):
+    """
+    Allow an IP address in Fail2Ban on mailcow by adding it to the whitelist,
+    so its failed attempts never lead to a ban. Requires Read-Write API key.
+    """
+    try:
+        return await _add_to_fail2ban_list(await _ip_from_body(request), "whitelist")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error allowing IP in Fail2Ban: {e}")
+        raise internal_error(e)
+
+
+@router.post("/fail2ban/remove", responses=documented(m.ActionResult, errors=MAILCOW_WRITE))
+async def remove_from_fail2ban_list(request: Request):
+    """
+    Take an address off the Fail2ban blacklist or whitelist. Body: {"ip", "list":
+    "blacklist" | "whitelist"}. Requires Read-Write API key.
+    """
+    try:
+        body = await request.json()
+        if not isinstance(body, dict):
+            body = {}
+        ip, list_name = body.get("ip"), body.get("list")
+        # Any text: an entry on the list may also be a host name mailcow took
+        if not ip or not isinstance(ip, str):
+            raise HTTPException(status_code=400, detail="Missing 'ip' field")
+        if list_name not in ("blacklist", "whitelist"):
+            raise HTTPException(status_code=400, detail="'list' must be blacklist or whitelist")
+        return await _add_to_fail2ban_list(ip, list_name, remove=True)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error removing IP from the Fail2Ban list: {e}")
+        raise internal_error(e)
+
+
+@router.post("/fail2ban/repair", responses=documented(m.ActionResult, errors=MAILCOW_WRITE))
+async def repair_fail2ban_entry(request: Request):
+    """
+    Replace an entry an earlier version wrote as a /32 network (2001:db8::1/32) with
+    the single address it was meant to be (2001:db8::1/128), in one edit, then read
+    the list back to confirm it. Body: {"entry", "list": "blacklist" | "whitelist"}.
+    Requires Read-Write API key.
+    """
+    try:
+        body = await request.json()
+        if not isinstance(body, dict):
+            body = {}
+        entry, list_name = body.get("entry"), body.get("list")
+        entry = entry.strip() if isinstance(entry, str) else ""
+        if list_name not in ("blacklist", "whitelist"):
+            raise HTTPException(status_code=400, detail="'list' must be blacklist or whitelist")
+        address = security_addresses.legacy_ipv6_entry(entry)
+        if not address:
+            raise HTTPException(status_code=400, detail=f"{entry} is not a single address written as a /32 network")
+        single = f"{address}/128"
+
+        async with protection_rules.fail2ban_lock:
+            current = await mailcow_api.get_fail2ban()
+            if current is None:
+                raise HTTPException(status_code=503, detail="Could not fetch current Fail2Ban settings")
+            lists = {name: _split_ip_list(current.get(name, "")) for name in ("blacklist", "whitelist")}
+            if entry not in lists[list_name]:
+                return {"status": "error", "msg": f"{entry} is no longer on the list"}
+            # The address takes the old entry's place, once if the list holds it already
+            lists[list_name] = list(dict.fromkeys(single if e == entry else e for e in lists[list_name]))
+
+            logger.info(f"Replacing {entry} with {single} on the Fail2Ban {list_name}")
+            result = await mailcow_api.edit_fail2ban(
+                protection_rules.fail2ban_attrs(current, lists["blacklist"], lists["whitelist"]))
+            failed = [m for m in result if isinstance(m, dict) and m.get("type") != "success"] if isinstance(result, list) else []
+            if failed:
+                return {"status": "error", "msg": failed[0].get("msg", "Update failed")}
+
+            after = await mailcow_api.get_fail2ban()
+        written = _split_ip_list((after or {}).get(list_name, ""))
+        if after is None or entry in written or single not in written:
+            return {"status": "error", "msg": "mailcow took the change, but the list did not show it when checked. Refresh to see what it holds."}
+        return {"status": "success", "msg": f"{entry} replaced with {single}"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error repairing a Fail2Ban list entry: {e}")
+        raise internal_error(e)
+
+
+@router.get("/geoip/{ip}", responses=documented(m.GeoIpResponse))
 def lookup_geoip(ip: str):
     """
     Lookup GeoIP information for an IP address.
@@ -711,7 +1122,20 @@ def lookup_geoip(ip: str):
     return {"available": True, "ip": ip, **geo}
 
 
-@router.get("/queue")
+def _queue_time_key(item: dict):
+    """Sort key: (has a time, the time). A number or a numeric string is a time;
+    anything else, such as text or a missing value, sorts after every time."""
+    value = item.get('arrival_time')
+    if isinstance(value, bool):
+        return (False, 0.0)
+    try:
+        number = float(value)  # a number too large for a float raises OverflowError
+    except (TypeError, ValueError, OverflowError):
+        return (False, 0.0)
+    return (True, number) if math.isfinite(number) else (False, 0.0)
+
+
+@router.get("/queue", responses=documented(m.QueueResponse, errors={502: None}))
 async def get_queue():
     """
     Get current mail queue from mailcow (real-time)
@@ -719,14 +1143,13 @@ async def get_queue():
     """
     try:
         queue = await mailcow_api.get_queue()
-        
+
         # Sort by arrival_time - newest first (descending order)
-        # arrival_time is a Unix timestamp (integer)
-        queue_sorted = sorted(
-            queue,
-            key=lambda x: x.get('arrival_time', 0),
-            reverse=True  # Newest first
-        )
+        # arrival_time is a Unix timestamp; an item without a readable one goes last
+        for item in queue:
+            if isinstance(item.get('arrival_time'), float) and not math.isfinite(item['arrival_time']):
+                item['arrival_time'] = None  # NaN and infinity are not JSON
+        queue_sorted = sorted(queue, key=_queue_time_key, reverse=True)  # Newest first
         
         return {
             "total": len(queue_sorted),
@@ -737,7 +1160,7 @@ async def get_queue():
         raise internal_error(e)
 
 
-@router.post("/queue/action")
+@router.post("/queue/action", responses=documented(m.ActionResult, errors=MAILCOW_ITEMS))
 async def queue_action(request: Request):
     """
     Perform an action on mail queue items (requires Read-Write API key).
@@ -774,7 +1197,7 @@ async def queue_action(request: Request):
         raise internal_error(e)
 
 
-@router.post("/queue/delete")
+@router.post("/queue/delete", responses=documented(m.ActionResult, errors=MAILCOW_ITEMS))
 async def delete_queue(request: Request):
     """
     Delete mail queue items (requires Read-Write API key).
@@ -806,7 +1229,7 @@ async def delete_queue(request: Request):
         raise internal_error(e)
 
 
-@router.get("/quarantine")
+@router.get("/quarantine", responses=documented(m.QuarantineResponse, errors={502: None}))
 async def get_quarantine():
     """
     Get quarantined messages from mailcow (real-time)
@@ -821,29 +1244,31 @@ async def get_quarantine():
                 # Handle Unix timestamp (number) or ISO string
                 if isinstance(item['created'], (int, float)):
                     # Convert Unix timestamp to ISO format with 'Z' suffix
-                    dt = datetime.fromtimestamp(item['created'], tz=timezone.utc)
-                    item['created'] = dt.replace(microsecond=0).isoformat().replace('+00:00', 'Z')
-                    # Store the numeric value for sorting
-                    item['_created_timestamp'] = item['created']
+                    try:
+                        dt = datetime.fromtimestamp(item['created'], tz=timezone.utc)
+                    except (OverflowError, OSError, ValueError):
+                        # A time mailcow cannot have meant (or NaN, which the
+                        # answer cannot carry): the item is shown without one
+                        item['created'] = None
+                        continue
+                    item['created'] = format_datetime_utc(dt)
+                    # Sort on the number, like the ISO branch (not on the string)
+                    item['_created_timestamp'] = dt.timestamp()
                 elif isinstance(item['created'], str):
                     # Parse ISO string and ensure it has 'Z' suffix for UTC
                     try:
-                        dt = datetime.fromisoformat(item['created'].replace('Z', '+00:00'))
-                        if dt.tzinfo is None:
-                            dt = dt.replace(tzinfo=timezone.utc)
-                        else:
-                            dt = dt.astimezone(timezone.utc)
-                        item['created'] = dt.replace(microsecond=0).isoformat().replace('+00:00', 'Z')
+                        dt = as_utc(datetime.fromisoformat(item['created'].replace('Z', '+00:00')))
+                        item['created'] = format_datetime_utc(dt)
                         # Store the datetime object for sorting
                         item['_created_timestamp'] = dt.timestamp()
                     except (ValueError, AttributeError):
                         pass
         
         # Sort by created timestamp - newest first (descending order)
-        # Items without valid timestamp will be at the end
+        # Items without valid timestamp will be at the end, after times before 1970 too
         quarantine_sorted = sorted(
             quarantine,
-            key=lambda x: x.get('_created_timestamp', 0),
+            key=lambda x: ('_created_timestamp' in x, x.get('_created_timestamp', 0)),
             reverse=True  # Newest first
         )
         
@@ -862,7 +1287,7 @@ async def get_quarantine():
 
 
 
-@router.post("/quarantine/release")
+@router.post("/quarantine/release", responses=documented(m.ActionResult, errors=MAILCOW_ITEMS))
 async def release_quarantine(request: Request):
     """
     Release quarantined messages on mailcow (requires Read-Write API key).
@@ -896,7 +1321,7 @@ async def release_quarantine(request: Request):
         raise internal_error(e)
 
 
-@router.post("/quarantine/delete")
+@router.post("/quarantine/delete", responses=documented(m.ActionResult, errors=MAILCOW_ITEMS))
 async def delete_quarantine(request: Request):
     """
     Delete quarantined messages on mailcow (requires Read-Write API key).
@@ -930,7 +1355,7 @@ async def delete_quarantine(request: Request):
         raise internal_error(e)
 
 
-@router.post("/quarantine/learnham")
+@router.post("/quarantine/learnham", responses=documented(m.ActionResult, errors=MAILCOW_ITEMS))
 async def learnham_quarantine(request: Request):
     """
     Release quarantined messages and train Rspamd that they are NOT spam.
@@ -962,7 +1387,7 @@ async def learnham_quarantine(request: Request):
         raise internal_error(e)
 
 
-@router.post("/quarantine/learnspam")
+@router.post("/quarantine/learnspam", responses=documented(m.ActionResult, errors=MAILCOW_ITEMS))
 async def learnspam_quarantine(request: Request):
     """
     Delete quarantined messages and train Rspamd that they ARE spam.
@@ -994,7 +1419,7 @@ async def learnspam_quarantine(request: Request):
         raise internal_error(e)
 
 
-@router.get("/quarantine/{item_id}/details")
+@router.get("/quarantine/{item_id}/details", responses=documented(m.QuarantineDetailsResponse, errors={502: None}))
 async def get_quarantine_details(item_id: str):
     """
     Get detailed information for a quarantine item.
@@ -1009,7 +1434,7 @@ async def get_quarantine_details(item_id: str):
         raise internal_error(e)
 
 
-@router.get("/message/{correlation_key}")
+@router.get("/message/{correlation_key}", responses=documented(m.CompactMessageResponse, errors={404: None, 500: None}))
 def get_message_details(
     correlation_key: str,
     db: Session = Depends(get_db)
@@ -1023,7 +1448,7 @@ def get_message_details(
             MessageCorrelation.correlation_key == correlation_key
         ).first()
         
-        if not correlation:
+        if not correlation or excluded_addresses.correlation_listed(correlation):
             raise HTTPException(status_code=404, detail="Message not found")
         
         # Get Rspamd log
@@ -1048,18 +1473,22 @@ def get_message_details(
                 PostfixLog.id.in_(correlation.postfix_log_ids)
             ).order_by(PostfixLog.time).all()
         
+        if excluded_addresses.delivery_hidden(correlation, postfix_logs):
+            raise HTTPException(status_code=404, detail="Message not found")
+        postfix_logs = excluded_addresses.visible_postfix_lines(postfix_logs)
+
         # Build response
         return {
             "correlation_key": correlation.correlation_key,
             "message_id": correlation.message_id,
             "queue_id": correlation.queue_id,
             "sender": correlation.sender,
-            "recipient": correlation.recipient,
+            "recipient": written_recipients.shown(correlation.recipient, correlation.written_recipients),
             "subject": correlation.subject,
             "direction": correlation.direction,
             "final_status": correlation.final_status,
-            "first_seen": correlation.first_seen.isoformat() if correlation.first_seen else None,
-            "last_seen": correlation.last_seen.isoformat() if correlation.last_seen else None,
+            "first_seen": format_datetime_utc(correlation.first_seen),
+            "last_seen": format_datetime_utc(correlation.last_seen),
             "rspamd": {
                 "score": rspamd_log.score,
                 "required_score": rspamd_log.required_score,
@@ -1071,7 +1500,7 @@ def get_message_details(
             } if rspamd_log else None,
             "postfix": [
                 {
-                    "time": log.time.isoformat(),
+                    "time": format_datetime_utc(log.time),
                     "program": log.program,
                     "message": log.message,
                     "status": log.status,
@@ -1080,11 +1509,15 @@ def get_message_details(
                 }
                 for log in postfix_logs
             ],
-            "timeline": sorted([
-                {"time": correlation.first_seen, "event": "Message received"},
-                *[{"time": log.time, "event": f"Postfix: {log.status}"} for log in postfix_logs if log.status],
-                {"time": rspamd_log.time, "event": f"Rspamd: {rspamd_log.action}"} if rspamd_log else None
-            ], key=lambda x: x["time"] if x else datetime.min) if correlation.first_seen else []
+            # Sorted on the stored times, then sent as UTC with Z like every other time
+            "timeline": [
+                dict(event, time=format_datetime_utc(event["time"])) if event else None
+                for event in sorted([
+                    {"time": correlation.first_seen, "event": "Message received"},
+                    *[{"time": log.time, "event": f"Postfix: {log.status}"} for log in postfix_logs if log.status],
+                    {"time": rspamd_log.time, "event": f"Rspamd: {rspamd_log.action}"} if rspamd_log else None
+                ], key=lambda x: x["time"] if x else datetime.min)
+            ] if correlation.first_seen else []
         }
     except HTTPException:
         raise

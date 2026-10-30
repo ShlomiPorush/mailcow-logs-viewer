@@ -7,13 +7,15 @@ import os
 import tarfile
 import tempfile
 from pathlib import Path
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+from urllib.parse import quote, quote_plus
 import requests
 
 logger = logging.getLogger(__name__)
 
 # Import settings (will use DB overrides if SETTINGS_EDIT_VIA_UI_ENABLED is true)
 from ..config import settings
+from ..utils import format_datetime_for_api
 
 # Configuration from settings (supports DB overrides)
 def get_maxmind_license_key() -> str:
@@ -32,8 +34,13 @@ GEOIP_DB_DIR = os.getenv('GEOIP_DB_DIR', '/app/data')
 GEOIP_CITY_DB_PATH = os.path.join(GEOIP_DB_DIR, 'GeoLite2-City.mmdb')
 GEOIP_ASN_DB_PATH = os.path.join(GEOIP_DB_DIR, 'GeoLite2-ASN.mmdb')
 
-# MaxMind download URL
-MAXMIND_DOWNLOAD_URL = "https://download.maxmind.com/app/geoip_download"
+# MaxMind download URL. The account ID and license key travel as HTTP Basic
+# auth, so the key is never part of a URL that an error message could quote.
+MAXMIND_DOWNLOAD_URL = "https://download.maxmind.com/geoip/databases/{edition_id}/download"
+# Older endpoint that takes the license key alone as a query parameter. Used
+# only when MaxMind rejects the account ID and key pair, so an install whose
+# account ID was never checked before keeps updating.
+MAXMIND_LEGACY_DOWNLOAD_URL = "https://download.maxmind.com/app/geoip_download"
 
 # Update frequency (days)
 UPDATE_CHECK_DAYS = 7
@@ -73,8 +80,8 @@ def get_db_age_days(db_path: str) -> int:
     
     # Get file modification time
     mtime = path.stat().st_mtime
-    modified_date = datetime.fromtimestamp(mtime)
-    age_days = (datetime.now() - modified_date).days
+    modified_date = datetime.fromtimestamp(mtime, timezone.utc)
+    age_days = (datetime.now(timezone.utc) - modified_date).days
     
     return age_days
 
@@ -101,6 +108,15 @@ def should_update_database(db_name: str) -> bool:
     return False
 
 
+def _redact(text: str, secret: str) -> str:
+    """Mask the license key (plain or URL-encoded) in a message before it is logged."""
+    if not secret:
+        return text
+    for form in {secret, quote(secret, safe=''), quote_plus(secret)}:
+        text = text.replace(form, '***')
+    return text
+
+
 def download_single_database(db_name: str) -> bool:
     """
     Download a single GeoIP database from MaxMind
@@ -112,6 +128,7 @@ def download_single_database(db_name: str) -> bool:
         True if successful, False otherwise
     """
     db_info = DATABASES[db_name]
+    license_key = ''
     
     try:
         logger.info(f"Downloading GeoLite2-{db_name} database from MaxMind...")
@@ -125,15 +142,29 @@ def download_single_database(db_name: str) -> bool:
             logger.error("MaxMind license key or account ID not configured")
             return False
         
-        # Construct download URL
-        params = {
-            'edition_id': db_info['edition_id'],
-            'license_key': license_key,
-            'suffix': 'tar.gz'
-        }
-        
         # Download
-        response = requests.get(MAXMIND_DOWNLOAD_URL, params=params, stream=True, timeout=300)
+        response = requests.get(
+            MAXMIND_DOWNLOAD_URL.format(edition_id=db_info['edition_id']),
+            params={'suffix': 'tar.gz'},
+            auth=(account_id, license_key),
+            stream=True,
+            timeout=300,
+        )
+        
+        if response.status_code == 401:
+            # Before Basic auth the account ID was required but never checked
+            response.close()
+            response = requests.get(
+                MAXMIND_LEGACY_DOWNLOAD_URL,
+                params={'edition_id': db_info['edition_id'],
+                        'license_key': license_key,
+                        'suffix': 'tar.gz'},
+                stream=True,
+                timeout=300,
+            )
+            if response.status_code == 200:
+                logger.warning("MaxMind rejected the account ID and license key pair; downloaded "
+                               "with the license key alone. Check the MaxMind account ID.")
         
         if response.status_code == 401:
             logger.error("MaxMind license key is invalid or expired")
@@ -209,10 +240,10 @@ def download_single_database(db_name: str) -> bool:
         return True
         
     except requests.exceptions.RequestException as e:
-        logger.error(f"Network error downloading {db_name} database: {e}")
+        logger.error(f"Network error downloading {db_name} database: {_redact(str(e), license_key)}")
         return False
     except Exception as e:
-        logger.error(f"Error downloading {db_name} database: {e}")
+        logger.error(f"Error downloading {db_name} database: {_redact(str(e), license_key)}")
         return False
 
 
@@ -347,6 +378,6 @@ def get_geoip_status() -> dict:
             status[db_name]['size_mb'] = round(db_path.stat().st_size / (1024 * 1024), 1)
             
             mtime = db_path.stat().st_mtime
-            status[db_name]['last_modified'] = datetime.fromtimestamp(mtime).isoformat()
+            status[db_name]['last_modified'] = format_datetime_for_api(datetime.fromtimestamp(mtime, timezone.utc))
     
     return status

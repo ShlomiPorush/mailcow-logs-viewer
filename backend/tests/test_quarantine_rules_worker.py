@@ -3,7 +3,7 @@ import asyncio
 import threading
 from contextlib import contextmanager
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, MagicMock, Mock
 
 import pytest
 from app import scheduler
@@ -24,7 +24,7 @@ def state(monkeypatch):
         SimpleNamespace(id=2, name="Deny", match_type="subject", match_value="blocked",
                         is_regex=False, action="delete", hit_count=0),
     ]
-    db = Mock()
+    db = MagicMock()
     db.query.return_value.filter.return_value.all.return_value = rules
     db.query.return_value.filter.return_value.first.side_effect = rules
     items = [
@@ -65,9 +65,11 @@ def test_quarantine_job_remains_responsive(monkeypatch, state, stage):
 
     async def released(ids):
         actions.append(("release", ids, threading.get_ident()))
+        return [{"type": "success", "log": [], "msg": ["item_released", i]} for i in ids]
 
     async def deleted(ids):
         actions.append(("delete", ids, threading.get_ident()))
+        return [{"type": "success", "log": [], "msg": ["item_deleted", i]} for i in ids]
 
     state.commit.side_effect = commit
     scheduler.mailcow_api.release_quarantine.side_effect = released

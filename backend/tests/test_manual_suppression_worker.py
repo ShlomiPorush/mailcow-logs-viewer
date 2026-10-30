@@ -48,6 +48,7 @@ def test_create_http_is_responsive_and_closes_before_cleanup(monkeypatch, reacti
         db.refresh.assert_called_once()
     cleanup_mock = AsyncMock(side_effect=cleanup)
     monkeypatch.setattr(suppressions, "SessionLocal", session)
+    monkeypatch.setattr(suppressions, "_manual_event", lambda *a, **k: None)
     monkeypatch.setattr(suppressions, "_cleanup_queue_for_email", cleanup_mock)
     monkeypatch.setattr(suppressions, "_serialize_suppression", lambda row, now: {"email": "user@example.test", "active": True})
     app = FastAPI()
