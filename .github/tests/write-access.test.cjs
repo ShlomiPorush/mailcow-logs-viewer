@@ -254,7 +254,7 @@ function check(dir = FRONTEND) {
     for (const key of Object.keys(WRITES)) {
         const [file, fn] = key.split(' ');
         const text = sources[file] = sources[file] || (fs.existsSync(path.join(dir, file)) ? fs.readFileSync(path.join(dir, file), 'utf8') : '');
-        const start = text.search(new RegExp(`^(?:async\\s+)?function\\s+${fn.replace(/\$/g, '\\$')}\\s*\\(`, 'm'));
+        const start = text.search(new RegExp(`^(?:async\\s+)?function\\s+${fn.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*\\(`, 'm'));
         if (start === -1) continue;
         const body = text.slice(start, text.indexOf('\n}', start));
         const guard = body.indexOf(`uiMayAct('${WRITES[key]}')`);
