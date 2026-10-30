@@ -32,13 +32,12 @@ COMMON_FILE = Path(__file__).resolve().parent.parent / "resources" / "ncsc_100k_
 # A core left after cutting digits and symbols off the ends is compared only when this long
 # ("abc123" is judged as it is)
 MIN_BASE = 4
-# Digits and symbols cut from each end: up to this many, at every place within the run
+# Digits and symbols cut from each end: at every place within this many of the run's outer end
+# and of its end next to the word
 MAX_CUT = 8
 # Characters that are written for one another all read as one: P@ssw0rd, Pa$$w0rd, W1ll1ams
 _CANON = str.maketrans({"l": "i", "1": "i", "!": "i", "|": "i", "0": "o", "@": "a", "4": "a", "3": "e",
                         "$": "s", "5": "s", "7": "t"})
-# The digits and symbols that stand for a letter in _CANON: next to a word they may be part of it
-_LOOKALIKES = frozenset("1!|0@43$57")
 
 _dummy: Optional[str] = None
 _dummy_lock = threading.Lock()
@@ -81,26 +80,22 @@ def _not_letter(c: str) -> bool:
     return not c.isalpha()
 
 
-def _cuts(run: str) -> Set[int]:
-    """Where a run of digits and symbols may be cut, counting from its outer end (run is given
-    from the outer end inwards): every place in its first 8 characters (so "123@dm1n456!" also
-    gives "@dm1n"), after the whole run however long it is, and after all of it but the
-    look-alikes next to the word, which may belong to it ("123456789@dm1n" gives "@dm1n")."""
-    whole = len(run)
-    kept = _count(reversed(run), _LOOKALIKES.__contains__)
-    return set(range(min(whole, MAX_CUT) + 1)) | {whole, whole - kept}
+def _cuts(length: int) -> Set[int]:
+    """Where a run of digits and symbols this long may be cut, counted from its outer end: every
+    place among its first 8 characters and among its last 8, next to the word. Padding of any
+    length is cut away whole, and a look-alike next to the word may stay as part of it
+    ("123@dm1n456!" and "111111111@dm1n" both give "@dm1n"). At most 18 places."""
+    return set(range(min(length, MAX_CUT) + 1)) | set(range(max(0, length - MAX_CUT), length + 1))
 
 
 def common_forms(password: str) -> Set[str]:
     """What a password is compared as, each in canonical form: itself, and every core left by
     cutting digits and symbols off the start and the end at the places _cuts gives, when the
-    core has 4 or more characters. At most 121 forms (11 places at each end)."""
+    core has 4 or more characters. At most 324 forms (18 places at each end)."""
     word = password.strip()
-    lead = word[:_count(word, _not_letter)]
-    trail = word[len(word) - _count(reversed(word), _not_letter):]
     forms = {canon(word)}
-    for start in _cuts(lead):
-        for cut in _cuts(trail[::-1]):
+    for start in _cuts(_count(word, _not_letter)):
+        for cut in _cuts(_count(reversed(word), _not_letter)):
             core = word[start:len(word) - cut]
             if len(core) >= MIN_BASE:
                 forms.add(canon(core))
