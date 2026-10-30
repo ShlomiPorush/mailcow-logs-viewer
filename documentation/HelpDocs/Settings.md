@@ -66,6 +66,10 @@ Basic authentication and OAuth2/OIDC can be on together. Turning on **Basic Auth
 
 **Sign-in Security** limits how long a browser stays signed in, for both sign-in methods. **Longest session (hours)** counts from sign-in whatever the activity. **Sign out after inactivity**, off by default, ends a session after **Inactivity limit (minutes)** without typing, clicking, scrolling with the wheel or touching; pages that refresh by themselves do not count. A minute before, the page asks whether you are still there. A shorter longest session applies to open sessions at once, so a session already past it ends; turning on sign-out after inactivity does not sign anyone out, because their inactivity time starts then. AI agents are not affected. See [Sessions and signing out](../OAuth2_Configuration.md#sessions-and-signing-out).
 
+## Users
+
+Who may sign in, and what each user may see and do: **Admin**, **Operator**, **Viewer** or **Custom**. The built-in admin from `.env` is always first and always has full access. Users who sign in with your OAuth2 provider are added by email; everyone else your provider lets in gets the access set below the list, **Admin** by default. Changes apply at once, and the app asks before a change that lowers your own access. The list works even while editing settings is off. See [Users](../OAuth2_Configuration.md#users).
+
 ## Agents
 
 Lets AI agents such as Claude Code and Codex connect, and lists the allowed ones with **Activity** and **Disconnect**. The list works even while editing settings is off. See [AI agents](../AI_Agents.md).

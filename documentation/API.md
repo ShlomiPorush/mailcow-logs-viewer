@@ -19,6 +19,7 @@ What applies to every endpoint:
 - [Health & Info](#health--info)
 - [OAuth2 Authentication Endpoints](#oauth2-authentication-endpoints)
 - [Agent Access](#agent-access)
+- [Users](#users)
 - [Job Status Tracking](#job-status-tracking)
 - [Domains](#domains)
 - [Mailbox Statistics](#mailbox-statistics)
@@ -63,7 +64,7 @@ Public endpoints: `GET /api/health`, `GET /api/info`, `GET /api/auth/provider-in
 
 #### Basic Authentication
 
-On when `BASIC_AUTH_ENABLED=true` (or the legacy `AUTH_ENABLED=true`). The username is `AUTH_USERNAME` (default `admin`), the password `AUTH_PASSWORD`; with an empty password, protected requests return 500.
+On when `BASIC_AUTH_ENABLED=true` (or the legacy `AUTH_ENABLED=true`). The username is `AUTH_USERNAME` (default `admin`), the password `AUTH_PASSWORD`; with an empty password, protected requests return 500. This built-in admin is the only account that can send `Authorization: Basic` on every request; [users](#users) added in the app get a session from `POST /api/auth/session` only.
 
 A request without credentials, or with wrong ones, gets 401 with a plain-text body and no `WWW-Authenticate` header, so browsers do not show their own password prompt. Page paths outside `/api` redirect to `/login?next=<page>` instead.
 
@@ -114,7 +115,7 @@ A request with a session that a [session limit](#basic-authentication) ended get
 { "detail": "Your session ended. Sign in again.", "reason": "session_idle" }
 ```
 
-`reason` is `session_idle` or `session_expired`. A page request in that case redirects to `/login?reason=<reason>&next=<page>`.
+`reason` is `session_idle`, `session_expired` or `access_changed` (the person was disabled, deleted or given other access, or their OAuth2 access is gone). A page request in that case redirects to `/login?reason=<reason>&next=<page>`.
 
 ### 403 Forbidden
 
@@ -125,6 +126,8 @@ A POST, PUT, PATCH or DELETE whose `Origin` (or, without it, `Referer`) names an
 ```
 
 Requests with neither header (curl, scripts) pass, and so do origins listed exactly in `CORS_ALLOWED_ORIGINS`. Some endpoints use 403 for their own reasons too, such as UI editing being off or a missing read-write key; their entries say so.
+
+A signed-in [user](#users) whose access does not cover the endpoint gets `{ "detail": "You do not have permission for this." }`. An endpoint needs View or Act on its area (the same areas agents get); Settings, Users and agent management need an admin. An answer that combines several areas, such as `GET /api/system/summary`, needs View on each. When the person's access cannot be checked, the request gets 503.
 
 ### 422, 429 and 503
 
@@ -303,6 +306,25 @@ These routes are for people only. A call an agent makes never reaches them.
 | DELETE | `/api/agents` | Disconnects every agent. Returns `{ "disconnected": <count> }`. |
 | GET | `/api/agents/{grant_id}/activity` | The last 50 entries: `at`, `event` (`grant_created`, `grant_revoked`, `call` or `denied`), `tool`, `method`, `path`, `http_status`, `outcome` and `detail`. |
 | GET, POST | `/api/agents/consent/{request_id}` | The consent page's request and answer. Only the browser session that opened the request can read or answer it, once. |
+
+Only admins can approve and manage agents.
+
+---
+
+## Users
+
+For admins only, and never for agents. See [Users](OAuth2_Configuration.md#users).
+
+| Method | Path | |
+| --- | --- | --- |
+| GET | `/api/users` | `areas`, `presets`, `builtin` (`username`, `basic_auth_enabled`), `oauth2` (`enabled`, `default_access`: `admin`, `operator`, `viewer` or `none`, `version`, `provider_name`), `you` (`kind`, `user_id`, `via_default`, `email`) and `users`, each with `id`, `kind` (`local` or `oauth2`), `username` or `email`, `access` (`admin`, `operator`, `viewer` or `custom`), `areas` (area: `view` or `act`), `disabled`, `name_conflict`, `last_login_at`, `created_at` and `row_version`. |
+| POST | `/api/users` | Adds a user: `kind`, `username` and `password` (local) or `email` (oauth2), `access`, `views` and `acts` for `custom`, and `disabled`. 201 with the user. 409 if the name or email is already there or is the built-in admin's, 422 for a password under 8 characters or on the common-password list. |
+| PUT | `/api/users/{id}` | Changes `access`, `views`, `acts`, `disabled` and optionally `password`, with the user's `row_version`. 409 if the user changed since then. |
+| DELETE | `/api/users/{id}` | Deletes a user. A deleted OAuth2 entry falls back to the access for everyone else. |
+| PUT | `/api/users/oauth2-default` | Sets the access for everyone else: `value` and `version`. 409 if it changed since then. |
+| POST | `/api/users/password-check` | `{ "password": "..." }` gives `ok` and `problem` (the reason to show, or null), the same check as saving. |
+
+Every change is refused with 409 if afterwards no admin could sign in.
 
 ---
 
