@@ -74,6 +74,8 @@ COMMON = "This password is too common. Choose another one."
     # Runs longer than 8 around a common word: the whole run is cut too
     "123456789password123456789", "123456789admin123456789", "123456789qwerty123456789",
     "123456789williams123456789", "!!!!!!!!!!password", "password##########",
+    # ... keeping a look-alike next to the word as part of it
+    "123456789@dm1n123456789", "1234567894dm1n123456789", "!!!!!!!!!!p@ssw0rd", "p@ssw0rd##########",
 ])
 def test_a_common_password_is_refused_in_any_case_and_written_around(password):
     assert passwords.password_problem(password) == COMMON
@@ -95,7 +97,12 @@ def test_the_forms_a_password_is_compared_as():
     # A run longer than 8 is also cut whole, at each end and at both
     forms = passwords.common_forms("123456789password123456789")
     assert {canon("password"), canon("password123456789"), canon("123456789password")} <= forms
-    # Bounded: 10 places at each end (0 to 8, and the whole run), so at most 100 forms
+    # A run cut whole except the look-alikes next to the word keeps them as part of it
+    assert canon("@dm1n") in passwords.common_forms("123456789@dm1n123456789")
+    assert canon("4dm1n") in passwords.common_forms("1234567894dm1n123456789")
+    # Bounded: 11 places at each end (0 to 8, the whole run, and the whole run but the
+    # look-alikes next to the word), so at most 121 forms
+    assert len(passwords.common_forms("#" * 15 + "@" + "x" * 200 + "@" + "#" * 15)) == 121
     assert len(passwords.common_forms("!" * 20 + "a" * 200 + "1" * 20)) == 100
     assert len(passwords.common_forms("!" * 8 + "a" * 240 + "1" * 8)) == 81
 

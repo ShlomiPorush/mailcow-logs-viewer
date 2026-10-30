@@ -37,6 +37,8 @@ MAX_CUT = 8
 # Characters that are written for one another all read as one: P@ssw0rd, Pa$$w0rd, W1ll1ams
 _CANON = str.maketrans({"l": "i", "1": "i", "!": "i", "|": "i", "0": "o", "@": "a", "4": "a", "3": "e",
                         "$": "s", "5": "s", "7": "t"})
+# The digits and symbols that stand for a letter in _CANON: next to a word they may be part of it
+_LOOKALIKES = frozenset("1!|0@43$57")
 
 _dummy: Optional[str] = None
 _dummy_lock = threading.Lock()
@@ -65,31 +67,40 @@ def common_passwords() -> FrozenSet[str]:
     return _load()[0]
 
 
-def _run(word: str, from_start: bool) -> int:
-    """How many digits and symbols (anything but a letter) the word starts or ends with."""
-    chars = word if from_start else reversed(word)
+def _count(chars, take) -> int:
+    """How many characters from the start of chars take() is true for."""
     count = 0
     for c in chars:
-        if c.isalpha():
+        if not take(c):
             break
         count += 1
     return count
 
 
-def _cuts(run: int) -> Set[int]:
-    """Where a run of digits and symbols may be cut: every place in its first 8 characters (so
-    "123@dm1n456!" also gives "@dm1n"), and after the whole run however long it is."""
-    return set(range(min(run, MAX_CUT) + 1)) | {run}
+def _not_letter(c: str) -> bool:
+    return not c.isalpha()
+
+
+def _cuts(run: str) -> Set[int]:
+    """Where a run of digits and symbols may be cut, counting from its outer end (run is given
+    from the outer end inwards): every place in its first 8 characters (so "123@dm1n456!" also
+    gives "@dm1n"), after the whole run however long it is, and after all of it but the
+    look-alikes next to the word, which may belong to it ("123456789@dm1n" gives "@dm1n")."""
+    whole = len(run)
+    kept = _count(reversed(run), _LOOKALIKES.__contains__)
+    return set(range(min(whole, MAX_CUT) + 1)) | {whole, whole - kept}
 
 
 def common_forms(password: str) -> Set[str]:
     """What a password is compared as, each in canonical form: itself, and every core left by
     cutting digits and symbols off the start and the end at the places _cuts gives, when the
-    core has 4 or more characters. At most 100 forms (10 places at each end)."""
+    core has 4 or more characters. At most 121 forms (11 places at each end)."""
     word = password.strip()
+    lead = word[:_count(word, _not_letter)]
+    trail = word[len(word) - _count(reversed(word), _not_letter):]
     forms = {canon(word)}
-    for start in _cuts(_run(word, True)):
-        for cut in _cuts(_run(word, False)):
+    for start in _cuts(lead):
+        for cut in _cuts(trail[::-1]):
             core = word[start:len(word) - cut]
             if len(core) >= MIN_BASE:
                 forms.add(canon(core))
