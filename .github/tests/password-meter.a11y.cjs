@@ -318,6 +318,37 @@ test('a generated password the server refuses is replaced without a word', async
     assert.equal(p.disabled(), false);
 });
 
+test('Copy waits for the server to accept the password, so what is copied is what is saved', async () => {
+    const p = page({ hold: true });
+    p.w.editUser(null);
+    p.input('#user-edit-name', 'erin');
+    const copy = p.$('#user-edit-pw-copy');
+    p.$('#user-edit-pw-generate').click();
+    assert.ok(copy.disabled, 'pending');
+    copy.click();
+    await tick();
+    assert.deepEqual(p.copied, []);
+    // Refused: replaced at once, and the new one is pending again
+    p.checks[0].release({ ok: false, problem: COMMON });
+    for (let i = 0; i < 5; i++) await tick();
+    assert.equal(p.checks.length, 2);
+    assert.ok(copy.disabled, 'still pending after the swap');
+    p.checks[1].release();
+    await tick();
+    assert.equal(copy.disabled, false);
+    copy.click();
+    await tick();
+    assert.deepEqual(p.copied, [p.checks[1].password], 'the final password');
+    assert.equal(p.$('#user-edit-pass').value, p.checks[1].password);
+    // A typed password follows the same rule
+    p.type('Typed-Pass-4u');
+    assert.ok(copy.disabled);
+    await settle();
+    p.checks[2].release();
+    await tick();
+    assert.equal(copy.disabled, false);
+});
+
 test('Generate stops after 5 refused tries and then says why', async () => {
     const p = page({ refuse: 99 });
     p.w.editUser(null);
@@ -386,6 +417,7 @@ test('Generate: a readable password of the length chosen, a new one when the len
     assert.equal(p.$('#user-edit-pw-length-value').textContent, '32');
     assert.equal(field.value.length, 32);
     assert.notEqual(field.value, first);
+    await tick();
     p.$('#user-edit-pw-copy').click();
     await tick();
     assert.deepEqual(p.copied, [field.value]);

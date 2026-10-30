@@ -288,6 +288,11 @@ function usersFormProblem(modal) {
 function usersValidate(modal) {
     const problem = usersFormProblem(modal);
     modal.querySelector('#user-edit-save')?.setAttribute('aria-disabled', String(!!problem));
+    // Copy only a password the server accepted, so what is copied is what is saved (a generated
+    // one the server refuses is replaced)
+    const field = modal.querySelector('#user-edit-pass');
+    const copy = modal.querySelector('#user-edit-pw-copy');
+    if (field && copy) copy.disabled = !(field.value && usersPwCheck.value === field.value && usersPwCheck.answer && usersPwCheck.answer.ok);
     return problem;
 }
 
@@ -303,7 +308,6 @@ function usersWirePassword(modal, keepWhenEmpty) {
     let generated = false;
     const update = (now, quiet = false) => {
         usersShowPasswordMeter(modal, field.value, keepWhenEmpty);
-        copy.disabled = !field.value;
         return usersCheckPassword(modal, field.value, now, { quiet });
     };
     const fill = async (tries = 1) => {

@@ -76,17 +76,20 @@ def _run(word: str, from_start: bool) -> int:
     return count
 
 
+def _cuts(run: int) -> Set[int]:
+    """Where a run of digits and symbols may be cut: every place in its first 8 characters (so
+    "123@dm1n456!" also gives "@dm1n"), and after the whole run however long it is."""
+    return set(range(min(run, MAX_CUT) + 1)) | {run}
+
+
 def common_forms(password: str) -> Set[str]:
     """What a password is compared as, each in canonical form: itself, and every core left by
-    cutting 0 to 8 digits and symbols off the start and 0 to 8 off the end (every place within
-    those runs, so "123@dm1n456!" also gives "@dm1n"), when the core has 4 or more characters.
-    At most 81 forms."""
+    cutting digits and symbols off the start and the end at the places _cuts gives, when the
+    core has 4 or more characters. At most 100 forms (10 places at each end)."""
     word = password.strip()
     forms = {canon(word)}
-    lead = min(_run(word, True), MAX_CUT)
-    trail = min(_run(word, False), MAX_CUT)
-    for start in range(lead + 1):
-        for cut in range(trail + 1):
+    for start in _cuts(_run(word, True)):
+        for cut in _cuts(_run(word, False)):
             core = word[start:len(word) - cut]
             if len(core) >= MIN_BASE:
                 forms.add(canon(core))

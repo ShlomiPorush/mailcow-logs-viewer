@@ -71,6 +71,9 @@ COMMON = "This password is too common. Choose another one."
     "Welcome123", "Summer2024", "summer2024!", "123password", "!!Password!!", "p4ssw0rd99", "@dmin2025",
     # Symbols on both sides, a look-alike at the start of the word, and 1 read as i and l in one word
     "!!12345678!!", "!!abc123!!", "123@dm1n456!", "W1111ams", "Ph1111ps",
+    # Runs longer than 8 around a common word: the whole run is cut too
+    "123456789password123456789", "123456789admin123456789", "123456789qwerty123456789",
+    "123456789williams123456789", "!!!!!!!!!!password", "password##########",
 ])
 def test_a_common_password_is_refused_in_any_case_and_written_around(password):
     assert passwords.password_problem(password) == COMMON
@@ -89,8 +92,11 @@ def test_the_forms_a_password_is_compared_as():
     # A core shorter than 4 is not compared on its own; the whole password is, whatever its length
     assert canon("abc") not in passwords.common_forms("abc1234567")
     assert canon("abc1234567") in passwords.common_forms("abc1234567")
-    # Bounded: at most 8 cut from each end, so at most 81 forms
-    assert len(passwords.common_forms("!" * 20 + "word" + "1" * 20)) <= 81
+    # A run longer than 8 is also cut whole, at each end and at both
+    forms = passwords.common_forms("123456789password123456789")
+    assert {canon("password"), canon("password123456789"), canon("123456789password")} <= forms
+    # Bounded: 10 places at each end (0 to 8, and the whole run), so at most 100 forms
+    assert len(passwords.common_forms("!" * 20 + "a" * 200 + "1" * 20)) == 100
     assert len(passwords.common_forms("!" * 8 + "a" * 240 + "1" * 8)) == 81
 
 
