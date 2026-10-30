@@ -205,16 +205,17 @@ function usersShowProblem(modal, id, text) {
 // after Generate or on Save. Only the answer for the latest value counts; while it is on its way
 // the password is not known to be fine. A check that fails (no connection, a server error, an
 // answer it cannot read) leaves it not known to be fine either: it says so, asks once more after
-// 3 seconds, and again on the next change or on Save
+// 3 seconds, and again on the next change or on Save. quiet: a refusal is not shown (Generate
+// draws another password instead). Resolves to the answer when asked at once
 let usersPwCheck = { seq: 0, value: '', answer: null, timer: null };
 
-function usersCheckPassword(modal, value, now, retry = true) {
+function usersCheckPassword(modal, value, now, { retry = true, quiet = false } = {}) {
     clearTimeout(usersPwCheck.timer);
     const seq = ++usersPwCheck.seq;
     usersPwCheck = { seq, value, answer: null, timer: null };
     usersShowProblem(modal, 'user-edit-pw-problem', '');
     usersValidate(modal);
-    if (!value) return Promise.resolve();
+    if (!value) return Promise.resolve(null);
     const ask = async () => {
         let answer = { ok: false, failed: true, problem: USERS_PASSWORD_UNCHECKED };
         try {
@@ -227,20 +228,21 @@ function usersCheckPassword(modal, value, now, retry = true) {
                 answer = { ok: data.ok, problem: data.ok ? '' : data.problem };
             }
         } catch (e) { /* not known: said below */ }
-        if (seq !== usersPwCheck.seq || !modal.isConnected) return;
+        if (seq !== usersPwCheck.seq || !modal.isConnected) return null;
         usersPwCheck.answer = answer;
-        usersShowProblem(modal, 'user-edit-pw-problem', answer.problem);
+        if (!(quiet && !answer.ok && !answer.failed)) usersShowProblem(modal, 'user-edit-pw-problem', answer.problem);
         usersValidate(modal);
         // One more try a little later, not a loop: after that, the next change or Save asks again
         if (answer.failed && retry) {
             usersPwCheck.timer = setTimeout(() => {
-                if (usersPwCheck.seq === seq && modal.isConnected) usersCheckPassword(modal, value, true, false);
+                if (usersPwCheck.seq === seq && modal.isConnected) usersCheckPassword(modal, value, true, { retry: false });
             }, 3000);
         }
+        return answer;
     };
     if (now) return ask();
     usersPwCheck.timer = setTimeout(ask, 300);
-    return Promise.resolve();
+    return Promise.resolve(null);
 }
 
 // A username or an email: only what is plainly missing or too long is stopped here, so the dialog
@@ -290,25 +292,30 @@ function usersValidate(modal) {
 }
 
 // Generate fills the field as readable text (it shows again as dots once typed over), a new
-// length draws a new one, and Copy takes what the field holds
+// length draws a new one, and Copy takes what the field holds. A generated password the server
+// finds too common (rare) is replaced by another without a word, up to 5 tries
+const USERS_GENERATE_TRIES = 5;
 function usersWirePassword(modal, keepWhenEmpty) {
     const field = modal.querySelector('#user-edit-pass');
     if (!field) return;
     const length = modal.querySelector('#user-edit-pw-length');
     const copy = modal.querySelector('#user-edit-pw-copy');
     let generated = false;
-    const update = now => {
+    const update = (now, quiet = false) => {
         usersShowPasswordMeter(modal, field.value, keepWhenEmpty);
         copy.disabled = !field.value;
-        usersCheckPassword(modal, field.value, now);
+        return usersCheckPassword(modal, field.value, now, { quiet });
     };
-    const fill = () => {
-        field.value = usersGeneratePassword(Number(length.value));
+    const fill = async (tries = 1) => {
+        const value = usersGeneratePassword(Number(length.value));
+        field.value = value;
         field.type = 'text';
         generated = true;
-        update(true);
+        const answer = await update(true, tries < USERS_GENERATE_TRIES);
+        // Still the generated password in the field, and refused: draw again
+        if (answer && !answer.ok && !answer.failed && generated && field.value === value && tries < USERS_GENERATE_TRIES) fill(tries + 1);
     };
-    modal.querySelector('#user-edit-pw-generate').addEventListener('click', fill);
+    modal.querySelector('#user-edit-pw-generate').addEventListener('click', () => fill());
     length.addEventListener('input', () => {
         modal.querySelector('#user-edit-pw-length-value').textContent = length.value;
         if (generated) fill();

@@ -3,6 +3,7 @@ the rule a new password meets: 8 to 256 characters, not one of the most common p
 import hashlib
 import json
 import random
+import threading
 
 import pytest
 
@@ -68,26 +69,34 @@ COMMON = "This password is too common. Choose another one."
     # Look-alike digits and symbols, and digits or symbols around a common word
     "P@ssw0rd", "Pa$$w0rd", "Password123", "Password123!", "Aa123456", "Aa123456!", "Admin123", "admin123",
     "Welcome123", "Summer2024", "summer2024!", "123password", "!!Password!!", "p4ssw0rd99", "@dmin2025",
+    # Symbols on both sides, a look-alike at the start of the word, and 1 read as i and l in one word
+    "!!12345678!!", "!!abc123!!", "123@dm1n456!", "W1111ams", "Ph1111ps",
 ])
 def test_a_common_password_is_refused_in_any_case_and_written_around(password):
     assert passwords.password_problem(password) == COMMON
 
 
 def test_the_forms_a_password_is_compared_as():
+    canon = passwords.canon
+    # Every look-alike group reads as one character
+    assert canon("P@ssw0rd") == canon("password") == "password"
+    assert canon("W1111ams") == canon("williams") == canon("w!|liams")
     forms = passwords.common_forms(" Summer2024! ")
-    assert {"summer2024!", "summer2024", "summer"} <= forms
-    assert {"password", "p@ssw0rd"} <= passwords.common_forms("P@ssw0rd")
-    # 1 is read as i and as l
-    assert {"hello", "heiio"} <= passwords.common_forms("he11o")
-    # A word shorter than 4 letters left after trimming is not compared on its own
-    assert "abc" not in passwords.common_forms("abc1234567")
-    assert "abc1234567" in passwords.common_forms("abc1234567")
+    assert {canon("summer2024!"), canon("summer2024"), canon("summer"), canon("summer2")} <= forms
+    # Every place within the runs at either end, so a look-alike that starts the word is kept
+    assert canon("@dm1n") in passwords.common_forms("123@dm1n456!")
+    assert canon("abc123") in passwords.common_forms("!!abc123!!")
+    # A core shorter than 4 is not compared on its own; the whole password is, whatever its length
+    assert canon("abc") not in passwords.common_forms("abc1234567")
+    assert canon("abc1234567") in passwords.common_forms("abc1234567")
+    # Bounded: at most 8 cut from each end, so at most 81 forms
+    assert len(passwords.common_forms("!" * 20 + "word" + "1" * 20)) <= 81
+    assert len(passwords.common_forms("!" * 8 + "a" * 240 + "1" * 8)) == 81
 
 
-def _generated(length):
+def _generated(rng, length):
     """As the Users dialog's Generate makes them (users.js usersGeneratePassword)."""
     upper, lower, digits, symbols = "ABCDEFGHJKLMNPQRSTUVWXYZ", "abcdefghijkmnpqrstuvwxyz", "23456789", "!@#$%*-_"
-    rng = random.SystemRandom()
     count = max(1, length // 8)
     body = [rng.choice(upper), rng.choice(lower), rng.choice(digits)]
     body += [rng.choice(upper + lower + digits) for _ in range(length - count - 3)]
@@ -100,11 +109,45 @@ def _generated(length):
     return "".join(rng.choice(symbols) if i in places else next(rest) for i in range(length))
 
 
-def test_generated_passwords_pass():
+def test_a_fixed_corpus_of_generated_passwords_passes():
+    # Seeded, so the same passwords every run; the dialog draws a new one in the rare case the
+    # server refuses a generated password
+    rng = random.Random(2026)
     for length in [12] * 1000 + [20] * 50:
-        password = _generated(length)
+        password = _generated(rng, length)
         assert len(password) == length and not set(password) & set("0Oo1lI")
         assert passwords.password_problem(password) is None, password
+
+
+def test_a_password_that_fits_the_generator_can_still_be_too_common():
+    # Why the dialog draws again: the generator's rules allow a common word in the middle
+    assert passwords.password_problem("2345Abcd%678") == COMMON
+
+
+def test_the_list_is_read_once_even_when_asked_at_the_same_time(monkeypatch):
+    opened = []
+    real_open = open
+
+    def counting_open(*args, **kwargs):
+        opened.append(args[0])
+        return real_open(*args, **kwargs)
+
+    monkeypatch.setattr(passwords, "_lists", None)
+    monkeypatch.setattr(passwords, "open", counting_open, raising=False)
+    start = threading.Barrier(8)
+    seen = []
+
+    def ask():
+        start.wait()
+        seen.append(passwords._load())
+
+    threads = [threading.Thread(target=ask) for _ in range(8)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert len(opened) == 1
+    assert all(lists is seen[0] for lists in seen)
 
 
 def test_the_common_password_list_is_the_vendored_file_and_loads_once():

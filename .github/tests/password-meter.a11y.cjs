@@ -38,8 +38,9 @@ const problemOf = password => [...password].length < 8 ? SHORT : [...password].l
     : ['password1'].includes(password.trim().toLowerCase()) ? COMMON : null;
 
 // hold: password checks wait until released, so a test can answer them out of order.
-// fail: the first checks fail this way ('throw', '500' or 'malformed'), failCount of them
-function page({ hold = false, fail = null, failCount = 1 } = {}) {
+// fail: the first checks fail this way ('throw', '500' or 'malformed'), failCount of them.
+// refuse: the first this many passwords checked are too common, whatever they are
+function page({ hold = false, fail = null, failCount = 1, refuse = 0 } = {}) {
     const dom = new JSDOM('<!doctype html><html lang="en"><head><title>t</title></head><body><div id="users-panel"></div></body></html>',
         { runScripts: 'dangerously', pretendToBeVisual: true, url: 'https://logs.example.com/settings/users',
           beforeParse: win => { win.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} }); } });
@@ -63,7 +64,8 @@ function page({ hold = false, fail = null, failCount = 1 } = {}) {
                 if (fail === '500') return { ok: false, status: 500, json: async () => ({ detail: 'An error occurred' }) };
                 return { ok: true, status: 200, json: async () => ({ fine: true }) };
             }
-            const problem = problemOf(body.password);
+            const refused = checks.filter(c => !c.failed).length < refuse;
+            const problem = refused ? COMMON : problemOf(body.password);
             const answer = { ok: true, status: 200, json: async () => ({ ok: !problem, problem }) };
             if (!hold) { checks.push({ password: body.password }); return answer; }
             // release(other): answer with other ({ ok, problem }) instead
@@ -295,6 +297,36 @@ test('the email field: empty or not an email address keeps Add disabled', async 
     p.input('#user-edit-email', 'carol@example.com');
     assert.equal(p.disabled(), false);
     assert.ok(p.$('#user-edit-email-problem').classList.contains('hidden'));
+});
+
+test('a generated password the server refuses is replaced without a word', async () => {
+    const p = page({ refuse: 2 });
+    p.w.editUser(null);
+    p.input('#user-edit-name', 'erin');
+    // Everything the refusal line ever says, while it happens
+    const said = [];
+    new p.w.MutationObserver(() => { const text = p.$('#user-edit-pw-problem').textContent; if (text) said.push(text); })
+        .observe(p.$('#user-edit-pw-status'), { childList: true, subtree: true, characterData: true });
+    p.$('#user-edit-pw-generate').click();
+    for (let i = 0; i < 10; i++) await tick();
+    assert.equal(p.checks.length, 3, 'two refused, the third accepted');
+    assert.equal(new Set(p.checks.map(c => c.password)).size, 3, 'a new password each time');
+    assert.equal(p.$('#user-edit-pass').value, p.checks[2].password);
+    assert.equal(p.$('#user-edit-pass').type, 'text');
+    assert.deepEqual(said, [], 'never shown or read out');
+    assert.equal(p.problem(), '');
+    assert.equal(p.disabled(), false);
+});
+
+test('Generate stops after 5 refused tries and then says why', async () => {
+    const p = page({ refuse: 99 });
+    p.w.editUser(null);
+    p.input('#user-edit-name', 'erin');
+    p.$('#user-edit-pw-generate').click();
+    for (let i = 0; i < 20; i++) await tick();
+    assert.equal(p.checks.length, 5);
+    assert.equal(p.problem(), COMMON);
+    assert.ok(p.disabled());
 });
 
 test('Save right after typing waits for the check, then sends', async () => {
