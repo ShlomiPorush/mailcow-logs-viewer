@@ -2,6 +2,7 @@
 the rule a new password meets: 8 to 256 characters, not one of the most common passwords."""
 import hashlib
 import json
+import random
 
 import pytest
 
@@ -36,8 +37,11 @@ SHORT = "Use at least 8 characters."
 @pytest.mark.parametrize("password", [
     "qzxkvbnw",                 # 8 characters of one kind: no character classes are required
     "73915846",
-    "Abcdef1!",
+    "Rtvqm7!k",
     "Kp7m-Rx4Tq9wZb2n",         # as Generate makes them
+    "Mailcow123",               # a word not on the list, with digits
+    "correct horse battery",
+    "Xk7#mQ2v",
     "日本語のパスワード",           # 9 characters outside ASCII
     "\U0001F600" * 8,           # 8 characters, each outside the BMP
     "A1!" + "b" * 253,          # 256 characters
@@ -58,10 +62,49 @@ def test_a_password_over_256_characters_is_refused_before_hashing():
 COMMON = "This password is too common. Choose another one."
 
 
-@pytest.mark.parametrize("password", ["password1", "Password1", "PASSWORD1", " password1 ", "12345678", "qwertyuiop",
-                                      "baseball"])
-def test_a_common_password_is_refused_in_any_case_and_with_spaces_around(password):
+@pytest.mark.parametrize("password", [
+    "password", "password1", "Password1", "PASSWORD1", " password1 ", "12345678", "qwertyuiop", "baseball",
+    "qwerty123", "Passw0rd", "1q2w3e4r",
+    # Look-alike digits and symbols, and digits or symbols around a common word
+    "P@ssw0rd", "Pa$$w0rd", "Password123", "Password123!", "Aa123456", "Aa123456!", "Admin123", "admin123",
+    "Welcome123", "Summer2024", "summer2024!", "123password", "!!Password!!", "p4ssw0rd99", "@dmin2025",
+])
+def test_a_common_password_is_refused_in_any_case_and_written_around(password):
     assert passwords.password_problem(password) == COMMON
+
+
+def test_the_forms_a_password_is_compared_as():
+    forms = passwords.common_forms(" Summer2024! ")
+    assert {"summer2024!", "summer2024", "summer"} <= forms
+    assert {"password", "p@ssw0rd"} <= passwords.common_forms("P@ssw0rd")
+    # 1 is read as i and as l
+    assert {"hello", "heiio"} <= passwords.common_forms("he11o")
+    # A word shorter than 4 letters left after trimming is not compared on its own
+    assert "abc" not in passwords.common_forms("abc1234567")
+    assert "abc1234567" in passwords.common_forms("abc1234567")
+
+
+def _generated(length):
+    """As the Users dialog's Generate makes them (users.js usersGeneratePassword)."""
+    upper, lower, digits, symbols = "ABCDEFGHJKLMNPQRSTUVWXYZ", "abcdefghijkmnpqrstuvwxyz", "23456789", "!@#$%*-_"
+    rng = random.SystemRandom()
+    count = max(1, length // 8)
+    body = [rng.choice(upper), rng.choice(lower), rng.choice(digits)]
+    body += [rng.choice(upper + lower + digits) for _ in range(length - count - 3)]
+    rng.shuffle(body)
+    while True:
+        places = set(rng.sample(range(1, length - 1), count))
+        if not any(i + 1 in places for i in places):
+            break
+    rest = iter(body)
+    return "".join(rng.choice(symbols) if i in places else next(rest) for i in range(length))
+
+
+def test_generated_passwords_pass():
+    for length in [12] * 1000 + [20] * 50:
+        password = _generated(length)
+        assert len(password) == length and not set(password) & set("0Oo1lI")
+        assert passwords.password_problem(password) is None, password
 
 
 def test_the_common_password_list_is_the_vendored_file_and_loads_once():
@@ -72,7 +115,12 @@ def test_the_common_password_list_is_the_vendored_file_and_loads_once():
     assert hashlib.sha256(licence.read_bytes()).hexdigest() == entry["license_sha256"]
     assert licence.read_text(encoding="utf-8").startswith("MIT License")
     words = passwords.common_passwords()
-    assert 9_900 <= len(words) <= 10_001
+    text = passwords.COMMON_FILE.read_text(encoding="utf-8")
+    assert entry["lines"] == text.count("\n") == 99_830
+    # The published file less the lines that are email addresses (no real addresses in the repository)
+    assert entry["source_lines"] - entry["lines"] == 10
+    assert not any("@" in line and "." in line.split("@")[-1] for line in text.splitlines())
+    assert 95_000 <= len(words) <= 99_830
     assert passwords.common_passwords() is words, "read once"
     assert all(w == w.strip().casefold() for w in words)
 

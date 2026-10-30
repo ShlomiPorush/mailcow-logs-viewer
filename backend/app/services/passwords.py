@@ -11,7 +11,7 @@ import hmac
 import secrets
 import threading
 from pathlib import Path
-from typing import FrozenSet, Optional
+from typing import FrozenSet, Optional, Set
 
 N = 2 ** 15
 R = 8
@@ -26,8 +26,14 @@ MAX_LENGTH = 256
 SHORT_PROBLEM = "Use at least 8 characters."
 LONG_PROBLEM = "Use at most 256 characters."
 COMMON_PROBLEM = "This password is too common. Choose another one."
-# SecLists' 10,000 most common passwords (MIT; source and checksum in resources/vendored.json)
-COMMON_FILE = Path(__file__).resolve().parent.parent / "resources" / "common_passwords.txt"
+# The 100,000 passwords most seen in breaches (NCSC, from Have I Been Pwned), as SecLists publishes
+# them (MIT; source, commit and checksum in resources/vendored.json). Read from the image: a check
+# never goes to the network
+COMMON_FILE = Path(__file__).resolve().parent.parent / "resources" / "ncsc_100k_passwords.txt"
+# A trimmed word is compared only when this much of it is left ("abc123" is judged as it is)
+MIN_BASE = 4
+# Digits and symbols written for letters: P@ssw0rd, Pa$$w0rd
+_LEET = str.maketrans({"@": "a", "4": "a", "0": "o", "3": "e", "$": "s", "5": "s", "7": "t", "!": "i", "|": "l"})
 
 _dummy: Optional[str] = None
 _dummy_lock = threading.Lock()
@@ -40,17 +46,55 @@ def common_passwords() -> FrozenSet[str]:
         return frozenset(word for word in (line.strip().casefold() for line in f) if word)
 
 
+def _trim(word: str, drop, at_start: bool) -> str:
+    """word without the run of characters drop() is true for at its start or end."""
+    start, end = 0, len(word)
+    if at_start:
+        while start < end and drop(word[start]):
+            start += 1
+    else:
+        while end > start and drop(word[end - 1]):
+            end -= 1
+    return word[start:end]
+
+
+def _symbol(c: str) -> bool:
+    return not c.isalnum()
+
+
+def _not_letter(c: str) -> bool:
+    return not c.isalpha()
+
+
+def common_forms(password: str) -> Set[str]:
+    """What a password is compared as: itself, without symbols around it, without the digits and
+    symbols around a word of 4 or more letters (Summer2024!, 123password), and each of those
+    with look-alike digits and symbols read as letters (1 as i, and as l)."""
+    word = password.strip().casefold()
+    bases = {word, _trim(word, _symbol, True), _trim(word, _symbol, False)}
+    tail = _trim(word, _not_letter, False)
+    for cut in (tail, _trim(word, _not_letter, True), _trim(tail, _not_letter, True)):
+        if len(cut) >= MIN_BASE:
+            bases.add(cut)
+    forms = set()
+    for base in bases:
+        letters = base.translate(_LEET)
+        forms.update((base, letters.replace("1", "i"), letters.replace("1", "l")))
+    forms.discard("")
+    return forms
+
+
 def is_common(password: str) -> bool:
-    words = common_passwords()
-    return password.casefold() in words or password.strip().casefold() in words
+    return not common_passwords().isdisjoint(common_forms(password))
 
 
 def password_problem(password: str) -> Optional[str]:
     """Why a local user's password cannot be set, or None. Checked before anything is hashed:
-    8 to 256 characters, and not one of the most common passwords (in any case, spaces around
-    it ignored). The dialog shows how strong it is as guidance, and asks this before Save
-    (POST /api/users/password-check). The built-in admin's password (AUTH_PASSWORD) is not
-    held to this.
+    8 to 256 characters, and not one of the most common passwords, also when written in another
+    case, with look-alike digits and symbols, or with digits and symbols added around a common
+    word (common_forms). The dialog shows how strong it is as guidance, and asks this before Save
+    (POST /api/users/password-check). The built-in admin's password (AUTH_PASSWORD) is not held
+    to this.
     """
     if not isinstance(password, str) or len(password) < MIN_LENGTH:
         return SHORT_PROBLEM
