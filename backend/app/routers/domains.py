@@ -15,24 +15,88 @@ from datetime import datetime, timezone, timedelta
 from sqlalchemy.orm import Session
 from sqlalchemy import text, func
 from app.database import get_db, get_db_context
-from app.models import DomainDNSCheck, DMARCReport, DMARCRecord
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from app.models import DomainDNSCheck, DMARCReport, DMARCRecord, SystemSetting
 from app.services.alias_domains import get_alias_domain_map, aliases_of_domain
+from app.app_time import local_wall_time_to_utc_naive
 from app.utils import format_datetime_for_api
 from app.config import settings
 from app.mailcow_api import mailcow_api
+from app.services.dmarc_parser import is_valid_domain_name
 from ..utils import internal_error
+from app.api_models import documented
+from app.api_models import domains as m
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+# RFC 7208 section 12: modifier = name "=" macro-string, without a qualifier
+SPF_MODIFIER_RE = re.compile(r'^[A-Za-z][A-Za-z0-9._-]*=')
+SPF_MECHANISM_NAMES = {'a', 'mx', 'ptr', 'ip4', 'ip6', 'include', 'exists'}
+# RFC 7208 sections 4.6.1 and 5.6: a CIDR length is decimal without a leading
+# zero, 0 to 32 for IPv4 and 0 to 128 for IPv6
+SPF_IP4_CIDR = r'(?:3[0-2]|[12][0-9]|[0-9])'
+SPF_IP6_CIDR = r'(?:12[0-8]|1[01][0-9]|[1-9][0-9]|[0-9])'
+# RFC 7208 section 7.1: a macro %{...} may hold '/', so only a '/' outside a
+# macro starts the CIDR length
+SPF_DOMAIN_SPEC = r'(?:%\{[^}]*\}|%(?!\{)|[^/%])+'
+# RFC 7208 sections 4.6.1 and 5: an optional qualifier, the whole mechanism name
+# (in any case), then only what that mechanism takes (a domain after ':', a CIDR
+# length after '/')
+SPF_MECHANISM_RE = re.compile(
+    r'[+\-~?]?(?:all'
+    r'|(?:include|exists):.+'
+    r'|(?:a|mx)(?::' + SPF_DOMAIN_SPEC + r')?(?:/' + SPF_IP4_CIDR + r')?(?://' + SPF_IP6_CIDR + r')?'
+    r'|ptr(?::.+)?'
+    # RFC 7208 section 5.6: ip4 takes an IPv4 network and ip6 an IPv6 one; only IPv6 has ':'
+    r'|ip4:[^/:]+(?:/' + SPF_IP4_CIDR + r')?'
+    r'|ip6:[^/]*:[^/]*(?:/' + SPF_IP6_CIDR + r')?)', re.IGNORECASE)
+
+
+def spf_term_valid(term: str) -> bool:
+    """A mechanism matches its grammar, and the value of ip4 or ip6 is an address
+    of that family (RFC 7208 section 5.6), not a host name or the other family"""
+    if not SPF_MECHANISM_RE.fullmatch(term):
+        return False
+    name, _, value = term.lstrip('+-~?').partition(':')
+    if name.lower() in ('ip4', 'ip6'):
+        try:
+            address = ipaddress.ip_address(value.split('/')[0])
+        except ValueError:
+            return False
+        return address.version == (4 if name.lower() == 'ip4' else 6)
+    return True
+
+
+# RFC 7208 section 5.6: a or mx, an optional domain, then the dual CIDR length
+SPF_A_MX_RE = re.compile(
+    r'(a|mx)(?::(' + SPF_DOMAIN_SPEC + r'))?'
+    r'((?:/(' + SPF_IP4_CIDR + r'))?(?://(' + SPF_IP6_CIDR + r'))?)', re.IGNORECASE)
+
 _server_ip_cache = None
+
+
+async def load_server_ip():
+    """The server IP, read from mailcow when it is not cached yet.
+
+    Raises MailcowAPIError when mailcow could not be asked, so a job that
+    needs the address fails instead of going on without it; None when
+    mailcow answered without one.
+    """
+    global _server_ip_cache
+
+    if _server_ip_cache is None:
+        _server_ip_cache = await mailcow_api.get_status_host_ip(strict=True)
+        if _server_ip_cache:
+            logger.info(f"Server IP cached successfully: {_server_ip_cache}")
+    return _server_ip_cache
 
 
 async def init_server_ip():
     """
-    Initialize and cache server IP address from mailcow API
-    Called once during application startup
+    Initialize and cache server IP address from mailcow API.
+    Forgiving: None when mailcow could not be asked as well.
     """
     global _server_ip_cache
     
@@ -249,7 +313,7 @@ async def check_spf_record(domain: str, spf_source_ips: Optional[List[Dict[str, 
         spf_records = []
         for rdata in answers:
             txt_data = b''.join(rdata.strings).decode('utf-8')
-            if txt_data.startswith('v=spf1'):
+            if txt_data.lower().startswith('v=spf1'):
                 spf_records.append(txt_data)
         
         if len(spf_records) > 1:
@@ -275,7 +339,7 @@ async def check_spf_record(domain: str, spf_source_ips: Optional[List[Dict[str, 
         
         spf_record = spf_records[0]
         
-        if not spf_record.startswith('v=spf1 ') and spf_record != 'v=spf1':
+        if not spf_record.lower().startswith('v=spf1 ') and spf_record.lower() != 'v=spf1':
             return {
                 'status': 'error',
                 'message': 'Invalid SPF syntax - must start with "v=spf1 " (with space)',
@@ -288,13 +352,13 @@ async def check_spf_record(domain: str, spf_source_ips: Optional[List[Dict[str, 
         parts = spf_record.split()
         mechanisms = parts[1:] if len(parts) > 1 else []
         
-        valid_prefixes = ['ip4:', 'ip6:', 'a', 'mx', 'include:', 'exists:', 'redirect', 'all']
+        # ptr is legal (RFC 7208), only discouraged: a warning below
         invalid_mechanisms = []
-        
+
         for mechanism in mechanisms:
-            clean_mech = mechanism.lstrip('+-~?')
-            is_valid = any(clean_mech == prefix or clean_mech.startswith(prefix) for prefix in valid_prefixes)
-            if not is_valid:
+            # Modifiers (redirect=, exp= and unknown ones, which must be ignored,
+            # RFC 7208 section 6) are name=value with no qualifier
+            if not spf_term_valid(mechanism) and not SPF_MODIFIER_RE.match(mechanism):
                 invalid_mechanisms.append(mechanism)
         
         if invalid_mechanisms:
@@ -307,13 +371,16 @@ async def check_spf_record(domain: str, spf_source_ips: Optional[List[Dict[str, 
                 'includes': []
             }
         
-        spf_lower = spf_record.lower()
-        has_strict_all = '-all' in spf_lower
-        has_soft_fail = '~all' in spf_lower
-        has_neutral = '?all' in spf_lower
-        has_pass_all = '+all' in spf_lower or ' all' in spf_lower
+        # The first all term decides (RFC 7208 section 5.1), by its qualifier;
+        # a search of the record would also find "-all" in a name like spf-all.example
+        all_term = next((t for t in mechanisms if t.lstrip('+-~?').lower() == 'all'), None)
+        qualifier = (all_term[0] if all_term[0] in '+-~?' else '+') if all_term else None
+        has_strict_all = qualifier == '-'
+        has_soft_fail = qualifier == '~'
+        has_neutral = qualifier == '?'
+        has_pass_all = qualifier == '+'
         
-        has_redirect = any(m.startswith('redirect=') for m in mechanisms)
+        has_redirect = any(m.lower().startswith('redirect=') for m in mechanisms)
         
         if not (has_strict_all or has_soft_fail or has_neutral or has_pass_all or has_redirect):
             return {
@@ -326,9 +393,9 @@ async def check_spf_record(domain: str, spf_source_ips: Optional[List[Dict[str, 
                 'warnings': ['SPF should end with -all or ~all']
             }
         
-        includes_mx = any(m.lstrip('+-~?') in ['mx'] or m.lstrip('+-~?').startswith('mx:') for m in mechanisms)
+        includes_mx = any(m.lstrip('+-~?').lower() in ['mx'] or m.lstrip('+-~?').lower().startswith(('mx:', 'mx/')) for m in mechanisms)
         
-        includes = [m.replace('include:', '') for m in mechanisms if m.startswith('include:')]
+        includes = [m[len('include:'):] for m in mechanisms if m.lower().startswith('include:')]
         
         dns_lookup_count = await count_spf_dns_lookups(domain, spf_record, None)
 
@@ -401,7 +468,7 @@ async def check_spf_record(domain: str, spf_source_ips: Optional[List[Dict[str, 
             message = 'SPF uses ?all (neutral). Consider using -all for stricter policy'
             warnings = ['Using ?all provides minimal protection']
         elif has_redirect:
-            redirect_domain = next((m.split('=', 1)[1] for m in mechanisms if m.startswith('redirect=')), 'unknown')
+            redirect_domain = next((m.split('=', 1)[1] for m in mechanisms if m.lower().startswith('redirect=')), 'unknown')
             
             if server_authorized:
                 status = 'success'
@@ -415,6 +482,19 @@ async def check_spf_record(domain: str, spf_source_ips: Optional[List[Dict[str, 
             status = 'success'
             message = 'SPF record found'
             warnings = []
+
+        if any(m.lstrip('+-~?').lower() == 'ptr' or m.lstrip('+-~?').lower().startswith('ptr:') for m in mechanisms):
+            if status == 'success':
+                status = 'warning'
+            warnings = warnings + ['The ptr mechanism is discouraged (RFC 7208): it is slow and unreliable. This check does not evaluate it']
+
+        # A mechanism written with = is an unknown modifier, so SPF ignores it
+        for term in mechanisms:
+            name, sep, value = term.partition('=')
+            if sep and SPF_MODIFIER_RE.match(term) and name.lower() in SPF_MECHANISM_NAMES:
+                if status == 'success':
+                    status = 'warning'
+                warnings = warnings + [f'{term} is ignored by SPF. Did you mean {name}:{value}?']
 
         if history_notes:
             warnings = warnings + history_notes
@@ -490,9 +570,14 @@ async def check_ip_in_spf(domain: str, ip_to_check: str, spf_record: str, resolv
     parts = spf_record.split()
 
     for part in parts:
+        # A term with invalid syntax, also in an included record, never authorizes
+        if not spf_term_valid(part) and not SPF_MODIFIER_RE.match(part):
+            continue
         clean_part = part.lstrip('+-~?')
+        # Names are case-insensitive (RFC 7208 4.6.1); values keep their text
+        name = clean_part.lower()
 
-        if clean_part.startswith('ip4:') or clean_part.startswith('ip6:'):
+        if name.startswith('ip4:') or name.startswith('ip6:'):
             mech_prefix = clean_part[:4]   # 'ip4:' / 'ip6:'
             ip_spec = clean_part[4:]
             try:
@@ -503,44 +588,46 @@ async def check_ip_in_spf(domain: str, ip_to_check: str, spf_record: str, resolv
             except Exception:
                 pass
 
-        elif clean_part in ['a'] or clean_part.startswith('a:'):
-            check_domain = domain if clean_part == 'a' else clean_part.split(':', 1)[1]
+        elif SPF_A_MX_RE.fullmatch(clean_part):
+            # Each resolved address covers the CIDR length for its family (default /32, /128)
+            mech, host, cidr, ip4_len, ip6_len = SPF_A_MX_RE.fullmatch(clean_part).groups()
+            mech = mech.lower()
+            # A macro (RFC 7208 section 7) cannot be expanded here: skip the term
+            if host and '%' in host:
+                continue
+            check_domain = host or domain
+            prefix_len = (ip6_len or '128') if target_ip.version == 6 else (ip4_len or '32')
+            method = f'{mech}:{host}{cidr}' if host else f'{mech}{cidr}'
             try:
-                a_records = await resolve_dns_with_fallback(check_domain, address_record_type, timeout=5)
-                for rdata in a_records:
+                if mech == 'a':
+                    hosts = [check_domain]
+                else:
+                    mx_records = await resolve_dns_with_fallback(check_domain, 'MX', timeout=5)
+                    hosts = [str(mx.exchange) for mx in mx_records]
+                for host_name in hosts:
                     try:
-                        if ipaddress.ip_address(str(rdata)) == target_ip:
-                            return True, f'a:{check_domain}' if clean_part.startswith('a:') else 'a'
-                    except ValueError:
-                        continue
-            except Exception:
-                pass
-
-        elif clean_part in ['mx'] or clean_part.startswith('mx:'):
-            check_domain = domain if clean_part == 'mx' else clean_part.split(':', 1)[1]
-            try:
-                mx_records = await resolve_dns_with_fallback(check_domain, 'MX', timeout=5)
-                for mx in mx_records:
-                    try:
-                        mx_a_records = await resolve_dns_with_fallback(str(mx.exchange), address_record_type, timeout=5)
-                        for rdata in mx_a_records:
-                            try:
-                                if ipaddress.ip_address(str(rdata)) == target_ip:
-                                    return True, f'mx:{check_domain}' if clean_part.startswith('mx:') else 'mx'
-                            except ValueError:
-                                continue
+                        address_records = await resolve_dns_with_fallback(host_name, address_record_type, timeout=5)
                     except Exception:
-                        pass
+                        continue
+                    for rdata in address_records:
+                        try:
+                            if target_ip in ipaddress.ip_network(f'{rdata}/{prefix_len}', strict=False):
+                                return True, method
+                        except ValueError:
+                            continue
             except Exception:
                 pass
         
-        elif clean_part.startswith('include:'):
-            include_domain = clean_part.replace('include:', '')
+        elif name.startswith('include:'):
+            include_domain = clean_part[len('include:'):]
+            # A macro (RFC 7208 section 7) cannot be expanded here: skip the term
+            if '%' in include_domain:
+                continue
             try:
                 include_answers = await resolve_dns_with_fallback(include_domain, 'TXT', timeout=5)
                 for rdata in include_answers:
                     include_spf = b''.join(rdata.strings).decode('utf-8')
-                    if include_spf.startswith('v=spf1'):
+                    if include_spf.lower().startswith('v=spf1'):
                         authorized, method = await check_ip_in_spf(
                             include_domain, 
                             ip_to_check, 
@@ -554,13 +641,15 @@ async def check_ip_in_spf(domain: str, ip_to_check: str, spf_record: str, resolv
             except Exception:
                 pass
         
-        elif clean_part.startswith('redirect='):
-            redirect_domain = clean_part.replace('redirect=', '')
+        elif name.startswith('redirect='):
+            redirect_domain = clean_part[len('redirect='):]
+            if '%' in redirect_domain:
+                continue
             try:
                 redirect_answers = await resolve_dns_with_fallback(redirect_domain, 'TXT', timeout=5)
                 for rdata in redirect_answers:
                     redirect_spf = b''.join(rdata.strings).decode('utf-8')
-                    if redirect_spf.startswith('v=spf1'):
+                    if redirect_spf.lower().startswith('v=spf1'):
                         authorized, method = await check_ip_in_spf(
                             redirect_domain, 
                             ip_to_check, 
@@ -598,15 +687,20 @@ async def count_spf_dns_lookups(domain: str, spf_record: str, resolver=None, vis
     
     for part in parts:
         clean_part = part.lstrip('+-~?')
+        # Names are case-insensitive (RFC 7208 4.6.1); values keep their text
+        name = clean_part.lower()
         
-        if clean_part.startswith('include:'):
+        if name.startswith('include:'):
             lookup_count += 1
-            include_domain = clean_part.replace('include:', '')
+            include_domain = clean_part[len('include:'):]
+            # Still one lookup, but a macro cannot be expanded to follow it
+            if '%' in include_domain:
+                continue
             try:
                 include_answers = await resolve_dns_with_fallback(include_domain, 'TXT', timeout=5)
                 for rdata in include_answers:
                     include_spf = b''.join(rdata.strings).decode('utf-8')
-                    if include_spf.startswith('v=spf1'):
+                    if include_spf.lower().startswith('v=spf1'):
                         nested_count = await count_spf_dns_lookups(
                             include_domain,
                             include_spf,
@@ -619,18 +713,36 @@ async def count_spf_dns_lookups(domain: str, spf_record: str, resolver=None, vis
             except Exception:
                 pass
         
-        elif clean_part in ['a'] or clean_part.startswith('a:'):
+        # a and mx are one lookup each, with or without a CIDR length (RFC 7208 4.6.4)
+        elif name in ['a'] or name.startswith(('a:', 'a/')):
             lookup_count += 1
         
-        elif clean_part in ['mx'] or clean_part.startswith('mx:'):
+        elif name in ['mx'] or name.startswith(('mx:', 'mx/')):
             lookup_count += 1
         
-        elif clean_part.startswith('exists:'):
+        elif name.startswith('exists:'):
             lookup_count += 1
-        
-        elif clean_part.startswith('redirect='):
+
+        elif name == 'ptr' or name.startswith('ptr:'):
             lookup_count += 1
-    
+
+        elif name.startswith('redirect='):
+            # The redirect target's own lookups count too (RFC 7208 4.6.4)
+            lookup_count += 1
+            redirect_domain = clean_part[len('redirect='):]
+            if '%' in redirect_domain:
+                continue
+            try:
+                redirect_answers = await resolve_dns_with_fallback(redirect_domain, 'TXT', timeout=5)
+                for rdata in redirect_answers:
+                    redirect_spf = b''.join(rdata.strings).decode('utf-8')
+                    if redirect_spf.lower().startswith('v=spf1'):
+                        lookup_count += await count_spf_dns_lookups(
+                            redirect_domain, redirect_spf, resolver, visited_domains.copy(), depth + 1)
+                        break
+            except Exception:
+                pass
+
     return lookup_count
 
 
@@ -668,7 +780,7 @@ def parse_dkim_parameters(dkim_record: str) -> Dict[str, Any]:
             info.append({
                 'level': 'info',
                 'message': 'DKIM uses strict subdomain mode (t=s)',
-                'description': 'Only the main domain can send emails. Subdomains like mail.example.com will fail DKIM validation'
+                'description': 'Signatures with this key must use the same domain in i= as in d=, not a subdomain of it (RFC 6376). This is the recommended setting'
             })
     
     if 'h' in params:
@@ -848,8 +960,8 @@ async def check_dkim_record(domain: str) -> Dict[str, Any]:
 
             dkim_params = parse_dkim_parameters(actual_record)
 
-            warnings = [f"❌ {m}" for m in comparison['mismatches']]
-            warnings += [f"⚠️ {d}" for d in comparison['differences']]
+            warnings = [f"Error: {m}" for m in comparison['mismatches']]
+            warnings += list(comparison['differences'])
             info_messages = []
             critical_issues = []
 
@@ -857,9 +969,9 @@ async def check_dkim_record(domain: str) -> Dict[str, Any]:
                 if issue['level'] == 'critical':
                     critical_issues.append(f"{issue['message']} - {issue['description']}")
                 elif issue['level'] == 'error':
-                    warnings.append(f"❌ {issue['message']}")
+                    warnings.append(f"Error: {issue['message']}")
                 elif issue['level'] == 'warning':
-                    warnings.append(f"⚠️ {issue['message']}")
+                    warnings.append(issue['message'])
             
             for item in dkim_params['info']:
                 info_messages.append(item['message'])
@@ -1032,12 +1144,12 @@ async def check_dmarc_record(domain: str) -> Dict[str, Any]:
                 'settings': {}
             }
         
-        # Extract policy
-        policy_match = re.search(r'p=(none|quarantine|reject)', dmarc_record)
-        policy = policy_match.group(1) if policy_match else 'unknown'
-        
-        # Parse all tags into settings
+        # Parse all tags into settings; the policy is the p tag (not sp=, which a
+        # search for "p=" in the record also finds)
         settings = parse_dmarc_record_tags(dmarc_record)
+        policy = settings.get('policy')
+        if policy not in ('none', 'quarantine', 'reject'):
+            policy = 'unknown'
         
         # Check if policy is strong enough
         is_strong = policy in ['quarantine', 'reject']
@@ -1212,6 +1324,9 @@ async def _host_address_validated(host: str) -> Optional[bool]:
     return None
 
 
+MAX_DANE_MX_HOSTS = 10  # MX hosts checked for DANE per domain; each costs a port 25 probe
+
+
 async def check_tlsa_record(domain: str) -> Dict[str, Any]:
     """
     Check DANE for a domain's mail servers: TLSA records, their DNSSEC
@@ -1231,7 +1346,7 @@ async def check_tlsa_record(domain: str) -> Dict[str, Any]:
         null_mx = False
         mx_validated = False
         mx_lookup_failed = False
-        hosts = set()
+        hosts = {}   # host -> its lowest MX preference
         try:
             mx_answer = await resolve_dnssec_with_fallback(domain, 'MX', timeout=5)
             if mx_answer.rcode not in (dns.rcode.NOERROR, dns.rcode.NXDOMAIN):
@@ -1244,10 +1359,20 @@ async def check_tlsa_record(domain: str) -> Dict[str, Any]:
                         # RFC 7505 "null MX" (0 .) - the domain accepts no mail at all
                         null_mx = True
                         continue
-                    hosts.add(exchange)
+                    preference = getattr(r, 'preference', 0)
+                    hosts[exchange] = min(hosts.get(exchange, preference), preference)
         except Exception:
             mx_lookup_failed = True
         mx_hosts = sorted(hosts)
+        # The domain's DNS decides how many MX hosts there are, and each one
+        # costs a port 25 probe, so only the most preferred ones are checked.
+        by_preference = sorted(hosts, key=lambda h: (hosts[h], h))
+        checked_hosts = sorted(by_preference[:MAX_DANE_MX_HOSTS])
+        not_checked = sorted(by_preference[MAX_DANE_MX_HOSTS:])
+        not_checked_warnings = [
+            f'Not checked: {", ".join(not_checked)}. '
+            f'Only the first {MAX_DANE_MX_HOSTS} mail servers are checked.'
+        ] if not_checked else []
 
         if not mx_hosts:
             if null_mx:
@@ -1305,6 +1430,9 @@ async def check_tlsa_record(domain: str) -> Dict[str, Any]:
             if any(r['usage'] == dane.USAGE_DANE_EE for r in host_records):
                 try:
                     certificate = await _fetch_mx_certificate(host)
+                except dane.ProbeBusy as e:
+                    host_result['certificate'] = 'busy'
+                    host_result['certificate_error'] = str(e)
                 except Exception as e:
                     host_result['certificate'] = 'unreachable'
                     host_result['certificate_error'] = str(e)
@@ -1319,8 +1447,8 @@ async def check_tlsa_record(domain: str) -> Dict[str, Any]:
         hosts_with_tlsa = []
         lookup_failed = []
         host_results = []
-        outcomes = await asyncio.gather(*(check_host(host) for host in mx_hosts))
-        for host, outcome in zip(mx_hosts, outcomes):
+        outcomes = await asyncio.gather(*(check_host(host) for host in checked_hosts))
+        for host, outcome in zip(checked_hosts, outcomes):
             if outcome is None:
                 lookup_failed.append(host)
                 continue
@@ -1338,24 +1466,32 @@ async def check_tlsa_record(domain: str) -> Dict[str, Any]:
                     'record': None,
                     'records': [],
                     'mx_hosts': mx_hosts,
-                    'warnings': [],
+                    'not_checked': not_checked,
+                    'warnings': not_checked_warnings,
                 }
+            if not_checked:
+                # A host that was not checked may publish TLSA, so this must
+                # not read as "No DANE" to change detection (_definitely_absent)
+                message = f'No TLSA records on the {len(checked_hosts)} mail servers checked'
+            else:
+                message = f'No DANE/TLSA records published for {", ".join(mx_hosts)}'
             return {
                 'status': 'warning',
-                'message': f'No DANE/TLSA records published for {", ".join(mx_hosts)}',
+                'message': message,
                 'record': None,
                 'records': [],
                 'mx_hosts': mx_hosts,
-                'warnings': [
+                'not_checked': not_checked,
+                'warnings': not_checked_warnings + [
                     'DANE is optional. If you publish TLSA records, senders can verify your '
                     'TLS certificate through DNSSEC. Requires a DNSSEC-signed zone.'
                 ],
             }
 
         # 3. Assess what was published
-        warnings = []
+        warnings = list(not_checked_warnings)
         info = []
-        missing = [h for h in mx_hosts if h not in hosts_with_tlsa and h not in lookup_failed]
+        missing = [h for h in checked_hosts if h not in hosts_with_tlsa and h not in lookup_failed]
         if missing:
             warnings.append(
                 f'No TLSA record for: {", ".join(missing)}. Every MX host should publish one, '
@@ -1388,6 +1524,7 @@ async def check_tlsa_record(domain: str) -> Dict[str, Any]:
             'mismatch': 'certificate does not match the TLSA record',
             'unreachable': 'certificate not compared - could not connect on port 25 from this server',
             'not_verifiable': 'certificate not compared - only DANE-EE (usage 3) records can be checked',
+            'busy': 'certificate not compared - too many checks were running at once, run the check again',
         }
         for host_result in host_results:
             info.append(f'{host_result["host"]}: {certificate_lines[host_result["certificate"]]}')
@@ -1423,6 +1560,7 @@ async def check_tlsa_record(domain: str) -> Dict[str, Any]:
             'hosts': host_results,
             'dane_active': dane_active,
             'certificate_mismatch': mismatched if dane_active else [],
+            'not_checked': not_checked,
             'warnings': warnings,
             'info': info,
         }
@@ -1439,7 +1577,7 @@ async def check_tlsa_record(domain: str) -> Dict[str, Any]:
         }
 
 
-MTA_STS_POLICY_TIMEOUT = 10          # seconds for the HTTPS policy fetch
+MTA_STS_POLICY_TIMEOUT = 10          # seconds for the whole HTTPS policy fetch
 MTA_STS_POLICY_MAX_BYTES = 64 * 1024  # RFC 8461 policies are a few lines; cap reads
 
 
@@ -1451,15 +1589,37 @@ async def _fetch_mta_sts_policy(domain: str) -> str:
 
     RFC 8461: the policy host must present a valid certificate and HTTP
     redirects must not be followed.
+
+    The domain's owner runs the policy host, so the fetch is bounded the same
+    way as the agent client documents (agent_access/cimd.py): no compressed
+    body, whose decoded size the server chooses; reading stops at the cap;
+    and one deadline for the whole fetch, since httpx's timeout applies to
+    each read and a server sending a byte every few seconds never trips it.
     """
     url = f"https://mta-sts.{domain}/.well-known/mta-sts.txt"
-    async with httpx.AsyncClient(timeout=MTA_STS_POLICY_TIMEOUT,
-                                 follow_redirects=False, verify=True) as client:
-        response = await client.get(url)
-        response.raise_for_status()
-        if len(response.content) > MTA_STS_POLICY_MAX_BYTES:
-            raise ValueError("policy file larger than expected")
-        return response.text
+    try:
+        async with asyncio.timeout(MTA_STS_POLICY_TIMEOUT):
+            async with httpx.AsyncClient(timeout=MTA_STS_POLICY_TIMEOUT,
+                                         follow_redirects=False, verify=True) as client:
+                async with client.stream("GET", url,
+                                         headers={"Accept-Encoding": "identity"}) as response:
+                    response.raise_for_status()
+                    encoding = response.headers.get("content-encoding", "identity").strip().lower()
+                    if encoding not in ("", "identity"):
+                        raise ValueError("policy file is compressed")
+                    length = response.headers.get("content-length")
+                    if length and length.isdigit() and int(length) > MTA_STS_POLICY_MAX_BYTES:
+                        raise ValueError("policy file larger than expected")
+                    # With every Content-Encoding refused above, these are the
+                    # bytes as sent (httpx decodes nothing), read a piece at a time
+                    body = bytearray()
+                    async for chunk in response.aiter_bytes():
+                        if len(body) + len(chunk) > MTA_STS_POLICY_MAX_BYTES:
+                            raise ValueError("policy file larger than expected")
+                        body.extend(chunk)
+    except TimeoutError:
+        raise ValueError("policy host took too long to answer") from None
+    return bytes(body).decode("utf-8", errors="replace")
 
 
 def _parse_mta_sts_policy(text: str) -> Dict[str, Any]:
@@ -1787,22 +1947,51 @@ async def check_domain_dns(domain: str, spf_source_ips: Optional[List[Dict[str, 
         }
 
 
+# When every domain was last checked together (the 6-hourly job or Check all).
+# It is kept apart from the per-domain rows: checking one domain on its own
+# rewrites that domain's row, which used to erase this time or move it back.
+DNS_FULL_CHECK_KEY = 'dns_last_full_check'
+
+
+def _last_full_dns_check(db: Session) -> Optional[datetime]:
+    """When every domain was last checked together (the 6-hourly job or Check all)."""
+    stored = db.query(SystemSetting.value).filter(SystemSetting.key == DNS_FULL_CHECK_KEY).scalar()
+    if stored:
+        try:
+            return datetime.fromisoformat(stored)
+        except ValueError:
+            logger.warning(f"Ignoring an unreadable {DNS_FULL_CHECK_KEY}: {stored!r}")
+    # Before the time was stored on its own: the newest row a full check wrote
+    last = db.query(DomainDNSCheck.checked_at).filter(
+        DomainDNSCheck.is_full_check == True
+    ).order_by(DomainDNSCheck.checked_at.desc()).first()
+    return last[0] if last else None
+
+
+def _mailcow_created(value):
+    """mailcow's own 'created' date ('YYYY-MM-DD HH:MM:SS', no zone, in mailcow's
+    clock) as UTC with Z. Admins set the app to the same time zone as mailcow,
+    so the wall time is read in the app's zone. Unreadable values pass as they came."""
+    if not value or not isinstance(value, str):
+        return value
+    try:
+        wall = datetime.strptime(value.strip(), '%Y-%m-%d %H:%M:%S')
+    except ValueError:
+        return value
+    return format_datetime_for_api(local_wall_time_to_utc_naive(wall))
+
+
 def _build_domain_list_worker(domains):
     """Build detached domain and DNS results in a worker-owned session."""
     with get_db_context() as db:
-        # Get last DNS check time FIRST
-        last_check = db.query(DomainDNSCheck).filter(
-        DomainDNSCheck.is_full_check == True
-        ).order_by(
-            DomainDNSCheck.checked_at.desc()
-        ).first()
+        last_check = _last_full_dns_check(db)
         
         if not domains:
             return {
                 'domains': [],
                 'total': 0,
                 'active': 0,
-                'last_dns_check': format_datetime_for_api(last_check.checked_at) if (last_check and last_check.checked_at) else None
+                'last_dns_check': format_datetime_for_api(last_check) if last_check else None
             }
         
         alias_domain_map = get_alias_domain_map(db)
@@ -1835,7 +2024,7 @@ def _build_domain_list_worker(domains):
                 'aliases_in_domain': domain_data.get('aliases_in_domain', 0),
                 'aliases_left': domain_data.get('aliases_left', 0),
                 'max_num_aliases_for_domain': domain_data.get('max_num_aliases_for_domain', 0),
-                'created': domain_data.get('created'),
+                'created': _mailcow_created(domain_data.get('created')),
                 'bytes_total': domain_data.get('bytes_total', 0),
                 'msgs_total': domain_data.get('msgs_total', 0),
                 'quota_used_in_domain': domain_data.get('quota_used_in_domain', '0'),
@@ -1853,11 +2042,11 @@ def _build_domain_list_worker(domains):
             'domains': result_domains,
             'total': len(result_domains),
             'active': active_count,
-            'last_dns_check': format_datetime_for_api(last_check.checked_at) if (last_check and last_check.checked_at) else None
+            'last_dns_check': format_datetime_for_api(last_check) if last_check else None
         }
 
 
-@router.get("/domains/all")
+@router.get("/domains/all", response_model=None, responses=documented(m.DomainsResponse, errors={500: None, 502: None}))
 async def get_all_domains_with_dns():
     """Get all domains with cached DNS checks"""
     try:
@@ -1870,23 +2059,11 @@ async def get_all_domains_with_dns():
         raise internal_error(e)
 
 
-@router.get("/domains/{domain}/dns-check")
-async def check_single_domain_dns(domain: str):
-    """
-    Check DNS records for a specific domain
-    
-    Args:
-        domain: Domain name to check
-        
-    Returns:
-        DNS check results for the domain
-    """
-    try:
-        dns_data = await check_domain_dns(domain)
-        return dns_data
-    except Exception as e:
-        logger.error(f"Error checking DNS for {domain}: {e}")
-        raise internal_error(e)
+def _require_domain_name(domain: str) -> None:
+    """Refuse a path value that is not a plain domain name before it reaches
+    DNS lookups, the mailcow API or the database."""
+    if not is_valid_domain_name(domain):
+        raise HTTPException(status_code=400, detail="Invalid domain name")
 
 
 def _record_value(check: Optional[Dict[str, Any]]) -> Optional[str]:
@@ -1969,9 +2146,16 @@ def notify_dns_changes(domain_name: str, changes: List[Dict[str, str]]) -> None:
         return
     try:
         from ..services.notification_service import notify
+        from ..services import email_layout as layout
 
         types = ', '.join(c['type'] for c in changes)
         subject = f"DNS records changed for {domain_name}: {types}"
+        advice = (
+            "If you did not expect this, check the domain at your DNS provider. "
+            "If mailcow generated new values (for example a new DKIM key), update "
+            "the records at your registrar so mail keeps authenticating."
+        )
+        footer = "DNS change alerts are on in Settings, Notifications."
         lines = [
             f"The following DNS records changed for {domain_name}:",
             "",
@@ -1981,12 +2165,22 @@ def notify_dns_changes(domain_name: str, changes: List[Dict[str, str]]) -> None:
             lines.append(f"  before: {change['old']}")
             lines.append(f"  now:    {change['new']}")
             lines.append("")
-        lines.append(
-            "If you did not expect this, check the domain at your DNS provider. "
-            "If mailcow generated new values (for example a new DKIM key), update "
-            "the records at your registrar so mail keeps authenticating."
-        )
-        notify(subject, "\n".join(lines), alert_type="dns_changes")
+        lines.append(advice)
+        lines += ["", footer]
+        html = layout.render(
+            title=f"DNS records changed for {domain_name}", topic='DNS', tone='warn',
+            intro=f"{len(changes)} record{'s' if len(changes) != 1 else ''} changed: {types}.",
+            # A DKIM key is a few hundred characters without a space; Outlook
+            # cannot wrap it, so the HTML shows its start and end
+            blocks=[layout.panel(change['type'], layout.table(
+                ['', 'Value'],
+                [['Before', layout.mono(change['old'], max_length=56)],
+                 ['Now', layout.mono(change['new'], max_length=56)]], head=False),
+                note=('Long values are shortened here; the plain-text part of this email has them in full.'
+                      if max(len(str(change['old'])), len(str(change['new']))) > 56 else None))
+                for change in changes] + [layout.banner('warn', 'What to do', advice)],
+            footer=footer)
+        notify(subject, "\n".join(lines), html_content=html, alert_type="dns_changes")
         logger.info(f"DNS change alert sent for {domain_name}: {types}")
     except Exception as e:
         logger.error(f"Could not send DNS change alert for {domain_name}: {e}")
@@ -2046,6 +2240,12 @@ async def save_dns_check_to_db(db: Session, domain_name: str, dns_data: Dict[str
             )
             db.add(new_check)
 
+        if is_full_check:
+            stamp = checked_at.replace(tzinfo=None)  # naive UTC, like checked_at
+            db.execute(pg_insert(SystemSetting).values(
+                key=DNS_FULL_CHECK_KEY, value=stamp.isoformat(), updated_at=stamp,
+            ).on_conflict_do_update(index_elements=['key'], set_={'value': stamp.isoformat(), 'updated_at': stamp}))
+
         db.commit()
         logger.info(f"Saved DNS check for {domain_name}")
 
@@ -2103,7 +2303,7 @@ def get_cached_dns_check(db: Session, domain_name: str) -> Dict[str, Any]:
         return None
 
 
-@router.post("/domains/check-all-dns")
+@router.post("/domains/check-all-dns", response_model=None, responses=documented(m.CheckAllResponse, description="Waits for every check to finish", errors={500: None, 502: None}))
 async def check_all_domains_dns_manual():
     """Manually trigger DNS check for all active domains"""
     try:
@@ -2154,9 +2354,10 @@ async def check_all_domains_dns_manual():
         raise internal_error(e)
 
 
-@router.post("/domains/{domain}/check-dns")
+@router.post("/domains/{domain}/check-dns", response_model=None, responses=documented(m.CheckOneResponse, errors={400: None, 500: None}))
 async def check_single_domain_dns_manual(domain: str):
     """Manually trigger DNS check for a single domain"""
+    _require_domain_name(domain)
     try:
         dns_data = await check_domain_dns(domain)
         await asyncio.to_thread(store_dns_check_worker, domain, dns_data, False)

@@ -20,15 +20,39 @@ ALLOWED_ROOT_PATHS = {
     "/logout",
     "/openapi.json",
     "/docs",
-    "/docs/oauth2-redirect",
     "/redoc",
     "/static",
     "/favicon.ico",
     "/robots.txt",
     "/manifest.json",
     "/ws/raw-logs",
-    # SPA catch-all: serves index.html for clean URLs such as /dashboard.
-    "/{full_path:path}",
+    # SPA catch-all: serves index.html for clean URLs such as /dashboard
+    # (never for paths under /api or /ws).
+    "/{full_path:spa_path}",
+    # Agent access (agent_access/): the OAuth and MCP standards fix these
+    # addresses. All answer 404 while agent access is not live. /mcp takes a
+    # bearer token only; token, register and revoke check the client and PKCE
+    # themselves; the discovery documents are public by design; authorize and
+    # the consent page need a signed-in session (the middleware sends others
+    # to the login page). test_agent_access.py covers each of them.
+    "/mcp",
+    "/oauth/authorize",
+    "/oauth/consent",
+    "/oauth/token",
+    "/oauth/register",
+    "/oauth/revoke",
+    "/.well-known/oauth-protected-resource",
+    "/.well-known/oauth-protected-resource/mcp",
+    "/.well-known/oauth-authorization-server",
+    # Agents that run commands: POST /oauth/device asks for a code (public, the
+    # code is worth nothing until a signed-in person approves it); GET is the
+    # approval link and needs a session. The skill's files are public text with
+    # no secret, served only while agent access is live.
+    "/oauth/device",
+    "/agents/skill",
+    "/agents/skill/{name:path}",
+    "/agents/mcp",
+    "/agents/mcp/",
 }
 
 

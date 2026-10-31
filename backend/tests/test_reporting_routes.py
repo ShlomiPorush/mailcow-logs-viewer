@@ -21,6 +21,7 @@ def report_client(monkeypatch):
     return TestClient(app), data, send, summary
 
 
+@pytest.mark.no_contract(reason="stubs get_system_summary_data with a partial answer")
 def test_summary_get_returns_report_json_from_main_app(report_client):
     client, data, send, summary = report_client
     response = client.get("/api/system/summary")
@@ -49,6 +50,7 @@ def test_summary_email_validates_force_before_scheduling(report_client):
 
 
 @pytest.mark.parametrize("method,path", [("GET", "/api/system/summary"), ("POST", "/api/system/summary/email")])
+@pytest.mark.no_contract(reason="stubs get_system_summary_data with a partial answer")
 def test_summary_routes_require_authentication(report_client, monkeypatch, method, path):
     client, data, send, summary = report_client
     monkeypatch.setattr(settings._inner, "basic_auth_enabled", True)

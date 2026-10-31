@@ -39,7 +39,7 @@ def test_sync_entry_point_uses_worker_and_closes_client(monkeypatch, state, manu
         finally:
             session_threads.append(threading.get_ident())
 
-    async def sync(session_db):
+    async def sync(session_db, automatic=False):
         sync_threads.append(threading.get_ident())
         started.set()
         release.wait(2)

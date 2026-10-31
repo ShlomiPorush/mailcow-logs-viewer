@@ -6,7 +6,7 @@ SIMPLIFIED VERSION:
 - Removed old generate_correlation_key function
 - Correlation key is now SHA256 of Message-ID
 """
-from sqlalchemy import Column, Integer, BigInteger, String, Float, DateTime, Boolean, Text, Index, JSON, UniqueConstraint, func
+from sqlalchemy import Column, Integer, BigInteger, String, Float, DateTime, Boolean, Text, Index, JSON, UniqueConstraint, ForeignKey, CheckConstraint, func, text, Uuid
 from sqlalchemy.dialects.postgresql import JSONB
 from datetime import datetime
 
@@ -43,6 +43,9 @@ class PostfixLog(Base):
         Index('idx_postfix_sender_recipient', 'sender', 'recipient'),
         Index('idx_postfix_correlation', 'correlation_key'),
         Index('idx_postfix_message_id', 'message_id'),
+        # The cleanup lines without a usable Message-ID (services/no_message_id.py, alembic 0026)
+        Index('idx_postfix_cleanup_no_message_id', 'time',
+              postgresql_where=text("message_id IS NULL AND program LIKE '%/cleanup'")),
         UniqueConstraint('time', 'program', 'queue_id', 'message', name='uq_postfix_log'),
     )
     
@@ -169,6 +172,11 @@ class MessageCorrelation(Base):
     
     sender = Column(String(255), index=True)
     recipient = Column(String(255), index=True)
+    # Rspamd records some recipients in a normalized form (ALIAS_RESOLVED: no
+    # Gmail dots, no +tag); `recipient` keeps that form for matching. This maps
+    # each such Rspamd address (lowercase) to the address Postfix delivered to,
+    # as the sender wrote it, for display and search (services/written_recipients.py)
+    written_recipients = Column(JSONB)
     subject = Column(Text)
     direction = Column(String(20))
     final_status = Column(String(50))
@@ -230,8 +238,12 @@ class DMARCReport(Base):
     
     id = Column(Integer, primary_key=True, index=True)
     
-    report_id = Column(String(255), unique=True, index=True, nullable=False)
-    
+    # Chosen by the sender, so not unique: a report is the same report only
+    # when its content is the same (services/report_identity.py). NULL only on
+    # rows written by an older version; the app computes them on demand.
+    report_id = Column(String(255), nullable=False)
+    content_hash = Column(String(64))
+
     domain = Column(String(255), index=True, nullable=False)
     
     org_name = Column(String(255), index=True, nullable=False)
@@ -245,12 +257,14 @@ class DMARCReport(Base):
     
     domain_id = Column(String(255), index=True)
     
+    # No longer written (always NULL); kept so an older version can still run
     raw_xml = Column(Text)
     
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
     __table_args__ = (
+        UniqueConstraint('report_id', 'content_hash', name='uq_dmarc_reports_report_id_hash'),
         Index('idx_dmarc_report_domain_date', 'domain', 'begin_date'),
         Index('idx_dmarc_report_org', 'org_name'),
     )
@@ -419,8 +433,9 @@ class TLSReport(Base):
     
     id = Column(Integer, primary_key=True, index=True)
     
-    # Report identification
-    report_id = Column(String(255), unique=True, index=True, nullable=False)
+    # Report identification: not unique, see DMARCReport.report_id
+    report_id = Column(String(255), nullable=False)
+    content_hash = Column(String(64))
     
     # Organization that sent the report
     organization_name = Column(String(255), index=True)
@@ -433,13 +448,14 @@ class TLSReport(Base):
     start_datetime = Column(DateTime, nullable=False)
     end_datetime = Column(DateTime, nullable=False)
     
-    # Raw JSON for reference
+    # No longer written (always NULL); kept so an older version can still run
     raw_json = Column(Text)
     
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
     __table_args__ = (
+        UniqueConstraint('report_id', 'content_hash', name='uq_tls_reports_report_id_hash'),
         Index('idx_tls_report_domain_date', 'policy_domain', 'start_datetime'),
         Index('idx_tls_report_org', 'organization_name'),
     )
@@ -604,6 +620,33 @@ class RawServiceLog(Base):
         return f"<RawServiceLog(service={self.service}, time={self.time})>"
 
 
+class EasDevice(Base):
+    """
+    One ActiveSync device of one user, built from SOGo's access log lines for
+    /Microsoft-Server-ActiveSync. Each row keeps the newest request seen for
+    the pair (user, device id) and when the pair was first and last seen.
+    """
+    __tablename__ = "eas_devices"
+
+    id = Column(Integer, primary_key=True, index=True)
+    username = Column(String(255), nullable=False)
+    device_id = Column(String(255), nullable=False)
+    device_type = Column(String(100))
+    last_ip = Column(String(255))
+    last_command = Column(String(64))
+    last_status = Column(Integer)
+    first_seen = Column(DateTime, nullable=False)
+    last_seen = Column(DateTime, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint('username', 'device_id', name='uq_eas_device'),
+        Index('idx_eas_device_last_seen', 'last_seen'),
+    )
+
+    def __repr__(self):
+        return f"<EasDevice(username={self.username}, device_id={self.device_id})>"
+
+
 class SpamSuppression(Base):
     """
     Spam suppression list for blocking outgoing emails to recipients
@@ -651,6 +694,45 @@ class SpamSuppression(Base):
     
     def __repr__(self):
         return f"<SpamSuppression(email={self.email}, reason={self.reason}, active={self.active}, bounces={self.bounce_count})>"
+
+
+class SuppressionEvent(Base):
+    """What happened to a blocked address, kept with it for as long as it is on
+    the list (Outbound > Suppressions > Block details).
+
+    Postfix logs and messages are deleted after RETENTION_DAYS, but a block can
+    last up to months, so each event keeps its own copy of the evidence: the
+    server's answer, the message's sender, subject and ids, and the Postfix
+    lines of that message. Deleting the address deletes its events.
+    """
+    __tablename__ = "suppression_events"
+
+    id = Column(Integer, primary_key=True)
+    suppression_id = Column(Integer, ForeignKey('spam_suppressions.id', ondelete='CASCADE'), nullable=False)
+    # hard_bounce, soft_bounce, rejected, deferred_stuck, added, imported,
+    # enabled, disabled, expiry_changed, notes_changed, before_upgrade
+    kind = Column(String(30), nullable=False)
+    # What the event did to the block: created, activated, extended, counted, kept, changed
+    outcome = Column(String(20))
+    recorded_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    message_time = Column(DateTime)
+    reason = Column(Text)
+    server_reply = Column(Text)
+    dsn = Column(String(20))
+    sender = Column(String(255))
+    recipient = Column(String(255))
+    subject = Column(Text)
+    queue_id = Column(String(50))
+    message_id = Column(String(255))
+    correlation_key = Column(String(64))
+    notes = Column(Text)
+    expires_at = Column(DateTime)
+    log_lines = Column(JSONB)
+    logs_shortened = Column(Boolean, default=False)
+
+    __table_args__ = (
+        Index('idx_suppression_event_owner', 'suppression_id', 'recorded_at'),
+    )
 
 
 class QuarantineRule(Base):
@@ -711,6 +793,25 @@ class QuarantineRuleLog(Base):
         Index('idx_qrule_log_created', 'created_at'),
     )
 
+class MetricSnapshot(Base):
+    """An hourly sample of a dashboard figure that shows a trend (services/figures.py):
+    one per figure and hour, kept 90 days; a hour whose source did not answer has
+    none (a gap). Alembic 0021."""
+    __tablename__ = "metric_snapshots"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String(40), nullable=False)
+    slot = Column(DateTime, nullable=False)       # the hour (UTC) the sample stands for
+    value = Column(Float)
+    of = Column(Float)                            # the denominator, when the figure has one
+    as_of = Column(DateTime, nullable=False)      # when it was read
+
+    __table_args__ = (
+        UniqueConstraint('name', 'slot', name='uq_metric_snapshot_name_slot'),
+        Index('idx_metric_snapshot_slot', 'slot'),
+    )
+
+
 class SecurityAlert(Base):
     """
     Anomaly-detection alerts: outbound volume spikes (possible compromised
@@ -728,6 +829,8 @@ class SecurityAlert(Base):
     metric_value = Column(Float)                 # observed value (messages, failures, ...)
     baseline_value = Column(Float)               # expected/baseline value for context
     acknowledged = Column(Boolean, default=False, index=True)
+    # The receipt of the dismissal that acknowledged it (Undo re-opens by it); Alembic 0020
+    ack_batch = Column(Uuid, nullable=True, index=True)
 
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
 
@@ -789,6 +892,53 @@ class SMTPAbuseAction(Base):
         return f"<SMTPAbuseAction(email={self.email}, action={self.action}, count={self.message_count})>"
 
 
+class ProtectionHit(Base):
+    """
+    An address a protection rule caught, and what happened to it.
+
+    One open hit per address and rule: later tries by the same address are
+    added to it rather than opening a new one. In watch mode a hit only records
+    what the rule would have banned (status 'watching'); the usernames tried and
+    the netfilter log ids are the evidence shown to the admin.
+    """
+    __tablename__ = "protection_hits"
+
+    id = Column(Integer, primary_key=True, index=True)
+    ip = Column(String(50), nullable=False, index=True)
+    rule = Column(String(40), nullable=False, index=True)
+    mode = Column(String(20), nullable=False, default="watch")        # 'watch' | 'enforce' | 'manual' (Ban now)
+    # Open: 'watching' (watch mode), 'pending' (to be banned), 'banned', 'alert' (breach alert, never banned)
+    # Closed: 'dismissed', 'expired', 'undone'
+    status = Column(String(20), nullable=False, default="watching", index=True)
+    reason = Column(Text)
+    usernames = Column(JSONB, default=list)
+    log_ids = Column(JSONB, default=list)
+    attempts = Column(Integer, nullable=False, default=0)
+    country_code = Column(String(2))
+    country_name = Column(String(100))
+
+    first_seen = Column(DateTime, nullable=False)
+    last_seen = Column(DateTime, nullable=False, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    ended_at = Column(DateTime)
+
+    # Enforcement: the ban length (0 = permanent), when it was written and when
+    # it ends, and whether this app added the entry to the Fail2ban blacklist.
+    # Only entries the app added are ever removed by it.
+    ban_hours = Column(Integer)
+    banned_at = Column(DateTime)
+    expires_at = Column(DateTime, index=True)
+    owned = Column(Boolean)
+    error = Column(Text)
+
+    __table_args__ = (
+        Index('idx_protection_hits_ip_rule_status', 'ip', 'rule', 'status'),
+    )
+
+    def __repr__(self):
+        return f"<ProtectionHit(ip={self.ip}, rule={self.rule}, status={self.status})>"
+
+
 class NotificationChannel(Base):
     """
     A configured destination for alerts (Slack, Telegram, ntfy, ...).
@@ -816,3 +966,160 @@ class NotificationChannel(Base):
 
     def __repr__(self):
         return f"<NotificationChannel(name={self.name}, type={self.channel_type}, enabled={self.enabled})>"
+
+
+# Agent access (agent_access/): AI agents a person approved in the browser.
+# Tokens and codes are stored only as SHA-256 hashes.
+
+class AgentClient(Base):
+    """A program that registered itself through Dynamic Client Registration.
+
+    Clients that identify with a metadata document URL (CIMD) are not stored:
+    their document is fetched and cached in memory.
+    """
+    __tablename__ = "agent_clients"
+
+    id = Column(Integer, primary_key=True)
+    client_id = Column(String(64), nullable=False, unique=True)
+    client_name = Column(String(100), nullable=False)
+    redirect_uris = Column(JSONB, nullable=False, default=list)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    created_ip = Column(String(64))
+    last_used_at = Column(DateTime)
+
+
+class AgentGrant(Base):
+    """One connected agent: who approved it, what it may do and until when."""
+    __tablename__ = "agent_grants"
+
+    id = Column(Integer, primary_key=True)
+    client_id = Column(String(512), nullable=False, index=True)
+    client_kind = Column(String(10), nullable=False)          # 'dcr' | 'cimd'
+    display_name = Column(String(100), nullable=False)        # the name the person gave it
+    declared_name = Column(String(100), nullable=False)       # the name the program gave itself
+    publisher = Column(String(255))                           # host of a CIMD client_id URL
+    redirect_uri = Column(String(512), nullable=False)
+    scopes = Column(Text, nullable=False)                     # space separated
+    resource = Column(String(512), nullable=False)
+    approved_by = Column(String(255))
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    expires_at = Column(DateTime, nullable=False, index=True)
+    last_used_at = Column(DateTime)
+    revoked_at = Column(DateTime, index=True)
+    revoke_reason = Column(String(40))
+
+
+class AgentCode(Base):
+    """An authorization code between the consent page and the token request."""
+    __tablename__ = "agent_codes"
+
+    id = Column(Integer, primary_key=True)
+    code_hash = Column(String(64), nullable=False, unique=True)
+    client_id = Column(String(512), nullable=False)
+    redirect_uri = Column(String(512), nullable=False)
+    code_challenge = Column(String(128), nullable=False)
+    resource = Column(String(512), nullable=False)
+    # Everything the person chose, applied when the code is exchanged
+    details = Column(JSONB, nullable=False)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    expires_at = Column(DateTime, nullable=False, index=True)
+    used_at = Column(DateTime)
+    grant_id = Column(Integer, ForeignKey("agent_grants.id", ondelete="CASCADE"))
+
+
+class AgentDeviceRequest(Base):
+    """An agent that asked to connect with a code (RFC 8628), until a person answers and it collects its tokens.
+
+    state: pending -> approved | denied | expired; approved -> consumed. The
+    device code is a secret only the agent holds (stored hashed); the user code
+    is the short code the person compares on the approval page.
+    """
+    __tablename__ = "agent_device_requests"
+
+    id = Column(Integer, primary_key=True)
+    device_code_hash = Column(String(64), nullable=False, unique=True)
+    user_code = Column(String(8), nullable=False, index=True)
+    client_id = Column(String(64), nullable=False)
+    label = Column(String(100), nullable=False)               # the agent's own name for itself
+    requested = Column(Text, nullable=False)                  # scopes it asked for, space separated
+    resource = Column(String(512), nullable=False)
+    state = Column(String(10), nullable=False, default="pending")
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    expires_at = Column(DateTime, nullable=False, index=True)
+    interval = Column(Integer, nullable=False, default=5)
+    last_poll_at = Column(DateTime)
+    # What the person chose, applied when the agent collects its tokens
+    details = Column(JSONB)
+    answered_at = Column(DateTime)
+    grant_id = Column(Integer, ForeignKey("agent_grants.id", ondelete="SET NULL"))
+
+
+class AgentToken(Base):
+    """An access or refresh token of a grant."""
+    __tablename__ = "agent_tokens"
+
+    id = Column(Integer, primary_key=True)
+    grant_id = Column(Integer, ForeignKey("agent_grants.id", ondelete="CASCADE"), nullable=False, index=True)
+    kind = Column(String(10), nullable=False)                 # 'access' | 'refresh'
+    token_hash = Column(String(64), nullable=False, unique=True)
+    client_id = Column(String(512), nullable=False)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    expires_at = Column(DateTime, nullable=False, index=True)
+    rotated_at = Column(DateTime)                             # refresh tokens: when it was exchanged
+
+
+class AgentAudit(Base):
+    """What a connected agent did, and when a grant was made or ended."""
+    __tablename__ = "agent_audit"
+
+    id = Column(Integer, primary_key=True)
+    grant_id = Column(Integer, ForeignKey("agent_grants.id", ondelete="SET NULL"), index=True)
+    agent_name = Column(String(100))
+    at = Column(DateTime, nullable=False, default=datetime.utcnow, index=True)
+    event = Column(String(20), nullable=False)                # grant_created | grant_revoked | call | denied
+    tool = Column(String(40))
+    method = Column(String(10))
+    path = Column(String(512))
+    http_status = Column(Integer)
+    outcome = Column(String(10))                              # ok | error | accepted | denied
+    detail = Column(String(300))
+
+
+class User(Base):
+    """A person who signs in with their own access (routers/users.py).
+
+    A local user signs in with a username and password on the login form. An
+    OAuth2 entry gives the person the provider signs in with that email its
+    own access, instead of the OAuth2 default. The built-in admin (AUTH_USERNAME)
+    is not stored here.
+    """
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True)
+    kind = Column(String(10), nullable=False)                 # 'local' | 'oauth2'
+    username = Column(String(64))                             # as typed, shown in the list
+    username_norm = Column(String(64))
+    email = Column(String(320))
+    email_norm = Column(String(320))
+    password_hash = Column(String(255))
+    access = Column(String(10), nullable=False)               # 'admin' | 'operator' | 'viewer' | 'custom'
+    scopes = Column(Text, nullable=False, default="")         # space separated, used only for custom
+    disabled = Column(Boolean, nullable=False, default=False, server_default=text("false"))
+    # Advances on every change that ends the user's sessions: password, access, disabled
+    auth_version = Column(Integer, nullable=False, default=1, server_default=text("1"))
+    # Advances on every edit, so an edit made on an older copy is refused
+    row_version = Column(Integer, nullable=False, default=1, server_default=text("1"))
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    last_login_at = Column(DateTime)
+
+    __table_args__ = (
+        CheckConstraint("kind IN ('local', 'oauth2')", name="ck_users_kind"),
+        CheckConstraint("access IN ('admin', 'operator', 'viewer', 'custom')", name="ck_users_access"),
+        CheckConstraint("kind <> 'local' OR (username_norm IS NOT NULL AND password_hash IS NOT NULL "
+                        "AND email IS NULL AND email_norm IS NULL)", name="ck_users_local"),
+        CheckConstraint("kind <> 'oauth2' OR (email_norm IS NOT NULL AND password_hash IS NULL)",
+                        name="ck_users_oauth2"),
+        Index("ux_users_local_username", "username_norm", unique=True, postgresql_where=text("kind = 'local'")),
+        Index("ux_users_oauth2_email", "email_norm", unique=True, postgresql_where=text("kind = 'oauth2'")),
+    )

@@ -47,6 +47,7 @@ def test_oversized_text_part_is_rejected_before_handler(client, path, filename):
     ("/api/dmarc/upload", "report.xml"),
     ("/api/suppressions/import", "addresses.csv"),
 ])
+@pytest.mark.no_contract(reason="stubs the upload workers with a partial answer")
 def test_text_part_limit_does_not_reject_normal_file_uploads(client, path, filename):
     # Files above the spool threshold remain supported; the field cap must not
     # accidentally impose a 1 MiB limit on uploaded files.

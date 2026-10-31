@@ -3,6 +3,8 @@ from fastapi.responses import PlainTextResponse
 import httpx
 import logging
 
+from ..api_models import documented
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
@@ -14,13 +16,23 @@ ALLOWED_DOCS = {
     "DMARC": "DMARC.md",
     "Mailbox_Stats": "Mailbox_Stats.md",
     "IP_Blacklist_Monitor": "IP_Blacklist_Monitor.md",
-    "Spam_Filter": "Spam_Filter.md",
     "Quarantine": "Quarantine.md",
     "Abuse_Protection": "Abuse_Protection.md",
     "Rate_Limits": "Rate_Limits.md",
+    "Devices": "Devices.md",
+    "Dashboard": "Dashboard.md",
+    "Messages": "Messages.md",
+    "Security": "Security.md",
+    "Outbound": "Outbound.md",
+    "Rspamd": "Rspamd.md",
+    "Status": "Status.md",
+    "Logs": "Logs.md",
+    "Settings": "Settings.md",
+    "About": "About.md",
 }
 
-@router.get("/docs/{doc_name}", response_class=PlainTextResponse)
+@router.get("/docs/{doc_name}", response_class=PlainTextResponse,
+            responses=documented(None, description="The help page, in Markdown", errors={404: None, 503: None}))
 async def get_documentation(doc_name: str):
     if doc_name not in ALLOWED_DOCS:
         raise HTTPException(status_code=404, detail="Documentation not found")

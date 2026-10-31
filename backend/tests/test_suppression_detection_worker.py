@@ -16,14 +16,20 @@ def state(monkeypatch):
     monkeypatch.setattr(type(settings._inner), "is_feature_enabled", lambda self, name: True)
     for key,value in {
         "suppression_enabled":True,"suppression_auto_detect":True,
-        "suppression_rspamd_sync":False,"suppression_hard_bounce_action":"suppress",
+        "suppression_rspamd_sync":True,"suppression_hard_bounce_action":"suppress",
         "suppression_whitelist_domains":"","mailcow_api_key_rw":"test-key"
     }.items():
         monkeypatch.setattr(settings._inner,key,value)
     monkeypatch.setattr(scheduler.mailcow_api, "headers_rw", {"X-API-Key":"test-key"})
     monkeypatch.setattr(scheduler, "update_job_status", Mock())
+    # Spam Filter's earlier Rspamd blocks are loaded (tested in test_feature_off_data.py)
+    monkeypatch.setattr(scheduler, "_spam_blocks_loaded", AsyncMock(return_value=True))
+    monkeypatch.setattr(scheduler, "record_bounces", lambda db, captured: None)
+    # Every address is still blocked when its mail is deleted (checked in test_rspamd_two_way.py)
+    monkeypatch.setattr(scheduler, "_blocked_now", lambda emails: set(emails))
+    monkeypatch.setattr(scheduler, "_protected_now", lambda emails: set())
     monkeypatch.setattr(scheduler.mailcow_api, "get_queue", AsyncMock(return_value=[]))
-    monkeypatch.setattr(scheduler.mailcow_api, "delete_queue", AsyncMock())
+    monkeypatch.setattr(scheduler.mailcow_api, "delete_queue", AsyncMock(return_value=[{"type": "success"}]))
 
 
 def test_detection_keeps_loop_responsive_and_closes_before_queue(monkeypatch, state):
@@ -31,8 +37,9 @@ def test_detection_keeps_loop_responsive_and_closes_before_queue(monkeypatch, st
     threads,api_threads = [],[]
     db=Mock()
     db.query.return_value.filter.return_value.all.return_value=[
-        SimpleNamespace(sender=None,recipient="user@example.com",dsn="5.1.1",message="No mailbox")]
+        SimpleNamespace(id=1,sender=None,recipient="user@example.com",dsn="5.1.1",message="No mailbox")]
     db.query.return_value.filter.return_value.first.return_value=None
+    db.query.return_value.filter.return_value.with_for_update.return_value.one.return_value=SimpleNamespace(value="0")
     db.commit.side_effect=lambda:threads.append(threading.get_ident())
 
     @contextmanager
@@ -76,8 +83,9 @@ def test_detection_keeps_loop_responsive_and_closes_before_queue(monkeypatch, st
 def test_failed_commit_prevents_queue_cleanup(monkeypatch,state):
     db=Mock()
     db.query.return_value.filter.return_value.all.return_value=[
-        SimpleNamespace(sender=None,recipient="user@example.com",dsn="5.1.1",message="No mailbox")]
+        SimpleNamespace(id=1,sender=None,recipient="user@example.com",dsn="5.1.1",message="No mailbox")]
     db.query.return_value.filter.return_value.first.return_value=None
+    db.query.return_value.filter.return_value.with_for_update.return_value.one.return_value=SimpleNamespace(value="0")
     db.commit.side_effect=RuntimeError("Database unavailable")
 
     @contextmanager

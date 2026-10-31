@@ -4,7 +4,9 @@ API endpoints for system status and health monitoring
 import asyncio
 import logging
 import httpx
+from urllib.parse import quote
 from fastapi import APIRouter, HTTPException, Query
+from pydantic import BaseModel
 from datetime import datetime, timedelta, timezone
 from typing import Dict, Any
 
@@ -13,7 +15,11 @@ from ..version import __version__
 from ..scheduler import check_app_version_update, get_app_version_cache
 from ..database import SessionLocal
 from ..models import KnownContainer
-from ..utils import internal_error
+from ..services.ignore_lists import load_ignored, set_ignored, IGNORED_CONTAINERS_KEY
+from ..utils import internal_error, format_datetime_for_api
+from ..api_models import Invalid, documented
+from ..api_models import status as m
+from ..api_models.mailboxes import MailcowInfo, StorageStatus
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +33,18 @@ version_cache = {
     "update_available": False,
     "changelog": None
 }
+
+def _started_at(value):
+    """A container start time as UTC with Z. Docker gives RFC 3339 in UTC with
+    nanoseconds; anything unreadable is passed on as it came."""
+    if not value or not isinstance(value, str):
+        return value
+    try:
+        parsed = datetime.fromisoformat(value.replace('Z', '+00:00'))
+    except ValueError:
+        return value
+    return format_datetime_for_api(parsed)
+
 
 async def _get_containers_status_internal():
     """Fetch mailcow asynchronously, then persist and build status in a worker."""
@@ -45,6 +63,10 @@ def _store_container_status_worker(containers_data):
 
             # Load known containers from database
             known_containers = {kc.container_name: kc for kc in db.query(KnownContainer).all()}
+            # Containers stopped on purpose (e.g. ipv6nat without IPv6) are
+            # listed but never counted, so they raise no alert
+            ignored = load_ignored(db, IGNORED_CONTAINERS_KEY)
+            ignored_count = 0
 
             # Track which containers are active (appear in API response)
             active_container_names = set(containers_dict.keys())
@@ -85,7 +107,9 @@ def _store_container_status_worker(containers_data):
                     known_containers[container_key] = known_container
 
                 # Count containers: only 'running' is considered running, everything else is stopped
-                if state == 'running':
+                if container_key in ignored:
+                    ignored_count += 1
+                elif state == 'running':
                     running_count += 1
                 else:
                     stopped_count += 1
@@ -94,7 +118,8 @@ def _store_container_status_worker(containers_data):
                 simplified_containers[container_key] = {
                     "name": display_name,
                     "state": state,
-                    "started_at": info.get('started_at', None)
+                    "started_at": _started_at(info.get('started_at')),
+                    "ignored": container_key in ignored
                 }
 
             # Process known containers that are not in API response (stopped containers)
@@ -106,9 +131,13 @@ def _store_container_status_worker(containers_data):
                     simplified_containers[container_key] = {
                         "name": display_name,
                         "state": "stopped",
-                        "started_at": None
+                        "started_at": None,
+                        "ignored": container_key in ignored
                     }
-                    stopped_count += 1
+                    if container_key in ignored:
+                        ignored_count += 1
+                    else:
+                        stopped_count += 1
 
             # Commit database changes
             try:
@@ -123,7 +152,8 @@ def _store_container_status_worker(containers_data):
                 "summary": {
                     "running": running_count,
                     "stopped": stopped_count,
-                    "total": len(simplified_containers)
+                    "total": len(simplified_containers) - ignored_count,
+                    "ignored": ignored_count
                 }
             }
 
@@ -138,7 +168,7 @@ def _store_container_status_worker(containers_data):
             raise
 
 
-@router.get("/status/containers")
+@router.get("/status/containers", responses=documented(m.ContainersResponse, errors={500: None, 502: None}))
 async def get_containers_status():
     """
     Get status of all mailcow containers
@@ -149,10 +179,24 @@ async def get_containers_status():
         return await _get_containers_status_internal()
     except Exception as e:
         logger.error("Failed to fetch container status: %s", e)
-        raise HTTPException(status_code=500, detail="Failed to fetch container status. Check the application logs.")
+        raise internal_error(e)
 
 
-@router.get("/status/storage")
+class ContainerIgnoreRequest(BaseModel):
+    ignored: bool
+
+
+@router.put("/status/containers/{container}/ignore", responses=documented(m.ContainerIgnored, errors={404: None, 422: Invalid, 500: None}))
+def ignore_container(container: str, body: ContainerIgnoreRequest):
+    """Ignore or stop ignoring one mailcow container (by its full name, e.g. ipv6nat-mailcow)."""
+    with SessionLocal() as db:
+        if not db.query(KnownContainer).filter(KnownContainer.container_name == container).first():
+            raise HTTPException(status_code=404, detail="Unknown container.")
+        set_ignored(db, IGNORED_CONTAINERS_KEY, container, body.ignored)
+    return {"container": container, "ignored": body.ignored}
+
+
+@router.get("/status/storage", responses=documented(StorageStatus, description="mailcow's mail storage, as mailcow reports it; unknown and zeros when it reports nothing", errors={500: None, 502: None}))
 async def get_storage_status():
     """
     Get storage/disk usage information
@@ -177,9 +221,9 @@ async def get_storage_status():
         
     except Exception as e:
         logger.error(f"Error fetching storage status: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="Failed to fetch storage status. Check the application logs.")
+        raise internal_error(e)
 
-@router.get("/status/version")
+@router.get("/status/version", responses=documented(m.MailcowVersion, errors={422: Invalid, 502: None}))
 async def get_version_status(force: bool = Query(False, description="Force a fresh version check")):
     """
     Get current mailcow version and check for updates
@@ -237,16 +281,7 @@ async def get_version_status(force: bool = Query(False, description="Force a fre
             version_cache["checked_at"] = now
         
         # Format last_checked with UTC timezone indicator ('Z' suffix)
-        last_checked = None
-        if version_cache["checked_at"]:
-            if version_cache["checked_at"].tzinfo is None:
-                # If naive, assume UTC
-                dt = version_cache["checked_at"].replace(tzinfo=timezone.utc)
-            else:
-                dt = version_cache["checked_at"]
-            # Convert to UTC and format with 'Z' suffix
-            dt_utc = dt.astimezone(timezone.utc)
-            last_checked = dt_utc.replace(microsecond=0).isoformat().replace('+00:00', 'Z')
+        last_checked = format_datetime_for_api(version_cache["checked_at"])
         
         return {
             "current_version": version_cache["current_version"],
@@ -261,7 +296,7 @@ async def get_version_status(force: bool = Query(False, description="Force a fre
         raise internal_error(e)
 
 
-@router.get("/status/app-version")
+@router.get("/status/app-version", responses=documented(m.AppVersion, errors={422: Invalid}))
 async def get_app_version_status(force: bool = Query(False, description="Force a fresh version check")):
     """
     Get current app version and check for updates from GitHub
@@ -284,16 +319,7 @@ async def get_app_version_status(force: bool = Query(False, description="Force a
             app_version_cache = get_app_version_cache()  # Get updated cache
         
         # Format last_checked with UTC timezone indicator ('Z' suffix)
-        last_checked = None
-        if app_version_cache["checked_at"]:
-            if app_version_cache["checked_at"].tzinfo is None:
-                # If naive, assume UTC
-                dt = app_version_cache["checked_at"].replace(tzinfo=timezone.utc)
-            else:
-                dt = app_version_cache["checked_at"]
-            # Convert to UTC and format with 'Z' suffix
-            dt_utc = dt.astimezone(timezone.utc)
-            last_checked = dt_utc.replace(microsecond=0).isoformat().replace('+00:00', 'Z')
+        last_checked = format_datetime_for_api(app_version_cache["checked_at"])
         
         return {
             "current_version": app_version_cache["current_version"],
@@ -314,7 +340,7 @@ async def get_app_version_status(force: bool = Query(False, description="Force a
         }
 
 
-@router.get("/status/mailcow-info")
+@router.get("/status/mailcow-info", responses=documented(MailcowInfo, errors={500: None, 502: None}))
 async def get_mailcow_info():
     """
     Get mailcow system information (domains, mailboxes, aliases)
@@ -352,7 +378,7 @@ async def get_mailcow_info():
         raise internal_error(e)
 
 
-@router.get("/status/mailcow-connection")
+@router.get("/status/mailcow-connection", responses=documented(m.MailcowConnection))
 async def get_mailcow_connection_status():
     """
     Check mailcow API connection status
@@ -361,18 +387,18 @@ async def get_mailcow_connection_status():
         is_connected = await mailcow_api.test_connection()
         return {
             "connected": is_connected,
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": format_datetime_for_api(datetime.now(timezone.utc))
         }
     except Exception as e:
         logger.error(f"Error checking mailcow connection: {e}")
         return {
             "connected": False,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": format_datetime_for_api(datetime.now(timezone.utc)),
             "error": "Unable to load system status. Check the application logs."
         }
 
 
-@router.get("/status/app-version/changelog/{version}")
+@router.get("/status/app-version/changelog/{version}", responses=documented(m.Changelog, description="The notes; a sentence in changelog when they could not be read"))
 async def get_app_version_changelog(version: str):
     """
     Get changelog for a specific app version from GitHub
@@ -384,7 +410,7 @@ async def get_app_version_changelog(version: str):
         async with httpx.AsyncClient(timeout=10) as client:
             # Try to get the specific release by tag
             response = await client.get(
-                f"https://api.github.com/repos/ShlomiPorush/mailcow-logs-viewer/releases/tags/{version_tag}"
+                f"https://api.github.com/repos/ShlomiPorush/mailcow-logs-viewer/releases/tags/{quote(version_tag, safe='')}"
             )
             
             if response.status_code == 200:
@@ -409,7 +435,7 @@ async def get_app_version_changelog(version: str):
         }
 
 
-@router.get("/status/summary")
+@router.get("/status/summary", responses=documented(m.StatusSummary))
 async def get_status_summary():
     """
     Get combined status summary for dashboard
@@ -418,27 +444,36 @@ async def get_status_summary():
         import asyncio
         
         # Fetch all status info in parallel
+        from ..services.figures import storage_figure
         containers_data, storage_data, mailcow_info = await asyncio.gather(
             _get_containers_status_internal(),
-            get_storage_status(),
+            storage_figure(),
             get_mailcow_info(),
             return_exceptions=True
         )
         
-        # Handle exceptions
-        if isinstance(containers_data, Exception):
+        # Handle exceptions. Without an answer from mailcow the counts are zeros, which
+        # are not "nothing stopped": containers_known says whether they were read. Its
+        # API runs in a container, so an answer has one running; none running means the
+        # counts came from the containers known before, not from mailcow
+        containers_known = not isinstance(containers_data, Exception)
+        if not containers_known:
             containers_data = {"summary": {"running": 0, "stopped": 0, "total": 0}}
+        containers_known = containers_known and containers_data.get("summary", {}).get("running", 0) > 0
         if isinstance(storage_data, Exception):
-            storage_data = {"used_percent": "0%"}
+            storage_data = {"used_percent": "0%", "valid": False}
         if isinstance(mailcow_info, Exception):
             mailcow_info = {"domains": {"total": 0}, "mailboxes": {"total": 0}, "aliases": {"total": 0}}
         
         return {
             "containers": containers_data.get("summary", {}),
+            "containers_known": containers_known,
             "storage": {
                 "used_percent": storage_data.get("used_percent", "0%"),
                 "used": storage_data.get("used", "0"),
-                "total": storage_data.get("total", "0")
+                "total": storage_data.get("total", "0"),
+                # False when mailcow did not tell it: the card says Unknown, not 0%
+                "known": bool(storage_data.get("valid")),
             },
             "system": {
                 "domains": mailcow_info.get("domains", {}).get("total", 0),
@@ -451,7 +486,7 @@ async def get_status_summary():
         raise internal_error(e)
 
 
-@router.get("/status/container-logs")
+@router.get("/status/container-logs", responses=documented(m.ContainerLogs, errors={422: Invalid}))
 def get_container_logs(lines: int = Query(100, ge=10, le=1000, description="Number of lines to fetch")):
     """
     Get the application container logs from the log file
