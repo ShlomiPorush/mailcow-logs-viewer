@@ -169,6 +169,7 @@ async def ingest():
     await _step("trend_samples", scheduler.trend_samples_job)
     await _step("trend_history", asyncio.to_thread, seed_trend_history)
     await _step("agents", asyncio.to_thread, seed_agents)
+    await _step("users", asyncio.to_thread, seed_users)
 
 
 def seed_trend_history(days=7):
@@ -284,6 +285,43 @@ def seed_agents(agents=DEMO_AGENTS):
         db.commit()
     logger.warning(f"[DEMO] Seeded {len(agents)} connected agents")
     return len(agents)
+
+
+# Users to look at in Settings > Users, one per access level. The demo has no
+# sign-in, so nobody can sign in as them: local users get a random password
+# nobody knows. Times are minutes before the start.
+DEMO_USERS = (
+    {"kind": "local", "username": "maria", "access": "operator", "login": 2 * 60},
+    {"kind": "local", "username": "helpdesk", "access": "viewer", "login": 1440 + 3 * 60},
+    {"kind": "local", "username": "contractor", "access": "viewer", "disabled": True, "login": 9 * 1440},
+    {"kind": "oauth2", "email": "it-lead@example.org", "access": "admin"},
+    {"kind": "oauth2", "email": "dana@example.com", "access": "custom",
+     "views": ("messages", "outbound", "security"), "acts": ("security",)},
+)
+
+
+def seed_users(users=DEMO_USERS):
+    """Fictional users with their access, for Settings > Users."""
+    import secrets
+    from datetime import datetime, timedelta
+    from app.database import get_db_context
+    from app.models import User
+    from app.services import users_store
+
+    start = datetime.utcnow()
+    with get_db_context() as db:
+        for spec in users:
+            local = spec["kind"] == "local"
+            created = users_store.create_user(
+                db, kind=spec["kind"], username=spec.get("username"), email=spec.get("email"),
+                password=secrets.token_urlsafe(24) if local else None, access_level=spec["access"],
+                views=spec.get("views", ()), acts=spec.get("acts", ()), disabled=spec.get("disabled", False))
+            if spec.get("login"):
+                db.query(User).filter(User.id == created["id"]).update(
+                    {User.last_login_at: start - timedelta(minutes=spec["login"])}, synchronize_session=False)
+        db.commit()
+    logger.warning(f"[DEMO] Seeded {len(users)} users")
+    return len(users)
 
 
 def run_ingest_blocking():
