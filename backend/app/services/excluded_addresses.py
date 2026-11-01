@@ -412,13 +412,39 @@ def forget_old_queues(now: datetime) -> None:
         if _last_forget is not None and now - _last_forget < timedelta(minutes=1):
             return
         _last_forget = now
-        for store in (_listed_queues, _removed_queues):
-            for queue_id in list(store):
-                kept = [(t, at) for t, at in store[queue_id] if now - at <= QUEUE_WINDOW]
-                if kept:
-                    store[queue_id] = kept
-                else:
-                    del store[queue_id]
+        for queue_id in list(_listed_queues):
+            kept = [(t, at) for t, at in _listed_queues[queue_id] if now - at <= QUEUE_WINDOW]
+            if kept:
+                _listed_queues[queue_id] = kept
+            else:
+                del _listed_queues[queue_id]
+        # Where a listed message ended is kept as long as the message is
+        for queue_id in list(_removed_queues):
+            if queue_id not in _listed_queues:
+                del _removed_queues[queue_id]
+
+
+_SECOND = timedelta(seconds=1)
+
+
+def message_span(t: datetime, removed: Iterable[datetime]) -> Tuple[datetime, datetime, Optional[datetime]]:
+    """The times w with same_message(t, w, removed), as (lo, hi, before):
+    lo <= w <= hi, and w < before when before is not None. From the last
+    "removed" in a second before t's to the first one in t's second or later."""
+    t = naive_utc(t)
+    s = _second(t)
+    seconds = sorted({_second(r) for r in removed if r is not None})
+    earlier = [r for r in seconds if r < s]
+    later = [r for r in seconds if r >= s]
+    lo = t - QUEUE_WINDOW
+    if earlier:
+        lo = max(lo, earlier[-1] + _SECOND)
+    return lo, t + QUEUE_WINDOW, (later[0] + _SECOND) if later else None
+
+
+def _in_span(column, span):
+    lo, hi, before = span
+    return and_(column >= lo, column <= hi, *([column < before] if before is not None else []))
 
 
 def delete_queue_occurrences(db, occurrences: Iterable[Tuple[str, datetime]],
@@ -429,11 +455,12 @@ def delete_queue_occurrences(db, occurrences: Iterable[Tuple[str, datetime]],
     queue id that is the same message as that time (same_message) is part of
     the message. The "removed" lines that decide it are the stored ones, the
     remembered ones and `removed` (queue id: times, from a page not stored
-    yet). All occurrences of a queue id are decided before any of its rows is
-    deleted, so deleting a listed message's own "removed" never joins the next
-    message to it. Returns (Postfix lines, deliveries) deleted.
+    yet). Each message's span is found before anything is deleted, so deleting
+    a listed message's own "removed" never joins the next message to it, and
+    the rows are deleted by their time (not by ids read before), so a line the
+    ingest commits meanwhile goes too. Returns (Postfix lines, deliveries) deleted.
     """
-    by_queue: Dict[str, list] = {}
+    by_queue: Dict[str, set] = {}
     for q, t in occurrences:
         if q and t is not None:
             by_queue.setdefault(q, set()).add(naive_utc(t))
@@ -447,31 +474,24 @@ def delete_queue_occurrences(db, occurrences: Iterable[Tuple[str, datetime]],
     queue_ids = sorted(by_queue)
     for i in range(0, len(queue_ids), 200):
         part = queue_ids[i:i + 200]
-        spans = {q: (min(by_queue[q]) - QUEUE_WINDOW, max(by_queue[q]) + QUEUE_WINDOW) for q in part}
-        rows = db.query(PostfixLog.id, PostfixLog.queue_id, PostfixLog.time, PostfixLog.program,
-                        PostfixLog.message).filter(or_(*[
-            and_(PostfixLog.queue_id == q, PostfixLog.time >= lo, PostfixLog.time <= hi)
-            for q, (lo, hi) in spans.items()])).all()
-        known = {q: remembered_removed(q) + list((removed or {}).get(q, ())) for q in part}
-        for row in rows:
-            if is_removed(row.program, row.message, row.queue_id):
-                known[row.queue_id].append(row.time)
-        doomed = [row for row in rows
-                  if any(same_message(t, row.time, known[row.queue_id]) for t in by_queue[row.queue_id])]
-        doomed_deliveries = [
-            row.id for row in db.query(MessageCorrelation.id, MessageCorrelation.queue_id, seen_at.label('at')).filter(
-                or_(*[and_(MessageCorrelation.queue_id == q, seen_at >= lo, seen_at <= hi)
-                      for q, (lo, hi) in spans.items()])).all()
-            if any(same_message(t, row.at, known[row.queue_id]) for t in by_queue[row.queue_id])]
-        for row in doomed:
-            if is_removed(row.program, row.message, row.queue_id):
-                remember_removed(row.queue_id, row.time)
-        ids = [row.id for row in doomed]
-        for j in range(0, len(doomed_deliveries), CHUNK):
-            deliveries += db.query(MessageCorrelation).filter(
-                MessageCorrelation.id.in_(doomed_deliveries[j:j + CHUNK])).delete(synchronize_session=False)
-        for j in range(0, len(ids), CHUNK):
-            lines += db.query(PostfixLog).filter(PostfixLog.id.in_(ids[j:j + CHUNK])).delete(synchronize_session=False)
+        stored = stored_ends(db, {q: list(by_queue[q]) for q in part})
+        spans = []
+        for q in part:
+            known = stored.get(q, []) + remembered_removed(q) + list((removed or {}).get(q, ()))
+            for t in by_queue[q]:
+                span = message_span(t, known)
+                spans.append((q, span))
+                # The listed message's own "removed" goes with it: the ingest
+                # still needs to know where it ended
+                for r in known:
+                    if same_message(t, r, known):
+                        remember_removed(q, r)
+        deliveries += db.query(MessageCorrelation).filter(or_(*[
+            and_(MessageCorrelation.queue_id == q, _in_span(seen_at, span)) for q, span in spans
+        ])).delete(synchronize_session=False)
+        lines += db.query(PostfixLog).filter(or_(*[
+            and_(PostfixLog.queue_id == q, _in_span(PostfixLog.time, span)) for q, span in spans
+        ])).delete(synchronize_session=False)
     return lines, deliveries
 
 

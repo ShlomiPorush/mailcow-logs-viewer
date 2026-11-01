@@ -937,6 +937,7 @@ def _store_postfix_page(logs):
             remembered = excluded_addresses.remembered_listed(page_times)
             known_removed = excluded_addresses.stored_ends(
                 db, {q: page_times[q] for q in remembered}) if remembered else {}
+            ends_read = set(remembered)
             for queue_id, times in page_removed.items():
                 known_removed.setdefault(queue_id, []).extend(times)
 
@@ -973,6 +974,13 @@ def _store_postfix_page(logs):
                     if unique_id in seen_postfix or unique_id in page_seen:
                         page_skipped += 1
                         continue
+
+                    if queue_id and queue_id not in ends_read and excluded_addresses.remembered_listed([queue_id]):
+                        # Listed since the page was read (by the Rspamd ingest):
+                        # its stored "removed" lines are needed as well
+                        ends_read.add(queue_id)
+                        for times in excluded_addresses.stored_ends(db, {queue_id: page_times[queue_id]}).values():
+                            known_removed.setdefault(queue_id, []).extend(times)
 
                     if _postfix_entry_listed(parsed, message) or excluded_addresses.queue_was_listed(
                             queue_id, _postfix_entry_time(log_entry), known_removed.get(queue_id, ())):

@@ -51,6 +51,38 @@ def test_a_removed_tells_two_times_apart_by_whole_seconds():
     assert not same_message(t, t + timedelta(days=2), [])
 
 
+def test_the_span_deleted_is_exactly_the_times_of_the_same_message():
+    """Deletion goes by a time span per listed line (message_span); it must
+    hold exactly what same_message() says, also for times between seconds."""
+    from app.services.excluded_addresses import message_span, same_message
+    t = datetime(2026, 10, 20, 9, 0, 5, 300000)
+    for removed in ([], [t - 3 * SECOND], [t], [t + 2 * SECOND], [t - 3 * SECOND, t + 2 * SECOND],
+                    [t.replace(microsecond=0) + timedelta(milliseconds=10)]):
+        lo, hi, before = message_span(t, removed)
+        for ms in range(-6000, 6000, 100):
+            w = t + timedelta(milliseconds=ms)
+            inside = lo <= w <= hi and (before is None or w < before)
+            assert inside == same_message(t, w, removed), (removed, w)
+
+
+def test_forgetting_keeps_where_a_listed_message_ended_while_it_is_remembered():
+    """A listed line seen again keeps its message remembered; where that
+    message ended must stay known as long, or its neighbour would be taken."""
+    from app.services import excluded_addresses as ex
+    queue, t = f'MEM{uuid.uuid4().hex[:8].upper()}', datetime(2026, 10, 20, 9, 0, 0)
+    ex.remember_listed_queue(queue, t)
+    ex.remember_removed(queue, t + SECOND)
+    with ex._listed_queues_lock:
+        ex._removed_queues[queue] = [(r, at - timedelta(days=2)) for r, at in ex._removed_queues[queue]]
+    ex._last_forget = None
+    ex.forget_old_queues(datetime.utcnow())
+    assert ex.remembered_removed(queue) == [t + SECOND]
+    assert not ex.queue_was_listed(queue, t + timedelta(hours=1))
+    with ex._listed_queues_lock:
+        ex._listed_queues.pop(queue, None)
+        ex._removed_queues.pop(queue, None)
+
+
 # ---------- data ----------
 
 def _postgres_available() -> bool:
@@ -228,6 +260,53 @@ def test_the_next_messages_lines_in_the_removed_second_are_treated_as_before(env
     b = _message(queue, removed_at, NORMAL)
     _ingest(a, b)
     assert _stored(queue) == _texts([line for line in b if line[0] > removed_at])
+
+
+def test_a_queue_id_listed_while_a_page_is_read_still_tells_its_messages_apart(env, monkeypatch):
+    """The Rspamd ingest lists a message (B) while the Postfix ingest reads a
+    page of the message before it (A), whose "removed" is stored: A's late
+    line is checked against B with A's "removed", and stored."""
+    from app.services import excluded_addresses
+    queue = _queue()
+    a = _message(queue, A_START, NORMAL)
+    _store(a[:2] + a[3:])
+    env.listed()
+    real = excluded_addresses.remembered_listed
+    calls = []
+
+    def listed_after_the_page_was_read(queue_ids):
+        calls.append(1)
+        if len(calls) == 1:
+            excluded_addresses.remember_listed_queue(queue, B_START + 2 * SECOND)
+            return {}
+        return real(queue_ids)
+    monkeypatch.setattr(excluded_addresses, 'remembered_listed', listed_after_the_page_was_read)
+    _ingest([a[2]])
+    assert _stored(queue) == _texts(a)
+
+
+def test_a_line_committed_while_a_listed_message_is_deleted_goes_with_it(env, monkeypatch):
+    """The Postfix ingest commits a line of the listed message after the
+    deletion read what it needs: it is deleted too, as the time is what counts."""
+    from app.database import get_db_context
+    from app.services import excluded_addresses
+    queue = _queue()
+    a = _message(queue, A_START, LISTED)
+    _store(a[:1] + a[3:])
+    real = excluded_addresses.remembered_removed
+    committed = []
+
+    def a_commit_meanwhile(queue_id):
+        if not committed:
+            committed.append(1)
+            _store(a[1:3])
+        return real(queue_id)
+    monkeypatch.setattr(excluded_addresses, 'remembered_removed', a_commit_meanwhile)
+    env.listed()
+    with get_db_context() as db:
+        excluded_addresses.delete_queue_occurrences(db, [(queue, a[3][0])])
+        db.commit()
+    assert _stored(queue) == []
 
 
 # ---------- the cleanup and the Rspamd ingest ----------
