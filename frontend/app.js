@@ -4143,7 +4143,7 @@ async function loadNetfilterLogs(page = 1) {
         currentPage.netfilter = page;
     } catch (error) {
         console.error('Failed to load Netfilter logs:', error);
-        document.getElementById('netfilter-logs').innerHTML = `<p class="ui-empty ui-text-fail">Failed to load logs: ${escapeHtml(uiSentence(uiErrorText(error)))}${uiRetryButton('loadNetfilterLogs()')}</p>`;
+        document.getElementById('netfilter-logs').innerHTML = `<p class="ui-empty ui-text-fail">Failed to load logs: ${escapeHtml(uiSentence(uiErrorText(error)))}${uiRetryButton(`loadNetfilterLogs(${Number(page) || 1})`)}</p>`;
         const countEl = document.getElementById('security-count');
         if (countEl) countEl.textContent = '';
     }
@@ -6248,8 +6248,8 @@ async function loadStatusExtended() {
     } catch (error) {
         console.error('Failed to load extended status:', error);
         if (!statusQuiet) document.getElementById('status-import').innerHTML = `<p class="ui-empty ui-text-fail">Failed to load: ${escapeHtml(uiSentence(uiErrorText(error)))}${uiRetryButton('loadStatusExtended()')}</p>`;
-        if (!statusQuiet) document.getElementById('status-correlation').innerHTML = `<p class="ui-empty ui-text-fail">Failed to load: ${escapeHtml(uiErrorText(error))}</p>`;
-        if (!statusQuiet) document.getElementById('status-jobs').innerHTML = `<p class="ui-empty ui-text-fail">Failed to load: ${escapeHtml(uiErrorText(error))}</p>`;
+        if (!statusQuiet) document.getElementById('status-correlation').innerHTML = `<p class="ui-empty ui-text-fail">Failed to load: ${escapeHtml(uiSentence(uiErrorText(error)))}${uiRetryButton('loadStatusExtended()')}</p>`;
+        if (!statusQuiet) document.getElementById('status-jobs').innerHTML = `<p class="ui-empty ui-text-fail">Failed to load: ${escapeHtml(uiSentence(uiErrorText(error)))}${uiRetryButton('loadStatusExtended()')}</p>`;
     }
 }
 

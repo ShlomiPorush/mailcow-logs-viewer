@@ -66,17 +66,24 @@ test('Try again after a failed load shows the spinner, not the last error', asyn
 test('a failed load offers Try again where it failed', async () => {
     const w = page();
     w.reply = () => FAIL;
-    for (const [loader, id, again] of [['loadQueue', 'queue-logs', 'loadQueue()'], ['loadStatusContainers', 'status-containers', 'loadStatusContainers()'],
-        ['loadUsersPanel', 'users-panel', 'loadUsersPanel()']]) {
+    // The Users panel is drawn by Settings: here it is put in place first
+    const users = w.document.createElement('div');
+    users.id = 'users-panel';
+    w.document.body.appendChild(users);
+    for (const [loader, id, again] of [['loadQueue()', 'queue-logs', 'loadQueue()'], ['loadStatusContainers()', 'status-containers', 'loadStatusContainers()'],
+        ['loadUsersPanel()', 'users-panel', 'loadUsersPanel()'], ['loadNetfilterLogs(3)', 'netfilter-logs', 'loadNetfilterLogs(3)'],
+        ['loadStatusExtended()', 'status-jobs', 'loadStatusExtended()'], ['loadStatusExtended()', 'status-correlation', 'loadStatusExtended()']]) {
         const box = w.document.getElementById(id);
-        if (!box) continue;
-        await w.eval(`${loader}()`);
+        assert.ok(box, `${id} is on the page`);
+        await w.eval(loader);
         await settle(w);
         assert.ok(box.querySelector(`button[onclick="${again}"]`), `${loader}: Try again calls ${again}`);
     }
 });
 
 test('the spinner waits before it shows, and says so when a load takes long', () => {
-    assert.match(css, /\.ui-loading > \.loading, \.ui-loading > p \{ animation: ui-appear [^;]* \.3s both; \}/);
+    assert.match(css, /\.ui-loading > p \{ animation: ui-appear [^;]* \.3s both; \}/);
+    // The spinner fades in and keeps turning: its own spin is not replaced
+    assert.match(css, /\.ui-loading > \.loading \{ animation: ui-appear [^;,]* \.3s both, spin 1s linear infinite; \}/);
     assert.match(css, /\.ui-loading:has\(> \.loading\)::after \{ content: "This is taking longer than usual\."; animation: ui-appear [^;]* 8s both; \}/);
 });

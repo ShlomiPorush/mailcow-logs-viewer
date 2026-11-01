@@ -854,7 +854,7 @@ function renderSecurityLists() {
         count.classList.toggle('hidden', !n);
     }
     if (fail2banLoadError) {
-        box.innerHTML = '<p class="ui-empty ui-text-fail">mailcow did not answer about Fail2ban, so its lists cannot be shown. The next refresh tries again.</p>';
+        box.innerHTML = `<p class="ui-empty ui-text-fail">mailcow did not answer about Fail2ban, so its lists cannot be shown.${uiRetryButton('loadFail2BanSettings()')}</p>`;
         return;
     }
     if (fail2banActiveBans === null) {
