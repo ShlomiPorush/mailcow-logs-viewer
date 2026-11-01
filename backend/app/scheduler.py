@@ -933,11 +933,12 @@ def _store_postfix_page(logs):
 
             # The "removed" lines that can tell this page's lines apart from a
             # remembered listed message: this page's and the stored ones, for
-            # the queue ids remembered as listed only (usually none)
+            # the queue ids remembered as listed only (usually none). Every
+            # writer of that memory holds this ingest's lock, so it does not
+            # change while the page is read
             remembered = excluded_addresses.remembered_listed(page_times)
             known_removed = excluded_addresses.stored_ends(
                 db, {q: page_times[q] for q in remembered}) if remembered else {}
-            ends_read = set(remembered)
             for queue_id, times in page_removed.items():
                 known_removed.setdefault(queue_id, []).extend(times)
 
@@ -974,13 +975,6 @@ def _store_postfix_page(logs):
                     if unique_id in seen_postfix or unique_id in page_seen:
                         page_skipped += 1
                         continue
-
-                    if queue_id and queue_id not in ends_read and excluded_addresses.remembered_listed([queue_id]):
-                        # Listed since the page was read (by the Rspamd ingest):
-                        # its stored "removed" lines are needed as well
-                        ends_read.add(queue_id)
-                        for times in excluded_addresses.stored_ends(db, {queue_id: page_times[queue_id]}).values():
-                            known_removed.setdefault(queue_id, []).extend(times)
 
                     if _postfix_entry_listed(parsed, message) or excluded_addresses.queue_was_listed(
                             queue_id, _postfix_entry_time(log_entry), known_removed.get(queue_id, ())):
@@ -1274,72 +1268,85 @@ def _store_rspamd_page(logs):
                     continue
 
             add_rows(db, RspamdLog, new_rows, 'Rspamd log entry')
-
-            if blacklisted_message_ids:
-                # The Message-ID only finds candidates: senders choose it, so
-                # an unrelated message can share it. Remove a correlation (and
-                # its queue's Postfix lines) only when that message itself
-                # involves a listed address.
-                candidates = db.query(MessageCorrelation).filter(
-                    MessageCorrelation.message_id.in_(blacklisted_message_ids)
-                ).all()
-                # A queue id names the same message only near its own time and
-                # up to its "removed": Postfix reuses queue ids
-                seen_at = {c.id: c.first_seen or c.created_at for c in candidates}
-                candidate_queues = {c.queue_id for c in candidates if c.queue_id}
-                listed_lines = []
-                ends = {q: excluded_addresses.remembered_removed(q) for q in candidate_queues}
-                if candidate_queues:
-                    for queue_id, time, program, p_sender, p_recipient, p_message in db.query(
-                            PostfixLog.queue_id, PostfixLog.time, PostfixLog.program, PostfixLog.sender,
-                            PostfixLog.recipient, PostfixLog.message,
-                    ).filter(PostfixLog.queue_id.in_(candidate_queues)).all():
-                        if excluded_addresses.postfix_line_listed(p_sender, p_recipient, p_message):
-                            listed_lines.append((queue_id, time))
-                        elif excluded_addresses.is_removed(program, p_message, queue_id):
-                            ends[queue_id].append(time)
-
-                def listed_near(c) -> list:
-                    """The listed lines of the delivery's own message."""
-                    at = seen_at.get(c.id)
-                    if not c.queue_id or at is None:
-                        return []
-                    return [(q, t) for q, t in listed_lines
-                            if q == c.queue_id and excluded_addresses.same_message(t, at, ends[q])]
-
-                correlations_to_delete = [
-                    c for c in candidates
-                    if is_blacklisted(c.sender) or is_blacklisted(c.recipient) or listed_near(c)
-                ]
-
-                deleted_corr = 0
-                if correlations_to_delete:
-                    deleted_corr = db.query(MessageCorrelation).filter(
-                        MessageCorrelation.id.in_([c.id for c in correlations_to_delete])
-                    ).delete(synchronize_session=False)
-
-                # Around the listed line that proves it (or the delivery's own
-                # time when its own address is listed), so the window cannot
-                # reach another message under the same queue id
-                occurrences = []
-                for c in correlations_to_delete:
-                    near = listed_near(c)
-                    if near:
-                        occurrences.extend(near)
-                    elif c.queue_id and seen_at.get(c.id) is not None:
-                        occurrences.append((c.queue_id, seen_at[c.id]))
-                if occurrences:
-                    deleted_postfix, _ = excluded_addresses.delete_queue_occurrences(db, occurrences)
-
-                    if deleted_postfix > 0:
-                        logger.info(f"[BLACKLIST] Deleted {deleted_postfix} Postfix logs linked to blacklisted messages")
-
-                if deleted_corr > 0:
-                    logger.info(f"[BLACKLIST] Deleted {deleted_corr} correlations for blacklisted message IDs")
-
             db.commit()
-            seen_rspamd.update(page_seen)
-        return page_new, page_skipped, page_blacklisted
+
+    if blacklisted_message_ids:
+        # With the Postfix ingest held: a page it is storing is committed
+        # before the deletion reads where each message ends, never between
+        # that read and the delete. Not inside the Rspamd lock: the cleanup
+        # takes the two in the other order
+        with _postfix_ingest_lock, get_db_context() as db:
+            _delete_blacklisted_messages(db, blacklisted_message_ids)
+            db.commit()
+    # Only now: a page whose deletion failed is read again
+    with _rspamd_ingest_lock:
+        seen_rspamd.update(page_seen)
+    return page_new, page_skipped, page_blacklisted
+
+
+def _delete_blacklisted_messages(db, blacklisted_message_ids) -> None:
+    """The deliveries and Postfix lines of messages an Rspamd entry with a
+    listed address names by Message-ID. Runs with the Postfix ingest held."""
+    # The Message-ID only finds candidates: senders choose it, so
+    # an unrelated message can share it. Remove a correlation (and
+    # its queue's Postfix lines) only when that message itself
+    # involves a listed address.
+    candidates = db.query(MessageCorrelation).filter(
+        MessageCorrelation.message_id.in_(blacklisted_message_ids)
+    ).all()
+    # A queue id names the same message only near its own time and
+    # up to its "removed": Postfix reuses queue ids
+    seen_at = {c.id: c.first_seen or c.created_at for c in candidates}
+    candidate_queues = {c.queue_id for c in candidates if c.queue_id}
+    listed_lines = []
+    ends = {q: excluded_addresses.remembered_removed(q) for q in candidate_queues}
+    if candidate_queues:
+        for queue_id, time, program, p_sender, p_recipient, p_message in db.query(
+                PostfixLog.queue_id, PostfixLog.time, PostfixLog.program, PostfixLog.sender,
+                PostfixLog.recipient, PostfixLog.message,
+        ).filter(PostfixLog.queue_id.in_(candidate_queues)).all():
+            if excluded_addresses.postfix_line_listed(p_sender, p_recipient, p_message):
+                listed_lines.append((queue_id, time))
+            elif excluded_addresses.is_removed(program, p_message, queue_id):
+                ends[queue_id].append(time)
+
+    def listed_near(c) -> list:
+        """The listed lines of the delivery's own message."""
+        at = seen_at.get(c.id)
+        if not c.queue_id or at is None:
+            return []
+        return [(q, t) for q, t in listed_lines
+                if q == c.queue_id and excluded_addresses.same_message(t, at, ends[q])]
+
+    correlations_to_delete = [
+        c for c in candidates
+        if is_blacklisted(c.sender) or is_blacklisted(c.recipient) or listed_near(c)
+    ]
+
+    deleted_corr = 0
+    if correlations_to_delete:
+        deleted_corr = db.query(MessageCorrelation).filter(
+            MessageCorrelation.id.in_([c.id for c in correlations_to_delete])
+        ).delete(synchronize_session=False)
+
+    # Around the listed line that proves it (or the delivery's own
+    # time when its own address is listed), so the window cannot
+    # reach another message under the same queue id
+    occurrences = []
+    for c in correlations_to_delete:
+        near = listed_near(c)
+        if near:
+            occurrences.extend(near)
+        elif c.queue_id and seen_at.get(c.id) is not None:
+            occurrences.append((c.queue_id, seen_at[c.id]))
+    if occurrences:
+        deleted_postfix, _ = excluded_addresses.delete_queue_occurrences(db, occurrences)
+
+        if deleted_postfix > 0:
+            logger.info(f"[BLACKLIST] Deleted {deleted_postfix} Postfix logs linked to blacklisted messages")
+
+    if deleted_corr > 0:
+        logger.info(f"[BLACKLIST] Deleted {deleted_corr} correlations for blacklisted message IDs")
 
 
 def _trim_rspamd_cache():

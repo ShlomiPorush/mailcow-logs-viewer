@@ -418,9 +418,15 @@ def forget_old_queues(now: datetime) -> None:
                 _listed_queues[queue_id] = kept
             else:
                 del _listed_queues[queue_id]
-        # Where a listed message ended is kept as long as the message is
+        # Where a listed message ended is kept as long as a listed time it can
+        # tell apart from another message is (within QUEUE_WINDOW of it)
         for queue_id in list(_removed_queues):
-            if queue_id not in _listed_queues:
+            marks = [t for t, _ in _listed_queues.get(queue_id, [])]
+            kept = [(r, at) for r, at in _removed_queues[queue_id]
+                    if any(abs(naive_utc(r) - naive_utc(t)) <= QUEUE_WINDOW for t in marks)]
+            if kept:
+                _removed_queues[queue_id] = kept
+            else:
                 del _removed_queues[queue_id]
 
 
