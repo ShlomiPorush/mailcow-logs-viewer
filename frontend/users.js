@@ -848,7 +848,7 @@ async function deleteUser(userId) {
             : `Delete ${name}? They can still sign in with ${usersProvider()} and then get the access for everyone else (${USERS_ACCESS_LABELS[oauth2.default_access] || oauth2.default_access}). To block them, edit them and turn on Disable sign-in.`;
     // One's own entry: what it means for oneself, in its place
     const self = usersSelfWarning({ kind: 'delete', user });
-    const confirmed = await showConfirmModal({ title: 'Delete user', message: self ? self.message : `${message} This cannot be undone.`,
+    const confirmed = await showConfirmModal({ title: 'Delete user', message: `${self ? self.message : message} This cannot be undone.`,
         confirmText: self ? self.confirmText : 'Delete', isDangerous: true, focusCancel: !!self });
     if (!confirmed) return;
     try {

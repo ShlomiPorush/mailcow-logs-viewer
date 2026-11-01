@@ -1717,7 +1717,7 @@ body { font-family: var(--ui-font); background: var(--ui-bg); color: var(--ui-in
 .ui-menu button { display: block; width: 100%; padding: 7px 10px; border: 0; border-radius: 6px; background: none; color: inherit; font: inherit;
     font-size: var(--ui-fs-sm); text-align: start; cursor: pointer; }
 .ui-menu button:focus-visible { background: color-mix(in srgb, var(--ui-ink) 7%, transparent); outline: 2px solid var(--ui-focus); outline-offset: -2px; }
-@media (hover: hover) { .ui-menu button:hover { background: color-mix(in srgb, var(--ui-ink) 7%, transparent); outline: none; } }
+@media (hover: hover) { .ui-menu button:hover:not(:focus-visible) { background: color-mix(in srgb, var(--ui-ink) 7%, transparent); outline: none; } }
 
 /* ---------- Status: attention list, tabs, one card per area ---------- */
 .ui-list-head .ui-head-actions { margin-inline-start: auto; }
@@ -2793,7 +2793,7 @@ html .markdown-body .markdown-alert-caution .markdown-alert-title { color: var(-
 .ui-fly-item { display: flex; align-items: center; gap: 8px; width: 100%; padding: 7px 10px; border: 0; border-radius: 8px;
     background: none; color: inherit; font: inherit; font-size: 14px; text-align: start; cursor: pointer; }
 .ui-fly-item:focus-visible { background: color-mix(in srgb, var(--ui-ink) 7%, transparent); outline: 2px solid var(--ui-focus); outline-offset: -2px; }
-@media (hover: hover) { .ui-fly-item:hover { background: color-mix(in srgb, var(--ui-ink) 7%, transparent); outline: none; } }
+@media (hover: hover) { .ui-fly-item:hover:not(:focus-visible) { background: color-mix(in srgb, var(--ui-ink) 7%, transparent); outline: none; } }
 .ui-fly-item.is-on { font-weight: 700; }
 .ui-fly-item.is-on::after { content: ""; width: 6px; height: 6px; margin-inline-start: auto; border-radius: 3px; background: currentColor; }
 .ui-fly-item .ui-nav-count { margin-inline-start: auto; }

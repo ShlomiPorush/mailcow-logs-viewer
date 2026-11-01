@@ -136,7 +136,7 @@ test('disabling one\'s own sign-in and deleting oneself ask in their own words',
     p.w.closeUserEditModal(true);
     const deleting = p.w.deleteUser(2);
     await p.tick();
-    assert.deepEqual(p.asked(), { text: 'This is your own account. Deleting it signs you out at once, and you can no longer sign in.', ok: 'Delete my account' });
+    assert.deepEqual(p.asked(), { text: 'This is your own account. Deleting it signs you out at once, and you can no longer sign in. This cannot be undone.', ok: 'Delete my account' });
     await p.answer(true);
     await deleting;
     assert.deepEqual(p.sent.map(s => s.method), ['DELETE']);
@@ -175,7 +175,7 @@ test('deleting one\'s own OAuth2 entry says what the access for everyone else le
     const p = page({ you: { kind: 'oauth2', user_id: 4, via_default: false }, status: { ...ADMIN, user_name: 'lead@example.com' }, defaultAccess: 'viewer' });
     const deleting = p.w.deleteUser(4);
     await p.tick();
-    assert.equal(p.asked().text, 'This is your own entry. Without it you get the access for everyone else (Viewer): you will lose Settings, Users and AI agents, and the actions you can take in Quarantine and Rspamd.');
+    assert.equal(p.asked().text, 'This is your own entry. Without it you get the access for everyone else (Viewer): you will lose Settings, Users and AI agents, and the actions you can take in Quarantine and Rspamd. This cannot be undone.');
     await p.answer(false);
     await deleting;
     assert.equal(p.sent.length, 0);

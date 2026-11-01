@@ -30,3 +30,11 @@ test('menu and flyout items show the ring when the keyboard is on them', () => {
         assert.match(body, /outline: 2px solid var\(--ui-focus\)/, selector);
     }
 });
+
+test('hovering a menu or flyout item does not take the keyboard ring away', () => {
+    // The hover rules come later in the file with outline: none; they must skip a focused item
+    assert.match(css, /\.ui-menu button:hover:not\(:focus-visible\) \{[^}]*outline: none/);
+    assert.match(css, /\.ui-fly-item:hover:not\(:focus-visible\) \{[^}]*outline: none/);
+    assert.doesNotMatch(css, /\.ui-menu button:hover \{/);
+    assert.doesNotMatch(css, /\.ui-fly-item:hover \{/);
+});

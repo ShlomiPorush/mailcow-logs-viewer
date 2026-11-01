@@ -1427,7 +1427,8 @@ function updateRegexWizardPreview() {
         case 'domain': {
             // Anchored, with the @ boundary and optional subdomain labels; @example.com
             // and example.com. are read as example.com, as in Add Suppression
-            const domain = suppressionDomainInput(value);
+            // The wizard covers subdomains already: a leading "*." means the same
+            const domain = suppressionDomainInput(value).replace(/^\*\./, '');
             pattern = `/^.+@(.+\\.)?${escapeRegex(domain)}$/i`;
             explanation = `Blocks: *@${domain} and all subdomains (e.g. *@sub.${domain})`;
             break;
