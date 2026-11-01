@@ -337,6 +337,19 @@ async function uiOnce(key, work, button = null, busyText = '') {
     }
 }
 
+// A load that failed offers to try it again where it failed (call: the loader, as code)
+function uiRetryButton(call) {
+    return ` <button type="button" class="ui-link-row ui-link" onclick="${call}">Try again</button>`;
+}
+
+// A loading area shows its spinner again when a load starts: a failed load put its error there
+function uiLoadingShow(el) {
+    if (!el) return;
+    if (!el.uiSpinner) el.uiSpinner = [...el.childNodes].map(node => node.cloneNode(true));
+    else el.replaceChildren(...el.uiSpinner.map(node => node.cloneNode(true)));
+    el.classList.remove('hidden');
+}
+
 // While saving: both buttons off and Save says so
 function uiSaveBarBusy(id, busy) {
     const bar = document.getElementById(id);

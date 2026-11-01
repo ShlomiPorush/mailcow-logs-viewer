@@ -2903,7 +2903,7 @@ function attentionStatus() {
 function renderAttentionNote(el, status) {
     if (!el) return;
     const html = status.failed
-        ? 'Some checks could not run. <button type="button" class="ui-link-row ui-link" onclick="attentionRetry()">Retry</button>'
+        ? 'Some checks could not run. <button type="button" class="ui-link-row ui-link" onclick="attentionRetry()">Try again</button>'
         : !status.loading && status.total === 0 ? 'Nothing needs attention right now.' : '';
     if (el.dataset.shown !== html) {
         el.innerHTML = html;
@@ -4143,7 +4143,7 @@ async function loadNetfilterLogs(page = 1) {
         currentPage.netfilter = page;
     } catch (error) {
         console.error('Failed to load Netfilter logs:', error);
-        document.getElementById('netfilter-logs').innerHTML = `<p class="ui-empty ui-text-fail">Failed to load logs: ${escapeHtml(uiErrorText(error))}</p>`;
+        document.getElementById('netfilter-logs').innerHTML = `<p class="ui-empty ui-text-fail">Failed to load logs: ${escapeHtml(uiSentence(uiErrorText(error)))}${uiRetryButton('loadNetfilterLogs()')}</p>`;
         const countEl = document.getElementById('security-count');
         if (countEl) countEl.textContent = '';
     }
@@ -4258,7 +4258,7 @@ async function loadQueue() {
         if (!queueTakeTurn(id)) return;
         queueLoading = false;
         console.error('Failed to load queue:', error);
-        document.getElementById('queue-logs').innerHTML = `<p class="ui-empty ui-text-fail">Failed to load queue: ${escapeHtml(uiErrorText(error))}</p>`;
+        document.getElementById('queue-logs').innerHTML = `<p class="ui-empty ui-text-fail">Failed to load queue: ${escapeHtml(uiSentence(uiErrorText(error)))}${uiRetryButton('loadQueue()')}</p>`;
         const countEl = document.getElementById('queue-count');
         if (countEl) countEl.textContent = '';
     }
@@ -4602,7 +4602,7 @@ async function loadQuarantine() {
         // Nothing is shown: the next refresh draws what it gets, even an answer like the last one
         lastDataCache.quarantine = null;
         console.error('Failed to load quarantine:', error);
-        document.getElementById('quarantine-logs').innerHTML = `<p class="ui-empty ui-text-fail">Failed to load quarantine: ${escapeHtml(uiErrorText(error))}</p>`;
+        document.getElementById('quarantine-logs').innerHTML = `<p class="ui-empty ui-text-fail">Failed to load quarantine: ${escapeHtml(uiSentence(uiErrorText(error)))}${uiRetryButton('loadQuarantine()')}</p>`;
     }
 }
 
@@ -5079,7 +5079,7 @@ async function loadQuarantineRules({ quiet = false } = {}) {
     } catch (err) {
         console.error('Failed to load quarantine rules:', err);
         if (quiet && _quarantineRulesCache) return;
-        uiReplaceKeepingFocus(container, `<p class="ui-empty ui-text-fail">Failed to load rules: ${escapeHtml(uiErrorText(err))}</p>`);
+        uiReplaceKeepingFocus(container, `<p class="ui-empty ui-text-fail">Failed to load rules: ${escapeHtml(uiSentence(uiErrorText(err)))}${uiRetryButton('loadQuarantineRules()')}</p>`);
     }
 }
 
@@ -6118,7 +6118,7 @@ async function loadStatusContainers() {
     } catch (error) {
         console.error('Failed to load containers status:', error);
         setStatusKpi('status-kpi-containers', '-');
-        if (!statusQuiet) document.getElementById('status-containers').innerHTML = `<p class="ui-empty ui-panel ui-text-fail">Failed to load containers: ${escapeHtml(uiErrorText(error))}</p>`;
+        if (!statusQuiet) document.getElementById('status-containers').innerHTML = `<p class="ui-empty ui-panel ui-text-fail">Failed to load containers: ${escapeHtml(uiSentence(uiErrorText(error)))}${uiRetryButton('loadStatusContainers()')}</p>`;
     }
 }
 
@@ -6167,7 +6167,7 @@ async function loadStatusSystem() {
         `;
     } catch (error) {
         console.error('Failed to load system info:', error);
-        if (!statusQuiet) document.getElementById('status-system').innerHTML = `<p class="ui-empty ui-text-fail">Failed to load system info: ${escapeHtml(uiErrorText(error))}</p>`;
+        if (!statusQuiet) document.getElementById('status-system').innerHTML = `<p class="ui-empty ui-text-fail">Failed to load system info: ${escapeHtml(uiSentence(uiErrorText(error)))}${uiRetryButton('loadStatusSystem()')}</p>`;
     }
 }
 
@@ -6219,7 +6219,7 @@ async function loadStatusStorage() {
     } catch (error) {
         console.error('Failed to load storage info:', error);
         setStatusKpi('status-kpi-storage', '-');
-        if (!statusQuiet) document.getElementById('status-storage').innerHTML = `<p class="ui-empty ui-text-fail">Failed to load storage info: ${escapeHtml(uiErrorText(error))}</p>`;
+        if (!statusQuiet) document.getElementById('status-storage').innerHTML = `<p class="ui-empty ui-text-fail">Failed to load storage info: ${escapeHtml(uiSentence(uiErrorText(error)))}${uiRetryButton('loadStatusStorage()')}</p>`;
     }
 }
 
@@ -6247,7 +6247,7 @@ async function loadStatusExtended() {
 
     } catch (error) {
         console.error('Failed to load extended status:', error);
-        if (!statusQuiet) document.getElementById('status-import').innerHTML = `<p class="ui-empty ui-text-fail">Failed to load: ${escapeHtml(uiErrorText(error))}</p>`;
+        if (!statusQuiet) document.getElementById('status-import').innerHTML = `<p class="ui-empty ui-text-fail">Failed to load: ${escapeHtml(uiSentence(uiErrorText(error)))}${uiRetryButton('loadStatusExtended()')}</p>`;
         if (!statusQuiet) document.getElementById('status-correlation').innerHTML = `<p class="ui-empty ui-text-fail">Failed to load: ${escapeHtml(uiErrorText(error))}</p>`;
         if (!statusQuiet) document.getElementById('status-jobs').innerHTML = `<p class="ui-empty ui-text-fail">Failed to load: ${escapeHtml(uiErrorText(error))}</p>`;
     }
@@ -6402,7 +6402,7 @@ async function loadBlacklistStatus() {
         renderBlacklistStatus(data);
     } catch (error) {
         console.error('Failed to load blacklist status:', error);
-        if (!statusQuiet) container.innerHTML = `<p class="ui-empty ui-text-fail">Failed to load: ${escapeHtml(uiErrorText(error))}</p>`;
+        if (!statusQuiet) container.innerHTML = `<p class="ui-empty ui-text-fail">Failed to load: ${escapeHtml(uiSentence(uiErrorText(error)))}${uiRetryButton('loadBlacklistStatus()')}</p>`;
     }
 }
 

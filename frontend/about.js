@@ -20,7 +20,7 @@ async function loadAbout() {
         get('/api/status/mailcow-connection'), get('/api/rw-status'), get('/api/health'),
     ]);
     if (!info) {
-        box.innerHTML = '<p class="ui-empty ui-text-fail">Failed to load the app information. Refresh the page to try again.</p>';
+        box.innerHTML = `<p class="ui-empty ui-text-fail">Failed to load the app information.${uiRetryButton('loadAbout()')}</p>`;
         return;
     }
     if (version) versionInfoCache.version_info = version;

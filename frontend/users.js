@@ -37,7 +37,7 @@ async function loadUsersPanel() {
         if (seq !== usersSeq) return;
         console.error('Users error:', e);
         usersFailed = true;
-        uiReplaceKeepingFocus(panel, `<section class="ui-panel ui-set-channels"><p class="ui-empty ui-text-fail">Could not load users: ${escapeHtml(uiErrorText(e))}</p></section>`);
+        uiReplaceKeepingFocus(panel, `<section class="ui-panel ui-set-channels"><p class="ui-empty ui-text-fail">Could not load users: ${escapeHtml(uiSentence(uiErrorText(e)))}${uiRetryButton('loadUsersPanel()')}</p></section>`);
     }
 }
 

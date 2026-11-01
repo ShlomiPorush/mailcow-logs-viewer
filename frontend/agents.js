@@ -43,7 +43,7 @@ async function loadAgentsPanel() {
         renderAgentsPanel();
     } catch (e) {
         console.error('Agents error:', e);
-        panel.innerHTML = `<section class="ui-panel ui-set-channels"><p class="ui-empty ui-text-fail">Could not load agents: ${escapeHtml(uiErrorText(e))}</p></section>`;
+        panel.innerHTML = `<section class="ui-panel ui-set-channels"><p class="ui-empty ui-text-fail">Could not load agents: ${escapeHtml(uiSentence(uiErrorText(e)))}${uiRetryButton('loadAgentsPanel()')}</p></section>`;
     }
 }
 

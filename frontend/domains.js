@@ -37,7 +37,7 @@ async function loadDomainsNow() {
         return false;
     }
 
-    loading.classList.remove('hidden');
+    uiLoadingShow(loading);
     content.classList.add('hidden');
 
     try {

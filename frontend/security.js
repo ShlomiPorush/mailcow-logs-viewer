@@ -82,7 +82,7 @@ async function loadSecurityOverview() {
     } catch (err) {
         console.error('Failed to load security overview:', err);
         const list = document.getElementById('security-list');
-        if (list) list.innerHTML = `<p class="ui-empty ui-text-fail">Could not load Security: ${escapeHtml(uiErrorText(err))}</p>`;
+        if (list) list.innerHTML = `<p class="ui-empty ui-text-fail">Could not load Security: ${escapeHtml(uiSentence(uiErrorText(err)))}${uiRetryButton('loadSecurityOverview()')}</p>`;
     }
 }
 
@@ -712,7 +712,7 @@ function renderSecurityOverview() {
         banned: f2bDown ? 'Bans are unavailable because mailcow did not respond.' : 'No banned IPs match this period and these filters.',
     }[securityFilter];
     const rows = securityFilter === 'history' ? securityHistoryRows()
-        : !page && securityPageError ? `<p class="ui-empty ui-text-fail">Could not load IPs. Reload this page to try again. Details: ${escapeHtml(securityPageError)}</p>`
+        : !page && securityPageError ? `<p class="ui-empty ui-text-fail">Could not load IPs: ${escapeHtml(uiSentence(securityPageError))}${uiRetryButton('loadSecurityAddresses()')}</p>`
         : !page ? '<div class="ui-loading" role="status"><div class="loading"></div><p>Loading...</p></div>'
         : list.map(securityRow).join('') || `<p class="ui-empty">${escapeHtml(empty)}</p>`;
     const footer = securityFilter === 'history' || !page ? ''

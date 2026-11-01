@@ -120,7 +120,7 @@ async function loadMailboxStats() {
     const loading = document.getElementById('mailbox-stats-loading');
     const content = document.getElementById('mailbox-stats-content');
 
-    if (loading) loading.classList.remove('hidden');
+    uiLoadingShow(loading);
     if (content) content.classList.add('hidden');
 
     try {
@@ -167,7 +167,7 @@ async function loadMailboxStats() {
                 <div class="ui-empty">
                     <p class="ui-text-fail">Failed to load mailbox statistics</p>
                     <p>${escapeHtml(uiErrorText(error))}</p>
-                    <button onclick="loadMailboxStats()" class="ui-btn ui-btn-sm">Retry</button>
+                    <button type="button" onclick="loadMailboxStats()" class="ui-btn ui-btn-sm">Try again</button>
                 </div>
             `;
         }
