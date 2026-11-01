@@ -27,12 +27,19 @@ test('on a touch screen the controls and checkboxes are big enough for a finger'
     assert.match(touch, /--ui-ctl-h: 44px/);
     for (const selector of ['.ui-btn-sm', '.ui-chip', '.ui-seg button']) assert.ok(touch.includes(selector), selector);
     assert.match(touch, /\.ui-icon-btn[^{]*\{[^}]*min-width: 44px; min-height: 44px/);
-    assert.match(touch, /input\[type="checkbox"\][^{]*\{[^}]*min-width: 24px; min-height: 24px/);
+    // Controls that set their own height grow too
+    for (const selector of ['.ui-logs-font', '.ui-logs-search', '.ui-logs-date', '.ui-prot-inline .ui-select', '.ui-sort-btn-icon', '.ui-sec-chip button']) {
+        assert.ok(touch.includes(selector), selector);
+    }
+    // A checkbox, but not a drawn switch
+    assert.match(touch, /input\[type="checkbox"\]:not\(:is\(\.ui-set-bool, \.ui-feature\) \.ui-check\)[^{]*\{[^}]*min-width: 24px; min-height: 24px/);
 });
 
 test('on a phone Sign out is in the More sheet, not beside the theme switch', () => {
     assert.match(css, /\.ui-mtop-actions \.ui-utilities > :not\(#theme-toggle\) \{ display: none; \}/);
-    assert.match(html, /id="mobile-logout" class="mobile-menu-item hidden"/);
+    // A ui- class, so its "hidden" wins over the menu item's own display (ui.css .hidden[class*="ui-"])
+    assert.match(html, /id="mobile-logout" class="mobile-menu-item ui-mobile-logout hidden"/);
+    assert.match(css, /\.hidden\[class\*="ui-"\] \{ display: none !important; \}/);
     assert.match(html, /onclick="closeMobileMenu\(\); handleLogout\(\)" id="mobile-logout"/);
 });
 
