@@ -225,8 +225,8 @@ function smtpAbuseWhitelistSavedText() {
 
 // One address per line, or several on a line apart by commas, semicolons or spaces
 function smtpAbuseWhitelistLines(text) {
-    // A quoted local part ("a,b"@example.com) keeps its commas and spaces
-    return text.match(/(?:"[^"]*"|[^\s,;"])+/g) || [];
+    // A quoted local part ("a,b"@example.com, escapes such as \" included) keeps its commas and spaces
+    return text.match(/(?:"(?:[^"\\]|\\.)*"|[^\s,;"])+/g) || [];
 }
 
 // The whitelist counts as one change, however many lines were edited

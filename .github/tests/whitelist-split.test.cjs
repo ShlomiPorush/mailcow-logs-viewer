@@ -23,6 +23,8 @@ test('the whitelist splits on lines, commas, semicolons and spaces, but not insi
     assert.deepEqual(lines('a@example.com, b@example.com'), ['a@example.com', 'b@example.com']);
     assert.deepEqual(lines('a@example.com\nb@example.com;c@example.com d@example.com'), ['a@example.com', 'b@example.com', 'c@example.com', 'd@example.com']);
     assert.deepEqual(lines('"a,b"@example.com\nc@example.com'), ['"a,b"@example.com', 'c@example.com']);
+    // An escaped quote inside the quoted part does not end it
+    assert.deepEqual(lines('"a\\",b"@example.com, c@example.com'), ['"a\\",b"@example.com', 'c@example.com']);
     assert.deepEqual(lines('  \n '), []);
 });
 
