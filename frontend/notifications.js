@@ -211,7 +211,7 @@ function closeNotificationChannelModal(saved = false) {
 // One save at a time: a double click does not add the destination twice
 function saveNotificationChannelOnce(event) {
     event.preventDefault();
-    return uiOnce('notification-channel', () => saveNotificationChannel(event), event.submitter, 'Saving...');
+    return uiOnce(event.submitter || 'notification-channel', () => saveNotificationChannel(event), event.submitter, 'Saving...');
 }
 async function saveNotificationChannel(event) {
     event.preventDefault();

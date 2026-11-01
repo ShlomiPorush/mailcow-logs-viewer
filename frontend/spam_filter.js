@@ -978,7 +978,7 @@ function toggleCreateExpiryField() {
 
 // One add at a time: a double click would add it, then say it is already there
 function createSuppressionOnce(button) {
-    return uiOnce('suppression-add', createSuppression, button, 'Adding...');
+    return uiOnce(button || 'suppression-add', createSuppression, button, 'Adding...');
 }
 async function createSuppression() {
     if (!uiMayAct('outbound')) return;
@@ -1120,7 +1120,7 @@ function extendExpiryBy(days) {
 }
 
 function saveEditSuppressionOnce(id, button) {
-    return uiOnce(`suppression-edit:${id}`, () => saveEditSuppression(id), button, 'Saving...');
+    return uiOnce(button || `suppression-edit:${id}`, () => saveEditSuppression(id), button, 'Saving...');
 }
 async function saveEditSuppression(id) {
     if (!uiMayAct('outbound')) return;

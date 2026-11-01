@@ -5239,7 +5239,7 @@ function closeQuarantineRuleModal(saved = false) {
 
 // One save at a time: a double click does not create the rule twice
 function saveQuarantineRuleOnce(ruleId, button) {
-    return uiOnce('quarantine-rule', () => saveQuarantineRule(ruleId), button, ruleId === null ? 'Creating...' : 'Saving...');
+    return uiOnce(button || 'quarantine-rule', () => saveQuarantineRule(ruleId), button, ruleId === null ? 'Creating...' : 'Saving...');
 }
 async function saveQuarantineRule(ruleId) {
     const name = document.getElementById('qrule-name')?.value?.trim();

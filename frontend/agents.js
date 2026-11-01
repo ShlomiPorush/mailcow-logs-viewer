@@ -275,7 +275,7 @@ function closeAgentEditModal(saved = false) {
 // One save at a time: a second press would answer "changed meanwhile" to the first
 function saveAgentAccessOnce(event, grantId) {
     event.preventDefault();
-    return uiOnce('agent-access', () => saveAgentAccess(event, grantId), event.submitter, 'Saving...');
+    return uiOnce(event.submitter || 'agent-access', () => saveAgentAccess(event, grantId), event.submitter, 'Saving...');
 }
 async function saveAgentAccess(event, grantId) {
     event.preventDefault();

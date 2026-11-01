@@ -399,7 +399,7 @@ function renderRateLimitSendersTable(senders) {
         const resetButton = !group.last_rl_hash ? ''
             : canWrite ? `
                 <button data-acts="mailboxes" type="button"
-                    onclick="event.stopPropagation(); resetRateLimitCounter('${escapeJsArg(group.user)}', '${escapeJsArg(group.last_rl_hash)}')"
+                    onclick="event.stopPropagation(); resetRateLimitCounterOnce('${escapeJsArg(group.user)}', '${escapeJsArg(group.last_rl_hash)}', this)"
                     class="ui-btn ui-btn-sm ui-btn-primary">
                     Reset counter
                 </button>
@@ -1127,7 +1127,7 @@ function closeRateLimitEdit() {
 
 // One save at a time per mailbox or domain
 function saveRateLimitOnce(kind, name, button) {
-    return uiOnce(`rate-limit:${kind}:${name}`, () => saveRateLimit(kind, name), button, 'Saving...');
+    return uiOnce(button || `rate-limit:${kind}:${name}`, () => saveRateLimit(kind, name), button, 'Saving...');
 }
 async function saveRateLimit(kind, name) {
     const valueInput = document.getElementById('rate-limit-value');

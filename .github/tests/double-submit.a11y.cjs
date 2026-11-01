@@ -27,7 +27,7 @@ const STUBS = `
         window.requests.push({ url, method });
         const body = method === 'GET' ? (url.startsWith('/api/quarantine/rules') ? { data: [] } : {}) : { id: 1, status: 'success' };
         const answer = { ok: true, status: 200, headers: { get: () => 'application/json' }, json: async () => body, clone() { return this; } };
-        if (method === 'GET') return Promise.resolve(answer);
+        if (method === 'GET' && !window.holdGets) return Promise.resolve(answer);
         return new Promise(resolve => window.waiting.push(() => resolve(answer)));
     };
     uiMayAct = () => true;
@@ -105,4 +105,24 @@ test('a destination saved twice in a row is added once', async () => {
     w.answerAll();
     await settle(w);
     assert.equal(submit.textContent, 'Save');
+});
+
+test('a save that is done does not hold the next dialog while the list reloads', async () => {
+    const w = page();
+    w.holdGets = true;
+    const create = () => {
+        w.eval('showAddQuarantineRuleModal()');
+        w.document.getElementById('qrule-name').value = 'Newsletter';
+        w.document.getElementById('qrule-match-value').value = 'news@example.com';
+        return [...w.document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Create Rule' && b.isConnected);
+    };
+    create().click();
+    await settle(w);
+    // The rule is saved and its dialog closed; the list's reload is still on its way
+    w.answerAll();
+    await settle(w);
+    assert.equal(posts(w, '/api/quarantine/rules'), 1);
+    create().click();
+    await settle(w);
+    assert.equal(posts(w, '/api/quarantine/rules'), 2);
 });
