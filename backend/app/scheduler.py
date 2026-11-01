@@ -1167,7 +1167,12 @@ def _store_rspamd_page(logs):
     Returns (new, skipped, blacklisted); a refused line counts as new, as in
     _store_postfix_page."""
     logs = _clean_entries(logs)
-    with _rspamd_ingest_lock:
+    # With the Postfix ingest held too (in the cleanup's order): deleting an
+    # excluded message reads where it ends ("removed") and then deletes its
+    # time span, and a Postfix page committed in between could add the
+    # "removed" and the next message's lines to that span, or list a queue
+    # id while the page checks its lines against the list
+    with _postfix_ingest_lock, _rspamd_ingest_lock:
         page_new = 0
         page_skipped = 0
         page_blacklisted = 0
@@ -1268,25 +1273,18 @@ def _store_rspamd_page(logs):
                     continue
 
             add_rows(db, RspamdLog, new_rows, 'Rspamd log entry')
-            db.commit()
 
-    if blacklisted_message_ids:
-        # With the Postfix ingest held: a page it is storing is committed
-        # before the deletion reads where each message ends, never between
-        # that read and the delete. Not inside the Rspamd lock: the cleanup
-        # takes the two in the other order
-        with _postfix_ingest_lock, get_db_context() as db:
-            _delete_blacklisted_messages(db, blacklisted_message_ids)
+            if blacklisted_message_ids:
+                _delete_blacklisted_messages(db, blacklisted_message_ids)
+
             db.commit()
-    # Only now: a page whose deletion failed is read again
-    with _rspamd_ingest_lock:
-        seen_rspamd.update(page_seen)
-    return page_new, page_skipped, page_blacklisted
+            seen_rspamd.update(page_seen)
+        return page_new, page_skipped, page_blacklisted
 
 
 def _delete_blacklisted_messages(db, blacklisted_message_ids) -> None:
-    """The deliveries and Postfix lines of messages an Rspamd entry with a
-    listed address names by Message-ID. Runs with the Postfix ingest held."""
+    """Delete the deliveries and Postfix lines of the messages that an Rspamd
+    entry with a listed address names by Message-ID. Runs with both ingests held."""
     # The Message-ID only finds candidates: senders choose it, so
     # an unrelated message can share it. Remove a correlation (and
     # its queue's Postfix lines) only when that message itself
