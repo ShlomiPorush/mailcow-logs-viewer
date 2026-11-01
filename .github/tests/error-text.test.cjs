@@ -46,6 +46,22 @@ test('a catch-all or a missing reason says what the status means', () => {
     assert.equal(uiHttpErrorText(400, { detail: [] }), 'The server refused the request (HTTP 400)');
 });
 
+test('every catch-all the server words an unexpected error with says nothing to the page', () => {
+    const backend = path.join(__dirname, '../../backend/app');
+    // main.py's global handler and utils.internal_error, outside debug mode
+    const sources = [['main.py', /settings\.debug else "([^"]+)"/], ['utils.py', /settings\.debug else "([^"]+)"/]];
+    for (const [file, pattern] of sources) {
+        const said = fs.readFileSync(path.join(backend, file), 'utf8').match(pattern);
+        assert.ok(said, `the catch-all text of ${file} must be found`);
+        assert.equal(uiHttpErrorText(500, { detail: said[1] }), 'The server hit an error. If it keeps happening, check the app log', file);
+    }
+});
+
+test('a reason becomes a sentence once', () => {
+    assert.equal(context.uiSentence('Could not reach the server. Check the connection'), 'Could not reach the server. Check the connection.');
+    assert.equal(context.uiSentence('You do not have permission for this.'), 'You do not have permission for this.');
+});
+
 test('what a request threw, in words', () => {
     // Chrome, Firefox and Safari word a network failure differently
     assert.equal(uiErrorText(new TypeError('Failed to fetch')), NO_CONNECTION);

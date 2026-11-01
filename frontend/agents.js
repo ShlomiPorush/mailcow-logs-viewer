@@ -290,11 +290,11 @@ async function saveAgentAccess(event, grantId) {
         });
         if (!response.ok) {
             const body = await response.json().catch(() => ({}));
-            const text = typeof body.detail === 'string' ? body.detail : 'Could not save the change. Try again.';
+            const text = uiHttpErrorText(response.status, body);
             if (response.status === 409 || response.status === 404) {
                 // Changed or disconnected meanwhile: show the list as it is now
                 closeAgentEditModal(true);
-                showToast(text, 'error');
+                showToast(`Could not save the change: ${text}`, 'error');
                 loadAgentsPanel();
                 return;
             }
@@ -303,7 +303,7 @@ async function saveAgentAccess(event, grantId) {
         closeAgentEditModal(true);
         showToast('Access changed', 'success');
     } catch (e) {
-        return say('Could not save the change. Check your connection and try again.');
+        return say(`Could not save the change: ${uiErrorText(e)}`);
     }
     loadAgentsPanel();
 }

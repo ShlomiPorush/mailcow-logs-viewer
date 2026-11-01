@@ -1222,7 +1222,7 @@ function settingsPlural(n, one, many) { return n === 1 ? one : many; }
 
 // A failed request in words (uiHttpErrorText), as a sentence: some messages go on after it
 function settingsErrorText(res, body) {
-    return uiHttpErrorText(res.status, body).replace(/[^.!?]$/, '$&.');
+    return uiSentence(uiHttpErrorText(res.status, body));
 }
 
 async function settingsRspamdState() {
@@ -3063,7 +3063,10 @@ async function showGeoIPSetupModal(reloadPage = false) {
         await loadSettings();
     });
     
+    // The step in progress: a request that fails shows its reason there
+    let stepNow = 1;
     const setStepStatus = (step, status, detail) => {
+        stepNow = step;
         const iconEl = document.getElementById(`geoip-step-${step}-icon`);
         const stepEl = document.getElementById(`geoip-step-${step}`);
         const detailEl = document.getElementById(`geoip-step-${step}-detail`);
@@ -3172,6 +3175,7 @@ async function showGeoIPSetupModal(reloadPage = false) {
         
     } catch (err) {
         console.error('GeoIP setup error:', err);
+        setStepStatus(stepNow, 'error', uiErrorText(err));
     }
     
     setupOver();

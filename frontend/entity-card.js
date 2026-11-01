@@ -127,7 +127,7 @@ async function entityCardLoad(seq, kind, value, { keep = false } = {}) {
         const response = await authenticatedFetch(`/api/entities/${kind}?value=${encodeURIComponent(value)}`);
         const body = await response.json().catch(() => null);
         // As a sentence: the server's own text may already end with a full stop
-        if (!response.ok) problem = uiHttpErrorText(response.status, body).replace(/[^.!?]$/, '$&.');
+        if (!response.ok) problem = uiSentence(uiHttpErrorText(response.status, body));
         else data = body;
         // Ban and Allow come with the Read-Write key: asked once more when it is not known to be there
         if (kind === 'ip' && !entityRwAsked && typeof mailcowRwConfigured !== 'undefined' && !mailcowRwConfigured
@@ -623,7 +623,7 @@ async function entityCardCheckRbl() {
     try {
         const response = await authenticatedFetch(`/api/blacklist/check?host=${encodeURIComponent(value)}&force=true`, { method: 'POST' });
         const body = await response.json().catch(() => null);
-        if (!response.ok) problem = uiHttpErrorText(response.status, body).replace(/[^.!?]$/, '$&.');
+        if (!response.ok) problem = uiSentence(uiHttpErrorText(response.status, body));
         else result = body;
     } catch (e) {
         problem = 'The server could not be reached.';

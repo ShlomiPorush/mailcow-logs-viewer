@@ -80,7 +80,7 @@ function dmarcLoading(text) {
 function dmarcFailed(error) {
     const view = dmarcView();
     dmarcShownHtml = null;
-    if (view) view.innerHTML = `<div class="ui-dm-card"><p class="ui-dm-empty">Could not load this: ${escapeHtml(uiErrorText(error))}. <button type="button" class="ui-dm-link" onclick="dmarcReload()">Try again</button></p></div>`;
+    if (view) view.innerHTML = `<div class="ui-dm-card"><p class="ui-dm-empty">Could not load this: ${escapeHtml(uiSentence(uiErrorText(error)))} <button type="button" class="ui-dm-link" onclick="dmarcReload()">Try again</button></p></div>`;
     if (typeof pageRefreshRetry === 'function') pageRefreshRetry('dmarc');
 }
 
@@ -748,7 +748,7 @@ async function openDmarcRecord(kind, domain) {
         dmarcRecordDomain = x;
         content.innerHTML = kind === 'tls' ? dmarcTlsRecord(x) : kind === 'spf' || kind === 'dkim' ? dmarcAuthRecord(x, kind) : dmarcDmarcRecord(x);
     } catch (error) {
-        content.innerHTML = `<p class="ui-dm-empty">Could not read the record: ${escapeHtml(uiErrorText(error))}.</p>`;
+        content.innerHTML = `<p class="ui-dm-empty">Could not read the record: ${escapeHtml(uiSentence(uiErrorText(error)))}</p>`;
     }
 }
 

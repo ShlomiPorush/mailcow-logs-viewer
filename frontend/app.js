@@ -3710,7 +3710,7 @@ async function acknowledgeSecurityAlert(alertId) {
         if (!done.receipt) { showToast('Already dismissed', 'info'); return; }
         offerAlertUndo(done.receipt, 'Alert dismissed', `Undo dismissing ${name}`, area ? [area] : ALERT_AREAS);
     } catch (e) {
-        showToast(`Could not dismiss the alert: ${uiErrorText(e)}.`, 'error');
+        showToast(`Could not dismiss the alert: ${uiSentence(uiErrorText(e))}`, 'error');
     }
 }
 
@@ -3731,7 +3731,7 @@ async function acknowledgeAllSecurityAlerts() {
         const words = `${uiCountLabel(done.acknowledged, 'alert', 'alerts')} dismissed`;
         offerAlertUndo(done.receipt, words, `Undo dismissing ${uiCountLabel(done.acknowledged, 'alert', 'alerts')}`, areas);
     } catch (e) {
-        showToast(`Could not dismiss the alerts: ${uiErrorText(e)}.`, 'error');
+        showToast(`Could not dismiss the alerts: ${uiSentence(uiErrorText(e))}`, 'error');
     }
 }
 
@@ -3776,7 +3776,7 @@ async function undoAlertDismissal(receipt, undoName, areas = ALERT_AREAS) {
         // Nothing back: dismissed again since, or no longer the person's to change
         showToast(back ? `${back} in Needs attention` : 'Nothing to undo: dismissed again, or your access changed', back ? 'success' : 'info');
     } catch (e) {
-        showToast(`Could not undo: ${uiErrorText(e)}.`, 'error', { duration: Infinity, action: { label: 'Retry', ariaLabel: `Retry: ${undoName}`, onAction: () => undoAlertDismissal(receipt, undoName, areas) } });
+        showToast(`Could not undo: ${uiSentence(uiErrorText(e))}`, 'error', { duration: Infinity, action: { label: 'Retry', ariaLabel: `Retry: ${undoName}`, onAction: () => undoAlertDismissal(receipt, undoName, areas) } });
     }
 }
 
@@ -5748,7 +5748,7 @@ async function loadMessages({ quiet = false, rows = 50, toEnd = false, applyIf =
         // A quiet load that failed leaves the list as it was
         if (quiet) return;
         console.error('Failed to load messages:', error);
-        container.innerHTML = `<p class="ui-empty ui-text-fail">Failed to load messages: ${escapeHtml(uiErrorText(error))}. <button type="button" class="ui-link-row ui-link" onclick="loadMessages()">Try again</button></p>`;
+        container.innerHTML = `<p class="ui-empty ui-text-fail">Failed to load messages: ${escapeHtml(uiSentence(uiErrorText(error)))} <button type="button" class="ui-link-row ui-link" onclick="loadMessages()">Try again</button></p>`;
         setMessagesCount(null);
         // Nothing is shown: no next page, and the next refresh draws what it gets
         messagesPaging.page = 1;

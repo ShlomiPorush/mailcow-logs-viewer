@@ -596,7 +596,7 @@ async function setUsersDefault(value) {
         });
         const body = await response.json().catch(() => ({}));
         if (!response.ok) {
-            showToast(typeof body.detail === 'string' ? body.detail : 'Could not change the access. Try again.', 'error');
+            showToast(`Could not change the access: ${uiHttpErrorText(response.status, body)}`, 'error');
             // Changed meanwhile: show it as it is now
             if (response.status === 409) loadUsersPanel();
             return;
@@ -615,7 +615,7 @@ async function setUsersDefault(value) {
         if (latest) showToast(value === 'none' ? 'Only users on the list can sign in now' : 'Access changed', 'success');
         else showToast('Someone else changed this access since. It is shown as it is now.', 'info');
     } catch (e) {
-        showToast('Could not change the access. Check your connection and try again.', 'error');
+        showToast(`Could not change the access: ${uiErrorText(e)}`, 'error');
     }
 }
 
@@ -805,11 +805,11 @@ async function saveUser(event, userId) {
         const response = await authenticatedFetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
         if (!response.ok) {
             const answer = await response.json().catch(() => ({}));
-            const text = typeof answer.detail === 'string' ? answer.detail : 'Could not save the user. Try again.';
+            const text = uiHttpErrorText(response.status, answer);
             if (userId != null && (response.status === 409 || response.status === 404)) {
                 // Changed or deleted meanwhile: show the list as it is now
                 closeUserEditModal(true);
-                showToast(text, 'error');
+                showToast(`Could not save the user: ${text}`, 'error');
                 loadUsersPanel();
                 return;
             }
@@ -819,7 +819,7 @@ async function saveUser(event, userId) {
         closeUserEditModal(true);
         showToast(userId == null ? `${usersName(saved) || 'User'} added` : 'Changes saved', 'success');
     } catch (e) {
-        return say('Could not save the user. Check your connection and try again.');
+        return say(`Could not save the user: ${uiErrorText(e)}`);
     }
     loadUsersPanel();
 }
@@ -846,12 +846,12 @@ async function deleteUser(userId) {
         const response = await authenticatedFetch(`/api/users/${Number(userId)}`, { method: 'DELETE' });
         if (!response.ok && response.status !== 404) {
             const answer = await response.json().catch(() => ({}));
-            showToast(typeof answer.detail === 'string' ? answer.detail : 'Could not delete the user. Try again.', 'error');
+            showToast(`Could not delete the user: ${uiHttpErrorText(response.status, answer)}`, 'error');
         } else {
             showToast(`${name} deleted`, 'success');
         }
     } catch (e) {
-        showToast('Could not delete the user. Check your connection and try again.', 'error');
+        showToast(`Could not delete the user: ${uiErrorText(e)}`, 'error');
     }
     loadUsersPanel();
 }

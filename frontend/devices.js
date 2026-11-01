@@ -66,7 +66,7 @@ async function loadDevices(page, { quiet = false } = {}) {
         // A refresh that failed leaves the list as it was
         if (quiet && devicesShownJson !== null) return;
         devicesShownJson = null;
-        container.innerHTML = `<p class="ui-empty ui-text-fail">Could not load the devices: ${escapeHtml(uiErrorText(error))}. <button type="button" class="ui-link-row ui-link" onclick="loadDevices()">Try again</button></p>`;
+        container.innerHTML = `<p class="ui-empty ui-text-fail">Could not load the devices: ${escapeHtml(uiSentence(uiErrorText(error)))} <button type="button" class="ui-link-row ui-link" onclick="loadDevices()">Try again</button></p>`;
     }
 }
 

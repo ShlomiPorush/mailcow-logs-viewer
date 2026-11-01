@@ -1430,7 +1430,7 @@ function uiApiErrorText(body, fallback) {
 // ("Failed to fetch"), a parser's ("Unexpected token '<'") or a bare status code.
 // The server's own words come first; its catch-all for an unexpected error says
 // nothing, and a proxy's error page in front of the app is not JSON at all.
-const UI_SERVER_SAYS_NOTHING = new Set(['An error occurred', 'Internal Server Error']);
+const UI_SERVER_SAYS_NOTHING = new Set(['An error occurred', 'Internal Server Error', 'Internal server error']);
 function uiHttpErrorText(status, body) {
     const said = uiApiErrorText(body, '');
     if (said && !UI_SERVER_SAYS_NOTHING.has(said)) return said;
@@ -1452,6 +1452,10 @@ function uiErrorText(error) {
     if (error.name === 'TypeError' && /fetch|network|load failed/i.test(error.message || '')) return 'Could not reach the server. Check the connection';
     if (['TypeError', 'ReferenceError', 'RangeError'].includes(error.name)) return 'Something went wrong in the page. Reload it';
     return error.message || 'Something went wrong';
+}
+// Text as a sentence: a full stop unless it already ends with one (the server's words may)
+function uiSentence(text) {
+    return String(text).replace(/[^.!?]$/, '$&.');
 }
 // The body of a response as JSON, or null when it is not JSON (a proxy's error page)
 async function uiReadJson(response) {

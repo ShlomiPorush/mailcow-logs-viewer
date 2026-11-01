@@ -78,7 +78,7 @@ async function loadRspamdMaps() {
         
     } catch (error) {
         console.error('Failed to load Rspamd maps:', error);
-        container.innerHTML = `<p class="ui-empty ui-text-fail">Failed to load maps: ${escapeHtml(uiErrorText(error))}. <button type="button" class="ui-link-row ui-link" onclick="loadRspamdMaps()">Try again</button></p>`;
+        container.innerHTML = `<p class="ui-empty ui-text-fail">Failed to load maps: ${escapeHtml(uiSentence(uiErrorText(error)))} <button type="button" class="ui-link-row ui-link" onclick="loadRspamdMaps()">Try again</button></p>`;
     }
 }
 
@@ -339,7 +339,9 @@ async function validateMapContent(filename) {
             errorsEl.innerHTML = data.errors.map(e => line(e, 'fail')).join('') + warningHtml;
         }
     } catch (error) {
+        // The tag stays short; the message says why
         statusEl.innerHTML = uiTag('Validation failed', 'fail');
+        showToast(`Could not check the map: ${uiErrorText(error)}`, 'error');
     }
 }
 

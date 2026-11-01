@@ -47,7 +47,7 @@ async function openAlertActivity(alertId) {
         renderAlertActivity();
     } catch (error) {
         if (gen !== alertActivityGen || (error && error.name === 'AbortError')) return;
-        content.innerHTML = `<p class="ui-empty">Could not load the activity: ${escapeHtml(uiErrorText(error))}.</p>`;
+        content.innerHTML = `<p class="ui-empty">Could not load the activity: ${escapeHtml(uiSentence(uiErrorText(error)))}</p>`;
     }
 }
 
