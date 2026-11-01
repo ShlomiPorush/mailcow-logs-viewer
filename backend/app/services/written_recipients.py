@@ -21,12 +21,12 @@ import logging
 import re
 from typing import Dict, Iterable, List, Optional
 
-from sqlalchemy import and_, case, cast, exists, func, literal, select, update
+from sqlalchemy import and_, case, cast, exists, func, literal, not_, select, update
 from sqlalchemy.dialects.postgresql import JSONB
 
 from ..correlation import _PF_DELIVERY_RE
 from ..models import MessageCorrelation, PostfixLog, RspamdLog
-from .excluded_addresses import QUEUE_WINDOW
+from .excluded_addresses import QUEUE_WINDOW, separated_sql
 
 logger = logging.getLogger(__name__)
 
@@ -106,8 +106,9 @@ def delivery_lines(db, correlation) -> List:
     queue id then (Postfix reuses queue ids), else the lines linked to it by
     id. A line from before the message was first seen is another message's,
     however close: a delivery comes after Rspamd and Postfix have it (first
-    seen is the Rspamd time or the earliest Postfix time). Postfix logs whole
-    seconds, so the first-seen time counts from its whole second."""
+    seen is the Rspamd time or the earliest Postfix time). So is a line after
+    a "removed" of the queue id (excluded_addresses.separated). Postfix logs
+    whole seconds, so the first-seen time counts from its whole second."""
     at = correlation.first_seen or correlation.created_at
     if at is None:
         return []
@@ -122,7 +123,9 @@ def delivery_lines(db, correlation) -> List:
             seen_at >= at - QUEUE_WINDOW, seen_at <= at + QUEUE_WINDOW).scalar()
         if owners != 1:
             return []
-        return db.query(*columns).filter(PostfixLog.queue_id == correlation.queue_id, near).all()
+        return db.query(*columns).filter(
+            PostfixLog.queue_id == correlation.queue_id, near,
+            not_(separated_sql(correlation.queue_id, literal(at), PostfixLog.time))).all()
     ids = sorted({i for i in (correlation.postfix_log_ids or []) if isinstance(i, int)})
     if not ids:
         return []

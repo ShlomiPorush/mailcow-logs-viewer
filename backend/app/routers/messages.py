@@ -814,9 +814,12 @@ def get_message_full_details(
             if msg_key not in seen_messages:
                 seen_messages.add(msg_key)
                 deduplicated_postfix_logs.append(log)
-        if excluded_addresses.delivery_hidden(correlation, deduplicated_postfix_logs):
+        # Hidden or not is decided on every line of the queue id, as the lists decide it
+        queue_lines = excluded_addresses.queue_lines(db, correlation.queue_id)
+        if excluded_addresses.delivery_hidden(
+                correlation, deduplicated_postfix_logs if queue_lines is None else queue_lines):
             raise HTTPException(status_code=404, detail="Message not found")
-        postfix_logs = excluded_addresses.visible_postfix_lines(deduplicated_postfix_logs)
+        postfix_logs = excluded_addresses.visible_postfix_lines(deduplicated_postfix_logs, queue_lines)
         if not correlation.queue_id and postfix_logs and excluded_addresses.listed():
             # Lines linked by id are not all of their queue occurrence: which of them
             # are visible is asked of the database, as the Messages list asks it, so
