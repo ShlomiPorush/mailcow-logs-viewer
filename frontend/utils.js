@@ -339,7 +339,12 @@ async function uiOnce(key, work, button = null, busyText = '') {
 
 // A load that failed offers to try it again where it failed (call: the loader, as code)
 function uiRetryButton(call) {
-    return ` <button type="button" class="ui-link-row ui-link" onclick="${call}">Try again</button>`;
+    return ` <button type="button" class="ui-link-row ui-link" onclick="uiRetrying(this); ${call}">Try again</button>`;
+}
+// Try again pressed: its failure note becomes the spinner while the load runs again
+function uiRetrying(button) {
+    const note = button.closest('p');
+    if (note) note.outerHTML = '<div class="ui-loading" role="status"><div class="loading"></div><p>Loading...</p></div>';
 }
 
 // A loading area shows its spinner again when a load starts: a failed load put its error there

@@ -75,9 +75,17 @@ test('a failed load offers Try again where it failed', async () => {
         ['loadStatusExtended()', 'status-jobs', 'loadStatusExtended()'], ['loadStatusExtended()', 'status-correlation', 'loadStatusExtended()']]) {
         const box = w.document.getElementById(id);
         assert.ok(box, `${id} is on the page`);
+        w.reply = () => FAIL;
         await w.eval(loader);
         await settle(w);
-        assert.ok(box.querySelector(`button[onclick="${again}"]`), `${loader}: Try again calls ${again}`);
+        const button = box.querySelector(`button[onclick="uiRetrying(this); ${again}"]`);
+        assert.ok(button, `${loader}: Try again calls ${again}`);
+        // Pressed, with the answer still on its way: the spinner, not the error
+        w.reply = () => new Promise(() => {});
+        button.click();
+        await settle(w);
+        assert.ok(box.querySelector('.loading'), `${loader}: Try again shows the spinner`);
+        assert.doesNotMatch(box.textContent, /did not answer/, `${loader}: the error is gone`);
     }
 });
 
