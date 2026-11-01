@@ -804,3 +804,22 @@ def test_the_postfix_list_describes_the_message_the_filter_found(env):
     assert [row['sender'] for row in by_sender] == [SENDER_A]
     latest = client.get('/api/logs/postfix', params={'queue_id': queue}).json()['data']
     assert [row['sender'] for row in latest] == [SENDER_B]
+
+
+# ---------- review round 3 ----------
+
+def test_creation_and_completion_never_link_lines_at_the_same_time(monkeypatch):
+    """Each job checks the other correlations of a queue id before it links
+    lines; two jobs doing it at once could both link the same lines."""
+    from app import scheduler
+    from app.services import correlation_jobs
+
+    held = []
+    monkeypatch.setattr(correlation_jobs, 'run_correlation',
+                        lambda **kwargs: held.append(scheduler._correlation_link_lock.locked()))
+    monkeypatch.setattr(correlation_jobs, 'complete_incomplete_correlations',
+                        lambda **kwargs: held.append(scheduler._correlation_link_lock.locked()))
+    scheduler._run_correlation_sync()
+    scheduler._complete_incomplete_correlations_sync()
+    assert held == [True, True]
+    assert not scheduler._correlation_link_lock.locked()

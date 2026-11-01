@@ -638,6 +638,11 @@ seen_rspamd: Set[str] = set()
 _rspamd_ingest_lock = threading.Lock()
 seen_netfilter: Set[str] = set()
 _netfilter_ingest_lock = threading.Lock()
+# Held while a job links a message to its queue id lines (creation and
+# completion). Postfix reuses queue ids: which lines are a message's is
+# checked against the other correlations of the queue id, and two jobs
+# doing that at once could both link the same lines
+_correlation_link_lock = threading.Lock()
 
 # Resume offsets: when max pages is hit, next cycle continues from here
 _resume_offset: Dict[str, int] = {
@@ -1714,10 +1719,11 @@ async def run_correlation():
 
 
 def _run_correlation_sync():
-    return correlation_jobs.run_correlation(
-        get_db_context=get_db_context, is_blacklisted=is_blacklisted,
-        correlate=correlate_single_message,
-    )
+    with _correlation_link_lock:
+        return correlation_jobs.run_correlation(
+            get_db_context=get_db_context, is_blacklisted=is_blacklisted,
+            correlate=correlate_single_message,
+        )
 
 
 def correlate_single_message(db: Session, rspamd_log: RspamdLog) -> Optional[MessageCorrelation]:
@@ -1732,10 +1738,11 @@ async def complete_incomplete_correlations():
 
 
 def _complete_incomplete_correlations_sync():
-    return correlation_jobs.complete_incomplete_correlations(
-        get_db_context=get_db_context, update_job_status=update_job_status,
-        max_age_minutes=settings.max_correlation_age_minutes, clock=datetime,
-    )
+    with _correlation_link_lock:
+        return correlation_jobs.complete_incomplete_correlations(
+            get_db_context=get_db_context, update_job_status=update_job_status,
+            max_age_minutes=settings.max_correlation_age_minutes, clock=datetime,
+        )
 
 
 async def expire_old_correlations():
