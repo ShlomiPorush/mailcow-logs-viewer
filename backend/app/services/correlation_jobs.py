@@ -21,7 +21,8 @@ from ..correlation import (
     identified_by_message_id,
     naive_utc,
     nearest_queue_chain,
-    occurrence_for,
+    owners_of_queue,
+    own_occurrence,
     queue_occurrences,
     settle_queue,
     split_queue_occurrences,
@@ -130,7 +131,7 @@ def correlate_single_message(db: Session, rspamd_log: RspamdLog, *, clock) -> Op
             # Message-ID (Postfix only logs it once per queue id), of this
             # message only: Postfix reuses queue ids, and another message's
             # lines would lend this one their time, status and lines
-            occurrence = occurrence_for(queue_occurrences(db, queue_id), message_id, near=rspamd_log.time)
+            occurrence = own_occurrence(db, queue_id, message_id, near=rspamd_log.time)
             if occurrence is None:
                 logger.warning(f"Queue {queue_id} holds Message-ID {message_id[:40]}... more than once - not linked")
                 continue
@@ -295,8 +296,8 @@ def complete_incomplete_correlations(*, get_db_context, update_job_status, max_a
 
                     # This message's lines of the queue id, not those of
                     # another message that used the id before or after it
-                    occurrence = occurrence_for(
-                        queue_occurrences(db, queue_id), correlation.message_id, near=correlation.first_seen)
+                    occurrence = own_occurrence(
+                        db, queue_id, correlation.message_id, near=correlation.first_seen)
                     if occurrence is None:
                         continue
                     all_postfix = occurrence.lines
@@ -427,7 +428,8 @@ def recompute_correlation_from_postfix(db: Session, correlation: MessageCorrelat
 
     if occurrences is None:
         occurrences = queue_occurrences(db, correlation.queue_id)
-    own = occurrence_for(occurrences, correlation.message_id, near=correlation.first_seen)
+    own = own_occurrence(db, correlation.queue_id, correlation.message_id,
+                         near=correlation.first_seen, occurrences=occurrences)
     if own is None:
         return False
 
@@ -551,16 +553,18 @@ def refresh_correlations_for_queue_ids(db: Session, queue_ids, *, recompute, clo
 
             repaired = settle_queue(db, correlations, occurrences, clock.now(timezone.utc))
             updated += len(repaired)
+            owned = owners_of_queue(correlations, occurrences)
 
             for correlation in correlations:
                 if correlation in repaired:
                     continue
-                occurrence = occurrence_for(occurrences, correlation.message_id, near=correlation.first_seen)
+                occurrence = owned.get(correlation.id)
                 identified = identified_by_message_id(occurrence, correlation.message_id)
 
-                # Which message the lines are cannot be told: guessing would
+                # Which message the lines are cannot be told (or another
+                # correlation's Message-ID is in them too): guessing would
                 # rewrite an unrelated message's status
-                if occurrence is None or (len(correlations) > 1 and not identified):
+                if occurrence is None:
                     skipped += 1
                     logger.warning(
                         f"[STATUS] Queue {queue_id} maps to {len(correlations)} correlation(s) and "

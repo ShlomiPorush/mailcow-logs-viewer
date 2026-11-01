@@ -25,21 +25,16 @@ The rules:
 import re
 from typing import Dict, Iterable, List, Optional, Tuple
 
-from sqlalchemy import and_, case, func, literal_column, select
+from sqlalchemy import and_, select
 
-from ..correlation import _PF_ADDR
-from ..models import MessageCorrelation, PostfixLog
+from ..correlation import _PF_ADDR, occurrence_for, split_queue_occurrences
+from ..models import PostfixLog
 from . import excluded_addresses, written_recipients
 
 # The written address of a delivery line, read only from the fixed start of
 # the line (an address or a reply cannot supply it), as correlation.py parses
 # it and as mdLineAddress() in message-details.js reads it
 _ORIG_TO_RE = re.compile(r'^[0-9A-F]+: to=<' + _PF_ADDR + r'>, orig_to=<(' + _PF_ADDR + r')>, ')
-
-# Contains every line _ORIG_TO_RE can match ("_" is a LIKE wildcard, so wider
-# still). A literal, not a parameter: the query groups by the expression, and
-# PostgreSQL only matches it to the selected one when both read the same
-_MAY_HAVE_ORIG_TO = literal_column("'%orig_to=<%'")
 
 
 def address_key(address) -> str:
@@ -136,26 +131,19 @@ def legs_recipients(db, legs, rspamd_logs: Optional[Dict[int, object]] = None) -
 
 def page_deliveries(db, legs) -> Dict[str, List[Tuple[str, str]]]:
     """(delivered to, written address) of the visible Postfix lines of each leg,
-    by correlation key: the lines of its queue id, else (no queue id, or one
-    another delivery has too) the lines linked to it.
+    by correlation key: the lines of its own message of its queue id, as the
+    message details show them, else the lines linked to it.
 
-    One grouped query for every leg with a queue id: a line without orig_to
-    counts once per address, a line with one once per text. A second query
-    only for legs linked to their lines by id alone. Never one per leg."""
+    One query for every leg with a queue id: Postfix reuses queue ids, so
+    the lines of each queue id are cut into messages
+    (correlation.split_queue_occurrences) and each leg counts its own. A
+    second query only for legs linked to their lines by id alone. Never one
+    per leg."""
     found = {leg.correlation_key: [] for leg in legs}
     by_queue, by_line = {}, {}
-    # A queue id that more than one delivery has was used by more than one
-    # message (Postfix reuses them): each of those legs counts the lines
-    # linked to it, its own message's
-    queues = list({leg.queue_id for leg in legs if leg.queue_id})
-    shared = set()
-    if queues:
-        shared = {queue_id for (queue_id,) in db.query(MessageCorrelation.queue_id).filter(
-            MessageCorrelation.queue_id.in_(queues)
-        ).group_by(MessageCorrelation.queue_id).having(func.count(MessageCorrelation.id) > 1).all()}
     for leg in legs:
-        if leg.queue_id and leg.queue_id not in shared:
-            by_queue.setdefault(leg.queue_id, []).append(leg.correlation_key)
+        if leg.queue_id:
+            by_queue.setdefault(leg.queue_id, []).append(leg)
         elif isinstance(leg.postfix_log_ids, list):
             for line_id in {i for i in leg.postfix_log_ids if isinstance(i, int)}:
                 by_line.setdefault(line_id, []).append(leg.correlation_key)
@@ -164,14 +152,20 @@ def page_deliveries(db, legs) -> Dict[str, List[Tuple[str, str]]]:
     # only (postfix_line_visible_among), never against the whole table
     has_recipient = and_(PostfixLog.recipient.isnot(None), PostfixLog.recipient != '')
     if by_queue:
-        aliased = case((PostfixLog.message.like(_MAY_HAVE_ORIG_TO), PostfixLog.message), else_=None)
-        rows = db.query(PostfixLog.queue_id, PostfixLog.recipient, aliased).filter(
-            PostfixLog.queue_id.in_(list(by_queue)), has_recipient,
-            excluded_addresses.postfix_line_visible_among(list(by_queue))
-        ).group_by(PostfixLog.queue_id, PostfixLog.recipient, aliased).all()
-        for queue_id, recipient, message in rows:
-            for key in by_queue[queue_id]:
-                found[key].append((recipient, written_address(recipient, message)))
+        lines = {}
+        for line in db.query(PostfixLog.id, PostfixLog.time, PostfixLog.program, PostfixLog.message,
+                             PostfixLog.queue_id, PostfixLog.message_id, PostfixLog.recipient).filter(
+                PostfixLog.queue_id.in_(list(by_queue)),
+                excluded_addresses.postfix_line_visible_among(list(by_queue))).all():
+            lines.setdefault(line.queue_id, []).append(line)
+        for queue_id, queue_legs in by_queue.items():
+            occurrences = split_queue_occurrences(lines.get(queue_id, []))
+            for leg in queue_legs:
+                occurrence = occurrence_for(occurrences, leg.message_id, near=leg.first_seen, strict=False)
+                for line in (occurrence.shown_lines() if occurrence else []):
+                    if line.recipient:
+                        found[leg.correlation_key].append(
+                            (line.recipient, written_address(line.recipient, line.message)))
     if by_line:
         line_ids = list(by_line)
         rows = db.query(PostfixLog.id, PostfixLog.recipient, PostfixLog.message).filter(

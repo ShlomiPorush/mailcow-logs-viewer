@@ -299,8 +299,9 @@ def settle_queue(load_rspamd, correlations, occurrences, now):
 # ── The repair ────────────────────────────────────────────────────────────
 
 # Queue ids whose lines show more than one message: more than one opener,
-# more than one Message-ID, or a receipt line in a later second than a
-# delivery or "removed" line. Plus the queue ids more than one correlation has.
+# more than one Message-ID, a receipt line in a later second than a delivery
+# or "removed" line, or any line in a later second than a "removed" line.
+# Plus the queue ids more than one correlation has.
 _PROGRAM = "regexp_replace(COALESCE(program, ''), '^.*/', '')"
 CANDIDATES = f"""
 SELECT queue_id FROM (
@@ -308,19 +309,23 @@ SELECT queue_id FROM (
            count(*) FILTER (WHERE opener) AS openers,
            count(DISTINCT message_id) AS message_ids,
            max(second) FILTER (WHERE receipt) AS last_receipt,
-           min(second) FILTER (WHERE NOT receipt) AS first_delivery
+           min(second) FILTER (WHERE NOT receipt) AS first_delivery,
+           min(second) FILTER (WHERE ended) AS first_end,
+           max(second) AS last_line
     FROM (
         SELECT queue_id, message_id, date_trunc('second', time) AS second,
                {_PROGRAM} IN ('smtpd', 'qmqpd', 'pickup', 'cleanup') AS receipt,
                ({_PROGRAM} IN ('smtpd', 'qmqpd') AND starts_with(COALESCE(message, ''), queue_id || ': client='))
                OR ({_PROGRAM} = 'pickup' AND starts_with(COALESCE(message, ''), queue_id || ': uid='))
-               AS opener
+               AS opener,
+               {_PROGRAM} IN ('qmgr', 'postsuper') AND starts_with(COALESCE(message, ''), queue_id || ': removed')
+               AS ended
         FROM postfix_logs
         WHERE queue_id IS NOT NULL AND queue_id <> '' AND time IS NOT NULL
     ) lines
     GROUP BY queue_id
 ) queues
-WHERE openers > 1 OR message_ids > 1 OR last_receipt > first_delivery
+WHERE openers > 1 OR message_ids > 1 OR last_receipt > first_delivery OR last_line > first_end
 UNION
 SELECT queue_id FROM message_correlations
 WHERE queue_id IS NOT NULL AND queue_id <> ''

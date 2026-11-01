@@ -598,3 +598,114 @@ def test_the_upgrade_leaves_one_message_queue_ids_alone(env):
 
     row = _correlation(key)
     assert (row.first_seen, row.final_status, row.postfix_log_ids) == (T0 - timedelta(seconds=1), 'delivered', ids)
+
+
+# ---------- review round 1 ----------
+
+def test_a_delivery_after_deferrals_is_delivered_whatever_order_the_lines_are_stored_in(env):
+    """mailcow returns the log newest first, so the sent line is often stored
+    before the deferral it followed."""
+    queue = _queue()
+    msgid = _msgid('a')
+    _store([_line(queue, T0 + timedelta(hours=1), 'sent', rcpt=RCPT_A),
+            _line(queue, T0 + timedelta(hours=1), 'removed')])
+    _store([_line(queue, T0, 'client'), _line(queue, T0, 'msgid', msgid=msgid),
+            _line(queue, T0 + timedelta(seconds=1), 'deferred', rcpt=RCPT_A)][::-1])
+    key = _correlate(_rspamd(msgid, T0, SENDER_A, RCPT_A))
+    assert _correlation(key).final_status == 'delivered'
+
+
+def test_lines_that_do_not_yet_tell_two_messages_apart_are_given_to_neither(env):
+    """Both Message-IDs are in one stretch of lines until a line between them
+    arrives: a bounce then is not given to either message."""
+    from app.database import get_db_context
+    from app.models import MessageCorrelation
+
+    queue = _queue()
+    msgid_a, msgid_b = _msgid('a'), _msgid('b')
+    a_ids = _store([_line(queue, T0, 'msgid', msgid=msgid_a)])
+    b_ids = _store([_line(queue, T0 + timedelta(seconds=10), 'msgid', msgid=msgid_b)])
+    keys = uuid.uuid4().hex, uuid.uuid4().hex
+    with get_db_context() as db:
+        for key, msgid, ids, when in ((keys[0], msgid_a, a_ids, T0), (keys[1], msgid_b, b_ids, T0 + timedelta(seconds=10))):
+            db.add(MessageCorrelation(correlation_key=key, message_id=msgid, queue_id=queue, is_complete=True,
+                                      postfix_log_ids=ids, first_seen=when, last_seen=when,
+                                      created_at=datetime.utcnow()))
+        db.commit()
+
+    _page([_line(queue, T0 + timedelta(seconds=11), 'bounced', rcpt=RCPT_B)])
+
+    a, b = _correlation(keys[0]), _correlation(keys[1])
+    assert (a.final_status, a.postfix_log_ids) == (None, a_ids)
+    assert (b.final_status, b.postfix_log_ids) == (None, b_ids)
+
+
+def test_the_recipient_count_reads_the_messages_own_current_lines(env):
+    """A later message on the queue id without a correlation of its own (a
+    server notice) is not counted; a delivery line of this message stored
+    after its status was final is."""
+    from app.database import get_db_context
+    from app.models import MessageCorrelation
+    from app.services.message_recipients import page_deliveries
+
+    queue = _queue()
+    msgid = _msgid('a')
+    _store([_line(queue, T0, 'client'), _line(queue, T0, 'msgid', msgid=msgid),
+            _line(queue, T0 + timedelta(seconds=1), 'sent', rcpt=RCPT_A)])
+    key = _correlate(_rspamd(msgid, T0, SENDER_A, RCPT_A))
+    _store([_line(queue, T0 + timedelta(seconds=2), 'sent', rcpt='three@example.test'),
+            _line(queue, T0 + timedelta(seconds=2), 'removed'),
+            _line(queue, T0 + timedelta(hours=2), 'msgid', msgid='notice@example.test'),
+            _line(queue, T0 + timedelta(hours=2, seconds=1), 'sent', rcpt=RCPT_B)])
+    with get_db_context() as db:
+        leg = db.query(MessageCorrelation).filter(MessageCorrelation.correlation_key == key).one()
+        found = page_deliveries(db, [leg])
+    assert {to for to, _ in found[key]} == {RCPT_A, 'three@example.test'}
+
+
+def test_the_upgrade_finds_a_line_stored_after_a_removed_message(env):
+    """The only sign of the next message is its bounce after an admin's
+    postsuper -d: one opener, one Message-ID, one correlation."""
+    from app.database import get_db_context
+    from app.models import MessageCorrelation
+
+    queue = _queue()
+    msgid = _msgid('a')
+    own = _store([_line(queue, T0, 'client'), _line(queue, T0, 'msgid', msgid=msgid),
+                  _line(queue, T0 + timedelta(seconds=1), 'deferred', rcpt=RCPT_A),
+                  _line(queue, T0 + timedelta(hours=1), 'postsuper')])
+    late = _store([_line(queue, T0 + timedelta(days=1), 'bounced', rcpt=RCPT_B)])
+    key = uuid.uuid4().hex
+    with get_db_context() as db:
+        db.add(MessageCorrelation(correlation_key=key, message_id=msgid, queue_id=queue,
+                                  final_status='bounced', is_complete=True, postfix_log_ids=own + late,
+                                  first_seen=T0, last_seen=T0))
+        db.commit()
+
+    _repair()
+
+    row = _correlation(key)
+    assert (row.final_status, set(row.postfix_log_ids)) == ('deferred', set(own))
+
+
+def test_the_older_line_by_line_path_does_not_give_a_line_to_another_message(env):
+    from app.correlation import correlate_postfix_log
+    from app.database import get_db_context
+    from app.models import MessageCorrelation, PostfixLog
+
+    queue = _queue()
+    msgid = _msgid('a')
+    ids = _store([_line(queue, T0, 'client'), _line(queue, T0, 'msgid', msgid=msgid),
+                  _line(queue, T0 + timedelta(seconds=1), 'deferred', rcpt=RCPT_A),
+                  _line(queue, T0 + timedelta(hours=1), 'postsuper')])
+    late = _store([_line(queue, T0 + timedelta(days=1), 'bounced', rcpt=RCPT_B)])
+    key = uuid.uuid4().hex
+    with get_db_context() as db:
+        db.add(MessageCorrelation(correlation_key=key, message_id=msgid, queue_id=queue,
+                                  final_status='deferred', is_complete=True, postfix_log_ids=ids,
+                                  first_seen=T0, last_seen=T0))
+        db.commit()
+        correlate_postfix_log(db, db.get(PostfixLog, late[0]))
+
+    row = _correlation(key)
+    assert (row.final_status, set(row.postfix_log_ids)) == ('deferred', set(ids))
