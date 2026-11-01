@@ -28,7 +28,7 @@ test('on a touch screen the controls and checkboxes are big enough for a finger'
     for (const selector of ['.ui-btn-sm', '.ui-chip', '.ui-seg button']) assert.ok(touch.includes(selector), selector);
     assert.match(touch, /\.ui-icon-btn[^{]*\{[^}]*min-width: 44px; min-height: 44px/);
     // Controls that set their own height grow too
-    for (const selector of ['.ui-logs-font', '.ui-logs-search', '.ui-logs-date', '.ui-prot-inline .ui-select', '.ui-sort-btn-icon', '.ui-sec-chip button']) {
+    for (const selector of ['.ui-btn, .ui-input, .ui-select', '.ui-logs-font', '.ui-logs-search', '.ui-logs-date', '.ui-sort-btn-icon', '.ui-sec-chip button']) {
         assert.ok(touch.includes(selector), selector);
     }
     // A checkbox, but not a drawn switch
