@@ -78,6 +78,12 @@ def test_forgetting_keeps_where_a_listed_message_ended_while_it_is_remembered():
     ex.forget_old_queues(datetime.utcnow())
     assert ex.remembered_removed(queue) == [t + SECOND]
     assert not ex.queue_was_listed(queue, t + timedelta(hours=1))
+    # A "removed" no remembered listed time is within a day of is not kept:
+    # the memory of a queue id listed again and again does not grow
+    ex.remember_removed(queue, t - timedelta(days=3))
+    ex._last_forget = None
+    ex.forget_old_queues(datetime.utcnow())
+    assert ex.remembered_removed(queue) == [t + SECOND]
     with ex._listed_queues_lock:
         ex._listed_queues.pop(queue, None)
         ex._removed_queues.pop(queue, None)
@@ -262,27 +268,31 @@ def test_the_next_messages_lines_in_the_removed_second_are_treated_as_before(env
     assert _stored(queue) == _texts([line for line in b if line[0] > removed_at])
 
 
-def test_a_queue_id_listed_while_a_page_is_read_still_tells_its_messages_apart(env, monkeypatch):
-    """The Rspamd ingest lists a message (B) while the Postfix ingest reads a
-    page of the message before it (A), whose "removed" is stored: A's late
-    line is checked against B with A's "removed", and stored."""
-    from app.services import excluded_addresses
+def test_the_rspamd_ingest_deletes_only_between_postfix_pages(env):
+    """The Rspamd ingest lists a message while a Postfix page is being stored:
+    its deletion waits for the page, so it never reads where a message ends
+    before the page commits the "removed" that ends it (the next message
+    would be deleted), and the page never reads the memory half way through."""
+    import threading
+    from app import scheduler
     queue = _queue()
-    a = _message(queue, A_START, NORMAL)
-    _store(a[:2] + a[3:])
+    _store(_message(queue, A_START, LISTED))
+    _correlation(queue, A_START, LISTED)
     env.listed()
-    real = excluded_addresses.remembered_listed
-    calls = []
-
-    def listed_after_the_page_was_read(queue_ids):
-        calls.append(1)
-        if len(calls) == 1:
-            excluded_addresses.remember_listed_queue(queue, B_START + 2 * SECOND)
-            return {}
-        return real(queue_ids)
-    monkeypatch.setattr(excluded_addresses, 'remembered_listed', listed_after_the_page_was_read)
-    _ingest([a[2]])
-    assert _stored(queue) == _texts(a)
+    entry = {'unix_time': int(A_START.replace(tzinfo=timezone.utc).timestamp()),
+             'message-id': f'{queue}.{A_START:%H%M%S}@{MARKER}', 'sender_smtp': SENDER, 'rcpt_smtp': [LISTED],
+             'action': 'no action', 'score': 0.0, 'required_score': 15.0, 'symbols': {}}
+    scheduler._postfix_ingest_lock.acquire()
+    try:
+        worker = threading.Thread(target=scheduler._store_rspamd_page, args=([entry],))
+        worker.start()
+        worker.join(0.5)
+        assert worker.is_alive(), 'the deletion did not wait for the Postfix page'
+        assert _keys(), 'deleted while the Postfix page was being stored'
+    finally:
+        scheduler._postfix_ingest_lock.release()
+    worker.join(60)
+    assert _keys() == set() and _stored(queue) == []
 
 
 def test_a_line_committed_while_a_listed_message_is_deleted_goes_with_it(env, monkeypatch):
