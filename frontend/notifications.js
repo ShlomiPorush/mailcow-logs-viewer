@@ -144,7 +144,7 @@ function renderNotificationChannelModal() {
     const { backdrop: modal } = uiDialog({
         id: 'notification-channel-modal', title: isNew ? 'Add destination' : 'Edit destination', size: 'sm',
         close: closeNotificationChannelModal, bodyClass: 'ui-form',
-        form: { id: 'nc-form', onsubmit: `saveNotificationChannel(event)` },
+        form: { id: 'nc-form', onsubmit: `saveNotificationChannelOnce(event)` },
         body: `
                 <label for="nc-name"><span class="ui-label">Name <span class="ui-text-fail">*</span></span>
                     <input type="text" id="nc-name" required value="${escapeHtml(notificationEditing.name || '')}" placeholder="Operations Slack" class="ui-input">
@@ -208,6 +208,11 @@ function closeNotificationChannelModal(saved = false) {
     } else uiCloseGuarded(modal, close);
 }
 
+// One save at a time: a double click does not add the destination twice
+function saveNotificationChannelOnce(event) {
+    event.preventDefault();
+    return uiOnce('notification-channel', () => saveNotificationChannel(event), event.submitter, 'Saving...');
+}
 async function saveNotificationChannel(event) {
     event.preventDefault();
     const data = _collectChannelForm();

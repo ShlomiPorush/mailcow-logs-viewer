@@ -678,7 +678,7 @@ function editUser(userId) {
         // The version of the user this dialog shows: a save after a change made meanwhile is refused
         dataset: { version: user ? String(user.row_version) : '' },
         bodyClass: 'ui-form ui-agent-edit',
-        form: { id: 'user-edit-form', onsubmit: `saveUser(event, ${user ? Number(user.id) : 'null'})` },
+        form: { id: 'user-edit-form', onsubmit: `saveUserOnce(event, ${user ? Number(user.id) : 'null'})` },
         body: `
             <div>
                 <label class="ui-sec-inline"><input type="checkbox" class="ui-check" id="user-edit-disabled" ${user && user.disabled ? 'checked' : ''}> Disable sign-in</label>
@@ -754,6 +754,11 @@ function closeUserEditModal(saved = false) {
     } else uiCloseGuarded(modal, close);
 }
 
+// One save at a time: a second press would answer "changed meanwhile" to the first
+function saveUserOnce(event, userId) {
+    event.preventDefault();
+    return uiOnce('user-save', () => saveUser(event, userId), event.submitter || document.getElementById('user-edit-save'), 'Saving...');
+}
 async function saveUser(event, userId) {
     event.preventDefault();
     if (!uiMayAct('admin')) return;

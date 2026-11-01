@@ -99,8 +99,8 @@ function renderSmtpAbusePanel() {
             }</td>
             <td class="ui-td-end ui-nowrap">${
                 locked ? '' : (item.blocked_by_protection || item.smtp_access === false
-                    ? `<button data-acts="security" type="button" onclick="smtpAbuseAction('${escapeJsArg(item.email)}', 'unblock')" class="ui-btn ui-btn-sm ui-btn-primary">Re-enable SMTP</button>`
-                    : `<button data-acts="security" type="button" onclick="smtpAbuseAction('${escapeJsArg(item.email)}', 'block')" class="ui-btn ui-btn-sm ui-btn-danger">Disable SMTP</button>`)
+                    ? `<button data-acts="security" type="button" onclick="smtpAbuseActionOnce('${escapeJsArg(item.email)}', 'unblock', this)" class="ui-btn ui-btn-sm ui-btn-primary">Re-enable SMTP</button>`
+                    : `<button data-acts="security" type="button" onclick="smtpAbuseActionOnce('${escapeJsArg(item.email)}', 'block', this)" class="ui-btn ui-btn-sm ui-btn-danger">Disable SMTP</button>`)
             }</td>
         </tr>`;
 
@@ -168,7 +168,7 @@ function renderSmtpAbusePanel() {
                         filteredWhitelist.map(item => `
                         <li>
                             <span class="ui-mono ui-dtable-wrap">${uiEntity('address', item.email, { mono: true, plain: true })}</span>
-                            ${locked ? '' : `<button data-acts="security" type="button" onclick="removeSmtpAbuseWhitelist('${escapeJsArg(item.email)}')" class="ui-btn ui-btn-sm ui-btn-danger">Remove</button>`}
+                            ${locked ? '' : `<button data-acts="security" type="button" onclick="removeSmtpAbuseWhitelistOnce('${escapeJsArg(item.email)}', this)" class="ui-btn ui-btn-sm ui-btn-danger">Remove</button>`}
                         </li>`).join('') || '<li class="ui-muted">No matching entries</li>'
                     }</ul>
                 </div>` : ''}
@@ -186,6 +186,10 @@ function renderSmtpAbusePanel() {
     }
 }
 
+// One action at a time per mailbox: a double click does not block and unblock it
+function smtpAbuseActionOnce(email, action, button) {
+    return uiOnce(`smtp-abuse:${email}`, () => smtpAbuseAction(email, action), button);
+}
 async function smtpAbuseAction(email, action) {
     if (!uiMayAct('security')) return;
     const verb = action === 'block' ? 'Disable SMTP for' : 'Re-enable SMTP for';
@@ -254,6 +258,9 @@ async function saveSmtpAbuseWhitelist(quiet = false) {
     }
 }
 
+function removeSmtpAbuseWhitelistOnce(email, button) {
+    return uiOnce(`smtp-abuse-whitelist:${email}`, () => removeSmtpAbuseWhitelist(email), button);
+}
 async function removeSmtpAbuseWhitelist(email) {
     if (!uiMayAct('security')) return;
     try {

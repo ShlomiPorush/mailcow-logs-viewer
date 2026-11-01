@@ -265,7 +265,8 @@ function check(dir = FRONTEND) {
         if (guard === -1 || (request !== -1 && guard > request)) problems.push(`${key} does not start with uiMayAct('${WRITES[key]}')`);
     }
     // Each control that calls one carries its area
-    const names = new Map(Object.entries(WRITES).map(([key, area]) => [key.split(' ')[1], area]));
+    // A control may call the one-press wrapper (uiOnce in utils.js) of a listed function: the same area
+    const names = new Map(Object.entries(WRITES).flatMap(([key, area]) => [[key.split(' ')[1], area], [`${key.split(' ')[1]}Once`, area]]));
     for (const { file, line, name, tag } of handlerTags(dir, new Set(names.keys()))) {
         const acts = (tag.match(/\sdata-acts="([^"]*)"/) || [])[1] || '';
         if (!acts.split(/\s+/).includes(names.get(name))) {
