@@ -295,6 +295,33 @@ def test_the_rspamd_ingest_deletes_only_between_postfix_pages(env):
     assert _keys() == set() and _stored(queue) == []
 
 
+def test_an_rspamd_page_whose_deletion_failed_is_stored_again_as_new(env, monkeypatch):
+    """The page is one transaction: when deleting an excluded message fails,
+    its other entries are not kept either, so the next try stores them as
+    new and the paging goes on to the pages behind it."""
+    from app import scheduler
+    monkeypatch.setattr(scheduler, 'seen_rspamd', set())
+    env.listed()
+    when = int(A_START.replace(tzinfo=timezone.utc).timestamp())
+
+    def entry(msgid, rcpt):
+        return {'unix_time': when, 'message-id': f'{msgid}@{MARKER}', 'sender_smtp': SENDER, 'rcpt_smtp': [rcpt],
+                'action': 'no action', 'score': 0.0, 'required_score': 15.0, 'symbols': {}}
+    page = [entry('normal', NORMAL), entry('excluded', LISTED)]
+    real, failed = scheduler._delete_blacklisted_messages, []
+
+    def fails_once(db, message_ids):
+        if not failed:
+            failed.append(1)
+            raise RuntimeError('database connection lost')
+        return real(db, message_ids)
+    monkeypatch.setattr(scheduler, '_delete_blacklisted_messages', fails_once)
+    with pytest.raises(RuntimeError):
+        scheduler._store_rspamd_page(page)
+    new, _, excluded = scheduler._store_rspamd_page(page)
+    assert (new, excluded) == (1, 1)
+
+
 def test_a_line_committed_while_a_listed_message_is_deleted_goes_with_it(env, monkeypatch):
     """The Postfix ingest commits a line of the listed message after the
     deletion read what it needs: it is deleted too, as the time is what counts."""
