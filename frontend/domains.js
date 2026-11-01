@@ -61,7 +61,7 @@ async function loadDomainsNow() {
         loading.innerHTML = `
             <div class="ui-empty ui-panel">
                 <p class="ui-text-fail">Failed to load domains</p>
-                <p>${escapeHtml(error.message)}</p>
+                <p>${escapeHtml(uiErrorText(error))}</p>
                 <p><button type="button" class="ui-btn ui-btn-sm" onclick="loadDomains()">Try again</button></p>
             </div>
         `;
@@ -449,6 +449,7 @@ async function checkAllDomainsDNS() {
         const response = await authenticatedFetch('/api/domains/check-all-dns', {
             method: 'POST'
         });
+        if (!response.ok) throw await responseError(response);
 
         const result = await response.json();
 
@@ -456,11 +457,13 @@ async function checkAllDomainsDNS() {
             showToast(`Checked ${result.domains_checked} domains`, 'success');
             setTimeout(() => loadDomains(), 1000);
         } else {
-            showToast('DNS check failed', 'error');
+            // Some domains could not be checked: the answer names them
+            const why = (result.errors || []).join(' ') || uiApiErrorText(result, result.message || 'No reason was given');
+            showToast(`Not every domain was checked: ${why}`, 'error');
         }
     } catch (error) {
         console.error('Failed:', error);
-        showToast('Failed to check DNS', 'error');
+        showToast(`Failed to check DNS: ${uiErrorText(error)}`, 'error');
     } finally {
         dnsCheckInProgress = false;
         if (button) {
@@ -483,6 +486,7 @@ async function checkSingleDomainDNS(domainName) {
         const response = await authenticatedFetch(`/api/domains/${encodeURIComponent(domainName)}/check-dns`, {
             method: 'POST'
         });
+        if (!response.ok) throw await responseError(response);
 
         const result = await response.json();
 
@@ -491,7 +495,8 @@ async function checkSingleDomainDNS(domainName) {
 
             // Re-render only this domain's row, still open, with the new results
             const domainsResponse = await authenticatedFetch('/api/domains/all');
-            const domainsData = await domainsResponse.json();
+            // The check itself is done: a list that cannot be read now leaves the row as it is
+            const domainsData = domainsResponse.ok ? await domainsResponse.json() : {};
             const updatedDomain = (domainsData.domains || []).find(d => d.domain_name === domainName);
             const row = [...document.querySelectorAll('[data-domain-row]')].find(el => el.dataset.domainRow === domainName);
             if (updatedDomain) {
@@ -502,11 +507,11 @@ async function checkSingleDomainDNS(domainName) {
                 if (row) row.outerHTML = renderDomainAccordionRow(updatedDomain, true);
             }
         } else {
-            showToast(`Failed to check DNS for ${domainName}`, 'error');
+            showToast(`Failed to check DNS for ${domainName}: ${uiApiErrorText(result, result.message || 'No reason was given')}`, 'error');
         }
     } catch (error) {
         console.error('Failed:', error);
-        showToast('Failed to check DNS', 'error');
+        showToast(`Failed to check DNS for ${domainName}: ${uiErrorText(error)}`, 'error');
     } finally {
         dnsCheckInProgress = false;
     }

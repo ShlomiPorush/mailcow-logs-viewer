@@ -27,7 +27,7 @@ async function loadUsersPanel() {
     const seq = ++usersSeq;
     try {
         const response = await authenticatedFetch('/api/users');
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        if (!response.ok) throw await responseError(response);
         const data = await response.json();
         if (seq !== usersSeq) return;
         usersData = data;
@@ -37,7 +37,7 @@ async function loadUsersPanel() {
         if (seq !== usersSeq) return;
         console.error('Users error:', e);
         usersFailed = true;
-        uiReplaceKeepingFocus(panel, '<section class="ui-panel ui-set-channels"><p class="ui-empty ui-text-fail">Could not load users. Reload this page to try again.</p></section>');
+        uiReplaceKeepingFocus(panel, `<section class="ui-panel ui-set-channels"><p class="ui-empty ui-text-fail">Could not load users: ${escapeHtml(uiErrorText(e))}</p></section>`);
     }
 }
 

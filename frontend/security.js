@@ -75,14 +75,14 @@ function securityShowTab(tab) {
 async function loadSecurityOverview() {
     try {
         const res = await authenticatedFetch('/api/logs/netfilter/overview?hours=24');
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        if (!res.ok) throw await responseError(res);
         securityOverview = await res.json();
         renderSecurityOverview();
         refreshSecurityAddresses();
     } catch (err) {
         console.error('Failed to load security overview:', err);
         const list = document.getElementById('security-list');
-        if (list) list.innerHTML = `<p class="ui-empty ui-text-fail">Could not load Security. Reload this page to try again. Details: ${escapeHtml(err.message)}</p>`;
+        if (list) list.innerHTML = `<p class="ui-empty ui-text-fail">Could not load Security: ${escapeHtml(uiErrorText(err))}</p>`;
     }
 }
 
@@ -90,7 +90,7 @@ async function loadSecurityOverview() {
 async function loadProtectionOverview() {
     try {
         const res = await authenticatedFetch('/api/protection/hits?status=active&limit=500');
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        if (!res.ok) throw await responseError(res);
         const data = await res.json();
         securityHits = data.hits || [];
         if (securityFilter === 'history') loadSecurityHistory();
@@ -107,11 +107,11 @@ async function loadProtectionOverview() {
 async function loadSecurityHistory() {
     try {
         const res = await authenticatedFetch('/api/protection/hits?status=history&limit=200');
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        if (!res.ok) throw await responseError(res);
         securityHistory = (await res.json()).hits || [];
     } catch (error) {
         securityHistory = [];
-        showToast(`Could not load the history. Reload this page to try again. Details: ${error.message}`, 'error');
+        showToast(`Could not load the history: ${uiErrorText(error)}`, 'error');
     }
     renderSecurityOverview();
 }
@@ -160,7 +160,7 @@ async function loadSecurityAddresses(more = false, limit = SECURITY_PAGE_SIZE) {
     if (more) params.set('after', securityPage.next);
     try {
         const res = await authenticatedFetch(`/api/security/addresses?${params}`);
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        if (!res.ok) throw await responseError(res);
         const data = await res.json();
         if (seq !== securityPageSeq) return;
         const items = data.items.map(securityFromServer);
@@ -179,7 +179,7 @@ async function loadSecurityAddresses(more = false, limit = SECURITY_PAGE_SIZE) {
     } catch (err) {
         if (seq !== securityPageSeq) return;
         console.error('Failed to load the security addresses:', err);
-        securityPageError = err.message;
+        securityPageError = uiErrorText(err);
     } finally {
         if (seq === securityPageSeq) securityPageLoading = false;
     }
@@ -218,7 +218,7 @@ async function reloadSecurityAddresses(shown) {
             if (securityNetwork) params.set('network', securityNetwork);
             if (page) params.set('after', page.next);
             const res = await authenticatedFetch(`/api/security/addresses?${params}`);
-            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            if (!res.ok) throw await responseError(res);
             page = await res.json();
             if (seq !== securityPageSeq) return;
             const have = new Set(items.map(a => a.ip));
@@ -233,7 +233,7 @@ async function reloadSecurityAddresses(shown) {
     } catch (err) {
         if (seq !== securityPageSeq) return;
         console.error('Failed to refresh the security addresses:', err);
-        securityPageError = err.message;
+        securityPageError = uiErrorText(err);
     } finally {
         if (seq === securityPageSeq) securityPageLoading = false;
     }
@@ -529,7 +529,7 @@ async function securityToggleRow(ip) {
     securityRawLog[ip] = 'loading';
     try {
         const res = await authenticatedFetch(`/api/logs/netfilter?ip=${encodeURIComponent(ip)}&exact_ip=true&limit=40`);
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        if (!res.ok) throw await responseError(res);
         securityRawLog[ip] = (await res.json()).data || [];
     } catch (e) {
         securityRawLog[ip] = 'error';
@@ -942,12 +942,12 @@ async function securityRemoveFromList(list, entry, button) {
             method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ip: entry, list })
         });
         const result = await res.json().catch(() => ({}));
-        if (!res.ok || result.status !== 'success') throw new Error(result.msg || result.detail || `HTTP ${res.status}`);
+        if (!res.ok || result.status !== 'success') throw new Error(actionErrorText(res, result));
         showToast(`${entry} removed from the ${label}`, 'success');
         fail2banSettingsLoaded = false;
         loadFail2BanSettings();
     } catch (error) {
-        showToast(`Could not remove ${entry}. Reload the list and try again. Details: ${error.message}`, 'error');
+        showToast(`Could not remove ${entry}: ${uiErrorText(error)}`, 'error');
         if (button) button.disabled = false;
     }
 }
@@ -970,10 +970,10 @@ async function securityRepairListEntry(list, entry, button) {
             method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ entry, list })
         });
         const result = await res.json().catch(() => ({}));
-        if (!res.ok || result.status !== 'success') throw new Error(result.msg || result.detail || `HTTP ${res.status}`);
+        if (!res.ok || result.status !== 'success') throw new Error(actionErrorText(res, result));
         showToast(`${entry} replaced with ${single} on the ${label}`, 'success');
     } catch (error) {
-        showToast(`Could not repair ${entry}. Reload the list and try again. Details: ${error.message}`, 'error');
+        showToast(`Could not repair ${entry}: ${uiErrorText(error)}`, 'error');
         if (button) button.disabled = false;
     }
     // The list is read again either way, so it shows what mailcow holds now
@@ -1011,7 +1011,7 @@ async function loadSecurityAppSettings() {
     }
     try {
         const res = await authenticatedFetch('/api/settings');
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        if (!res.ok) throw await responseError(res);
         securityAppSettings = await res.json();
     } catch (error) {
         console.error('Failed to load the app settings:', error);
@@ -1161,13 +1161,13 @@ async function saveSecurityF2b() {
             body: JSON.stringify(Object.fromEntries(SECURITY_F2B_KEYS.map(k => [k, values[k]])))
         });
         const result = await res.json().catch(() => ({}));
-        if (!res.ok || result.status !== 'success') throw new Error(result.msg || result.detail || `HTTP ${res.status}`);
+        if (!res.ok || result.status !== 'success') throw new Error(actionErrorText(res, result));
         securityF2bDraft = null;
         fail2banSettingsLoaded = false;
         await loadFail2BanSettings();
         return true;
     } catch (error) {
-        showToast(`Could not save Fail2ban settings. Check the values and try again. Details: ${error.message}`, 'error');
+        showToast(`Could not save Fail2ban settings: ${uiErrorText(error)}`, 'error');
         return false;
     }
 }
@@ -1180,13 +1180,13 @@ async function saveSecurityAbuse() {
             method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
         });
         const result = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(result.detail || `HTTP ${res.status}`);
+        if (!res.ok) throw new Error(uiHttpErrorText(res.status, result));
         securityAbuseDraft = {};
         await loadSecurityAppSettings();
         loadSmtpAbusePanel();
         return true;
     } catch (error) {
-        showToast(`Could not save outgoing spam settings. Check the values and try again. Details: ${error.message}`, 'error');
+        showToast(`Could not save outgoing spam settings: ${uiErrorText(error)}`, 'error');
         return false;
     }
 }

@@ -28,7 +28,8 @@ async function loadNotificationChannels() {
             authenticatedFetch('/api/notifications/types'),
             authenticatedFetch('/api/notifications/channels')
         ]);
-        if (!typesRes.ok || !channelsRes.ok) throw new Error('HTTP error');
+        if (!typesRes.ok) throw await responseError(typesRes);
+        if (!channelsRes.ok) throw await responseError(channelsRes);
         const typesPayload = await typesRes.json();
         notificationChannelTypes = typesPayload.types || [];
         notificationAlertTypes = typesPayload.alert_types || [];
@@ -36,7 +37,7 @@ async function loadNotificationChannels() {
         renderNotificationChannels();
     } catch (e) {
         console.error('Notification channels error:', e);
-        panel.innerHTML = '<p class="ui-empty ui-text-fail">Could not load destinations. Reload this page to try again.</p>';
+        panel.innerHTML = `<p class="ui-empty ui-text-fail">Could not load destinations: ${escapeHtml(uiErrorText(e))}</p>`;
     }
 }
 
@@ -227,14 +228,14 @@ async function saveNotificationChannel(event) {
             });
         if (!response.ok) {
             const detail = await response.json().catch(() => ({}));
-            showToast(uiApiErrorText(detail, 'Could not save the destination. Check the fields and try again.'), 'error');
+            showToast(`Could not save the destination: ${uiHttpErrorText(response.status, detail)}`, 'error');
             return;
         }
         showToast(isNew ? 'Destination added' : 'Destination updated', 'success');
         closeNotificationChannelModal(true);
         loadNotificationChannels();
     } catch (e) {
-        showToast('Could not save the destination. Check the fields and try again.', 'error');
+        showToast(`Could not save the destination: ${uiErrorText(e)}`, 'error');
     }
 }
 
@@ -249,11 +250,11 @@ async function deleteNotificationChannel(channelId) {
     if (!confirmed) return;
     try {
         const response = await authenticatedFetch(`/api/notifications/channels/${channelId}`, { method: 'DELETE' });
-        if (!response.ok) { showToast('Could not delete the destination. Reload the list and try again.', 'error'); return; }
+        if (!response.ok) throw await responseError(response);
         showToast('Destination deleted', 'success');
         loadNotificationChannels();
     } catch (e) {
-        showToast('Could not delete the destination. Reload the list and try again.', 'error');
+        showToast(`Could not delete the destination: ${uiErrorText(e)}`, 'error');
     }
 }
 
@@ -261,11 +262,12 @@ async function testNotificationChannel(channelId) {
     const run = showConnectionTestModal('Notification test', 'Sending test notification...');
     try {
         const response = await authenticatedFetch(`/api/notifications/channels/${channelId}/test`, { method: 'POST' });
+        if (!response.ok) throw await responseError(response);
         const result = await response.json();
         updateConnectionTestModal(result.success ? 'success' : 'error', result.logs || ['No logs available'], run);
         loadNotificationChannels();
     } catch (e) {
-        updateConnectionTestModal('error', ['Could not send the test notification. Check the destination settings and try again.', `Error: ${e.message}`], run);
+        updateConnectionTestModal('error', ['Could not send the test notification. Check the destination settings and try again.', `Error: ${uiErrorText(e)}`], run);
     }
 }
 
@@ -278,9 +280,10 @@ async function testNotificationChannelDraft() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ channel_type: data.channel_type, config: data.config })
         });
+        if (!response.ok) throw await responseError(response);
         const result = await response.json();
         updateConnectionTestModal(result.success ? 'success' : 'error', result.logs || ['No logs available'], run);
     } catch (e) {
-        updateConnectionTestModal('error', ['Could not send the test notification. Check the destination settings and try again.', `Error: ${e.message}`], run);
+        updateConnectionTestModal('error', ['Could not send the test notification. Check the destination settings and try again.', `Error: ${uiErrorText(e)}`], run);
     }
 }

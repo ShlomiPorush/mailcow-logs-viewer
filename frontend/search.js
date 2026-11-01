@@ -134,7 +134,7 @@ function gsSearchSettings(q) {
 
 async function gsJson(url, signal) {
     const response = await authenticatedFetch(url, { signal });
-    if (!response.ok) throw new Error('HTTP ' + response.status);
+    if (!response.ok) throw await responseError(response);
     return response.json();
 }
 

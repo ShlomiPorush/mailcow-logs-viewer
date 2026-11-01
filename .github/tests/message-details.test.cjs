@@ -36,6 +36,10 @@ function harness(data, ok = true) {
         setTimeout: () => 0, clearTimeout: () => {},
     });
     vm.runInContext(fs.readFileSync(path.join(frontend, 'utils.js'), 'utf8'), context);
+    // responseError (app.js): a failed answer as an Error in words
+    const app = fs.readFileSync(path.join(frontend, 'app.js'), 'utf8');
+    const responseErrorStart = app.indexOf('async function responseError(');
+    vm.runInContext(app.slice(responseErrorStart, app.indexOf('\n}\n', responseErrorStart) + 3), context);
     // Stable timestamp display keeps rendering assertions independent of host locale.
     context.formatTime = value => value || '-';
     vm.runInContext(source, context);
@@ -104,7 +108,7 @@ test('empty analysis and security records retain their empty states', () => {
 test('failed fetch and disabled security retain their behavior', async () => {
     const failed = harness({}, false);
     await failed.context.viewMessageDetails('example-key');
-    assert.match(failed.element('message-modal-content').innerHTML, /Failed to load message details/);
+    assert.match(failed.element('message-modal-content').innerHTML, /Failed to load message details: The server hit an error/);
     const disabled = harness(message());
     disabled.context.window.disabledFeatures.push('netfilter');
     await disabled.context.viewMessageDetails('example-key');

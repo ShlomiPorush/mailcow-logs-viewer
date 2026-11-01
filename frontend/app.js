@@ -181,15 +181,18 @@ async function noteNotPermitted(response) {
     }
 }
 
-// The reason the server gave for a failed request (FastAPI's `detail`), or its status
+// A failed request as an Error in words (uiHttpErrorText): the reason the server
+// gave, or what its status means
 async function responseError(response) {
-    let detail = '';
-    try {
-        detail = (await response.json()).detail;
-    } catch (e) {
-        // not JSON
-    }
-    return new Error(typeof detail === 'string' && detail ? detail : `HTTP ${response.status}`);
+    return new Error(uiHttpErrorText(response.status, await uiReadJson(response)));
+}
+
+// Why an action that answers { status, msg } did not succeed: a failed request in
+// words, or the answer's own message when the request went through but the action
+// was refused (mailcow's words). result is the body from uiReadJson, null when not JSON.
+function actionErrorText(response, result) {
+    if (!response.ok) return uiHttpErrorText(response.status, result);
+    return (result && result.msg) || uiApiErrorText(result, 'No reason was given');
 }
 
 // Handle logout - one path for both login methods, since both are backed by
@@ -1664,8 +1667,9 @@ async function messagesFetch(url, timeout = 0) {
     if (control) messagesRequests.add(control);
     try {
         const response = await authenticatedFetch(url, { ...(control ? { signal: control.signal } : {}), ...(timeout ? { timeout } : {}) });
-        const data = response.ok ? await response.json() : null;
-        return { ok: response.ok, status: response.status, statusText: response.statusText, json: async () => data };
+        // A failed answer's body is kept too (null when not JSON): it says what went wrong
+        const data = response.ok ? await response.json() : await uiReadJson(response);
+        return { ok: response.ok, status: response.status, json: async () => data };
     } finally {
         if (control) messagesRequests.delete(control);
     }
@@ -1893,7 +1897,7 @@ async function loadMoreMessages(retry = false) {
     const gen = messagesGen;
     try {
         const response = await messagesFetch(messagesListUrl(messagesQueryParams(messagesPaging.cursor, 50, messagesNew.watermark)));
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        if (!response.ok) throw await responseError(response);
         const data = await response.json();
         // The list was loaded again meanwhile: this page is not part of it
         if (gen !== messagesGen) return;
@@ -2073,8 +2077,8 @@ async function unbanIP(ip, btnEl) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ ip: ipWithMask })
         });
-        const result = await res.json();
-        if (res.ok && result.status === 'success') {
+        const result = await uiReadJson(res);
+        if (res.ok && result && result.status === 'success') {
             // Fail2ban may have banned the whole network around the address: name what was lifted
             const lifted = result.networks || [ipWithMask];
             showToast(lifted.map(fail2banBare).join(', ') + ' queued for unbanning', 'success');
@@ -2086,14 +2090,14 @@ async function unbanIP(ip, btnEl) {
             setTimeout(() => { fail2banSettingsLoaded = false; loadFail2BanSettings(); }, 5000);
             smartRefreshNetfilter();
         } else {
-            showToast('Could not unban the IP. Refresh Security and try again. Details: ' + (result.msg || result.detail || 'Unknown error'), 'error');
+            showToast('Could not unban the IP: ' + actionErrorText(res, result), 'error');
             if (btnEl) {
                 btnEl.disabled = false;
                 btnEl.textContent = 'Unban';
             }
         }
     } catch (err) {
-        showToast('Could not unban the IP. Check your connection and try again. Details: ' + err.message, 'error');
+        showToast('Could not unban the IP: ' + uiErrorText(err), 'error');
         if (btnEl) {
             btnEl.disabled = false;
             btnEl.textContent = 'Unban';
@@ -2167,9 +2171,9 @@ async function banIP(ip, btnEl) {
             body: JSON.stringify({ ip: ipWithMask })
         });
 
-        const result = await response.json();
+        const result = await uiReadJson(response);
 
-        if (result.status === 'success') {
+        if (response.ok && result && result.status === 'success') {
             showToast(result.already ? result.msg : `IP ${ip} added to the denylist`, 'success');
             // Refresh fail2ban data and netfilter logs
             fail2banSettingsLoaded = false;
@@ -2178,14 +2182,14 @@ async function banIP(ip, btnEl) {
             smartRefreshNetfilter();
             return true;
         } else {
-            showToast('Could not ban the IP. Refresh Security and try again. Details: ' + (result.msg || result.detail || 'Unknown error'), 'error');
+            showToast('Could not ban the IP: ' + actionErrorText(response, result), 'error');
             if (btnEl) {
                 btnEl.disabled = false;
                 btnEl.textContent = 'Ban';
             }
         }
     } catch (err) {
-        showToast('Could not ban the IP. Check your connection and try again. Details: ' + err.message, 'error');
+        showToast('Could not ban the IP: ' + uiErrorText(err), 'error');
         if (btnEl) {
             btnEl.disabled = false;
             btnEl.textContent = 'Ban';
@@ -2207,17 +2211,17 @@ async function allowIP(ip, btnEl) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ ip: ipWithMask })
         });
-        const result = await res.json();
-        if (res.ok && result.status === 'success') {
+        const result = await uiReadJson(res);
+        if (res.ok && result && result.status === 'success') {
             showToast(result.already ? result.msg : `IP ${ip} added to the allowlist`, 'success');
             fail2banSettingsLoaded = false;
             fail2banActiveBans = null;
             loadFail2BanSettings();
             return true;
         }
-        showToast('Could not add the IP to the allowlist. Refresh Security and try again. Details: ' + (result.msg || result.detail || 'Unknown error'), 'error');
+        showToast('Could not add the IP to the allowlist: ' + actionErrorText(res, result), 'error');
     } catch (err) {
-        showToast('Could not add the IP to the allowlist. Check your connection and try again. Details: ' + err.message, 'error');
+        showToast('Could not add the IP to the allowlist: ' + uiErrorText(err), 'error');
     }
     if (btnEl) {
         btnEl.disabled = false;
@@ -3336,8 +3340,8 @@ function mailFlowSettle() {
 }
 
 function mailFlowGet(query, control) {
-    return authenticatedFetch(`/api/stats/flow?${query}`, control ? { signal: control.signal } : {}).then(res => {
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return authenticatedFetch(`/api/stats/flow?${query}`, control ? { signal: control.signal } : {}).then(async res => {
+        if (!res.ok) throw await responseError(res);
         return res.json();
     });
 }
@@ -3700,13 +3704,13 @@ async function acknowledgeSecurityAlert(alertId) {
     const name = !alert ? 'the alert' : alert.subject && !String(alert.title).includes(alert.subject) ? `${alert.title}: ${alert.subject}` : alert.title;
     try {
         const res = await authenticatedFetch(`/api/security-alerts/${alertId}/acknowledge`, { method: 'POST' });
-        if (!res.ok) throw new Error(res.status === 404 ? 'it is gone' : `the server answered ${res.status}`);
+        if (!res.ok) throw await responseError(res);
         const done = await res.json();
         loadDashboardSecurityAlerts();
         if (!done.receipt) { showToast('Already dismissed', 'info'); return; }
         offerAlertUndo(done.receipt, 'Alert dismissed', `Undo dismissing ${name}`, area ? [area] : ALERT_AREAS);
     } catch (e) {
-        showToast(`Could not dismiss the alert: ${e.message || 'no answer'}. Try again.`, 'error');
+        showToast(`Could not dismiss the alert: ${uiErrorText(e)}.`, 'error');
     }
 }
 
@@ -3720,14 +3724,14 @@ async function acknowledgeAllSecurityAlerts() {
         const res = await authenticatedFetch('/api/security-alerts/acknowledge-all', {
             method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids }),
         });
-        if (!res.ok) throw new Error(`the server answered ${res.status}`);
+        if (!res.ok) throw await responseError(res);
         const done = await res.json();
         loadDashboardSecurityAlerts();
         if (!done.receipt) { showToast('Already dismissed', 'info'); return; }
         const words = `${uiCountLabel(done.acknowledged, 'alert', 'alerts')} dismissed`;
         offerAlertUndo(done.receipt, words, `Undo dismissing ${uiCountLabel(done.acknowledged, 'alert', 'alerts')}`, areas);
     } catch (e) {
-        showToast(`Could not dismiss the alerts: ${e.message || 'no answer'}. Try again.`, 'error');
+        showToast(`Could not dismiss the alerts: ${uiErrorText(e)}.`, 'error');
     }
 }
 
@@ -3751,7 +3755,7 @@ async function undoAlertDismissal(receipt, undoName, areas = ALERT_AREAS) {
     if (!areas.some(a => userCan(a, 'write'))) { uiNotPermitted(); return; }
     try {
         const res = await authenticatedFetch(`/api/security-alerts/acknowledgements/${encodeURIComponent(receipt)}/undo`, { method: 'POST' });
-        if (!res.ok) throw new Error(`the server answered ${res.status}`);
+        if (!res.ok) throw await responseError(res);
         const done = await res.json();
         const shown = await loadDashboardSecurityAlerts();
         const back = done.restored ? `${uiCountLabel(done.restored, 'alert', 'alerts')} back` : '';
@@ -3772,7 +3776,7 @@ async function undoAlertDismissal(receipt, undoName, areas = ALERT_AREAS) {
         // Nothing back: dismissed again since, or no longer the person's to change
         showToast(back ? `${back} in Needs attention` : 'Nothing to undo: dismissed again, or your access changed', back ? 'success' : 'info');
     } catch (e) {
-        showToast(`Could not undo: ${e.message || 'no answer'}.`, 'error', { duration: Infinity, action: { label: 'Retry', ariaLabel: `Retry: ${undoName}`, onAction: () => undoAlertDismissal(receipt, undoName, areas) } });
+        showToast(`Could not undo: ${uiErrorText(e)}.`, 'error', { duration: Infinity, action: { label: 'Retry', ariaLabel: `Retry: ${undoName}`, onAction: () => undoAlertDismissal(receipt, undoName, areas) } });
     }
 }
 
@@ -3911,7 +3915,7 @@ async function loadDashboardStatusSummary() {
 
         const response = await authenticatedFetch('/api/status/summary');
         if (!response.ok) {
-            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            throw await responseError(response);
         }
 
         const data = await response.json();
@@ -4037,7 +4041,7 @@ async function loadNetfilterLogs(page = 1) {
 
         const response = await authenticatedFetch(`/api/logs/netfilter?${params}`);
         if (!response.ok) {
-            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            throw await responseError(response);
         }
 
         const data = await response.json();
@@ -4052,7 +4056,7 @@ async function loadNetfilterLogs(page = 1) {
         currentPage.netfilter = page;
     } catch (error) {
         console.error('Failed to load Netfilter logs:', error);
-        document.getElementById('netfilter-logs').innerHTML = `<p class="ui-empty ui-text-fail">Failed to load logs: ${escapeHtml(error.message)}</p>`;
+        document.getElementById('netfilter-logs').innerHTML = `<p class="ui-empty ui-text-fail">Failed to load logs: ${escapeHtml(uiErrorText(error))}</p>`;
         const countEl = document.getElementById('security-count');
         if (countEl) countEl.textContent = '';
     }
@@ -4076,7 +4080,7 @@ async function loadFail2BanSettings() {
     if (fail2banSettingsLoaded) return;
     try {
         const response = await authenticatedFetch('/api/fail2ban');
-        if (!response.ok) throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        if (!response.ok) throw await responseError(response);
         const data = await response.json();
         const list = value => (value || '').replace(/\n/g, ',').split(',').map(e => e.trim()).filter(e => e);
         fail2banSettingsLoaded = true;
@@ -4167,7 +4171,7 @@ async function loadQueue() {
         if (!queueTakeTurn(id)) return;
         queueLoading = false;
         console.error('Failed to load queue:', error);
-        document.getElementById('queue-logs').innerHTML = `<p class="ui-empty ui-text-fail">Failed to load queue: ${escapeHtml(error.message)}</p>`;
+        document.getElementById('queue-logs').innerHTML = `<p class="ui-empty ui-text-fail">Failed to load queue: ${escapeHtml(uiErrorText(error))}</p>`;
         const countEl = document.getElementById('queue-count');
         if (countEl) countEl.textContent = '';
     }
@@ -4410,17 +4414,17 @@ async function queueAction(action, itemIds) {
             body: JSON.stringify({ items: itemIds, action: action })
         });
 
-        const result = await res.json();
-        if (res.ok && result.status === 'success') {
+        const result = await uiReadJson(res);
+        if (res.ok && result && result.status === 'success') {
             const labels = { deliver: 'Retry delivery', hold: 'Hold', unhold: 'Unhold', flush: 'Flush all', super_delete: 'Delete all' };
             showToast(result.msg || `${labels[action] || action} completed`, 'success');
             lastDataCache.queue = null;
             await loadQueue();
         } else {
-            showToast(`Queue action failed: ` + (result.msg || result.detail || 'Unknown error'), 'error');
+            showToast(`Queue action failed: ` + actionErrorText(res, result), 'error');
         }
     } catch (err) {
-        showToast(`Queue action failed: ` + err.message, 'error');
+        showToast(`Queue action failed: ` + uiErrorText(err), 'error');
     } finally {
         queueActing--;
         document.querySelectorAll('.queue-action-btn, .queue-checkbox, #queue-flush-all-btn, #queue-delete-all-btn, #queue-select-all-btn, #queue-bulk-retry-btn, #queue-bulk-delete-btn')
@@ -4441,16 +4445,16 @@ async function queueDeleteRequest(itemIds) {
             body: JSON.stringify({ items: itemIds })
         });
 
-        const result = await res.json();
-        if (res.ok && result.status === 'success') {
+        const result = await uiReadJson(res);
+        if (res.ok && result && result.status === 'success') {
             showToast(result.msg || 'Message deleted from queue', 'success');
             lastDataCache.queue = null;
             await loadQueue();
         } else {
-            showToast('Failed to delete from queue: ' + (result.msg || result.detail || 'Unknown error'), 'error');
+            showToast('Failed to delete from queue: ' + actionErrorText(res, result), 'error');
         }
     } catch (err) {
-        showToast('Failed to delete from queue: ' + err.message, 'error');
+        showToast('Failed to delete from queue: ' + uiErrorText(err), 'error');
     } finally {
         queueActing--;
         document.querySelectorAll('.queue-action-btn, .queue-checkbox, #queue-flush-all-btn, #queue-delete-all-btn, #queue-select-all-btn, #queue-bulk-retry-btn, #queue-bulk-delete-btn')
@@ -4511,7 +4515,7 @@ async function loadQuarantine() {
         // Nothing is shown: the next refresh draws what it gets, even an answer like the last one
         lastDataCache.quarantine = null;
         console.error('Failed to load quarantine:', error);
-        document.getElementById('quarantine-logs').innerHTML = `<p class="ui-empty ui-text-fail">Failed to load quarantine: ${escapeHtml(error.message)}</p>`;
+        document.getElementById('quarantine-logs').innerHTML = `<p class="ui-empty ui-text-fail">Failed to load quarantine: ${escapeHtml(uiErrorText(error))}</p>`;
     }
 }
 
@@ -4720,17 +4724,17 @@ async function quarantineAction(action, itemIds) {
             body: JSON.stringify({ items: itemIds })
         });
 
-        const result = await res.json();
+        const result = await uiReadJson(res);
         const actionLabels = { release: 'released', delete: 'deleted', learnham: 'released & marked as not spam', learnspam: 'deleted & marked as spam' };
-        if (res.ok && result.status === 'success') {
+        if (res.ok && result && result.status === 'success') {
             showToast(result.msg || `Message(s) ${actionLabels[action] || action} successfully`, 'success');
             lastDataCache.quarantine = null;
             await loadQuarantine();
         } else {
-            showToast(`Failed to ${action} message(s): ` + (result.msg || result.detail || 'Unknown error'), 'error');
+            showToast(`Failed to ${action} message(s): ` + actionErrorText(res, result), 'error');
         }
     } catch (err) {
-        showToast(`Failed to ${action} message(s): ` + err.message, 'error');
+        showToast(`Failed to ${action} message(s): ` + uiErrorText(err), 'error');
     } finally {
         quarantineActing--;
         document.querySelectorAll(allBtns).forEach(el => { el.disabled = false; el.style.opacity = ''; });
@@ -4755,14 +4759,13 @@ async function showQuarantineDetails(itemId) {
 
     try {
         const res = await authenticatedFetch(`/api/quarantine/${encodeURIComponent(itemId)}/details`);
-        if (!res.ok) throw new Error('Failed to fetch details');
+        if (!res.ok) throw await responseError(res);
         const data = await res.json();
         renderQuarantineDetailContent(data, itemId);
     } catch (err) {
         document.getElementById('quarantine-detail-content').innerHTML = `
             <div class="ui-empty">
-                <p class="ui-text-fail">Failed to load details</p>
-                <p>${escapeHtml(err.message)}</p>
+                <p class="ui-text-fail">Could not load the details: ${escapeHtml(uiErrorText(err))}</p>
             </div>`;
     }
 }
@@ -4947,7 +4950,7 @@ async function loadQuarantineRules({ quiet = false } = {}) {
     
     try {
         const res = await authenticatedFetch('/api/quarantine/rules', quiet ? { timeout: PAGE_REFRESH_TIMEOUT } : {});
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        if (!res.ok) throw await responseError(res);
         const data = await res.json();
         _quarantineRulesCache = data;
         
@@ -4989,7 +4992,7 @@ async function loadQuarantineRules({ quiet = false } = {}) {
     } catch (err) {
         console.error('Failed to load quarantine rules:', err);
         if (quiet && _quarantineRulesCache) return;
-        uiReplaceKeepingFocus(container, `<p class="ui-empty ui-text-fail">Failed to load rules: ${escapeHtml(err.message)}</p>`);
+        uiReplaceKeepingFocus(container, `<p class="ui-empty ui-text-fail">Failed to load rules: ${escapeHtml(uiErrorText(err))}</p>`);
     }
 }
 
@@ -5189,16 +5192,13 @@ async function _submitQuarantineRule(ruleId, body, doneMessage) {
             body: JSON.stringify(body)
         });
         
-        if (!res.ok) {
-            const err = await res.json().catch(() => ({}));
-            throw new Error(err.detail || `HTTP ${res.status}`);
-        }
+        if (!res.ok) throw await responseError(res);
         
         closeQuarantineRuleModal(true);
         showToast(doneMessage || (isEdit ? 'Rule updated' : 'Rule created'), 'success');
         await loadQuarantineRules();
     } catch (err) {
-        showToast('Failed to save rule: ' + err.message, 'error');
+        showToast('Failed to save rule: ' + uiErrorText(err), 'error');
     }
 }
 
@@ -5218,12 +5218,12 @@ async function deleteQuarantineRule(ruleId, ruleName) {
     
     try {
         const res = await authenticatedFetch(`/api/quarantine/rules/${ruleId}`, { method: 'DELETE' });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        if (!res.ok) throw await responseError(res);
         
         showToast('Rule deleted', 'success');
         await loadQuarantineRules();
     } catch (err) {
-        showToast('Failed to delete rule: ' + err.message, 'error');
+        showToast('Failed to delete rule: ' + uiErrorText(err), 'error');
     }
 }
 
@@ -5231,13 +5231,13 @@ async function toggleQuarantineRule(ruleId) {
     if (!uiMayAct('quarantine')) return;
     try {
         const res = await authenticatedFetch(`/api/quarantine/rules/${ruleId}/toggle`, { method: 'POST' });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        if (!res.ok) throw await responseError(res);
         
         const rule = await res.json();
         showToast(`Rule ${rule.enabled ? 'enabled' : 'disabled'}`, 'success');
         await loadQuarantineRules();
     } catch (err) {
-        showToast('Failed to toggle rule: ' + err.message, 'error');
+        showToast('Failed to toggle rule: ' + uiErrorText(err), 'error');
     }
 }
 
@@ -5246,7 +5246,7 @@ async function testQuarantineRules() {
     try {
         showToast('Testing rules against quarantine...', 'info');
         const res = await authenticatedFetch('/api/quarantine/rules/test', { method: 'POST' });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        if (!res.ok) throw await responseError(res);
         
         const data = await res.json();
         
@@ -5305,7 +5305,7 @@ async function testQuarantineRules() {
                     <p class="ui-kv-note ui-list-foot">This is a dry-run preview. No actions were taken.</p>`,
         });
     } catch (err) {
-        showToast('Test failed: ' + err.message, 'error');
+        showToast('Test failed: ' + uiErrorText(err), 'error');
     }
 }
 
@@ -5330,7 +5330,7 @@ async function loadQuarantineRuleHistory({ quiet = false } = {}) {
 
     try {
         const res = await authenticatedFetch('/api/quarantine/rules/logs?limit=20', quiet ? { timeout: PAGE_REFRESH_TIMEOUT } : {});
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        if (!res.ok) throw await responseError(res);
         const data = await res.json();
 
         if (!data.data || data.data.length === 0) {
@@ -5348,7 +5348,7 @@ async function loadQuarantineRuleHistory({ quiet = false } = {}) {
     } catch (err) {
         // A refresh that failed leaves the history as it was
         if (quiet) return;
-        uiReplaceKeepingFocus(container, `<p class="ui-empty ui-text-fail">Failed: ${escapeHtml(err.message)}</p>`);
+        uiReplaceKeepingFocus(container, `<p class="ui-empty ui-text-fail">Failed: ${escapeHtml(uiErrorText(err))}</p>`);
     }
 }
 
@@ -5713,12 +5713,12 @@ async function loadMessages({ quiet = false, rows = 50, toEnd = false, applyIf =
         const timeout = quiet ? PAGE_REFRESH_TIMEOUT : 0;
         const response = await messagesFetch(messagesListUrl(messagesQueryParams(null, Math.min(500, rows))), timeout);
         if (!response.ok) {
-            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            throw await responseError(response);
         }
         const data = await response.json();
         while (data.next_cursor && (data.data || []).length < rows && gen === messagesGen) {
             const next = await messagesFetch(messagesListUrl(messagesQueryParams(data.next_cursor, Math.min(500, rows - data.data.length), data.watermark)), timeout);
-            if (!next.ok) throw new Error(`HTTP ${next.status}: ${next.statusText}`);
+            if (!next.ok) throw await responseError(next);
             const page = await next.json();
             data.data = data.data.concat(page.data || []);
             data.next_cursor = page.next_cursor;
@@ -5748,7 +5748,7 @@ async function loadMessages({ quiet = false, rows = 50, toEnd = false, applyIf =
         // A quiet load that failed leaves the list as it was
         if (quiet) return;
         console.error('Failed to load messages:', error);
-        container.innerHTML = `<p class="ui-empty ui-text-fail">Failed to load messages: ${escapeHtml(error.message)}. <button type="button" class="ui-link-row ui-link" onclick="loadMessages()">Try again</button></p>`;
+        container.innerHTML = `<p class="ui-empty ui-text-fail">Failed to load messages: ${escapeHtml(uiErrorText(error))}. <button type="button" class="ui-link-row ui-link" onclick="loadMessages()">Try again</button></p>`;
         setMessagesCount(null);
         // Nothing is shown: no next page, and the next refresh draws what it gets
         messagesPaging.page = 1;
@@ -5917,7 +5917,7 @@ async function loadStatusAppVersion() {
     const note = document.getElementById('status-kpi-version-note');
     try {
         const res = await authenticatedFetch('/api/status/app-version');
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        if (!res.ok) throw await responseError(res);
         const data = await res.json();
         setStatusKpi('status-kpi-version', data.current_version || '-');
         if (note) {
@@ -5937,12 +5937,12 @@ async function setContainerIgnored(container, ignored) {
         const res = await authenticatedFetch(`/api/status/containers/${encodeURIComponent(container)}/ignore`, {
             method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ignored })
         });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        if (!res.ok) throw await responseError(res);
         showToast(ignored ? `${container.replace('-mailcow', '')} is ignored. It no longer counts or alerts.` : `${container.replace('-mailcow', '')} counts again.`, 'success');
         loadStatusContainers();
         loadNavCounters();
     } catch (e) {
-        showToast(`Could not change the container: ${e.message}`, 'error');
+        showToast(`Could not change the container: ${uiErrorText(e)}`, 'error');
     }
 }
 
@@ -6020,7 +6020,7 @@ async function loadStatusContainers() {
     } catch (error) {
         console.error('Failed to load containers status:', error);
         setStatusKpi('status-kpi-containers', '-');
-        if (!statusQuiet) document.getElementById('status-containers').innerHTML = `<p class="ui-empty ui-panel ui-text-fail">Failed to load containers: ${escapeHtml(error.message)}</p>`;
+        if (!statusQuiet) document.getElementById('status-containers').innerHTML = `<p class="ui-empty ui-panel ui-text-fail">Failed to load containers: ${escapeHtml(uiErrorText(error))}</p>`;
     }
 }
 
@@ -6069,7 +6069,7 @@ async function loadStatusSystem() {
         `;
     } catch (error) {
         console.error('Failed to load system info:', error);
-        if (!statusQuiet) document.getElementById('status-system').innerHTML = `<p class="ui-empty ui-text-fail">Failed to load system info: ${escapeHtml(error.message)}</p>`;
+        if (!statusQuiet) document.getElementById('status-system').innerHTML = `<p class="ui-empty ui-text-fail">Failed to load system info: ${escapeHtml(uiErrorText(error))}</p>`;
     }
 }
 
@@ -6121,7 +6121,7 @@ async function loadStatusStorage() {
     } catch (error) {
         console.error('Failed to load storage info:', error);
         setStatusKpi('status-kpi-storage', '-');
-        if (!statusQuiet) document.getElementById('status-storage').innerHTML = `<p class="ui-empty ui-text-fail">Failed to load storage info: ${escapeHtml(error.message)}</p>`;
+        if (!statusQuiet) document.getElementById('status-storage').innerHTML = `<p class="ui-empty ui-text-fail">Failed to load storage info: ${escapeHtml(uiErrorText(error))}</p>`;
     }
 }
 
@@ -6129,7 +6129,7 @@ async function loadStatusExtended() {
     try {
         const response = await authenticatedFetch('/api/settings/info');
         if (!response.ok) {
-            throw new Error(`HTTP ${response.status}`);
+            throw await responseError(response);
         }
 
         const data = await response.json();
@@ -6149,9 +6149,9 @@ async function loadStatusExtended() {
 
     } catch (error) {
         console.error('Failed to load extended status:', error);
-        if (!statusQuiet) document.getElementById('status-import').innerHTML = `<p class="ui-empty ui-text-fail">Failed to load: ${escapeHtml(error.message)}</p>`;
-        if (!statusQuiet) document.getElementById('status-correlation').innerHTML = `<p class="ui-empty ui-text-fail">Failed to load: ${escapeHtml(error.message)}</p>`;
-        if (!statusQuiet) document.getElementById('status-jobs').innerHTML = `<p class="ui-empty ui-text-fail">Failed to load: ${escapeHtml(error.message)}</p>`;
+        if (!statusQuiet) document.getElementById('status-import').innerHTML = `<p class="ui-empty ui-text-fail">Failed to load: ${escapeHtml(uiErrorText(error))}</p>`;
+        if (!statusQuiet) document.getElementById('status-correlation').innerHTML = `<p class="ui-empty ui-text-fail">Failed to load: ${escapeHtml(uiErrorText(error))}</p>`;
+        if (!statusQuiet) document.getElementById('status-jobs').innerHTML = `<p class="ui-empty ui-text-fail">Failed to load: ${escapeHtml(uiErrorText(error))}</p>`;
     }
 }
 
@@ -6243,7 +6243,7 @@ async function checkBlacklists(force = false, host = null) {
         const qs = params.toString();
         const response = await authenticatedFetch(`/api/blacklist/check${qs ? '?' + qs : ''}`, { method: 'POST' });
         if (!response.ok) {
-            throw new Error(`HTTP ${response.status}`);
+            throw await responseError(response);
         }
         const body = await response.json().catch(() => null);
         if (body && body.status === 'busy') {
@@ -6273,7 +6273,7 @@ async function checkBlacklists(force = false, host = null) {
         if (temp) temp.remove();
 
         console.error('Failed to check blacklists:', error);
-        showToast(`Failed to check: ${error.message}`, 'error');
+        showToast(`Failed to check: ${uiErrorText(error)}`, 'error');
     } finally {
         if (btn) {
             btn.disabled = false;
@@ -6297,14 +6297,14 @@ async function loadBlacklistStatus() {
     try {
         const response = await authenticatedFetch('/api/blacklist/monitored');
         if (!response.ok) {
-            throw new Error(`HTTP ${response.status}`);
+            throw await responseError(response);
         }
 
         const data = await response.json();
         renderBlacklistStatus(data);
     } catch (error) {
         console.error('Failed to load blacklist status:', error);
-        if (!statusQuiet) container.innerHTML = `<p class="ui-empty ui-text-fail">Failed to load: ${escapeHtml(error.message)}</p>`;
+        if (!statusQuiet) container.innerHTML = `<p class="ui-empty ui-text-fail">Failed to load: ${escapeHtml(uiErrorText(error))}</p>`;
     }
 }
 
@@ -6313,7 +6313,7 @@ async function loadDashboardBlacklistSummary() {
     if (!document.getElementById('dash-kpi-blocklists')) return;
     try {
         const response = await authenticatedFetch('/api/blacklist/summary');
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        if (!response.ok) throw await responseError(response);
         const data = await response.json();
         if (!data.has_data) {
             setDashKpi('dash-kpi-blocklists', '-', '', 'No check yet; the first one runs by itself');
@@ -6451,13 +6451,13 @@ async function setBlocklistIgnored(zone, ignored) {
         const res = await authenticatedFetch(`/api/blacklist/lists/${encodeURIComponent(zone)}/ignore`, {
             method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ignored })
         });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        if (!res.ok) throw await responseError(res);
         const data = await res.json();
         showToast(ignored ? `${data.name} is ignored for every address.` : `${data.name} counts again.`, 'success');
         loadBlacklistStatus();
         loadNavCounters();
     } catch (e) {
-        showToast(`Could not change the blocklist: ${e.message}`, 'error');
+        showToast(`Could not change the blocklist: ${uiErrorText(e)}`, 'error');
     }
 }
 
@@ -6696,7 +6696,7 @@ async function runBackgroundJob(jobKey, jobName = null) {
 
         if (!response.ok) {
             const err = await response.json().catch(() => null);
-            const detail = uiApiErrorText(err, `HTTP ${response.status}`);
+            const detail = uiHttpErrorText(response.status, err);
             if (response.status === 409 && /already running/i.test(detail)) {
                 showToast(`Job "${displayName}" is already running`, 'warning');
                 return 'running';
@@ -6717,7 +6717,7 @@ async function runBackgroundJob(jobKey, jobName = null) {
         return 'started';
     } catch (error) {
         console.error(`Failed to trigger job ${jobKey}:`, error); // nosemgrep: javascript.lang.security.audit.unsafe-formatstring.unsafe-formatstring
-        showToast(`Failed to start job: ${error.message}`, 'error');
+        showToast(`Failed to start job: ${uiErrorText(error)}`, 'error');
         return 'failed';
     }
 }
@@ -6994,7 +6994,7 @@ async function showHelpModal(docName, title) {
         const response = await authenticatedFetch(`/api/docs/${docName}`);
 
         if (!response.ok) {
-            throw new Error(`Failed to load documentation: ${response.statusText}`);
+            throw await responseError(response);
         }
 
         const markdown = helpDocMarkdown(await response.text(), docName);
@@ -7006,7 +7006,7 @@ async function showHelpModal(docName, title) {
         console.error('Failed to load help documentation:', error);
         if (uiIsPhone()) {
             uiSheetShow('markdown-sheet', { label: 'Help', head: '<h3 class="ui-sheet-title">Help</h3>',
-                body: '<p class="ui-text-fail">Failed to load help documentation. Please try again later.</p>' });
+                body: `<p class="ui-text-fail">Failed to load help documentation: ${escapeHtml(uiErrorText(error))}</p>` });
             return;
         }
 
@@ -7018,7 +7018,7 @@ async function showHelpModal(docName, title) {
             if (modalTitle) {
                 modalTitle.textContent = 'Help';
             }
-            content.innerHTML = '<p class="text-red-500">Failed to load help documentation. Please try again later.</p>';
+            content.innerHTML = `<p class="text-red-500">Failed to load help documentation: ${escapeHtml(uiErrorText(error))}</p>`;
             revealChangelogModal(modal);
         }
     }
@@ -7058,7 +7058,7 @@ async function fetchContainerLogs(silent = false) {
     try {
         const response = await authenticatedFetch('/api/status/container-logs?lines=500');
         if (!response.ok) {
-            throw new Error(`HTTP ${response.status}`);
+            throw await responseError(response);
         }
 
         const data = await response.json();
@@ -7089,7 +7089,7 @@ async function fetchContainerLogs(silent = false) {
     } catch (error) {
         console.error('Failed to load container logs:', error);
         if (content && !silent) {
-            content.textContent = `Failed to load logs: ${error.message}`;
+            content.textContent = `Failed to load logs: ${uiErrorText(error)}`;
         }
     }
 }
