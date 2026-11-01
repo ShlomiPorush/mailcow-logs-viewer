@@ -3869,6 +3869,12 @@ function dashKpiFailed(...ids) {
         if (noteEl) noteEl.textContent = !el || el.textContent === '-' ? 'Could not load' : 'Could not update';
     }
 }
+// mailcow did not tell it: a reading shown before stays, said to be not current; none yet is Unknown
+function dashKpiUnknown(id) {
+    const shown = document.getElementById(id)?.textContent;
+    if (shown && shown !== '-' && shown !== 'Unknown') dashKpiFailed(id);
+    else setDashKpi(id, 'Unknown', '', 'mailcow did not answer');
+}
 
 // The Security card: whether the protections are on, and the Security page's two
 // lists with the same real counts. Which protections are on is read once; the
@@ -3977,7 +3983,7 @@ async function loadDashboardStatusSummary() {
 
         // Containers: red when one is stopped; ignored ones are only mentioned
         const containers = data.containers || {};
-        if (data.containers_known === false) setDashKpi('dash-kpi-containers', 'Unknown', '', 'mailcow did not answer');
+        if (data.containers_known === false) dashKpiUnknown('dash-kpi-containers');
         else setDashKpi('dash-kpi-containers', `${containers.running || 0} of ${containers.total || 0} running`, containers.stopped > 0 ? 'fail' : '',
             [containers.stopped ? `${containers.stopped} stopped` : 'All running', containers.ignored ? `${containers.ignored} ignored` : ''].filter(Boolean).join(', '));
 
@@ -3985,11 +3991,16 @@ async function loadDashboardStatusSummary() {
         const storage = data.storage || {};
         const usedPercent = parseInt(storage.used_percent) || 0;
         const storageLevel = usedPercent > 90 ? 'fail' : usedPercent > 75 ? 'warn' : '';
-        if (storage.known === false) setDashKpi('dash-kpi-storage', 'Unknown', '', 'mailcow did not answer');
+        if (storage.known === false) dashKpiUnknown('dash-kpi-storage');
         else setDashKpi('dash-kpi-storage', `${storage.used_percent || '0%'} used`, storageLevel, `${storage.used || '0'} of ${storage.total || '0'}`);
 
         const systemDiv = document.getElementById('dashboard-system-summary');
         const system = data.system || {};
+        // mailcow did not answer: counts shown before stay; none shown yet says so, not 0
+        if (system.known === false) {
+            if (!systemDiv.querySelector('.ui-kv')) systemDiv.innerHTML = '<p class="ui-empty ui-text-fail">Could not load: mailcow did not answer</p>';
+            return;
+        }
         systemDiv.innerHTML = `
             <div class="ui-kv"><span>Domains</span><b>${Number(system.domains || 0).toLocaleString()}</b></div>
             <div class="ui-kv"><span>Mailboxes</span><b>${Number(system.mailboxes || 0).toLocaleString()}</b></div>

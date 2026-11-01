@@ -147,3 +147,26 @@ test('the phone\'s problem mark stays when the next read fails', async () => {
     await w.eval('loadNavCounters()');
     assert.equal(pip.classList.contains('hidden'), false);
 });
+
+test('an answer that mailcow could not give keeps the reading shown before, and Hosted never shows its zeros', async () => {
+    const w = page();
+    const answer = known => ({ containers: known ? { running: 17, total: 18, stopped: 1 } : { running: 0, total: 0, stopped: 0 }, containers_known: known,
+        storage: known ? { used_percent: '11%', used: '21G', total: '200G', known: true } : { used_percent: '0%', used: '0', total: '0', known: false },
+        system: known ? { domains: 4, mailboxes: 13, aliases: 10, known: true } : { domains: 0, mailboxes: 0, aliases: 0, known: false } });
+    // Never answered: Unknown, and Hosted says so instead of three zeros
+    w.reply = url => url.startsWith('/api/status/summary') ? answer(false) : {};
+    await w.eval('loadDashboardStatusSummary()');
+    assert.equal(text(w, 'dash-kpi-containers'), 'Unknown');
+    assert.equal(text(w, 'dash-kpi-storage'), 'Unknown');
+    assert.equal(text(w, 'dashboard-system-summary'), 'Could not load: mailcow did not answer');
+    // Answered once, then not: the readings stay, red included, and say they are not current
+    w.reply = url => url.startsWith('/api/status/summary') ? answer(true) : {};
+    await w.eval('loadDashboardStatusSummary()');
+    w.reply = url => url.startsWith('/api/status/summary') ? answer(false) : {};
+    await w.eval('loadDashboardStatusSummary()');
+    assert.equal(text(w, 'dash-kpi-containers'), '17 of 18 running');
+    assert.equal(w.document.getElementById('dash-kpi-containers').className, 'ui-fail');
+    assert.equal(text(w, 'dash-kpi-containers-note'), 'Could not update');
+    assert.equal(text(w, 'dash-kpi-storage'), '11% used');
+    assert.match(text(w, 'dashboard-system-summary'), /Domains\s*4/);
+});

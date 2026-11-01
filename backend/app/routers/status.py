@@ -464,7 +464,8 @@ async def get_status_summary():
         containers_known = containers_known and containers_data.get("summary", {}).get("running", 0) > 0
         if isinstance(storage_data, Exception):
             storage_data = {"used_percent": "0%", "valid": False}
-        if isinstance(mailcow_info, Exception):
+        system_known = not isinstance(mailcow_info, Exception)
+        if not system_known:
             mailcow_info = {"domains": {"total": 0}, "mailboxes": {"total": 0}, "aliases": {"total": 0}}
         
         return {
@@ -480,7 +481,9 @@ async def get_status_summary():
             "system": {
                 "domains": mailcow_info.get("domains", {}).get("total", 0),
                 "mailboxes": mailcow_info.get("mailboxes", {}).get("total", 0),
-                "aliases": mailcow_info.get("aliases", {}).get("total", 0)
+                "aliases": mailcow_info.get("aliases", {}).get("total", 0),
+                # False when mailcow did not answer: the dashboard says so, not 0
+                "known": system_known,
             }
         }
     except Exception as e:

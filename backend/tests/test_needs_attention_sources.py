@@ -75,12 +75,12 @@ def test_open_critical_alerts_are_counted_past_the_rows_asked_for(db_ready):
     assert c.get('/api/security-alerts?acknowledged=false&limit=20').json()['unacknowledged_critical'] == before
 
 
-def _summary(monkeypatch, containers):
+def _summary(monkeypatch, containers, info=None):
     from app.routers import status
     import app.services.figures as figures
     monkeypatch.setattr(status, '_get_containers_status_internal', containers)
     monkeypatch.setattr(figures, 'storage_figure', AsyncMock(return_value={'used_percent': '1%', 'valid': True}))
-    monkeypatch.setattr(status, 'get_mailcow_info', AsyncMock(return_value={}))
+    monkeypatch.setattr(status, 'get_mailcow_info', info or AsyncMock(return_value={}))
     app = FastAPI()
     app.include_router(status.router)
     with TestClient(app) as client:
@@ -102,3 +102,13 @@ def test_container_counts_say_whether_mailcow_answered(monkeypatch):
     # are the containers known before, all counted as stopped, not mailcow's answer
     cached = _summary(monkeypatch, AsyncMock(return_value={'summary': {'running': 0, 'stopped': 18, 'total': 18}}))
     assert cached['containers_known'] is False
+
+
+def test_mailcow_counts_say_whether_mailcow_answered(monkeypatch):
+    running = AsyncMock(return_value={'summary': {'running': 18, 'stopped': 0, 'total': 18}})
+    info = {'domains': {'total': 4}, 'mailboxes': {'total': 13}, 'aliases': {'total': 10}}
+    read = _summary(monkeypatch, running, AsyncMock(return_value=info))
+    assert read['system'] == {'domains': 4, 'mailboxes': 13, 'aliases': 10, 'known': True}
+    # No answer: zeros, which the dashboard must not show as a mailcow with nothing on it
+    failed = _summary(monkeypatch, running, AsyncMock(side_effect=RuntimeError('mailcow did not answer')))
+    assert failed['system'] == {'domains': 0, 'mailboxes': 0, 'aliases': 0, 'known': False}
