@@ -13,6 +13,7 @@ from typing import List, Optional
 
 from ..database import get_db
 from ..models import PostfixLog, RspamdLog, NetfilterLog, MessageCorrelation
+from ..correlation import shown_postfix_lines, split_queue_occurrences
 from ..mailcow_api import MailcowShownError, mailcow_api
 from ..config import settings
 from ..services import entity_values, excluded_addresses, geoip_service, protection_rules, security_addresses, written_recipients
@@ -48,9 +49,11 @@ def get_postfix_logs_by_queue(
         if not logs:
             raise HTTPException(status_code=404, detail="No logs found for this Queue ID")
         
-        # Get correlation key from first log
-        correlation_key = logs[0].correlation_key if logs else None
-        
+        # The message's correlation key, from its first line. A queue id used
+        # by more than one message (Postfix reuses them) has none: its lines
+        # are listed, and no one message's data is put next to all of them
+        correlation_key = logs[0].correlation_key if len(split_queue_occurrences(logs)) <= 1 else None
+
         # Try to find Rspamd data via correlation
         rspamd_data = None
         if correlation_key:
@@ -196,6 +199,9 @@ def get_postfix_logs(
             queue_logs = logs_by_queue.get(qid)
             if not queue_logs:
                 continue
+            # The row describes the queue id's latest message: Postfix reuses
+            # queue ids, and an earlier message's sender or status is not this one's
+            queue_logs = split_queue_occurrences(queue_logs)[-1].lines or queue_logs
 
             # Aggregate data from all logs
             aggregated = {
@@ -1458,21 +1464,10 @@ def get_message_details(
                 RspamdLog.id == correlation.rspamd_log_id
             ).first()
         
-        # Get Postfix logs - Use queue_id instead of postfix_log_ids
-        # This ensures we always get ALL logs, even if they arrive after correlation is marked complete
-        postfix_logs = []
-        if correlation.queue_id:
-            # Query ALL postfix logs with this queue_id
-            # This is the source of truth, not postfix_log_ids
-            postfix_logs = db.query(PostfixLog).filter(
-                PostfixLog.queue_id == correlation.queue_id
-            ).order_by(PostfixLog.time).all()
-        elif correlation.postfix_log_ids:
-            # Fallback: if no queue_id yet, use postfix_log_ids (for incomplete correlations)
-            postfix_logs = db.query(PostfixLog).filter(
-                PostfixLog.id.in_(correlation.postfix_log_ids)
-            ).order_by(PostfixLog.time).all()
-        
+        # This message's Postfix lines, never those of another message that
+        # used its queue id (Postfix reuses them)
+        postfix_logs = shown_postfix_lines(db, correlation)
+
         if excluded_addresses.delivery_hidden(correlation, postfix_logs):
             raise HTTPException(status_code=404, detail="Message not found")
         postfix_logs = excluded_addresses.visible_postfix_lines(postfix_logs)

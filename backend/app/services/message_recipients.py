@@ -25,10 +25,10 @@ The rules:
 import re
 from typing import Dict, Iterable, List, Optional, Tuple
 
-from sqlalchemy import and_, case, literal_column, select
+from sqlalchemy import and_, case, func, literal_column, select
 
 from ..correlation import _PF_ADDR
-from ..models import PostfixLog
+from ..models import MessageCorrelation, PostfixLog
 from . import excluded_addresses, written_recipients
 
 # The written address of a delivery line, read only from the fixed start of
@@ -136,15 +136,25 @@ def legs_recipients(db, legs, rspamd_logs: Optional[Dict[int, object]] = None) -
 
 def page_deliveries(db, legs) -> Dict[str, List[Tuple[str, str]]]:
     """(delivered to, written address) of the visible Postfix lines of each leg,
-    by correlation key: the lines of its queue id, else the lines linked to it.
+    by correlation key: the lines of its queue id, else (no queue id, or one
+    another delivery has too) the lines linked to it.
 
     One grouped query for every leg with a queue id: a line without orig_to
     counts once per address, a line with one once per text. A second query
     only for legs linked to their lines by id alone. Never one per leg."""
     found = {leg.correlation_key: [] for leg in legs}
     by_queue, by_line = {}, {}
+    # A queue id that more than one delivery has was used by more than one
+    # message (Postfix reuses them): each of those legs counts the lines
+    # linked to it, its own message's
+    queues = list({leg.queue_id for leg in legs if leg.queue_id})
+    shared = set()
+    if queues:
+        shared = {queue_id for (queue_id,) in db.query(MessageCorrelation.queue_id).filter(
+            MessageCorrelation.queue_id.in_(queues)
+        ).group_by(MessageCorrelation.queue_id).having(func.count(MessageCorrelation.id) > 1).all()}
     for leg in legs:
-        if leg.queue_id:
+        if leg.queue_id and leg.queue_id not in shared:
             by_queue.setdefault(leg.queue_id, []).append(leg.correlation_key)
         elif isinstance(leg.postfix_log_ids, list):
             for line_id in {i for i in leg.postfix_log_ids if isinstance(i, int)}:

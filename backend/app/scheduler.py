@@ -53,7 +53,6 @@ from .services.correlation_jobs import (
     TERMINAL_FINAL_STATUSES,
     PUSH_SKIP_FINAL_STATUSES,
     LATE_STATUS_MAX_CORRELATION_AGE,
-    PUSH_TRIGGER_STATUSES,
 )
 
 from .services.geoip_downloader import is_license_configured
@@ -886,8 +885,8 @@ def _store_postfix_page(logs):
     logs = _clean_entries(logs)
     with _postfix_ingest_lock:
         page_new = 0
-        # Queue ids whose outcome changed on this page - see refresh below
-        page_status_queue_ids = set()
+        # Queue ids of the lines stored on this page - see refresh below
+        page_queue_ids = set()
         page_skipped = 0
         page_blacklisted = 0
         # Entries join the duplicate cache only after the page is committed;
@@ -936,7 +935,7 @@ def _store_postfix_page(logs):
                     existing_in_db.add(_postfix_line_key(
                         int(dt.timestamp()), row.program, row.queue_id, row.message))
 
-            # (values, queue id whose outcome changed or None) per new line
+            # values per new line
             new_rows = []
             for log_entry in logs:
                 try:
@@ -987,8 +986,7 @@ def _store_postfix_page(logs):
                         raw_data=log_entry
                     ))
 
-                    status_queue_id = queue_id if queue_id and parsed.get('status') in PUSH_TRIGGER_STATUSES else None
-                    new_rows.append((values, status_queue_id))
+                    new_rows.append(values)
                     page_seen.add(unique_id)
                     page_new += 1
 
@@ -996,12 +994,12 @@ def _store_postfix_page(logs):
                     logger.error(f"Error processing Postfix log: {e}")
                     continue
 
-            stored = add_rows(db, PostfixLog, [values for values, _ in new_rows], 'Postfix log line')
-            page_status_queue_ids.update(
-                status_queue_id for (_, status_queue_id), ok in zip(new_rows, stored) if ok and status_queue_id)
+            stored = add_rows(db, PostfixLog, new_rows, 'Postfix log line')
+            page_queue_ids.update(
+                values['queue_id'] for values, ok in zip(new_rows, stored) if ok and values.get('queue_id'))
             # Queues with a new delivery line, whatever its outcome (a delivery to
             # the spam folder too): it may name the address the sender wrote
-            delivery_queue_ids = {values['queue_id'] for (values, _), ok in zip(new_rows, stored)
+            delivery_queue_ids = {values['queue_id'] for values, ok in zip(new_rows, stored)
                                   if ok and values.get('queue_id') and values.get('recipient')}
 
             db.commit()
@@ -1011,19 +1009,21 @@ def _store_postfix_page(logs):
                 written_recipients.record_for_queues(db, delivery_queue_ids)
                 db.commit()
 
-            # The outcome of these queues just changed. Refresh only those
-            # correlations, so a delivery that lands after the correlation age
-            # window is still recorded without re-polling anything else.
+            # These queues just got lines. Refresh only their correlations, so
+            # a delivery that lands after the correlation age window is still
+            # recorded without re-polling anything else, and a line that shows
+            # the queue id was used by another message gives each message
+            # back its own lines (Postfix reuses queue ids).
             # Failing here must never lose the logs that were just stored.
-            if page_status_queue_ids:
+            if page_queue_ids:
                 try:
                     refreshed, skipped_refresh = refresh_correlations_for_queue_ids(
-                        db, page_status_queue_ids)
+                        db, page_queue_ids)
                     if refreshed or skipped_refresh:
                         db.commit()
                         logger.info(
                             f"[STATUS] Refreshed {refreshed} correlation(s) from "
-                            f"{len(page_status_queue_ids)} arriving queue(s), "
+                            f"{len(page_queue_ids)} arriving queue(s), "
                             f"skipped {skipped_refresh}"
                         )
                 except Exception as e:
@@ -1752,8 +1752,9 @@ def _expire_old_correlations_sync():
     )
 
 
-def _recompute_correlation_from_postfix(db: Session, correlation: MessageCorrelation) -> bool:
-    return correlation_jobs.recompute_correlation_from_postfix(db, correlation, clock=datetime)
+def _recompute_correlation_from_postfix(db: Session, correlation: MessageCorrelation, occurrences=None) -> bool:
+    return correlation_jobs.recompute_correlation_from_postfix(
+        db, correlation, clock=datetime, occurrences=occurrences)
 
 
 def refresh_correlations_for_queue_ids(db: Session, queue_ids) -> tuple:
