@@ -108,3 +108,42 @@ test('a sidebar counter that could not be read keeps what it showed, and the ser
     assert.equal(badge.classList.contains('hidden'), false);
     assert.equal(text(w, 'ui-server-problems'), 'Could not check');
 });
+
+test('a refresh of the same period that fails keeps the figures it had; Clear never brings back another period\'s', async () => {
+    const w = page();
+    w.reply = url => url.startsWith('/api/stats/flow') ? flow(66) : {};
+    w.eval('loadMailFlowChart()');
+    await settle(w);
+    w.reply = url => url.startsWith('/api/stats/flow') ? FAIL : {};
+    w.eval('loadMailFlowChart()');
+    await settle(w);
+    assert.equal(text(w, 'stat-messages-24h'), '66', 'a failed refresh keeps the answer shown');
+    // Another period: the last one's answer is gone, even through Clear
+    w.eval("setDashFlowPeriod('7d')");
+    assert.equal(text(w, 'stat-messages-24h'), '-', 'nothing of the last period while the new one loads');
+    await settle(w);
+    w.eval('pickMailFlowHour(null)');
+    assert.equal(text(w, 'stat-messages-24h'), '-');
+});
+
+test('checks that answered "not known" are not "No problems", and Containers says Unknown', async () => {
+    const w = page();
+    w.reply = url => url.startsWith('/api/status/summary') ? { containers_known: false, containers: { running: 0, total: 0, stopped: 0 } }
+        : url.startsWith('/api/blacklist/summary') ? { status: 'error' } : {};
+    await w.eval('loadNavCounters()');
+    assert.equal(text(w, 'ui-server-problems'), 'Could not check');
+    await w.eval('loadDashboardStatusSummary()');
+    assert.equal(text(w, 'dash-kpi-containers'), 'Unknown');
+    assert.equal(text(w, 'dash-kpi-containers-note'), 'mailcow did not answer');
+});
+
+test('the phone\'s problem mark stays when the next read fails', async () => {
+    const w = page();
+    w.reply = url => url.startsWith('/api/status/summary') ? { containers: { running: 17, total: 18, stopped: 1 } } : {};
+    await w.eval('loadNavCounters()');
+    const pip = w.document.getElementById('tabbar-pip-status');
+    assert.equal(pip.classList.contains('hidden'), false);
+    w.reply = () => FAIL;
+    await w.eval('loadNavCounters()');
+    assert.equal(pip.classList.contains('hidden'), false);
+});

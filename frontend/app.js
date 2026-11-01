@@ -1056,7 +1056,8 @@ async function loadNavCounters() {
     if (stopped > 0) problems.push(`${stopped} container${stopped === 1 ? '' : 's'} stopped`);
     if (blacklist && blacklist !== FAILED && blacklist.status === 'listed') problems.push('listed on a blocklist');
     // A check that could not run is not "No problems"
-    const unchecked = summary === FAILED || blacklist === FAILED;
+    const unchecked = summary === FAILED || blacklist === FAILED
+        || (summary && summary.containers_known === false) || (blacklist && blacklist.status === 'error');
     if (problems.length || !unchecked) setNavCount('status', problems.length, true, problems.join(', '));
 
     const label = problems.length ? `${problems.length} problem${problems.length === 1 ? '' : 's'}`
@@ -1069,7 +1070,7 @@ async function loadNavCounters() {
     }
     // On a phone the header bell has these too, with the rest of Needs attention
     const pip = document.getElementById('tabbar-pip-status');
-    if (pip) pip.classList.toggle('hidden', problems.length === 0);
+    if (pip && (problems.length || !unchecked)) pip.classList.toggle('hidden', problems.length === 0);
 
     const host = document.getElementById('ui-server-host');
     const url = info && info.configuration ? info.configuration.mailcow_url : '';
@@ -3292,6 +3293,9 @@ function setDashFlowPeriod(period) {
     dashFlow.zoom = null;
     dashFlow.pick = null;
     dashFlow.full = null;
+    // The last period's answer is not this one's: nothing draws it again
+    dashFlow.data = null;
+    mailFlowFiguresUnknown();
     dashFlow.view++;
     document.querySelectorAll('#dashboard-flow-period button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.period === period)));
     loadMailFlowChart();
@@ -3377,7 +3381,13 @@ function mailFlowFailed() {
     const view = chart.querySelector('.ui-flow-view');
     if (view) view.innerHTML = failed;
     else chart.innerHTML = mailFlowFrame(failed);
-    // Without an answer the figures are not known: none is shown (not 0, nor the last period's)
+    // A refresh that failed keeps the figures of the answer it had
+    if (!dashFlow.data) mailFlowFiguresUnknown();
+}
+
+// No answer for the period shown: its figures are not known, so none is shown
+// (not 0, nor the last period's)
+function mailFlowFiguresUnknown() {
     for (const id of ['stat-messages-24h', 'stat-blocked-24h', 'stat-deferred-24h', 'stat-auth-failures-24h']) {
         const el = document.getElementById(id);
         if (el) el.textContent = '-';
@@ -3967,7 +3977,8 @@ async function loadDashboardStatusSummary() {
 
         // Containers: red when one is stopped; ignored ones are only mentioned
         const containers = data.containers || {};
-        setDashKpi('dash-kpi-containers', `${containers.running || 0} of ${containers.total || 0} running`, containers.stopped > 0 ? 'fail' : '',
+        if (data.containers_known === false) setDashKpi('dash-kpi-containers', 'Unknown', '', 'mailcow did not answer');
+        else setDashKpi('dash-kpi-containers', `${containers.running || 0} of ${containers.total || 0} running`, containers.stopped > 0 ? 'fail' : '',
             [containers.stopped ? `${containers.stopped} stopped` : 'All running', containers.ignored ? `${containers.ignored} ignored` : ''].filter(Boolean).join(', '));
 
         // Storage: amber above 75%, red above 90%
