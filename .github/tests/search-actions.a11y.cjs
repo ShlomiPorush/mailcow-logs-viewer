@@ -770,3 +770,12 @@ test('S7: a second question closes the first through its own close: it settles, 
     assert.deepEqual(Array.from(seen), [false]);
     w.HTMLElement.prototype.focus = focus;
 });
+
+test('a search the server could not run is not "nothing found": the panel names what was not searched', async () => {
+    const w = page();
+    w.reply = () => ({ __status: 500, detail: 'An error occurred' });
+    await search(w, 'zzqq');
+    const text = $(w, '#ui-gs-panel').textContent;
+    assert.match(text, /Could not search .+\. Try again in a moment\./);
+    assert.match(text, /Nothing found for “zzqq”\. Could not search/);
+});

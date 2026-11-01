@@ -533,9 +533,14 @@ function gsRender() {
             body += `<div class="ui-gs-sec" role="row"><span role="gridcell">${escapeHtml(c.label)} · ${Number(r.count).toLocaleString()}</span>${r.count > GS_SUMMARY ? `<span role="gridcell"><button type="button" class="ui-link" data-gs-tab="${c.id}">See all</button></span>` : ''}</div>`
                 + r.items.slice(0, GS_SUMMARY).map(item => gsItem(c.id, item, q)).join('');
         });
-        if (!body) body = note('ui-gs-empty', loading ? 'Searching…' : short ? GS_SHORT : `Nothing found for “${escapeHtml(gsQuery)}”`);
+        // A place that could not be searched is not one where nothing was found
+        const failed = categories.filter(c => gsResults[c.id] && gsResults[c.id].failed).map(c => c.label);
+        const notSearched = failed.length ? `Could not search ${failed.join(', ')}. Try again in a moment.` : '';
+        if (!body) body = note('ui-gs-empty', loading ? 'Searching…' : short ? GS_SHORT
+            : `Nothing found for “${escapeHtml(gsQuery)}”${notSearched ? `. ${escapeHtml(notSearched)}` : ''}`);
         else if (loading) body += note('ui-gs-wait', 'Still searching…');
         else if (short) body += note('ui-gs-wait', GS_SHORT);
+        else if (notSearched) body += note('ui-gs-wait', escapeHtml(notSearched));
     } else {
         const r = gsResults[gsTab] || { count: 0, items: [] };
         if (r.more && r.count) {
