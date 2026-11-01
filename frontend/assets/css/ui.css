@@ -3512,7 +3512,7 @@ button.ui-aa-col:focus-visible { outline: 2px solid var(--ui-focus); outline-off
     :root { --ui-ctl-h: 44px; }
     .ui-btn-sm, .ui-chip, .ui-seg button { min-width: 44px; min-height: 44px; }
     /* Every button and field, also those that set their own height (Apply, the Logs toolbar, a Settings number) */
-    .ui-btn, .ui-input, .ui-select, .ui-gs-box, .ui-logs-font, .ui-logs-search, .ui-logs-date { min-height: 44px; }
+    .ui-btn, .ui-input, .ui-select, .ui-gs-box, .ui-logs-font, .ui-logs-search, .ui-logs-date, .ui-msg-new, .ui-logs-new { min-height: 44px; }
     .ui-icon-btn, .ui-gs-phone, .ui-set-clear, .ui-mtop-home, .ui-sort-btn-icon, .ui-sec-chip button { min-width: 44px; min-height: 44px; justify-content: center; align-items: center; }
     /* A switch (Settings, features) keeps its drawn size: its whole row is the target */
     input[type="checkbox"]:not(:is(.ui-set-bool, .ui-feature) .ui-check), input[type="radio"] { min-width: 24px; min-height: 24px; }
