@@ -344,6 +344,9 @@ function uiRetryButton(call) {
 // Try again pressed: its failure note becomes the spinner while the load runs again
 function uiRetrying(button) {
     const note = button.closest('p');
+    // A list drawn only when its content changes (uiReplaceKeepingFocus) draws the same failure again
+    const host = button.closest('[data-shown]');
+    if (host) delete host.dataset.shown;
     if (note) note.outerHTML = '<div class="ui-loading" role="status"><div class="loading"></div><p>Loading...</p></div>';
 }
 

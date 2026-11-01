@@ -95,3 +95,37 @@ test('the spinner waits before it shows, and says so when a load takes long', ()
     assert.match(css, /\.ui-loading > \.loading \{ animation: ui-appear [^;,]* \.3s both, spin 1s linear infinite; \}/);
     assert.match(css, /\.ui-loading:has\(> \.loading\)::after \{ content: "This is taking longer than usual\."; animation: ui-appear [^;]* 8s both; \}/);
 });
+
+test('Try again that fails again shows the failure again, also in a quiet Status refresh', async () => {
+    const w = page();
+    const users = w.document.createElement('div');
+    users.id = 'users-panel';
+    w.document.body.appendChild(users);
+    w.reply = () => FAIL;
+    for (const [loader, id] of [['loadUsersPanel()', 'users-panel'], ['loadQuarantineRules()', 'quarantine-rules-list'], ['loadStatusSystem()', 'status-system']]) {
+        const box = w.document.getElementById(id);
+        if (!box) { assert.equal(id, 'quarantine-rules-list', `${id} is on the page`); continue; }
+        await w.eval(loader);
+        await settle(w);
+        // A refresh of Status is on (statusQuiet) while Try again is pressed
+        if (id === 'status-system') w.eval('statusQuiet = true');
+        box.querySelector('button[onclick^="uiRetrying"]').click();
+        await settle(w);
+        assert.ok(box.querySelector('button[onclick^="uiRetrying"]'), `${loader}: the second failure offers Try again`);
+        assert.equal(box.querySelector('.loading'), null, `${loader}: no spinner left`);
+        w.eval('statusQuiet = false');
+    }
+});
+
+test('a Fail2ban read that fails after another succeeded can be tried again', async () => {
+    const w = page();
+    let calls = 0;
+    // The first read answers late with a failure, the second at once with the lists
+    w.reply = url => url === '/api/fail2ban'
+        ? (++calls === 1 ? new Promise(resolve => w.setTimeout(() => resolve(FAIL), 30)) : { active_bans: [], blacklist: '', whitelist: '' }) : {};
+    const first = w.eval('loadFail2BanSettings()');
+    await w.eval('loadFail2BanSettings()');
+    await first;
+    assert.equal(w.eval('fail2banLoadError'), true);
+    assert.equal(w.eval('fail2banSettingsLoaded'), false, 'Try again reads it again');
+});
