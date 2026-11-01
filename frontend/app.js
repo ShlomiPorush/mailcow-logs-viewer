@@ -189,10 +189,17 @@ async function responseError(response) {
 
 // Why an action that answers { status, msg } did not succeed: a failed request in
 // words, or the answer's own message when the request went through but the action
-// was refused (mailcow's words). result is the body from uiReadJson, null when not JSON.
+// was refused. result is the body from uiReadJson, null when not JSON.
 function actionErrorText(response, result) {
     if (!response.ok) return uiHttpErrorText(response.status, result);
-    return (result && result.msg) || uiApiErrorText(result, 'No reason was given');
+    const msg = result && result.msg;
+    if (mailcowWords(msg)) return msg;
+    return msg ? `mailcow refused it (${[].concat(msg)[0]})` : uiApiErrorText(result, 'No reason was given');
+}
+// An action's message when it is a sentence (this app's words); mailcow answers with a
+// message code instead ("item_released", or a list such as ["network_host_invalid", "x"])
+function mailcowWords(msg) {
+    return typeof msg === 'string' && /\s/.test(msg.trim()) ? msg : '';
 }
 
 // Handle logout - one path for both login methods, since both are backed by
@@ -4417,7 +4424,7 @@ async function queueAction(action, itemIds) {
         const result = await uiReadJson(res);
         if (res.ok && result && result.status === 'success') {
             const labels = { deliver: 'Retry delivery', hold: 'Hold', unhold: 'Unhold', flush: 'Flush all', super_delete: 'Delete all' };
-            showToast(result.msg || `${labels[action] || action} completed`, 'success');
+            showToast(mailcowWords(result.msg) || `${labels[action] || action} completed`, 'success');
             lastDataCache.queue = null;
             await loadQueue();
         } else {
@@ -4447,7 +4454,7 @@ async function queueDeleteRequest(itemIds) {
 
         const result = await uiReadJson(res);
         if (res.ok && result && result.status === 'success') {
-            showToast(result.msg || 'Message deleted from queue', 'success');
+            showToast(mailcowWords(result.msg) || 'Message deleted from queue', 'success');
             lastDataCache.queue = null;
             await loadQueue();
         } else {
@@ -4727,7 +4734,7 @@ async function quarantineAction(action, itemIds) {
         const result = await uiReadJson(res);
         const actionLabels = { release: 'released', delete: 'deleted', learnham: 'released & marked as not spam', learnspam: 'deleted & marked as spam' };
         if (res.ok && result && result.status === 'success') {
-            showToast(result.msg || `Message(s) ${actionLabels[action] || action} successfully`, 'success');
+            showToast(mailcowWords(result.msg) || `Message(s) ${actionLabels[action] || action} successfully`, 'success');
             lastDataCache.quarantine = null;
             await loadQuarantine();
         } else {

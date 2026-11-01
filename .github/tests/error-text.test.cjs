@@ -122,3 +122,18 @@ test('no page shows what a request threw as it is', () => {
         .map(({ text, line }) => `${name}:${line}: ${text.trim()}`));
     assert.deepEqual(found, [], 'show uiErrorText(error) instead');
 });
+
+test('an action mailcow refused says so in words, and its codes stay out of the toasts', () => {
+    const app = fs.readFileSync(path.join(frontend, 'app.js'), 'utf8');
+    const fn = name => { const start = app.indexOf(`function ${name}(`); return app.slice(start, app.indexOf('\n}\n', start) + 3); };
+    vm.runInContext(fn('actionErrorText') + fn('mailcowWords'), context);
+    const ok = { ok: true, status: 200 };
+    // The app's own sentence is kept; mailcow's message codes are not shown as they are
+    assert.equal(context.actionErrorText(ok, { status: 'error', msg: '192.0.2.1 is not banned by Fail2ban now' }), '192.0.2.1 is not banned by Fail2ban now');
+    assert.equal(context.actionErrorText(ok, { status: 'error', msg: ['network_host_invalid', 'x'] }), 'mailcow refused it (network_host_invalid)');
+    assert.equal(context.actionErrorText(ok, { status: 'error', msg: 'f2b_modified' }), 'mailcow refused it (f2b_modified)');
+    assert.equal(context.actionErrorText(ok, null), 'No reason was given');
+    assert.equal(context.actionErrorText({ ok: false, status: 502 }, null), DID_NOT_ANSWER);
+    assert.equal(context.mailcowWords(['item_released', '1']), '');
+    assert.equal(context.mailcowWords('Message(s) released'), 'Message(s) released');
+});
