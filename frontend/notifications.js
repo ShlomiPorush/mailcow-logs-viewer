@@ -248,7 +248,7 @@ async function deleteNotificationChannel(channelId) {
     const channel = notificationChannels.find(c => c.id === channelId);
     const confirmed = await showConfirmModal({
         title: 'Delete destination',
-        message: `Delete "${channel ? channel.name : 'this destination'}"? Alerts will no longer be sent there.`,
+        message: `Delete "${channel ? channel.name : 'this destination'}"? Alerts will no longer be sent there. This cannot be undone.`,
         confirmText: 'Delete',
         isDangerous: true
     });

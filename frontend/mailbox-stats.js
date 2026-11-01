@@ -606,7 +606,13 @@ function renderMailboxStatsAccordion(mailboxes, page = 1, totalPages = 1, total 
     if (!container) return;
 
     if (mailboxes.length === 0) {
-        container.innerHTML = '<p class="ui-empty ui-panel">No mailboxes found</p>';
+        // As on Devices: with filters on, the way back is right there
+        const bar = document.getElementById('mailbox-stats-search')?.closest('.ui-fbar');
+        container.innerHTML = bar && uiFilterBarOn(bar) ? `
+            <div class="ui-empty ui-panel">
+                <p><b>No mailboxes match these filters</b></p>
+                <p><button onclick="resetMailboxStatsFilters()" class="ui-btn ui-btn-sm">Clear filters</button></p>
+            </div>` : '<p class="ui-empty ui-panel">Mailboxes with mail in this period show up here.</p>';
         mailboxStatsWatchMore(false);
         return;
     }

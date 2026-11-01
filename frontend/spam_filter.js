@@ -904,7 +904,7 @@ function showAddSuppressionModal(prefillEmail, queueId, { notes = 'Added from qu
                 <option value="domain">Domain</option>
             </select>
         </label>
-        <label><span id="new-suppression-label" class="ui-label">Email Address</span>
+        <label><span class="ui-label"><span id="new-suppression-label">Email Address</span> <span class="ui-text-fail">*</span></span>
             <input type="text" id="new-suppression-email" class="ui-input" placeholder="user@example.com">
             <small id="new-suppression-hint" class="ui-muted hidden"></small>
         </label>
@@ -980,30 +980,43 @@ function toggleCreateExpiryField() {
 function createSuppressionOnce(button) {
     return uiOnce(button || 'suppression-add', createSuppression, button, 'Adding...');
 }
+// A domain as typed, as the hostname its pattern is made from: one @ before it
+// (@example.com) and one dot after it (example.com., as DNS writes it) are dropped
+function suppressionDomainInput(value) {
+    return String(value).trim().toLowerCase().replace(/^@/, '').replace(/\.$/, '');
+}
+
 async function createSuppression() {
     if (!uiMayAct('outbound')) return;
-    let email = document.getElementById('new-suppression-email').value.trim();
+    const field = document.getElementById('new-suppression-email');
+    let email = field.value.trim();
     const type = document.getElementById('new-suppression-type').value;
     const reason = document.getElementById('new-suppression-reason').value;
     const notes = document.getElementById('new-suppression-notes').value.trim();
-    
+
     if (!email) {
-        showToast(type === 'domain' ? 'Domain name is required' : 'Email address is required', 'error');
+        uiFieldProblem(field, type === 'domain' ? 'Enter a domain name.' : 'Enter an email address.');
         return;
     }
-    
+
     // Fix #5: Convert domain to regex pattern
     if (type === 'domain') {
         // If user entered a raw domain, convert to regex
         if (!email.startsWith('/')) {
+            const domain = suppressionDomainInput(email);
+            // The pattern blocks that domain only, never its subdomains
+            if (domain.startsWith('*.')) {
+                uiFieldProblem(field, 'Enter the domain without "*." - only that domain is blocked, not its subdomains.');
+                return;
+            }
             // Only a plain hostname can be turned into a pattern safely. Escaping
             // just the dots left every other metacharacter (and the / delimiter)
             // free to change the regex that ends up in the Rspamd map.
-            if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/i.test(email)) {
-                showToast('Enter a plain domain name, for example example.com', 'error');
+            if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/i.test(domain)) {
+                uiFieldProblem(field, 'Enter a plain domain name, for example example.com');
                 return;
             }
-            email = `/^.+@${escapeRegex(email)}$/i`;
+            email = `/^.+@${escapeRegex(domain)}$/i`;
         }
     }
     
@@ -1189,7 +1202,7 @@ async function toggleSuppression(id, newActive) {
 
 async function deleteSuppression(id, email) {
     if (!uiMayAct('outbound')) return;
-    if (!await showConfirmModal({ title: 'Delete Suppression', message: `Delete suppression for ${email}? This cannot be undone.`, confirmText: 'Delete', isDangerous: true })) return;
+    if (!await showConfirmModal({ title: 'Delete suppression', message: `Delete suppression for ${email}? This cannot be undone.`, confirmText: 'Delete', isDangerous: true })) return;
     
     try {
         const response = await authenticatedFetch(`/api/suppressions/${id}`, { method: 'DELETE' });
@@ -1411,11 +1424,14 @@ function updateRegexWizardPreview() {
             pattern = `/^${value.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$/i`;
             explanation = `Blocks exactly: ${value}`;
             break;
-        case 'domain':
-            // Anchored, with the @ boundary and optional subdomain labels
-            pattern = `/^.+@(.+\\.)?${escaped}$/i`;
-            explanation = `Blocks: *@${value} and all subdomains (e.g. *@sub.${value})`;
+        case 'domain': {
+            // Anchored, with the @ boundary and optional subdomain labels; @example.com
+            // and example.com. are read as example.com, as in Add Suppression
+            const domain = suppressionDomainInput(value);
+            pattern = `/^.+@(.+\\.)?${escapeRegex(domain)}$/i`;
+            explanation = `Blocks: *@${domain} and all subdomains (e.g. *@sub.${domain})`;
             break;
+        }
         case 'tld':
             // Match any address ending in .tld
             pattern = `/^.+\\.${escaped}$/i`;

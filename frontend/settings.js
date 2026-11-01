@@ -621,7 +621,8 @@ const SETTINGS_SYNC_TWINS = { hard: { suppress: 'delete' }, soft: { queue: 'queu
 // Settings that do nothing while another switch is off: shown greyed out and
 // unclickable until it is on. Groups say it with needs:, single fields here.
 const SETTINGS_FIELD_NEEDS = {
-    session_idle_timeout_minutes: 'session_idle_enabled'
+    session_idle_timeout_minutes: 'session_idle_enabled',
+    oauth2_provider_name: 'oauth2_enabled'
 };
 
 function settingsShowNeeds(root) {
@@ -1606,9 +1607,9 @@ var SETTINGS_EDIT_TABS = [
         id: 'auth', label: 'Authentication', description: 'Choose how users sign in and how long they stay signed in.', groups: [
             { label: 'Basic Auth', intro: 'Changing sign-in methods, credentials or provider endpoints signs out other users and disconnects agents.', keys: ['basic_auth_enabled', 'auth_username', 'auth_password', 'auth_max_failure_clients'] },
             { label: 'OAuth2 / OIDC', keys: ['oauth2_enabled', 'oauth2_provider_name'] },
-            { label: 'Endpoint discovery', keys: ['oauth2_issuer_url', 'oauth2_use_oidc_discovery'] },
-            { label: 'Manual endpoints', keys: ['oauth2_authorization_url', 'oauth2_token_url', 'oauth2_userinfo_url'] },
-            { label: 'Provider credentials', keys: ['oauth2_client_id', 'oauth2_client_secret', 'oauth2_redirect_uri', 'oauth2_scopes'] },
+            { label: 'Endpoint discovery', needs: 'oauth2_enabled', keys: ['oauth2_issuer_url', 'oauth2_use_oidc_discovery'] },
+            { label: 'Manual endpoints', needs: 'oauth2_enabled', keys: ['oauth2_authorization_url', 'oauth2_token_url', 'oauth2_userinfo_url'] },
+            { label: 'Provider credentials', needs: 'oauth2_enabled', keys: ['oauth2_client_id', 'oauth2_client_secret', 'oauth2_redirect_uri', 'oauth2_scopes'] },
             { label: 'Session limits', intro: 'These limits apply to browser sessions, including Basic Auth and OAuth2 / OIDC. Agents and API tokens are not affected.', keys: ['session_idle_enabled', 'session_idle_timeout_minutes', 'session_expiry_hours'] },
             { label: 'Sessions', keys: ['session_secret_key', 'session_max_entries'] }
         ]
@@ -1625,10 +1626,10 @@ var SETTINGS_EDIT_TABS = [
     {
         id: 'smtp', label: 'SMTP', description: 'Set up email delivery for alerts and reports.', groups: [
             { label: 'Enable', keys: ['smtp_enabled'] },
-            { label: 'Server', keys: ['smtp_host', 'smtp_port'] },
-            { label: 'Security', keys: ['smtp_use_tls', 'smtp_use_ssl', 'smtp_verify_ssl'] },
-            { label: 'Authentication', keys: ['smtp_user', 'smtp_password', 'smtp_relay_mode'] },
-            { label: 'Sender', keys: ['smtp_from'] }
+            { label: 'Server', needs: 'smtp_enabled', keys: ['smtp_host', 'smtp_port'] },
+            { label: 'Security', needs: 'smtp_enabled', keys: ['smtp_use_tls', 'smtp_use_ssl', 'smtp_verify_ssl'] },
+            { label: 'Authentication', needs: 'smtp_enabled', keys: ['smtp_user', 'smtp_password', 'smtp_relay_mode'] },
+            { label: 'Sender', needs: 'smtp_enabled', keys: ['smtp_from'] }
         ]
     },
     {
@@ -1640,8 +1641,8 @@ var SETTINGS_EDIT_TABS = [
     {
         id: 'smtp_abuse', label: 'Outgoing spam', description: 'Block sending from mailboxes that exceed a fixed message limit within a set time. See and manage them in Security > Settings > Outgoing spam.', groups: [
             { label: 'Enable', keys: ['smtp_abuse_enabled'] },
-            { label: 'Limit', keys: ['smtp_abuse_threshold', 'smtp_abuse_window_minutes'] },
-            { label: 'Response', keys: ['smtp_abuse_revoke_app_passwords', 'smtp_abuse_unblock_grace_minutes', 'smtp_abuse_help_address'] }
+            { label: 'Limit', needs: 'smtp_abuse_enabled', keys: ['smtp_abuse_threshold', 'smtp_abuse_window_minutes'] },
+            { label: 'Response', needs: 'smtp_abuse_enabled', keys: ['smtp_abuse_revoke_app_passwords', 'smtp_abuse_unblock_grace_minutes', 'smtp_abuse_help_address'] }
         ]
     },
     {

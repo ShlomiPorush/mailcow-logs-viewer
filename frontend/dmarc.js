@@ -1394,8 +1394,8 @@ async function deleteDomainReports(domain) {
     const row = reportsManagementState.domains.find(d => d.domain === domain);
     if (!row) return;
     if (!await showConfirmModal({
-        title: 'Delete All Reports',
-        message: `Delete all reports for ${domain}?\n\nThis deletes ${reportsCount(row.dmarc_reports, 'DMARC')} and ${reportsCount(row.tls_reports, 'TLS')}. This action cannot be undone.`,
+        title: 'Delete all reports',
+        message: `Delete all reports for ${domain}?\n\nThis deletes ${reportsCount(row.dmarc_reports, 'DMARC')} and ${reportsCount(row.tls_reports, 'TLS')}. This cannot be undone.`,
         confirmText: 'Delete all', isDangerous: true
     })) {
         return;
@@ -1530,7 +1530,7 @@ function renderReportsManagementTable(reports, allowDelete, { total, page, total
 
 async function deleteReport(reportType, reportId, domain) {
     if (!uiMayAct('dmarc')) return;
-    if (!await showConfirmModal({ title: 'Delete Report', message: `Are you sure you want to delete this ${reportType.toUpperCase()} report for ${domain}?\n\nThis action cannot be undone.`, confirmText: 'Delete', isDangerous: true })) {
+    if (!await showConfirmModal({ title: 'Delete report', message: `Delete this ${reportType.toUpperCase()} report for ${domain}?\n\nThis cannot be undone.`, confirmText: 'Delete', isDangerous: true })) {
         return;
     }
 
