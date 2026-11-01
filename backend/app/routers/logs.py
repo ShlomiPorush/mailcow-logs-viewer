@@ -188,20 +188,27 @@ def get_postfix_logs(
 
         # Fetch all logs for this page's queues in a single query
         logs_by_queue = {}
+        matching = set()
         if page_queue_ids:
             for log in db.query(PostfixLog).filter(
                 PostfixLog.queue_id.in_(page_queue_ids), visible
             ).order_by(PostfixLog.time).all():
                 logs_by_queue.setdefault(log.queue_id, []).append(log)
+            # The lines the filters matched, to tell which message they found
+            matching = {line_id for (line_id,) in base_query.with_entities(PostfixLog.id).filter(
+                PostfixLog.queue_id.in_(page_queue_ids)).all()}
 
         results = []
         for qid in page_queue_ids:
             queue_logs = logs_by_queue.get(qid)
             if not queue_logs:
                 continue
-            # The row describes the queue id's latest message: Postfix reuses
-            # queue ids, and an earlier message's sender or status is not this one's
-            queue_logs = split_queue_occurrences(queue_logs)[-1].lines or queue_logs
+            # The row describes one message: Postfix reuses queue ids, and
+            # another message's sender or status is not this one's. The latest
+            # message the filters matched a line of
+            found = [o for o in split_queue_occurrences(queue_logs)
+                     if any(line.id in matching for line in o.lines + o.boundary)]
+            queue_logs = (found[-1].lines if found else []) or queue_logs
 
             # Aggregate data from all logs
             aggregated = {

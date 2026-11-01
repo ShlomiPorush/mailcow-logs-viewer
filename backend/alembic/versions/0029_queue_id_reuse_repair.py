@@ -75,7 +75,7 @@ def postfix_line_kind(line) -> str:
         return OPENER
     if program in _RECEIPT_PROGRAMS:
         return RECEIPT
-    if program in ('qmgr', 'postsuper') and text_.startswith('removed'):
+    if program == 'qmgr' and text_.startswith('removed'):
         return END
     return DELIVERY
 
@@ -300,7 +300,7 @@ def settle_queue(load_rspamd, correlations, occurrences, now):
 
 # Queue ids whose lines show more than one message: more than one opener,
 # more than one Message-ID, a receipt line in a later second than a delivery
-# or "removed" line, or any line in a later second than a "removed" line.
+# or qmgr "removed" line, or any line in a later second than qmgr's "removed".
 # Plus the queue ids more than one correlation has.
 _PROGRAM = "regexp_replace(COALESCE(program, ''), '^.*/', '')"
 CANDIDATES = f"""
@@ -318,7 +318,7 @@ SELECT queue_id FROM (
                ({_PROGRAM} IN ('smtpd', 'qmqpd') AND starts_with(COALESCE(message, ''), queue_id || ': client='))
                OR ({_PROGRAM} = 'pickup' AND starts_with(COALESCE(message, ''), queue_id || ': uid='))
                AS opener,
-               {_PROGRAM} IN ('qmgr', 'postsuper') AND starts_with(COALESCE(message, ''), queue_id || ': removed')
+               {_PROGRAM} = 'qmgr' AND starts_with(COALESCE(message, ''), queue_id || ': removed')
                AS ended
         FROM postfix_logs
         WHERE queue_id IS NOT NULL AND queue_id <> '' AND time IS NOT NULL

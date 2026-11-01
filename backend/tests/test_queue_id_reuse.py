@@ -160,16 +160,27 @@ def test_a_fast_message_after_a_removed_predecessor_keeps_all_its_lines():
     assert _ids_of(second.lines) == _ids_of(b) and not second.boundary
 
 
-def test_postsuper_removed_ends_a_message():
-    """A line after an admin's postsuper -d is someone else's, even a status
-    line that arrived before the next message's receipt lines."""
+def test_a_line_after_qmgr_removed_is_another_messages():
+    """qmgr logs "removed" once every delivery is done: a line after it is
+    someone else's, even a status line that arrived before the next
+    message's receipt lines."""
     a = [_line('AAA7', T0, 'client'), _line('AAA7', T0, 'msgid', msgid='a@example.test'),
          _line('AAA7', T0 + timedelta(seconds=1), 'deferred', rcpt=RCPT_A),
-         _line('AAA7', T0 + timedelta(hours=1), 'postsuper')]
+         _line('AAA7', T0 + timedelta(hours=1), 'removed')]
     late = _line('AAA7', T0 + timedelta(days=1), 'bounced', rcpt=RCPT_B)
     first, second = split_queue_occurrences(a + [late])
     assert _ids_of(first.lines) == _ids_of(a)
     assert second.lines == [late] and not second.message_ids
+
+
+def test_a_delivery_after_postsuper_removed_is_still_the_messages():
+    """postsuper -d can remove a message whose delivery is still running;
+    that delivery's result is logged after the "removed"."""
+    a = [_line('AAA0', T0, 'client'), _line('AAA0', T0, 'msgid', msgid='a@example.test'),
+         _line('AAA0', T0 + timedelta(seconds=1), 'deferred', rcpt=RCPT_A),
+         _line('AAA0', T0 + timedelta(seconds=60), 'postsuper'),
+         _line('AAA0', T0 + timedelta(seconds=61), 'sent', rcpt=RCPT_A)]
+    assert [_ids_of(o.lines) for o in split_queue_occurrences(a)] == [_ids_of(a)]
 
 
 def test_what_one_message_logs_never_cuts_it():
@@ -422,8 +433,8 @@ def test_a_late_delivery_of_the_second_message_reaches_it(env):
 
 
 def test_a_line_after_a_removed_message_is_not_that_messages(env):
-    """An admin deleted A from the queue (postsuper -d). The id's next
-    message's bounce arrives before its receipt lines: it is not A's."""
+    """A left the queue (qmgr logged "removed"). The id's next message's
+    bounce arrives before its receipt lines: it is not A's."""
     from app.database import get_db_context
     from app.models import MessageCorrelation
 
@@ -431,7 +442,7 @@ def test_a_line_after_a_removed_message_is_not_that_messages(env):
     msgid = _msgid('a')
     ids = _store([_line(queue, T0, 'client'), _line(queue, T0, 'msgid', msgid=msgid),
                   _line(queue, T0 + timedelta(seconds=1), 'deferred', rcpt=RCPT_A),
-                  _line(queue, T0 + timedelta(hours=1), 'postsuper')])
+                  _line(queue, T0 + timedelta(hours=1), 'removed')])
     key = uuid.uuid4().hex
     with get_db_context() as db:
         db.add(MessageCorrelation(correlation_key=key, message_id=msgid, queue_id=queue,
@@ -664,8 +675,8 @@ def test_the_recipient_count_reads_the_messages_own_current_lines(env):
 
 
 def test_the_upgrade_finds_a_line_stored_after_a_removed_message(env):
-    """The only sign of the next message is its bounce after an admin's
-    postsuper -d: one opener, one Message-ID, one correlation."""
+    """The only sign of the next message is its bounce after qmgr's "removed":
+    one opener, one Message-ID, one correlation."""
     from app.database import get_db_context
     from app.models import MessageCorrelation
 
@@ -673,7 +684,7 @@ def test_the_upgrade_finds_a_line_stored_after_a_removed_message(env):
     msgid = _msgid('a')
     own = _store([_line(queue, T0, 'client'), _line(queue, T0, 'msgid', msgid=msgid),
                   _line(queue, T0 + timedelta(seconds=1), 'deferred', rcpt=RCPT_A),
-                  _line(queue, T0 + timedelta(hours=1), 'postsuper')])
+                  _line(queue, T0 + timedelta(hours=1), 'removed')])
     late = _store([_line(queue, T0 + timedelta(days=1), 'bounced', rcpt=RCPT_B)])
     key = uuid.uuid4().hex
     with get_db_context() as db:
@@ -697,7 +708,7 @@ def test_the_older_line_by_line_path_does_not_give_a_line_to_another_message(env
     msgid = _msgid('a')
     ids = _store([_line(queue, T0, 'client'), _line(queue, T0, 'msgid', msgid=msgid),
                   _line(queue, T0 + timedelta(seconds=1), 'deferred', rcpt=RCPT_A),
-                  _line(queue, T0 + timedelta(hours=1), 'postsuper')])
+                  _line(queue, T0 + timedelta(hours=1), 'removed')])
     late = _store([_line(queue, T0 + timedelta(days=1), 'bounced', rcpt=RCPT_B)])
     key = uuid.uuid4().hex
     with get_db_context() as db:
@@ -709,3 +720,87 @@ def test_the_older_line_by_line_path_does_not_give_a_line_to_another_message(env
 
     row = _correlation(key)
     assert (row.final_status, set(row.postfix_log_ids)) == ('deferred', set(ids))
+
+
+# ---------- review round 2 ----------
+
+def test_the_upgrade_keeps_a_delivery_logged_after_postsuper_removed(env):
+    from app.database import get_db_context
+    from app.models import MessageCorrelation
+
+    queue = _queue()
+    msgid = _msgid('a')
+    ids = _store([_line(queue, T0, 'client'), _line(queue, T0, 'msgid', msgid=msgid),
+                  _line(queue, T0 + timedelta(seconds=1), 'deferred', rcpt=RCPT_A),
+                  _line(queue, T0 + timedelta(seconds=60), 'postsuper'),
+                  _line(queue, T0 + timedelta(seconds=61), 'sent', rcpt=RCPT_A)])
+    key = uuid.uuid4().hex
+    with get_db_context() as db:
+        db.add(MessageCorrelation(correlation_key=key, message_id=msgid, queue_id=queue,
+                                  final_status='delivered', is_complete=True, postfix_log_ids=ids,
+                                  first_seen=T0, last_seen=T0))
+        db.commit()
+
+    _repair()
+
+    row = _correlation(key)
+    assert (row.final_status, row.postfix_log_ids) == ('delivered', ids)
+
+
+def test_two_waiting_messages_do_not_both_take_lines_they_share(env):
+    """Two correlations wait for their queue id; the stored lines hold both
+    Message-IDs and nothing yet between them. One completion run must not
+    give the same lines to both."""
+    from app.database import get_db_context
+    from app.models import MessageCorrelation
+    from app.services import correlation_jobs
+
+    queue = _queue()
+    msgid_a, msgid_b = _msgid('a'), _msgid('b')
+    _store([_line(queue, T0, 'msgid', msgid=msgid_a),
+            _line(queue, T0 + timedelta(seconds=10), 'msgid', msgid=msgid_b),
+            _line(queue, T0 + timedelta(seconds=11), 'bounced', rcpt=RCPT_B)])
+    keys = uuid.uuid4().hex, uuid.uuid4().hex
+    with get_db_context() as db:
+        for key, msgid in zip(keys, (msgid_a, msgid_b)):
+            db.add(MessageCorrelation(correlation_key=key, message_id=msgid, is_complete=False,
+                                      first_seen=T0, last_seen=T0, created_at=datetime.utcnow()))
+        db.commit()
+
+    correlation_jobs.complete_incomplete_correlations(
+        get_db_context=get_db_context, update_job_status=lambda *a: None, max_age_minutes=60, clock=datetime)
+
+    assert sum(_correlation(key).queue_id == queue for key in keys) == 1
+
+
+def test_the_older_line_by_line_path_makes_no_leg_from_shared_lines(env):
+    from app.correlation import correlate_postfix_log
+    from app.database import get_db_context
+    from app.models import MessageCorrelation, PostfixLog
+
+    queue = _queue()
+    msgid_a, msgid_b = _msgid('a'), _msgid('b')
+    a_ids = _store([_line(queue, T0, 'msgid', msgid=msgid_a)])
+    b_ids = _store([_line(queue, T0 + timedelta(seconds=10), 'msgid', msgid=msgid_b),
+                    _line(queue, T0 + timedelta(seconds=11), 'bounced', rcpt=RCPT_B)])
+    with get_db_context() as db:
+        for msgid, ids in ((msgid_a, a_ids), (msgid_b, b_ids[:1])):
+            db.add(MessageCorrelation(correlation_key=uuid.uuid4().hex, message_id=msgid, queue_id=queue,
+                                      is_complete=True, postfix_log_ids=ids, first_seen=T0, last_seen=T0))
+        db.commit()
+        correlate_postfix_log(db, db.get(PostfixLog, b_ids[0]))
+        legs = db.query(MessageCorrelation).filter(MessageCorrelation.message_id == msgid_b).all()
+        assert [leg.postfix_log_ids for leg in legs] == [b_ids[:1]]
+
+
+def test_the_postfix_list_describes_the_message_the_filter_found(env):
+    from fastapi.testclient import TestClient
+    from app.main import app
+
+    queue = _queue()
+    _two_messages(queue)
+    client = TestClient(app)
+    by_sender = client.get('/api/logs/postfix', params={'queue_id': queue, 'sender': SENDER_A}).json()['data']
+    assert [row['sender'] for row in by_sender] == [SENDER_A]
+    latest = client.get('/api/logs/postfix', params={'queue_id': queue}).json()['data']
+    assert [row['sender'] for row in latest] == [SENDER_B]

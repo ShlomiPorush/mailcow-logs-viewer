@@ -454,13 +454,16 @@ def nearest_queue_chain(
 #   log newest first, and PostfixLog.id is the order of storage. So lines
 #   are compared by whole second only.
 # - "removed" is not always logged, and qmgr logs it after the file is gone,
-#   possibly in the second the next message opens.
+#   possibly in the second the next message opens. Only qmgr's "removed"
+#   ends a message: qmgr logs it once every delivery is done, while
+#   postsuper -d can remove a message whose delivery is still running, and
+#   that delivery's result is logged after it.
 # - cleanup logs one message-id= line per Message-ID header, so a message
 #   with that header twice logs two lines; those never split a message.
 
 OPENER = 'opener'      # smtpd/qmqpd "client=", pickup "uid=": the queue file is created
 RECEIPT = 'receipt'    # any other smtpd, qmqpd, pickup or cleanup line
-END = 'end'            # qmgr or postsuper "removed": the queue file is gone
+END = 'end'            # qmgr "removed": every delivery is done and the queue file is gone
 DELIVERY = 'delivery'  # everything else: qmgr, delivery agents, bounce, postsuper
 
 _RECEIPT_PROGRAMS = ('smtpd', 'qmqpd', 'pickup', 'cleanup')
@@ -479,7 +482,7 @@ def postfix_line_kind(line) -> str:
         return OPENER
     if program in _RECEIPT_PROGRAMS:
         return RECEIPT
-    if program in ('qmgr', 'postsuper') and text.startswith('removed'):
+    if program == 'qmgr' and text.startswith('removed'):
         return END
     return DELIVERY
 
@@ -651,6 +654,10 @@ def own_occurrence(db: Session, queue_id: Optional[str], message_id: Optional[st
         occurrences = queue_occurrences(db, queue_id)
     occurrence = occurrence_for(occurrences, message_id, near=near)
     others = (occurrence.message_ids - {message_id}) if occurrence is not None else set()
+    if others:
+        # The session does not autoflush: a correlation given this queue id
+        # earlier in the same run must be seen
+        db.flush()
     if others and db.query(MessageCorrelation.id).filter(
             MessageCorrelation.queue_id == queue_id, MessageCorrelation.message_id.in_(others)).first():
         return None
@@ -961,24 +968,28 @@ def correlate_postfix_log(db: Session, postfix_log: PostfixLog) -> Optional[Mess
     # takes it from the rest of its own chain: its own occurrence of the queue
     # id, never another message that used the id before or after it
     message_id = postfix_log.message_id
-    own_lines = None
+    mine, occurrences = None, []
     if postfix_log.queue_id:
         lines = db.query(PostfixLog).filter(PostfixLog.queue_id == postfix_log.queue_id).all()
         if not any(line is postfix_log for line in lines):
             lines.append(postfix_log)
         occurrences = split_queue_occurrences(lines)
         mine = next((o for o in occurrences if any(line is postfix_log for line in o.lines)), None)
-        own_lines = mine.lines if mine else [postfix_log]
         if not message_id and mine and len(mine.message_ids) == 1:
             message_id = next(iter(mine.message_ids))
 
-    # Method 1: the queue chain this line belongs to, when the leg found is
-    # the message this line is part of, not another one that used the id
+    def owns_this_line(leg_message_id, near=None):
+        """The line's occurrence is this message's, for a write."""
+        return mine is not None and own_occurrence(
+            db, postfix_log.queue_id, leg_message_id, near=near, occurrences=occurrences) is mine
+
+    # Method 1: the queue chain this line belongs to. A leg of the queue id
+    # that is not the message this line is part of gets nothing, and no
+    # other leg is made from the line either
     correlation = find_leg_by_queue(db, postfix_log.queue_id, message_id)
-    if correlation and postfix_log.queue_id and (mine is None or own_occurrence(
-            db, postfix_log.queue_id, correlation.message_id, near=correlation.first_seen,
-            occurrences=occurrences) is not mine):
-        correlation = None
+    if correlation and postfix_log.queue_id and not owns_this_line(correlation.message_id, correlation.first_seen):
+        logger.debug(f"Queue-ID {postfix_log.queue_id}: the line is not {correlation.message_id}'s")
+        return None
 
     if correlation:
         logger.debug(f"Found correlation by Queue-ID: {postfix_log.queue_id}")
@@ -991,8 +1002,8 @@ def correlate_postfix_log(db: Session, postfix_log: PostfixLog) -> Optional[Mess
 
     # Method 3: another delivery of a Message-ID we already know - a new leg
     if not correlation and message_id and postfix_log.queue_id:
-        if find_legs(db, message_id):
-            all_postfix_logs = list(own_lines)
+        if find_legs(db, message_id) and owns_this_line(message_id):
+            all_postfix_logs = list(mine.lines)
             logger.info(
                 f"New delivery leg for Message-ID {message_id[:50]} "
                 f"(Queue-ID: {postfix_log.queue_id})"
