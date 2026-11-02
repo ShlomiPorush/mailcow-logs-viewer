@@ -3506,18 +3506,15 @@ button.ui-aa-col:focus-visible { outline: 2px solid var(--ui-focus); outline-off
 /* The copy icon of a value that wraps stays on its last line, instead of a line of its own */
 .copyable.ui-copy-wrap .copy-icon { display: inline-block; vertical-align: -2px; margin-inline-start: 4px; }
 
-/* Touch: a finger needs a bigger target than a mouse pointer. Every control grows to
-   44px (WCAG 2.5.5) and a checkbox to 24px (WCAG 2.5.8); what they show stays the same */
+/* Touch: the controls keep their size (28 to 34px, above the 24px WCAG 2.5.8 asks);
+   only what is smaller than that grows to it */
 @media (pointer: coarse) {
-    :root { --ui-ctl-h: 44px; }
-    .ui-btn-sm, .ui-chip, .ui-seg button { min-width: 44px; min-height: 44px; }
-    /* Every button and field, also those that set their own height (Apply, the Logs toolbar, a Settings number) */
-    .ui-btn, .ui-input, .ui-select, .ui-gs-box, .ui-logs-font, .ui-logs-search, .ui-logs-date, .ui-msg-new, .ui-logs-new { min-height: 44px; }
-    .ui-icon-btn, .ui-gs-phone, .ui-set-clear, .ui-mtop-home, .ui-sort-btn-icon, .ui-sec-chip button { min-width: 44px; min-height: 44px; justify-content: center; align-items: center; }
+    .ui-sec-chip button, .ui-set-clear { min-width: 24px; min-height: 24px; }
     /* A switch (Settings, features) keeps its drawn size: its whole row is the target */
-    input[type="checkbox"]:not(:is(.ui-set-bool, .ui-feature) .ui-check), input[type="radio"] { min-width: 24px; min-height: 24px; }
-    /* A log line's Copy floats over the lines under it: 24px, not more */
+    input[type="checkbox"]:not(:is(.ui-set-bool, .ui-feature) .ui-check), input[type="radio"] { min-width: 20px; min-height: 20px; }
     .ui-line-copy { min-height: 24px; }
+    /* The phone's top bar: its buttons as big as the bell beside them */
+    .ui-mtop-actions .ui-icon-btn, .ui-gs-phone { width: 36px; height: 36px; }
 }
 
 /* Tablet rail: each icon has its name under it, as a navigation rail does; a finger

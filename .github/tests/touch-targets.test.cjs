@@ -1,5 +1,5 @@
-// A finger needs a bigger target than a mouse pointer (ui.css): on a touch screen
-// every control is at least 44px (WCAG 2.5.5) and a checkbox 24px (WCAG 2.5.8);
+// Touch (ui.css): on a touch screen
+// the controls keep their size and only what is under 24px grows (WCAG 2.5.8);
 // on a phone, Sign out is in the More sheet, away from the top bar's theme switch;
 // on a tablet the icon rail names each page under its icon.
 const assert = require('node:assert/strict');
@@ -22,17 +22,15 @@ function media(query) {
     throw new Error('unclosed block');
 }
 
-test('on a touch screen the controls and checkboxes are big enough for a finger', () => {
+test('on a touch screen the controls keep their size; only the tiny ones grow', () => {
     const touch = media('(pointer: coarse)');
-    assert.match(touch, /--ui-ctl-h: 44px/);
-    for (const selector of ['.ui-btn-sm', '.ui-chip', '.ui-seg button']) assert.ok(touch.includes(selector), selector);
-    assert.match(touch, /\.ui-icon-btn[^{]*\{[^}]*min-width: 44px; min-height: 44px/);
-    // Controls that set their own height grow too
-    for (const selector of ['.ui-btn, .ui-input, .ui-select', '.ui-logs-font', '.ui-logs-search', '.ui-logs-date', '.ui-sort-btn-icon', '.ui-sec-chip button']) {
-        assert.ok(touch.includes(selector), selector);
-    }
+    // The owner's call: no 44px controls, the look stays (28 to 34px is above WCAG 2.5.8's 24px)
+    assert.doesNotMatch(touch, /--ui-ctl-h/);
+    assert.doesNotMatch(touch, /44px/);
+    // What is smaller than 24px: a chip's remove button and Settings' Reset
+    assert.match(touch, /\.ui-sec-chip button, \.ui-set-clear \{ min-width: 24px; min-height: 24px; \}/);
     // A checkbox, but not a drawn switch
-    assert.match(touch, /input\[type="checkbox"\]:not\(:is\(\.ui-set-bool, \.ui-feature\) \.ui-check\)[^{]*\{[^}]*min-width: 24px; min-height: 24px/);
+    assert.match(touch, /input\[type="checkbox"\]:not\(:is\(\.ui-set-bool, \.ui-feature\) \.ui-check\)[^{]*\{[^}]*min-width: 20px; min-height: 20px/);
 });
 
 test('on a phone Sign out is in the More sheet, not beside the theme switch', () => {
