@@ -23,11 +23,12 @@ _warned = set()
 
 # An enhanced status code (RFC 3463): class.subject.detail
 _CODE = re.compile(r'^[45]\.\d{1,3}\.\d{1,3}$')
-# The code at the start of the server's reply, where Postfix writes it: "host
-# mx said: 452 4.2.2 Mailbox full" ("refused to talk to me:" for a greeting),
-# right after a reply code of the same class. A number anywhere else, as in a
-# host name (4.2.2-mx.example.org) or an address in the reply, is not a code.
-_CODE_IN_TEXT = re.compile(r'(?:said|refused to talk to me):\s+([45])\d\d[ -]\s*(\1\.\d{1,3}\.\d{1,3})(?![\w.-])')
+# A code in a server reply comes right after a reply code of its class:
+# "said: 452 4.2.2 Mailbox full", "452-4.2.2", "refused to start TLS: 454
+# 4.7.0", or the last line of a reply joined by Postfix. The remote server
+# picks its reply anyway; what must not pass for a code is a number in a host
+# name (452-4.2.2-mx.example.org) or an address (<452-4.2.2@example.org>).
+_CODE_IN_TEXT = re.compile(r'(?<![\w.<@-])([45])\d\d[ -]\s*(\1\.\d{1,3}\.\d{1,3})(?![\w.@>-])')
 EXCLUDED_CODES_KEYS = {'5': 'suppression_hard_bounce_excluded_codes', '4': 'suppression_soft_bounce_excluded_codes'}
 
 

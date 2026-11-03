@@ -94,6 +94,11 @@ def test_the_code_is_read_from_a_reply_and_never_from_an_address():
     assert bounce_policy.codes_in_text('host mx said: 451 4.7.1 <452-4.2.2@example.test>: Recipient address rejected') == ['4.7.1']
     assert bounce_policy.codes_in_text('host mx.example.test said: 452  4.2.2 Mailbox full') == ['4.2.2']
     assert bounce_policy.codes_in_text('host mx[192.0.2.1] refused to talk to me: 421 4.7.0 Try again later') == ['4.7.0']
+    # Round 4: other Postfix wordings, and a code only on the last line of a joined reply
+    assert bounce_policy.codes_in_text('TLS is required, but host mx.example.test[192.0.2.1] refused to start TLS: '
+                                       '454 4.7.0 TLS not available due to temporary reason') == ['4.7.0']
+    assert bounce_policy.codes_in_text('host mx.example.test[192.0.2.1] said: 452-Temporary delivery failure '
+                                       '452 4.2.2 Mailbox full (in reply to RCPT TO command)') == ['4.2.2']
 
 
 # ---- The queue cleanup ----
