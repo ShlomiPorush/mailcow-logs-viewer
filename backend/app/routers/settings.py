@@ -264,6 +264,25 @@ def _validate_bounce_actions(allowed: Dict[str, Any]) -> None:
             raise HTTPException(status_code=400, detail=f"{key} accepts only: {', '.join(known)}.")
 
 
+def _normalize_bounce_codes(allowed: Dict[str, Any]) -> None:
+    """Refuse a code left alone that is not a code of its kind (a 4.x.x among
+    the permanent failures, say), and store each list in one form. The value in
+    effect sent back as it is never blocks saving the other settings."""
+    from ..services.bounce_policy import EXCLUDED_CODES_KEYS, normalize_codes
+    labels = {'5': 'Permanent delivery failure', '4': 'Temporary delivery failure'}
+    for kind, key in EXCLUDED_CODES_KEYS.items():
+        if key not in allowed:
+            continue
+        try:
+            allowed[key] = normalize_codes(allowed[key], kind)
+        except ValueError as bad:
+            if str(allowed[key] or '') == str(getattr(settings, key) or ''):
+                allowed.pop(key)
+                continue
+            raise HTTPException(status_code=400, detail=(
+                f"{labels[kind]}: \"{bad}\" is not a {kind}.x.x code, such as {kind}.2.2."))
+
+
 def _validate_agent_access(allowed: Dict[str, Any], current: Optional[Settings] = None) -> None:
     """Refuse a save that turns agent access on, or sign-in off under it: a
     person must sign in to approve each agent. A state that was already like
@@ -943,6 +962,7 @@ def update_settings(body: Dict[str, Any], request: Request = None, response: Res
     _validate_time_zone(allowed, db)
     _validate_display_formats(allowed)
     _validate_bounce_actions(allowed)
+    _normalize_bounce_codes(allowed)
     _validate_agent_access(allowed)
     _validate_session_limits(allowed)
     # For sensitive keys, mask placeholder means "do not change" - omit from payload

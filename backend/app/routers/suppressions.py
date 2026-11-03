@@ -21,7 +21,7 @@ from sqlalchemy import func, or_, desc
 from ..services.csv_export import CSV_ESCAPE_COLUMN, csv_download, csv_query_rows, get_csv_db, restore_csv_text
 from ..database import SessionLocal, get_db, get_db_context
 from ..config import settings
-from ..models import MessageCorrelation, SpamSuppression, SuppressionEvent
+from ..models import MessageCorrelation, PostfixLog, SpamSuppression, SuppressionEvent
 from ..mailcow_api import mailcow_api, MailcowAPIError, MailcowRwKeyError
 from ..services.rspamd_map_lock import MapBusyError, map_write_lock
 from ..services import excluded_addresses
@@ -473,7 +473,9 @@ def get_suppression_config():
         "list_kept": rspamd_sync_on(),
         "suppression_whitelist_domains": settings.suppression_whitelist_domains,
         "suppression_hard_bounce_action": settings.suppression_hard_bounce_action,
+        "suppression_hard_bounce_excluded_codes": settings.suppression_hard_bounce_excluded_codes,
         "suppression_soft_bounce_action": settings.suppression_soft_bounce_action,
+        "suppression_soft_bounce_excluded_codes": settings.suppression_soft_bounce_excluded_codes,
         "suppression_soft_bounce_threshold": settings.suppression_soft_bounce_threshold,
         "queue_cleanup_enabled": settings.queue_cleanup_enabled,
         "queue_cleanup_block": settings.queue_cleanup_block,
@@ -483,6 +485,33 @@ def get_suppression_config():
         "rspamd_configured": settings.is_rspamd_configured,
         "rw_key_configured": mailcow_api.has_rw_key,
         "is_fully_configured": settings.is_suppression_configured,
+    }
+
+
+BOUNCE_CODE_DAYS = 7
+
+
+@router.get("/suppressions/bounce-codes", responses=documented(m.BounceCodes, errors={500: None}))
+def get_bounce_codes(db: Session = Depends(get_db)):
+    """The status codes of the outgoing mail that could not be delivered in
+    the last 7 days, with how often each came: the lines bounce detection
+    reads (a delivery agent's result for a queued message), so Settings can
+    offer the codes that really come."""
+    from ..scheduler import _BOUNCE_AGENTS
+    since = datetime.utcnow() - timedelta(days=BOUNCE_CODE_DAYS)
+    rows = db.query(PostfixLog.dsn, func.count(PostfixLog.id)).filter(
+        PostfixLog.time >= since,
+        PostfixLog.status.in_(['bounced', 'deferred']),
+        PostfixLog.recipient.isnot(None),
+        PostfixLog.queue_id.isnot(None),
+        or_(PostfixLog.dsn.like('4.%'), PostfixLog.dsn.like('5.%')),
+        or_(*[PostfixLog.program.like(f'%/{agent}') for agent in _BOUNCE_AGENTS]),
+    ).group_by(PostfixLog.dsn).all()
+    counts = sorted(((dsn, n) for dsn, n in rows if dsn), key=lambda row: (-row[1], row[0]))
+    return {
+        "days": BOUNCE_CODE_DAYS,
+        "permanent": [{"code": dsn, "count": n} for dsn, n in counts if dsn.startswith('5.')],
+        "temporary": [{"code": dsn, "count": n} for dsn, n in counts if dsn.startswith('4.')],
     }
 
 

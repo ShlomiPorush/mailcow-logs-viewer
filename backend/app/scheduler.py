@@ -26,7 +26,7 @@ from .database import get_db_context, SessionLocal
 from .mailcow_api import MailcowWriteUnknownError, mailcow_api, mailcow_handled_items
 from .services.suppression_events import disabled_by_hand, record_bounces, record_stuck
 from .services.suppression_rows_lock import lock_suppression_rows
-from .services.bounce_policy import cleanup_blocks, handling_on, hard_action, soft_action, rspamd_sync_on
+from .services.bounce_policy import cleanup_blocks, code_excluded, codes_in_text, handling_on, hard_action, soft_action, rspamd_sync_on
 from .services.rspamd_map_lock import map_write_lock_async
 from .services.netfilter_address import netfilter_address
 from .services.db_values import add_rows, strip_nul
@@ -3749,6 +3749,14 @@ def _queue_item_addresses(item) -> Optional[List[str]]:
     return addresses
 
 
+def _queue_item_reasons(item) -> List[Optional[str]]:
+    """The deferral reason of each recipient of a queued message, in the order
+    of its recipients (None when there is none). mailcow writes it after the
+    address: "a@b (connect to ...: timed out)"."""
+    return [(raw.split(' ', 1)[1].strip().strip('()') or None) if isinstance(raw, str) and ' ' in raw else None
+            for raw in (item.get('recipients') or [])]
+
+
 def _queue_delete_confirmed(reply) -> None:
     """mailcow answers 200 even when it did not delete: only a reply of success
     entries counts. Raises otherwise."""
@@ -3930,15 +3938,18 @@ async def cleanup_deferred_queue_job():
             # Mail to an excluded domain stays in the queue for Postfix to retry
             if _left_alone(addresses):
                 continue
+            reasons = _queue_item_reasons(item)
+            # So does mail deferred with a code left alone in Settings
+            if any(code_excluded(code) for reason in reasons for code in codes_in_text(reason)):
+                logger.info(f"[QUEUE CLEANUP] Deferred item {queue_id} failed with a code left alone in Settings - left in the queue")
+                continue
             items[queue_id] = addresses
 
             if blocking:
                 arrived = datetime.fromtimestamp(arrival_time, tz=timezone.utc).replace(tzinfo=None)
-                for raw, email in zip(item.get('recipients'), addresses):
-                    # mailcow writes the deferral reason after the address: "a@b (connect to ...: timed out)"
-                    reason = raw.split(' ', 1)[1].strip().strip('()') if ' ' in raw else None
+                for reason, email in zip(reasons, addresses):
                     recipients_to_suppress.append({'email': email, 'queue_id': queue_id, 'sender': item.get('sender'),
-                                                   'arrived': arrived, 'reason': reason or None})
+                                                   'arrived': arrived, 'reason': reason})
 
             age_min = int(age_seconds / 60)
             logger.info(
@@ -4804,6 +4815,9 @@ def _detect_suppressions_worker():
             # (4.x.x) counts; any other status line is left alone
             is_hard = dsn.startswith('5.')
             is_soft = dsn.startswith('4.')
+            # A code left alone in Settings: no block, count or queue deletion
+            if code_excluded(dsn):
+                continue
             if is_hard:
                 if hard == 'ignore':
                     continue

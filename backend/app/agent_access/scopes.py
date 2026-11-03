@@ -120,7 +120,7 @@ POLICY: Dict[Tuple[str, str], Rule] = {
 
     # Outbound
     **_r("GET /api/queue", "GET /api/suppressions", "GET /api/suppressions/stats", "GET /api/suppressions/config",
-         "GET /api/suppressions/{suppression_id}/events", "GET /api/suppressions/export",
+         "GET /api/suppressions/bounce-codes", "GET /api/suppressions/{suppression_id}/events", "GET /api/suppressions/export",
          "GET /api/suppressions/rspamd/state",
          area="outbound", kind=READ),
     **_r("POST /api/queue/action", area="outbound", kind=WRITE,

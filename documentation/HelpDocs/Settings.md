@@ -112,6 +112,7 @@ Which addresses **Status** > **Blocklists** checks, and the DNS resolver it asks
 What happens when outgoing mail cannot be delivered. The blocked addresses are listed on [Outbound](Outbound.md#suppressions) > **Suppressions**. **Sync with Rspamd** (on by default) keeps the list and this app's Rspamd blocks in step, both ways; off, the app keeps no list (turning it off deletes the list, turning it on loads this app's blocks back from Rspamd). Nothing is blocked automatically until **Handle undeliverable mail automatically** is on (off by default).
 
 - **Permanent delivery failure** (5.x.x) and **Temporary delivery failure** (4.x.x) are one choice each. A permanent failure blocks the address and deletes its queued mail (the default), only deletes its queued mail, or does nothing. A temporary failure is deleted after its minutes in the queue, with its recipients blocked (the default) or not, or stays in the queue while the address is blocked after a number of failures, at the first one, or not at all.
+- **Leave these codes alone**, under each choice, lists status codes such as 5.2.2 that are not blocked, counted or deleted.
 - The options that block need **Sync with Rspamd**. With it off they are not available, and a picked one changes to the option that does the same without blocking.
 - The app reads the Postfix logs only when a choice needs them.
 - A value set in the environment closes only the options it rules out, and the choice names the variable.

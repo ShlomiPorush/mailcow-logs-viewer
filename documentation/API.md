@@ -2251,7 +2251,13 @@ Totals as top-level fields: `total`, `active`, `expired`, `hard_bounce`, `soft_b
 
 #### GET /api/suppressions/config
 
-The suppression settings (`suppression_enabled`, `suppression_auto_detect`, `suppression_rspamd_sync`, `list_kept` (the app keeps a list now: Suppressions and the sync on), `suppression_whitelist_domains` as the comma-separated string, `suppression_hard_bounce_action` (`suppress`, `delete` or `ignore`), `suppression_soft_bounce_action`, `suppression_soft_bounce_threshold`, `queue_cleanup_enabled`, `queue_cleanup_block`, `queue_cleanup_threshold_minutes`, `suppression_base_expiry_days`, `suppression_max_expiry_days`) and `rspamd_configured`, `rw_key_configured` and `is_fully_configured`. `is_fully_configured` means suppression is on and a read-write key is set; Rspamd sync also needs `rspamd_configured`.
+The suppression settings (`suppression_enabled`, `suppression_auto_detect`, `suppression_rspamd_sync`, `list_kept` (the app keeps a list now: Suppressions and the sync on), `suppression_whitelist_domains` as the comma-separated string, `suppression_hard_bounce_action` (`suppress`, `delete` or `ignore`), `suppression_hard_bounce_excluded_codes` and `suppression_soft_bounce_excluded_codes` (the codes left alone, comma-separated, such as `5.2.2`), `suppression_soft_bounce_action`, `suppression_soft_bounce_threshold`, `queue_cleanup_enabled`, `queue_cleanup_block`, `queue_cleanup_threshold_minutes`, `suppression_base_expiry_days`, `suppression_max_expiry_days`) and `rspamd_configured`, `rw_key_configured` and `is_fully_configured`. `is_fully_configured` means suppression is on and a read-write key is set; Rspamd sync also needs `rspamd_configured`.
+
+---
+
+#### GET /api/suppressions/bounce-codes
+
+The status codes of outgoing mail that could not be delivered in the last 7 days, read from the same Postfix lines as bounce detection, most frequent first: `days` (7), `permanent` (5.x.x) and `temporary` (4.x.x), each a list of `{ "code": "5.1.1", "count": 14 }`.
 
 ---
 
