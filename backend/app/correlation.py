@@ -13,7 +13,7 @@ import ipaddress
 import logging
 import re
 import hashlib
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Any, Optional, List
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, exists, func, literal_column, or_
@@ -438,6 +438,387 @@ def nearest_queue_chain(
     return min(queue_ids, key=distance)
 
 
+# --- Queue occurrences ----------------------------------------------------
+#
+# Postfix names a queued message by a short queue id made of the queue
+# file's inode and the microsecond it was created, so an id comes back once
+# the previous message has left the queue: minutes or days later, for an
+# unrelated message. All lines of one queue id are therefore not one
+# message. split_queue_occurrences() cuts them into occurrences, one per
+# message, and occurrence_for() says which one a correlation owns.
+#
+# What the cut relies on:
+# - Every line of the previous message is logged before the first line of
+#   the next one (the id is free only once the file is gone).
+# - Line order inside one second is not chronological: mailcow returns the
+#   log newest first, and PostfixLog.id is the order of storage. So lines
+#   are compared by whole second only.
+# - "removed" is not always logged, and qmgr logs it after the file is gone,
+#   possibly in the second the next message opens. Only qmgr's "removed"
+#   ends a message: qmgr logs it once every delivery is done, while
+#   postsuper -d can remove a message whose delivery is still running, and
+#   that delivery's result is logged after it.
+# - cleanup logs one message-id= line per Message-ID header, so a message
+#   with that header twice logs two lines; those never split a message.
+
+OPENER = 'opener'      # smtpd/qmqpd "client=", pickup "uid=": the queue file is created
+RECEIPT = 'receipt'    # any other smtpd, qmqpd, pickup or cleanup line
+END = 'end'            # qmgr "removed": every delivery is done and the queue file is gone
+DELIVERY = 'delivery'  # everything else: qmgr, delivery agents, bounce, postsuper
+
+_RECEIPT_PROGRAMS = ('smtpd', 'qmqpd', 'pickup', 'cleanup')
+
+
+def postfix_line_kind(line) -> str:
+    """Which part of a message's life a Postfix line with a queue id logs."""
+    program = (getattr(line, 'program', None) or '').rsplit('/', 1)[-1]
+    message = getattr(line, 'message', None) or ''
+    queue_id = getattr(line, 'queue_id', None) or ''
+    prefix = f'{queue_id}: '
+    text = message[len(prefix):] if queue_id and message.startswith(prefix) else message
+    if program in ('smtpd', 'qmqpd') and text.startswith('client='):
+        return OPENER
+    if program == 'pickup' and text.startswith('uid='):
+        return OPENER
+    if program in _RECEIPT_PROGRAMS:
+        return RECEIPT
+    if program == 'qmgr' and text.startswith('removed'):
+        return END
+    return DELIVERY
+
+
+def naive_utc(value: Optional[datetime]) -> Optional[datetime]:
+    """Times are stored as naive UTC; an aware value is converted to that."""
+    if value is not None and value.tzinfo is not None:
+        value = value.astimezone(timezone.utc).replace(tzinfo=None)
+    return value
+
+
+def _line_order(line):
+    return (naive_utc(line.time) or datetime.min, line.id or 0)
+
+
+class QueueOccurrence:
+    """One message's lines of a queue id.
+
+    lines: the lines that are this message's.
+    boundary: delivery and "removed" lines of the second this message
+    opened in that may be the previous message's, when that one logged no
+    "removed" before. They belong to both messages for display and to
+    neither for status, times or links.
+    """
+
+    def __init__(self, opened_at: datetime):
+        self.opened_at = opened_at
+        self.lines: List[PostfixLog] = []
+        self.boundary: List[PostfixLog] = []
+        self.ended = False      # an own "removed" line
+        self.delivered = False  # an own delivery or "removed" line
+
+    def add(self, line) -> None:
+        self.lines.append(line)
+        kind = postfix_line_kind(line)
+        if kind == END:
+            self.ended = True
+        if kind in (END, DELIVERY):
+            self.delivered = True
+
+    @property
+    def message_ids(self) -> set:
+        return {line.message_id for line in self.lines if line.message_id}
+
+    @property
+    def ids(self) -> set:
+        return {line.id for line in self.lines if line.id}
+
+    def shown_lines(self) -> List[PostfixLog]:
+        """Own and boundary lines, in time order: what a detail view shows."""
+        return sorted(self.lines + self.boundary, key=_line_order)
+
+    def span(self):
+        times = [naive_utc(line.time) for line in self.lines + self.boundary if line.time]
+        return (min(times), max(times)) if times else (self.opened_at, self.opened_at)
+
+
+def split_queue_occurrences(lines) -> List[QueueOccurrence]:
+    """Cut the lines of one queue id into messages, earliest first.
+
+    A second opens a new message when the current one already has a line in
+    an earlier second and either: the second holds an opener; or it holds a
+    receipt line and the current message already logged a delivery or
+    "removed"; or the current message already logged "removed" (anything
+    after that is someone else's). Deferred retries, hold and release, and
+    gaps of days never cut a message.
+
+    When the previous message logged no "removed" before the second the new
+    one opens in, the delivery and "removed" lines of that second cannot be
+    placed: they are boundary lines of both.
+    """
+    by_second: Dict[datetime, list] = {}
+    for line in lines:
+        if line.time is None:
+            continue
+        by_second.setdefault(naive_utc(line.time).replace(microsecond=0), []).append(line)
+
+    occurrences: List[QueueOccurrence] = []
+    current: Optional[QueueOccurrence] = None
+    for second in sorted(by_second):
+        group = sorted(by_second[second], key=_line_order)
+        kinds = [postfix_line_kind(line) for line in group]
+        opens = current is not None and (
+            OPENER in kinds
+            or (RECEIPT in kinds and current.delivered)
+            or current.ended
+        )
+        if not opens:
+            if current is None:
+                current = QueueOccurrence(second)
+                occurrences.append(current)
+            for line in group:
+                current.add(line)
+            continue
+
+        previous, current = current, QueueOccurrence(second)
+        occurrences.append(current)
+        for line, kind in zip(group, kinds):
+            if not previous.ended and kind in (DELIVERY, END):
+                previous.boundary.append(line)
+                current.boundary.append(line)
+            else:
+                current.add(line)
+    return occurrences
+
+
+def _distance(occurrence: QueueOccurrence, near: Optional[datetime]) -> timedelta:
+    start, end = occurrence.span()
+    near = naive_utc(near)
+    if near is None or start <= near <= end:
+        return timedelta(0)
+    return min(abs(start - near), abs(end - near))
+
+
+def occurrence_for(
+    occurrences: List[QueueOccurrence],
+    message_id: Optional[str],
+    near: Optional[datetime] = None,
+    strict: bool = True,
+) -> Optional[QueueOccurrence]:
+    """The occurrence that is the message with this Message-ID.
+
+    An occurrence that logged another Message-ID (and not this one) is
+    someone else's. When exactly one occurrence logged this Message-ID, it is
+    that one. When none did, the only occurrence of the queue id is taken, as
+    long as it logged no other Message-ID.
+
+    Anything else cannot be decided from the lines: strict (every write)
+    returns None; otherwise (a detail view) the occurrence nearest to `near`
+    is returned.
+    """
+    if not occurrences:
+        return None
+    if message_id:
+        holding = [o for o in occurrences if message_id in o.message_ids]
+        if len(holding) == 1:
+            return holding[0]
+        if holding:
+            return None if strict else min(holding, key=lambda o: _distance(o, near))
+        candidates = [o for o in occurrences if not o.message_ids]
+    else:
+        candidates = list(occurrences)
+    if len(occurrences) == 1 and candidates:
+        return occurrences[0]
+    if strict:
+        return None
+    return min(candidates or occurrences, key=lambda o: _distance(o, near))
+
+
+def identified_by_message_id(occurrence: Optional[QueueOccurrence], message_id: Optional[str]) -> bool:
+    return bool(occurrence and message_id and message_id in occurrence.message_ids)
+
+
+def queue_occurrences(db: Session, queue_id: Optional[str]) -> List[QueueOccurrence]:
+    """The occurrences of one queue id, from all its stored lines."""
+    if not queue_id:
+        return []
+    return split_queue_occurrences(
+        db.query(PostfixLog).filter(PostfixLog.queue_id == queue_id).all())
+
+
+def own_occurrence(db: Session, queue_id: Optional[str], message_id: Optional[str],
+                   near: Optional[datetime] = None, occurrences=None) -> Optional[QueueOccurrence]:
+    """The occurrence a write may read for this message (occurrence_for,
+    strict). None as well when it also holds the Message-ID of another
+    correlation of the queue id: the lines that tell the two messages apart
+    have not all arrived yet. occurrences: when the caller already split them."""
+    if occurrences is None:
+        occurrences = queue_occurrences(db, queue_id)
+    occurrence = occurrence_for(occurrences, message_id, near=near)
+    others = (occurrence.message_ids - {message_id}) if occurrence is not None else set()
+    if others:
+        # The session does not autoflush: a correlation given this queue id
+        # earlier in the same run must be seen
+        db.flush()
+    if others and db.query(MessageCorrelation.id).filter(
+            MessageCorrelation.queue_id == queue_id, MessageCorrelation.message_id.in_(others)).first():
+        return None
+    return occurrence
+
+
+def shown_postfix_lines(db: Session, correlation) -> List[PostfixLog]:
+    """The Postfix lines a detail view shows for a correlation: its own
+    occurrence of its queue id with that occurrence's boundary lines, else
+    the lines linked to it by id."""
+    if correlation.queue_id:
+        occurrence = occurrence_for(
+            queue_occurrences(db, correlation.queue_id), correlation.message_id,
+            near=correlation.first_seen, strict=False)
+        return occurrence.shown_lines() if occurrence else []
+    ids = sorted({i for i in (correlation.postfix_log_ids or []) if isinstance(i, int)})
+    if not ids:
+        return []
+    return db.query(PostfixLog).filter(PostfixLog.id.in_(ids)).order_by(PostfixLog.time, PostfixLog.id).all()
+
+
+def rspamd_marks_spam(rspamd_log) -> bool:
+    """RspamdLog.is_spam as the import sets it (scheduler, Rspamd ingest)."""
+    symbols = rspamd_log.symbols if isinstance(rspamd_log.symbols, dict) else {}
+    return rspamd_log.action in ('reject', 'add header', 'rewrite subject') or 'SPAM_TRAP' in symbols
+
+
+def derive_final_status(lines, rspamd_log, dovecot_status, stored_status) -> Optional[str]:
+    """A delivery's final status from its own Postfix lines alone.
+
+    Postfix outcome first (a bounce or reject wins, then a delivery to the
+    spam pipe, a delivery, an expiry, a deferral), then the Rspamd verdict
+    when Postfix logged none, then the Dovecot discard (issue #65) as
+    scheduler._apply_dovecot_verdict applies it.
+    """
+    statuses = {line.status for line in lines if line.status}
+    status = next((outcome for found, outcome in (
+        ('bounced', 'bounced'), ('rejected', 'rejected'), ('spam', 'spam'), ('sent', 'delivered'),
+        ('expired', 'expired'), ('deferred', 'deferred')) if found in statuses), None)
+    if status is None and rspamd_log is not None:
+        if rspamd_log.action == 'reject':
+            status = 'rejected'
+        elif rspamd_log.is_spam:
+            status = 'spam'
+    if status is None and stored_status == 'expired':
+        status = 'expired'
+    if dovecot_status == 'discarded' and status not in ('bounced', 'rejected', 'deferred'):
+        status = 'discarded'
+    return status
+
+
+def _own_value(stored, own_values, rspamd_values, other_values):
+    """stored, unless it is evidently another message's: found in another
+    occurrence of the queue id and neither in this message's lines nor in its
+    Rspamd scan. Then this message's own value replaces it."""
+    if not stored:
+        return stored
+    own = [v for v in own_values if v]
+    rspamd = [v for v in rspamd_values if v]
+    known = {v.lower() for v in own + rspamd}
+    if stored.lower() in known or stored.lower() not in {v.lower() for v in other_values if v}:
+        return stored
+    return (own or rspamd or [None])[0]
+
+
+def ownership_differs(correlation, occurrences: List[QueueOccurrence], occurrence: QueueOccurrence,
+                      queue_keys: set) -> bool:
+    """Whether a correlation holds lines of its queue id that are not its own
+    occurrence's (another message's, or boundary lines), or its own lines
+    carry the key of another correlation of this queue id."""
+    own = occurrence.ids
+    others = {line.id for o in occurrences for line in o.lines + o.boundary if line.id} - own
+    stored = {i for i in (correlation.postfix_log_ids or []) if isinstance(i, int)}
+    if stored & others:
+        return True
+    return any(line.correlation_key and line.correlation_key != correlation.correlation_key
+               and line.correlation_key in queue_keys for line in occurrence.lines)
+
+
+def repair_from_occurrence(db: Session, correlation, occurrence: QueueOccurrence,
+                           occurrences: List[QueueOccurrence], now: datetime) -> None:
+    """Re-derive a correlation from its own occurrence alone, after it was
+    found holding another message's lines. Does not commit; stamps are set by
+    settle_queue()."""
+    rspamd_log = db.get(RspamdLog, correlation.rspamd_log_id) if correlation.rspamd_log_id else None
+    own = sorted(occurrence.lines, key=_line_order)
+    other = [line for o in occurrences if o is not occurrence for line in o.lines]
+
+    correlation.postfix_log_ids = [line.id for line in own if line.id]
+    times = [naive_utc(line.time) for line in own if line.time]
+    if rspamd_log is not None and rspamd_log.time:
+        times.append(naive_utc(rspamd_log.time))
+    if times:
+        correlation.first_seen = min(times)
+
+    if rspamd_log is not None:
+        rspamd_log.is_spam = rspamd_marks_spam(rspamd_log) or any(line.status == 'spam' for line in own)
+
+    rspamd_recipients = rspamd_log.recipients_smtp if rspamd_log is not None and isinstance(
+        rspamd_log.recipients_smtp, list) else []
+    correlation.sender = _own_value(
+        correlation.sender, [line.sender for line in own],
+        [rspamd_log.sender_smtp if rspamd_log is not None else None], [line.sender for line in other])
+    correlation.recipient = _own_value(
+        correlation.recipient, [line.recipient for line in own], rspamd_recipients,
+        [line.recipient for line in other])
+
+    correlation.final_status = derive_final_status(
+        own, rspamd_log, correlation.dovecot_status, correlation.final_status)
+    correlation.last_seen = now
+
+
+def owners_of_queue(correlations, occurrences: List[QueueOccurrence]) -> Dict[int, QueueOccurrence]:
+    """{correlation id: its own occurrence} for the correlations of one queue
+    id whose occurrence can be told. With several correlations on the queue
+    id, only a Message-ID tells; an occurrence two of them claim is no one's."""
+    owned = {}
+    for correlation in correlations:
+        occurrence = occurrence_for(occurrences, correlation.message_id, near=correlation.first_seen)
+        if occurrence is None:
+            continue
+        if len(correlations) > 1 and not identified_by_message_id(occurrence, correlation.message_id):
+            continue
+        owned[correlation.id] = occurrence
+    claimed = [id(o) for o in owned.values()]
+    return {cid: o for cid, o in owned.items() if claimed.count(id(o)) == 1}
+
+
+def settle_queue(db: Session, correlations, occurrences: List[QueueOccurrence], now: datetime) -> list:
+    """Give every message of one queue id back its own lines.
+
+    A correlation found holding lines that are not its own occurrence's is
+    re-derived from its occurrence alone (repair_from_occurrence). Then the
+    queue id's lines are stamped: the lines of an owned occurrence with its
+    owner's key; any other line that carries the key of one of these
+    correlations loses it. Returns the correlations repaired. Does not
+    commit."""
+    owned = owners_of_queue(correlations, occurrences)
+    keys = {c.correlation_key for c in correlations}
+    repaired = [c for c in correlations if c.id in owned
+                and ownership_differs(c, occurrences, owned[c.id], keys)]
+    if not repaired:
+        return []
+    for correlation in repaired:
+        repair_from_occurrence(db, correlation, owned[correlation.id], occurrences, now)
+    by_occurrence = {id(owned[c.id]): c.correlation_key for c in correlations if c.id in owned}
+    for occurrence in occurrences:
+        for line in occurrence.lines:
+            key = by_occurrence.get(id(occurrence))
+            if key:
+                line.correlation_key = key
+            elif line.correlation_key in keys:
+                line.correlation_key = None
+        for line in occurrence.boundary:
+            if line.correlation_key in keys:
+                line.correlation_key = None
+    logger.info(f"[CORRELATION] Queue id {repaired[0].queue_id} was used by more than one message: "
+                f"{len(repaired)} correlation(s) re-derived from their own lines")
+    return repaired
+
+
 def ensure_leg(
     db: Session,
     message_id: str,
@@ -547,13 +928,15 @@ def correlate_rspamd_log(db: Session, rspamd_log: RspamdLog) -> Optional[Message
 
     correlation = None
     for queue_id in chains:
-        # The full chain, including lines that do not repeat the Message-ID
-        all_postfix_logs = db.query(PostfixLog).filter(
-            PostfixLog.queue_id == queue_id
-        ).all() or chains[queue_id]
+        # The whole chain, including lines that do not repeat the Message-ID,
+        # of this message only: the queue id may have been used by others
+        occurrence = own_occurrence(db, queue_id, message_id, near=rspamd_log.time)
+        if occurrence is None:
+            logger.warning(f"Queue {queue_id} holds Message-ID {message_id[:50]} more than once - not linked")
+            continue
 
         leg = ensure_leg(
-            db, message_id, queue_id, all_postfix_logs,
+            db, message_id, queue_id, occurrence.lines,
             rspamd_log=rspamd_log if queue_id == target_queue else None
         )
         if queue_id == target_queue:
@@ -582,17 +965,31 @@ def correlate_postfix_log(db: Session, postfix_log: PostfixLog) -> Optional[Mess
         MessageCorrelation object or None
     """
     # Postfix logs the Message-ID once per queue chain, so a line without one
-    # takes it from the rest of its own chain.
+    # takes it from the rest of its own chain: its own occurrence of the queue
+    # id, never another message that used the id before or after it
     message_id = postfix_log.message_id
-    if not message_id and postfix_log.queue_id:
-        sibling = db.query(PostfixLog).filter(
-            PostfixLog.queue_id == postfix_log.queue_id,
-            PostfixLog.message_id.isnot(None)
-        ).first()
-        message_id = sibling.message_id if sibling else None
+    mine, occurrences = None, []
+    if postfix_log.queue_id:
+        lines = db.query(PostfixLog).filter(PostfixLog.queue_id == postfix_log.queue_id).all()
+        if not any(line is postfix_log for line in lines):
+            lines.append(postfix_log)
+        occurrences = split_queue_occurrences(lines)
+        mine = next((o for o in occurrences if any(line is postfix_log for line in o.lines)), None)
+        if not message_id and mine and len(mine.message_ids) == 1:
+            message_id = next(iter(mine.message_ids))
 
-    # Method 1: the queue chain this line belongs to
+    def owns_this_line(leg_message_id, near=None):
+        """The line's occurrence is this message's, for a write."""
+        return mine is not None and own_occurrence(
+            db, postfix_log.queue_id, leg_message_id, near=near, occurrences=occurrences) is mine
+
+    # Method 1: the queue chain this line belongs to. A leg of the queue id
+    # that is not the message this line is part of gets nothing, and no
+    # other leg is made from the line either
     correlation = find_leg_by_queue(db, postfix_log.queue_id, message_id)
+    if correlation and postfix_log.queue_id and not owns_this_line(correlation.message_id, correlation.first_seen):
+        logger.debug(f"Queue-ID {postfix_log.queue_id}: the line is not {correlation.message_id}'s")
+        return None
 
     if correlation:
         logger.debug(f"Found correlation by Queue-ID: {postfix_log.queue_id}")
@@ -605,12 +1002,8 @@ def correlate_postfix_log(db: Session, postfix_log: PostfixLog) -> Optional[Mess
 
     # Method 3: another delivery of a Message-ID we already know - a new leg
     if not correlation and message_id and postfix_log.queue_id:
-        if find_legs(db, message_id):
-            all_postfix_logs = db.query(PostfixLog).filter(
-                PostfixLog.queue_id == postfix_log.queue_id
-            ).all()
-            if postfix_log not in all_postfix_logs:
-                all_postfix_logs.append(postfix_log)
+        if find_legs(db, message_id) and owns_this_line(message_id):
+            all_postfix_logs = list(mine.lines)
             logger.info(
                 f"New delivery leg for Message-ID {message_id[:50]} "
                 f"(Queue-ID: {postfix_log.queue_id})"
@@ -729,7 +1122,8 @@ def create_correlation_with_all_data(
                 break  # Priority status found
             elif plog.status == 'deferred' and not final_status:
                 final_status = plog.status
-            elif plog.status == 'sent' and not final_status:
+            elif plog.status == 'sent' and final_status in (None, 'deferred'):
+                # A delivery after deferrals, whatever order the lines come in
                 final_status = 'delivered'
             elif plog.status == 'spam':
                 final_status = 'spam'
@@ -955,12 +1349,13 @@ def update_correlation_with_postfix_log(
     if first_queue_id and postfix_log.queue_id:
         logger.info(f"First queue_id {postfix_log.queue_id} for correlation - searching for related logs")
         
-        # Find all PostfixLogs with this queue_id that aren't already linked
-        related_logs = db.query(PostfixLog).filter(
-            PostfixLog.queue_id == postfix_log.queue_id,
-            PostfixLog.id != postfix_log.id  # Exclude current log
-        ).all()
-        
+        # The other lines of this message's occurrence of the queue id; none
+        # when the lines cannot tell which occurrence is this message
+        occurrence = own_occurrence(
+            db, postfix_log.queue_id, correlation.message_id, near=correlation.first_seen)
+        related_logs = [line for line in (occurrence.lines if occurrence else [])
+                        if line.id != postfix_log.id]
+
         if related_logs:
             logger.info(f"Found {len(related_logs)} additional postfix logs with queue_id {postfix_log.queue_id}")
             
@@ -1054,19 +1449,26 @@ def update_correlation_with_postfix_logs(
 ):
     """
     Update correlation with multiple Postfix logs
-    
+
     Args:
         db: Database session
         correlation: MessageCorrelation object
-        postfix_logs: List of PostfixLog objects
+        postfix_logs: The PostfixLog objects of this message alone (its own
+            occurrence of the queue id, see occurrence_for)
     """
     # Collect all IDs (use list() to ensure mutable copy)
     current_ids = list(correlation.postfix_log_ids or [])
     for plog in postfix_logs:
         if plog.id and plog.id not in current_ids:
             current_ids.append(plog.id)
-    
+
     correlation.postfix_log_ids = current_ids
+
+    # The message was first seen at its earliest line: a line stored after the
+    # correlation was made (an smtpd "client=" line read later) moves it back
+    times = [naive_utc(plog.time) for plog in postfix_logs if plog.time]
+    if times and (correlation.first_seen is None or min(times) < naive_utc(correlation.first_seen)):
+        correlation.first_seen = min(times)
     
     # Update fields from logs
     for plog in postfix_logs:
@@ -1125,7 +1527,8 @@ def update_correlation_with_postfix_logs(
                 break
             elif plog.status == 'deferred' and not final_status:
                 final_status = plog.status
-            elif plog.status == 'sent' and not final_status:
+            elif plog.status == 'sent' and final_status in (None, 'deferred'):
+                # A delivery after deferrals, whatever order the lines come in
                 final_status = 'delivered'
             elif plog.status == 'spam':
                  if final_status not in ['bounced', 'rejected']:
@@ -1212,11 +1615,15 @@ def complete_incomplete_correlations(db: Session) -> int:
                 
                 logger.info(f"Completing correlation: Message-ID {message_id[:50]} => Queue-ID {queue_id}")
                 
-                # Find ALL Postfix logs with this Queue-ID
-                all_postfix_logs = db.query(PostfixLog).filter(
-                    PostfixLog.queue_id == queue_id
-                ).all()
-                
+                # This message's lines of the queue id, not those of another
+                # message that used the id before or after it
+                occurrence = own_occurrence(
+                    db, queue_id, message_id, near=correlation.first_seen)
+                if occurrence is None:
+                    logger.debug(f"Queue-ID {queue_id} cannot tell which lines are {message_id[:50]}")
+                    continue
+                all_postfix_logs = occurrence.lines
+
                 # Update correlation with all Postfix data
                 update_correlation_with_postfix_logs(db, correlation, all_postfix_logs)
                 

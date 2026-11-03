@@ -13,6 +13,7 @@ from typing import List, Optional
 
 from ..database import get_db
 from ..models import MessageCorrelation, PostfixLog, RspamdLog, NetfilterLog, RawServiceLog
+from ..correlation import shown_postfix_lines
 from ..config import settings
 from ..app_time import range_bound
 from ..services import entity_values, excluded_addresses, written_recipients
@@ -799,21 +800,11 @@ def get_message_full_details(
                 RspamdLog.id == correlation.rspamd_log_id
             ).first()
 
-        # Get Postfix logs - Use queue_id instead of postfix_log_ids
-        # This ensures we always get ALL logs, even if they arrive after correlation is marked complete
-        postfix_logs = []
-        if correlation.queue_id:
-            # Query ALL postfix logs with this queue_id
-            # This is the source of truth, not postfix_log_ids
-            postfix_logs = db.query(PostfixLog).filter(
-                PostfixLog.queue_id == correlation.queue_id
-            ).order_by(PostfixLog.time).all()
-        elif correlation.postfix_log_ids:
-            # Fallback: if no queue_id yet, use postfix_log_ids (for incomplete correlations)
-            unique_ids = list(set(correlation.postfix_log_ids))
-            postfix_logs = db.query(PostfixLog).filter(
-                PostfixLog.id.in_(unique_ids)
-            ).order_by(PostfixLog.time).all()
+        # Postfix logs: this message's lines of its queue id, read from the
+        # queue id so lines that arrive after the correlation is complete are
+        # shown too, but never those of another message that used the queue
+        # id (Postfix reuses them). Without a queue id, the lines linked by id
+        postfix_logs = shown_postfix_lines(db, correlation)
 
         # Deduplicate postfix_logs (the same line stored twice)
         seen_messages = set()

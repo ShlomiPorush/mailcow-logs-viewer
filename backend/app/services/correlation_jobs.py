@@ -18,7 +18,14 @@ from ..correlation import (
     find_legs,
     find_stub_leg,
     group_postfix_logs_by_queue,
+    identified_by_message_id,
+    naive_utc,
     nearest_queue_chain,
+    owners_of_queue,
+    own_occurrence,
+    queue_occurrences,
+    settle_queue,
+    split_queue_occurrences,
 )
 from . import written_recipients
 
@@ -39,10 +46,6 @@ PUSH_SKIP_FINAL_STATUSES = TERMINAL_FINAL_STATUSES + ('spam',)
 # so a genuine retry cannot arrive later than that. A queue id that matches an
 # older correlation is far more likely to be a reused short id.
 LATE_STATUS_MAX_CORRELATION_AGE = timedelta(days=5)
-
-# Postfix statuses worth reacting to on arrival. Anything else carries no
-# outcome, so pushing on it would be pure overhead.
-PUSH_TRIGGER_STATUSES = ('sent', 'bounced', 'deferred')
 
 
 def run_correlation(*, get_db_context, is_blacklisted, correlate):
@@ -125,13 +128,16 @@ def correlate_single_message(db: Session, rspamd_log: RspamdLog, *, clock) -> Op
 
         for queue_id in chains:
             # The whole chain, including the lines that do not repeat the
-            # Message-ID (Postfix only logs it once per queue id)
-            chain_logs = db.query(PostfixLog).filter(
-                PostfixLog.queue_id == queue_id
-            ).all() or chains[queue_id]
+            # Message-ID (Postfix only logs it once per queue id), of this
+            # message only: Postfix reuses queue ids, and another message's
+            # lines would lend this one their time, status and lines
+            occurrence = own_occurrence(db, queue_id, message_id, near=rspamd_log.time)
+            if occurrence is None:
+                logger.warning(f"Queue {queue_id} holds Message-ID {message_id[:40]}... more than once - not linked")
+                continue
 
             leg = ensure_leg(
-                db, message_id, queue_id, chain_logs,
+                db, message_id, queue_id, occurrence.lines,
                 rspamd_log=rspamd_log if queue_id == target_queue else None
             )
             if queue_id == target_queue:
@@ -288,16 +294,23 @@ def complete_incomplete_correlations(*, get_db_context, update_job_status, max_a
                     if not queue_id:
                         continue
 
-                    # Find ALL Postfix logs with this queue_id
-                    all_postfix = db.query(PostfixLog).filter(
-                        PostfixLog.queue_id == queue_id
-                    ).all()
+                    # This message's lines of the queue id, not those of
+                    # another message that used the id before or after it
+                    occurrence = own_occurrence(
+                        db, queue_id, correlation.message_id, near=correlation.first_seen)
+                    if occurrence is None:
+                        continue
+                    all_postfix = occurrence.lines
 
                     # Update correlation
                     correlation.queue_id = queue_id
                     correlation.postfix_log_ids = [plog.id for plog in all_postfix]
                     correlation.is_complete = True
                     correlation.last_seen = clock.now(timezone.utc)
+                    times = [naive_utc(plog.time) for plog in all_postfix if plog.time]
+                    if times and (correlation.first_seen is None
+                                  or min(times) < naive_utc(correlation.first_seen)):
+                        correlation.first_seen = min(times)
 
                     # Update final status. A 'discarded' verdict from Dovecot is kept:
                     # Postfix logs status=sent for a message Sieve then drops,
@@ -390,9 +403,18 @@ def expire_old_correlations(*, get_db_context, update_job_status, max_age_minute
         update_job_status('expire_correlations', 'failed', str(e))
 
 
-def recompute_correlation_from_postfix(db: Session, correlation: MessageCorrelation, *, clock) -> bool:
-    """Re-derive final_status and postfix_log_ids for one correlation from every
-    Postfix log sharing its queue_id. Returns True when something was written.
+def recompute_correlation_from_postfix(db: Session, correlation: MessageCorrelation, *, clock,
+                                       occurrences=None) -> bool:
+    """Re-derive final_status and postfix_log_ids for one correlation from its
+    own Postfix lines. Returns True when something was written.
+
+    Postfix reuses queue ids, so the lines of the queue id are first cut into
+    messages (correlation.split_queue_occurrences) and only this message's
+    are read. A correlation found holding another message's lines is
+    re-derived from its own lines alone, with the other correlations of the
+    queue id (correlation.settle_queue). Otherwise the status moves on from
+    the stored one. occurrences: the queue id's occurrences when the caller
+    already split them.
 
     Does not commit; the caller owns the transaction.
     """
@@ -404,14 +426,28 @@ def recompute_correlation_from_postfix(db: Session, correlation: MessageCorrelat
     if not correlation.queue_id:
         return False
 
-    all_postfix = db.query(PostfixLog).filter(
-        PostfixLog.queue_id == correlation.queue_id
-    ).all()
-
-    if not all_postfix:
+    if occurrences is None:
+        occurrences = queue_occurrences(db, correlation.queue_id)
+    own = own_occurrence(db, correlation.queue_id, correlation.message_id,
+                         near=correlation.first_seen, occurrences=occurrences)
+    if own is None:
         return False
 
-    # Determine best final status from all Postfix logs
+    # Lines of another message linked or stamped to this one: settle the
+    # whole queue id (an unknown key is an older version's and is just
+    # replaced below)
+    stored = {i for i in (correlation.postfix_log_ids or []) if isinstance(i, int)}
+    foreign = {line.id for o in occurrences for line in o.lines + o.boundary if line.id} - own.ids
+    if stored & foreign or any(line.correlation_key not in (None, correlation.correlation_key)
+                               for line in own.lines):
+        correlations = db.query(MessageCorrelation).filter(
+            MessageCorrelation.queue_id == correlation.queue_id).all()
+        if correlation in settle_queue(db, correlations, occurrences, clock.now(timezone.utc)):
+            return True
+
+    all_postfix = own.lines
+
+    # Determine best final status from this message's Postfix logs
     # Priority: bounced > rejected > sent (delivered) > deferred
     new_final_status = correlation.final_status
 
@@ -445,7 +481,7 @@ def recompute_correlation_from_postfix(db: Session, correlation: MessageCorrelat
     if ids_added > 0:
         correlation.postfix_log_ids = current_ids
 
-    # Point every Postfix log of this queue at the correlation
+    # Point every Postfix log of this message at the correlation
     for plog in all_postfix:
         if not plog.correlation_key or plog.correlation_key != correlation.correlation_key:
             plog.correlation_key = correlation.correlation_key
@@ -464,12 +500,23 @@ def recompute_correlation_from_postfix(db: Session, correlation: MessageCorrelat
 
 
 def refresh_correlations_for_queue_ids(db: Session, queue_ids, *, recompute, clock) -> tuple:
-    """Re-derive the status of the correlations behind the given Postfix queue ids.
+    """Re-derive the correlations behind the given Postfix queue ids.
 
-    Called right after a page of Postfix logs is stored, so the work follows the
-    log lines that actually arrived instead of re-polling every open correlation
-    on a timer. That is what lets a delivery which succeeds long after the
-    correlation age window still be recorded.
+    Called right after a page of Postfix logs is stored, with the queue id of
+    every line stored, so the work follows the log lines that actually arrived
+    instead of re-polling every open correlation on a timer. That is what lets
+    a delivery which succeeds long after the correlation age window still be
+    recorded.
+
+    Postfix reuses queue ids. The lines of each queue id are cut into messages
+    once (correlation.split_queue_occurrences) and every correlation reads
+    only its own message's lines. A line that arrives can show that a
+    correlation holds another message's lines; that correlation is re-derived
+    from its own lines whatever its status (correlation.settle_queue). The
+    others move on as before: a final status is kept; a correlation whose
+    lines cannot be told from another one's is not touched; and one older than
+    Postfix's queue lifetime is left alone unless its Message-ID line names
+    its lines.
 
     Returns (updated, skipped). Does not commit; the caller owns the transaction.
     """
@@ -491,30 +538,49 @@ def refresh_correlations_for_queue_ids(db: Session, queue_ids, *, recompute, clo
         by_queue = {}
         for row in rows:
             by_queue.setdefault(row.queue_id, []).append(row)
+        if not by_queue:
+            continue
+
+        # The lines of every queue id that has a correlation, in one query
+        lines = {}
+        for line in db.query(PostfixLog).filter(PostfixLog.queue_id.in_(list(by_queue))).all():
+            lines.setdefault(line.queue_id, []).append(line)
 
         for queue_id, correlations in by_queue.items():
-            # A queue id shared by two correlations is ambiguous: Postfix reuses
-            # short queue ids, so we cannot tell which message the new line
-            # belongs to. Guessing would rewrite an unrelated message's status.
-            if len(correlations) > 1:
-                skipped += len(correlations)
-                logger.warning(
-                    f"[STATUS] Queue {queue_id} maps to {len(correlations)} correlations - "
-                    "not attributing the new log line to either"
-                )
+            occurrences = split_queue_occurrences(lines.get(queue_id, []))
+            if not occurrences:
                 continue
 
-            correlation = correlations[0]
+            repaired = settle_queue(db, correlations, occurrences, clock.now(timezone.utc))
+            updated += len(repaired)
+            owned = owners_of_queue(correlations, occurrences)
 
-            if correlation.final_status in PUSH_SKIP_FINAL_STATUSES:
-                continue
+            for correlation in correlations:
+                if correlation in repaired:
+                    continue
+                occurrence = owned.get(correlation.id)
+                identified = identified_by_message_id(occurrence, correlation.message_id)
 
-            if correlation.created_at and correlation.created_at < horizon:
-                skipped += 1
-                continue
+                # Which message the lines are cannot be told (or another
+                # correlation's Message-ID is in them too): guessing would
+                # rewrite an unrelated message's status
+                if occurrence is None:
+                    skipped += 1
+                    logger.warning(
+                        f"[STATUS] Queue {queue_id} maps to {len(correlations)} correlation(s) and "
+                        "its lines do not tell which is this one - not attributing them"
+                    )
+                    continue
 
-            if recompute(db, correlation):
-                updated += 1
+                if correlation.final_status in PUSH_SKIP_FINAL_STATUSES:
+                    continue
+
+                if not identified and correlation.created_at and correlation.created_at < horizon:
+                    skipped += 1
+                    continue
+
+                if recompute(db, correlation, occurrences=occurrences):
+                    updated += 1
 
     return (updated, skipped)
 
