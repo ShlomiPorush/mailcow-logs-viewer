@@ -1475,9 +1475,11 @@ def get_message_details(
         # used its queue id (Postfix reuses them)
         postfix_logs = shown_postfix_lines(db, correlation)
 
-        if excluded_addresses.delivery_hidden(correlation, postfix_logs):
+        # Hidden or not is decided on every line of the queue id, as the lists decide it
+        queue_lines = excluded_addresses.queue_lines(db, correlation.queue_id)
+        if excluded_addresses.delivery_hidden(correlation, postfix_logs if queue_lines is None else queue_lines):
             raise HTTPException(status_code=404, detail="Message not found")
-        postfix_logs = excluded_addresses.visible_postfix_lines(postfix_logs)
+        postfix_logs = excluded_addresses.visible_postfix_lines(postfix_logs, queue_lines)
 
         # Build response
         return {

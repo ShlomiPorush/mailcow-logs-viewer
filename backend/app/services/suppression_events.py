@@ -65,23 +65,33 @@ def postfix_lines(db: Session, wanted: List[tuple]) -> List[Tuple[list, bool]]:
     the others. A line is kept when it falls in that request's time span and
     names no recipient or that recipient: a message to several people must not
     keep the others' lines, and a queue id Postfix reused days later is another
-    message. The deciding row always stays, read from the event itself.
+    message. Nor is a line kept that a "removed" of its queue id separates from
+    the request's start (the deciding row, or the arrival of a stuck message):
+    it is another message on the same queue id (excluded_addresses.separated).
+    The "removed" lines are read on their own, so LINES_PER_QUEUE never hides
+    one. The deciding row always stays, read from the event itself.
     Returns one (lines, shortened) per request.
     """
     asked = [w for w in wanted if w[0]]
     by_queue: Dict[str, list] = {}
+    ends: Dict[str, list] = {}
     if asked:
         lo = min(w[2] for w in asked) - NEARBY
         hi = max(w[3] for w in asked) + NEARBY
+        queue_ids = {w[0] for w in asked}
         ranked = db.query(PostfixLog.id.label('id'), func.row_number().over(
             partition_by=PostfixLog.queue_id, order_by=(PostfixLog.time.desc(), PostfixLog.id.desc())).label('n')
-        ).filter(PostfixLog.queue_id.in_({w[0] for w in asked}), PostfixLog.time >= lo, PostfixLog.time <= hi).subquery()
+        ).filter(PostfixLog.queue_id.in_(queue_ids), PostfixLog.time >= lo, PostfixLog.time <= hi).subquery()
         rows = db.query(PostfixLog.id, PostfixLog.queue_id, PostfixLog.time, PostfixLog.program,
                         PostfixLog.message, PostfixLog.recipient) \
             .join(ranked, ranked.c.id == PostfixLog.id).filter(ranked.c.n <= LINES_PER_QUEUE) \
             .order_by(PostfixLog.time, PostfixLog.id).all()
         for row in rows:
             by_queue.setdefault(row.queue_id, []).append(row)
+        for queue_id, time in db.query(PostfixLog.queue_id, PostfixLog.time).filter(
+                PostfixLog.queue_id.in_(queue_ids), PostfixLog.time >= lo, PostfixLog.time <= hi,
+                excluded_addresses.removed_line(PostfixLog)).all():
+            ends.setdefault(queue_id, []).append(time)
     # A queue id with more lines than were read: older lines of it may be missing
     capped = {q for q, lines in by_queue.items() if len(lines) >= LINES_PER_QUEUE}
 
@@ -95,7 +105,8 @@ def postfix_lines(db: Session, wanted: List[tuple]) -> List[Tuple[list, bool]]:
         key = (queue_id, rcpt, start, end)
         if key not in picked_cache:
             picked_cache[key] = [r for r in by_queue.get(queue_id, [])
-                                 if start - NEARBY <= r.time <= end + NEARBY and (not r.recipient or r.recipient.lower() == rcpt)]
+                                 if start - NEARBY <= r.time <= end + NEARBY and (not r.recipient or r.recipient.lower() == rcpt)
+                                 and not excluded_addresses.separated(r.time, start, ends.get(queue_id, ()))]
         lines = list(picked_cache[key])
         shortened = queue_id in capped
         if deciding is not None and all(r.id != deciding.id for r in lines):
