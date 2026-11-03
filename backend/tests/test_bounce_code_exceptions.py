@@ -176,6 +176,48 @@ def test_a_permanent_failure_with_a_code_left_alone_is_not_blocked_or_deleted(db
     scheduler.mailcow_api.delete_queue.assert_awaited_once_with(['GONE'])
 
 
+def test_mail_waiting_with_a_code_left_alone_stays_when_its_address_also_failed_permanently(db, base):
+    """Review R1: another, permanent failure of the same address deletes its
+    queued mail, but not a message deferred with a code left alone."""
+    gone = f'gone-{MARK}@example.org'
+    _line(db, gone, '5.1.1')
+    _queue(base, [{'queue_id': 'WAITING', 'recipients': [f'{gone} (host mx.example.org[192.0.2.1] said: 452 4.2.2 Mailbox full)']},
+                  {'queue_id': 'OTHER', 'recipients': [gone]}])
+    asyncio.run(scheduler.detect_suppressions_job())
+    scheduler.mailcow_api.delete_queue.assert_awaited_once_with(['OTHER'])
+
+
+@pytest.mark.parametrize('block', [True, False])
+def test_a_list_saved_while_the_cleanup_runs_keeps_the_mail(base, block):
+    """Review R2: the codes are asked again right before the deletion, under the map lock."""
+    _set(base, suppression_soft_bounce_excluded_codes='', queue_cleanup_block=block)
+    base.setattr(scheduler, '_store_deferred_suppressions_worker', lambda r, uncovered=None: len(r))
+    real = scheduler._cleanup_deletable
+
+    def saved_then_check(items, blocking):
+        _set(base, suppression_soft_bounce_excluded_codes='4.2.2')
+        return real(items, blocking)
+
+    base.setattr(scheduler, '_cleanup_deletable', saved_then_check)
+    _queue(base, [_stuck('FULL', 'full@example.org (host mx.example.org[192.0.2.1] said: 452 4.2.2 Mailbox full)')])
+    asyncio.run(scheduler.cleanup_deferred_queue_job())
+    scheduler.mailcow_api.delete_queue.assert_not_awaited()
+
+
+def test_a_list_saved_before_the_block_is_stored_blocks_nobody(db, base):
+    """Review R2: the block is stored under the row lock, with the codes asked again there."""
+    arrived = datetime.utcnow() - timedelta(hours=2)
+    full, slow = f'full-{MARK}@example.org', f'slow-{MARK}@example.org'
+    counted = scheduler._store_deferred_suppressions_worker([
+        {'email': full, 'queue_id': 'FULL', 'sender': None, 'arrived': arrived,
+         'reason': 'host mx.example.org[192.0.2.1] said: 452 4.2.2 Mailbox full'},
+        {'email': slow, 'queue_id': 'FULL', 'sender': None, 'arrived': arrived, 'reason': 'connect to mx: timed out'},
+        {'email': slow, 'queue_id': 'SLOW', 'sender': None, 'arrived': arrived, 'reason': 'connect to mx: timed out'},
+    ], set())
+    assert counted == 1
+    assert _rows(db) == {slow: True}, 'no recipient of the message that stays is blocked for it'
+
+
 def test_a_temporary_failure_with_a_code_left_alone_is_not_counted(db, base):
     _set(base, queue_cleanup_enabled=False)
     full, slow = f'full-{MARK}@example.org', f'slow-{MARK}@example.org'

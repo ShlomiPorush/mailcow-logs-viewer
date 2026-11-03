@@ -726,7 +726,7 @@ function settingsBounceCodes(kind, config, lockedKeys, defaults) {
                 ' aria-label="Add a code" oninput="settingsCodePicked(this)" onkeydown="if (event.key === \'Enter\') { event.preventDefault(); settingsAddCode(this); }">' +
             '<datalist id="' + id + '-options">' + options + '</datalist>' +
             '<button type="button" class="ui-btn" onclick="settingsAddCode(this)">Add</button></div>' +
-            '<small class="ui-set-invalid ui-text-fail" data-codes-error role="status" hidden></small>') +
+            '<small class="ui-set-codes-error ui-text-fail" data-codes-error role="status" hidden></small>') +
         '<div class="ui-set-codes-seen" data-codes-seen hidden></div>' +
         '<input type="hidden" id="edit-' + key + '" name="' + key + '" value="' + escapeHtml(String(config[key] ?? '')) + '"' + (locked ? ' disabled' : '') + '>' +
         (locked ? '' : '<button type="button" class="ui-set-clear is-reset" onclick="settingsResetCodes(this)" hidden>↺ Reset to default (' +
