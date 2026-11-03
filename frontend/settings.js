@@ -712,7 +712,13 @@ function settingsBounceCodes(kind, config, lockedKeys, defaults) {
     const cls = kind === 'hard' ? '5' : '4';
     const id = 'codes-' + kind;
     const desc = SETTINGS_FIELD_DESCRIPTIONS[key];
-    const options = SETTINGS_STATUS_CODES.map(([code, name]) => '<option value="' + escapeHtml(`${cls}.${code} ${name}`) + '"></option>').join('');
+    // The registered codes in the shared picker (MP-4: searchable by code and meaning); a pick adds at once
+    const picker = locked ? '' : uiPicker({
+        id: 'settings-' + id, label: 'Status codes', value: 'Pick a code', field: true, labelledBy: 'label-' + id,
+        search: 'Search codes', options: SETTINGS_STATUS_CODES.map(([code, name]) => ({
+            label: `${cls}.${code} ${name}`, value: `${cls}.${code}`, onclick: `settingsPickCode('${kind}', '${cls}.${code}')`
+        }))
+    });
     return '<div class="ui-set-field ui-set-wide ui-set-codes' + (locked ? ' is-locked' : '') + '" data-codes="' + kind + '" data-class="' + cls + '" data-default="' +
             escapeHtml(String(defaults[key] ?? '')) + '">' +
         '<div class="ui-set-choice-head"><span class="ui-label" id="label-' + id + '">Leave these codes alone</span>' +
@@ -720,12 +726,12 @@ function settingsBounceCodes(kind, config, lockedKeys, defaults) {
             '<span class="ui-set-pill is-changed" title="Differs from the default" hidden>Changed</span></div>' +
         '<small class="ui-set-desc">' + escapeHtml(desc) + '</small>' +
         '<div class="ui-chip-row" data-codes-list aria-labelledby="label-' + id + '"></div>' +
-        (locked ? '' : '<div class="ui-sec-ladd ui-flush">' +
-            '<input type="text" class="ui-input" id="' + id + '-add" list="' + id + '-options" autocomplete="off" spellcheck="false" maxlength="120"' +
-                ' placeholder="Code or meaning, like ' + (kind === 'hard' ? '5.2.2' : '4.2.2') + '"' +
-                ' aria-label="Add a code" oninput="settingsCodePicked(this)" onkeydown="if (event.key === \'Enter\') { event.preventDefault(); settingsAddCode(this); }">' +
-            '<datalist id="' + id + '-options">' + options + '</datalist>' +
-            '<button type="button" class="ui-btn" onclick="settingsAddCode(this)">Add</button></div>' +
+        // A code the registry does not list (a provider's own, such as 5.7.509) is typed beside it
+        (locked ? '' : '<div class="ui-sec-ladd ui-flush ui-set-codes-add">' + picker +
+            '<span class="ui-set-codes-other"><input type="text" class="ui-input" id="' + id + '-other" autocomplete="off" spellcheck="false" maxlength="20"' +
+                ' placeholder="Other ' + cls + '.x.x code" aria-label="Other ' + cls + '.x.x code" oninput="settingsCodeTyped(this)"' +
+                ' onkeydown="if (event.key === \'Enter\') { event.preventDefault(); settingsAddCode(this); }">' +
+            '<button type="button" class="ui-btn" onclick="settingsAddCode(this)">Add</button></span></div>' +
             '<small class="ui-set-codes-error ui-text-fail" data-codes-error role="status" hidden></small>') +
         '<div class="ui-set-codes-seen" data-codes-seen hidden></div>' +
         '<input type="hidden" id="edit-' + key + '" name="' + key + '" value="' + escapeHtml(String(config[key] ?? '')) + '"' + (locked ? ' disabled' : '') + '>' +
@@ -772,41 +778,44 @@ function settingsSetCodes(box, codes) {
         return x[1] - y[1] || x[2] - y[2];
     });
     field.value = sorted.join(',');
+    // A code went in or out: an earlier "Enter a code" no longer applies
+    const other = box.querySelector('.ui-set-codes-other input');
+    if (other) settingsCodeTyped(other);
     settingsShowCodes(box);
     field.form && field.form.dispatchEvent(new Event('input', { bubbles: true }));
 }
 
-// A typed code, a pick from the list ("5.2.2 Mailbox full") or a meaning ("mailbox full")
+// A code typed in the Other field
 function settingsAddCode(el) {
     const box = el.closest('.ui-set-codes');
-    const input = box.querySelector('.ui-sec-ladd input');
+    const input = box.querySelector('.ui-set-codes-other input');
     const error = box.querySelector('[data-codes-error]');
     const cls = box.dataset.class;
-    const text = input.value.trim();
-    if (!text) return false;
-    const named = SETTINGS_STATUS_CODES.find(([, name]) => name.toLowerCase() === text.toLowerCase());
-    const code = settingsCodeOf(text.split(/\s+/)[0], cls) || (named ? `${cls}.${named[0]}` : '');
+    if (!input.value.trim()) return false;
+    const code = settingsCodeOf(input.value, cls);
     if (!code) {
         error.textContent = `Enter a ${cls}.x.x code, such as ${cls}.2.2, or pick one from the list.`;
         error.hidden = false;
         input.setAttribute('aria-invalid', 'true');
         return false;
     }
-    error.hidden = true;
-    input.removeAttribute('aria-invalid');
+    settingsCodeTyped(input);
     settingsSetCodes(box, settingsCodeList(box.querySelector('input[type="hidden"]')).concat(code));
     input.value = '';
     input.focus();
     return true;
 }
 
-// A pick from the browser's list is added at once, without pressing Add
-function settingsCodePicked(input) {
-    const box = input.closest('.ui-set-codes');
-    const error = box.querySelector('[data-codes-error]');
-    if (!error.hidden) { error.hidden = true; input.removeAttribute('aria-invalid'); }
-    const [code, ...name] = input.value.trim().split(/\s+/);
-    if (name.length && settingsCodeOf(code, box.dataset.class) && name.join(' ') === settingsCodeName(code)) settingsAddCode(input);
+function settingsCodeTyped(input) {
+    const error = input.closest('.ui-set-codes').querySelector('[data-codes-error]');
+    error.hidden = true;
+    input.removeAttribute('aria-invalid');
+}
+
+// A pick from the picker's list
+function settingsPickCode(kind, code) {
+    const box = document.querySelector('.ui-set-codes[data-codes="' + kind + '"]');
+    if (box) settingsSetCodes(box, settingsCodeList(box.querySelector('input[type="hidden"]')).concat(code));
 }
 
 function settingsAddSeenCode(btn) {
@@ -819,7 +828,7 @@ function settingsRemoveCode(btn) {
     const code = btn.dataset.code;
     settingsSetCodes(box, settingsCodeList(box.querySelector('input[type="hidden"]')).filter(c => c !== code));
     // The focus stays in the list: on the next chip, else on the Add field
-    const next = box.querySelector('[data-codes-list] button') || box.querySelector('.ui-sec-ladd input');
+    const next = box.querySelector('[data-codes-list] button') || box.querySelector('.ui-picker-btn');
     if (next) next.focus();
 }
 
