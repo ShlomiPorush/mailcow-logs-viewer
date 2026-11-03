@@ -90,6 +90,10 @@ def test_the_code_is_read_from_a_reply_and_never_from_an_address():
     assert bounce_policy.codes_in_text('host 452-4.2.2-mx.example.test[192.0.2.1] refused to talk to me') == []
     assert bounce_policy.codes_in_text('host mx said: 550 4.2.2 odd') == [], 'a code of another class than its reply'
     assert bounce_policy.codes_in_text('host mx[192.0.2.1] said: 451 4.7.1 Greylisted, try again') == ['4.7.1']
+    # Round 3: only the code that opens the reply, however many spaces follow its reply code
+    assert bounce_policy.codes_in_text('host mx said: 451 4.7.1 <452-4.2.2@example.test>: Recipient address rejected') == ['4.7.1']
+    assert bounce_policy.codes_in_text('host mx.example.test said: 452  4.2.2 Mailbox full') == ['4.2.2']
+    assert bounce_policy.codes_in_text('host mx[192.0.2.1] refused to talk to me: 421 4.7.0 Try again later') == ['4.7.0']
 
 
 # ---- The queue cleanup ----
