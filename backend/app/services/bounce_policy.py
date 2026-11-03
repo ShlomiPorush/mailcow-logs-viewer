@@ -23,8 +23,10 @@ _warned = set()
 
 # An enhanced status code (RFC 3463): class.subject.detail
 _CODE = re.compile(r'^[45]\.\d{1,3}\.\d{1,3}$')
-# The code in a deferral reason, such as "host mx said: 452 4.2.2 Mailbox full"
-_CODE_IN_TEXT = re.compile(r'(?<![\d.])([45]\.\d{1,3}\.\d{1,3})(?![\d.])')
+# The code in a server reply, right after its reply code of the same class:
+# "said: 452 4.2.2 Mailbox full" or "452-4.2.2". A number elsewhere, as in a
+# host name (4.2.2-mx.example.org) or an address, is not a code.
+_CODE_IN_TEXT = re.compile(r'(?<![\w.-])([45])\d\d[ -](\1\.\d{1,3}\.\d{1,3})(?![\w.-])')
 EXCLUDED_CODES_KEYS = {'5': 'suppression_hard_bounce_excluded_codes', '4': 'suppression_soft_bounce_excluded_codes'}
 
 
@@ -86,7 +88,7 @@ def code_excluded(dsn: str) -> bool:
 
 def codes_in_text(text: str) -> List[str]:
     """The 4.x.x and 5.x.x codes written in a server reply or a deferral reason."""
-    return _CODE_IN_TEXT.findall(str(text or ''))
+    return [match.group(2) for match in _CODE_IN_TEXT.finditer(str(text or ''))]
 
 
 def rspamd_sync_on() -> bool:

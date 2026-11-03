@@ -85,6 +85,11 @@ def test_the_code_is_read_from_a_reply_and_never_from_an_address():
     assert bounce_policy.codes_in_text('connect to mx.example.org[5.4.3.2]:25: Connection timed out') == []
     assert bounce_policy.codes_in_text('connect to mx.example.org[45.4.3.2]:25: timed out') == []
     assert bounce_policy.codes_in_text(None) == []
+    # Review R4: a number in a host name or an address is not a code, only one after its reply code
+    assert bounce_policy.codes_in_text('connect to 4.2.2-mx.example.test[192.0.2.1]:25: Connection timed out') == []
+    assert bounce_policy.codes_in_text('host 452-4.2.2-mx.example.test[192.0.2.1] refused to talk to me') == []
+    assert bounce_policy.codes_in_text('host mx said: 550 4.2.2 odd') == [], 'a code of another class than its reply'
+    assert bounce_policy.codes_in_text('host mx[192.0.2.1] said: 451 4.7.1 Greylisted, try again') == ['4.7.1']
 
 
 # ---- The queue cleanup ----
