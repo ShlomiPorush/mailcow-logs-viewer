@@ -29,6 +29,8 @@ _CODE = re.compile(r'^[45]\.\d{1,3}\.\d{1,3}$')
 # picks its reply anyway; what must not pass for a code is a number in a host
 # name (452-4.2.2-mx.example.org) or an address (<452-4.2.2@example.org>).
 _CODE_IN_TEXT = re.compile(r'(?<![\w.<@-])([45])\d\d[ -]\s*(\1\.\d{1,3}\.\d{1,3})(?![\w.@>-])')
+# Addresses are taken out first, whole: <sender+452-4.2.2+tag@example.org>
+_ADDRESS = re.compile(r'<[^<>]*>|\S*@\S*')
 EXCLUDED_CODES_KEYS = {'5': 'suppression_hard_bounce_excluded_codes', '4': 'suppression_soft_bounce_excluded_codes'}
 
 
@@ -90,7 +92,8 @@ def code_excluded(dsn: str) -> bool:
 
 def codes_in_text(text: str) -> List[str]:
     """The 4.x.x and 5.x.x codes written in a server reply or a deferral reason."""
-    return [match.group(2) for match in _CODE_IN_TEXT.finditer(str(text or ''))]
+    text = _ADDRESS.sub(' ', str(text or ''))
+    return [match.group(2) for match in _CODE_IN_TEXT.finditer(text)]
 
 
 def rspamd_sync_on() -> bool:

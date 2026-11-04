@@ -1803,6 +1803,8 @@ async function loadSettings() {
                         currentData.version_info = versionInfo;
                     }
                     renderSettings(content, currentData);
+                    // A picker open meanwhile (Time Zone, codes left alone) keeps its search and the focus (MP-2)
+                    uiPickerRefocus();
                 }
             } catch (error) {
                 console.error('Failed to load version info:', error);
