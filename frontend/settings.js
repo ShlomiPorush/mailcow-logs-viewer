@@ -300,7 +300,7 @@ var SETTINGS_FIELD_DESCRIPTIONS = {
     anomaly_alert_cooldown_hours: 'Applies to the same alert type for the same mailbox or username.',
 
     // SMTP abuse protection
-    smtp_abuse_enabled: 'Blocks sending and emails the mailbox owner, who can still receive mail. Requires a read-write API key.',
+    smtp_abuse_enabled: 'Blocks sending, but the mailbox can still receive mail. If SMTP is set up, the owner gets an email. Requires a read-write API key.',
     smtp_abuse_threshold: "Set this above the busiest mailbox's expected sending volume.",
     smtp_abuse_revoke_app_passwords: "Deletes the mailbox's app passwords, so mail apps using them lose access.",
     smtp_abuse_help_address: 'Shown in the email sent to the mailbox owner after blocking. Leave empty to use Admin email.',
@@ -348,8 +348,8 @@ var SETTINGS_FIELD_DESCRIPTIONS = {
     smtp_use_tls: 'Keep TLS enabled unless you use implicit TLS or a trusted local relay.',
     smtp_use_ssl: 'Port 465 uses implicit TLS even if this is off.',
     smtp_verify_ssl: 'Automatic skips certificate checks for localhost, IP addresses, and container names. Turn verification off only if you trust the server and need a self-signed certificate.',
-    smtp_from: 'Leave empty to use SMTP username.',
-    smtp_relay_mode: 'Use only with a trusted relay that does not require a username and password.',
+    smtp_from: 'Required when sending without authentication. Otherwise, leave empty to use SMTP username.',
+    smtp_relay_mode: 'Use only with a trusted relay that does not require a username and password. Requires a From address.',
     admin_email: 'Receives system alerts and summaries. Separate addresses with commas.',
     blacklist_alert_email: 'Leave empty to use Admin email. Separate addresses with commas.',
     dmarc_retention_days: 'Older DMARC and TLS reports are deleted automatically.',
@@ -2613,7 +2613,7 @@ function renderSettings(content, data) {
                     }
                     if (checkToast) showToast(...checkToast);
                     if (isEnablingBasicAuth) {
-                        showToast('Basic Auth enabled. Sign in to continue.', 'success');
+                        showToast('Basic Auth enabled.', 'success');
                     }
                     
                     // Detect if MaxMind credentials were changed - show setup modal
@@ -2692,7 +2692,7 @@ function renderSettings(content, data) {
                     await loadSettings();
                 } catch (err) {
                     uiSaveBarBusy('settings-savebar', false);
-                    showToast('Could not save settings: ' + (err.message || err), 'error');
+                    showToast('Could not save settings. Try again. Details: ' + (err.message || err), 'error');
                 }
             };
         }
@@ -2709,7 +2709,7 @@ function renderSettings(content, data) {
                     }
                     await loadSettings();
                 } catch (err) {
-                    showToast('Could not migrate settings: ' + (err.message || err), 'error');
+                    showToast('Could not migrate settings. Try again. Details: ' + (err.message || err), 'error');
                 } finally {
                     importBtn.disabled = false;
                 }
@@ -2818,7 +2818,7 @@ async function showGeoIPSetupModal(reloadPage = false) {
                 setStepStatus(1, 'success', 'Credentials configured');
             } else if (valLicData && valLicData.error) {
                 _cachedMaxMindStatus = valLicData;
-                setStepStatus(1, 'error', 'Could not validate the license: ' + valLicData.error);
+                setStepStatus(1, 'error', 'Could not validate the license. Check your MaxMind credentials. Details: ' + valLicData.error);
                 setupOver();
                 return;
             } else {
@@ -2908,7 +2908,7 @@ async function showGeoIPSetupModal(reloadPage = false) {
         if (valData.valid) {
             setStepStatus(3, 'success', 'Database check passed. GeoIP is ready.');
         } else {
-            setStepStatus(3, 'error', valData.error || 'Database check failed. Close this window and use Repair to download the databases again.');
+            setStepStatus(3, 'error', valData.error || 'Database check failed. Check the application logs, then close this window and try Repair.');
         }
         
     } catch (err) {
@@ -2953,7 +2953,7 @@ async function validateMaxMindLicense() {
         if (result.valid) {
             showToast('MaxMind license is valid', 'success');
         } else if (result.error) {
-            showToast('Could not validate the MaxMind license: ' + result.error, 'error');
+            showToast('Could not validate the MaxMind license. Check your credentials. Details: ' + result.error, 'error');
         }
     } catch (error) {
         console.error('Failed to validate MaxMind license:', error);
@@ -3036,7 +3036,7 @@ async function repairGeoIPDatabase() {
 
     } catch (error) {
         console.error('Failed to repair GeoIP databases:', error);
-        showToast('Could not repair the GeoIP databases: ' + error.message, 'error');
+        showToast('Could not repair the GeoIP databases. Check Status and try again. Details: ' + error.message, 'error');
         if (statusEl) {
             statusEl.innerHTML = renderGeoIPDbStatus({ db_valid: false });
         }

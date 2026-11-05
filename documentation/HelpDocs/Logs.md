@@ -66,7 +66,7 @@ Under **Settings** > **Logs**:
 | **Fetch every (seconds)** (`RAW_LOGS_FETCH_INTERVAL`) | 30 seconds | How often mailcow logs are fetched. |
 | **Logs per service per fetch** (`RAW_LOGS_FETCH_COUNT`) | 1000 | Lines fetched per service. Postfix and Rspamd can read up to 10 extra pages when one fetch is not enough. |
 | **Keep service logs (days)** (`RAW_LOGS_RETENTION_DAYS`) | 2 | Days retained. Cleanup runs daily at 3:00. |
-| **Keep rate limit history (days)** (`RATE_LIMITS_RETENTION_DAYS`) | 90 | Days the Ratelimited lines are kept, for **Rate Limits**. Never less than Raw Logs Retention Days. |
+| **Keep rate limit history (days)** (`RATE_LIMITS_RETENTION_DAYS`) | 90 | Days the Ratelimited lines are kept, for **Rate Limits**. Never less than **Keep service logs (days)**. |
 | **Services** (`RAW_LOGS_SERVICES`) | All ten | A comma-separated service list, or `all`. An environment value locks the UI switches. |
 
 Some services remain collected even when hidden here or the Logs feature is off:

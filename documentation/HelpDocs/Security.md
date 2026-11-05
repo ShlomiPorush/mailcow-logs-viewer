@@ -36,7 +36,7 @@ The list and both charts count the selected period. "Since" beside the period me
 - A single address is written as `/32` for IPv4 or `/128` for IPv6. **Ban permanently** and **Allow** do not duplicate an address already held in another notation.
 - **Unban** lifts Fail2ban's ban. If Fail2ban banned a network, it lifts the whole network, named on the button. Further failures can cause another ban. Denylisted addresses must be removed from the denylist instead.
 - **Unban all**, at the top of **Banned**, lifts every ban Fail2ban made. Bans by the protection rules and the denylist stay. It needs the read-write key.
-- When Fail2ban bans a whole network around an attacker (**Ban the network** under **Settings** on this page), **Banned** shows the network as a row of its own, such as `198.51.96.0/20` tagged **Whole network** with its number of addresses, and the addresses from it on the list as **Banned through** that network. The network's row offers only **Unban**.
+- When Fail2ban bans a whole network around an attacker (**IPv4 ban prefix length** and **IPv6 ban prefix length** under **Settings** on this page), **Banned** shows the network as a row of its own, such as `198.51.96.0/20` tagged **Whole network** with its number of addresses, and the addresses from it on the list as **Banned through** that network. The network's row offers only **Unban**.
 - **Undo** cancels a pending rule ban or removes the denylist entry the app added. **Dismiss** closes a watched catch without changing mailcow. Both pause that rule for this address for 7 days.
 - Removing an allowlist or denylist entry removes the covering entry, which may be a network.
 
@@ -95,7 +95,7 @@ Switching back to **Watch first** cancels unwritten automatic bans. Written bans
 
 Rules exclude allowlisted addresses, private, loopback and link-local networks, the mailcow server's IP and literal IPs checked by the [blocklist monitor](IP_Blacklist_Monitor.md). Allowlisting an address cancels its pending ban.
 
-**Send notifications when an IP is banned** covers successful and failed ban attempts. **Send notifications for every alert** covers **Possible stolen password**. Each run sends at most one email, grouping addresses by outcome; expiry sends none. Destinations must receive the Security topic. See [Notifications](../Notifications.md).
+**Send notifications about bans** covers successful and failed ban attempts. **Send notifications for every alert** covers **Possible stolen password**. Each run sends at most one email, grouping addresses by outcome; expiry sends none. Destinations must receive the Security topic. See [Notifications](../Notifications.md).
 
 #### Trap accounts
 

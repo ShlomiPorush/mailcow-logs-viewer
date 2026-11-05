@@ -64,7 +64,7 @@ For port 587, turn on **Use STARTTLS** (STARTTLS); port 465 always uses implicit
 
 Basic authentication and OAuth2/OIDC can be on together. Turning on **Enable Basic Auth** asks you to type the username and password again before it saves, so a typo cannot lock you out. See [Sign-in configuration](../OAuth2_Configuration.md).
 
-**Session limits** limits how long a browser stays signed in, for both sign-in methods. **Longest session (hours)** counts from sign-in whatever the activity. **Sign out after inactivity**, off by default, ends a session after **Inactivity limit (minutes)** without typing, clicking, scrolling with the wheel or touching; pages that refresh by themselves do not count. A minute before, the page asks whether you are still there. A shorter longest session applies to open sessions at once, so a session already past it ends; turning on sign-out after inactivity does not sign anyone out, because their inactivity time starts then. AI agents are not affected. See [Sessions and signing out](../OAuth2_Configuration.md#sessions-and-signing-out).
+**Session limits** sets how long a browser stays signed in, for both sign-in methods. **Longest session (hours)** counts from sign-in whatever the activity. **Sign out after inactivity**, off by default, ends a session after **Inactivity limit (minutes)** without typing, clicking, scrolling with the wheel or touching; pages that refresh by themselves do not count. A minute before, the page asks whether you are still there. A shorter longest session applies to open sessions at once, so a session already past it ends; turning on sign-out after inactivity does not sign anyone out, because their inactivity time starts then. AI agents are not affected. See [Sessions and signing out](../OAuth2_Configuration.md#sessions-and-signing-out).
 
 ## Users
 
@@ -96,7 +96,7 @@ Which sending addresses must pass each domain's SPF check on [Domains](Domains.m
 
 ## MaxMind
 
-A free MaxMind account lets the app download the GeoLite2 City and ASN databases, which turn IP addresses into countries and networks. The databases update every Sunday at 03:00; saving or removing the license key adds or removes that update at once. **Repair**, shown with **Database check failed**, downloads the databases again.
+A free MaxMind account lets the app download the GeoLite2 City and ASN databases, which turn IP addresses into countries and networks. The databases update every Sunday at 03:00; saving or removing the license key adds or removes that update at once. **Repair**, shown with **Database check failed**, runs the database update and checks the databases again. It downloads only databases that are missing or out of date.
 
 Saving a new license key opens **GeoIP database setup**, which checks the key, downloads missing databases and tests them. If a step fails, fix the account ID or key and save again. After three minutes the window stops waiting for the download; check **Database status** later.
 
@@ -120,7 +120,7 @@ What happens when outgoing mail cannot be delivered. The blocked addresses are l
 
 ## Quarantine
 
-Limits for the rules on **Quarantine** > **Auto-Rules**. A new **Run Auto-Rules every (minutes)** applies when you save it.
+Limits for the rules on **Quarantine** > **Auto-Rules**. A new **Run Auto-Rules every (minutes)** value applies when you save it.
 
 ## When something is missing
 

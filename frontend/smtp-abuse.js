@@ -192,8 +192,8 @@ async function smtpAbuseAction(email, action) {
         title: action === 'block' ? 'Disable SMTP' : 'Re-enable SMTP',
         message: `${verb} ${email}?` + (action !== 'block' ? ''
             : smtpAbuseStatus && smtpAbuseStatus.revoke_app_passwords
-                ? ' The mailbox still receives mail, but the app also emails its owner and tries to revoke app passwords used by mail apps.'
-                : ' The mailbox still receives mail, and the app emails its owner about the block.'),
+                ? ' The mailbox still receives mail, but the app tries to revoke the app passwords used by mail apps. If SMTP is set up, its owner gets an email.'
+                : ' The mailbox still receives mail. If SMTP is set up, its owner gets an email.'),
         confirmText: action === 'block' ? 'Disable SMTP' : 'Re-enable',
         isDangerous: action === 'block'
     });

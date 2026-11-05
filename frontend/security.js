@@ -82,7 +82,7 @@ async function loadSecurityOverview() {
     } catch (err) {
         console.error('Failed to load security overview:', err);
         const list = document.getElementById('security-list');
-        if (list) list.innerHTML = `<p class="ui-empty ui-text-fail">Could not load Security: ${escapeHtml(err.message)}</p>`;
+        if (list) list.innerHTML = `<p class="ui-empty ui-text-fail">Could not load Security. Reload this page to try again. Details: ${escapeHtml(err.message)}</p>`;
     }
 }
 
@@ -111,7 +111,7 @@ async function loadSecurityHistory() {
         securityHistory = (await res.json()).hits || [];
     } catch (error) {
         securityHistory = [];
-        showToast(`Could not load the history: ${error.message}`, 'error');
+        showToast(`Could not load the history. Reload this page to try again. Details: ${error.message}`, 'error');
     }
     renderSecurityOverview();
 }
@@ -712,11 +712,11 @@ function renderSecurityOverview() {
         banned: f2bDown ? 'Bans are unavailable because mailcow did not respond.' : 'No banned IPs match this period and these filters.',
     }[securityFilter];
     const rows = securityFilter === 'history' ? securityHistoryRows()
-        : !page && securityPageError ? `<p class="ui-empty ui-text-fail">Could not load IPs: ${escapeHtml(securityPageError)}</p>`
+        : !page && securityPageError ? `<p class="ui-empty ui-text-fail">Could not load IPs. Reload this page to try again. Details: ${escapeHtml(securityPageError)}</p>`
         : !page ? '<div class="ui-loading" role="status"><div class="loading"></div><p>Loading...</p></div>'
         : list.map(securityRow).join('') || `<p class="ui-empty">${escapeHtml(empty)}</p>`;
     const footer = securityFilter === 'history' || !page ? ''
-        : page.next ? `<p id="security-more" class="ui-msg-more" aria-live="polite">${securityPageError ? `Could not load more IPs: ${escapeHtml(securityPageError)}` : 'Loading more...'}</p>`
+        : page.next ? `<p id="security-more" class="ui-msg-more" aria-live="polite">${securityPageError ? `Could not load more IPs. Reload this page to try again. Details: ${escapeHtml(securityPageError)}` : 'Loading more...'}</p>`
         : page.total > SECURITY_PAGE_SIZE ? `<p class="ui-msg-more">All ${Number(page.total).toLocaleString()} shown</p>` : '';
 
     box.innerHTML = `
@@ -727,7 +727,7 @@ function renderSecurityOverview() {
                 options: SECURITY_DAYS.map(d => ({ label: securityDaysLabel(d), selected: securityDays === d, onclick: `setSecurityDays(${d})` })),
             })}${securityPeriodSince() ? `<small class="ui-muted" title="The oldest log line kept">since ${escapeHtml(securityPeriodSince())}</small>` : ''}</span>`}
             ${uiPicker({
-                id: 'security-country', label: 'Country', hostClass: 'ui-sec-chost', set: !!securityCountry, panelClass: 'ui-sec-cpanel', panelLabel: 'Login attempts by country',
+                id: 'security-country', label: 'Country', hostClass: 'ui-sec-chost', set: !!securityCountry, panelClass: 'ui-sec-cpanel', panelLabel: 'Attempts by country',
                 value: securityCountry ? `${securityFlag(securityCountryCode(securityCountry))}${escapeHtml(securityCountry)}` : 'All', panel: securityCountryPanel(),
             })}
             ${uiPicker({
@@ -809,7 +809,7 @@ function securityCountryBars() {
 // The phone's country picker: the countries, and All
 function securityCountryPanel() {
     const rows = securityCountries ? securityCountries.data : null;
-    return `<span class="ui-sec-cpanel-head"><b>Login attempts by country</b><span class="ui-muted">${escapeHtml(securityPeriodLabel())}</span></span>
+    return `<span class="ui-sec-cpanel-head"><b>Attempts by country</b><span class="ui-muted">${escapeHtml(securityPeriodLabel())}</span></span>
         ${rows === null ? '<span class="ui-muted">Loading...</span>'
             : !rows.length ? '<span class="ui-muted">No country data for these IPs; check Settings > MaxMind.</span>'
             : `<span class="ui-sec-bars">${securityCountryBars()}</span>`}
@@ -825,7 +825,7 @@ function renderSecurityCountries() {
     const period = escapeHtml(securityPeriodLabel());
     box.innerHTML = `
         <section class="ui-panel">
-            <div class="ui-panel-head">Login attempts by country <span class="ui-count">${period}</span></div>
+            <div class="ui-panel-head">Attempts by country <span class="ui-count">${period}</span></div>
             ${rows === null ? '<div class="ui-loading" role="status"><div class="loading"></div><p>Loading...</p></div>'
                 : !rows.length ? '<p id="country-chart-empty" class="ui-empty">No country data for these IPs; check Settings > MaxMind.</p>'
                 : `<div class="ui-sec-bars">${securityCountryBars()}</div>
@@ -947,7 +947,7 @@ async function securityRemoveFromList(list, entry, button) {
         fail2banSettingsLoaded = false;
         loadFail2BanSettings();
     } catch (error) {
-        showToast(`Could not remove ${entry}: ${error.message}`, 'error');
+        showToast(`Could not remove ${entry}. Reload the list and try again. Details: ${error.message}`, 'error');
         if (button) button.disabled = false;
     }
 }
@@ -973,7 +973,7 @@ async function securityRepairListEntry(list, entry, button) {
         if (!res.ok || result.status !== 'success') throw new Error(result.msg || result.detail || `HTTP ${res.status}`);
         showToast(`${entry} replaced with ${single} on the ${label}`, 'success');
     } catch (error) {
-        showToast(`Could not repair ${entry}: ${error.message}`, 'error');
+        showToast(`Could not repair ${entry}. Reload the list and try again. Details: ${error.message}`, 'error');
         if (button) button.disabled = false;
     }
     // The list is read again either way, so it shows what mailcow holds now
@@ -1167,7 +1167,7 @@ async function saveSecurityF2b() {
         await loadFail2BanSettings();
         return true;
     } catch (error) {
-        showToast(`Could not save Fail2ban settings: ${error.message}`, 'error');
+        showToast(`Could not save Fail2ban settings. Check the values and try again. Details: ${error.message}`, 'error');
         return false;
     }
 }
@@ -1186,7 +1186,7 @@ async function saveSecurityAbuse() {
         loadSmtpAbusePanel();
         return true;
     } catch (error) {
-        showToast(`Could not save outgoing spam settings: ${error.message}`, 'error');
+        showToast(`Could not save outgoing spam settings. Check the values and try again. Details: ${error.message}`, 'error');
         return false;
     }
 }
@@ -1229,7 +1229,7 @@ function securityRuleSentence(key, edit) {
     if (who) {
         if (edit) return `Ban ${who()} ${securityBanSelect(key, r.ban_hours)}.`;
         if (banning) return `Bans ${who()}. The ban lasts ${securityBanText(r.ban_hours)}.${mail}`;
-        return `Watches ${who()} without banning. In Ban mode, the ban lasts ${securityBanText(r.ban_hours)}.${mail}`;
+        return `Watches ${who()} without banning. In Ban mode, the ban lasts ${securityBanText(r.ban_hours)}${mail ? ', and you get a notification' : ''}.`;
     }
     switch (key) {
         case 'breach': return `${edit ? 'Alert' : 'Alerts'} when a mailbox logs in after ${num('failures', 1, 50, 'Number of failed tries', 3)} failed tries from the same address within ${num('window_minutes', 5, 1440, 'Minutes', 4)} minutes${!edit && r.new_country && caps.geoip ? ', or from a country it did not use in 30 days' : ''}. Never bans.${mail}`;
@@ -1305,7 +1305,7 @@ function securityCardBody(key) {
             </div>
             <span class="ui-muted">${r.mode === 'enforce' ? 'Bans an IP as soon as it matches.' : 'Records matching IPs without banning them. Review matches in Security > Overview.'}</span>
         </div>`;
-    const notify = `<label class="ui-sec-inline"><input type="checkbox" class="ui-check" ${r.notify ? 'checked' : ''} onchange="setProtectionRule('${key}', 'notify', this.checked)"> ${key === 'breach' ? 'Send notifications for every alert' : 'Send notifications when an IP is banned'}</label>`;
+    const notify = `<label class="ui-sec-inline"><input type="checkbox" class="ui-check" ${r.notify ? 'checked' : ''} onchange="setProtectionRule('${key}', 'notify', this.checked)"> ${key === 'breach' ? 'Send notifications for every alert' : 'Send notifications about bans'}</label>`;
     let extra = '';
     if (key === 'trap') {
         const suggest = protectionSuggestions.filter(s => !r.names.includes(s.name));
@@ -1372,7 +1372,7 @@ function securityCardHtml(key) {
             <button type="button" onclick="event.stopPropagation(); showHelpModal('Abuse_Protection', 'Outgoing spam')" class="ui-icon-btn ui-help-btn" title="Help - Outgoing spam" aria-label="Help - Outgoing spam"><svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg></button>`;
         sentence = securityAbuseSentence(open);
     } else {
-        if (protectionLoadError) return securityCardShell(key, name, open, '', '', '', `<p class="ui-text-fail">Could not load protection rules: ${escapeHtml(protectionLoadError)}</p>`, '');
+        if (protectionLoadError) return securityCardShell(key, name, open, '', '', '', `<p class="ui-text-fail">Could not load protection rules. Reload this page to try again. Details: ${escapeHtml(protectionLoadError)}</p>`, '');
         if (!protectionRules) return securityCardShell(key, name, open, '', '', '', '<p class="ui-muted">Loading...</p>', '');
         const r = protectionRules[key];
         const needsGeo = key === 'country' && !protectionCaps.geoip;

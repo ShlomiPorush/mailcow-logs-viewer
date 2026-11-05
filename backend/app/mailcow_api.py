@@ -1885,7 +1885,7 @@ class MailcowAPI:
             raise MailcowAPIError(f"Rspamd returned HTTP {e.response.status_code}. Check the Rspamd connection and try again.",
                                   transient=e.response.status_code >= 500)
         except httpx.RequestError as e:
-            raise MailcowAPIError(f"Could not reach Rspamd: {str(e)}",
+            raise MailcowAPIError(f"Could not reach Rspamd. Check the Rspamd connection and try again. Details: {str(e)}",
                                   transient=isinstance(e, httpx.TransportError))
 
     async def get_rspamd_maps(self) -> List[Dict[str, Any]]:

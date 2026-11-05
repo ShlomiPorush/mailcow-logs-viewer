@@ -2086,14 +2086,14 @@ async function unbanIP(ip, btnEl) {
             setTimeout(() => { fail2banSettingsLoaded = false; loadFail2BanSettings(); }, 5000);
             smartRefreshNetfilter();
         } else {
-            showToast('Could not unban the IP: ' + (result.msg || result.detail || 'Unknown error'), 'error');
+            showToast('Could not unban the IP. Refresh Security and try again. Details: ' + (result.msg || result.detail || 'Unknown error'), 'error');
             if (btnEl) {
                 btnEl.disabled = false;
                 btnEl.textContent = 'Unban';
             }
         }
     } catch (err) {
-        showToast('Could not unban the IP: ' + err.message, 'error');
+        showToast('Could not unban the IP. Check your connection and try again. Details: ' + err.message, 'error');
         if (btnEl) {
             btnEl.disabled = false;
             btnEl.textContent = 'Unban';
@@ -2178,14 +2178,14 @@ async function banIP(ip, btnEl) {
             smartRefreshNetfilter();
             return true;
         } else {
-            showToast('Could not ban the IP: ' + (result.msg || result.detail || 'Unknown error'), 'error');
+            showToast('Could not ban the IP. Refresh Security and try again. Details: ' + (result.msg || result.detail || 'Unknown error'), 'error');
             if (btnEl) {
                 btnEl.disabled = false;
                 btnEl.textContent = 'Ban';
             }
         }
     } catch (err) {
-        showToast('Could not ban the IP: ' + err.message, 'error');
+        showToast('Could not ban the IP. Check your connection and try again. Details: ' + err.message, 'error');
         if (btnEl) {
             btnEl.disabled = false;
             btnEl.textContent = 'Ban';
@@ -2215,9 +2215,9 @@ async function allowIP(ip, btnEl) {
             loadFail2BanSettings();
             return true;
         }
-        showToast('Could not add the IP to the allowlist: ' + (result.msg || result.detail || 'Unknown error'), 'error');
+        showToast('Could not add the IP to the allowlist. Refresh Security and try again. Details: ' + (result.msg || result.detail || 'Unknown error'), 'error');
     } catch (err) {
-        showToast('Could not add the IP to the allowlist: ' + err.message, 'error');
+        showToast('Could not add the IP to the allowlist. Check your connection and try again. Details: ' + err.message, 'error');
     }
     if (btnEl) {
         btnEl.disabled = false;

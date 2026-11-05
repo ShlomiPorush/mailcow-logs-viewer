@@ -42,7 +42,7 @@ Turning off **Blocklists** under **Settings** > **Features** hides this tab and 
 
 The app checks every address shortly after it starts and daily at 05:00 in the app's time zone. Scheduled checks reuse results younger than 24 hours; the buttons always query again. Every 6 hours the app reads transports and relayhosts from mailcow and checks new addresses right away, without alerts.
 
-A check that finds a listing sends an **Blocklists** alert, again on every later check while the listing lasts. Scheduled checks and **Check all now** send it; **Check now** does not. The app also tells you when fewer addresses are listed and when all are clear. UCEPROTECT Level 2 or Level 3 listings alone send no alert. The email goes to **Blocklist alert email**, or to **Admin email** when that is empty; see [Notifications](../Notifications.md).
+A check that finds a listing sends a **Blocklists** alert, again on every later check while the listing lasts. Scheduled checks and **Check all now** send it; **Check now** does not. The app also tells you when fewer addresses are listed and when all are clear. UCEPROTECT Level 2 or Level 3 listings alone send no alert. The email goes to **Blocklist alert email**, or to **Admin email** when that is empty; see [Notifications](../Notifications.md).
 
 ## When something is missing
 

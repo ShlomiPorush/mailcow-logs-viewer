@@ -62,7 +62,7 @@ The export uses the list's filters and search, with two differences:
 
 <!-- VERIFY: owner's decision pending (finding 20): the export's row structure (one row per delivery) and its order (latest activity). Update the next item once decided. -->
 - It has one row per delivery, not per message, ordered by the latest activity.
-- It stops at **Maximum CSV rows** rows (**Settings** > **Application**, 10000 by default).
+- It stops at **Maximum CSV rows** (**Settings** > **Application**, 10000 by default).
 
 Text cells starting with `=`, `+`, `-` or `@` get a leading apostrophe so a spreadsheet does not treat them as formulas. **Export CSV** is available only in the wide layout with the filters column.
 

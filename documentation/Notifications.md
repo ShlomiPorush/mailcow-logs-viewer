@@ -29,7 +29,7 @@ Each alert goes to its email recipients and to every enabled destination that ha
 
 Unticking all topics is the same as ticking all; to stop a destination, turn off **Enabled**.
 
-Protection rule messages follow each rule's **Send notifications when an IP is banned** box (**Send notifications for every alert** for **Possible stolen password**), which covers destinations as well; see [Protection rules](HelpDocs/Security.md#protection-rules). Adding a destination does not turn on any of these features.
+Protection rule messages follow each rule's **Send notifications about bans** box (**Send notifications for every alert** for **Possible stolen password**), which covers destinations as well; see [Protection rules](HelpDocs/Security.md#protection-rules). Adding a destination does not turn on any of these features.
 
 ## Email addresses
 

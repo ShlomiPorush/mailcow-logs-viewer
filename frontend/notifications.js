@@ -150,7 +150,6 @@ function renderNotificationChannelModal() {
         body: `
                 <label for="nc-name"><span class="ui-label">Name <span class="ui-text-fail">*</span></span>
                     <input type="text" id="nc-name" required value="${escapeHtml(notificationEditing.name || '')}" placeholder="Operations Slack" class="ui-input">
-                    
                 </label>
                 <label for="nc-type"><span class="ui-label">Service</span>
                     <select id="nc-type" onchange="changeNotificationChannelType(this.value)" class="ui-select">${typeOptions}</select>
