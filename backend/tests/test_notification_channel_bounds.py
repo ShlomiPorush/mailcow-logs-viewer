@@ -21,7 +21,7 @@ import pytest
 
 from app.services import notification_channels as nc
 
-TOO_SLOW = "The server took too long to answer."
+TOO_SLOW = "The destination took too long to respond. Try sending a test again."
 # New for each run: the secret part of the webhook URL
 SECRET_PATH = secrets.token_hex(5)
 

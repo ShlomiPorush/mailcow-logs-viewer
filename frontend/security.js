@@ -14,7 +14,7 @@ let securityHits = [];           // the rules' open hits: watching, pending, ban
 let securityHistory = null;      // closed hits, loaded when the History filter opens
 let securityFilter = 'review';
 let securityCountry = null;      // a country picked in the chart filters the list
-let securityNetwork = null;      // and so does a network picked in Networks that try most
+let securityNetwork = null;      // and so does a network picked in Networks with the most attempts
 let securityOpenRow = null;      // the address whose details are open
 let securityRawLog = {};         // ip -> log lines, or 'loading' / 'error'
 let securityPage = null;         // the loaded part of the chosen list: items, next cursor, real counts
@@ -82,7 +82,7 @@ async function loadSecurityOverview() {
     } catch (err) {
         console.error('Failed to load security overview:', err);
         const list = document.getElementById('security-list');
-        if (list) list.innerHTML = `<p class="ui-empty ui-text-fail">Failed to load: ${escapeHtml(err.message)}</p>`;
+        if (list) list.innerHTML = `<p class="ui-empty ui-text-fail">Could not load Security: ${escapeHtml(err.message)}</p>`;
     }
 }
 
@@ -264,7 +264,7 @@ function securityProtectionItems() {
     };
     // Without the Read-Write key the check does not run, even when it is switched on
     const abuse = typeof smtpAbuseStatus !== 'undefined' && smtpAbuseStatus
-        ? smtpAbuseStatus.enabled && !smtpAbuseStatus.rw_key_configured ? item('off', 'Outgoing spam', 'needs a Read-Write key', 'abuse')
+        ? smtpAbuseStatus.enabled && !smtpAbuseStatus.rw_key_configured ? item('off', 'Outgoing spam', 'needs a read-write API key', 'abuse')
         : item(smtpAbuseStatus.enabled ? 'on' : 'off', 'Outgoing spam', '', 'abuse') : '';
     return [f2b, ...SECURITY_RULE_ORDER.map(rule), abuse].filter(Boolean);
 }
@@ -355,7 +355,7 @@ function securityDescribe(a) {
     if (a.state === 'banned' && a.networkSize) {
         // IPv6 networks are too large for a count that reads; an IPv4 size is a plain figure, without a thousands separator
         const size = a.ip.includes(':') ? 'Whole network' : `Whole network, ${Number(a.networkSize)} addresses`;
-        const range = a.networkRange ? `Every address from ${escapeHtml(a.networkRange[0])} to ${escapeHtml(a.networkRange[1])} is blocked. ` : 'Every address in it is blocked. ';
+        const range = a.networkRange ? `Every IP from ${escapeHtml(a.networkRange[0])} to ${escapeHtml(a.networkRange[1])} is banned. ` : 'Every IP in this network is banned. ';
         return {
             tag: `${uiTag('Banned', 'fail')}<span class="ui-sec-by">by Fail2ban</span>${uiTag(size, 'warn')}`,
             why: `${range}<b>${a.f2b.banned_until ? `${escapeHtml(a.f2b.banned_until)} left` : 'Banned now'}</b>, then Fail2ban lets them try again.${a.f2b.queued_for_unban ? ' Unbanning...' : ''}`,
@@ -367,7 +367,7 @@ function securityDescribe(a) {
         const tries = a.tries ? `${Number(a.tries).toLocaleString()} failed login${a.tries === 1 ? '' : 's'} ${securityWindowText()}${a.services.length ? ` (${escapeHtml(a.services.join(', '))})` : ''}. ` : '';
         return {
             tag: `${uiTag('Banned', 'fail')}<span class="ui-sec-by">through ${escapeHtml(a.bannedThrough)}</span>`,
-            why: `${tries}Blocked with its whole network: <b>${a.f2b.banned_until ? `${escapeHtml(a.f2b.banned_until)} left` : 'banned now'}</b>. Unban lifts the whole network.${a.f2b.queued_for_unban ? ' Unbanning...' : ''}`,
+            why: `${tries}Banned with its whole network: <b>${a.f2b.banned_until ? `${escapeHtml(a.f2b.banned_until)} left` : 'banned now'}</b>. Unban lifts the whole network.${a.f2b.queued_for_unban ? ' Unbanning...' : ''}`,
             acts: rw && !a.f2b.queued_for_unban ? `<button data-acts="security" ${B} onclick="unbanIP('${escapeJsArg(a.bannedThrough)}', this)" title="Unban ${escapeHtml(a.bannedThrough)}">Unban</button>
                 <button data-acts="security" type="button" class="ui-btn ui-btn-sm ui-btn-danger" onclick="banIP('${ipArg}', this)" title="Put it on the denylist">Ban permanently</button>` : ''
         };
@@ -409,7 +409,7 @@ function securityDescribe(a) {
         tag: '',
         why: `${attemptsText}.${policy}`,
         acts: rw && known ? `<button data-acts="security" type="button" class="ui-btn ui-btn-sm ui-btn-danger" onclick="banIP('${ipArg}', this)" title="Put ${escapeHtml(fail2banEntry(a.ip))} on the denylist; it stays until removed">Ban permanently</button>
-            <button data-acts="security" ${B} onclick="allowIP('${ipArg}', this)" title="Never ban ${escapeHtml(fail2banEntry(a.ip))}">Allow</button>` : ''
+            <button data-acts="security" ${B} onclick="allowIP('${ipArg}', this)" title="Add ${escapeHtml(fail2banEntry(a.ip))} to the allowlist">Allow</button>` : ''
     };
 }
 
@@ -480,8 +480,8 @@ function securityDetail(a) {
     const lines = securityRawLog[a.ip];
     const hitsText = a.hits.map(h => `<div class="ui-sec-ev"><time title="${escapeHtml(formatTime(h.last_seen))}">${formatAgo(h.last_seen)}</time><span>${escapeHtml(securityRuleName(h.rule))}: ${escapeHtml(h.reason || '')}</span>${protectionStatus(h)}</div>`).join('');
     const raw = lines === 'loading' ? '<p class="ui-muted">Loading...</p>'
-        : lines === 'error' ? '<p class="ui-text-fail">Could not load the log lines.</p>'
-        : !lines || !lines.length ? '<p class="ui-muted">No log lines for this address.</p>'
+        : lines === 'error' ? '<p class="ui-text-fail">Could not load log entries. Reload this page to try again.</p>'
+        : !lines || !lines.length ? '<p class="ui-muted">No stored log entries for this IP.</p>'
         : `<pre class="ui-sec-raw">${lines.map(e => `<span class="ui-muted">${escapeHtml(formatTime(e.time))}</span> <span class="ui-sec-act is-${escapeHtml(e.action || '')}">${escapeHtml((e.action || '').padEnd(7))}</span> ${escapeHtml(e.message || '')}`).join('\n')}</pre>`;
     // An address outside the overview's busiest has its place in its own log lines
     const logged = Array.isArray(lines) ? lines.find(e => e.country_name || e.asn_org) : null;
@@ -497,10 +497,10 @@ function securityDetail(a) {
                 ${fact('Failed logins', securityFailedText(a, lines))}
                 ${a.hits.length ? fact('Caught by', securityRuleTags(a.hits)) : ''}
             </div>
-            ${a.users.length ? `<div><h4>Accounts it tried</h4><div class="ui-chip-row">${a.users.map(u => `<span class="ui-sec-chip">${uiEntity('address', u)}</span>`).join('')}</div></div>` : ''}
-            ${hitsText ? `<div><h4>What the rules said</h4>${hitsText}</div>` : ''}
+            ${a.users.length ? `<div><h4>Login names tried</h4><div class="ui-chip-row">${a.users.map(u => `<span class="ui-sec-chip">${uiEntity('address', u)}</span>`).join('')}</div></div>` : ''}
+            ${hitsText ? `<div><h4>Rule matches</h4>${hitsText}</div>` : ''}
             <div><h4>Raw log${Array.isArray(lines) && lines.length ? ` <span class="ui-muted">${lines.length} newest lines</span>` : ''}</h4>${raw}
-                <div class="ui-sec-more"><button type="button" class="ui-btn ui-btn-sm" onclick="securityOpenEvents('${escapeJsArg(a.ip)}')">All events of this address</button></div></div>
+                <div class="ui-sec-more"><button type="button" class="ui-btn ui-btn-sm" onclick="securityOpenEvents('${escapeJsArg(a.ip)}')">View all events for this IP</button></div></div>
         </div>`;
 }
 
@@ -644,10 +644,10 @@ function pickSecurityNetwork(name) {
 // The phone's network picker: the networks that try most, and All
 function securityNetworkPanel() {
     const rows = securityNetworks ? securityNetworks.data : null;
-    return `<span class="ui-sec-cpanel-head"><b>Networks that try most</b><span class="ui-muted">${escapeHtml(securityPeriodLabel())}</span></span>
-        ${rows === null ? '<span class="ui-muted">Loading...</span>' : !rows.length ? '<span class="ui-muted">No network data yet.</span>'
+    return `<span class="ui-sec-cpanel-head"><b>Networks with the most attempts</b><span class="ui-muted">${escapeHtml(securityPeriodLabel())}</span></span>
+        ${rows === null ? '<span class="ui-muted">Loading...</span>' : !rows.length ? '<span class="ui-muted">No network data for the IPs in this period.</span>'
             : `<span class="ui-sec-nets">${securityNetworkRows()}</span>`}
-        ${securityNetwork ? '<button type="button" class="ui-btn ui-btn-sm ui-sec-call" onclick="pickSecurityNetwork(null)">Every network</button>' : ''}`;
+        ${securityNetwork ? '<button type="button" class="ui-btn ui-btn-sm ui-sec-call" onclick="pickSecurityNetwork(null)">All networks</button>' : ''}`;
 }
 
 function securityNetworkRows() {
@@ -659,7 +659,7 @@ function securityNetworkRows() {
 function securityHistoryRows() {
     if (securityHistory === null) return '<div class="ui-loading" role="status"><div class="loading"></div><p>Loading...</p></div>';
     const rows = securityHistory.filter(h => !securityCountry || h.country_name === securityCountry);
-    if (!rows.length) return '<p class="ui-empty">Nothing here yet. Ended, undone and dismissed catches are kept here, and the watched ones with no new activity for a week.</p>';
+    if (!rows.length) return '<p class="ui-empty">No past rule matches yet; expired, undone, dismissed, and inactive matches appear here.</p>';
     return rows.map(h => `
         <div class="ui-sec-row is-static">
             <div class="ui-sec-main">
@@ -699,7 +699,7 @@ function renderSecurityOverview() {
     }).join('');
     const list = page ? page.items : [];
     const rwNote = !mailcowRwConfigured && securityFilter !== 'history' && userCan('security', 'write')
-        ? `<div class="ui-list-note">${uiLocked('Ban, Allow and Unban are locked', `Changing Fail2ban from this list ${UI_RW_KEY_TEXT}`)}</div>` : '';
+        ? `<div class="ui-list-note">${uiLocked('Ban controls are unavailable', `Changing Fail2ban from this list ${UI_RW_KEY_TEXT}`)}</div>` : '';
     const f2bDown = fail2banLoadError || (page && page.fail2ban_known === false);
     // Unban all: Fail2ban's own bans; the rules' bans and the denylist stay
     const liftable = securityFilter === 'banned' && !f2bDown && mailcowRwConfigured && userCan('security', 'write') ? fail2banLiftable().length : 0;
@@ -708,15 +708,15 @@ function renderSecurityOverview() {
     const f2bNote = f2bDown && securityFilter !== 'history'
         ? `<p class="ui-sec-note ui-text-fail">mailcow did not answer about Fail2ban, so its bans are not shown and nothing can be banned from here. The next refresh tries again.</p>` : '';
     const empty = {
-        review: 'Nothing to review. Every address that tries to sign in or probe the server, and what the protection rules catch, shows up here.',
-        banned: f2bDown ? 'The bans are not known while mailcow does not answer.' : 'Nothing is banned right now.',
+        review: 'No IPs to review for this period and these filters.',
+        banned: f2bDown ? 'Bans are unavailable because mailcow did not respond.' : 'No banned IPs match this period and these filters.',
     }[securityFilter];
     const rows = securityFilter === 'history' ? securityHistoryRows()
-        : !page && securityPageError ? `<p class="ui-empty ui-text-fail">Failed to load: ${escapeHtml(securityPageError)}</p>`
+        : !page && securityPageError ? `<p class="ui-empty ui-text-fail">Could not load IPs: ${escapeHtml(securityPageError)}</p>`
         : !page ? '<div class="ui-loading" role="status"><div class="loading"></div><p>Loading...</p></div>'
         : list.map(securityRow).join('') || `<p class="ui-empty">${escapeHtml(empty)}</p>`;
     const footer = securityFilter === 'history' || !page ? ''
-        : page.next ? `<p id="security-more" class="ui-msg-more" aria-live="polite">${securityPageError ? `Could not load more: ${escapeHtml(securityPageError)}` : 'Loading more...'}</p>`
+        : page.next ? `<p id="security-more" class="ui-msg-more" aria-live="polite">${securityPageError ? `Could not load more IPs: ${escapeHtml(securityPageError)}` : 'Loading more...'}</p>`
         : page.total > SECURITY_PAGE_SIZE ? `<p class="ui-msg-more">All ${Number(page.total).toLocaleString()} shown</p>` : '';
 
     box.innerHTML = `
@@ -727,11 +727,11 @@ function renderSecurityOverview() {
                 options: SECURITY_DAYS.map(d => ({ label: securityDaysLabel(d), selected: securityDays === d, onclick: `setSecurityDays(${d})` })),
             })}${securityPeriodSince() ? `<small class="ui-muted" title="The oldest log line kept">since ${escapeHtml(securityPeriodSince())}</small>` : ''}</span>`}
             ${uiPicker({
-                id: 'security-country', label: 'Country', hostClass: 'ui-sec-chost', set: !!securityCountry, panelClass: 'ui-sec-cpanel', panelLabel: 'Where attacks come from',
+                id: 'security-country', label: 'Country', hostClass: 'ui-sec-chost', set: !!securityCountry, panelClass: 'ui-sec-cpanel', panelLabel: 'Login attempts by country',
                 value: securityCountry ? `${securityFlag(securityCountryCode(securityCountry))}${escapeHtml(securityCountry)}` : 'All', panel: securityCountryPanel(),
             })}
             ${uiPicker({
-                id: 'security-network', label: 'Network', hostClass: 'ui-sec-chost', set: !!securityNetwork, panelClass: 'ui-sec-cpanel', panelLabel: 'Networks that try most',
+                id: 'security-network', label: 'Network', hostClass: 'ui-sec-chost', set: !!securityNetwork, panelClass: 'ui-sec-cpanel', panelLabel: 'Networks with the most attempts',
                 value: securityNetwork ? escapeHtml(securityNetwork) : 'All', panel: securityNetworkPanel(),
             })}
             ${securityCountry ? `<span class="ui-sec-filter">${securityFlag(securityCountryCode(securityCountry))}${escapeHtml(securityCountry)}<button type="button" onclick="pickSecurityCountry(null)" aria-label="Show every country" title="Show every country">&times;</button></span>` : ''}
@@ -809,11 +809,11 @@ function securityCountryBars() {
 // The phone's country picker: the countries, and All
 function securityCountryPanel() {
     const rows = securityCountries ? securityCountries.data : null;
-    return `<span class="ui-sec-cpanel-head"><b>Where attacks come from</b><span class="ui-muted">${escapeHtml(securityPeriodLabel())}</span></span>
+    return `<span class="ui-sec-cpanel-head"><b>Login attempts by country</b><span class="ui-muted">${escapeHtml(securityPeriodLabel())}</span></span>
         ${rows === null ? '<span class="ui-muted">Loading...</span>'
-            : !rows.length ? '<span class="ui-muted">No country for these addresses. Configure MaxMind to see where they come from.</span>'
+            : !rows.length ? '<span class="ui-muted">No country data for these IPs; check Settings > MaxMind.</span>'
             : `<span class="ui-sec-bars">${securityCountryBars()}</span>`}
-        ${securityCountry ? '<button type="button" class="ui-btn ui-btn-sm ui-sec-call" onclick="pickSecurityCountry(null)">Every country</button>' : ''}`;
+        ${securityCountry ? '<button type="button" class="ui-btn ui-btn-sm ui-sec-call" onclick="pickSecurityCountry(null)">All countries</button>' : ''}`;
 }
 
 function renderSecurityCountries() {
@@ -825,17 +825,17 @@ function renderSecurityCountries() {
     const period = escapeHtml(securityPeriodLabel());
     box.innerHTML = `
         <section class="ui-panel">
-            <div class="ui-panel-head">Where attacks come from <span class="ui-count">${period}</span></div>
+            <div class="ui-panel-head">Login attempts by country <span class="ui-count">${period}</span></div>
             ${rows === null ? '<div class="ui-loading" role="status"><div class="loading"></div><p>Loading...</p></div>'
-                : !rows.length ? '<p id="country-chart-empty" class="ui-empty">No country for these addresses. Configure MaxMind to see where they come from.</p>'
+                : !rows.length ? '<p id="country-chart-empty" class="ui-empty">No country data for these IPs; check Settings > MaxMind.</p>'
                 : `<div class="ui-sec-bars">${securityCountryBars()}</div>
                    <p class="ui-sec-legend"><span><i class="is-warn"></i>To review</span><span><i class="is-ban"></i>Banned</span>${watched.size ? '<span><i class="ui-sec-watch"></i>Watched by the Countries rule</span>' : ''}</p>
-                   <p class="ui-sec-note">The addresses in the list, by country. Pick one to see them.</p>`}
+                   <p class="ui-sec-note">Select a country to filter the IP list.</p>`}
         </section>
         <section class="ui-panel ui-sec-networks">
-            <div class="ui-panel-head">Networks that try most <span class="ui-count">${period}</span></div>
-            ${networks === null ? '' : !networks.length ? '<p class="ui-empty">No network for these addresses.</p>'
-                : `<div class="ui-sec-nets">${securityNetworkRows()}</div><p class="ui-sec-note">Pick a network to see its addresses.</p>`}
+            <div class="ui-panel-head">Networks with the most attempts <span class="ui-count">${period}</span></div>
+            ${networks === null ? '' : !networks.length ? '<p class="ui-empty">No network data for these IPs.</p>'
+                : `<div class="ui-sec-nets">${securityNetworkRows()}</div><p class="ui-sec-note">Select a network to filter the IP list.</p>`}
         </section>`;
 }
 
@@ -881,7 +881,7 @@ function renderSecurityLists() {
     const legacyRow = (list, entry) => {
         const old = fail2banLegacy.find(l => l.list === list && l.entry === entry);
         if (!old) return '';
-        const effect = list === 'whitelist' ? `Exempts the whole ${escapeHtml(old.network)} network from Fail2ban.` : `Blocks the whole ${escapeHtml(old.network)} network.`;
+        const effect = list === 'whitelist' ? `Exempts the whole ${escapeHtml(old.network)} network from Fail2ban.` : `Bans the whole ${escapeHtml(old.network)} network.`;
         return row(entry, `${uiTag('Whole network', 'warn')} ${effect} An earlier version wrote this single address as a network.`,
             rw ? `<button data-acts="security" type="button" class="ui-btn ui-btn-sm" onclick="securityRepairListEntry('${list}', '${escapeJsArg(entry)}', this)" title="Replace it with ${escapeHtml(old.address)}/128">Repair</button>
                 <button data-acts="security" type="button" class="ui-btn ui-btn-sm" onclick="securityRemoveFromList('${list}', '${escapeJsArg(entry)}', this)">Remove</button>` : '');
@@ -906,17 +906,17 @@ function renderSecurityLists() {
             rw ? `<button data-acts="security" type="button" class="ui-btn ui-btn-sm" onclick="securityRemoveFromList('blacklist', '${escapeJsArg(entry)}', this)">Remove</button>` : '');
     }).join('');
     box.innerHTML = `
-        ${rw || !mayAct ? '' : `<div class="ui-list-note ui-flush">${uiLocked('The lists are read-only here', `Changing the allowlist and the denylist ${UI_RW_KEY_TEXT}`)}</div>`}
+        ${rw || !mayAct ? '' : `<div class="ui-list-note ui-flush">${uiLocked('List editing is unavailable', `Changing the allowlist and the denylist ${UI_RW_KEY_TEXT}`)}</div>`}
         <div class="ui-sec-lists">
             <section class="ui-panel">
                 <div class="ui-panel-head">Allowlist <span class="ui-count">${fail2banWhitelist.length}</span></div>
-                <p class="ui-sec-note">Never banned, by Fail2ban or by the rules. Your own offices and monitoring belong here.</p>
+                <p class="ui-sec-note">Exempts these IPs and networks from Fail2ban and the protection rules unless they are also denylisted.</p>
                 ${addForm('whitelist', 'Address or network, like 192.0.2.0/24')}
                 ${allowRows || '<p class="ui-empty">The allowlist is empty.</p>'}
             </section>
             <section class="ui-panel">
                 <div class="ui-panel-head">Denylist <span class="ui-count">${fail2banBlacklist.length}</span></div>
-                <p class="ui-sec-note">Banned until removed. The denylist wins over the allowlist. Changes take a few seconds to apply.</p>
+                <p class="ui-sec-note">Bans these IPs and networks until removed, even if allowlisted. Changes take a few seconds to apply.</p>
                 ${addForm('blacklist', 'Address or network')}
                 ${denyRows || '<p class="ui-empty">The denylist is empty.</p>'}
             </section>
@@ -962,7 +962,7 @@ async function securityRepairListEntry(list, entry, button) {
     const label = list === 'whitelist' ? 'allowlist' : 'denylist';
     const effect = list === 'whitelist'
         ? `Only ${old.address} stays exempt from Fail2ban; the rest of ${old.network} can be banned again.`
-        : `Only ${old.address} stays banned; the rest of ${old.network} is no longer blocked.`;
+        : `Only ${old.address} stays banned; the rest of ${old.network} is no longer banned.`;
     if (!await showConfirmModal({ title: 'Repair the entry', message: `Replace ${entry} with ${single} on the ${label}?\n\n${effect}`, confirmText: 'Repair', focusCancel: true })) return;
     if (button) button.disabled = true;
     try {
@@ -1143,7 +1143,7 @@ async function saveSecuritySettings() {
     if (protectionChangeCount() && await saveProtectionRules(true)) saved.push('the protection rules');
     if (securityF2bChanges().length && await saveSecurityF2b()) saved.push('Fail2ban');
     if (securityAbuseChanges().length && await saveSecurityAbuse()) saved.push('outgoing spam');
-    if (smtpAbuseWhitelistDraft !== null && await saveSmtpAbuseWhitelist(true)) saved.push('the whitelist');
+    if (smtpAbuseWhitelistDraft !== null && await saveSmtpAbuseWhitelist(true)) saved.push('the allowlist');
     uiSaveBarBusy('security-savebar', false);
     securityUpdateSaveBar();
     if (saved.length) {
@@ -1167,7 +1167,7 @@ async function saveSecurityF2b() {
         await loadFail2BanSettings();
         return true;
     } catch (error) {
-        showToast(`Failed to save the Fail2ban settings: ${error.message}`, 'error');
+        showToast(`Could not save Fail2ban settings: ${error.message}`, 'error');
         return false;
     }
 }
@@ -1186,7 +1186,7 @@ async function saveSecurityAbuse() {
         loadSmtpAbusePanel();
         return true;
     } catch (error) {
-        showToast(`Could not save the outgoing spam settings: ${error.message}`, 'error');
+        showToast(`Could not save outgoing spam settings: ${error.message}`, 'error');
         return false;
     }
 }
@@ -1218,21 +1218,21 @@ function securityRuleSentence(key, edit) {
         ? securityNum(r[field], `setProtectionRule('${key}', '${field}', this.value)`, min, max, label, width)
         : `<b>${escapeHtml(String(r[field]))}</b>`;
     const banning = r.mode === 'enforce' && caps.can_ban;
-    const mail = !edit && r.notify ? ' You get an email.' : '';
+    const mail = !edit && r.notify ? ' You get a notification.' : '';
     const who = {
-        trap: () => `anyone who tries one of <b>${r.names.length} trap name${r.names.length === 1 ? '' : 's'}</b>`,
-        unknown_accounts: () => `an address that tries ${num('threshold', 2, 100, 'Number of accounts', 3)} accounts that do not exist within ${num('window_minutes', 5, 1440, 'Minutes', 4)} minutes`,
-        repeat_offender: () => `an address Fail2ban banned ${num('threshold', 2, 50, 'Number of bans', 3)} times within ${num('window_days', 1, 365, 'Days', 3)} days`,
+        trap: () => `any IP that tries one of <b>${r.names.length} trap name${r.names.length === 1 ? '' : 's'}</b>`,
+        unknown_accounts: () => `an IP that tries ${num('threshold', 2, 100, 'Number of accounts', 3)} login names that do not exist within ${num('window_minutes', 5, 1440, 'Minutes', 4)} minutes`,
+        repeat_offender: () => `an IP Fail2ban banned ${num('threshold', 2, 50, 'Number of bans', 3)} times within ${num('window_days', 1, 365, 'Days', 3)} days`,
         subnet: () => `a whole network (IPv4 /24) when ${num('threshold', 2, 256, 'Number of addresses', 3)} of its addresses attack within ${num('window_hours', 1, 168, 'Hours', 3)} hours`,
-        country: () => `an address that fails to log in from one of <b>${r.countries.length} countr${r.countries.length === 1 ? 'y' : 'ies'}</b>`,
+        country: () => `an IP with a failed login from one of <b>${r.countries.length} countr${r.countries.length === 1 ? 'y' : 'ies'}</b>`,
     }[key];
     if (who) {
-        if (edit) return `Ban ${securityBanSelect(key, r.ban_hours)} ${who()}.`;
-        if (banning) return `Bans ${securityBanText(r.ban_hours)} ${who()}.${mail}`;
-        return `Notes ${who()}, and bans no one. Set to Ban, it bans ${securityBanText(r.ban_hours)}.${mail}`;
+        if (edit) return `Ban ${who()} ${securityBanSelect(key, r.ban_hours)}.`;
+        if (banning) return `Bans ${who()}. The ban lasts ${securityBanText(r.ban_hours)}.${mail}`;
+        return `Watches ${who()} without banning. In Ban mode, the ban lasts ${securityBanText(r.ban_hours)}.${mail}`;
     }
     switch (key) {
-        case 'breach': return `${edit ? 'Alert' : 'Alerts'} when an account logs in after ${num('failures', 1, 50, 'Number of failed tries', 3)} failed tries from the same address within ${num('window_minutes', 5, 1440, 'Minutes', 4)} minutes${!edit && r.new_country && caps.geoip ? ', or from a country it did not use in 30 days' : ''}. Never bans.${mail}`;
+        case 'breach': return `${edit ? 'Alert' : 'Alerts'} when a mailbox logs in after ${num('failures', 1, 50, 'Number of failed tries', 3)} failed tries from the same address within ${num('window_minutes', 5, 1440, 'Minutes', 4)} minutes${!edit && r.new_country && caps.geoip ? ', or from a country it did not use in 30 days' : ''}. Never bans.${mail}`;
         default: return '';
     }
 }
@@ -1241,11 +1241,11 @@ function securityF2bSentence(edit) {
     const v = securityF2bValues();
     const off = !mailcowRwConfigured;
     if (!edit) {
-        return `An address that fails <b>${escapeHtml(String(v.max_attempts))} logins</b> within <b>${escapeHtml(formatSeconds(v.retry_window))}</b> is banned for <b>${escapeHtml(formatSeconds(v.ban_time))}</b>${v.ban_time_increment ? `, longer each time it comes back, up to <b>${escapeHtml(formatSeconds(v.max_ban_time))}</b>` : ''}.`;
+        return `An IP with <b>${escapeHtml(String(v.max_attempts))} failed logins</b> within <b>${escapeHtml(formatSeconds(v.retry_window))}</b> is banned for <b>${escapeHtml(formatSeconds(v.ban_time))}</b>${v.ban_time_increment ? `, longer each time it comes back, up to <b>${escapeHtml(formatSeconds(v.max_ban_time))}</b>` : ''}.`;
     }
     const n = (key, min, max, label, width) => securityNum(v[key], `setSecurityF2b('${key}', this.value)`, min, max, label, width, off);
     const hint = key => `<span class="ui-sec-hint">${escapeHtml(formatSeconds(v[key]))}</span>`;
-    return `An address that fails ${n('max_attempts', 1, 0, 'Failed logins before a ban', 3)} logins within ${n('retry_window', 1, 0, 'Retry window in seconds', 6)} seconds ${hint('retry_window')}
+    return `An IP with ${n('max_attempts', 1, 0, 'Failed logins before a ban', 3)} failed logins within ${n('retry_window', 1, 0, 'Retry window in seconds', 6)} seconds ${hint('retry_window')}
         is banned for ${n('ban_time', 60, 0, 'Ban time in seconds', 6)} seconds ${hint('ban_time')},
         <label class="ui-sec-inline"><input type="checkbox" class="ui-check" ${v.ban_time_increment ? 'checked' : ''} ${off ? 'disabled' : ''} onchange="setSecurityF2b('ban_time_increment', this.checked)"> longer each time it comes back</label>,
         up to ${n('max_ban_time', 60, 0, 'Longest ban in seconds', 7)} seconds ${hint('max_ban_time')}.`;
@@ -1253,7 +1253,7 @@ function securityF2bSentence(edit) {
 
 function securityAbuseSentence(edit) {
     const val = key => securityAbuseValue(key);
-    if (!securityAppSettings && !(typeof smtpAbuseStatus !== 'undefined' && smtpAbuseStatus)) return 'Stops a mailbox from sending when it suddenly sends far more than usual.';
+    if (!securityAppSettings && !(typeof smtpAbuseStatus !== 'undefined' && smtpAbuseStatus)) return 'Blocks sending from mailboxes that exceed a fixed message limit.';
     const editable = securityAppSettingsEditable();
     const locked = key => !editable || (securityAppSettings.env_locked_keys || []).includes(key);
     if (!edit) {
@@ -1273,9 +1273,9 @@ function securityCardBody(key) {
         const off = mailcowRwConfigured && userCan('security', 'write') ? '' : 'disabled';
         return `
             <div class="ui-sec-fields">
-                <label class="ui-sec-field"><span>Ban the network, IPv4<small>Prefix length; ${escapeHtml(String(v.netban_ipv4))} bans ${Number(v.netban_ipv4) === 32 ? 'just the address' : 'the whole network'}</small></span>
+                <label class="ui-sec-field"><span>IPv4 ban prefix length<small>Prefix length; ${escapeHtml(String(v.netban_ipv4))} bans ${Number(v.netban_ipv4) === 32 ? 'just the address' : 'the whole network'}</small></span>
                     <input type="number" class="ui-input" min="8" max="32" value="${escapeHtml(String(v.netban_ipv4))}" onchange="setSecurityF2b('netban_ipv4', this.value)" ${off}></label>
-                <label class="ui-sec-field"><span>Ban the network, IPv6<small>Prefix length; ${escapeHtml(String(v.netban_ipv6))} bans ${Number(v.netban_ipv6) === 128 ? 'just the address' : 'the whole network'}</small></span>
+                <label class="ui-sec-field"><span>IPv6 ban prefix length<small>Prefix length; ${escapeHtml(String(v.netban_ipv6))} bans ${Number(v.netban_ipv6) === 128 ? 'just the address' : 'the whole network'}</small></span>
                     <input type="number" class="ui-input" min="8" max="128" value="${escapeHtml(String(v.netban_ipv6))}" onchange="setSecurityF2b('netban_ipv6', this.value)" ${off}></label>
             </div>
             <p class="ui-sec-note ui-flush">The allowlist and the denylist are on the Lists tab.</p>`;
@@ -1285,13 +1285,13 @@ function securityCardBody(key) {
         const envLocked = k => securityAppSettings && (securityAppSettings.env_locked_keys || []).includes(k);
         const revoke = securityAbuseValue('smtp_abuse_revoke_app_passwords');
         return `
-            ${securityAppSettings && !securityAppSettings.settings_edit_via_ui_enabled ? uiLocked('Editing settings is off', 'These values come from the environment and are shown read-only. To change them here, set <code>SETTINGS_EDIT_VIA_UI_ENABLED=true</code> in <code>.env</code> and run <code>docker compose up -d</code>. A restart does not read <code>.env</code> again.') : ''}
+            ${securityAppSettings && !securityAppSettings.settings_edit_via_ui_enabled ? uiLocked('Editing settings is off', 'To edit settings here, set <code>SETTINGS_EDIT_VIA_UI_ENABLED=true</code> in <code>.env</code> and run <code>docker compose up -d</code>.') : ''}
             ${securityAppSettings && securityAppSettings.settings_edit_via_ui_enabled && !securityAppSettings.settings_migrated
                 ? uiLocked('Settings are not migrated yet', 'These values are read-only until the configuration is copied into the database: click <strong>Migrate Settings from ENV</strong> on the Settings page.', `<button data-acts="admin" type="button" class="ui-btn ui-btn-sm" onclick="navigateTo('settings')">Open Settings</button>`) : ''}
             <div class="ui-sec-fields">
-                <label class="ui-sec-field"><span>Revoke its app passwords<small>When a mailbox is stopped, its app passwords stop working too</small></span>
+                <label class="ui-sec-field"><span>Revoke app passwords when blocking<small>Mail apps using these passwords lose access</small></span>
                     <span><input type="checkbox" class="ui-check" ${revoke ? 'checked' : ''} ${!editable || envLocked('smtp_abuse_revoke_app_passwords') ? 'disabled' : ''} onchange="setSecurityAbuse('smtp_abuse_revoke_app_passwords', this.checked)"> On</span></label>
-                <label class="ui-sec-field"><span>Who users should contact<small>Shown to the mailbox owner when sending is stopped</small></span>
+                <label class="ui-sec-field"><span>Support email<small>Shown in the email sent to the blocked mailbox owner</small></span>
                     <input type="text" class="ui-input" value="${escapeHtml(securityAbuseValue('smtp_abuse_help_address') || '')}" ${!editable || envLocked('smtp_abuse_help_address') ? 'disabled' : ''} onchange="setSecurityAbuse('smtp_abuse_help_address', this.value)" placeholder="support@example.com"></label>
             </div>
             <div id="smtp-abuse-panel"></div>`;
@@ -1300,12 +1300,12 @@ function securityCardBody(key) {
     const mode = key === 'breach' ? '' : `
         <div class="ui-sec-mode">
             <div class="ui-seg" role="group" aria-label="What the rule does">
-                <button type="button" aria-pressed="${r.mode !== 'enforce'}" onclick="setProtectionMode('${key}', 'watch')" title="Note what it catches; ban nothing">Watch first</button>
-                <button type="button" aria-pressed="${r.mode === 'enforce'}" onclick="setProtectionMode('${key}', 'enforce')" ${caps.can_ban ? '' : 'disabled'} title="${caps.can_ban ? 'Put what it catches on the Fail2ban denylist' : 'Banning needs the Read-Write API key'}">Ban</button>
+                <button type="button" aria-pressed="${r.mode !== 'enforce'}" onclick="setProtectionMode('${key}', 'watch')" title="Record matching IPs without banning them">Watch first</button>
+                <button type="button" aria-pressed="${r.mode === 'enforce'}" onclick="setProtectionMode('${key}', 'enforce')" ${caps.can_ban ? '' : 'disabled'} title="${caps.can_ban ? 'Add matching IPs to the Fail2ban denylist' : 'Banning requires a read-write API key'}">Ban</button>
             </div>
-            <span class="ui-muted">${r.mode === 'enforce' ? 'Bans as soon as it catches an address.' : 'Notes who it catches, and bans nothing. You decide on the Overview.'}</span>
+            <span class="ui-muted">${r.mode === 'enforce' ? 'Bans an IP as soon as it matches.' : 'Records matching IPs without banning them. Review matches in Security > Overview.'}</span>
         </div>`;
-    const notify = `<label class="ui-sec-inline"><input type="checkbox" class="ui-check" ${r.notify ? 'checked' : ''} onchange="setProtectionRule('${key}', 'notify', this.checked)"> ${key === 'breach' ? 'Email me on every alert' : 'Email me when it bans'}</label>`;
+    const notify = `<label class="ui-sec-inline"><input type="checkbox" class="ui-check" ${r.notify ? 'checked' : ''} onchange="setProtectionRule('${key}', 'notify', this.checked)"> ${key === 'breach' ? 'Send notifications for every alert' : 'Send notifications when an IP is banned'}</label>`;
     let extra = '';
     if (key === 'trap') {
         const suggest = protectionSuggestions.filter(s => !r.names.includes(s.name));
@@ -1316,9 +1316,9 @@ function securityCardBody(key) {
                 <input type="text" name="name" class="ui-input" placeholder="admin or admin@example.com" aria-label="Trap account name" maxlength="255">
                 <button type="submit" class="ui-btn">Add</button>
             </form>
-            ${suggest.length ? `<h4>Tried in the last 7 days, and no such mailbox here</h4>
+            ${suggest.length ? `<h4>Nonexistent login names tried in the last 7 days</h4>
                 <div class="ui-chip-row">${suggest.map(s => `<button type="button" class="ui-chip" onclick="addTrapName('${escapeJsArg(s.name)}')" title="${escapeHtml(String(s.tries))} tries from ${escapeHtml(String(s.addresses))} address${s.addresses === 1 ? '' : 'es'}">+ ${escapeHtml(s.name)} <small>${escapeHtml(String(s.tries))}</small></button>`).join('')}</div>` : ''}
-            <p class="ui-sec-note ui-flush">A real mailbox or alias can never be a trap name.</p>`;
+            <p class="ui-sec-note ui-flush">Existing mailboxes and aliases cannot be trap names.</p>`;
     } else if (key === 'country') {
         const suggest = protectionCountrySuggestions.filter(s => !r.countries.includes(s.code));
         extra = `
@@ -1331,17 +1331,17 @@ function securityCardBody(key) {
                     .map(c => `<option value="${escapeHtml(`${c.name} (${c.code})`)}"></option>`).join('')}</datalist>
                 <button type="submit" class="ui-btn">Add</button>
             </form>
-            ${suggest.length ? `<h4>Failed logins in the last 7 days came from</h4>
+            ${suggest.length ? `<h4>Countries with failed logins in the last 7 days</h4>
                 <div class="ui-chip-row">${suggest.map(s => `<button type="button" class="ui-chip" onclick="addProtectionCountry('${escapeJsArg(s.code)}')" title="${escapeHtml(String(s.tries))} failed logins">+ ${securityFlag(s.code)}${escapeHtml(s.name)} <small>${escapeHtml(String(s.tries))}</small></button>`).join('')}</div>` : ''}
-            <p class="ui-sec-note ui-flush">Only failed logins are caught. A user who logs in from one of these countries is not affected.</p>`;
+            <p class="ui-sec-note ui-flush">Matches failed logins only. Successful logins do not trigger this rule.</p>`;
     } else if (key === 'unknown_accounts') {
-        extra = '<p class="ui-sec-note ui-flush">An address with a successful login in the last day is never caught, so a user who mistyped the address is safe.</p>';
+        extra = '<p class="ui-sec-note ui-flush">Excludes IPs with a successful login in the last 24 hours.</p>';
     } else if (key === 'subnet') {
-        extra = '<p class="ui-sec-note ui-flush">A network that holds an allowlisted address, an internal address or the mailcow server is never caught.</p>';
+        extra = '<p class="ui-sec-note ui-flush">Excludes networks containing an allowlisted IP, an internal IP, or the mailcow server.</p>';
     } else if (key === 'breach') {
         extra = `
-            <label class="ui-sec-inline"><input type="checkbox" class="ui-check" ${r.new_country ? 'checked' : ''} ${caps.geoip ? '' : 'disabled'} onchange="setProtectionRule('breach', 'new_country', this.checked)"> Also alert on a login from a country the account did not use in 30 days${caps.geoip ? '' : ' (needs GeoIP)'}</label>
-            <p class="ui-sec-note ui-flush">${caps.raw_logs ? 'SMTP and IMAP logins are checked.' : 'Only SMTP logins are checked. IMAP logins need Live Logs to be on.'}</p>`;
+            <label class="ui-sec-inline"><input type="checkbox" class="ui-check" ${r.new_country ? 'checked' : ''} ${caps.geoip ? '' : 'disabled'} onchange="setProtectionRule('breach', 'new_country', this.checked)"> Also alert on a login from a country the mailbox did not use in 30 days${caps.geoip ? '' : ' (needs GeoIP)'}</label>
+            <p class="ui-sec-note ui-flush">${caps.raw_logs ? 'SMTP and IMAP logins are checked.' : 'Only SMTP logins are checked. IMAP checks require Dovecot log collection.'}</p>`;
     }
     return `${mode}<div class="ui-sec-card-foot">${notify}</div>${extra}`;
 }
@@ -1360,7 +1360,7 @@ function securityCardHtml(key) {
         if (!fail2banPolicy) return securityCardShell(key, name, open, '', '', '', '<p class="ui-muted">Loading...</p>', '');
         status = uiTag('Always on', 'ok');
         sentence = securityF2bSentence(open);
-        if (open && !mailcowRwConfigured) locked = uiLocked('Editing Fail2ban is locked', `Editing ${UI_RW_KEY_TEXT}`);
+        if (open && !mailcowRwConfigured) locked = uiLocked('Fail2ban editing is unavailable', `Editing ${UI_RW_KEY_TEXT}`);
     } else if (key === 'abuse') {
         const enabled = securityAbuseValue('smtp_abuse_enabled');
         const editable = securityAppSettingsEditable()
@@ -1368,11 +1368,11 @@ function securityCardHtml(key) {
         on = !!enabled;
         toggle = securityToggle(name, on, !editable, `setSecurityAbuse('smtp_abuse_enabled', this.checked)`, editable ? ''
             : !userIsAdmin() ? 'Only an admin can change this' : securityAppSettings && securityAppSettings.settings_edit_via_ui_enabled && !securityAppSettings.settings_migrated ? 'Settings are not migrated yet' : 'Editing settings is off');
-        status = `${!on ? '' : mailcowRwConfigured ? uiTag('Stops mailboxes', 'fail') : uiTag('Needs a Read-Write key', '')}<span class="ui-tag ui-tag-warn ui-tab-tag" title="This feature is new - please report any issues on GitHub">Beta</span>
+        status = `${!on ? '' : mailcowRwConfigured ? uiTag('Blocks sending', 'fail') : uiTag('Needs a read-write API key', '')}<span class="ui-tag ui-tag-warn ui-tab-tag" title="This feature is new - please report any issues on GitHub">Beta</span>
             <button type="button" onclick="event.stopPropagation(); showHelpModal('Abuse_Protection', 'Outgoing spam')" class="ui-icon-btn ui-help-btn" title="Help - Outgoing spam" aria-label="Help - Outgoing spam"><svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg></button>`;
         sentence = securityAbuseSentence(open);
     } else {
-        if (protectionLoadError) return securityCardShell(key, name, open, '', '', '', `<p class="ui-text-fail">Failed to load the protection rules: ${escapeHtml(protectionLoadError)}</p>`, '');
+        if (protectionLoadError) return securityCardShell(key, name, open, '', '', '', `<p class="ui-text-fail">Could not load protection rules: ${escapeHtml(protectionLoadError)}</p>`, '');
         if (!protectionRules) return securityCardShell(key, name, open, '', '', '', '<p class="ui-muted">Loading...</p>', '');
         const r = protectionRules[key];
         const needsGeo = key === 'country' && !protectionCaps.geoip;
@@ -1382,7 +1382,7 @@ function securityCardHtml(key) {
         // The switch says on or off; the tag says what an enabled rule does
         status = needsGeo ? uiTag('Needs MaxMind GeoIP', '') : !r.enabled ? '' : key === 'breach' ? uiTag('Alerts', 'warn')
             : r.mode === 'enforce' && protectionCaps.can_ban ? uiTag('Bans', 'fail') : uiTag('Watching', 'warn');
-        if (needsGeo) locked = uiLocked('Needs GeoIP', 'This rule knows the country of an address only with the MaxMind GeoIP databases.');
+        if (needsGeo) locked = uiLocked('Needs GeoIP', 'Set up MaxMind GeoIP in Settings > MaxMind to use this rule.');
         sentence = securityRuleSentence(key, open);
     }
     return securityCardShell(key, name, open, `${status}${caught}`, toggle, locked, `<p class="ui-sec-sent">${sentence}</p>`, open ? securityCardBody(key) : '', on, canOpen);

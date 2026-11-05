@@ -79,7 +79,7 @@ def test_saving_a_banning_rule_needs_the_rw_key(db):
     from app.services import protection_rules
     rules = protection_rules.load_rules(db)
     rules['trap'].update(enabled=True, mode='enforce')
-    with pytest.raises(ValueError, match='Read-Write'):
+    with pytest.raises(ValueError, match='read-write'):
         protection_rules.save_rules(db, rules, can_ban=False)
 
 
@@ -357,7 +357,7 @@ def test_the_api_refuses_to_ban_without_the_rw_key(db, monkeypatch):
     hit_id = _hits(db)[0].id
     assert client.post(f'/api/protection/hits/{hit_id}/ban').status_code == 400
     saved = client.put('/api/protection/rules', json={'rules': {'trap': {'mode': 'enforce'}}})
-    assert saved.status_code == 400 and 'Read-Write' in saved.json()['detail']
+    assert saved.status_code == 400 and 'read-write' in saved.json()['detail']
     assert api.edits == []
 
 

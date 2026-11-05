@@ -333,7 +333,7 @@ const zoneOption = (selected, value, text) => new RegExp(literal(
 
 test('the Time Zone setting is a searchable list of IANA zones under Application', () => {
     const html = settingsField('Europe/Berlin');
-    assert.match(html, /<span class="ui-label" id="label-tz">Time Zone/);
+    assert.match(html, /<span class="ui-label" id="label-tz">Time zone/);
     assert.match(html, /<button type="button" class="ui-select ui-select-btn ui-picker-btn" aria-haspopup="dialog" aria-expanded="false" aria-controls="settings-tz-panel" aria-labelledby="label-tz"><span>Europe\/Berlin <small class="ui-zone-offset">UTC\+0[12]:00<\/small><\/span>/);
     assert.match(html, /<input type="search" class="ui-input ui-picker-search" placeholder="Search time zones"/);
     assert.match(html, /<input type="hidden" id="edit-tz" name="tz" value="Europe\/Berlin" data-saved="Europe\/Berlin">/);
@@ -349,8 +349,8 @@ test('the Time Zone setting is a searchable list of IANA zones under Application
 test('with no zone set the Time Zone field shows UTC, said once', () => {
     for (const value of ['', 'UTC']) {
         const html = settingsField(value);
-        // The description says it; no note under the field repeats it
-        assert.match(html, /The app&#039;s time zone\. Default: UTC\./);
+        // The field says it; no description or note repeats it
+        assert.doesNotMatch(html, /Default: UTC/);
         assert.doesNotMatch(html, /data-zone-note/);
         // Empty is UTC, the default: not marked as changed
         assert.doesNotMatch(html, /Changed|Reset to default/);

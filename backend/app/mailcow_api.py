@@ -1849,8 +1849,7 @@ class MailcowAPI:
         rspamd_pw = settings.rspamd_password
         if not rspamd_pw:
             raise MailcowAPIError(
-                "Rspamd password (RSPAMD_PASSWORD) is not configured. "
-                "Set the Rspamd UI password in Settings to use Rspamd map features."
+                "Add the Rspamd password in Settings > mailcow > Rspamd to use Rspamd maps."
             )
         
         # By default Rspamd is reached through the mailcow proxy
@@ -1871,7 +1870,7 @@ class MailcowAPI:
                 response = await client.request(method, url, headers=headers, **kwargs)
 
             if response.status_code == 401 or response.status_code == 403:
-                raise MailcowAPIError("Rspamd password authentication failed. Check RSPAMD_PASSWORD setting.")
+                raise MailcowAPIError("Rspamd rejected the password. Check Rspamd password in Settings > mailcow > Rspamd.")
 
             response.raise_for_status()
             return response
@@ -1883,10 +1882,10 @@ class MailcowAPI:
                     "before authentication. Set RSPAMD_URL to reach the Rspamd controller directly, "
                     "e.g. http://rspamd-mailcow:11334"
                 )
-            raise MailcowAPIError(f"Rspamd API request failed with status {e.response.status_code}",
+            raise MailcowAPIError(f"Rspamd returned HTTP {e.response.status_code}. Check the Rspamd connection and try again.",
                                   transient=e.response.status_code >= 500)
         except httpx.RequestError as e:
-            raise MailcowAPIError(f"Rspamd API request failed: {str(e)}",
+            raise MailcowAPIError(f"Could not reach Rspamd: {str(e)}",
                                   transient=isinstance(e, httpx.TransportError))
 
     async def get_rspamd_maps(self) -> List[Dict[str, Any]]:

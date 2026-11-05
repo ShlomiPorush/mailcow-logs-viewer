@@ -200,7 +200,7 @@ function uiLocked(title, textHtml, action = 'settings') {
 }
 
 // The Read-Write key sentence used by every locked area that needs it
-const UI_RW_KEY_TEXT = 'needs a <strong>Read-Write API key</strong> (<code>MAILCOW_API_KEY_RW</code>). Configure it in Settings → Mailcow → Connection.';
+const UI_RW_KEY_TEXT = 'requires a <strong>read-write API key</strong>. Add it in Settings > mailcow > Connection.';
 
 // What the signed-in person may view and do, from GET /api/auth/status: area:read
 // (View) and area:write (Take action) per area, and whether they are an admin

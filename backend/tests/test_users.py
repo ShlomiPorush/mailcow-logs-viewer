@@ -835,7 +835,7 @@ def test_the_last_admin_cannot_be_demoted_in_oauth2_only_mode(oauth2, monkeypatc
     monkeypatch.setattr(settings._inner, "basic_auth_enabled", False)
     carol = _oauth2_client("carol@example.com")
     r = _change(carol, row, access="operator")
-    assert r.status_code == 409 and r.json()["detail"] == "This change would leave no admin who can sign in."
+    assert r.status_code == 409 and r.json()["detail"] == "Keep at least one admin who can sign in before making this change."
     assert carol.delete(f"/api/users/{row['id']}").status_code == 409
     assert _change(carol, row, disabled=True).status_code == 409
     version = carol.get("/api/users").json()["oauth2"]["version"]

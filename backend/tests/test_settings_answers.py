@@ -417,7 +417,7 @@ def test_geoip_validation(client, monkeypatch):
     files = get_geoip_status()
     missing = {**files, 'City': {**files['City'], 'available': False}}
     monkeypatch.setattr(settings_router, 'get_geoip_status', lambda: missing)
-    assert client.post('/api/settings/geoip/validate').json()['error'] == 'City database file not found'
+    assert client.post('/api/settings/geoip/validate').json()['error'] == 'The City database is missing. Download the GeoIP databases again.'
     # The file is there: the readers are reloaded and the lookups tried
     there = {**files, 'City': {**files['City'], 'available': True}}
     monkeypatch.setattr(settings_router, 'get_geoip_status', lambda: there)

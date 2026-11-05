@@ -36,7 +36,7 @@ async function loadNotificationChannels() {
         renderNotificationChannels();
     } catch (e) {
         console.error('Notification channels error:', e);
-        panel.innerHTML = '<p class="ui-empty ui-text-fail">Could not load notification destinations.</p>';
+        panel.innerHTML = '<p class="ui-empty ui-text-fail">Could not load destinations. Reload this page to try again.</p>';
     }
 }
 
@@ -78,7 +78,7 @@ function renderNotificationChannels() {
                 ${ch.last_error ? `<small class="ui-text-fail" title="${escapeHtml(ch.last_error)}">${escapeHtml(ch.last_error)}</small>` : ''}
             </div>
             <div class="ui-row-actions">
-                <button type="button" onclick="testNotificationChannel(${Number(ch.id)})" class="ui-btn ui-btn-sm">Test</button>
+                <button type="button" onclick="testNotificationChannel(${Number(ch.id)})" class="ui-btn ui-btn-sm">Send test</button>
                 <button type="button" onclick="editNotificationChannel(${Number(ch.id)})" class="ui-btn ui-btn-sm">Edit</button>
                 <button type="button" onclick="deleteNotificationChannel(${Number(ch.id)})" class="ui-btn ui-btn-sm ui-btn-danger">Delete</button>
             </div>
@@ -89,11 +89,11 @@ function renderNotificationChannels() {
         <div class="ui-list-head">
             <div>
                 <h4 class="ui-md-h">Alert destinations</h4>
-                <p class="ui-set-desc">Each destination receives the alert types you pick for it, in addition to email.</p>
+                <p class="ui-set-desc">Send selected alerts to each destination.</p>
             </div>
             <button type="button" onclick="editNotificationChannel(null)" class="ui-btn ui-btn-sm ui-btn-primary ui-head-actions">+ Add destination</button>
         </div>
-        <div class="ui-channels">${rows || '<p class="ui-empty">No destinations yet. Alerts are sent by email only.</p>'}</div>`;
+        <div class="ui-channels">${rows || '<p class="ui-empty">No destinations added yet.</p>'}</div>`;
 }
 
 function editNotificationChannel(channelId) {
@@ -149,8 +149,8 @@ function renderNotificationChannelModal() {
         form: { id: 'nc-form', onsubmit: `saveNotificationChannel(event)` },
         body: `
                 <label for="nc-name"><span class="ui-label">Name <span class="ui-text-fail">*</span></span>
-                    <input type="text" id="nc-name" required value="${escapeHtml(notificationEditing.name || '')}" placeholder="e.g. Ops Slack" class="ui-input">
-                    <small class="ui-muted">Only used to identify this destination in the list.</small>
+                    <input type="text" id="nc-name" required value="${escapeHtml(notificationEditing.name || '')}" placeholder="Operations Slack" class="ui-input">
+                    
                 </label>
                 <label for="nc-type"><span class="ui-label">Service</span>
                     <select id="nc-type" onchange="changeNotificationChannelType(this.value)" class="ui-select">${typeOptions}</select>
@@ -158,7 +158,7 @@ function renderNotificationChannelModal() {
                 <div id="nc-fields" class="ui-form">${_renderChannelFields()}</div>
 
                 <div class="ui-form ui-form-split">
-                    <div><span class="ui-label">Which alerts to send here</span><p class="ui-set-desc">Leave all ticked to receive everything.</p></div>
+                    <div><span class="ui-label">Alert types</span><p class="ui-set-desc">Selecting none also sends all alert types.</p></div>
                     ${_renderAlertTypeChoices()}
                 </div>
 
@@ -231,14 +231,14 @@ async function saveNotificationChannel(event) {
             });
         if (!response.ok) {
             const detail = await response.json().catch(() => ({}));
-            showToast(uiApiErrorText(detail, 'Could not save destination'), 'error');
+            showToast(uiApiErrorText(detail, 'Could not save the destination. Check the fields and try again.'), 'error');
             return;
         }
         showToast(isNew ? 'Destination added' : 'Destination updated', 'success');
         closeNotificationChannelModal(true);
         loadNotificationChannels();
     } catch (e) {
-        showToast('Could not save destination', 'error');
+        showToast('Could not save the destination. Check the fields and try again.', 'error');
     }
 }
 
@@ -253,29 +253,29 @@ async function deleteNotificationChannel(channelId) {
     if (!confirmed) return;
     try {
         const response = await authenticatedFetch(`/api/notifications/channels/${channelId}`, { method: 'DELETE' });
-        if (!response.ok) { showToast('Could not delete destination', 'error'); return; }
+        if (!response.ok) { showToast('Could not delete the destination. Reload the list and try again.', 'error'); return; }
         showToast('Destination deleted', 'success');
         loadNotificationChannels();
     } catch (e) {
-        showToast('Could not delete destination', 'error');
+        showToast('Could not delete the destination. Reload the list and try again.', 'error');
     }
 }
 
 async function testNotificationChannel(channelId) {
-    const run = showConnectionTestModal('Notification Test', 'Sending test notification...');
+    const run = showConnectionTestModal('Notification test', 'Sending test notification...');
     try {
         const response = await authenticatedFetch(`/api/notifications/channels/${channelId}/test`, { method: 'POST' });
         const result = await response.json();
         updateConnectionTestModal(result.success ? 'success' : 'error', result.logs || ['No logs available'], run);
         loadNotificationChannels();
     } catch (e) {
-        updateConnectionTestModal('error', ['Failed to send test notification', `Error: ${e.message}`], run);
+        updateConnectionTestModal('error', ['Could not send the test notification. Check the destination settings and try again.', `Error: ${e.message}`], run);
     }
 }
 
 async function testNotificationChannelDraft() {
     const data = _collectChannelForm();
-    const run = showConnectionTestModal('Notification Test', 'Sending test notification...');
+    const run = showConnectionTestModal('Notification test', 'Sending test notification...');
     try {
         const response = await authenticatedFetch('/api/notifications/test', {
             method: 'POST',
@@ -285,6 +285,6 @@ async function testNotificationChannelDraft() {
         const result = await response.json();
         updateConnectionTestModal(result.success ? 'success' : 'error', result.logs || ['No logs available'], run);
     } catch (e) {
-        updateConnectionTestModal('error', ['Failed to send test notification', `Error: ${e.message}`], run);
+        updateConnectionTestModal('error', ['Could not send the test notification. Check the destination settings and try again.', `Error: ${e.message}`], run);
     }
 }

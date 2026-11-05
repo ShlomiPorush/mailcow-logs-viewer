@@ -63,9 +63,9 @@ class WhitelistBulkRequest(BaseModel):
 def require_control_access() -> None:
     """Write operations need the feature on and a Read-Write mailcow key."""
     if not settings.smtp_abuse_enabled:
-        raise HTTPException(status_code=403, detail="SMTP abuse protection is disabled")
+        raise HTTPException(status_code=403, detail="Outgoing spam is off. Enable it in Security > Settings > Outgoing spam.")
     if not mailcow_api.has_rw_key:
-        raise HTTPException(status_code=503, detail="MAILCOW_API_KEY_RW is required")
+        raise HTTPException(status_code=503, detail="Add a read-write API key in Settings > mailcow > Connection.")
 
 
 @router.get("/status", responses=documented(m.AbuseStatusResponse, errors={422: Invalid, 500: None}))
@@ -165,7 +165,7 @@ def replace_whitelist(request: WhitelistBulkRequest):
     if len(request.emails) > _MAX_WHITELIST_ENTRIES:
         raise HTTPException(
             status_code=422,
-            detail=f"Too many entries: the whitelist holds at most {_MAX_WHITELIST_ENTRIES} addresses",
+            detail=f"The allowlist holds at most {_MAX_WHITELIST_ENTRIES} addresses. Remove extra entries and try again.",
         )
     emails = []
     for value in request.emails:
@@ -173,7 +173,7 @@ def replace_whitelist(request: WhitelistBulkRequest):
         if not email:
             continue
         if not is_valid_email(email):
-            raise HTTPException(status_code=422, detail=f"Invalid email format: {value}")
+            raise HTTPException(status_code=422, detail=f"Invalid mailbox address: {value}. Enter a full address, such as user@example.com.")
         emails.append(email)
     try:
         active = svc.set_whitelist(emails)
@@ -189,7 +189,7 @@ def remove_whitelist(email: str):
     require_control_access()
     try:
         if not svc.deactivate_whitelist_entry(email):
-            raise HTTPException(status_code=404, detail="Email is not on the whitelist")
+            raise HTTPException(status_code=404, detail="This mailbox is no longer on the allowlist. Reload the list.")
         return {"email": svc.normalize(email), "active": False}
     except HTTPException:
         raise

@@ -1010,13 +1010,13 @@ class MapUnavailable(Exception):
     """The app's part of the Rspamd map cannot be read or written now."""
 
     REASONS = {
-        "no_rw_key": "The Read-Write API key is not set.",
-        "no_password": "The Rspamd password is not set.",
-        "no_rw_key_and_password": "The Read-Write API key and Rspamd password are not set.",
+        "no_rw_key": "Add a read-write API key in Settings > mailcow > Connection.",
+        "no_password": "Add the Rspamd password in Settings > mailcow > Rspamd.",
+        "no_rw_key_and_password": "Add a read-write API key and the Rspamd password in Settings > mailcow.",
         "read_failed": "The Rspamd map could not be read. Check the connection and try again.",
-        "map_not_found": "Rspamd has no recipient denylist map.",
+        "map_not_found": "No recipient denylist map was found. Check the maps in Rspamd.",
         "feature_off": "Suppressions are off in Settings > Features.",
-        "import_failed": "This app's Rspamd blocks could not be loaded into the list.",
+        "import_failed": "Could not load this app's Rspamd blocks. Check the Rspamd connection and try again.",
         "section_missing": "The app's section is missing from the Rspamd map. Nothing was changed.",
         "section_unclear": ("The app's section markers in the Rspamd map are missing or repeated. "
                             "Fix them in mailcow. Nothing was changed."),

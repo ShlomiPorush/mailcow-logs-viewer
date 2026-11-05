@@ -290,18 +290,18 @@ window.disabledFeatures = [];
 
 // All toggleable feature definitions (for settings UI)
 const TOGGLEABLE_FEATURES = [
-    { id: 'netfilter', label: 'Security', description: 'Fail2Ban management and security events' },
+    { id: 'netfilter', label: 'Security', description: 'Review login attempts, bans, and protection rules.' },
     { id: 'queue', label: 'Queue', description: 'Outbound > Queue: mail waiting in the Postfix queue' },
     { id: 'suppressions', label: 'Suppressions', description: 'Outbound > Suppressions: recipients blocked after failed delivery' },
-    { id: 'quarantine', label: 'Quarantine', description: 'Quarantined emails and auto-rules' },
+    { id: 'quarantine', label: 'Quarantine', description: 'Review quarantined messages and manage Auto-Rules.' },
     { id: 'rspamd', label: 'Rspamd', description: 'The Rspamd maps that allow or block mail, incoming and outgoing' },
     { id: 'domains', label: 'Domains', description: 'Domain DNS analysis and transports' },
-    { id: 'dmarc', label: 'DMARC & TLS', description: 'DMARC/TLS reports and IMAP sync' },
+    { id: 'dmarc', label: 'DMARC & TLS', description: 'Review DMARC and TLS reports.' },
     { id: 'mailbox-stats', label: 'Mailbox Stats', description: 'Mailbox and alias statistics' },
     { id: 'rate-limits', label: 'Rate Limits', description: 'Sender rate limit hits and the configured limits' },
-    { id: 'devices', label: 'Devices', description: 'ActiveSync phones and tablets, read from the SOGo log' },
+    { id: 'devices', label: 'Devices', description: 'Review devices that sync through ActiveSync.' },
     { id: 'logs', label: 'Logs', description: 'Raw service log viewer' },
-    { id: 'blacklist', label: 'IP Blacklist Monitor', description: 'DNS blacklist monitoring for your IPs' },
+    { id: 'blacklist', label: 'Blocklists', description: 'Check whether sending IPs are on blocklists.' },
 ];
 
 function isFeatureDisabled(featureId) {
@@ -2062,7 +2062,7 @@ function fail2banBare(entry) {
 async function unbanIP(ip, btnEl) {
     if (!uiMayAct('security')) return;
     const ipWithMask = fail2banEntry(ip);
-    if (!await showConfirmModal({ title: 'Unban IP', message: 'Unban ' + ip + '?', confirmText: 'Unban', focusCancel: true })) return;
+    if (!await showConfirmModal({ title: 'Unban IP', message: 'Unban ' + ip + '? If it is part of a network ban, the whole network is unbanned.', confirmText: 'Unban', focusCancel: true })) return;
     try {
         if (btnEl) {
             btnEl.disabled = true;
@@ -2077,7 +2077,7 @@ async function unbanIP(ip, btnEl) {
         if (res.ok && result.status === 'success') {
             // Fail2ban may have banned the whole network around the address: name what was lifted
             const lifted = result.networks || [ipWithMask];
-            showToast(lifted.map(fail2banBare).join(', ') + ' unbanned successfully', 'success');
+            showToast(lifted.map(fail2banBare).join(', ') + ' queued for unbanning', 'success');
             // mailcow queues the unban and lifts it a few seconds later: the address
             // leaves the lists now, and Fail2ban is asked again once it has acted
             if (fail2banActiveBans) fail2banActiveBans = fail2banActiveBans.filter(b => !lifted.includes(b.network) && fail2banBare(b.ip || b.network) !== fail2banBare(ip));
@@ -2086,14 +2086,14 @@ async function unbanIP(ip, btnEl) {
             setTimeout(() => { fail2banSettingsLoaded = false; loadFail2BanSettings(); }, 5000);
             smartRefreshNetfilter();
         } else {
-            showToast('Failed to unban: ' + (result.msg || result.detail || 'Unknown error'), 'error');
+            showToast('Could not unban the IP: ' + (result.msg || result.detail || 'Unknown error'), 'error');
             if (btnEl) {
                 btnEl.disabled = false;
                 btnEl.textContent = 'Unban';
             }
         }
     } catch (err) {
-        showToast('Failed to unban IP: ' + err.message, 'error');
+        showToast('Could not unban the IP: ' + err.message, 'error');
         if (btnEl) {
             btnEl.disabled = false;
             btnEl.textContent = 'Unban';
@@ -2153,7 +2153,7 @@ async function unbanAllFail2ban(btnEl) {
 async function banIP(ip, btnEl) {
     if (!uiMayAct('security')) return;
     const ipWithMask = fail2banEntry(ip);
-    if (!await showConfirmModal({ title: 'Ban IP', message: `Are you sure you want to permanently ban ${ipWithMask}?\n\nThis will add the IP to the Fail2Ban denylist.`, confirmText: 'Ban', isDangerous: true, focusCancel: true })) return;
+    if (!await showConfirmModal({ title: 'Ban IP', message: `Add ${ipWithMask} to the Fail2ban denylist? It stays banned until removed.`, confirmText: 'Ban', isDangerous: true, focusCancel: true })) return;
 
     if (btnEl) {
         btnEl.disabled = true;
@@ -2178,14 +2178,14 @@ async function banIP(ip, btnEl) {
             smartRefreshNetfilter();
             return true;
         } else {
-            showToast('Failed to ban: ' + (result.msg || result.detail || 'Unknown error'), 'error');
+            showToast('Could not ban the IP: ' + (result.msg || result.detail || 'Unknown error'), 'error');
             if (btnEl) {
                 btnEl.disabled = false;
                 btnEl.textContent = 'Ban';
             }
         }
     } catch (err) {
-        showToast('Failed to ban IP: ' + err.message, 'error');
+        showToast('Could not ban the IP: ' + err.message, 'error');
         if (btnEl) {
             btnEl.disabled = false;
             btnEl.textContent = 'Ban';
@@ -2196,7 +2196,7 @@ async function banIP(ip, btnEl) {
 async function allowIP(ip, btnEl) {
     if (!uiMayAct('security')) return;
     const ipWithMask = fail2banEntry(ip);
-    if (!await showConfirmModal({ title: 'Allow IP', message: `Add ${ipWithMask} to the Fail2Ban allowlist?\n\nFailed attempts from this address will never lead to a ban.`, confirmText: 'Allow', focusCancel: true })) return;
+    if (!await showConfirmModal({ title: 'Allow IP', message: `Add ${ipWithMask} to the Fail2ban allowlist? It is exempt from bans unless also on the denylist.`, confirmText: 'Allow', focusCancel: true })) return;
     if (btnEl) {
         btnEl.disabled = true;
         btnEl.textContent = 'Allowing...';
@@ -2215,9 +2215,9 @@ async function allowIP(ip, btnEl) {
             loadFail2BanSettings();
             return true;
         }
-        showToast('Failed to allow: ' + (result.msg || result.detail || 'Unknown error'), 'error');
+        showToast('Could not add the IP to the allowlist: ' + (result.msg || result.detail || 'Unknown error'), 'error');
     } catch (err) {
-        showToast('Failed to allow IP: ' + err.message, 'error');
+        showToast('Could not add the IP to the allowlist: ' + err.message, 'error');
     }
     if (btnEl) {
         btnEl.disabled = false;

@@ -2168,7 +2168,7 @@ async def update_geoip_database():
         update_job_status('update_geoip', 'running')
         
         if not is_license_configured():
-            update_job_status('update_geoip', 'idle', 'License key not configured')
+            update_job_status('update_geoip', 'idle', 'Add a MaxMind account ID and license key in Settings > MaxMind.')
             return
         
         # Run blocking download in thread pool to avoid blocking the event loop

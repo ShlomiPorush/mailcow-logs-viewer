@@ -80,9 +80,9 @@ test('About does not call a failed version check Up to Date', () => {
 
     // GitHub could not be reached: the server answers "unknown"
     const failed = render({ latest_version: 'unknown', update_available: false });
-    assert.doesNotMatch(failed, /Up to Date|vunknown/);
+    assert.doesNotMatch(failed, /Up to date|vunknown/i);
     assert.match(failed, /Check failed/);
 
-    assert.equal(render({ latest_version: '3.0.0', update_available: false }), 'v3.0.0 Up to Date');
-    assert.equal(render({ latest_version: '3.1.0', update_available: true }), 'v3.1.0 Update Available');
+    assert.equal(render({ latest_version: '3.0.0', update_available: false }), 'v3.0.0 Up to date');
+    assert.equal(render({ latest_version: '3.1.0', update_available: true }), 'v3.1.0 Update available');
 });

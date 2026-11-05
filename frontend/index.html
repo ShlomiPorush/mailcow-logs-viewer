@@ -797,7 +797,7 @@
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
                                 </svg>
                             </button></h1>
-                        <p class="ui-muted">Who tries to get in, what stops them, and what is waiting for you</p>
+                        <p class="ui-muted">Review login attempts and manage protection rules.</p>
                     </div>
                 </div>
                 <div class="ui-tabs ui-page-tabs ui-se-tabs" role="tablist" aria-label="Security sections">
@@ -820,26 +820,26 @@
                 <section class="ui-panel ui-filters ui-fbar">
                     <div class="ui-fbar-pickers">
                         <select id="netfilter-filter-action" class="ui-select" aria-label="Action" data-picker-label="Action" onchange="applyNetfilterFilters()">
-                            <option value="" data-short="All">All Actions</option>
+                            <option value="" data-short="All">All actions</option>
                             <option value="ban">BAN</option>
                             <option value="unban">UNBAN</option>
                             <option value="warning">Warning</option>
                             <option value="info">Info</option>
                         </select>
                         <select id="netfilter-filter-country" class="ui-select" aria-label="Country" data-picker-label="Country" data-picker-search="Search countries" onchange="applyNetfilterFilters()">
-                            <option value="" data-short="All">All Countries</option>
+                            <option value="" data-short="All">All countries</option>
                         </select>
                         <button type="button" class="ui-icon-btn ui-msg-filter-btn ui-filters-toggle" aria-expanded="false" aria-controls="netfilter-more" aria-label="Filters" title="Filters" onclick="uiToggleFilters(this)"><svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"></path></svg><span class="ui-msg-filter-n hidden"></span></button>
                     </div>
                     <div id="netfilter-more" class="ui-fbar-more">
-                        <input type="text" id="netfilter-filter-ip" class="ui-input" placeholder="IP Address" aria-label="IP Address" onkeypress="if(event.key==='Enter') applyNetfilterFilters()">
+                        <input type="text" id="netfilter-filter-ip" class="ui-input" placeholder="IP address" aria-label="IP address" onkeypress="if(event.key==='Enter') applyNetfilterFilters()">
                         <input type="text" id="netfilter-filter-username" class="ui-input" placeholder="Username" aria-label="Username" onkeypress="if(event.key==='Enter') applyNetfilterFilters()">
                         <button onclick="applyNetfilterFilters()" class="ui-btn ui-btn-primary">Apply</button>
                     </div>
                 </section>
                 <p class="ui-list-summary"><span id="security-count" class="ui-count"></span><span id="netfilter-exact"></span><button type="button" class="ui-clear-filters hidden" onclick="clearNetfilterFilters()">Clear filters</button></p>
                 <section class="ui-panel">
-                    <div class="ui-panel-head">Security Events
+                    <div class="ui-panel-head">Security events
                         <button onclick="exportCSV('netfilter')" class="ui-btn ui-btn-sm ui-head-actions">Export CSV</button>
                     </div>
                     <div id="netfilter-logs"><div class="ui-loading" role="status"><div class="loading"></div><p>Loading...</p></div></div>
@@ -851,10 +851,10 @@
                 </div>
 
                 <div id="security-tab-settings" class="ui-scroll ui-st-panel hidden" role="tabpanel">
-                    <p class="ui-muted ui-sec-intro">The same protections as on the Overview. Each says what it does now; open one to change it. The allowlist, internal networks and the mailcow server are never caught.</p>
+                    <p class="ui-muted ui-sec-intro">Configure each protection rule and choose whether it watches or bans.</p>
                     <div id="security-cards" class="ui-sec-cards"></div>
                     <section class="ui-panel ui-sec-alerts">
-                        <span><b>Email alerts</b> <span class="ui-muted">The rules' emails, and a mailbox stopped for outgoing spam, go to the destinations that receive the Security topic.</span></span>
+                        <span><b>Alert delivery</b> <span class="ui-muted">Security notifications go to Admin email and destinations that receive Security alerts.</span></span>
                         <button data-acts="admin" type="button" class="ui-btn ui-btn-sm" onclick="navigateTo('settings', { sub: 'notifications' })">Notifications</button>
                     </section>
                     <div class="ui-savebar hidden" id="security-savebar" role="region" aria-label="Unsaved changes">
@@ -1575,10 +1575,10 @@
 
     <!-- JavaScript -->
     <script src="/static/session-guard.js?v=3"></script>
-    <script src="/static/utils.js?v=42"></script>
+    <script src="/static/utils.js?v=43"></script>
     <script src="/static/router.js?v=12"></script>
-    <script src="/static/app.js?v=103"></script>
-    <script src="/static/alert-activity.js?v=6"></script>
+    <script src="/static/app.js?v=104"></script>
+    <script src="/static/alert-activity.js?v=7"></script>
     <script src="/static/export.js?v=2"></script>
     <script src="/static/message-details.js?v=25"></script>
     <script src="/static/entity-card.js?v=5"></script>
@@ -1590,13 +1590,13 @@
     <script src="/static/mailbox-stats.js?v=15"></script>
     <script src="/static/devices.js?v=9"></script>
     <script src="/static/rate-limits.js?v=32"></script>
-    <script src="/static/smtp-abuse.js?v=9"></script>
-    <script src="/static/protection.js?v=4"></script>
-    <script src="/static/security.js?v=17"></script>
+    <script src="/static/smtp-abuse.js?v=10"></script>
+    <script src="/static/protection.js?v=5"></script>
+    <script src="/static/security.js?v=18"></script>
     <script src="/static/search.js?v=19"></script>
     <script src="/static/notifications.js?v=11"></script>
-    <script src="/static/agents.js?v=2"></script>
-    <script src="/static/users.js?v=16"></script>
+    <script src="/static/agents.js?v=3"></script>
+    <script src="/static/users.js?v=17"></script>
     <script src="/static/spam_filter.js?v=26"></script>
 
     <!-- DMARC fetch history -->

@@ -111,7 +111,7 @@ def test_validate_requires_mandatory_fields():
 
 def test_validate_rejects_unknown_type():
     ok, err = nc.validate_config("carrier-pigeon", {})
-    assert not ok and "Unknown channel type" in err
+    assert not ok and "Unknown destination service" in err
 
 
 def test_optional_fields_are_not_required():
