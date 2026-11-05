@@ -820,12 +820,12 @@ class Settings(BaseSettings):
     suppression_hard_bounce_excluded_codes: str = Field(
         default='',
         env='SUPPRESSION_HARD_BOUNCE_EXCLUDED_CODES',
-        description='Comma-separated 5.x.x codes left alone: not blocked, counted or deleted'
+        description='Comma-separated 5.x.x codes excluded from automatic handling: the app does not block the address, count the failure, or delete queued mail'
     )
     suppression_hard_bounce_standard_codes: bool = Field(
         default=True,
         env='SUPPRESSION_HARD_BOUNCE_STANDARD_CODES',
-        description='Also leave alone the standard 5.x.x codes, which say nothing about the recipient address'
+        description='Also exclude a fixed list of 5.x.x codes for failures unrelated to the recipient address'
     )
     suppression_soft_bounce_action: str = Field(
         default='count',
@@ -835,12 +835,12 @@ class Settings(BaseSettings):
     suppression_soft_bounce_excluded_codes: str = Field(
         default='',
         env='SUPPRESSION_SOFT_BOUNCE_EXCLUDED_CODES',
-        description='Comma-separated 4.x.x codes left alone: not blocked or counted, and their queued mail stays'
+        description='Comma-separated 4.x.x codes excluded from automatic handling: the app does not block the address or count the failure, and the message stays in the queue'
     )
     suppression_soft_bounce_standard_codes: bool = Field(
         default=True,
         env='SUPPRESSION_SOFT_BOUNCE_STANDARD_CODES',
-        description='Also leave alone the standard 4.x.x codes, which say nothing about the recipient address'
+        description='Also exclude a fixed list of 4.x.x codes for failures unrelated to the recipient address'
     )
     suppression_soft_bounce_threshold: int = Field(
         default=3,

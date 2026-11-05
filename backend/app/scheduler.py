@@ -4037,7 +4037,7 @@ async def cleanup_deferred_queue_job():
         if items:
             await _add_logged_codes(item_codes, arrived_by_queue_id, items)
         for queue_id in [queue_id for queue_id in items if _excluded_now(item_codes.get(queue_id))]:
-            logger.info(f"[QUEUE CLEANUP] Deferred item {queue_id} failed with a code left alone in Settings - left in the queue")
+            logger.info(f"[QUEUE CLEANUP] Deferred item {queue_id} failed with a code excluded in Settings - left in the queue")
             del items[queue_id]
         recipients_to_suppress = [{**r, 'codes': item_codes.get(r['queue_id'], [])}
                                   for r in recipients_to_suppress if r['queue_id'] in items]
