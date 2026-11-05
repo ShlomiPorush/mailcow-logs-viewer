@@ -109,3 +109,136 @@ def test_settings_does_not_save_an_example_value(monkeypatch):
     assert answer.status_code == 400, answer.text
     assert "smtp_password" in answer.json()["detail"]
     assert saved == []
+
+
+@pytest.mark.parametrize("env, name", [
+    ({"BASIC_AUTH_ENABLED": "true", "AUTH_PASSWORD": ""}, "AUTH_PASSWORD"),
+    ({"AUTH_ENABLED": "true", "AUTH_PASSWORD": ""}, "AUTH_PASSWORD"),
+    ({"OAUTH2_ENABLED": "true", "OAUTH2_CLIENT_SECRET": ""}, "OAUTH2_CLIENT_SECRET"),
+])
+def test_a_sign_in_method_without_its_secret_is_a_problem(monkeypatch, env, name):
+    assert name in config.sign_in_problem(_settings(monkeypatch, **env))
+
+
+def test_sign_in_methods_with_their_secrets_are_fine(monkeypatch):
+    loaded = _settings(monkeypatch, BASIC_AUTH_ENABLED="true", AUTH_PASSWORD=secrets.token_hex(16),
+                       OAUTH2_ENABLED="true", OAUTH2_CLIENT_SECRET=secrets.token_hex(16))
+    assert config.sign_in_problem(loaded) is None
+    assert config.sign_in_problem(_settings(monkeypatch, BASIC_AUTH_ENABLED="false", AUTH_PASSWORD="",
+                                            OAUTH2_ENABLED="false")) is None
+
+
+def test_a_stored_password_completes_basic_auth_set_in_env(stored, monkeypatch):
+    monkeypatch.setenv("BASIC_AUTH_ENABLED", "true")
+    stored({"auth_password": secrets.token_hex(16)})
+    assert config.sign_in_problem(build_settings(object())) is None
+
+
+_SIGN_IN_ENV = ("SETTINGS_EDIT_VIA_UI_ENABLED", "AUTH_ENABLED", "BASIC_AUTH_ENABLED", "AUTH_PASSWORD",
+                "OAUTH2_ENABLED", "OAUTH2_CLIENT_SECRET")
+
+
+def _start(monkeypatch):
+    """Run the app start up to the sign-in check, with no database or mailcow."""
+    import asyncio
+    from contextlib import contextmanager
+    from unittest.mock import AsyncMock
+    from app import database, migrations
+
+    monkeypatch.setattr(main, "init_db", lambda: None)
+    monkeypatch.setattr(main, "check_db_connection", lambda: True)
+    monkeypatch.setattr(main, "run_migrations", lambda: None)
+    monkeypatch.setattr(migrations, "run_alembic_upgrade", lambda: None)
+
+    @contextmanager
+    def fake_db():
+        yield object()
+    monkeypatch.setattr(database, "get_db_context", fake_db)
+    # Nothing past the check may run for real if startup wrongly continues
+    monkeypatch.setattr(main, "is_license_configured", lambda: False)
+    monkeypatch.setattr(main.mailcow_api, "test_connection", AsyncMock(return_value=False))
+    monkeypatch.setattr(main, "start_scheduler", lambda: None)
+    monkeypatch.setattr(main, "stop_scheduler", lambda: None)
+    monkeypatch.setattr(main, "start_raw_logs_scheduler", lambda: None)
+    monkeypatch.setattr(main, "stop_raw_logs_scheduler", lambda: None)
+    monkeypatch.setattr(main.mailcow_api, "aclose", AsyncMock())
+
+    async def start():
+        async with main.lifespan(main.app):
+            pass
+    previous = config._settings_wrapper._inner
+    try:
+        asyncio.run(start())
+    finally:
+        config._settings_wrapper._inner = previous
+
+
+def test_the_app_does_not_start_with_basic_auth_and_no_password(monkeypatch):
+    monkeypatch.setattr(settings._inner, "edit_settings_via_ui_enabled", False)
+    monkeypatch.setattr(settings._inner, "basic_auth_enabled", True)
+    monkeypatch.setattr(settings._inner, "auth_password", "")
+    with pytest.raises(SettingsLoadError, match="AUTH_PASSWORD is not set"):
+        _start(monkeypatch)
+
+
+def test_the_app_does_not_start_with_oauth2_stored_without_a_client_secret(stored, monkeypatch):
+    for name in _SIGN_IN_ENV[1:]:
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr(settings._inner, "edit_settings_via_ui_enabled", True)
+    stored({"oauth2_enabled": True})
+    with pytest.raises(SettingsLoadError, match="OAUTH2_CLIENT_SECRET is not set"):
+        _start(monkeypatch)
+
+
+def _save(monkeypatch, stored_values, body):
+    """PUT /api/settings against stored settings, with sign-in off for the request itself."""
+    from fastapi.testclient import TestClient
+    from app.database import get_db
+    from app.routers import settings as settings_router
+
+    monkeypatch.setenv("SETTINGS_EDIT_VIA_UI_ENABLED", "true")
+    monkeypatch.setattr(settings._inner, "edit_settings_via_ui_enabled", True)
+    for flag in ("basic_auth_enabled", "auth_enabled", "oauth2_enabled"):
+        monkeypatch.setattr(settings._inner, flag, False)
+    monkeypatch.setattr(settings_store, "get_config_overrides_from_db", lambda *args: dict(stored_values))
+    saved = []
+    monkeypatch.setattr(settings_router, "save_config_overrides_to_db", lambda *args: saved.append(args))
+    main.app.dependency_overrides[get_db] = lambda: object()
+    try:
+        answer = TestClient(main.app, raise_server_exceptions=False).put("/api/settings", json=body)
+    finally:
+        main.app.dependency_overrides.pop(get_db, None)
+    return answer, saved
+
+
+@pytest.fixture
+def no_sign_in_env(monkeypatch):
+    for name in _SIGN_IN_ENV[1:]:
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr(settings._inner, "oauth2_client_secret", None)
+
+
+def test_settings_does_not_save_oauth2_without_a_client_secret(no_sign_in_env, monkeypatch):
+    answer, saved = _save(monkeypatch, {}, {"oauth2_enabled": True})
+    assert answer.status_code == 400, answer.text
+    assert "OAUTH2_CLIENT_SECRET" in answer.json()["detail"]
+    assert saved == []
+
+
+def test_turning_off_a_flag_that_env_sets_does_not_let_the_secret_go(no_sign_in_env, monkeypatch):
+    # OAUTH2_ENABLED from .env stays in force, whatever the save sends for it
+    monkeypatch.setenv("OAUTH2_ENABLED", "true")
+    answer, saved = _save(monkeypatch, {"oauth2_client_secret": secrets.token_hex(16)},
+                          {"oauth2_enabled": False, "oauth2_client_secret": ""})
+    assert answer.status_code == 400, answer.text
+    assert "OAUTH2_CLIENT_SECRET" in answer.json()["detail"]
+    assert saved == []
+
+
+def test_the_save_checks_the_settings_as_stored_now(no_sign_in_env, monkeypatch):
+    # Another save turned OAuth2 on after this app last loaded its settings
+    answer, saved = _save(monkeypatch, {"oauth2_enabled": True, "oauth2_client_secret": secrets.token_hex(16)},
+                          {"oauth2_client_secret": ""})
+    assert answer.status_code == 400, answer.text
+    assert "OAUTH2_CLIENT_SECRET" in answer.json()["detail"]
+    assert saved == []

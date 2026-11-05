@@ -121,6 +121,21 @@ def _secret_setting_message(key: str, problem: str) -> str:
     hint = _SECRET_HINTS.get(key, "Set a value of your own.")
     return f"{key.upper()} {problem}. {hint}"
 
+
+def sign_in_problem(source: Any) -> Optional[str]:
+    """A sign-in method that is on but lacks its secret, in the effective settings.
+
+    Checked at start and on a Settings save, not per source: a password stored
+    in Settings may complete a BASIC_AUTH_ENABLED set in .env.
+    """
+    if source.is_basic_auth_enabled and not (source.auth_password or "").strip():
+        return ("Basic Auth is on (BASIC_AUTH_ENABLED, or the older AUTH_ENABLED), but AUTH_PASSWORD is not "
+                "set. Set AUTH_PASSWORD, or turn Basic Auth off.")
+    if source.is_oauth2_enabled and not (source.oauth2_client_secret or "").strip():
+        return ("OAuth2 is on, but OAUTH2_CLIENT_SECRET is not set. Set the client secret from your "
+                "provider, or turn OAuth2 off.")
+    return None
+
 ALL_RAW_LOG_SERVICES = [
     'acme', 'api', 'autodiscover', 'dovecot', 'netfilter',
     'postfix', 'ratelimited', 'rspamd-history', 'sogo', 'watchdog'

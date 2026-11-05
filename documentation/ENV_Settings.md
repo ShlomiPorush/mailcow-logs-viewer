@@ -119,7 +119,7 @@ The names are `netfilter` (Security), `queue`, `quarantine`, `suppressions`, `rs
 | --- | --- | --- |
 | `BASIC_AUTH_ENABLED` | `false` | Sign-in with username and password. Needs a password. |
 | `AUTH_USERNAME` | `admin` | |
-| `AUTH_PASSWORD` | Empty | The Settings page will not clear it while Basic authentication is on. |
+| `AUTH_PASSWORD` | Empty | Required while Basic authentication is on: without it, the app does not start and the Settings page does not save. |
 | `AUTH_MAX_FAILURE_CLIENTS` | `10000` | How many client addresses the failed-login counter tracks, at least 1. When full, the oldest make room. |
 | `OAUTH2_ENABLED` | `false` | Sign-in through an OAuth2/OIDC provider. |
 | `OAUTH2_PROVIDER_NAME` | `OAuth2 Provider` | Text on the login button. |
@@ -129,7 +129,7 @@ The names are `netfilter` (Security), `queue`, `quarantine`, `suppressions`, `rs
 | `OAUTH2_TOKEN_URL` | Unset | Token endpoint, only without discovery. |
 | `OAUTH2_USERINFO_URL` | Unset | UserInfo endpoint, only without discovery. |
 | `OAUTH2_CLIENT_ID` | Unset | |
-| `OAUTH2_CLIENT_SECRET` | Unset | |
+| `OAUTH2_CLIENT_SECRET` | Unset | Required while OAuth2 is on: without it, the app does not start and the Settings page does not save. |
 | `OAUTH2_REDIRECT_URI` | Unset | Callback address, exactly as registered with the provider, such as `https://logs.example.com/api/auth/callback`. |
 | `OAUTH2_SCOPES` | `openid profile email` | Scopes, separated by spaces. |
 | `SESSION_SECRET_KEY` | Empty | Signs the session cookie. Empty uses a temporary key for each run. Set a long random value, for example from `openssl rand -hex 32`. Sessions live in memory, so a restart signs everyone out either way. |
