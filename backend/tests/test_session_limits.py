@@ -21,7 +21,7 @@ from app.main import app
 from app.routers import auth as auth_router
 from app.routers import settings as settings_router
 from app.services import settings_store
-from test_session_revocation import basic, signed_in, store  # noqa: F401 (store: autouse fixture)
+from test_session_revocation import NEW_PASSWORD, basic, signed_in, store  # noqa: F401 (store: autouse fixture)
 
 HOUR = 3600.0
 MINUTE = 60.0
@@ -317,7 +317,7 @@ def test_re_issuing_keeps_the_clocks_and_the_cookie_follows_the_issued_length(cl
     login_at = clock["t"]
     _save(operator, {"session_expiry_hours": 2})
     clock["t"] += HOUR
-    rotated = _save(operator, {"auth_password": "new-test-password"})
+    rotated = _save(operator, {"auth_password": NEW_PASSWORD})
     assert _max_age(rotated) == int(23 * HOUR)
     record = session._session_store[_key(operator)]
     assert (record["login_at"], record["issued_hours"]) == (login_at, 24)
@@ -332,7 +332,7 @@ def test_re_issuing_keeps_the_last_activity(clock):
     operator = signed_in()
     _save(operator, _idle(60))
     clock["t"] += 50 * MINUTE
-    _save(operator, {"auth_password": "new-test-password"})
+    _save(operator, {"auth_password": NEW_PASSWORD})
     assert operator.get("/api/auth/status").json()["session"]["idle_seconds_left"] == int(10 * MINUTE)
 
 
@@ -402,7 +402,7 @@ def test_a_session_that_ends_while_a_save_runs_is_not_re_issued(clock, monkeypat
         return reload_settings(db)
 
     monkeypatch.setattr(settings_router, "reload_settings", late_reload)
-    response = _save(operator, {"auth_password": "new-test-password", "session_expiry_hours": 24})
+    response = _save(operator, {"auth_password": NEW_PASSWORD, "session_expiry_hours": 24})
     assert session.SESSION_COOKIE_NAME + "=" not in response.headers.get("set-cookie", "")
     assert not session._session_store
 
@@ -452,6 +452,6 @@ def test_a_session_that_reaches_a_shorter_limit_while_the_save_finishes_is_not_k
         cfg.reload_settings(object())
 
     monkeypatch.setattr(agent_store, "check_sign_in_unchanged", later_change)
-    response = _save(operator, {"auth_password": "new-test-password", "session_expiry_hours": 1})
+    response = _save(operator, {"auth_password": NEW_PASSWORD, "session_expiry_hours": 1})
     assert session.SESSION_COOKIE_NAME + "=" not in response.headers.get("set-cookie", "")
     assert not session._session_store

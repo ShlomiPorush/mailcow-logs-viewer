@@ -7,13 +7,14 @@ download now authenticates with HTTP Basic auth (account ID + license key, as
 MaxMind documents), and any error text is redacted before it is logged.
 """
 import logging
+import secrets
 
 import pytest
 import requests
 
 from app.services import geoip_downloader as gd
 
-KEY = "TESTLICENSEKEY_abc123"
+KEY = secrets.token_hex(16)
 ACCOUNT = "123456"
 
 

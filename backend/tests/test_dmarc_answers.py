@@ -6,6 +6,7 @@ list with and without a page, an upload stored or a duplicate), a database that 
 the calls refuse (400, 404, 422). DNS and the IMAP server are faked and no notification
 is sent; nothing leaves the test."""
 import json
+import secrets
 import uuid
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
@@ -396,7 +397,7 @@ def test_imap_import(client, rows, monkeypatch):
     assert client.get('/api/dmarc/imap/status').json()['configuration']['host'] is None
 
     for key, value in (('dmarc_imap_enabled', True), ('dmarc_imap_host', 'imap.example'), ('dmarc_imap_port', 993),
-                       ('dmarc_imap_user', 'reports'), ('dmarc_imap_password', 'x'), ('dmarc_imap_folder', 'INBOX'),
+                       ('dmarc_imap_user', 'reports'), ('dmarc_imap_password', secrets.token_hex(16)), ('dmarc_imap_folder', 'INBOX'),
                        ('dmarc_imap_delete_after', False), ('dmarc_imap_interval', 3600),
                        ('dmarc_imap_scan_all_unseen', False)):
         monkeypatch.setattr(settings._inner, key, value)

@@ -6,6 +6,7 @@
 // words, and send nothing on Cancel. A change that takes nothing away asks nothing.
 // Set A11Y_MODULES to jsdom's node_modules to run it locally (see layers.a11y.cjs).
 const assert = require('node:assert/strict');
+const { randomBytes } = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const { test } = require('node:test');
@@ -108,7 +109,7 @@ test('a change that takes nothing away from oneself asks nothing', async () => {
     // Only an admin edits users: staying Admin (here, a new password) takes nothing away
     const p = page({ you: { kind: 'local', user_id: 2, via_default: false }, status: ADMIN });
     p.w.editUser(2);
-    p.$('#user-edit-pass').value = 'Another l0ng password';
+    p.$('#user-edit-pass').value = randomBytes(16).toString('hex');
     await p.w.saveUser({ preventDefault() {} }, 2);
     assert.equal(p.asked(), null);
     assert.equal(p.sent.length, 1);

@@ -1,5 +1,6 @@
 """Exercise credential throttling through real routes and Uvicorn proxy handling."""
 import base64
+import secrets
 from unittest.mock import mock_open, patch
 
 import pytest
@@ -11,7 +12,11 @@ from app.config import settings
 from app.main import app
 
 
-def credentials(password="correct-test-password"):
+# New for each run; test_auth_capacity and test_auth_failure_keys sign in with it too
+PASSWORD = secrets.token_hex(16)
+
+
+def credentials(password=PASSWORD):
     value = base64.b64encode(f"admin:{password}".encode()).decode()
     return {"Authorization": f"Basic {value}"}
 
@@ -22,7 +27,7 @@ def basic_auth(monkeypatch):
     monkeypatch.setattr(settings._inner, "auth_enabled", False)
     monkeypatch.setattr(settings._inner, "oauth2_enabled", False)
     monkeypatch.setattr(settings._inner, "auth_username", "admin")
-    monkeypatch.setattr(settings._inner, "auth_password", "correct-test-password")
+    monkeypatch.setattr(settings._inner, "auth_password", PASSWORD)
     auth._auth_failures.clear()
     session._session_store.clear()
     yield

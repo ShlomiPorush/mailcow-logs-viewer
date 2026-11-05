@@ -5,6 +5,7 @@ password at once but leave every session cookie issued with it valid until it
 expired, so rotating a password did not evict whoever held a stolen cookie.
 """
 import base64
+import secrets
 import threading
 
 import pytest
@@ -24,7 +25,12 @@ from app.routers import auth as auth_router
 from app.routers import settings as settings_router
 
 
-def basic(password="old-test-password"):
+# New for each run
+OLD_PASSWORD = secrets.token_hex(16)
+NEW_PASSWORD = secrets.token_hex(16)
+
+
+def basic(password=OLD_PASSWORD):
     return {"Authorization": "Basic " + base64.b64encode(f"admin:{password}".encode()).decode()}
 
 
@@ -49,7 +55,7 @@ def store(monkeypatch):
     monkeypatch.setattr(settings_router.mailcow_api, "reload_config", lambda: None)
     monkeypatch.setattr(settings_router.oauth2_client, "reload_config", lambda: None)
     data.update({"basic_auth_enabled": True, "oauth2_enabled": False,
-                 "auth_username": "admin", "auth_password": "old-test-password"})
+                 "auth_username": "admin", "auth_password": OLD_PASSWORD})
     cfg.reload_settings(object())
     app.dependency_overrides[get_db] = lambda: object()
     session._session_store.clear()
@@ -67,9 +73,9 @@ def signed_in():
 
 
 @pytest.mark.parametrize("change", [
-    {"auth_password": "new-test-password"},
+    {"auth_password": NEW_PASSWORD},
     {"auth_username": "operator"},
-    {"oauth2_client_secret": "new-test-secret"},
+    {"oauth2_client_secret": secrets.token_hex(16)},
     {"oauth2_issuer_url": "https://id.example.com"},
 ])
 def test_auth_change_revokes_other_sessions_and_keeps_the_operator_signed_in(change):
@@ -77,7 +83,7 @@ def test_auth_change_revokes_other_sessions_and_keeps_the_operator_signed_in(cha
     response = operator.put("/api/settings", json=change)
     assert response.status_code == 200
     assert stolen.get("/api/auth/verify").status_code == 401
-    assert stolen.put("/api/settings", json={"auth_password": "attacker-test-password"}).status_code == 401
+    assert stolen.put("/api/settings", json={"auth_password": secrets.token_hex(16)}).status_code == 401
     # The operator who saved got a fresh session and is not signed out mid-save
     assert "session_id=" in response.headers.get("set-cookie", "")
     assert operator.get("/api/auth/verify").status_code == 200
@@ -120,7 +126,7 @@ def test_revocation_is_decided_from_the_saved_settings(monkeypatch):
         return real(*args, **kwargs)
 
     monkeypatch.setattr(settings_router, "_record_list_transition", put_old_settings_back)
-    assert operator.put("/api/settings", json={"auth_password": "new-test-password"}).status_code == 200
+    assert operator.put("/api/settings", json={"auth_password": NEW_PASSWORD}).status_code == 200
     assert stolen.get("/api/auth/verify").status_code == 401
 
 
@@ -188,15 +194,15 @@ def test_a_reload_elsewhere_cannot_bring_the_old_password_back(store, monkeypatc
     monkeypatch.setattr(settings_router, "save_config_overrides_to_db", save)
     monkeypatch.setattr(settings_router, "_record_list_transition", after_reload)
     try:
-        assert operator.put("/api/settings", json={"auth_password": "new-test-password"}).status_code == 200
+        assert operator.put("/api/settings", json={"auth_password": NEW_PASSWORD}).status_code == 200
     finally:
         put_reloaded.set()
         get_thread["thread"].join(timeout=5)
     assert not get_thread["thread"].is_alive() and not errors
-    assert settings.auth_password == "new-test-password"
+    assert settings.auth_password == NEW_PASSWORD
     assert stolen.get("/api/auth/verify").status_code == 401
     assert TestClient(app).post("/api/auth/session", headers=basic()).status_code == 401
-    assert TestClient(app).post("/api/auth/session", headers=basic("new-test-password")).status_code == 200
+    assert TestClient(app).post("/api/auth/session", headers=basic(NEW_PASSWORD)).status_code == 200
 
 
 # ── A login that ends after a sign-in change ───────────────────────────────
@@ -264,7 +270,7 @@ def test_the_saver_is_not_signed_in_again_after_a_later_change(monkeypatch):
         session.revoke_all_sessions()
 
     monkeypatch.setattr(agent_store, "check_sign_in_unchanged", another_change_meanwhile)
-    response = operator.put("/api/settings", json={"auth_password": "new-test-password"})
+    response = operator.put("/api/settings", json={"auth_password": NEW_PASSWORD})
     assert response.status_code == 200
     assert "session_id=" not in response.headers.get("set-cookie", "")
     assert operator.get("/api/auth/verify").status_code == 401

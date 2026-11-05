@@ -9,7 +9,7 @@ import pytest
 
 from app import auth, session
 from app.config import settings
-from test_auth_request_limits import client_at, credentials
+from test_auth_request_limits import PASSWORD, client_at, credentials
 
 
 @pytest.fixture(autouse=True)
@@ -20,7 +20,7 @@ def small_table(monkeypatch):
     monkeypatch.setattr(settings._inner, "auth_enabled", False)
     monkeypatch.setattr(settings._inner, "oauth2_enabled", False)
     monkeypatch.setattr(settings._inner, "auth_username", "admin")
-    monkeypatch.setattr(settings._inner, "auth_password", "correct-test-password")
+    monkeypatch.setattr(settings._inner, "auth_password", PASSWORD)
     monkeypatch.setattr(auth, "_next_capacity_cleanup", 0.0)
     auth._auth_failures.clear()
     session._session_store.clear()

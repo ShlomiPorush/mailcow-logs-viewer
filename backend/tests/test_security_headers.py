@@ -5,6 +5,7 @@ after that runtime was removed. Nothing the app serves needs eval, so the
 policy must not allow it on any response.
 """
 import base64
+import secrets
 import builtins
 from pathlib import Path
 
@@ -22,7 +23,7 @@ from app.main import app  # noqa: E402
 
 FRONTEND = Path(__file__).resolve().parents[2] / "frontend"
 USERNAME = "admin"
-PASSWORD = "correct horse battery staple"
+PASSWORD = secrets.token_hex(16)
 
 
 @pytest.fixture

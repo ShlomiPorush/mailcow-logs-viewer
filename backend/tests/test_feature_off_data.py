@@ -3,6 +3,7 @@ server still has (decision 57).
 
 Fictional addresses only."""
 import asyncio
+import secrets
 import uuid
 from datetime import datetime, timedelta
 from types import SimpleNamespace
@@ -74,7 +75,7 @@ def _fake_map(monkeypatch, initial=''):
     monkeypatch.setattr(sup.mailcow_api, 'get_rspamd_map_content', fake_read)
     monkeypatch.setattr(sup.mailcow_api, 'edit_rspamd_map', fake_write)
     monkeypatch.setattr(sup.mailcow_api, 'aclose', AsyncMock())
-    monkeypatch.setattr(sup.mailcow_api, 'headers_rw', {'X-API-Key': 'test-key'})
+    monkeypatch.setattr(sup.mailcow_api, 'headers_rw', {'X-API-Key': secrets.token_hex(16)})
     return state
 
 
@@ -502,7 +503,7 @@ def test_the_queue_cleanup_keeps_messages_no_block_covers(monkeypatch):
     for key, value in {'suppression_enabled': True, 'queue_cleanup_enabled': True, 'queue_cleanup_threshold_minutes': 30,
                        'suppression_rspamd_sync': True, 'suppression_whitelist_domains': ''}.items():
         monkeypatch.setattr(settings._inner, key, value)
-    monkeypatch.setattr(scheduler.mailcow_api, 'headers_rw', {'X-API-Key': 'test-key'})
+    monkeypatch.setattr(scheduler.mailcow_api, 'headers_rw', {'X-API-Key': secrets.token_hex(16)})
     monkeypatch.setattr(scheduler, 'update_job_status', Mock())
     monkeypatch.setattr(scheduler, '_spam_blocks_loaded', AsyncMock(return_value=True))
     old = datetime.utcnow().timestamp() - 7200
@@ -540,7 +541,7 @@ def test_detection_leaves_a_block_from_rspamd_alone(db_ready, monkeypatch):
         _, _, cleanup, _ = scheduler._detect_suppressions_worker()
         # No block covers it: its queued mail stays (checked right before a deletion)
         monkeypatch.setattr(settings._inner, 'suppression_enabled', True)
-        monkeypatch.setattr(scheduler.mailcow_api, 'headers_rw', {'X-API-Key': 'test-key'})
+        monkeypatch.setattr(scheduler.mailcow_api, 'headers_rw', {'X-API-Key': secrets.token_hex(16)})
         address = f'off-{MARK}@example.test'
         assert scheduler._hard_deletable({'Q1': [address]}, set(cleanup) | {address}, set()) == []
         assert scheduler._hard_deletable({'Q1': [address]}, set(), {address}) == [], 'nor without a block'

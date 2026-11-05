@@ -10,6 +10,7 @@
 Fictional domains only.
 """
 import asyncio
+import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, Mock
@@ -304,7 +305,7 @@ def queue(monkeypatch):
                        'suppression_whitelist_domains': '', 'rspamd_password': ''}.items():
         monkeypatch.setattr(settings._inner, key, value)
     monkeypatch.setattr(config, '_cached_active_domains', [HOSTED])
-    monkeypatch.setattr(sch.mailcow_api, 'headers_rw', {'X-API-Key': 'test-key'})
+    monkeypatch.setattr(sch.mailcow_api, 'headers_rw', {'X-API-Key': secrets.token_hex(16)})
     monkeypatch.setattr(sch, 'update_job_status', Mock())
     monkeypatch.setattr(sch, '_spam_blocks_loaded', AsyncMock(return_value=True))
     monkeypatch.setattr(sch, '_protected_now', lambda emails: set())

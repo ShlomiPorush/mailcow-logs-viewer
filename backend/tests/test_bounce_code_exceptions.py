@@ -6,6 +6,7 @@ Deleting queued mail cannot be undone, so the queue paths are pinned for both
 kinds and for every choice that deletes. Fictional addresses only.
 """
 import asyncio
+import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, Mock
@@ -46,7 +47,7 @@ def base(monkeypatch):
          suppression_hard_bounce_standard_codes=False, suppression_soft_bounce_standard_codes=False,
          queue_cleanup_enabled=True, queue_cleanup_block=True, queue_cleanup_threshold_minutes=30,
          suppression_whitelist_domains='', rspamd_password='')
-    monkeypatch.setattr(scheduler.mailcow_api, 'headers_rw', {'X-API-Key': 'test-key'})
+    monkeypatch.setattr(scheduler.mailcow_api, 'headers_rw', {'X-API-Key': secrets.token_hex(16)})
     monkeypatch.setattr(scheduler, 'update_job_status', Mock())
     monkeypatch.setattr(scheduler, '_spam_blocks_loaded', AsyncMock(return_value=True))
     monkeypatch.setattr(scheduler, '_protected_now', lambda emails: set())

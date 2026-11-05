@@ -9,6 +9,7 @@ that fails (500), and the requests the calls refuse (400, 403, 404, 422).
 mailcow, its queue and the Rspamd map are faked; nothing leaves the test. The map
 calls work on the whole list, so the list, its events and its spam_filter.*
 settings are put back exactly as they were."""
+import secrets
 import threading
 import types
 import uuid
@@ -94,8 +95,8 @@ def env(monkeypatch):
     monkeypatch.setattr(type(settings._inner), 'is_feature_enabled',
                         lambda self, name: state['feature'] if name == 'suppressions' else real(self, name))
     monkeypatch.setattr(settings._inner, 'suppression_rspamd_sync', True)
-    monkeypatch.setattr(settings._inner, 'rspamd_password', 'test-password')
-    monkeypatch.setattr(mailcow_api, 'headers_rw', {'X-API-Key': 'test-key'})
+    monkeypatch.setattr(settings._inner, 'rspamd_password', secrets.token_hex(16))
+    monkeypatch.setattr(mailcow_api, 'headers_rw', {'X-API-Key': secrets.token_hex(16)})
 
     async def queue():
         return state['queue']
@@ -287,7 +288,7 @@ def test_sync_and_state(env, whole_list, monkeypatch):
     assert read_only['skipped_off'] is True and 'pending_count' in read_only
     assert c.post('/api/suppressions/sync').status_code == 403
     assert c.get('/api/suppressions/rspamd/state').json()['reason'] == 'no_rw_key'
-    monkeypatch.setattr(mailcow_api, 'headers_rw', {'X-API-Key': 'test-key'})
+    monkeypatch.setattr(mailcow_api, 'headers_rw', {'X-API-Key': secrets.token_hex(16)})
 
     # mailcow does not confirm the save, or refuses the key: the read already changed nothing
     c.post('/api/suppressions', json={'email': f'e-{MARK}@example.net'})
@@ -308,7 +309,7 @@ def test_sync_and_state(env, whole_list, monkeypatch):
 
     monkeypatch.setattr(settings._inner, 'rspamd_password', None)
     assert c.post('/api/suppressions/sync').status_code == 400
-    monkeypatch.setattr(settings._inner, 'rspamd_password', 'test-password')
+    monkeypatch.setattr(settings._inner, 'rspamd_password', secrets.token_hex(16))
 
 
 def test_clear_and_start_fresh(env, whole_list, monkeypatch):
@@ -355,7 +356,7 @@ def test_load_back_from_rspamd(env, whole_list, monkeypatch):
     _pending_load()
     monkeypatch.setattr(settings._inner, 'rspamd_password', None)
     assert c.post('/api/suppressions/rspamd/import').json()['reason'] == 'no_password'
-    monkeypatch.setattr(settings._inner, 'rspamd_password', 'test-password')
+    monkeypatch.setattr(settings._inner, 'rspamd_password', secrets.token_hex(16))
 
     state['map'] = f'{START}\n'
     unclear = c.post('/api/suppressions/rspamd/import')

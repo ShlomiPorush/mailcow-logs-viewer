@@ -6,6 +6,7 @@ error in the list), a save refused for its content (400), a missing Read-Write k
 the calls refuse (404, 400, 422). Rspamd and mailcow are faked at the HTTP client;
 nothing leaves the test."""
 import json
+import secrets
 
 import httpx
 import pytest
@@ -38,9 +39,9 @@ def rspamd(monkeypatch):
     for /getmap and state['edit'] mailcow's reply to the save."""
     for key in ('auth_enabled', 'basic_auth_enabled', 'oauth2_enabled'):
         monkeypatch.setattr(settings._inner, key, False)
-    monkeypatch.setattr(settings._inner, 'rspamd_password', 'rspamd-test-password')
+    monkeypatch.setattr(settings._inner, 'rspamd_password', secrets.token_hex(16))
     monkeypatch.setattr(settings._inner, 'rspamd_url', None)
-    monkeypatch.setattr(mailcow_api, 'headers_rw', {'X-API-Key': 'rw-test-key'})
+    monkeypatch.setattr(mailcow_api, 'headers_rw', {'X-API-Key': secrets.token_hex(16)})
     state = {
         'maps': [{'map': 7, 'uri': f'/etc/rspamd/custom/{MAP}', 'description': 'Recipient denylist',
                   'editable': True, 'loaded': True}],

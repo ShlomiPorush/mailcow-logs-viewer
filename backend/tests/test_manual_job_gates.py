@@ -4,6 +4,8 @@ The Status page hides Run for such a job, but the API accepted it: the job
 returned at once and was marked success (or, for Protection Rules with the
 Security feature off, ran anyway).
 """
+import secrets
+
 import pytest
 
 import starlette.staticfiles as sf
@@ -64,7 +66,7 @@ def test_suppression_sync_without_the_rw_key_still_reads(started, monkeypatch):
     _rw(monkeypatch, False)
     monkeypatch.setattr(settings._inner, 'suppression_enabled', True)
     monkeypatch.setattr(settings._inner, 'suppression_rspamd_sync', True)
-    monkeypatch.setattr(settings._inner, 'rspamd_password', 'example-password')
+    monkeypatch.setattr(settings._inner, 'rspamd_password', secrets.token_hex(16))
     resp = TestClient(app).post("/api/settings/jobs/sync_suppressions/run")
     assert resp.status_code == 200, resp.text
     assert len(started) == 1

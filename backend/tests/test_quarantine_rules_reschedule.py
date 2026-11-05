@@ -1,4 +1,5 @@
 """Saving settings reschedules the quarantine rules job, like the other interval jobs."""
+import secrets
 from datetime import timedelta
 from unittest.mock import Mock
 
@@ -22,7 +23,7 @@ def _quarantine_job(fake):
 
 
 def test_new_interval_takes_effect_without_restart(monkeypatch, fake_scheduler):
-    monkeypatch.setattr(scheduler.mailcow_api, "headers_rw", {"X-API-Key": "test-key"})
+    monkeypatch.setattr(scheduler.mailcow_api, "headers_rw", {"X-API-Key": secrets.token_hex(16)})
     monkeypatch.setattr(settings._inner, "quarantine_rules_interval", 15)
     scheduler.reschedule_interval_jobs()
     call = _quarantine_job(fake_scheduler)
@@ -37,13 +38,13 @@ def test_read_write_key_added_later_starts_the_job(monkeypatch, fake_scheduler):
     assert _quarantine_job(fake_scheduler) is None
     fake_scheduler.remove_job.assert_any_call("process_quarantine_rules")
 
-    monkeypatch.setattr(scheduler.mailcow_api, "headers_rw", {"X-API-Key": "test-key"})
+    monkeypatch.setattr(scheduler.mailcow_api, "headers_rw", {"X-API-Key": secrets.token_hex(16)})
     scheduler.reschedule_interval_jobs()
     assert _quarantine_job(fake_scheduler) is not None
 
 
 def test_feature_switched_off_stops_the_job(monkeypatch, fake_scheduler):
-    monkeypatch.setattr(scheduler.mailcow_api, "headers_rw", {"X-API-Key": "test-key"})
+    monkeypatch.setattr(scheduler.mailcow_api, "headers_rw", {"X-API-Key": secrets.token_hex(16)})
     monkeypatch.setattr(type(settings._inner), "is_feature_enabled", lambda self, name: name != "quarantine")
     scheduler.reschedule_interval_jobs()
     assert _quarantine_job(fake_scheduler) is None

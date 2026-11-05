@@ -3,6 +3,8 @@
 UI. The search in the top bar leaves out its Settings results while editing
 is off: they open fields that only the edit form has.
 """
+import secrets
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -33,7 +35,7 @@ def test_info_says_whether_settings_can_be_edited(monkeypatch, editable):
 def test_info_keeps_it_from_a_visitor_who_is_not_signed_in(monkeypatch):
     monkeypatch.setattr(settings._inner, "basic_auth_enabled", True)
     monkeypatch.setattr(settings._inner, "auth_username", "admin")
-    monkeypatch.setattr(settings._inner, "auth_password", "correct-test-password")
+    monkeypatch.setattr(settings._inner, "auth_password", secrets.token_hex(16))
 
     info = TestClient(app).get("/api/info").json()
 

@@ -9,6 +9,7 @@ The guard compares host[:port] only: behind the documented TLS reverse proxy
 the app sees plain HTTP while the browser sends an https Origin.
 """
 import base64
+import secrets
 
 import pytest
 from fastapi import FastAPI
@@ -117,9 +118,10 @@ def test_proxy_that_rewrites_host_but_sends_forwarded_host():
 def test_guard_applies_with_authentication_on(monkeypatch):
     monkeypatch.setattr(settings._inner, "basic_auth_enabled", True)
     monkeypatch.setattr(settings._inner, "auth_username", "admin")
-    monkeypatch.setattr(settings._inner, "auth_password", "test-password")
+    password = secrets.token_hex(16)
+    monkeypatch.setattr(settings._inner, "auth_password", password)
     signed_in = client()
-    header = {"Authorization": "Basic " + base64.b64encode(b"admin:test-password").decode()}
+    header = {"Authorization": "Basic " + base64.b64encode(f"admin:{password}".encode()).decode()}
     assert signed_in.post(WRITE, headers={**header, "Origin": APP}).status_code == 200
     # Valid credentials and a valid session cookie do not make a cross-site write acceptable
     assert signed_in.post(WRITE, headers={**header, "Origin": "https://evil.invalid"}).status_code == 403

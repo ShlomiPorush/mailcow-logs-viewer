@@ -10,6 +10,7 @@ with "mailcow cannot be reached", one request then tries again, and startup
 does not ask mailcow at all.
 """
 import asyncio
+import secrets
 import threading
 import time
 from contextlib import asynccontextmanager, contextmanager
@@ -422,7 +423,7 @@ def test_an_unrelated_settings_save_keeps_mailcow_refused(mailcow, monkeypatch):
     async def scenario():
         with pytest.raises(MailcowAPIError):
             await _read(api)
-        monkeypatch.setattr(settings._inner, "mailcow_api_key", "another-key")
+        monkeypatch.setattr(settings._inner, "mailcow_api_key", secrets.token_hex(16))
         api.reload_config()
         with pytest.raises(MailcowUnreachableError):
             await _read(api)
@@ -436,7 +437,7 @@ def test_an_unrelated_settings_save_keeps_mailcow_refused(mailcow, monkeypatch):
 
 @pytest.fixture()
 def rspamd_direct(monkeypatch):
-    monkeypatch.setattr(settings._inner, "rspamd_password", "rspamd-pw")
+    monkeypatch.setattr(settings._inner, "rspamd_password", secrets.token_hex(16))
     monkeypatch.setattr(settings._inner, "rspamd_url", "http://rspamd.example.test:11334")
 
 
@@ -492,11 +493,11 @@ def _mark_unreachable(api):
 
 
 def test_every_kind_of_request_is_refused_locally(mailcow, monkeypatch):
-    monkeypatch.setattr(settings._inner, "rspamd_password", "rspamd-pw")
+    monkeypatch.setattr(settings._inner, "rspamd_password", secrets.token_hex(16))
     monkeypatch.setattr(settings._inner, "rspamd_url", "")
     mailcow["answer"] = _raise(httpx.ConnectError)
     api = _api()
-    api.headers_rw = {"X-API-Key": "rw", "Content-Type": "application/json"}
+    api.headers_rw = {"X-API-Key": secrets.token_hex(16), "Content-Type": "application/json"}
 
     async def scenario():
         await _mark_unreachable(api)
@@ -520,7 +521,7 @@ def test_a_write_whose_connection_failed_is_sent_once_and_fails_at_once(mailcow)
     """No wait patched out: the page is told within the second."""
     mailcow["answer"] = _raise(httpx.ConnectError)
     api = _api()
-    api.headers_rw = {"X-API-Key": "rw", "Content-Type": "application/json"}
+    api.headers_rw = {"X-API-Key": secrets.token_hex(16), "Content-Type": "application/json"}
     start = time.monotonic()
     with pytest.raises(MailcowAPIError) as raised:
         run(_closing(api, api.release_quarantine(["1"])))
@@ -592,7 +593,7 @@ def test_startup_does_not_ask_mailcow(mailcow, monkeypatch):
 @pytest.fixture()
 def transports(monkeypatch):
     monkeypatch.setattr(type(settings._inner), "is_feature_enabled", lambda self, name: True)
-    monkeypatch.setattr(settings._inner, "mailcow_api_key", "test-key")
+    monkeypatch.setattr(settings._inner, "mailcow_api_key", secrets.token_hex(16))
     monkeypatch.setattr(settings._inner, "blacklist_source_transports", False)
     monkeypatch.setattr(settings._inner, "blacklist_source_relayhosts", False)
     monkeypatch.setattr(settings._inner, "blacklist_source_server_ip", True)

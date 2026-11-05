@@ -1,5 +1,6 @@
 """API fallbacks must not serialize database exception details."""
 import logging
+import secrets
 from unittest.mock import AsyncMock, Mock
 
 import pytest
@@ -21,7 +22,7 @@ from app.routers import mailbox_stats, stats
     (stats, "/stats/recent-activity", "activity"),
 ])
 def test_database_errors_remain_server_side(monkeypatch, caplog, module, path, fallback):
-    private_detail = "SELECT private_column FROM private_table; token=synthetic-secret"
+    private_detail = f"SELECT private_column FROM private_table; token={secrets.token_hex(16)}"
     db = Mock()
     db.query.side_effect = RuntimeError(private_detail)
     monkeypatch.setattr(mailbox_stats, "_stats_cache", {})

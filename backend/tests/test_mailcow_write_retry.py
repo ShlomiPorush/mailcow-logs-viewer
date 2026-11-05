@@ -8,6 +8,7 @@ made; any other failure is either a definite refusal (4xx) or an outcome
 mailcow did not confirm, which the page is told to check before trying again.
 """
 import asyncio
+import secrets
 import time
 
 import httpx
@@ -59,7 +60,7 @@ def _raise(error):
 def _release(api_key=True):
     async def go():
         api = mod.MailcowAPI()
-        api.headers_rw = {"X-API-Key": "rw", "Content-Type": "application/json"} if api_key else None
+        api.headers_rw = {"X-API-Key": secrets.token_hex(16), "Content-Type": "application/json"} if api_key else None
         try:
             return await api.release_quarantine(["1", "2"])
         finally:
@@ -166,7 +167,7 @@ def test_an_unban_mailcow_did_not_confirm_says_so(monkeypatch):
 
     async def unban(networks):
         raise MailcowWriteUnknownError("read timeout")
-    monkeypatch.setattr(mod.mailcow_api, "headers_rw", {"X-API-Key": "rw"})
+    monkeypatch.setattr(mod.mailcow_api, "headers_rw", {"X-API-Key": secrets.token_hex(16)})
     monkeypatch.setattr(mod.mailcow_api, "get_fail2ban", bans)
     monkeypatch.setattr(mod.mailcow_api, "unban_fail2ban", unban)
     r = TestClient(app, raise_server_exceptions=False).post("/api/fail2ban/unban", json={"ip": "198.51.100.7"})

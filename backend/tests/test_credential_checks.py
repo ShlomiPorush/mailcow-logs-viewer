@@ -4,6 +4,7 @@ Read-Write API key and whether Rspamd accepts its password, and the last
 result is kept only for the address and secret it ran against.
 """
 import asyncio
+import secrets
 import uuid
 from contextlib import contextmanager
 
@@ -18,11 +19,15 @@ from app.models import Base, SystemSetting
 from app.routers import settings as settings_router
 from app.services import settings_store
 
+# New for each run
+RW_KEY = secrets.token_hex(16)
+RSPAMD_PASSWORD = secrets.token_hex(16)
+
 
 def _client(handler):
     api = MailcowAPI()
     api.base_url = "https://mail.example.com"
-    api.headers_rw = {"X-API-Key": "rw-key", "Content-Type": "application/json"}
+    api.headers_rw = {"X-API-Key": RW_KEY, "Content-Type": "application/json"}
     requests = []
 
     def record(request):
@@ -53,7 +58,7 @@ def test_rw_key_check_reads_the_mailcow_answer(status, valid, error):
     request = requests[0]
     assert request.method == "POST"
     assert request.url.path == "/api/v1/edit/mlv-key-check"
-    assert request.headers["X-API-Key"] == "rw-key"
+    assert request.headers["X-API-Key"] == RW_KEY
 
 
 def test_rw_key_check_reports_an_unreachable_mailcow():
@@ -77,7 +82,7 @@ def test_rw_key_check_without_a_key_sends_nothing():
 @pytest.fixture
 def rspamd(monkeypatch):
     from app.config import settings
-    monkeypatch.setattr(settings._inner, "rspamd_password", "rspamd-pw")
+    monkeypatch.setattr(settings._inner, "rspamd_password", RSPAMD_PASSWORD)
     monkeypatch.setattr(settings._inner, "rspamd_url", "")
     return settings
 
@@ -98,7 +103,7 @@ def test_rspamd_check_reads_the_rspamd_answer(rspamd, status, body, valid, error
     request = requests[0]
     assert request.method == "GET"
     assert str(request.url) == "https://mail.example.com/rspamd/auth"
-    assert request.headers["Password"] == "rspamd-pw"
+    assert request.headers["Password"] == RSPAMD_PASSWORD
 
 
 def test_rspamd_check_uses_the_direct_rspamd_url(rspamd, monkeypatch):
@@ -163,7 +168,7 @@ def test_status_is_forgotten_when_the_address_or_secret_changes():
             yield db
     try:
         Base.metadata.create_all(isolated, tables=[SystemSetting.__table__])
-        current = settings_store.credential_fingerprint("https://mail.example.com", "rw-key")
+        current = settings_store.credential_fingerprint("https://mail.example.com", RW_KEY)
         with session() as db:
             assert settings_store.get_credential_check_status(db, "mailcow_rw_key", current) is None
             settings_store.save_credential_check_status(
@@ -173,10 +178,10 @@ def test_status_is_forgotten_when_the_address_or_secret_changes():
             assert status["error"] == "rejected" and status["checked_at"]
             assert "fingerprint" not in status
             # The secret itself is never stored with the status
-            assert "rw-key" not in db.query(SystemSetting).one().value
+            assert RW_KEY not in db.query(SystemSetting).one().value
             # Each credential keeps its own result
             assert settings_store.get_credential_check_status(db, "rspamd_password", current) is None
-            for url, key in [("https://mail.example.com", "new-key"), ("https://other.example.com", "rw-key")]:
+            for url, key in [("https://mail.example.com", secrets.token_hex(16)), ("https://other.example.com", RW_KEY)]:
                 changed = settings_store.credential_fingerprint(url, key)
                 assert settings_store.get_credential_check_status(db, "mailcow_rw_key", changed) is None
     finally:

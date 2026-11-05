@@ -7,6 +7,7 @@ GeoIP and the manual job runs (404, 409). mailcow, Rspamd, MaxMind, SMTP and IMA
 are faked or left unconfigured; nothing leaves the test. Every setting and stored
 row a call changes is put back."""
 import pathlib
+import secrets
 import types
 import uuid
 from contextlib import contextmanager
@@ -154,7 +155,7 @@ def test_settings_info(client, rows, monkeypatch):
         assert any(c['queue_id'] == f'Q{MARK}' for c in body['recent_incomplete_correlations'])
         # Editing on, MaxMind set, a stored license check and a job at its clock time
         _set(monkeypatch, 'edit_settings_via_ui_enabled', True)
-        _set(monkeypatch, 'maxmind_license_key', 'placeholder')
+        _set(monkeypatch, 'maxmind_license_key', secrets.token_hex(16))
         _set(monkeypatch, 'maxmind_account_id', '1')
         _set(monkeypatch, 'dmarc_imap_enabled', True)
         _set(monkeypatch, 'smtp_enabled', True)
@@ -278,8 +279,8 @@ def test_purge_feature_data(editing, monkeypatch):
 
 def test_purge_when_mailcow_does_not_confirm_the_removal(editing, monkeypatch):
     _set(monkeypatch, 'disabled_features', 'suppressions')
-    _set(monkeypatch, 'rspamd_password', 'placeholder')
-    monkeypatch.setattr(mailcow_api, 'headers_rw', {'X-API-Key': 'placeholder'})
+    _set(monkeypatch, 'rspamd_password', secrets.token_hex(16))
+    monkeypatch.setattr(mailcow_api, 'headers_rw', {'X-API-Key': secrets.token_hex(16)})
     content = '\n'.join(['# kept', MANAGED_MARKER_START, f'blocked@{MARK}.example', MANAGED_MARKER_END])
 
     async def map_id(name):
@@ -324,7 +325,7 @@ class _MaxMind:
 
 def test_maxmind_license(client, rows, monkeypatch):
     assert client.post('/api/settings/maxmind/validate').json()['configured'] is False
-    _set(monkeypatch, 'maxmind_license_key', 'placeholder')
+    _set(monkeypatch, 'maxmind_license_key', secrets.token_hex(16))
     monkeypatch.setattr(settings_router, 'httpx', types.SimpleNamespace(AsyncClient=_MaxMind, Timeout=httpx.Timeout))
     assert client.post('/api/settings/maxmind/validate').json()['error'] == 'Invalid'
     monkeypatch.setattr(settings_router, 'get_db_context', _broken_context)
@@ -340,8 +341,8 @@ def _answering(monkeypatch, status):
 def test_credential_checks(client, rows, monkeypatch):
     for path in ('/api/settings/mailcow/rw-key/validate', '/api/settings/rspamd/password/validate'):
         assert client.post(path).json() == {'configured': False, 'valid': False, 'error': None}
-    monkeypatch.setattr(mailcow_api, 'headers_rw', {'X-API-Key': 'placeholder'})
-    _set(monkeypatch, 'rspamd_password', 'placeholder')
+    monkeypatch.setattr(mailcow_api, 'headers_rw', {'X-API-Key': secrets.token_hex(16)})
+    _set(monkeypatch, 'rspamd_password', secrets.token_hex(16))
     _answering(monkeypatch, 401)
     assert client.post('/api/settings/mailcow/rw-key/validate').json()['error'] == 'rejected'
     _answering(monkeypatch, 302)
@@ -366,7 +367,7 @@ def test_credential_checks(client, rows, monkeypatch):
 def test_geoip(client, monkeypatch):
     assert client.get('/api/settings/geoip/status').json()['configured'] is False
     assert client.post('/api/settings/geoip/download').status_code == 400
-    _set(monkeypatch, 'maxmind_license_key', 'placeholder')
+    _set(monkeypatch, 'maxmind_license_key', secrets.token_hex(16))
     _set(monkeypatch, 'maxmind_account_id', '1')
     assert client.get('/api/settings/geoip/status').json()['configured'] is True
 
@@ -407,7 +408,7 @@ def test_geoip_files_that_cannot_be_read(client, monkeypatch):
 
     monkeypatch.setattr(geoip_downloader, 'Path', Vanishing)
     monkeypatch.setattr(geoip_downloader, 'get_db_age_days', lambda path: 1)
-    _set(monkeypatch, 'maxmind_license_key', 'placeholder')
+    _set(monkeypatch, 'maxmind_license_key', secrets.token_hex(16))
     _set(monkeypatch, 'maxmind_account_id', '1')
     assert client.get('/api/settings/geoip/status').status_code == 500
     assert client.post('/api/settings/geoip/validate').status_code == 500
