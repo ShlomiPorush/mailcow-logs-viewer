@@ -15,6 +15,10 @@ DB="mlv-demo-smoke-db"
 APP="mlv-demo-smoke-app"
 PORT="${SMOKE_PORT:-18090}"
 BASE="http://localhost:${PORT}"
+# A new database password for each run, passed to the containers by name only
+export POSTGRES_USER=demo POSTGRES_DB=demo
+POSTGRES_PASSWORD="$(openssl rand -hex 32)"
+export POSTGRES_PASSWORD
 
 fail() { echo "::error::$*"; echo "FAIL: $*"; exit 1; }
 step() { echo; echo "==> $*"; }
@@ -31,10 +35,11 @@ trap cleanup EXIT
 step "Start PostgreSQL"
 docker network create "${NET}" >/dev/null
 docker run -d --name "${DB}" --network "${NET}" \
-    -e POSTGRES_USER=demo -e POSTGRES_PASSWORD=demo -e POSTGRES_DB=demo \
+    -e POSTGRES_USER -e POSTGRES_PASSWORD -e POSTGRES_DB \
     postgres:16-alpine >/dev/null
 for i in $(seq 1 30); do
-    if docker exec "${DB}" pg_isready -U demo -q 2>/dev/null; then break; fi
+    # Over TCP: during initialisation the server listens on its socket only
+    if docker exec "${DB}" pg_isready -h 127.0.0.1 -U demo -q 2>/dev/null; then break; fi
     sleep 1
     [ "$i" -eq 30 ] && fail "PostgreSQL did not become ready"
 done
@@ -43,7 +48,7 @@ done
 start_app() {
     docker run -d --name "${APP}" --network "${NET}" -p "${PORT}:8080" \
         -e POSTGRES_HOST="${DB}" \
-        -e POSTGRES_USER=demo -e POSTGRES_PASSWORD=demo -e POSTGRES_DB=demo \
+        -e POSTGRES_USER -e POSTGRES_PASSWORD -e POSTGRES_DB \
         "$@" "${IMAGE}" >/dev/null
 }
 
@@ -131,8 +136,9 @@ check /api/quarantine "all(str(i['id']) != '${before}' for i in d['data'])" "the
 step "Visitors cannot lock others out or change the demo's own limits"
 # Enabling Basic Auth with a valid confirmation would lock every other
 # visitor out; in the demo the setting is fixed by the image
+lock_password="$(openssl rand -hex 16)"
 curl -s -o /dev/null -X PUT -H 'Content-Type: application/json' \
-    -d '{"basic_auth_enabled": true, "auth_username": "admin", "auth_password": "demo-lock", "verify_username": "admin", "verify_password": "demo-lock"}' \
+    -d "{\"basic_auth_enabled\": true, \"auth_username\": \"admin\", \"auth_password\": \"${lock_password}\", \"verify_username\": \"admin\", \"verify_password\": \"${lock_password}\"}" \
     "${BASE}/api/settings"
 curl -s -o /dev/null -X PUT -H 'Content-Type: application/json' -d '{"retention_days": 0}' "${BASE}/api/settings"
 code=$(curl -s -o /dev/null -w '%{http_code}' "${BASE}/api/stats/dashboard")

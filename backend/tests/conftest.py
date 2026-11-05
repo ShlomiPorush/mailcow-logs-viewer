@@ -6,15 +6,18 @@ app.config.Settings() can construct without a real deployment environment.
 """
 import os
 import pathlib
+import secrets
 import sys
 import time as _real_time
 
 import pytest
 
+# Secrets are new for each run; a run against a real database passes its
+# POSTGRES_* settings in the environment
 os.environ.setdefault("MAILCOW_URL", "https://mail.example.com")
-os.environ.setdefault("MAILCOW_API_KEY", "test-key")
+os.environ.setdefault("MAILCOW_API_KEY", secrets.token_hex(16))
 os.environ.setdefault("POSTGRES_USER", "test")
-os.environ.setdefault("POSTGRES_PASSWORD", "test")
+os.environ.setdefault("POSTGRES_PASSWORD", secrets.token_hex(16))
 os.environ.setdefault("POSTGRES_DB", "test")
 
 # Make `app` importable when running pytest from the repo root or backend/
