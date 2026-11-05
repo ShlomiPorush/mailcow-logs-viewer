@@ -434,3 +434,15 @@ def test_the_permanent_failure_deletion_reads_the_log_of_the_recipient_waiting(d
     assert _rows(db) == {gone: True}
     # The message deferred with a timeout stays; the other one's logged code belongs to another recipient
     scheduler.mailcow_api.delete_queue.assert_awaited_once_with([f'O{MARK.upper()}'])
+
+
+def test_a_later_code_of_the_same_recipient_does_not_hide_a_code_left_alone(db, base, real_queue_log):
+    """Review R3: a line of an earlier message with the same queue ID can fall inside
+    the window (a clock set back); every line counts, so it can only keep the mail."""
+    _set(base, suppression_soft_bounce_excluded_codes='', suppression_soft_bounce_standard_codes=True)
+    rcpt, qid = f'rcpt-{MARK}@example.org', f'C{MARK.upper()}'
+    _deferral(db, qid, rcpt, '4.4.1', timedelta(minutes=40))
+    _deferral(db, qid, rcpt, '4.1.1', timedelta(minutes=20))
+    _queue(base, [_stuck(qid, f'{rcpt} (connect to mx.example.org[192.0.2.1]:25: Connection timed out)')])
+    asyncio.run(scheduler.cleanup_deferred_queue_job())
+    scheduler.mailcow_api.delete_queue.assert_not_awaited()

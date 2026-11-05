@@ -3782,24 +3782,26 @@ def _queue_item_arrived(item) -> Optional[datetime]:
 
 def _logged_deferral_codes(arrived_by_queue_id: Dict[str, Optional[datetime]],
                            waiting: Dict[str, List[str]]) -> Dict[str, List[str]]:
-    """The status code of the latest deferral of each recipient still waiting
-    in these queued messages (waiting: their addresses by queue ID), read from
-    the Postfix log: {queue_id: [dsn, ...]}. A reason in the queue often has
-    none ("connect to ...: Connection timed out", which Postfix logs as 4.4.1).
-    A recipient already delivered says nothing about the rest, and only lines
-    from the message's arrival on count: a queue ID can come back later."""
+    """The status codes of the deferrals of each recipient still waiting in
+    these queued messages (waiting: their addresses by queue ID), read from the
+    Postfix log: {queue_id: [dsn, ...]}. A reason in the queue often has none
+    ("connect to ...: Connection timed out", which Postfix logs as 4.4.1). A
+    recipient already delivered says nothing about the rest, and only lines from
+    the message's arrival on count: a queue ID can come back later. Every such
+    line counts, not only the last: a line of an earlier message that slips into
+    the window can then only keep the mail, never hide a code left alone."""
     if not arrived_by_queue_id:
         return {}
     with get_db_context() as db:
-        rows = db.query(PostfixLog.id, PostfixLog.queue_id, PostfixLog.recipient, PostfixLog.dsn, PostfixLog.time).filter(
+        rows = db.query(PostfixLog.queue_id, PostfixLog.recipient, PostfixLog.dsn, PostfixLog.time).filter(
             PostfixLog.queue_id.in_(list(arrived_by_queue_id)),
             PostfixLog.status == 'deferred',
             PostfixLog.recipient.isnot(None),
             PostfixLog.dsn.isnot(None),
             or_(*[PostfixLog.program.like(f'%/{agent}') for agent in _BOUNCE_AGENTS]),
         ).all()
-    latest = {}
-    for row_id, queue_id, recipient, dsn, logged in rows:
+    codes = {}
+    for queue_id, recipient, dsn, logged in rows:
         arrived = arrived_by_queue_id.get(queue_id)
         # A minute of slack: the log time and mailcow's arrival time come from different clocks
         if arrived is not None and logged is not None and logged < arrived - timedelta(minutes=1):
@@ -3807,12 +3809,6 @@ def _logged_deferral_codes(arrived_by_queue_id: Dict[str, Optional[datetime]],
         address = auto_suppression_address(recipient.strip('<>'))
         if address not in (waiting.get(queue_id) or ()):
             continue
-        key = (queue_id, address)
-        order = (logged or datetime.min, row_id)
-        if key not in latest or order > latest[key][0]:
-            latest[key] = (order, dsn)
-    codes = {}
-    for (queue_id, _), (_, dsn) in latest.items():
         codes.setdefault(queue_id, []).append(dsn)
     return codes
 
