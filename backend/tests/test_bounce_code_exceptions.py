@@ -42,6 +42,8 @@ def base(monkeypatch):
          suppression_hard_bounce_action='suppress', suppression_soft_bounce_action='count',
          suppression_soft_bounce_threshold=1,
          suppression_hard_bounce_excluded_codes='5.2.2', suppression_soft_bounce_excluded_codes='4.2.2',
+         # The tests of the list read it alone; the standard codes have their own below
+         suppression_hard_bounce_standard_codes=False, suppression_soft_bounce_standard_codes=False,
          queue_cleanup_enabled=True, queue_cleanup_block=True, queue_cleanup_threshold_minutes=30,
          suppression_whitelist_domains='', rspamd_password='')
     monkeypatch.setattr(scheduler.mailcow_api, 'headers_rw', {'X-API-Key': 'test-key'})
@@ -284,3 +286,118 @@ def test_the_codes_offered_are_the_failures_the_detection_reads(db, base):
     assert [c for c in answer['temporary'] if c['code'] == temp] == [{'code': temp, 'count': 1}]
     assert all(c['code'].startswith('5.') for c in answer['permanent'])
     assert all(c['code'].startswith('4.') for c in answer['temporary'])
+
+
+# ---- The standard codes (on by default) ----
+
+@pytest.mark.parametrize('code', ['5.7.0', '5.7.1', '5.7.509', '5.6.11', '5.2.2', '5.2.121', '5.1.8', '5.4.6', '5.5.2',
+                                  '4.2.2', '4.2.1', '4.4.1', '4.4.7', '4.7.1', '4.7.28', '4.0.0', '4.5.3'])
+def test_a_code_that_says_nothing_about_the_address_is_left_alone_by_default(base, code):
+    _set(base, suppression_hard_bounce_excluded_codes='', suppression_soft_bounce_excluded_codes='',
+         suppression_hard_bounce_standard_codes=True, suppression_soft_bounce_standard_codes=True)
+    assert bounce_policy.code_excluded(code)
+    _set(base, suppression_hard_bounce_standard_codes=False, suppression_soft_bounce_standard_codes=False)
+    assert not bounce_policy.code_excluded(code), 'the switch off leaves only the list'
+
+
+@pytest.mark.parametrize('code', ['5.0.0', '5.1.1', '5.1.2', '5.1.10', '5.2.1', '5.3.0', '5.4.1', '5.4.4', '5.5.0',
+                                  '4.1.1', '4.2.0', '4.3.0'])
+def test_a_code_about_the_address_still_counts_by_default(base, code):
+    _set(base, suppression_hard_bounce_standard_codes=True, suppression_soft_bounce_standard_codes=True,
+         suppression_hard_bounce_excluded_codes='', suppression_soft_bounce_excluded_codes='')
+    assert not bounce_policy.code_excluded(code)
+
+
+def test_the_switch_is_on_by_default():
+    from app.config import Settings
+    fields = Settings.model_fields if hasattr(Settings, 'model_fields') else Settings.__fields__
+    for key in bounce_policy.STANDARD_CODES_KEYS.values():
+        field = fields[key]
+        assert (field.default if hasattr(field, 'default') else field.field_info.default) is True
+
+
+def test_settings_shows_the_same_standard_codes_the_jobs_use():
+    import re
+    from pathlib import Path
+    source = (Path(__file__).resolve().parents[2] / 'frontend' / 'settings.js').read_text(encoding='utf-8')
+    block = source[source.index('const SETTINGS_STANDARD_CODES = {'):]
+    block = block[:block.index('\n};')]
+    shown = {}
+    for cls, body in re.findall(r'\n    ([45]): \[(.*?)\n    \]', block, re.S):
+        shown[cls] = tuple(re.findall(r"'([45]\.\d+\.(?:\d+|x))'", body))
+    assert shown == bounce_policy.STANDARD_CODES
+
+
+def test_the_reported_gmail_content_block_blocks_nobody_by_default(db, base):
+    """Issue #562: Gmail refused an attachment with 552 5.7.0; the address is fine."""
+    _set(base, suppression_hard_bounce_standard_codes=True, suppression_hard_bounce_excluded_codes='')
+    flagged, gone = f'flagged-{MARK}@example.org', f'gone-{MARK}@example.org'
+    _line(db, flagged, '5.7.0')
+    _line(db, gone, '5.1.1')
+    _queue(base, [])
+    asyncio.run(scheduler.detect_suppressions_job())
+    assert _rows(db) == {gone: True}
+
+
+def _deferral(db, queue_id, recipient, dsn, age):
+    from app.models import PostfixLog
+    with db() as s:
+        s.add(PostfixLog(time=datetime.utcnow() - age, created_at=datetime.utcnow(), program='postfix/smtp', priority='info',
+                         message=f'deferral {MARK}', queue_id=queue_id, recipient=recipient, status='deferred', dsn=dsn))
+        s.commit()
+
+
+@pytest.mark.parametrize('standard', [True, False])
+def test_the_cleanup_reads_the_code_a_queue_reason_leaves_out_from_the_log(db, base, standard, real_queue_log):
+    """A timeout reads "connect to ...: Connection timed out" in the queue; Postfix logs it as 4.4.1."""
+    _set(base, suppression_soft_bounce_excluded_codes='', suppression_soft_bounce_standard_codes=standard)
+    stored = []
+    base.setattr(scheduler, '_store_deferred_suppressions_worker',
+                 lambda r, uncovered=None: stored.extend(r) or len({i['email'] for i in r}))
+    slow, full = f'slow-{MARK}@example.org', f'full-{MARK}@example.org'
+    qid = f'T{MARK.upper()}'
+    _deferral(db, qid, slow, '4.4.1', timedelta(minutes=30))
+    _queue(base, [_stuck(qid, f'{slow} (connect to mx.example.net[192.0.2.2]:25: Connection timed out)'),
+                  _stuck(f'F{MARK.upper()}', f'{full} (host mx.example.org[192.0.2.1] said: 452 4.2.2 Mailbox full)')])
+    asyncio.run(scheduler.cleanup_deferred_queue_job())
+    if standard:
+        scheduler.mailcow_api.delete_queue.assert_not_awaited()
+        assert stored == [], 'nobody is blocked for mail that stays'
+    else:
+        scheduler.mailcow_api.delete_queue.assert_awaited_once_with([qid, f'F{MARK.upper()}'])
+        assert {i['email'] for i in stored} == {slow, full}
+
+
+def test_a_logged_code_of_an_earlier_message_with_the_same_queue_id_is_not_read(db, base, real_queue_log):
+    """Postfix can give a queue ID again: only lines from the message's arrival on count."""
+    _set(base, suppression_soft_bounce_excluded_codes='', suppression_soft_bounce_standard_codes=True, queue_cleanup_block=False)
+    qid = f'R{MARK.upper()}'
+    _deferral(db, qid, f'old-{MARK}@example.org', '4.4.1', timedelta(hours=5))   # before OLD (2 hours ago)
+    _queue(base, [_stuck(qid, f'new-{MARK}@example.org (lost connection with mx.example.org[192.0.2.1])')])
+    asyncio.run(scheduler.cleanup_deferred_queue_job())
+    scheduler.mailcow_api.delete_queue.assert_awaited_once_with([qid])
+
+
+def test_a_log_that_cannot_be_read_deletes_nothing(base):
+    _set(base, suppression_soft_bounce_excluded_codes='', queue_cleanup_block=False)
+
+    def unreadable(arrived):
+        raise RuntimeError('database gone')
+
+    base.setattr(scheduler, '_logged_deferral_codes', unreadable)
+    _queue(base, [_stuck('SLOW', 'slow@example.org (connect to mx.example.net[192.0.2.2]:25: Connection timed out)')])
+    asyncio.run(scheduler.cleanup_deferred_queue_job())
+    scheduler.mailcow_api.delete_queue.assert_not_awaited()
+
+
+def test_the_block_store_reads_the_codes_the_cleanup_passes(db, base):
+    """The codes of the message (the log's included) are asked again under the row lock."""
+    _set(base, suppression_soft_bounce_standard_codes=True)
+    arrived = datetime.utcnow() - timedelta(hours=2)
+    slow, gone = f'slow-{MARK}@example.org', f'gone-{MARK}@example.org'
+    counted = scheduler._store_deferred_suppressions_worker([
+        {'email': slow, 'queue_id': 'SLOW', 'sender': None, 'arrived': arrived, 'reason': 'connect to mx: timed out', 'codes': ['4.4.1']},
+        {'email': gone, 'queue_id': 'GONE', 'sender': None, 'arrived': arrived, 'reason': 'connect to mx: timed out', 'codes': []},
+    ], set())
+    assert counted == 1
+    assert _rows(db) == {gone: True}

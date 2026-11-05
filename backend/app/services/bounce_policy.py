@@ -32,6 +32,26 @@ _CODE_IN_TEXT = re.compile(r'(?<![\w.<@-])([45])\d\d[ -]\s*(\1\.\d{1,3}\.\d{1,3}
 # Addresses are taken out first, whole: <sender+452-4.2.2+tag@example.org>
 _ADDRESS = re.compile(r'<[^<>]*>|\S*@\S*')
 EXCLUDED_CODES_KEYS = {'5': 'suppression_hard_bounce_excluded_codes', '4': 'suppression_soft_bounce_excluded_codes'}
+STANDARD_CODES_KEYS = {'5': 'suppression_hard_bounce_standard_codes', '4': 'suppression_soft_bounce_standard_codes'}
+
+# The standard codes: failures about the sender, the message, the network or
+# policy, which say nothing about the recipient's address (RFC 3463 and the
+# IANA registry, plus provider codes such as Microsoft's 5.2.121). "x" stands
+# for every detail of a subject, codes no registry lists included: providers
+# number their own policy codes (Microsoft's 5.7.509, 5.7.606). Kept equal to
+# SETTINGS_STANDARD_CODES in frontend/settings.js (a test compares them).
+STANDARD_CODES = {
+    '5': ('5.1.7', '5.1.8', '5.1.9',
+          '5.2.2', '5.2.3', '5.2.4', '5.2.121', '5.2.122',
+          '5.3.1', '5.3.2', '5.3.3', '5.3.4', '5.3.5',
+          '5.4.0', '5.4.2', '5.4.3', '5.4.5', '5.4.6', '5.4.7', '5.4.8', '5.4.300',
+          '5.5.1', '5.5.2', '5.5.3', '5.5.4', '5.5.5', '5.5.6',
+          '5.6.x', '5.7.x'),
+    '4': ('4.0.0', '4.1.7', '4.1.8', '4.1.9',
+          '4.2.1', '4.2.2', '4.2.3', '4.2.4',
+          '4.3.1', '4.3.2', '4.3.3', '4.3.4', '4.3.5',
+          '4.4.x', '4.5.x', '4.6.x', '4.7.x'),
+}
 
 
 def split_codes(value) -> List[str]:
@@ -80,14 +100,27 @@ def excluded_codes(kind: str) -> FrozenSet[str]:
     return frozenset(good)
 
 
+def standard_code(code: str) -> bool:
+    """Whether a well-formed code is one of the standard codes of its class."""
+    code = _canonical(code)
+    subject = code.rsplit('.', 1)[0] + '.x'
+    return any(entry in (code, subject) for entry in STANDARD_CODES.get(code[0], ()))
+
+
+def standard_codes_on(kind: str) -> bool:
+    """Whether the standard codes of class kind are left alone (the default)."""
+    return bool(getattr(settings, STANDARD_CODES_KEYS[kind], True))
+
+
 def code_excluded(dsn: str) -> bool:
     """Whether a failure with this status code is left alone: not blocked,
     counted or deleted. Only a permanent (5.x.x) or temporary (4.x.x) code
-    can be."""
+    can be: a standard code while its switch is on, or one on the list."""
     dsn = str(dsn or '').strip()
     if not dsn or dsn[0] not in EXCLUDED_CODES_KEYS or bad_code(dsn, dsn[0]):
         return False
-    return _canonical(dsn) in excluded_codes(dsn[0])
+    kind = dsn[0]
+    return (standard_codes_on(kind) and standard_code(dsn)) or _canonical(dsn) in excluded_codes(kind)
 
 
 def codes_in_text(text: str) -> List[str]:

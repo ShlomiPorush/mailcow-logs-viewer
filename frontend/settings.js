@@ -25,6 +25,8 @@ const SETTINGS_LABEL_OVERRIDES = {
     suppression_soft_bounce_action: 'Temporary delivery failure',
     suppression_hard_bounce_excluded_codes: 'Permanent failure codes left alone',
     suppression_soft_bounce_excluded_codes: 'Temporary failure codes left alone',
+    suppression_hard_bounce_standard_codes: 'Leave the standard codes alone',
+    suppression_soft_bounce_standard_codes: 'Leave the standard codes alone',
     queue_cleanup_enabled: 'Delete delayed mail',
     queue_cleanup_block: 'Block the recipients of deleted delayed mail',
     queue_cleanup_threshold_minutes: 'Queue age before deletion (minutes)',
@@ -321,6 +323,8 @@ var SETTINGS_FIELD_DESCRIPTIONS = {
     suppression_soft_bounce_action: 'What happens when delivery fails for now (4.x.x) and the queue is not cleaned.',
     suppression_hard_bounce_excluded_codes: 'A permanent failure with one of these codes is not blocked, counted or deleted. Postfix returns it to the sender as usual.',
     suppression_soft_bounce_excluded_codes: 'A temporary failure with one of these codes is not blocked or counted, and its message stays in the queue for Postfix to retry.',
+    suppression_hard_bounce_standard_codes: "Codes about the sender, the message, the network or policy, which say nothing about the recipient's address.",
+    suppression_soft_bounce_standard_codes: "Codes about the sender, the message, the network or policy, which say nothing about the recipient's address.",
     suppression_soft_bounce_threshold: 'Failures before the address is blocked. Each failed retry counts, even for the same message.',
     suppression_base_expiry_days: 'Repeated failures increase the block length.',
     suppression_max_expiry_days: 'The longest a block grows with repeated failures.',
@@ -688,11 +692,71 @@ const SETTINGS_STATUS_CODES = [
     ['7.27', 'Sender address has null MX'], ['7.28', 'Mail flood detected'], ['7.29', 'ARC validation failure'], ['7.30', 'REQUIRETLS support required']
 ];
 const SETTINGS_STATUS_CODE_NAMES = new Map(SETTINGS_STATUS_CODES);
+// Codes no registry lists, by the provider that sends them
+const SETTINGS_PROVIDER_CODE_NAMES = new Map([
+    ['5.2.121', "Recipient's hourly limit from one sender (Microsoft)"], ['5.2.122', "Recipient's hourly limit (Microsoft)"],
+    ['5.4.8', 'MX hosts failed MTA-STS validation (Microsoft)'], ['5.4.300', 'Message expired (Microsoft)']
+]);
+// A whole subject: x stands for every detail, also codes no list has (Microsoft's 5.7.509)
+const SETTINGS_CODE_SUBJECT_NAMES = new Map([
+    ['4', 'Any network or routing status, also codes not listed'], ['5', 'Any protocol status, also codes not listed'],
+    ['6', 'Any content or media status, also codes not listed'], ['7', 'Any security or policy status, also codes not listed']
+]);
+const SETTINGS_STANDARD_KEYS = { hard: 'suppression_hard_bounce_standard_codes', soft: 'suppression_soft_bounce_standard_codes' };
+// The standard codes, by subject: failures about the sender, the message, the
+// network or policy, which say nothing about the recipient's address. Kept
+// equal to STANDARD_CODES in backend/app/services/bounce_policy.py (a test compares them)
+const SETTINGS_STANDARD_CODES = {
+    5: [
+        ['Address', ['5.1.7', '5.1.8', '5.1.9']],
+        ['Mailbox', ['5.2.2', '5.2.3', '5.2.4', '5.2.121', '5.2.122']],
+        ['Mail system', ['5.3.1', '5.3.2', '5.3.3', '5.3.4', '5.3.5']],
+        ['Network and routing', ['5.4.0', '5.4.2', '5.4.3', '5.4.5', '5.4.6', '5.4.7', '5.4.8', '5.4.300']],
+        ['Protocol', ['5.5.1', '5.5.2', '5.5.3', '5.5.4', '5.5.5', '5.5.6']],
+        ['Content', ['5.6.x']],
+        ['Security and policy', ['5.7.x']]
+    ],
+    4: [
+        ['Undefined', ['4.0.0']],
+        ['Address', ['4.1.7', '4.1.8', '4.1.9']],
+        ['Mailbox', ['4.2.1', '4.2.2', '4.2.3', '4.2.4']],
+        ['Mail system', ['4.3.1', '4.3.2', '4.3.3', '4.3.4', '4.3.5']],
+        ['Network and routing', ['4.4.x']],
+        ['Protocol', ['4.5.x']],
+        ['Content', ['4.6.x']],
+        ['Security and policy', ['4.7.x']]
+    ]
+};
 // What the mail logs had in the last days, read once per Settings load: { days, permanent, temporary }
 let settingsCodesSeen = null;
 
 function settingsCodeName(code) {
-    return SETTINGS_STATUS_CODE_NAMES.get(String(code).slice(2)) || '';
+    code = String(code);
+    if (code.endsWith('.x')) return SETTINGS_CODE_SUBJECT_NAMES.get(code.split('.')[1]) || '';
+    return SETTINGS_STATUS_CODE_NAMES.get(code.slice(2)) || SETTINGS_PROVIDER_CODE_NAMES.get(code) || '';
+}
+
+// Whether a code is one of the standard codes of its class
+function settingsStandardCovers(code) {
+    const [cls, subject] = String(code).split('.');
+    return (SETTINGS_STANDARD_CODES[cls] || []).some(([, codes]) => codes.includes(code) || codes.includes(cls + '.' + subject + '.x'));
+}
+
+// The standard codes of a box are left alone now: its switch is on (or set on by ENV)
+function settingsStandardOn(box) {
+    const toggle = document.getElementById('edit-' + SETTINGS_STANDARD_KEYS[box.dataset.codes]);
+    return !!toggle && toggle.checked;
+}
+
+// The switch for the standard codes, with the list it leaves alone (read only)
+function settingsStandardCodes(kind, cls, config, lockedKeys, defaults) {
+    const key = SETTINGS_STANDARD_KEYS[kind];
+    if (config[key] === undefined) return '';
+    const groups = SETTINGS_STANDARD_CODES[cls].map(([title, codes]) => '<div><h5>' + escapeHtml(title) + '</h5>' +
+        codes.map(code => '<span><b>' + escapeHtml(code) + '</b>' + escapeHtml(settingsCodeName(code)) + '</span>').join('') + '</div>').join('');
+    return '<div class="ui-set-codes-std">' +
+        renderSettingsEditField(key, config[key], [], SETTINGS_FIELD_DESCRIPTIONS[key] || '', lockedKeys.has(key), defaults[key]) +
+        '<details class="ui-set-codes-std-list"><summary>Show the list</summary><div class="ui-set-codes-groups">' + groups + '</div></details></div>';
 }
 
 // A well-formed code of the class ('5' or '4') without leading zeros, or ''
@@ -714,7 +778,7 @@ function settingsBounceCodes(kind, config, lockedKeys, defaults) {
     const desc = SETTINGS_FIELD_DESCRIPTIONS[key];
     // The registered codes in the shared picker (MP-4: searchable by code and meaning); a pick adds at once
     const picker = locked ? '' : uiPicker({
-        id: 'settings-' + id, label: 'Status codes', value: 'Pick a code', field: true, labelledBy: 'label-' + id,
+        id: 'settings-' + id, label: 'Status codes', value: 'Pick a code', field: true, labelledBy: 'label-' + id + '-also',
         search: 'Search codes', options: SETTINGS_STATUS_CODES.map(([code, name]) => ({
             label: `${cls}.${code} ${name}`, value: `${cls}.${code}`, onclick: `settingsPickCode('${kind}', '${cls}.${code}')`
         }))
@@ -725,7 +789,9 @@ function settingsBounceCodes(kind, config, lockedKeys, defaults) {
             (locked ? '<span class="ui-set-pill" title="Set by an environment variable, change it there">' + SETTINGS_LOCK_ICON + ' Set by ENV: ' + escapeHtml(key.toUpperCase()) + '</span>' : '') +
             '<span class="ui-set-pill is-changed" title="Differs from the default" hidden>Changed</span></div>' +
         '<small class="ui-set-desc">' + escapeHtml(desc) + '</small>' +
-        '<div class="ui-chip-row" data-codes-list aria-labelledby="label-' + id + '"></div>' +
+        settingsStandardCodes(kind, cls, config, lockedKeys, defaults) +
+        '<span class="ui-label ui-set-codes-also" id="label-' + id + '-also">Also leave alone</span>' +
+        '<div class="ui-chip-row" data-codes-list aria-labelledby="label-' + id + '-also"></div>' +
         // A code the registry does not list (a provider's own, such as 5.7.509) is typed beside it
         (locked ? '' : '<div class="ui-sec-ladd ui-flush ui-set-codes-add">' + picker +
             '<span class="ui-set-codes-other"><input type="text" class="ui-input" id="' + id + '-other" autocomplete="off" spellcheck="false" maxlength="20"' +
@@ -753,9 +819,23 @@ function settingsShowCodes(box) {
                 escapeHtml(code) + '" title="Remove">&times;</button>') + '</span>';
     };
     box.querySelector('[data-codes-list]').innerHTML = codes.length ? codes.map(chip).join('') : '<span class="ui-muted">No codes yet</span>';
+    // A code the standard codes leave alone is not offered again while their switch is on
+    const standard = settingsStandardOn(box);
+    box.dataset.standard = String(standard);
+    const covered = code => standard && settingsStandardCovers(code);
+    box.querySelectorAll('.ui-picker-panel [role="option"]').forEach(option => {
+        const on = covered(option.dataset.value);
+        option.disabled = on;
+        let tag = option.querySelector('small');
+        if (on && !tag) {
+            tag = document.createElement('small');
+            tag.textContent = 'Standard';
+            option.appendChild(tag);
+        } else if (!on && tag) tag.remove();
+    });
     const seenBox = box.querySelector('[data-codes-seen]');
     const seen = settingsCodesSeen && !locked
-        ? (settingsCodesSeen[box.dataset.class === '5' ? 'permanent' : 'temporary'] || []).filter(s => !codes.includes(s.code)) : [];
+        ? (settingsCodesSeen[box.dataset.class === '5' ? 'permanent' : 'temporary'] || []).filter(s => !codes.includes(s.code) && !covered(s.code)) : [];
     seenBox.hidden = !seen.length;
     seenBox.innerHTML = seen.length ? '<h4 class="ui-set-codes-h">In the mail logs in the last ' + escapeHtml(uiCountLabel(settingsCodesSeen.days, 'day', 'days')) + '</h4>' +
         '<div class="ui-chip-row">' + seen.map(s => {
@@ -1333,11 +1413,11 @@ var SETTINGS_EDIT_TABS = [
             // Reading the logs is set by the choices (settingsSyncBounce)
             // Each choice is followed by the codes it leaves alone (settingsBounceCodes)
             { label: 'Permanent delivery failure', choice: 'hard', needs: 'suppression_enabled',
-                keys: ['suppression_hard_bounce_action', 'suppression_auto_detect', 'suppression_hard_bounce_excluded_codes'],
+                keys: ['suppression_hard_bounce_action', 'suppression_auto_detect', 'suppression_hard_bounce_standard_codes', 'suppression_hard_bounce_excluded_codes'],
                 intro: 'The receiving server rejected the message permanently. (5.x.x)' },
             { label: 'Temporary delivery failure', choice: 'soft', needs: 'suppression_enabled',
                 keys: ['queue_cleanup_enabled', 'queue_cleanup_block', 'suppression_soft_bounce_action', 'queue_cleanup_threshold_minutes', 'suppression_soft_bounce_threshold',
-                    'suppression_soft_bounce_excluded_codes'],
+                    'suppression_soft_bounce_standard_codes', 'suppression_soft_bounce_excluded_codes'],
                 intro: 'Postfix keeps the message and retries. (4.x.x)' },
             // A block reaches Rspamd only through the sync: without it nothing is blocked
             { label: 'How long to block', needs: 'suppression_enabled suppression_rspamd_sync', keys: ['suppression_base_expiry_days', 'suppression_max_expiry_days'] },
@@ -2310,6 +2390,12 @@ function renderSettings(content, data) {
             form.addEventListener('input', showChoices);
             // The codes left alone: their chips, and dimmed while their choice is Do nothing
             content.querySelectorAll('.ui-set-codes').forEach(settingsShowCodes);
+            // A box follows its standard codes switch (Reset on its row: the clear buttons below)
+            const followStandard = () => content.querySelectorAll('.ui-set-codes').forEach(box => {
+                if (String(settingsStandardOn(box)) !== box.dataset.standard) settingsShowCodes(box);
+            });
+            form.addEventListener('change', followStandard);
+            form.addEventListener('input', followStandard);
             settingsShowCodesNeeds();
             form.addEventListener('change', settingsShowCodesNeeds);
             form.addEventListener('input', settingsShowCodesNeeds);
@@ -2328,7 +2414,7 @@ function renderSettings(content, data) {
             });
             form.addEventListener('input', () => settingsSuggestAgentUrl(content, false));
             // Clearing and resetting change a field without an input event
-            content.querySelectorAll('.settings-clear-btn').forEach(btn => btn.addEventListener('click', () => setTimeout(() => { updateDirty(); settingsShowNeeds(content); settingsShowFormatExample(content); settingsSuggestAgentUrl(content, false); })));
+            content.querySelectorAll('.settings-clear-btn').forEach(btn => btn.addEventListener('click', () => setTimeout(() => { updateDirty(); settingsShowNeeds(content); settingsShowFormatExample(content); settingsSuggestAgentUrl(content, false); content.querySelectorAll('.ui-set-codes').forEach(settingsShowCodes); })));
         }
 
         if (form) {

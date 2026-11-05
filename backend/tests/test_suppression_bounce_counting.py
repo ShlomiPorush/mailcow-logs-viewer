@@ -36,6 +36,9 @@ def env(monkeypatch):
         'suppression_base_expiry_days': 7, 'suppression_max_expiry_days': 90,
         # Soft bounces are read from the logs only while Queue Cleanup is off
         'queue_cleanup_enabled': False,
+        # The count itself: a connection timeout (4.4.1) is a standard code left
+        # alone by default (see test_bounce_code_exceptions)
+        'suppression_soft_bounce_standard_codes': False,
     }.items():
         monkeypatch.setattr(settings._inner, key, value)
     monkeypatch.setattr(sch.mailcow_api, 'headers_rw', None)   # no queue calls

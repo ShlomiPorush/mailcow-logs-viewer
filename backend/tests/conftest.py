@@ -94,6 +94,20 @@ def local_domains_loaded(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def queue_log_unread(monkeypatch, request):
+    """The queue jobs also read the codes the Postfix log has for queued mail; a
+    test with a made-up queue reads none, unless it asks for the log (real_queue_log)."""
+    scheduler = sys.modules.get("app.scheduler")
+    if scheduler is not None and "real_queue_log" not in request.fixturenames:
+        monkeypatch.setattr(scheduler, "_logged_deferral_codes", lambda arrived: {})
+
+
+@pytest.fixture
+def real_queue_log():
+    """The queue jobs read the logged codes of queued mail from the test database."""
+
+
+@pytest.fixture(autouse=True)
 def mailcow_reachable(monkeypatch):
     """No test starts with mailcow refused because an earlier test could not connect to it."""
     from app import mailcow_api as client

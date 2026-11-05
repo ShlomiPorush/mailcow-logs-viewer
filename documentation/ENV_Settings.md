@@ -253,6 +253,8 @@ Some services are collected whatever this list says, because other pages read th
 | `SUPPRESSION_SOFT_BOUNCE_ACTION` | `count` | For temporary failures (4.x.x): `suppress`, `count` (suppress at the threshold) or `ignore`. Used only while `QUEUE_CLEANUP_ENABLED=false`. With `SUPPRESSION_RSPAMD_SYNC=false`, both that block act as `ignore`. |
 | `SUPPRESSION_HARD_BOUNCE_EXCLUDED_CODES` | Empty | Comma-separated 5.x.x codes, such as `5.2.2`, that are not blocked, counted or deleted. |
 | `SUPPRESSION_SOFT_BOUNCE_EXCLUDED_CODES` | Empty | Comma-separated 4.x.x codes, such as `4.2.2`, that are not blocked or counted; their mail stays in the queue. |
+| `SUPPRESSION_HARD_BOUNCE_STANDARD_CODES` | `true` | Also leave alone the standard 5.x.x codes, which say nothing about the recipient address, such as 5.7.x for policy. Settings > Outbound lists them. |
+| `SUPPRESSION_SOFT_BOUNCE_STANDARD_CODES` | `true` | Also leave alone the standard 4.x.x codes, such as 4.2.2 for a full mailbox and 4.4.x for the network. Settings > Outbound lists them. |
 | `SUPPRESSION_SOFT_BOUNCE_THRESHOLD` | `3` | Soft bounces before `count` suppresses. Used only while `QUEUE_CLEANUP_ENABLED=false`. |
 | `QUEUE_CLEANUP_ENABLED` | `true` | Delete messages stuck in the deferred queue longer than the threshold. Needs the read-write key and `SUPPRESSION_ENABLED=true`. |
 | `QUEUE_CLEANUP_BLOCK` | `true` | Also block the recipients of the messages `QUEUE_CLEANUP_ENABLED` deletes. Needs `SUPPRESSION_RSPAMD_SYNC=true`; without it the cleanup only deletes. |

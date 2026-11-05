@@ -656,7 +656,8 @@
 .ui-fct-list { display: grid; gap: 1px; }
 .ui-fct { display: flex; align-items: center; gap: 10px; width: 100%; padding: 5px 8px; border: 0; border-radius: var(--ui-radius-sm);
     background: none; color: var(--ui-ink); font: inherit; text-align: start; cursor: pointer; }
-@media (hover: hover) { .ui-fct:hover { background: color-mix(in srgb, var(--ui-ink) 6%, transparent); } }
+@media (hover: hover) { .ui-fct:hover:not(:disabled) { background: color-mix(in srgb, var(--ui-ink) 6%, transparent); } }
+.ui-fct:disabled { opacity: .55; cursor: default; }
 .ui-fct[aria-pressed="true"] { background: var(--ui-accent); color: var(--ui-on-accent); font-weight: 700; }
 .ui-fct small { margin-inline-start: auto; color: var(--ui-muted); font-variant-numeric: tabular-nums; }
 .ui-fct[aria-pressed="true"] small { color: inherit; }
@@ -2322,6 +2323,16 @@ html body .ui-main .ui-set-choice-opt > input[type="radio"] { accent-color: var(
 .ui-set-codes-add > .ui-picker { flex: 2 1 260px; min-width: 0; }
 .ui-set-codes-other { display: flex; gap: 8px; flex: 1 1 220px; min-width: 0; }
 .ui-set-codes-other .ui-input { flex: 1; min-width: 0; }
+.ui-set-codes-std { display: grid; gap: 6px; padding: 12px 14px; border: 1px solid var(--ui-line); border-radius: var(--ui-radius);
+  background: color-mix(in srgb, var(--ui-ink) 3%, transparent); }
+.ui-set-codes-std > .ui-set-bool { padding: 0; border: 0; }
+.ui-set-codes-std summary { width: fit-content; color: var(--ui-muted); font-size: 12.5px; cursor: pointer; }
+.ui-set-codes-groups { columns: 3 250px; column-gap: 24px; margin-top: 10px; }
+.ui-set-codes-groups > div { break-inside: avoid; margin-bottom: 10px; }
+.ui-set-codes-groups h5 { margin: 0 0 3px; color: var(--ui-muted); font-size: 12px; font-weight: 650; }
+.ui-set-codes-groups span { display: flex; gap: 8px; font-size: 12.5px; line-height: 1.55; }
+.ui-set-codes-groups b { flex: none; min-width: 4.6em; direction: ltr; unicode-bidi: isolate; text-align: start; }
+.ui-set-codes-also { margin-top: 6px; }
 
 /* Floating save bar (uiSaveBar), shown only with unsaved changes, on every editable page */
 .ui-savebar { position: fixed; inset: auto 0 18px 0; z-index: 60; display: flex; align-items: center; gap: 12px; width: fit-content; margin: 0 auto;

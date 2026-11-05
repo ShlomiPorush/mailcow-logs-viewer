@@ -3608,9 +3608,11 @@ def _store_deferred_suppressions_worker(recipients_to_suppress, uncovered: Optio
         # Asked again under the lock: the domain list may have changed since the run picked them
         by_email = {email: group for email, group in by_email.items() if not _left_alone([email])}
         # And the codes left alone: a message waiting with one of them is not
-        # deleted, so none of its recipients is blocked for it
+        # deleted, so none of its recipients is blocked for it. The cleanup
+        # passes the message's codes, the log's included; else the reason has them
         kept_messages = {item['queue_id'] for group in by_email.values() for item in group
-                         if item.get('queue_id') and _excluded_now(codes_in_text(item.get('reason')))}
+                         if item.get('queue_id') and _excluded_now(
+                             item['codes'] if 'codes' in item else codes_in_text(item.get('reason')))}
         by_email = {email: kept for email, kept in (
             (email, [item for item in group if item.get('queue_id') not in kept_messages]) for email, group in by_email.items()) if kept}
         existing_by_email = {s.email: s for s in db.query(SpamSuppression).filter(
@@ -3766,6 +3768,57 @@ def _queue_item_reasons(item) -> List[Optional[str]]:
 def _queue_item_codes(item) -> List[str]:
     """The status codes in the deferral reasons of a queued message."""
     return [code for reason in _queue_item_reasons(item) for code in codes_in_text(reason)]
+
+
+def _queue_item_arrived(item) -> Optional[datetime]:
+    """When a queued message arrived, in UTC, or None when mailcow gave no
+    readable time."""
+    try:
+        arrived = item.get('arrival_time')
+        return datetime.fromtimestamp(arrived, tz=timezone.utc).replace(tzinfo=None) if arrived else None
+    except (OverflowError, OSError, TypeError, ValueError):
+        return None
+
+
+def _logged_deferral_codes(arrived_by_queue_id: Dict[str, Optional[datetime]]) -> Dict[str, List[str]]:
+    """The status code of the latest deferral of each recipient of these queued
+    messages, read from the Postfix log: {queue_id: [dsn, ...]}. A reason
+    in the queue often has none ("connect to ...: Connection timed out", which
+    Postfix logs as 4.4.1). Only lines from the message's arrival on count: a
+    queue ID can come back for a later message."""
+    if not arrived_by_queue_id:
+        return {}
+    with get_db_context() as db:
+        rows = db.query(PostfixLog.id, PostfixLog.queue_id, PostfixLog.recipient, PostfixLog.dsn, PostfixLog.time).filter(
+            PostfixLog.queue_id.in_(list(arrived_by_queue_id)),
+            PostfixLog.status == 'deferred',
+            PostfixLog.recipient.isnot(None),
+            PostfixLog.dsn.isnot(None),
+            or_(*[PostfixLog.program.like(f'%/{agent}') for agent in _BOUNCE_AGENTS]),
+        ).all()
+    latest = {}
+    for row_id, queue_id, recipient, dsn, logged in rows:
+        arrived = arrived_by_queue_id.get(queue_id)
+        # A minute of slack: the log time and mailcow's arrival time come from different clocks
+        if arrived is not None and logged is not None and logged < arrived - timedelta(minutes=1):
+            continue
+        key = (queue_id, recipient.strip('<>').lower())
+        order = (logged or datetime.min, row_id)
+        if key not in latest or order > latest[key][0]:
+            latest[key] = (order, dsn)
+    codes = {}
+    for (queue_id, _), (_, dsn) in latest.items():
+        codes.setdefault(queue_id, []).append(dsn)
+    return codes
+
+
+async def _add_logged_codes(item_codes: Dict[str, List[str]], arrived: Dict[str, Optional[datetime]]) -> None:
+    """Adds to item_codes (by queue ID) the codes the log has for these queued
+    messages. A log that cannot be read raises: nothing is deleted this run."""
+    logged = await asyncio.get_running_loop().run_in_executor(
+        get_thread_pool_executor(), _logged_deferral_codes, arrived)
+    for queue_id, codes in logged.items():
+        item_codes.setdefault(queue_id, []).extend(codes)
 
 
 def _excluded_now(codes) -> bool:
@@ -3931,6 +3984,7 @@ async def cleanup_deferred_queue_job():
 
         items = {}
         item_codes = {}
+        arrived_by_queue_id = {}
         recipients_to_suppress = []
 
         for item in queue:
@@ -3958,11 +4012,8 @@ async def cleanup_deferred_queue_job():
             if _left_alone(addresses):
                 continue
             reasons = _queue_item_reasons(item)
-            # So does mail deferred with a code left alone in Settings
             item_codes[queue_id] = _queue_item_codes(item)
-            if _excluded_now(item_codes[queue_id]):
-                logger.info(f"[QUEUE CLEANUP] Deferred item {queue_id} failed with a code left alone in Settings - left in the queue")
-                continue
+            arrived_by_queue_id[queue_id] = _queue_item_arrived(item)
             items[queue_id] = addresses
 
             if blocking:
@@ -3977,6 +4028,16 @@ async def cleanup_deferred_queue_job():
                 f"(threshold: {settings.queue_cleanup_threshold_minutes}m) - "
                 f"recipients: {', '.join(addresses)}"
             )
+
+        # Mail deferred with a code left alone in Settings stays. The log has
+        # the code a reason in the queue often leaves out (a timeout is 4.4.1)
+        if items:
+            await _add_logged_codes(item_codes, arrived_by_queue_id)
+        for queue_id in [queue_id for queue_id in items if _excluded_now(item_codes.get(queue_id))]:
+            logger.info(f"[QUEUE CLEANUP] Deferred item {queue_id} failed with a code left alone in Settings - left in the queue")
+            del items[queue_id]
+        recipients_to_suppress = [{**r, 'codes': item_codes.get(r['queue_id'], [])}
+                                  for r in recipients_to_suppress if r['queue_id'] in items]
 
         if not items:
             update_job_status('cleanup_deferred_queue', 'success')
@@ -4983,13 +5044,16 @@ async def detect_suppressions_job():
         targets = to_block | to_delete
         if targets and mailcow_api.has_rw_key:
             try:
-                items, item_codes = {}, {}
+                items, item_codes, arrived = {}, {}, {}
                 for item in await mailcow_api.get_queue() or []:
                     queue_id = item.get('queue_id') if isinstance(item, dict) else None
                     addresses = _queue_item_addresses(item)
                     if queue_id and addresses and any(a in targets for a in addresses):
                         items[queue_id] = addresses
                         item_codes[queue_id] = _queue_item_codes(item)
+                        arrived[queue_id] = _queue_item_arrived(item)
+                if items:
+                    await _add_logged_codes(item_codes, arrived)
                 if items and settings.is_feature_enabled('suppressions'):
                     async with map_write_lock_async():
                         deletable = await asyncio.get_running_loop().run_in_executor(
