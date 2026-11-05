@@ -215,6 +215,8 @@ def test_after_the_upgrade_the_threshold_counts_new_bounces_only(suppression_set
         "suppression_soft_bounce_action": "count", "suppression_soft_bounce_threshold": 3,
         "suppression_hard_bounce_action": "suppress", "suppression_whitelist_domains": "",
         "suppression_base_expiry_days": 7, "suppression_max_expiry_days": 90, "queue_cleanup_enabled": False,
+        # The count itself: 4.4.1 is a standard code left alone by default
+        "suppression_soft_bounce_standard_codes": False,
     }.items():
         monkeypatch.setattr(settings._inner, key, value)
     revision = _revision("soft_bounce_threshold_repair")

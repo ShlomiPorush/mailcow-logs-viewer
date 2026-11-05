@@ -817,10 +817,30 @@ class Settings(BaseSettings):
         env='SUPPRESSION_HARD_BOUNCE_ACTION',
         description='Action for hard bounces (DSN 5.x.x): suppress (block and delete queued mail), delete (only the queued mail) or ignore'
     )
+    suppression_hard_bounce_excluded_codes: str = Field(
+        default='',
+        env='SUPPRESSION_HARD_BOUNCE_EXCLUDED_CODES',
+        description='Comma-separated 5.x.x codes excluded from automatic handling: the app does not block the address, count the failure, or delete queued mail'
+    )
+    suppression_hard_bounce_standard_codes: bool = Field(
+        default=True,
+        env='SUPPRESSION_HARD_BOUNCE_STANDARD_CODES',
+        description='Also exclude a fixed list of 5.x.x codes for failures unrelated to the recipient address'
+    )
     suppression_soft_bounce_action: str = Field(
         default='count',
         env='SUPPRESSION_SOFT_BOUNCE_ACTION',
         description='Action for soft bounces (DSN 4.x.x): suppress, count, or ignore'
+    )
+    suppression_soft_bounce_excluded_codes: str = Field(
+        default='',
+        env='SUPPRESSION_SOFT_BOUNCE_EXCLUDED_CODES',
+        description='Comma-separated 4.x.x codes excluded from automatic handling: the app does not block the address or count the failure, and the message stays in the queue'
+    )
+    suppression_soft_bounce_standard_codes: bool = Field(
+        default=True,
+        env='SUPPRESSION_SOFT_BOUNCE_STANDARD_CODES',
+        description='Also exclude a fixed list of 4.x.x codes for failures unrelated to the recipient address'
     )
     suppression_soft_bounce_threshold: int = Field(
         default=3,

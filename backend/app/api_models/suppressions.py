@@ -76,7 +76,17 @@ class SuppressionConfig(Fixed):
     list_kept: bool = Field(description="The app keeps a list now: Suppressions and Sync with Rspamd are on")
     suppression_whitelist_domains: str = Field(description="Comma-separated domains never suppressed")
     suppression_hard_bounce_action: str = Field(description="suppress, delete or ignore")
+    suppression_hard_bounce_excluded_codes: str = Field(description="Comma-separated 5.x.x codes excluded from "
+                                                                    "automatic handling: the app does not block the address, "
+                                                                    "count the failure, or delete queued mail")
+    suppression_hard_bounce_standard_codes: bool = Field(description="Also exclude a fixed list of 5.x.x codes "
+                                                                     "for failures unrelated to the recipient address")
     suppression_soft_bounce_action: str
+    suppression_soft_bounce_excluded_codes: str = Field(description="Comma-separated 4.x.x codes excluded from "
+                                                                    "automatic handling: the app does not block the address "
+                                                                    "or count the failure, and the message stays in the queue")
+    suppression_soft_bounce_standard_codes: bool = Field(description="Also exclude a fixed list of 4.x.x codes "
+                                                                     "for failures unrelated to the recipient address")
     suppression_soft_bounce_threshold: int
     queue_cleanup_enabled: bool
     queue_cleanup_block: bool
@@ -86,6 +96,18 @@ class SuppressionConfig(Fixed):
     rspamd_configured: bool = Field(description="An Rspamd password is set; it is not tested")
     rw_key_configured: bool = Field(description="A Read-Write mailcow API key is set; it is not tested")
     is_fully_configured: bool = Field(description="Suppression is on and a Read-Write key is set")
+
+
+class BounceCodeCount(Fixed):
+    code: str = Field(description="The status code, such as 5.1.1")
+    count: int = Field(description="Delivery failures with this code")
+
+
+class BounceCodes(Fixed):
+    """The status codes of the delivery failures in the mail logs, most frequent first."""
+    days: int = Field(description="How many days back the logs are read")
+    permanent: List[BounceCodeCount] = Field(description="5.x.x codes")
+    temporary: List[BounceCodeCount] = Field(description="4.x.x codes")
 
 
 class SuppressionDeleted(Fixed):

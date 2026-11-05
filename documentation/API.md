@@ -2251,7 +2251,13 @@ Totals as top-level fields: `total`, `active`, `expired`, `hard_bounce`, `soft_b
 
 #### GET /api/suppressions/config
 
-The suppression settings (`suppression_enabled`, `suppression_auto_detect`, `suppression_rspamd_sync`, `list_kept` (the app keeps a list now: Suppressions and the sync on), `suppression_whitelist_domains` as the comma-separated string, `suppression_hard_bounce_action` (`suppress`, `delete` or `ignore`), `suppression_soft_bounce_action`, `suppression_soft_bounce_threshold`, `queue_cleanup_enabled`, `queue_cleanup_block`, `queue_cleanup_threshold_minutes`, `suppression_base_expiry_days`, `suppression_max_expiry_days`) and `rspamd_configured`, `rw_key_configured` and `is_fully_configured`. `is_fully_configured` means suppression is on and a read-write key is set; Rspamd sync also needs `rspamd_configured`.
+The suppression settings (`suppression_enabled`, `suppression_auto_detect`, `suppression_rspamd_sync`, `list_kept` (the app keeps a list now: Suppressions and the sync on), `suppression_whitelist_domains` as the comma-separated string, `suppression_hard_bounce_action` (`suppress`, `delete` or `ignore`), `suppression_hard_bounce_excluded_codes`, `suppression_soft_bounce_excluded_codes`, `suppression_hard_bounce_standard_codes`, `suppression_soft_bounce_standard_codes`, `suppression_soft_bounce_action`, `suppression_soft_bounce_threshold`, `queue_cleanup_enabled`, `queue_cleanup_block`, `queue_cleanup_threshold_minutes`, `suppression_base_expiry_days`, `suppression_max_expiry_days`) and `rspamd_configured`, `rw_key_configured` and `is_fully_configured`. `is_fully_configured` means suppression is on and a read-write key is set; Rspamd sync also needs `rspamd_configured`. `suppression_hard_bounce_excluded_codes` and `suppression_soft_bounce_excluded_codes` are comma-separated strings of additional codes excluded from automatic handling. They accept 5.x.x and 4.x.x codes respectively, such as `5.2.2` and `4.2.2`. When `suppression_hard_bounce_standard_codes` or `suppression_soft_bounce_standard_codes` is `true`, the corresponding fixed list of codes is also excluded. View these lists in Settings > Outbound. For excluded codes, the app does not block the address, count the failure, or delete queued mail. Postfix returns permanently failed messages to the sender and keeps retrying temporarily failed messages.
+
+---
+
+#### GET /api/suppressions/bounce-codes
+
+Returns status codes from failed outgoing delivery attempts in the last 7 days, sorted by frequency, highest first. The response contains `days` (`7`), `permanent` (5.x.x codes), and `temporary` (4.x.x codes). Each code list contains objects such as `{ "code": "5.1.1", "count": 14 }`. The `count` is the number of failed delivery attempts with that code.
 
 ---
 
