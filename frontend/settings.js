@@ -451,7 +451,7 @@ function settingsBounceChoice(kind, config, lockedKeys, defaults) {
     const changed = Object.keys(resetTo).some(differs);
     return '<div class="ui-set-field ui-set-wide ui-set-choice' + (changed ? ' is-changed' : '') + '" data-choice="' + kind + '" data-rw="' +
             (config.mailcow_api_key_rw ? '1' : '0') + '" data-defaults="' + escapeHtml(JSON.stringify(resetTo)) + '" data-loaded="' + escapeHtml(picked) + '">' +
-        '<div class="ui-set-choice-head"><span class="ui-label" id="label-' + group + '">What should happen?</span>' +
+        '<div class="ui-set-choice-head"><span class="ui-label" id="label-' + group + '">Action</span>' +
             (lockedNames.length ? '<span class="ui-set-pill" title="Set by an environment variable, change it there">' + SETTINGS_LOCK_ICON + ' Set by ENV: ' + escapeHtml(lockedNames.join(', ')) + '</span>' : '') +
             '<span class="ui-set-pill is-changed" title="Differs from the default"' + (changed ? '' : ' hidden') + '>Changed</span></div>' +
         '<small class="ui-set-choice-note" data-sync-changed hidden></small>' +
