@@ -4,6 +4,7 @@ the application's own request, retry and parsing code is what is tested.
 """
 import asyncio
 import logging
+import secrets
 
 import pytest
 
@@ -17,9 +18,9 @@ def api(monkeypatch):
     original = MailcowAPI._get_client
     fake_mailcow.install(fake)
     client = MailcowAPI()
-    client.headers_rw = {"X-API-Key": "demo", "Content-Type": "application/json"}
+    client.headers_rw = {"X-API-Key": secrets.token_hex(16), "Content-Type": "application/json"}
     from app.config import settings
-    monkeypatch.setattr(settings._inner, "rspamd_password", "demo")
+    monkeypatch.setattr(settings._inner, "rspamd_password", secrets.token_hex(16))
     try:
         yield client, fake
     finally:
