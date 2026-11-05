@@ -3780,12 +3780,14 @@ def _queue_item_arrived(item) -> Optional[datetime]:
         return None
 
 
-def _logged_deferral_codes(arrived_by_queue_id: Dict[str, Optional[datetime]]) -> Dict[str, List[str]]:
-    """The status code of the latest deferral of each recipient of these queued
-    messages, read from the Postfix log: {queue_id: [dsn, ...]}. A reason
-    in the queue often has none ("connect to ...: Connection timed out", which
-    Postfix logs as 4.4.1). Only lines from the message's arrival on count: a
-    queue ID can come back for a later message."""
+def _logged_deferral_codes(arrived_by_queue_id: Dict[str, Optional[datetime]],
+                           waiting: Dict[str, List[str]]) -> Dict[str, List[str]]:
+    """The status code of the latest deferral of each recipient still waiting
+    in these queued messages (waiting: their addresses by queue ID), read from
+    the Postfix log: {queue_id: [dsn, ...]}. A reason in the queue often has
+    none ("connect to ...: Connection timed out", which Postfix logs as 4.4.1).
+    A recipient already delivered says nothing about the rest, and only lines
+    from the message's arrival on count: a queue ID can come back later."""
     if not arrived_by_queue_id:
         return {}
     with get_db_context() as db:
@@ -3802,7 +3804,10 @@ def _logged_deferral_codes(arrived_by_queue_id: Dict[str, Optional[datetime]]) -
         # A minute of slack: the log time and mailcow's arrival time come from different clocks
         if arrived is not None and logged is not None and logged < arrived - timedelta(minutes=1):
             continue
-        key = (queue_id, recipient.strip('<>').lower())
+        address = auto_suppression_address(recipient.strip('<>'))
+        if address not in (waiting.get(queue_id) or ()):
+            continue
+        key = (queue_id, address)
         order = (logged or datetime.min, row_id)
         if key not in latest or order > latest[key][0]:
             latest[key] = (order, dsn)
@@ -3812,11 +3817,13 @@ def _logged_deferral_codes(arrived_by_queue_id: Dict[str, Optional[datetime]]) -
     return codes
 
 
-async def _add_logged_codes(item_codes: Dict[str, List[str]], arrived: Dict[str, Optional[datetime]]) -> None:
-    """Adds to item_codes (by queue ID) the codes the log has for these queued
-    messages. A log that cannot be read raises: nothing is deleted this run."""
+async def _add_logged_codes(item_codes: Dict[str, List[str]], arrived: Dict[str, Optional[datetime]],
+                            waiting: Dict[str, List[str]]) -> None:
+    """Adds to item_codes (by queue ID) the codes the log has for the recipients
+    still waiting in these queued messages. A log that cannot be read raises:
+    nothing is deleted this run."""
     logged = await asyncio.get_running_loop().run_in_executor(
-        get_thread_pool_executor(), _logged_deferral_codes, arrived)
+        get_thread_pool_executor(), _logged_deferral_codes, arrived, waiting)
     for queue_id, codes in logged.items():
         item_codes.setdefault(queue_id, []).extend(codes)
 
@@ -4032,7 +4039,7 @@ async def cleanup_deferred_queue_job():
         # Mail deferred with a code left alone in Settings stays. The log has
         # the code a reason in the queue often leaves out (a timeout is 4.4.1)
         if items:
-            await _add_logged_codes(item_codes, arrived_by_queue_id)
+            await _add_logged_codes(item_codes, arrived_by_queue_id, items)
         for queue_id in [queue_id for queue_id in items if _excluded_now(item_codes.get(queue_id))]:
             logger.info(f"[QUEUE CLEANUP] Deferred item {queue_id} failed with a code left alone in Settings - left in the queue")
             del items[queue_id]
@@ -5053,7 +5060,7 @@ async def detect_suppressions_job():
                         item_codes[queue_id] = _queue_item_codes(item)
                         arrived[queue_id] = _queue_item_arrived(item)
                 if items:
-                    await _add_logged_codes(item_codes, arrived)
+                    await _add_logged_codes(item_codes, arrived, items)
                 if items and settings.is_feature_enabled('suppressions'):
                     async with map_write_lock_async():
                         deletable = await asyncio.get_running_loop().run_in_executor(

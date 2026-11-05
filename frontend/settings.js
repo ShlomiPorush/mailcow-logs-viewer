@@ -846,7 +846,8 @@ function settingsShowCodes(box) {
         }).join('') + '</div>' : '';
     const changed = !locked && field.value !== box.dataset.default;
     box.classList.toggle('is-changed', changed);
-    box.querySelectorAll('.ui-set-pill.is-changed, .is-reset').forEach(el => { el.hidden = !changed; });
+    // The list's own marker and Reset: the switch row inside has its own
+    box.querySelectorAll(':scope > .ui-set-choice-head .ui-set-pill.is-changed, :scope > .is-reset').forEach(el => { el.hidden = !changed; });
 }
 
 function settingsSetCodes(box, codes) {

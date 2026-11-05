@@ -99,7 +99,7 @@ def queue_log_unread(monkeypatch, request):
     test with a made-up queue reads none, unless it asks for the log (real_queue_log)."""
     scheduler = sys.modules.get("app.scheduler")
     if scheduler is not None and "real_queue_log" not in request.fixturenames:
-        monkeypatch.setattr(scheduler, "_logged_deferral_codes", lambda arrived: {})
+        monkeypatch.setattr(scheduler, "_logged_deferral_codes", lambda arrived, waiting: {})
 
 
 @pytest.fixture

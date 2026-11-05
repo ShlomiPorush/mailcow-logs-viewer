@@ -381,7 +381,7 @@ def test_a_logged_code_of_an_earlier_message_with_the_same_queue_id_is_not_read(
 def test_a_log_that_cannot_be_read_deletes_nothing(base):
     _set(base, suppression_soft_bounce_excluded_codes='', queue_cleanup_block=False)
 
-    def unreadable(arrived):
+    def unreadable(arrived, waiting):
         raise RuntimeError('database gone')
 
     base.setattr(scheduler, '_logged_deferral_codes', unreadable)
@@ -401,3 +401,36 @@ def test_the_block_store_reads_the_codes_the_cleanup_passes(db, base):
     ], set())
     assert counted == 1
     assert _rows(db) == {gone: True}
+
+
+def test_a_code_of_a_recipient_already_delivered_does_not_keep_the_rest(db, base, real_queue_log):
+    """Review R1: the log's code of a recipient no longer in the queue says nothing about the one still waiting."""
+    _set(base, suppression_soft_bounce_excluded_codes='', suppression_soft_bounce_standard_codes=True)
+    stored = []
+    base.setattr(scheduler, '_store_deferred_suppressions_worker',
+                 lambda r, uncovered=None: stored.extend(r) or len({i['email'] for i in r}))
+    done, remaining = f'done-{MARK}@example.org', f'remaining-{MARK}@example.org'
+    qid = f'P{MARK.upper()}'
+    _deferral(db, qid, done, '4.4.1', timedelta(minutes=50))       # later delivered: gone from the queue
+    _deferral(db, qid, remaining, '4.1.1', timedelta(minutes=40))
+    _queue(base, [_stuck(qid, f'{remaining.upper()} (host mx.example.org[192.0.2.1] said: 450 user unknown here)')])
+    asyncio.run(scheduler.cleanup_deferred_queue_job())
+    scheduler.mailcow_api.delete_queue.assert_awaited_once_with([qid])
+    assert {i['email'] for i in stored} == {remaining}
+
+
+def test_the_permanent_failure_deletion_reads_the_log_of_the_recipient_waiting(db, base, real_queue_log):
+    """The deletion after a permanent failure asks the log too, per recipient still waiting."""
+    _set(base, suppression_soft_bounce_standard_codes=True, suppression_hard_bounce_excluded_codes='',
+         suppression_soft_bounce_excluded_codes='')
+    gone = f'gone-{MARK}@example.org'
+    _line(db, gone, '5.1.1')
+    _deferral(db, f'W{MARK.upper()}', gone, '4.4.1', timedelta(minutes=30))
+    _deferral(db, f'O{MARK.upper()}', f'other-{MARK}@example.org', '4.4.1', timedelta(minutes=30))
+    _queue(base, [{'queue_id': f'W{MARK.upper()}', 'queue_name': 'deferred', 'arrival_time': OLD,
+                   'recipients': [f'{gone} (connect to mx.example.org[192.0.2.1]:25: Connection timed out)']},
+                  {'queue_id': f'O{MARK.upper()}', 'queue_name': 'deferred', 'arrival_time': OLD, 'recipients': [gone]}])
+    asyncio.run(scheduler.detect_suppressions_job())
+    assert _rows(db) == {gone: True}
+    # The message deferred with a timeout stays; the other one's logged code belongs to another recipient
+    scheduler.mailcow_api.delete_queue.assert_awaited_once_with([f'O{MARK.upper()}'])
