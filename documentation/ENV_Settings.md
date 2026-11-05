@@ -21,10 +21,18 @@ The app reads these before it can reach the database, so they stay in `.env`.
 | `POSTGRES_HOST` | `db` | `db` is the database container of the supplied Compose file. |
 | `POSTGRES_PORT` | `5432` | |
 | `POSTGRES_USER` | Required | `env.example` uses `mailcowlogs`. |
-| `POSTGRES_PASSWORD` | Required | Replace the `changeme` from `env.example` with a long random value; hexadecimal avoids characters that break the database URL. |
+| `POSTGRES_PASSWORD` | Required | A long random value, for example from `openssl rand -hex 32`; hexadecimal avoids characters that break the database URL. |
 | `POSTGRES_DB` | Required | `env.example` uses `mailcowlogs`. |
 
-The `db` service in `docker-compose.yml` falls back to `mailcowlogs` and `changeme`, but the app does not: it does not start without these values in `.env`.
+The `db` service in `docker-compose.yml` falls back to `mailcowlogs` for the user and the database name, but not for the password, and the app does not start without these values in `.env`.
+
+The app does not start when `POSTGRES_PASSWORD` or `MAILCOW_API_KEY` is empty, or when any password, key or secret setting holds an example value from this project's documentation, earlier versions included, such as `changeme` or a value starting with `replace-with-`. Those values are public. The error names the setting. For `POSTGRES_PASSWORD`, change the database user's password to the new value first, then put the same value in `.env` and run `docker compose up -d`:
+
+```sh
+docker compose exec db psql -U mailcowlogs -d mailcowlogs -c "ALTER USER mailcowlogs PASSWORD 'replace-with-the-new-password'"
+```
+
+Use your own `POSTGRES_USER` and `POSTGRES_DB` if you changed them.
 
 ## Settings UI configuration
 

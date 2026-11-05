@@ -74,6 +74,52 @@ _DB_ONLY_KEYS = frozenset({"postgres_host", "postgres_port", "postgres_user", "p
 # Name avoids "settings_" prefix to prevent Pydantic protected namespace warning.
 _EDIT_VIA_UI_FLAG_KEY = "edit_settings_via_ui_enabled"
 
+# Settings that hold a password, key or other secret. Each environment
+# variable is the setting's name in capitals.
+SECRET_SETTING_KEYS = (
+    "postgres_password", "mailcow_api_key", "mailcow_api_key_rw", "auth_password",
+    "session_secret_key", "oauth2_client_secret", "smtp_password", "dmarc_imap_password",
+    "rspamd_password", "maxmind_license_key",
+)
+_REQUIRED_SECRET_KEYS = frozenset({"postgres_password", "mailcow_api_key"})
+# Every value this project's examples, documentation, tests or demo ever gave
+# a secret setting. They are public, so none of them may guard an installation.
+# Values starting with "replace-with-" are refused too.
+_PUBLIC_EXAMPLE_SECRETS = frozenset({
+    "changeme", "a7f3c8e2-4b1d-4f9a-8c3e-7d2f1a9b5e4c", "abc123-def456-ghi789", "pass",
+    "your-api-key-here", "your_api_key_here", "your-rw-api-key-here", "your-password",
+    "your_password", "your_secure_password", "your_smtp_password", "your_app_password",
+    "your_key", "your_license_key", "your_license_key_here", "your-client-secret",
+    "your-client-secret-from-authentik", "your-client-secret-from-keycloak",
+    "your-client-secret-from-mailcow", "your-google-client-secret", "your-azure-client-secret",
+    "your-random-secret-key", "demo", "demo-lock", "ci", "ci-placeholder", "test", "test-key",
+})
+_SECRET_HINTS = {
+    "postgres_password": "Generate one with openssl rand -hex 32, set it as the database user's "
+                         "password (ALTER USER) and put the same value in .env.",
+    "mailcow_api_key": "Create an API key in mailcow and put it in .env.",
+    "mailcow_api_key_rw": "Create a read-write API key in mailcow.",
+}
+
+
+def secret_setting_problem(key: str, value: Any) -> Optional[str]:
+    """Why a value cannot be used for a secret setting, or None when it can.
+    An empty optional setting is simply not set."""
+    if value is None:
+        return "is not set" if key in _REQUIRED_SECRET_KEYS else None
+    text = str(value).strip()
+    if not text:
+        return "is empty" if key in _REQUIRED_SECRET_KEYS or value else None
+    text = text.casefold()
+    if text in _PUBLIC_EXAMPLE_SECRETS or text.startswith("replace-with-"):
+        return "is an example value from the documentation, which anyone can read"
+    return None
+
+
+def _secret_setting_message(key: str, problem: str) -> str:
+    hint = _SECRET_HINTS.get(key, "Set a value of your own.")
+    return f"{key.upper()} {problem}. {hint}"
+
 ALL_RAW_LOG_SERVICES = [
     'acme', 'api', 'autodiscover', 'dovecot', 'netfilter',
     'postfix', 'ratelimited', 'rspamd-history', 'sogo', 'watchdog'
@@ -917,6 +963,16 @@ class Settings(BaseSettings):
             raise ValueError("must be false, auto or true")
         return mode
 
+    @field_validator(*SECRET_SETTING_KEYS, mode='after')
+    @classmethod
+    def refuse_public_secrets(cls, v, info):
+        """A required secret must be set, and no secret may be a published example:
+        the app does not start with one from ENV, and Settings does not save one."""
+        problem = secret_setting_problem(info.field_name, v)
+        if problem:
+            raise ValueError(_secret_setting_message(info.field_name, problem))
+        return v
+
     @validator('mailcow_url')
     def validate_mailcow_url(cls, v):
         """Ensure URL doesn't end with slash"""
@@ -1281,6 +1337,15 @@ def build_settings(db: Optional[Any] = None) -> Settings:
                 logger.warning("Ignoring invalid authentication capacity override for %s", key)
                 allowed.pop(key)
     _validate_session_limit_overrides(allowed)
+    # model_copy skips the secret check too. A stored example value refuses the
+    # load, so the app does not start with it.
+    for key in SECRET_SETTING_KEYS:
+        problem = secret_setting_problem(key, allowed[key]) if key in allowed else None
+        if problem:
+            raise SettingsLoadError(
+                f"{key.upper()}, stored in Settings, {problem}. Set {key.upper()} in .env to a value "
+                "of your own: it overrides the stored one. To manage it in Settings again, use "
+                f"Migrate Settings from ENV, then remove {key.upper()} from .env.")
     merged = base.model_copy(update=allowed)
     # model_copy skips validators. Apply them manually on affected fields.
     # (We can't use Settings.model_validate() because BaseSettings re-reads ENV on init)

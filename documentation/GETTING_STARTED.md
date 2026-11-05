@@ -48,10 +48,13 @@ On the Docker host:
 mkdir mailcow-logs-viewer
 cd mailcow-logs-viewer
 curl -fsSLO https://raw.githubusercontent.com/ShlomiPorush/mailcow-logs-viewer/main/docker-compose.yml
-curl -fsSL -o .env https://raw.githubusercontent.com/ShlomiPorush/mailcow-logs-viewer/main/env.example
+(umask 077 && set -C && curl -fsSL https://raw.githubusercontent.com/ShlomiPorush/mailcow-logs-viewer/main/env.example > .env &&
+  sed -i "s/^POSTGRES_PASSWORD=$/POSTGRES_PASSWORD=$(openssl rand -hex 32)/" .env)
 ```
 
-<!-- VERIFY: Before publishing v3, confirm that the image referenced by docker-compose.yml contains v3. The latest image can still contain the previous release during development. -->
+The last command creates `.env`, readable only by you, with a new random database password. When `.env` already exists, it stops and changes nothing.
+
+<!-- VERIFY: Before publishing v3, confirm that the image referenced by docker-compose.yml contains v3, and that env.example on main is the v3 one (an empty POSTGRES_PASSWORD). The latest image can still contain the previous release during development. -->
 The Compose file uses the `latest` image. To stay on one release, replace `latest` with that version's tag.
 
 ## 4. Set the required values
@@ -62,7 +65,6 @@ Open `.env` and set these values. The other values in the file can stay as they 
 MAILCOW_URL=https://mail.example.com
 MAILCOW_API_KEY=replace-with-read-only-key
 MAILCOW_API_KEY_RW=replace-with-read-write-key
-POSTGRES_PASSWORD=replace-with-a-random-hex-password
 SETTINGS_EDIT_VIA_UI_ENABLED=true
 BASIC_AUTH_ENABLED=true
 AUTH_USERNAME=admin
@@ -72,7 +74,8 @@ TZ=Europe/Berlin
 
 - `MAILCOW_URL` is your mailcow web address, without a trailing slash.
 - Leave out `MAILCOW_API_KEY_RW` if you did not create the read-write key.
-- Use only letters and digits in `POSTGRES_PASSWORD`, for example the output of `openssl rand -hex 32`. Characters such as `@`, `/` or `:` break the database connection.
+- `POSTGRES_PASSWORD` already has its random value. If you change it, use only letters and digits: characters such as `@`, `/` or `:` break the database connection.
+- The app does not start with a value that starts with `replace-with-` or with any other example value from this documentation.
 - `SETTINGS_EDIT_VIA_UI_ENABLED=true` lets you change settings in the app. Without it, the Settings page is read-only.
 - The `AUTH` lines turn on sign-in. Without sign-in, anyone who can reach the app can read all mail logs.
 - `TZ` is the time zone the app works in: times on screen, days, emails and scheduled jobs. Use the one your mailcow server uses. Without it, the app uses UTC.
