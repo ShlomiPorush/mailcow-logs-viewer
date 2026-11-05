@@ -11,7 +11,7 @@ Configure it on [Security](Security.md) > **Settings** > **Outgoing spam**, or u
 
 The time window rolls back from each check. The pause after re-enabling prevents messages still in that window from immediately stopping the mailbox again; `0` disables the pause.
 
-**Revoke its app passwords** deletes all app passwords when stopping a mailbox. Clients using them, including IMAP clients, need replacements. **Who users should contact** sets the address in the owner's email; if empty, it uses the admin email address or "your administrator".
+**Revoke app passwords when blocking** deletes all app passwords when stopping a mailbox. Clients using them, including IMAP clients, need replacements. **Support email** sets the address in the owner's email; if empty, it uses the admin email address or "your administrator".
 
 ### Blocked by abuse protection
 
@@ -36,7 +36,7 @@ The mailbox is stopped only when its count is above the threshold, unless whitel
 ## What happens when a mailbox is stopped
 
 1. The app turns off SMTP access in mailcow. Incoming delivery continues and IMAP stays enabled. If mailcow refuses the change, nothing is recorded and the next check retries.
-2. With **Revoke its app passwords** on, all its app passwords are deleted.
+2. With **Revoke app passwords when blocking** on, all its app passwords are deleted.
 3. The app records the count, threshold and number of revoked passwords, and adds a critical alert under [Dashboard > Needs attention](Dashboard.md).
 4. The admin email address and destinations receiving the Security topic get an email with the count, threshold and revoked-password count. See [Notifications](../Notifications.md).
 5. If the app's SMTP settings are configured, the mailbox owner gets an email explaining the pause and any revoked passwords. It asks them to change their password, remove unused app passwords and contact the configured help address.
@@ -51,7 +51,7 @@ Re-enable it from this card. Turning SMTP back on in mailcow leaves the app's st
 
 Check activity over normal sending cycles. Set the threshold above legitimate bursts and whitelist known bulk senders.
 
-Anomaly detection counts mail the same way but only alerts, comparing each mailbox with its usual sending. See [Dashboard](Dashboard.md) and **Settings** > **Anomaly Detection (Beta)**.
+Anomaly detection counts mail the same way but only alerts, comparing each mailbox with its usual sending. See [Dashboard](Dashboard.md) and **Settings** > **Anomaly detection (Beta)**.
 
 ## Settings that change this page
 

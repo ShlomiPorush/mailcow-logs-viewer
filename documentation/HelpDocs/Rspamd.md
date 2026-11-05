@@ -27,7 +27,7 @@ The wizard's **Domain** pattern includes subdomains, unlike a domain suppression
 
 ## Settings that change this page
 
-Under **Settings** > **Mailcow**, set **Rspamd Password** to read the maps. Leave **Rspamd URL** empty to use mailcow's path; try a direct URL such as `http://rspamd-mailcow:11334` if that fails.
+Under **Settings** > **mailcow**, set **Rspamd password** to read the maps. Leave **Rspamd URL** empty to use mailcow's path; try a direct URL such as `http://rspamd-mailcow:11334` if that fails.
 
 Under **Settings** > **Features**, **Rspamd** turns this page off. The old name `spam-filter` in `DISABLED_FEATURES` turns off both this page and Suppressions.
 

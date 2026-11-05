@@ -80,8 +80,8 @@ This changes mailcow's Fail2ban policy. **Always on** means the app cannot turn 
 | Ban time | First ban length; at least 60 seconds. |
 | **longer each time it comes back** | Increases the ban length for repeated bans. |
 | Longest ban | At least 60 seconds and no shorter than the first ban. |
-| **Ban the network, IPv4** | Prefix length 8 to 32. `32` bans one address; shorter prefixes ban its surrounding network. |
-| **Ban the network, IPv6** | Prefix length 8 to 128. `128` bans one address. |
+| **IPv4 ban prefix length** | Prefix length 8 to 32. `32` bans one address; shorter prefixes ban its surrounding network. |
+| **IPv6 ban prefix length** | Prefix length 8 to 128. `128` bans one address. |
 
 mailcow's **Manage Fail2Ban externally**, under **System** > **Configuration** > **Options** > **Fail2ban parameters**, keeps the ban list but sets no firewall rules. You must block those addresses with your own firewall. The app does not expose this option and preserves it when saving policy or lists.
 
@@ -95,7 +95,7 @@ Switching back to **Watch first** cancels unwritten automatic bans. Written bans
 
 Rules exclude allowlisted addresses, private, loopback and link-local networks, the mailcow server's IP and literal IPs checked by the [blocklist monitor](IP_Blacklist_Monitor.md). Allowlisting an address cancels its pending ban.
 
-**Email me when it bans** covers successful and failed ban attempts. **Email me on every alert** covers **Possible stolen password**. Each run sends at most one email, grouping addresses by outcome; expiry sends none. Destinations must receive the Security topic. See [Notifications](../Notifications.md).
+**Send notifications when an IP is banned** covers successful and failed ban attempts. **Send notifications for every alert** covers **Possible stolen password**. Each run sends at most one email, grouping addresses by outcome; expiry sends none. Destinations must receive the Security topic. See [Notifications](../Notifications.md).
 
 #### Trap accounts
 
@@ -148,7 +148,7 @@ Events are netfilter log lines. When a line names no account, the account column
 ## Settings that change this page
 
 - Turning **Settings** > **Features** > **Security** off stops netfilter fetching and protection rules and deletes stored netfilter logs.
-- **Settings** > **Mailcow** > **Connection**: the read-write API key (`MAILCOW_API_KEY_RW`), needed for every change written to mailcow: bans, unbans, list entries, the Fail2ban policy, a rule in **Ban** mode and lifting a written rule ban.
+- **Settings** > **mailcow** > **Connection**: the read-write API key (`MAILCOW_API_KEY_RW`), needed for every change written to mailcow: bans, unbans, list entries, the Fail2ban policy, a rule in **Ban** mode and lifting a written rule ban.
 - **Settings** > **MaxMind** supplies country, city and network data.
 
 ## When something is missing

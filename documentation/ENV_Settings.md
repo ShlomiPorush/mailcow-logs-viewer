@@ -44,7 +44,7 @@ Use your own `POSTGRES_USER` and `POSTGRES_DB` if you changed them.
 
 | Variable | Default | Effect |
 | --- | --- | --- |
-| `MAILCOW_API_KEY_RW` | Unset | Separate read-write mailcow API key, needed for every action that changes mailcow. Without it the app only monitors. It has its own allowed IPs, with the same rule as `MAILCOW_API_KEY`; check it with **Validate** under **Settings** > **Mailcow**. |
+| `MAILCOW_API_KEY_RW` | Unset | Separate read-write mailcow API key, needed for every action that changes mailcow. Without it the app only monitors. It has its own allowed IPs, with the same rule as `MAILCOW_API_KEY`; check it with **Validate** under **Settings** > **mailcow**. |
 | `RSPAMD_PASSWORD` | Unset | Rspamd UI password, needed to view Rspamd maps. Editing them also needs the read-write key. |
 | `RSPAMD_URL` | Empty | Empty reaches Rspamd through the mailcow URL plus `/rspamd`. Set a direct address, such as `http://rspamd-mailcow:11334`, only when that path fails. |
 | `MAILCOW_API_TIMEOUT` | `30` | Seconds before a mailcow API request gives up. |

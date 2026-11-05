@@ -138,11 +138,11 @@ Under **Settings** > **Outbound**:
 - **Exclude failures unrelated to the recipient address** applies a fixed list that includes full mailboxes, sending limits, sender or message problems, network failures, and policy rejections. **View excluded codes** shows the list.
 - **Additional codes to exclude** lets you select a code, enter one, or add one seen in recent mail logs. Failures without a status code follow the selected action.
 - **Exclude these domains** accepts comma-separated exact domains.
-- The options that block need **Sync with Rspamd**: with it off they are not available, and a picked one changes to the option that does the same without blocking. **How long to block** is greyed then.
+- The options that block need **Sync with Rspamd**: with it off they are not available, and a picked one changes to the option that does the same without blocking. **Block duration** is greyed then.
 
 The jobs, including hourly expiry, require **Handle undeliverable mail automatically**, except the sync with Rspamd. With it off, expiry does not run.
 
-Under **Settings** > **Mailcow**, set **Rspamd Password** to sync the list. Leave **Rspamd URL** empty to use mailcow's path; try a direct URL such as `http://rspamd-mailcow:11334` if that fails. See [Settings](Settings.md#outbound).
+Under **Settings** > **mailcow**, set **Rspamd password** to sync the list. Leave **Rspamd URL** empty to use mailcow's path; try a direct URL such as `http://rspamd-mailcow:11334` if that fails. See [Settings](Settings.md#outbound).
 
 Under **Settings** > **Features**, **Queue** turns off the Queue tab and the sidebar counter, and **Suppressions** turns off the Suppressions tab, its jobs and the Outbound settings, and deletes the list as described in [When the sync stops or starts](#when-the-sync-stops-or-starts). The old name `spam-filter` in `DISABLED_FEATURES` turns off both Suppressions and [Rspamd](Rspamd.md).
 

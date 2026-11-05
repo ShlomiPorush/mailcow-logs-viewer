@@ -178,7 +178,7 @@ Three lines in this block matter for mailcow. `root /web;` lets nginx serve the 
 1. Run `docker compose up -d` in the app's directory and in the mailcow directory.
 2. In the mailcow directory, run `docker compose exec nginx-mailcow nginx -t`, then `docker compose restart nginx-mailcow`. Browsers show a certificate error until mailcow's certificate includes the new name.
 3. Set `FORWARDED_ALLOW_IPS` to the IPv4 address of `nginx-mailcow` on mailcow's network.
-4. On mailcow's network, the app may reach mailcow from a different address. Check the allowed IPs of both API keys in mailcow under **System** > **Configuration** > **Access** > **Administrators** > **API**, then click **Validate** next to the read-write key in **Settings** > **Mailcow**.
+4. On mailcow's network, the app may reach mailcow from a different address. Check the allowed IPs of both API keys in mailcow under **System** > **Configuration** > **Access** > **Administrators** > **API**, then click **Validate** next to the read-write key in **Settings** > **mailcow**.
 
 ## Caddy
 

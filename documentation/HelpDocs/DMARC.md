@@ -87,25 +87,25 @@ In **What receivers saw**, **From** is the header From domain, and **SPF** and *
 
 ## Fetching reports from the mailbox
 
-DMARC and TLS reports arrive by email at the addresses in the `rua=` tags of your records. The app reads them from that mailbox over IMAP. Set it up under **Settings** > **DMARC & TLS IMAP**; with **IMAP Enabled** on, the app imports every hour (**IMAP Interval**, 3600 seconds by default) and once 30 seconds after it starts (**IMAP Run On Startup**).
+DMARC and TLS reports arrive by email at the addresses in the `rua=` tags of your records. The app reads them from that mailbox over IMAP. Set it up under **Settings** > **DMARC & TLS IMAP**; with **Import reports automatically** on, the app imports every hour (**Import every (seconds)**, 3600 seconds by default) and once 30 seconds after it starts (**Import when the app starts**).
 
 How the import works:
 
-- It reads the folders chosen in **IMAP Folders** (`INBOX` by default). **Choose folders** lists the mailbox's folders; a folder with **With subfolders** also covers every folder below it, including folders created later, for example the subfolders mailcow creates for plus-tag addresses.
-- In each folder it reads unread messages whose subject contains `Report Domain:`, `DMARC`, `Report-ID:`, `TLS-RPT` or `TLS Report`. With **IMAP Scan All Unseen** on, it reads every unread message, for reports with subjects in other languages; this applies only to folders chosen themselves, not to folders read through **With subfolders**.
+- It reads the folders chosen in **Report folders** (`INBOX` by default). **Choose folders** lists the mailbox's folders; a folder with **With subfolders** also covers every folder below it, including folders created later, for example the subfolders mailcow creates for plus-tag addresses.
+- In each folder it reads unread messages whose subject contains `Report Domain:`, `DMARC`, `Report-ID:`, `TLS-RPT` or `TLS Report`. With **Check all unread emails** on, it reads every unread message, for reports with subjects in other languages; this applies only to folders chosen themselves, not to folders read through **With subfolders**.
 - An XML attachment is read as a DMARC report, a JSON attachment as a TLS report; a ZIP is opened to see which one it holds, and must hold only one. Each report must expand to 10 MB or less.
 - A message may hold at most 10 reports, with at most 20,000 records together (for TLS, policies and failure details) and 10 MB of report data. Identical records in a report are stored once, with their counts added up. A message over a limit is not imported at all.
 - A report counts as a duplicate, and is not imported twice, only when the same report with the same content is already stored. The sender writes the report ID, so a report with the ID of a stored report but other content is stored as well, and both are marked **Shared report ID** under **Manage Reports**. Its message stays in the mailbox, marked as read.
-- A message is deleted with **IMAP Delete After** on (the default), or marked as read with it off, once every report in it is imported or already stored. Only that message is removed. A server that cannot remove a single message gets it marked as deleted and read, for a mail client to remove.
+- A message is deleted with **Delete emails after import** on (the default), or marked as read with it off, once every report in it is imported or already stored. Only that message is removed. A server that cannot remove a single message gets it marked as deleted and read, for a mail client to remove.
 - A chosen folder that does not exist does not stop the others; the import reads them and ends with an error that names the folder.
 - Bounces and messages without a report are marked as read and skipped. They are not counted as failures and never deleted. mailcow sends its own DMARC reports from an address that often receives reports, so bounces of those reports land here.
 - A message with a report that cannot be imported is marked as read, left in the mailbox and counted as failed; its other reports are imported. Messages larger than 20 MB are not downloaded at all and count as failed.
-- Messages are handled in batches of **IMAP Batch Size** (10 by default).
+- Messages are handled in batches of **Emails per batch** (10 by default).
 
 Reading a report in a mail client before import makes it ineligible until you mark it unread again.
 
 > [!NOTE]
-> Use a mailbox that receives only reports. With **IMAP Scan All Unseen** on, the import reads every unread message in the folder and marks it as read, reports or not.
+> Use a mailbox that receives only reports. With **Check all unread emails** on, the import reads every unread message in the folder and marks it as read, reports or not.
 
 **Fetch reports** starts an import and reloads the page after a few seconds. Only one import runs at a time: while one runs, **Fetch reports** says "Reports are already being fetched", and a scheduled import skips its turn. An import left `running` because the app stopped during it is marked `failed` when the next one starts.
 
@@ -120,7 +120,7 @@ Reading a report in a mail client before import makes it ineligible until you ma
 
 The file may be at most 10 MB and must expand to 10 MB or less. The app tells XML, gzip and ZIP apart by their content, not by the file name. The limits and the duplicate rule of the import apply.
 
-Upload is allowed by default. Turn it off with **Manual Upload Enabled** under **Settings** > **DMARC & TLS**; the button then disappears.
+Upload is allowed by default. Turn it off with **Allow report uploads** under **Settings** > **DMARC & TLS**; the button then disappears.
 
 ## Manage Reports
 
@@ -129,15 +129,15 @@ Upload is allowed by default. Turn it off with **Manual Upload Enabled** under *
 
 **Manage Reports** lists the stored reports by domain and one by one. **Delete all** removes all reports of a domain, **Delete** a single report. In **All reports**, the search finds reports by domain or reporter, and a click on a column header sorts the whole list, across all pages.
 
-Deleting is off by default. Turn it on with **Allow Report Delete** under **Settings** > **DMARC & TLS** (`DMARC_ALLOW_REPORT_DELETE=true`). Deletion cannot be undone. New reports can recreate a deleted domain's entry.
+Deleting is off by default. Turn it on with **Allow report deletion** under **Settings** > **DMARC & TLS** (`DMARC_ALLOW_REPORT_DELETE=true`). Deletion cannot be undone. New reports can recreate a deleted domain's entry.
 
 ## How long reports are kept
 
-Every day at 02:15 the app deletes DMARC and TLS reports that were imported more than **Retention Days** ago (60 by default, under **Settings** > **DMARC & TLS**). The age counts from the import, not from the report's period.
+Every day at 02:15 the app deletes DMARC and TLS reports that were imported more than **Keep reports (days)** ago (60 by default, under **Settings** > **DMARC & TLS**). The age counts from the import, not from the report's period.
 
 ## Emails from this page
 
-- **Import errors.** When an import leaves messages it could not import, the app sends `DMARC & TLS: N report emails could not be imported`, with the subject, Message-ID and error of each message. It goes to **Report Import Error Email** (comma-separated addresses), or the **Admin Email** when that is empty (both under **Settings** > **Notifications**), and to the notification destinations that receive **DMARC processing errors**. Email needs SMTP; the other notification destinations receive the alert without it. Skipped bounces do not trigger it.
+- **Import errors.** When an import leaves messages it could not import, the app sends `DMARC & TLS: N report emails could not be imported`, with the subject, Message-ID and error of each message. It goes to **Report import error email** (comma-separated addresses), or the **Admin email** when that is empty (both under **Settings** > **Notifications**), and to the notification destinations that receive **Report import errors**. Email needs SMTP; the other notification destinations receive the alert without it. Skipped bounces do not trigger it.
 - **The weekly summary** has no figures from the reports. Its **DNS issues** section lists DMARC records with an error, from the DNS checks. See [Domains](Domains.md#the-weekly-summary).
 - **DNS change alerts** cover the DMARC and TLS-RPT records. See [Domains](Domains.md#dns-change-alerts).
 
@@ -147,15 +147,15 @@ See [Notifications](../Notifications.md) for the destinations.
 
 The **DMARC & TLS** entry in the menu shows a count: the domains whose reports suggest a stricter policy, show a low pass rate, or show new addresses that fail DMARC. The Dashboard lists the same under its items that need attention.
 
-Both use **Settings** > **DMARC & TLS** > **Insights (policy recommendations)**, not the 30 days of the report views. By default, with at least 100 messages (**DMARC Insights Min Volume**) over 28 days (**DMARC Insights Window Days**), they suggest a stricter policy at a pass rate of 99.5% or more (**DMARC Insights Pass Threshold**) and warn below 90%. The record window's **Ready.** is a separate calculation, described [above](#dmarc-record).
+Both use **Settings** > **DMARC & TLS** > **Policy suggestions**, not the 30 days of the report views. By default, with at least 100 messages (**Minimum messages before a suggestion**) over 28 days (**Review reports from the last (days)**), they suggest a stricter policy at a pass rate of 99.5% or more (**Minimum DMARC pass rate (%)**) and warn below 90%. The record window's **Ready.** is a separate calculation, described [above](#dmarc-record).
 
 ## When something is missing
 
 - The page is not in the menu: the DMARC & TLS feature is off. Turn it on under **Settings** > **Features**. While it is off, the import and the daily cleanup do not run.
 - **No reports yet**: nothing has been imported. Check that your DMARC records have a `rua=` address that ends up in the report mailbox, that IMAP is set up, and that the address may receive reports for the domain (see [Receiving reports at another domain](#receiving-reports-at-another-domain)). Receivers send aggregate reports about once a day, so the first ones take a day or two.
 - A domain says it has no TLS reports: it has no TLS-RPT record, or no server has sent mail to it with TLS reporting turned on yet. The TLS-RPT record window shows a record to publish.
-- **Fetch reports** is greyed out with **Not set up** under it: IMAP is not set up. **IMAP Enabled** is off by default; the connection defaults are port 993, SSL on and **IMAP Verify SSL** off.
-- **Last fetch failed**: the import could not connect or log in. **View History** shows the import; the error is in the app's log. A certificate problem names the setting to change (**IMAP Verify SSL**).
+- **Fetch reports** is greyed out with **Not set up** under it: IMAP is not set up. **Import reports automatically** is off by default; the connection defaults are port 993, SSL on and **Verify TLS certificates** off.
+- **Last fetch failed**: the import could not connect or log in. **View History** shows the import; the error is in the app's log. A certificate problem names the setting to change (**Verify TLS certificates**).
 - There is no **Manage Reports** button: there are no reports.
 - **No location or network known** on a sender: the MaxMind databases are not set up, or the address is not in them.
 
