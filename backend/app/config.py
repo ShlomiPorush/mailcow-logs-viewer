@@ -82,9 +82,10 @@ SECRET_SETTING_KEYS = (
     "rspamd_password", "maxmind_license_key",
 )
 _REQUIRED_SECRET_KEYS = frozenset({"postgres_password", "mailcow_api_key"})
-# Every value this project's examples, documentation, tests or demo ever gave
-# a secret setting. They are public, so none of them may guard an installation.
-# Values starting with "replace-with-" are refused too.
+# The values this project ever offered for a secret setting: in env.example and
+# the documentation, as the CI and test defaults, and in the demo image. They
+# are public, so none of them may guard an installation. Values starting with
+# "replace-with-" are refused too.
 _PUBLIC_EXAMPLE_SECRETS = frozenset({
     "changeme", "a7f3c8e2-4b1d-4f9a-8c3e-7d2f1a9b5e4c", "abc123-def456-ghi789", "pass",
     "your-api-key-here", "your_api_key_here", "your-rw-api-key-here", "your-password",

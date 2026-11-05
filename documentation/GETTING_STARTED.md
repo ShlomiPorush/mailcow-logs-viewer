@@ -48,8 +48,9 @@ On the Docker host:
 mkdir mailcow-logs-viewer
 cd mailcow-logs-viewer
 curl -fsSLO https://raw.githubusercontent.com/ShlomiPorush/mailcow-logs-viewer/main/docker-compose.yml
-(umask 077 && set -C && curl -fsSL https://raw.githubusercontent.com/ShlomiPorush/mailcow-logs-viewer/main/env.example > .env &&
-  sed -i "s/^POSTGRES_PASSWORD=$/POSTGRES_PASSWORD=$(openssl rand -hex 32)/" .env)
+(password="$(openssl rand -hex 32)" && umask 077 && set -C &&
+  curl -fsSL https://raw.githubusercontent.com/ShlomiPorush/mailcow-logs-viewer/main/env.example > .env &&
+  sed -i "s/^POSTGRES_PASSWORD=$/POSTGRES_PASSWORD=${password}/" .env)
 ```
 
 The last command creates `.env`, readable only by you, with a new random database password. When `.env` already exists, it stops and changes nothing.
