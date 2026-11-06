@@ -310,6 +310,7 @@ def test_connection_tests_without_a_server(client):
 
 def test_imap_folder_list(client, monkeypatch):
     from app.services import connection_test
+    import secrets
 
     class Imap:
         def list(self, directory, pattern):
