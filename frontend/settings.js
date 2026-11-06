@@ -3444,7 +3444,9 @@ function settingsFolderPicker(result, input, body, foot, close) {
             const pick = f.selectable !== false
                 ? '<label class="ui-set-tree-pick"><input type="checkbox" class="ui-check" data-pick="' + i + '"' + (own || cover ? ' checked' : '') + (cover ? ' disabled' : '') + '>' + SETTINGS_FOLDER_ICON + name + '</label>'
                 : '<span class="ui-set-tree-pick"><span class="ui-set-tree-gap"></span>' + SETTINGS_FOLDER_ICON + name + '</span>';
-            const subsBox = f.can_have_children && !cover
+            // Offered on folders that have subfolders now (as in the design), and kept on one
+            // already read with its subfolders, so that choice can still be turned off
+            const subsBox = f.can_have_children && !cover && ((kids.get(f) || []).length > 0 || subs)
                 ? '<label class="ui-set-tree-subs' + (subs ? ' is-on' : '') + '"><input type="checkbox" class="ui-check" data-subs="' + i + '"' + (subs ? ' checked' : '') +
                     ' aria-label="' + uiEntityAttr(f.name) + ' with subfolders">With subfolders</label>'
                 : '';
