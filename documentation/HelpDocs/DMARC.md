@@ -91,11 +91,13 @@ DMARC and TLS reports arrive by email at the addresses in the `rua=` tags of you
 
 How the import works:
 
-- It reads unread messages in **IMAP Folder** (`INBOX` by default) whose subject contains `Report Domain:`, `DMARC`, `Report-ID:`, `TLS-RPT` or `TLS Report`. With **IMAP Scan All Unseen** on, it reads every unread message, for reports with subjects in other languages.
+- It reads the folders chosen in **IMAP Folders** (`INBOX` by default). **Choose folders** lists the mailbox's folders; a folder with **With subfolders** also covers every folder below it, including folders created later, for example the subfolders mailcow creates for plus-tag addresses.
+- In each folder it reads unread messages whose subject contains `Report Domain:`, `DMARC`, `Report-ID:`, `TLS-RPT` or `TLS Report`. With **IMAP Scan All Unseen** on, it reads every unread message, for reports with subjects in other languages; this applies only to folders chosen themselves, not to folders read through **With subfolders**.
 - An XML attachment is read as a DMARC report, a JSON attachment as a TLS report; a ZIP is opened to see which one it holds, and must hold only one. Each report must expand to 10 MB or less.
 - A message may hold at most 10 reports, with at most 20,000 records together (for TLS, policies and failure details) and 10 MB of report data. Identical records in a report are stored once, with their counts added up. A message over a limit is not imported at all.
 - A report counts as a duplicate, and is not imported twice, only when the same report with the same content is already stored. The sender writes the report ID, so a report with the ID of a stored report but other content is stored as well, and both are marked **Shared report ID** under **Manage Reports**. Its message stays in the mailbox, marked as read.
-- A message is deleted with **IMAP Delete After** on (the default), or marked as read with it off, once every report in it is imported or already stored.
+- A message is deleted with **IMAP Delete After** on (the default), or marked as read with it off, once every report in it is imported or already stored. Only that message is removed. A server that cannot remove a single message gets it marked as deleted and read, for a mail client to remove.
+- A chosen folder that does not exist does not stop the others; the import reads them and ends with an error that names the folder.
 - Bounces and messages without a report are marked as read and skipped. They are not counted as failures and never deleted. mailcow sends its own DMARC reports from an address that often receives reports, so bounces of those reports land here.
 - A message with a report that cannot be imported is marked as read, left in the mailbox and counted as failed; its other reports are imported. Messages larger than 20 MB are not downloaded at all and count as failed.
 - Messages are handled in batches of **IMAP Batch Size** (10 by default).

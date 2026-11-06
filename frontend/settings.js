@@ -17,6 +17,7 @@ const SETTINGS_LABEL_OVERRIDES = {
     dmarc_error_email: 'Report Import Error Email',
     eas_devices_retention_days: 'Retention Days',
     tz: 'Time Zone',
+    dmarc_imap_folder: 'IMAP Folders',
     // Outbound: what the setting does, in words; the search shows these names
     suppression_enabled: 'Handle undeliverable mail automatically',
     suppression_auto_detect: 'Read the mail logs for failures',
@@ -297,12 +298,12 @@ var SETTINGS_FIELD_DESCRIPTIONS = {
     dmarc_imap_verify_ssl: 'Check the IMAP server certificate before the password is sent, so nobody between this app and the server can read it. Off (default) does not check. Automatic checks host names such as imap.example.com and skips localhost, IP addresses and container names. On always checks. Automatic or On is recommended; keep Off only for a server with a self-signed certificate.',
     dmarc_imap_user: 'IMAP username (email address).',
     dmarc_imap_password: 'IMAP password.',
-    dmarc_imap_folder: 'IMAP folder to scan for DMARC and TLS reports. Default: INBOX.',
-    dmarc_imap_delete_after: 'Delete emails after successful processing. Default: true.',
+    dmarc_imap_folder: 'The folders to read reports from. A folder read with its subfolders also covers subfolders added later.',
+    dmarc_imap_delete_after: 'Delete emails after successful processing. If the server cannot remove single emails, they are marked as deleted and left for your mail client to remove. Default: true.',
     dmarc_imap_interval: 'Interval between IMAP syncs in seconds. Default: 3600 (1 hour).',
     dmarc_imap_run_on_startup: 'Run IMAP sync once on application startup. Default: true.',
     dmarc_imap_batch_size: 'Number of emails to process per batch. Default: 10.',
-    dmarc_imap_scan_all_unseen: 'Scan all unread emails for DMARC/TLS-RPT attachments, not just those matching known subject patterns. Enable if you receive reports from providers that use non-English subjects. Only recommended for dedicated DMARC mailboxes.',
+    dmarc_imap_scan_all_unseen: 'Scan all unread emails for DMARC/TLS-RPT attachments, not just those matching known subject patterns. Enable if you receive reports from providers that use non-English subjects. Only recommended for dedicated DMARC mailboxes. Subfolders read through "With subfolders" are not scanned this way, only checked for report subjects.',
     dmarc_error_email: 'Email for errors while importing DMARC and TLS reports (defaults to the Admin email if not set). Separate several addresses with commas.',
     maxmind_account_id: 'MaxMind Account ID for GeoIP database downloads. Required to download GeoLite2 databases.',
     maxmind_license_key: 'MaxMind License Key for GeoIP database downloads. Required to download GeoLite2 databases. Keep this secret.',
@@ -1652,6 +1653,19 @@ function renderSettingsEditField(key, value, sensitiveKeys, description, envLock
         }
     }
 
+    // IMAP folders: the chosen folders as rows, and a button that opens the folder
+    // picker (settingsChooseFolders). The hidden field carries the value into the save
+    if (key === 'dmarc_imap_folder') {
+        const raw = value === null || value === undefined ? '' : String(value);
+        return '<div class="ui-set-field' + (envLocked ? ' is-locked' : '') + '"><span class="ui-label" id="label-' + keyAttr + '">' + escapeHtml(label) + '</span>' +
+            descHtml +
+            (envLocked ? '<p class="ui-set-env">' + LOCK + ' Set by ENV (DMARC_IMAP_FOLDER), change it there</p>' : '') +
+            '<div class="ui-set-folders" role="group" aria-labelledby="label-' + keyAttr + '"><ul class="ui-set-folder-rows" data-folder-rows>' + settingsFolderRows(raw) + '</ul>' +
+            (envLocked ? '' : '<div><button type="button" class="ui-btn ui-btn-sm" onclick="settingsChooseFolders()">Choose folders</button></div>') + '</div>' +
+            '<input type="hidden" id="edit-' + keyAttr + '" name="' + keyAttr + '" value="' + settingsAttr(raw) + '"' + (envLocked ? ' disabled' : '') + '>' +
+            clearBtnHtml + '</div>';
+    }
+
     // A value that differs from its default is marked, so a changed setting stands out
     const changed = (isChanged || isSensitiveChanged) && !envLocked ? ' is-changed' : '';
     const changedPill = changed ? ' <span class="ui-set-pill is-changed" title="Differs from the default">Changed</span>' : '';
@@ -2324,6 +2338,8 @@ function renderSettings(content, data) {
                     if (seg) seg.querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', String(b.getAttribute('data-value') === el.value)));
                     // So does the Time Zone picker
                     if (key === 'tz') settingsShowZone(el);
+                    // So do the IMAP folder rows
+                    if (key === 'dmarc_imap_folder') settingsShowFolders(el);
                 }
                 // The field is back at its default, so it is no longer marked as changed
                 const parent = el.closest('.ui-set-bool, .ui-set-field');
@@ -2355,6 +2371,11 @@ function renderSettings(content, data) {
         const fieldValue = el => el.type === 'checkbox' ? String(el.checked) : el.value;
         const initialValues = new Map();
         if (form) form.querySelectorAll('[name]:not([data-choice])').forEach(el => initialValues.set(el.name, fieldValue(el)));
+        // The folder picker asks whether the IMAP connection has unsaved changes
+        settingsFieldUnsaved = name => {
+            const el = form && form.querySelector('[name="' + CSS.escape(name) + '"]');
+            return !!el && initialValues.has(name) && initialValues.get(name) !== fieldValue(el);
+        };
         const updateDirty = () => {
             if (!form) return;
             const dirty = new Set();
@@ -3228,4 +3249,280 @@ function closeConnectionTestModal() {
     if (modal) {
         modal.remove();
     }
+}
+
+// =============================================================================
+// IMAP folders (dmarc_imap_folder): a JSON list, each item a folder name or
+// {"name": ..., "subfolders": true} (the folder and every folder below it, also
+// ones added later). Any other value is one folder name from before, used as
+// stored. The same rule as parse_setting in backend/app/services/imap_folders.py
+// =============================================================================
+
+const SETTINGS_FOLDER_ICON = '<svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linejoin="round" d="M3 6.5A1.5 1.5 0 0 1 4.5 5h4.6l2 2.2h8.4A1.5 1.5 0 0 1 21 8.7v9.8a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 18.5z"/></svg>';
+const SETTINGS_IMAP_CONNECTION_KEYS = ['dmarc_imap_host', 'dmarc_imap_port', 'dmarc_imap_use_ssl', 'dmarc_imap_verify_ssl', 'dmarc_imap_user', 'dmarc_imap_password'];
+
+// Whether a field differs from the value it loaded with; set when the settings form is built
+let settingsFieldUnsaved = () => false;
+
+// Folder names and the JSON value as text in markup. Not escapeHtml (utils.js):
+// it drops the backslash of \", which changes a name or breaks the JSON
+function settingsAttr(text) {
+    const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' };
+    return String(text).replace(/[&<>"']/g, c => map[c]);
+}
+
+// { entries: [{ name, subfolders, item }] } for the list form (item: the stored
+// item, written back as it was while unchanged), { legacy: name } for one folder name
+function settingsParseFolders(value) {
+    const text = typeof value === 'string' ? value : '';
+    if (!text.trim()) return { legacy: 'INBOX' };
+    let items;
+    try { items = JSON.parse(text); } catch (e) { return { legacy: text }; }
+    if (!Array.isArray(items) || !items.length) return { legacy: text };
+    const entries = [];
+    for (const item of items) {
+        if (typeof item === 'string' && item) {
+            entries.push({ name: item, subfolders: false, item });
+        } else if (item && typeof item === 'object' && !Array.isArray(item)
+            && Object.keys(item).every(k => k === 'name' || k === 'subfolders')
+            && typeof item.name === 'string' && item.name
+            && (item.subfolders === undefined || typeof item.subfolders === 'boolean')) {
+            entries.push({ name: item.name, subfolders: item.subfolders === true, item });
+        } else {
+            return { legacy: text };
+        }
+    }
+    return { entries };
+}
+
+// The rows of the field: one per chosen folder, or the one folder name from before
+function settingsFolderRows(value) {
+    const parsed = settingsParseFolders(value);
+    const list = parsed.entries || [{ name: parsed.legacy, subfolders: false }];
+    return list.map(e => '<li class="ui-set-folder" title="' + settingsAttr(e.name) + '">' + SETTINGS_FOLDER_ICON +
+        '<span class="ui-set-folder-name" dir="auto">' + settingsAttr(e.name) + '</span>' +
+        (e.subfolders ? uiTag('With subfolders', 'info') : '') + '</li>').join('');
+}
+
+function settingsShowFolders(input) {
+    const field = input && input.closest('.ui-set-field');
+    const rows = field && field.querySelector('[data-folder-rows]');
+    if (rows) rows.innerHTML = settingsFolderRows(input.value);
+}
+
+// One picker at a time. Each opening is a new run, and closing ends it: a folder
+// list that comes back for a closed or reopened picker is dropped
+let settingsFoldersRun = 0;
+async function settingsChooseFolders() {
+    const input = document.getElementById('edit-dmarc_imap_folder');
+    if (!input || input.disabled) return;
+    document.getElementById('settings-folders-modal')?.remove();
+    const run = ++settingsFoldersRun;
+    const close = () => {
+        settingsFoldersRun += 1;
+        document.getElementById('settings-folders-modal')?.remove();
+    };
+    const { body, foot } = uiDialog({
+        id: 'settings-folders-modal', title: 'Choose folders', size: 'md', close, footClass: 'ui-set-tree-foot',
+        body: '<div class="ui-loading" role="status"><div class="loading"></div><p>Reading the folders on the server...</p></div>',
+        foot: '<button type="button" class="ui-btn" data-folders-close>Cancel</button>',
+    });
+    foot.querySelector('[data-folders-close]').addEventListener('click', close);
+    const say = text => {
+        body.innerHTML = '<p class="ui-set-tree-msg" role="status">' + settingsAttr(text) + '</p>';
+        foot.innerHTML = '<button type="button" class="ui-btn" data-folders-close>Close</button>';
+        foot.querySelector('[data-folders-close]').addEventListener('click', close);
+    };
+    // The folders come from the saved connection, so an unsaved one would show another mailbox
+    if (SETTINGS_IMAP_CONNECTION_KEYS.some(name => settingsFieldUnsaved(name))) {
+        say('Save the connection settings first, then choose folders.');
+        return;
+    }
+    let result = null;
+    let failure = '';
+    try {
+        const res = await authenticatedFetch('/api/settings/imap/folders', { method: 'POST' });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok) result = data;
+        else failure = settingsErrorText(data, '');
+    } catch (err) {
+        failure = '';
+    }
+    if (run !== settingsFoldersRun || !body.isConnected) return;
+    if (!result) {
+        say(failure || 'The folders could not be loaded. Try again in a moment.');
+        return;
+    }
+    if (!result.ok) {
+        say(result.message || 'The folders could not be read from the server. Try again in a moment.');
+        return;
+    }
+    settingsFolderPicker(result, input, body, foot, close);
+}
+
+function settingsFolderPicker(result, input, body, foot, close) {
+    const folders = (Array.isArray(result.folders) ? result.folders : []).filter(f => f && typeof f.name === 'string' && f.name);
+    const byName = new Map(folders.map(f => [f.name, f]));
+    // INBOX is one folder in any case (RFC 3501); every other name is matched exactly
+    const inbox = folders.find(f => f.name.toUpperCase() === 'INBOX');
+    const listed = name => byName.get(name) || (inbox && name.toUpperCase() === 'INBOX' ? inbox : null);
+    // A folder's parent: the listed folder whose name and its delimiter are the longest start of this name
+    const parentOf = new Map();
+    folders.forEach(f => {
+        for (let i = f.name.length - 1; i > 0; i--) {
+            const p = byName.get(f.name.slice(0, i));
+            if (p && p !== f && p.delimiter && f.name.startsWith(p.name + p.delimiter)) { parentOf.set(f, p); break; }
+        }
+    });
+    const kids = new Map();
+    const roots = [];
+    folders.forEach(f => {
+        const p = parentOf.get(f);
+        if (!p) roots.push(f);
+        else (kids.get(p) || kids.set(p, []).get(p)).push(f);
+    });
+    const rows = [];
+    const walk = (list, depth) => list.forEach(f => {
+        const p = parentOf.get(f);
+        rows.push({ f, depth, label: p ? f.name.slice(p.name.length + p.delimiter.length) : f.name });
+        walk(kids.get(f) || [], depth + 1);
+    });
+    walk(roots, 0);
+
+    // The choice being made, by folder: { name, subfolders, item, folder, legacy }.
+    // A name the server does not list keeps its own name as key and is shown at the top
+    const draft = new Map();
+    const missing = [];
+    const add = (name, subfolders, item, legacy) => {
+        const folder = listed(name);
+        const key = folder ? folder.name : name;
+        if (draft.has(key)) return;
+        const entry = { name, subfolders, item, folder, legacy };
+        draft.set(key, entry);
+        if (!folder) missing.push({ key, entry });
+    };
+    // The picker starts from the field's current value, so an unsaved earlier choice wins
+    const parsed = settingsParseFolders(input.value);
+    if (parsed.entries) {
+        parsed.entries.forEach(e => add(e.name, e.subfolders, e.item, false));
+    } else {
+        // A folder name from before is used as stored. The server matched the saved one;
+        // another (Clear sets INBOX) counts as found only when it is plain text,
+        // which reads the same before and after decoding
+        const saved = result.legacy && result.legacy.value === input.value ? result.legacy : null;
+        const match = saved ? (saved.name ? listed(saved.name) : null)
+            : (/^[\x20-\x7e]+$/.test(parsed.legacy) && !parsed.legacy.includes('&') ? listed(parsed.legacy) : null);
+        if (match) add(match.name, false, null, false);
+        else add(saved ? saved.value : parsed.legacy, false, null, true);
+    }
+
+    const coverOf = f => {
+        for (const e of draft.values()) {
+            if (e.subfolders && e.folder && e.folder !== f && e.folder.delimiter && f.name.startsWith(e.folder.name + e.folder.delimiter)) return e;
+        }
+        return null;
+    };
+    const indent = depth => 'padding-inline-start:' + (8 + depth * 22) + 'px';
+    const treeHtml = () => {
+        const top = missing.map((m, i) => {
+            const on = draft.has(m.key);
+            return '<div class="ui-set-tree-node is-missing" style="' + indent(0) + '">' +
+                '<label class="ui-set-tree-pick"><input type="checkbox" class="ui-check" data-missing="' + i + '"' + (on ? ' checked' : '') + '>' +
+                SETTINGS_FOLDER_ICON + '<span class="ui-set-tree-name" dir="auto">' + settingsAttr(m.entry.name) + '</span></label>' +
+                (m.entry.subfolders ? uiTag('With subfolders', 'info') : '') + uiTag('Not found on the server', 'warn') + '</div>';
+        }).join('');
+        return top + rows.map((row, i) => {
+            const f = row.f;
+            const own = draft.get(f.name);
+            const cover = coverOf(f);
+            const subs = !!(own && own.subfolders) && !cover;
+            const name = '<span class="ui-set-tree-name" dir="auto">' + settingsAttr(row.label) + '</span>';
+            const pick = f.selectable !== false
+                ? '<label class="ui-set-tree-pick"><input type="checkbox" class="ui-check" data-pick="' + i + '"' + (own || cover ? ' checked' : '') + (cover ? ' disabled' : '') + '>' + SETTINGS_FOLDER_ICON + name + '</label>'
+                : '<span class="ui-set-tree-pick"><span class="ui-set-tree-gap"></span>' + SETTINGS_FOLDER_ICON + name + '</span>';
+            const subsBox = f.can_have_children && !cover
+                ? '<label class="ui-set-tree-subs' + (subs ? ' is-on' : '') + '"><input type="checkbox" class="ui-check" data-subs="' + i + '"' + (subs ? ' checked' : '') +
+                    ' aria-label="' + settingsAttr(f.name) + ' with subfolders">With subfolders</label>'
+                : '';
+            return '<div class="ui-set-tree-node' + (cover ? ' is-covered' : '') + (f.selectable === false ? ' is-noselect' : '') + '" style="' + indent(row.depth) + '" title="' + settingsAttr(f.name) + '">' + pick + subsBox + '</div>' +
+                (subs ? '<p class="ui-set-tree-future" style="padding-inline-start:' + (38 + row.depth * 22) + 'px">Subfolders added later are read too.</p>' : '');
+        }).join('');
+    };
+
+    const unreadable = Number(result.unreadable) || 0;
+    body.innerHTML = '<p class="ui-set-tree-intro">' + settingsAttr('Folders in ' + (result.user || '') + ' on ' + (result.host || '')) + '</p>' +
+        (rows.length || missing.length ? '' : '<p class="ui-set-tree-msg">The server listed no folders.</p>') +
+        '<div class="ui-set-tree" data-folder-tree></div>' +
+        (unreadable > 0 ? '<p class="ui-set-tree-note">' + settingsAttr(uiCountLabel(unreadable, 'folder', 'folders') + ' could not be read from the server\'s folder list.') + '</p>' : '');
+    foot.innerHTML = '<span class="ui-set-tree-sum" aria-live="polite"></span>' +
+        '<button type="button" class="ui-btn" data-folders-close>Cancel</button>' +
+        '<button type="button" class="ui-btn ui-btn-primary" data-folders-apply>Use these folders</button>';
+    const tree = body.querySelector('[data-folder-tree]');
+    const sum = foot.querySelector('.ui-set-tree-sum');
+    const apply = foot.querySelector('[data-folders-apply]');
+    foot.querySelector('[data-folders-close]').addEventListener('click', close);
+
+    const redraw = () => {
+        // The tree is drawn again on every change; the box that was used keeps the focus
+        const active = document.activeElement && tree.contains(document.activeElement) ? document.activeElement : null;
+        const focusKey = active ? ['pick', 'subs', 'missing'].map(k => active.dataset[k] !== undefined ? '[data-' + k + '="' + active.dataset[k] + '"]' : '').join('') : '';
+        tree.innerHTML = treeHtml();
+        if (focusKey) tree.querySelector(focusKey)?.focus();
+        const blocking = [...draft.values()].find(e => e.legacy);
+        const now = rows.filter(row => row.f.selectable !== false && (draft.has(row.f.name) || coverOf(row.f))).length;
+        const later = [...draft.values()].filter(e => e.subfolders && e.folder).length;
+        apply.disabled = !draft.size || !!blocking;
+        sum.classList.toggle('is-blocked', apply.disabled);
+        sum.textContent = blocking ? 'Uncheck ' + blocking.name + ' to save a new choice.'
+            : !draft.size ? 'Choose at least one folder.'
+            : now + ' ' + settingsPlural(now, 'folder', 'folders') + ' now' + (later ? ', plus new subfolders of ' + (later === 1 ? 'one folder' : later + ' folders') : '');
+    };
+
+    tree.addEventListener('change', event => {
+        const box = event.target;
+        if (!box || box.type !== 'checkbox') return;
+        if (box.dataset.missing !== undefined) {
+            const m = missing[Number(box.dataset.missing)];
+            if (box.checked) draft.set(m.key, m.entry); else draft.delete(m.key);
+        } else if (box.dataset.pick !== undefined) {
+            const f = rows[Number(box.dataset.pick)].f;
+            if (!box.checked) draft.delete(f.name);
+            else if (!draft.has(f.name)) draft.set(f.name, { name: f.name, subfolders: false, item: null, folder: f, legacy: false });
+        } else if (box.dataset.subs !== undefined) {
+            const f = rows[Number(box.dataset.subs)].f;
+            const own = draft.get(f.name);
+            if (box.checked) {
+                // The subfolders are read through this folder now, so they are no longer named one by one
+                const below = f.name + (f.delimiter || '');
+                [...draft.keys()].forEach(key => { if (f.delimiter && key !== f.name && key.startsWith(below)) draft.delete(key); });
+                draft.set(f.name, own ? { ...own, subfolders: true, item: own.subfolders ? own.item : null }
+                    : { name: f.name, subfolders: true, item: null, folder: f, legacy: false });
+            } else if (own) {
+                // A folder that cannot be read itself is only there for its subfolders
+                if (f.selectable === false) draft.delete(f.name);
+                else draft.set(f.name, { ...own, subfolders: false, item: own.subfolders ? null : own.item });
+            }
+        }
+        redraw();
+    });
+
+    apply.addEventListener('click', () => {
+        if (apply.disabled) return;
+        // Names the server does not list first, as shown, then the server's order
+        const order = [];
+        missing.forEach(m => { if (draft.get(m.key) === m.entry) order.push(m.entry); });
+        const seen = new Set();
+        folders.forEach(f => {
+            const e = draft.get(f.name);
+            if (e && !seen.has(e)) { seen.add(e); order.push(e); }
+        });
+        if (!order.length) return;
+        input.value = JSON.stringify(order.map(e => e.item !== null ? e.item : (e.subfolders ? { name: e.name, subfolders: true } : e.name)));
+        // The save bar counts it like a typed change
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+        settingsShowFolders(input);
+        close();
+    });
+
+    redraw();
 }

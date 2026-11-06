@@ -92,7 +92,7 @@ Which sending addresses must pass each domain's SPF check on [Domains](Domains.m
 
 ## DMARC & TLS IMAP
 
-**Test IMAP** logs in with the saved settings, lists the folders and counts the emails in **IMAP Folder** without importing anything. Use a mailbox that only receives reports: the import reads its unread emails and, by default, deletes each one it imports.
+**Choose folders** under **IMAP Folders** lists the folders of the saved account; save the connection settings first. **Test IMAP** logs in with the saved settings and counts the emails in each folder the import reads, without importing anything. Use a mailbox that only receives reports: the import reads its unread emails and, by default, deletes each one it imports.
 
 ## MaxMind
 

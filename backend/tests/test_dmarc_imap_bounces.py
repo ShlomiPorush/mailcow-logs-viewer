@@ -204,7 +204,7 @@ def test_sync_skips_bounces_without_failing_or_deleting(monkeypatch):
     imap = FakeImap({1: DSN, 2: ALIYUN_BOUNCE, 3: BROKEN_REPORT})
     service.connection = imap
     monkeypatch.setattr(service, "connect", lambda: True)
-    monkeypatch.setattr(service, "select_folder", lambda: True)
+    monkeypatch.setattr(service, "select_folder", lambda *folder: True)
     monkeypatch.setattr(service, "disconnect", lambda: None)
     monkeypatch.setattr(imap_module, "SessionLocal", Mock)
     monkeypatch.setattr(imap_module, "DMARCSync", _SyncRecord)

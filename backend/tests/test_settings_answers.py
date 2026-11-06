@@ -304,6 +304,35 @@ def test_connection_tests_without_a_server(client):
     # Not configured: the tests stop before connecting
     for path in ('/api/settings/test/smtp', '/api/settings/test/imap'):
         assert client.post(path).json()['success'] is False
+    folders = client.post('/api/settings/imap/folders').json()
+    assert folders['ok'] is False and folders['error'] == 'not_configured' and folders['folders'] == []
+
+
+def test_imap_folder_list(client, monkeypatch):
+    from app.services import connection_test
+
+    class Imap:
+        def list(self, directory, pattern):
+            return 'OK', [b'(\\HasChildren) "/" INBOX', b'(\\Noselect \\HasChildren) "/" "Archive"',
+                          b'(\\HasNoChildren) "/" "INBOX/&BdMF1QXXBdUF6g-"', b'broken']
+
+        def logout(self):
+            return 'BYE', [b'']
+    for key, value in (('dmarc_imap_host', 'imap.example'), ('dmarc_imap_user', 'reports'),
+                       ('dmarc_imap_password', secrets.token_hex(16)), ('dmarc_imap_folder', 'inbox')):
+        _set(monkeypatch, key, value)
+    monkeypatch.setattr(connection_test, '_open_imap', lambda current: Imap())
+    answer = client.post('/api/settings/imap/folders').json()
+    assert answer['ok'] is True and answer['unreadable'] == 1
+    assert [(f['name'], f['selectable']) for f in answer['folders']] == [
+        ('INBOX', True), ('Archive', False), ('INBOX/דוחות', True)]
+    assert answer['legacy'] == {'value': 'inbox', 'name': 'INBOX'}
+
+    def refused(current):
+        raise connection_test.imaplib.IMAP4.error('LOGIN failed')
+    monkeypatch.setattr(connection_test, '_open_imap', refused)
+    answer = client.post('/api/settings/imap/folders').json()
+    assert answer['ok'] is False and answer['error'] == 'auth_failed'
 
 
 class _MaxMind:

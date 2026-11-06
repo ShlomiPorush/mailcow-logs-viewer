@@ -236,6 +236,7 @@ EXCLUDED: Dict[Tuple[str, str], str] = {
     ("POST", "/api/settings/import-from-env"): _SETTINGS,
     ("POST", "/api/settings/test/smtp"): "test messages are not available to agents",
     ("POST", "/api/settings/test/imap"): "testing the stored IMAP credentials is not available to agents",
+    ("POST", "/api/settings/imap/folders"): "listing the stored IMAP account's folders is not available to agents",
     ("POST", "/api/settings/geoip/download"): _SETTINGS,
     ("POST", "/api/settings/maxmind/validate"): "checks a credential",
     ("POST", "/api/settings/mailcow/rw-key/validate"): "checks a credential",

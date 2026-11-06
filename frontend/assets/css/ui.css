@@ -2224,7 +2224,7 @@ button.ui-st-card { cursor: pointer; }
 .ui-set-field > .ui-label, .ui-set-field > .ui-set-desc, .ui-set-field > .ui-set-env { grid-column: 1; }
 .ui-set-field > .ui-label { grid-row: 1; margin: 0; color: var(--ui-ink); font-size: 14px; }
 .ui-set-field > .ui-set-desc { grid-row: 2; }
-.ui-set-field > .ui-input, .ui-set-field > .ui-select, .ui-set-field > .ui-set-secret, .ui-set-field > .ui-set-checks, .ui-set-field > .ui-seg, .ui-set-field > .ui-picker { grid-row: 1 / span 2; }
+.ui-set-field > .ui-input, .ui-set-field > .ui-select, .ui-set-field > .ui-set-secret, .ui-set-field > .ui-set-checks, .ui-set-field > .ui-seg, .ui-set-field > .ui-picker, .ui-set-field > .ui-set-folders { grid-row: 1 / span 2; }
 /* Three-way choice: at the end edge of the row with Reset under the description, like the on/off toggles */
 .ui-set-field > .ui-seg { justify-self: end; }
 .ui-set-seg > .ui-set-clear { grid-column: 1; }
@@ -2248,6 +2248,38 @@ button.ui-st-card { cursor: pointer; }
 .ui-set-secret { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-height: var(--ui-ctl-h); }
 .ui-set-secret-state { flex: 1; color: var(--ui-muted); }
 .ui-set-secret.is-removing .ui-set-secret-state { color: var(--ui-fail); font-weight: 600; }
+
+/* IMAP folders: the chosen folders as rows, and the picker's folder tree (settingsChooseFolders) */
+.ui-set-folders { display: grid; gap: 6px; justify-items: start; }
+.ui-set-folder-rows { display: grid; gap: 6px; width: 100%; margin: 0; padding: 0; list-style: none; }
+.ui-set-folder { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 7px 10px; border: 1px solid var(--ui-line); border-radius: var(--ui-radius-sm); background: var(--ui-bg); }
+.ui-set-folder svg { flex: none; color: var(--ui-muted); }
+.ui-set-folder-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--ui-mono); font-size: 13px; }
+.ui-set-folder .ui-tag { flex: none; margin-inline-start: auto; }
+.ui-set-field.is-locked .ui-set-folder { opacity: .7; }
+.ui-set-tree-intro { margin: 0 0 6px; color: var(--ui-muted); font-size: 13px; overflow-wrap: anywhere; }
+.ui-set-tree-msg { margin: 0; font-size: var(--ui-fs-sm); line-height: 1.5; }
+.ui-set-tree-note { margin: 8px 0 0; color: var(--ui-muted); font-size: 12.5px; }
+.ui-set-tree { display: grid; gap: 2px; }
+.ui-set-tree-node { display: flex; align-items: center; gap: 10px; min-height: 36px; padding: 4px 8px; border-radius: var(--ui-radius-sm); }
+@media (hover: hover) { .ui-set-tree-node:hover { background: var(--ui-bg); } }
+.ui-set-tree-pick { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; font-size: 14px; cursor: pointer; }
+span.ui-set-tree-pick { cursor: default; }
+.ui-set-tree-pick svg { flex: none; color: var(--ui-muted); }
+.ui-set-tree-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ui-set-tree-gap { flex: none; width: 16px; }
+.ui-set-tree-node.is-covered .ui-set-tree-pick, .ui-set-tree-node.is-noselect .ui-set-tree-pick { color: var(--ui-muted); }
+.ui-set-tree-node.is-covered .ui-set-tree-pick { cursor: default; }
+.ui-set-tree-node.is-missing { flex-wrap: wrap; row-gap: 4px; }
+.ui-set-tree-node.is-missing .ui-set-tree-pick { flex-basis: 180px; }
+.ui-set-tree-node.is-missing .ui-set-tree-name { font-family: var(--ui-mono); font-size: 13px; }
+.ui-set-tree-node .ui-tag { flex: none; }
+.ui-set-tree-subs { display: flex; align-items: center; gap: 6px; flex: none; color: var(--ui-muted); font-size: 12.5px; white-space: nowrap; cursor: pointer; }
+.ui-set-tree-subs.is-on { color: var(--ui-ink); font-weight: 650; }
+.ui-set-tree-future { margin: -2px 0 4px; color: var(--ui-info-text); font-size: 12px; }
+.ui-set-tree-foot { flex-wrap: wrap; align-items: center; }
+.ui-set-tree-sum { margin-inline-end: auto; color: var(--ui-muted); font-size: 13px; }
+.ui-set-tree-sum.is-blocked { color: var(--ui-warn); }
 
 /* On and off settings: the explanation left, a switch right */
 .ui-set-bool { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 6px 10px; padding: 14px var(--ui-pad-x); border-top: 1px solid var(--ui-line); }
@@ -2450,7 +2482,8 @@ html body .ui-main .ui-set-choice-opt > input[type="radio"] { accent-color: var(
 @media (max-width: 760px) {
     .ui-set-field { grid-template-columns: minmax(0, 1fr); }
     .ui-set-field > *, .ui-set-field > .ui-label, .ui-set-field > .ui-set-desc { grid-column: 1; grid-row: auto; }
-    .ui-set-field > .ui-input, .ui-set-field > .ui-select, .ui-set-field > .ui-set-secret, .ui-set-field > .ui-set-checks, .ui-set-field > .ui-seg, .ui-set-field > .ui-picker { grid-row: auto; }
+    .ui-set-field > .ui-input, .ui-set-field > .ui-select, .ui-set-field > .ui-set-secret, .ui-set-field > .ui-set-checks, .ui-set-field > .ui-seg, .ui-set-field > .ui-picker, .ui-set-field > .ui-set-folders { grid-row: auto; }
+    .ui-set-tree-foot .ui-set-tree-sum { flex-basis: 100%; }
     .settings-mobile-nav { top: 0; }
     .ui-savebar { inset: auto 10px calc(76px + env(safe-area-inset-bottom)) 10px; width: auto; }
     .ui-savebar .ui-savebar-count { flex: 1; }

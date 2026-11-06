@@ -331,6 +331,30 @@ class ConnectionTest(Fixed):
     logs: List[str] = Field(description="The steps, in order")
 
 
+class ImapFolder(Fixed):
+    name: str = Field(description="The folder's name, readable (decoded from the server's modified UTF-7)")
+    delimiter: Optional[str] = Field(description="The server's hierarchy separator for this folder; null when it has none")
+    selectable: bool = Field(description="false for a folder that holds only other folders (\\Noselect)")
+    can_have_children: bool = Field(description="Whether folders can exist below it")
+
+
+class ImapLegacyFolder(Fixed):
+    value: str = Field(description="The stored single folder name, as stored")
+    name: Optional[str] = Field(description="The listed folder it selects, readable; null when none matches")
+
+
+class ImapFolderList(Fixed):
+    """The stored IMAP account's folders, for choosing which ones to read. A failure is still 200."""
+    ok: bool
+    host: Optional[str] = Field(description="null when ok is false")
+    user: Optional[str] = Field(description="null when ok is false")
+    folders: List[ImapFolder] = Field(description="Every listed folder, in the server's order")
+    legacy: Optional[ImapLegacyFolder] = Field(description="Set when the setting holds one folder name (the form used before the folder list); null for the list form")
+    unreadable: int = Field(description="Lines of the server's folder list that could not be read")
+    error: Optional[str] = Field(description="not_configured, auth_failed, unreachable, tls or failed; null when ok")
+    message: Optional[str] = Field(description="What went wrong, as a sentence; null when ok")
+
+
 class HealthDatabase(Fixed):
     status: str = Field(description="connected")
     response_time_ms: float

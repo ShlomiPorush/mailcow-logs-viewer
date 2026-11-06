@@ -255,6 +255,7 @@ def _fake_smtp_test():
 
 def _fake_imap_test():
     from app.config import settings
+    from app.services.imap_folders import describe_setting
     host = settings.dmarc_imap_host or "imap.example.com"
     return {"success": True, "logs": [
         "Starting IMAP connection test...",
@@ -263,9 +264,34 @@ def _fake_imap_test():
         "Connecting...",
         "Connected over SSL.",
         "Login successful.",
-        f"Folder '{settings.dmarc_imap_folder}' selected: 0 new messages.",
+        f"Folders: {describe_setting(settings.dmarc_imap_folder)}: 0 new messages.",
         "IMAP connection test completed successfully.",
     ]}
+
+
+# The demo mailbox's folders: reports filed into subfolders by plus tag
+_DEMO_FOLDERS = (
+    ("INBOX", True), ("INBOX/dmarc", True), ("INBOX/dmarc/google.com", True),
+    ("INBOX/dmarc/microsoft.com", True), ("INBOX/dmarc/yahoo.com", True), ("INBOX/tls-rpt", True),
+    ("Archive", False), ("Archive/2025", True), ("Archive/2026", True),
+    ("Drafts", True), ("Junk", True), ("Sent", True), ("Trash", True),
+)
+
+
+def _fake_imap_folders():
+    from app.config import settings
+    from app.services.imap_folders import parse_setting
+    entries, legacy = parse_setting(settings.dmarc_imap_folder)
+    names = [name for name, _ in _DEMO_FOLDERS]
+    return {
+        "ok": True, "host": settings.dmarc_imap_host or "imap.example.com",
+        "user": settings.dmarc_imap_user or "reports@example.com",
+        "folders": [{"name": name, "delimiter": "/", "selectable": selectable, "can_have_children": True}
+                    for name, selectable in _DEMO_FOLDERS],
+        "legacy": None if entries is not None else {
+            "value": legacy, "name": next((n for n in names if n == legacy or n.upper() == legacy.upper() == "INBOX"), None)},
+        "unreadable": 0, "error": None, "message": None,
+    }
 
 
 def _fake_imap_sync(self, sync_type="auto"):
@@ -335,6 +361,8 @@ def install():
     connection_test.test_imap_connection = _fake_imap_test
     settings_router.test_smtp_connection = _fake_smtp_test
     settings_router.test_imap_connection = _fake_imap_test
+    connection_test.list_imap_folders = _fake_imap_folders
+    settings_router.list_imap_folders = _fake_imap_folders
     dmarc_imap_service.DMARCImapService.sync_reports = _fake_imap_sync
     notification_channels.send_to_config = _fake_send_to_config
     geoip_downloader.download_single_database = _fake_geoip_download

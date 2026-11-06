@@ -30,7 +30,8 @@ from ..scheduler import last_fetch_run_time, get_job_status, update_job_status, 
 from ..services.settings_store import get_config_overrides_from_db, save_config_overrides_to_db, has_config_overrides_in_db, get_maxmind_validation_status, save_maxmind_validation_status, clear_maxmind_validation_status
 from ..services.settings_store import credential_fingerprint, get_credential_check_status, save_credential_check_status
 from ..services.settings_store import parse_bool
-from ..services.connection_test import test_smtp_connection, test_imap_connection
+from ..services.connection_test import test_smtp_connection, test_imap_connection, list_imap_folders
+from ..services.imap_folders import describe_setting
 from ..services.geoip_downloader import is_license_configured, get_geoip_status
 from .domains import get_cached_server_ip
 from ..mailcow_api import mailcow_api, MailcowAPIError
@@ -855,7 +856,7 @@ def get_settings_info(request: Request = None, db: Session = Depends(get_db)):
                 "imap_sync_enabled": settings.dmarc_imap_enabled,
                 "imap_host": settings.dmarc_imap_host if settings.dmarc_imap_enabled and with_settings else None,
                 "imap_user": settings.dmarc_imap_user if settings.dmarc_imap_enabled and with_settings else None,
-                "imap_folder": settings.dmarc_imap_folder if settings.dmarc_imap_enabled and with_settings else None,
+                "imap_folder": describe_setting(settings.dmarc_imap_folder) if settings.dmarc_imap_enabled and with_settings else None,
                 "imap_delete_after": settings.dmarc_imap_delete_after if settings.dmarc_imap_enabled else None,
                 "imap_interval_minutes": round(settings.dmarc_imap_interval / 60, 1) if settings.dmarc_imap_enabled else None,
                 "smtp_configured": settings.notification_smtp_configured
@@ -1313,6 +1314,11 @@ def test_imap():
     """Test IMAP connection with detailed logging"""
     result = test_imap_connection()
     return result
+
+@router.post("/settings/imap/folders", responses=documented(m.ImapFolderList, description="The stored IMAP account's folders; a failure is still 200, with error and message"))
+def list_imap_folders_endpoint():
+    """List the folders of the stored IMAP account, to choose which ones the report import reads"""
+    return list_imap_folders()
 
 @router.get("/settings/health", responses=documented(m.DetailedHealthResponse, description="healthy, or unhealthy when the database could not be read"))
 def get_health_detailed(db: Session = Depends(get_db)):

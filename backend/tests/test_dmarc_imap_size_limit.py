@@ -97,7 +97,7 @@ def test_sync_reports_an_oversized_email_as_failed_and_moves_on(monkeypatch):
     imap = SizedImap({1: TLS_REPORT, 2: TLS_REPORT.replace(b'tls-1', b'tls-2')}, sizes={1: 25 * MB})
     service.connection = imap
     monkeypatch.setattr(service, "connect", lambda: True)
-    monkeypatch.setattr(service, "select_folder", lambda: True)
+    monkeypatch.setattr(service, "select_folder", lambda *folder: True)
     monkeypatch.setattr(service, "disconnect", lambda: None)
     monkeypatch.setattr(report_store, "enrich_dmarc_record", lambda row: row)
     monkeypatch.setattr(imap_module, "SessionLocal", Mock)
@@ -114,6 +114,7 @@ def test_sync_reports_an_oversized_email_as_failed_and_moves_on(monkeypatch):
     assert result['reports_failed'] == 1
     assert [e['email_id'] for e in result['failed_emails']] == ['1']
     assert [[e['email_id'] for e in failed] for failed in notified] == [['1']]
-    # Kept, marked as read so it is not checked again; only the imported one is deleted
-    assert imap.seen == {'1'}
+    # Kept, marked as read so it is not checked again; only the imported one is deleted.
+    # This server cannot remove one email (no UIDPLUS), so that one is also marked as read
+    assert imap.seen == {"1", "2"}
     assert imap.deleted == {'2'}
