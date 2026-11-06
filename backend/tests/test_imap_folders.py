@@ -1,6 +1,7 @@
 """Several IMAP folders for the DMARC & TLS report import (issue #564): the
 stored setting, the folder list, which folders a run reads, and a run across
 folders against a fake IMAP server. Nothing leaves the test."""
+import imaplib
 import secrets
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -41,9 +42,9 @@ def test_folder_list():
 
 def test_modified_utf7():
     # RFC 3501, 5.1.3
-    assert decode_mutf7('~peter/mail/&U,BTFw-/&ZeVnLIqe-') == '~peter/mail/台北/日本語'
+    assert decode_mutf7('~peter/mail/&U,BTFw-/&ZeVnLIqe-') == '~peter/mail/\u53f0\u5317/\u65e5\u672c\u8a9e'
     assert decode_mutf7('Tom &- Jerry') == 'Tom & Jerry'
-    assert decode_mutf7('&BdMF1QXXBdUF6g-') == 'דוחות'
+    assert decode_mutf7('&BdMF1QXXBdUF6g-') == '\u05d3\u05d5\u05d7\u05d5\u05ea'
     for bad in ('&ZeVn', '&!!!-', '&AA-'):
         with pytest.raises(ValueError):
             decode_mutf7(bad)
@@ -67,7 +68,7 @@ def test_list_answer_as_imaplib_returns_it():
         ('INBOX', 'INBOX', '/', True, True),
         ('INBOX/with "quotes" and \\ back', 'INBOX/with "quotes" and \\ back', '/', True, True),
         ('Archive', 'Archive', '/', False, True),
-        ('Reports/&BdMF1QXXBdUF6g-', 'Reports/דוחות', '/', True, True),
+        ('Reports/&BdMF1QXXBdUF6g-', 'Reports/\u05d3\u05d5\u05d7\u05d5\u05ea', '/', True, True),
         ('INBOX/{lit}', 'INBOX/{lit}', '/', True, True),
         ('Flat', 'Flat', None, True, False),
         ('dotted.name', 'dotted.name', '.', True, True),
@@ -108,9 +109,9 @@ def test_inbox_is_case_insensitive_and_noselect_parents():
 
 def test_a_stored_single_name_matches_the_raw_listed_name():
     folders = _folders('INBOX', 'Reports/&ZeVnLIqe-')
-    assert legacy_match(folders, 'Reports/&ZeVnLIqe-') == 'Reports/日本語'
+    assert legacy_match(folders, 'Reports/&ZeVnLIqe-') == 'Reports/\u65e5\u672c\u8a9e'
     assert legacy_match(folders, 'inbox') == 'INBOX'
-    assert legacy_match(folders, 'Reports/日本語') is None
+    assert legacy_match(folders, 'Reports/\u65e5\u672c\u8a9e') is None
 
 
 # ---------------------------------------------------------------- a fake server
@@ -359,8 +360,8 @@ def test_folder_list_answer(monkeypatch):
     monkeypatch.setattr(connection_test, '_open_imap', lambda current: server)
     answer = connection_test.list_imap_folders()
     assert answer['ok'] is True and answer['user'] == 'reports'
-    assert [f['name'] for f in answer['folders']] == ['INBOX', 'Reports/日本語']
-    assert answer['legacy'] == {'value': 'Reports/&ZeVnLIqe-', 'name': 'Reports/日本語'}
+    assert [f['name'] for f in answer['folders']] == ['INBOX', 'Reports/\u65e5\u672c\u8a9e']
+    assert answer['legacy'] == {'value': 'Reports/&ZeVnLIqe-', 'name': 'Reports/\u65e5\u672c\u8a9e'}
     assert password not in repr(answer)
 
     monkeypatch.setattr(settings._inner, 'dmarc_imap_password', None)
@@ -377,3 +378,36 @@ def test_history_hides_the_folder_from_callers_without_settings(monkeypatch):
     assert dmarc._failure_for('admin', item, True) == item
     # Entries from runs before folder lists have no folder
     assert dmarc._failure_for('admin', {'email_id': '1', 'error': 'x'}, True) == {'email_id': '1', 'error': 'x'}
+
+
+def test_hostile_list_answers_are_not_offered_or_read():
+    data = [
+        b'(\HasNoChildren) "/" "Reports"',
+        # A line break in a name would start another command when the name is sent back
+        (b'(\HasNoChildren) "/" {27}', b'Reports/x\r\na LOGOUT\r\nb NOOP'), b'',
+        # An empty separator would make "Reports" cover "ReportsPrivate"
+        b'(\HasNoChildren) "" "ReportsPrivate"',
+        # NUL through modified UTF-7
+        b'(\HasNoChildren) "/" "Reports/&AAA-"',
+        # A second spelling of a listed name: neither can be told apart
+        b'(\HasNoChildren) "/" "Dup"', b'(\HasNoChildren) "/" "&AEQAdQBw-"',
+    ]
+    folders, unreadable = parse_list(data)
+    assert [f.raw for f in folders] == ['Reports']
+    assert unreadable == 5
+    targets, missing, empty = resolve(folders, [Entry('Reports', True)])
+    assert [t.label for t in targets] == ['Reports']
+
+
+def test_a_read_only_folder_does_not_stop_the_others(monkeypatch):
+    server = Server({'Shared/reports': {1: REPORT}, 'INBOX/dmarc': {1: REPORT}})
+    real_select = server.select
+
+    def select(mailbox, readonly=False):
+        if 'Shared' in mailbox:
+            raise imaplib.IMAP4.readonly('Shared/reports is not writable')
+        return real_select(mailbox, readonly)
+    monkeypatch.setattr(server, 'select', select)
+    result, processed, *_ = _run(monkeypatch, server, '["Shared/reports","INBOX/dmarc"]')
+    assert processed == [('INBOX/dmarc', '1')]
+    assert result['status'] == 'error' and result['error_message'] == 'Failed to select folder Shared/reports'

@@ -126,9 +126,19 @@ def _unquote(text: str) -> str:
     return re.sub(r'\\(.)', r'\1', text)
 
 
+_CONTROL = re.compile(r'[\x00-\x1f\x7f]')
+
+
 def _folder(flags_text: str, delimiter: Optional[str], raw: str) -> Folder:
+    # A name goes back to the server inside a command: a line break in it
+    # would start another command. A separator is one character (RFC 3501, 7.2.2).
+    if _CONTROL.search(raw) or (delimiter is not None and (len(delimiter) != 1 or _CONTROL.search(delimiter))):
+        raise ValueError(f'unsafe name or separator: {raw!r}')
+    name = decode_mutf7(raw)
+    if not name or _CONTROL.search(name):
+        raise ValueError(f'unsafe decoded name: {raw!r}')
     flags = frozenset(flag.lower() for flag in flags_text.split())
-    return Folder(raw=raw, name=decode_mutf7(raw), delimiter=delimiter, flags=flags)
+    return Folder(raw=raw, name=name, delimiter=delimiter, flags=flags)
 
 
 def parse_list(data) -> Tuple[List[Folder], int]:
@@ -172,7 +182,15 @@ def parse_list(data) -> Tuple[List[Folder], int]:
         except (ValueError, UnicodeError, AttributeError, IndexError) as error:
             unreadable += 1
             logger.warning(f"Could not read a line of the IMAP folder list: {str(error)[:200]!r}")
-    return folders, unreadable
+    # Two raw names that read the same (modified UTF-7 can spell a name in
+    # more than one way) cannot be told apart by name: neither is offered
+    counts = {}
+    for folder in folders:
+        counts[_key(folder.name)] = counts.get(_key(folder.name), 0) + 1
+    clashing = [folder for folder in folders if counts[_key(folder.name)] > 1]
+    if clashing:
+        logger.warning(f"{len(clashing)} IMAP folders share a name with another folder and are left out")
+    return [folder for folder in folders if counts[_key(folder.name)] == 1], unreadable + len(clashing)
 
 
 def list_folders(connection) -> Tuple[List[Folder], int]:

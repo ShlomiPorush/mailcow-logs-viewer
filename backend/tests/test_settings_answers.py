@@ -325,7 +325,7 @@ def test_imap_folder_list(client, monkeypatch):
     answer = client.post('/api/settings/imap/folders').json()
     assert answer['ok'] is True and answer['unreadable'] == 1
     assert [(f['name'], f['selectable']) for f in answer['folders']] == [
-        ('INBOX', True), ('Archive', False), ('INBOX/דוחות', True)]
+        ('INBOX', True), ('Archive', False), ('INBOX/\u05d3\u05d5\u05d7\u05d5\u05ea', True)]
     assert answer['legacy'] == {'value': 'inbox', 'name': 'INBOX'}
 
     def refused(current):

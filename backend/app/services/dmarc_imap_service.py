@@ -180,6 +180,11 @@ class DMARCImapService:
             logger.info(f"Selected folder: {folder}")
             return True
 
+        except imaplib.IMAP4.readonly:
+            # A read-only folder (imaplib raises it as a kind of abort): the
+            # import cannot mark or delete there, so it is skipped like a missing one
+            logger.error(f"Folder {folder} is read-only")
+            return False
         except imaplib.IMAP4.abort:
             # The connection is gone: not a folder problem
             raise

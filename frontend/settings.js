@@ -1662,7 +1662,7 @@ function renderSettingsEditField(key, value, sensitiveKeys, description, envLock
             (envLocked ? '<p class="ui-set-env">' + LOCK + ' Set by ENV (DMARC_IMAP_FOLDER), change it there</p>' : '') +
             '<div class="ui-set-folders" role="group" aria-labelledby="label-' + keyAttr + '"><ul class="ui-set-folder-rows" data-folder-rows>' + settingsFolderRows(raw) + '</ul>' +
             (envLocked ? '' : '<div><button type="button" class="ui-btn ui-btn-sm" onclick="settingsChooseFolders()">Choose folders</button></div>') + '</div>' +
-            '<input type="hidden" id="edit-' + keyAttr + '" name="' + keyAttr + '" value="' + settingsAttr(raw) + '"' + (envLocked ? ' disabled' : '') + '>' +
+            '<input type="hidden" id="edit-' + keyAttr + '" name="' + keyAttr + '" value="' + uiEntityAttr(raw) + '"' + (envLocked ? ' disabled' : '') + '>' +
             clearBtnHtml + '</div>';
     }
 
@@ -3264,12 +3264,8 @@ const SETTINGS_IMAP_CONNECTION_KEYS = ['dmarc_imap_host', 'dmarc_imap_port', 'dm
 // Whether a field differs from the value it loaded with; set when the settings form is built
 let settingsFieldUnsaved = () => false;
 
-// Folder names and the JSON value as text in markup. Not escapeHtml (utils.js):
-// it drops the backslash of \", which changes a name or breaks the JSON
-function settingsAttr(text) {
-    const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' };
-    return String(text).replace(/[&<>"']/g, c => map[c]);
-}
+// Folder names and the JSON value go into markup with uiEntityAttr (utils.js), not
+// escapeHtml: that one drops the backslash of \", which changes a name or breaks the JSON
 
 // { entries: [{ name, subfolders, item }] } for the list form (item: the stored
 // item, written back as it was while unchanged), { legacy: name } for one folder name
@@ -3299,8 +3295,8 @@ function settingsParseFolders(value) {
 function settingsFolderRows(value) {
     const parsed = settingsParseFolders(value);
     const list = parsed.entries || [{ name: parsed.legacy, subfolders: false }];
-    return list.map(e => '<li class="ui-set-folder" title="' + settingsAttr(e.name) + '">' + SETTINGS_FOLDER_ICON +
-        '<span class="ui-set-folder-name" dir="auto">' + settingsAttr(e.name) + '</span>' +
+    return list.map(e => '<li class="ui-set-folder" title="' + uiEntityAttr(e.name) + '">' + SETTINGS_FOLDER_ICON +
+        '<span class="ui-set-folder-name" dir="auto">' + uiEntityAttr(e.name) + '</span>' +
         (e.subfolders ? uiTag('With subfolders', 'info') : '') + '</li>').join('');
 }
 
@@ -3329,7 +3325,7 @@ async function settingsChooseFolders() {
     });
     foot.querySelector('[data-folders-close]').addEventListener('click', close);
     const say = text => {
-        body.innerHTML = '<p class="ui-set-tree-msg" role="status">' + settingsAttr(text) + '</p>';
+        body.innerHTML = '<p class="ui-set-tree-msg" role="status">' + uiEntityAttr(text) + '</p>';
         foot.innerHTML = '<button type="button" class="ui-btn" data-folders-close>Close</button>';
         foot.querySelector('[data-folders-close]').addEventListener('click', close);
     };
@@ -3396,7 +3392,15 @@ function settingsFolderPicker(result, input, body, foot, close) {
     const add = (name, subfolders, item, legacy) => {
         const folder = listed(name);
         const key = folder ? folder.name : name;
-        if (draft.has(key)) return;
+        if (draft.has(key)) {
+            // The same folder twice: one entry that keeps the subfolders if either had them
+            const known = draft.get(key);
+            if (subfolders && !known.subfolders) {
+                known.subfolders = true;
+                known.item = null;
+            }
+            return;
+        }
         const entry = { name, subfolders, item, folder, legacy };
         draft.set(key, entry);
         if (!folder) missing.push({ key, entry });
@@ -3428,7 +3432,7 @@ function settingsFolderPicker(result, input, body, foot, close) {
             const on = draft.has(m.key);
             return '<div class="ui-set-tree-node is-missing" style="' + indent(0) + '">' +
                 '<label class="ui-set-tree-pick"><input type="checkbox" class="ui-check" data-missing="' + i + '"' + (on ? ' checked' : '') + '>' +
-                SETTINGS_FOLDER_ICON + '<span class="ui-set-tree-name" dir="auto">' + settingsAttr(m.entry.name) + '</span></label>' +
+                SETTINGS_FOLDER_ICON + '<span class="ui-set-tree-name" dir="auto">' + uiEntityAttr(m.entry.name) + '</span></label>' +
                 (m.entry.subfolders ? uiTag('With subfolders', 'info') : '') + uiTag('Not found on the server', 'warn') + '</div>';
         }).join('');
         return top + rows.map((row, i) => {
@@ -3436,24 +3440,24 @@ function settingsFolderPicker(result, input, body, foot, close) {
             const own = draft.get(f.name);
             const cover = coverOf(f);
             const subs = !!(own && own.subfolders) && !cover;
-            const name = '<span class="ui-set-tree-name" dir="auto">' + settingsAttr(row.label) + '</span>';
+            const name = '<span class="ui-set-tree-name" dir="auto">' + uiEntityAttr(row.label) + '</span>';
             const pick = f.selectable !== false
                 ? '<label class="ui-set-tree-pick"><input type="checkbox" class="ui-check" data-pick="' + i + '"' + (own || cover ? ' checked' : '') + (cover ? ' disabled' : '') + '>' + SETTINGS_FOLDER_ICON + name + '</label>'
                 : '<span class="ui-set-tree-pick"><span class="ui-set-tree-gap"></span>' + SETTINGS_FOLDER_ICON + name + '</span>';
             const subsBox = f.can_have_children && !cover
                 ? '<label class="ui-set-tree-subs' + (subs ? ' is-on' : '') + '"><input type="checkbox" class="ui-check" data-subs="' + i + '"' + (subs ? ' checked' : '') +
-                    ' aria-label="' + settingsAttr(f.name) + ' with subfolders">With subfolders</label>'
+                    ' aria-label="' + uiEntityAttr(f.name) + ' with subfolders">With subfolders</label>'
                 : '';
-            return '<div class="ui-set-tree-node' + (cover ? ' is-covered' : '') + (f.selectable === false ? ' is-noselect' : '') + '" style="' + indent(row.depth) + '" title="' + settingsAttr(f.name) + '">' + pick + subsBox + '</div>' +
+            return '<div class="ui-set-tree-node' + (cover ? ' is-covered' : '') + (f.selectable === false ? ' is-noselect' : '') + '" style="' + indent(row.depth) + '" title="' + uiEntityAttr(f.name) + '">' + pick + subsBox + '</div>' +
                 (subs ? '<p class="ui-set-tree-future" style="padding-inline-start:' + (38 + row.depth * 22) + 'px">Subfolders added later are read too.</p>' : '');
         }).join('');
     };
 
     const unreadable = Number(result.unreadable) || 0;
-    body.innerHTML = '<p class="ui-set-tree-intro">' + settingsAttr('Folders in ' + (result.user || '') + ' on ' + (result.host || '')) + '</p>' +
+    body.innerHTML = '<p class="ui-set-tree-intro">' + uiEntityAttr('Folders in ' + (result.user || '') + ' on ' + (result.host || '')) + '</p>' +
         (rows.length || missing.length ? '' : '<p class="ui-set-tree-msg">The server listed no folders.</p>') +
         '<div class="ui-set-tree" data-folder-tree></div>' +
-        (unreadable > 0 ? '<p class="ui-set-tree-note">' + settingsAttr(uiCountLabel(unreadable, 'folder', 'folders') + ' could not be read from the server\'s folder list.') + '</p>' : '');
+        (unreadable > 0 ? '<p class="ui-set-tree-note">' + uiEntityAttr(uiCountLabel(unreadable, 'folder', 'folders') + ' could not be read from the server\'s folder list.') + '</p>' : '');
     foot.innerHTML = '<span class="ui-set-tree-sum" aria-live="polite"></span>' +
         '<button type="button" class="ui-btn" data-folders-close>Cancel</button>' +
         '<button type="button" class="ui-btn ui-btn-primary" data-folders-apply>Use these folders</button>';
