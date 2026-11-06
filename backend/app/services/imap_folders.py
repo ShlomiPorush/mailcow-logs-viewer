@@ -112,7 +112,12 @@ def decode_mutf7(raw: str) -> str:
             decoded = base64.b64decode(data, validate=True)
             if len(decoded) % 2:
                 raise ValueError('odd UTF-16 length')
-            out.append(decoded.decode('utf-16-be'))
+            text = decoded.decode('utf-16-be')
+            # Printable ASCII is never shifted (RFC 3501): a shifted "/" would
+            # make a folder read as a subfolder of another
+            if any(0x20 <= ord(char) <= 0x7e for char in text):
+                raise ValueError('printable ASCII in a shifted sequence')
+            out.append(text)
         i = end + 1
     return ''.join(out)
 

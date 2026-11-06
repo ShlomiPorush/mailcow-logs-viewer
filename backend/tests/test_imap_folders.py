@@ -382,15 +382,15 @@ def test_history_hides_the_folder_from_callers_without_settings(monkeypatch):
 
 def test_hostile_list_answers_are_not_offered_or_read():
     data = [
-        b'(\HasNoChildren) "/" "Reports"',
+        b'(\\HasNoChildren) "/" "Reports"',
         # A line break in a name would start another command when the name is sent back
-        (b'(\HasNoChildren) "/" {27}', b'Reports/x\r\na LOGOUT\r\nb NOOP'), b'',
+        (b'(\\HasNoChildren) "/" {27}', b'Reports/x\r\na LOGOUT\r\nb NOOP'), b'',
         # An empty separator would make "Reports" cover "ReportsPrivate"
-        b'(\HasNoChildren) "" "ReportsPrivate"',
+        b'(\\HasNoChildren) "" "ReportsPrivate"',
         # NUL through modified UTF-7
-        b'(\HasNoChildren) "/" "Reports/&AAA-"',
-        # A second spelling of a listed name: neither can be told apart
-        b'(\HasNoChildren) "/" "Dup"', b'(\HasNoChildren) "/" "&AEQAdQBw-"',
+        b'(\\HasNoChildren) "/" "Reports/&AAA-"',
+        # Two spellings of one name (one shift or two): neither can be told apart
+        b'(\\HasNoChildren) "/" "&ZeVnLIqe-"', b'(\\HasNoChildren) "/" "&ZeU-&ZyyKng-"',
     ]
     folders, unreadable = parse_list(data)
     assert [f.raw for f in folders] == ['Reports']
@@ -411,3 +411,16 @@ def test_a_read_only_folder_does_not_stop_the_others(monkeypatch):
     result, processed, *_ = _run(monkeypatch, server, '["Shared/reports","INBOX/dmarc"]')
     assert processed == [('INBOX/dmarc', '1')]
     assert result['status'] == 'error' and result['error_message'] == 'Failed to select folder Shared/reports'
+
+
+def test_a_shifted_separator_does_not_make_a_subfolder():
+    # "&AC8-" spells "/": printable ASCII is never shifted (RFC 3501, 5.1.3), so
+    # the folder is not read as Reports/private and not covered by Reports
+    for bad in ('Reports&AC8-private', '&AFIAZQBwAG8AcgB0AHM-', 'x&ACY-'):
+        with pytest.raises(ValueError):
+            decode_mutf7(bad)
+    folders, unreadable = parse_list([b'(\\HasChildren) "/" "Reports"',
+                                      b'(\\HasNoChildren) "/" "Reports&AC8-private"'])
+    assert [f.raw for f in folders] == ['Reports'] and unreadable == 1
+    targets, _, _ = resolve(folders, [Entry('Reports', True)])
+    assert [t.select for t in targets] == ['"Reports"']
