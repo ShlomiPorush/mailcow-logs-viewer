@@ -12,7 +12,8 @@ from typing import List, Dict, Optional, Tuple
 from email.message import EmailMessage
 from email.header import decode_header as decode_rfc2047
 
-from ..config import settings
+from ..config import settings, settings_snapshot
+from .imap_folders import folder_targets
 from .mail_tls import mail_tls_context, certificate_error_hint
 from ..database import SessionLocal
 from ..models import DMARCSync
@@ -105,16 +106,25 @@ class DMARCImapService:
     """Service to fetch DMARC reports from IMAP inbox"""
     
     def __init__(self):
-        self.host = settings.dmarc_imap_host
-        self.port = settings.dmarc_imap_port
-        self.use_ssl = settings.dmarc_imap_use_ssl
-        self.user = settings.dmarc_imap_user
-        self.password = settings.dmarc_imap_password
-        self.folder = settings.dmarc_imap_folder
-        self.delete_after = settings.dmarc_imap_delete_after
-        self.scan_all_unseen = settings.dmarc_imap_scan_all_unseen
+        # One snapshot for the whole run: a save during it cannot mix two accounts
+        current = settings_snapshot()
+        self.host = current.dmarc_imap_host
+        self.port = current.dmarc_imap_port
+        self.use_ssl = current.dmarc_imap_use_ssl
+        self.verify_ssl = current.dmarc_imap_verify_ssl
+        self.user = current.dmarc_imap_user
+        self.password = current.dmarc_imap_password
+        self.folder = current.dmarc_imap_folder
+        self.delete_after = current.dmarc_imap_delete_after
+        self.scan_all_unseen = current.dmarc_imap_scan_all_unseen
+        self.batch_size = current.dmarc_imap_batch_size
         self.connection = None
-        
+        # Whether the server can expunge one message (RFC 4315), from its
+        # capabilities after login
+        self.uidplus = False
+        # Scan all unseen applies to the folder being read (only folders chosen themselves)
+        self.scan_unseen_here = self.scan_all_unseen
+
     def connect(self) -> bool:
         """Connect to IMAP server"""
         try:
@@ -122,12 +132,16 @@ class DMARCImapService:
                 raise ValueError(f"IMAP server configuration incomplete: host={self.host}, port={self.port}")
             
             if self.use_ssl:
-                context = mail_tls_context(self.host, settings.dmarc_imap_verify_ssl, "DMARC_IMAP_VERIFY_SSL")
+                context = mail_tls_context(self.host, self.verify_ssl, "DMARC_IMAP_VERIFY_SSL")
                 self.connection = imaplib.IMAP4_SSL(self.host, self.port, ssl_context=context, timeout=30)
             else:
                 self.connection = imaplib.IMAP4(self.host, self.port, timeout=30)
-            
+
             self.connection.login(self.user, self.password)
+            # imaplib keeps the capabilities from before login, and servers add
+            # some (such as UIDPLUS) only after it
+            status, data = self.connection.capability()
+            self.uidplus = status == 'OK' and bool(data) and b'UIDPLUS' in (data[0] or b'').upper().split()
             logger.info(f"Successfully connected to IMAP server {self.host}:{self.port}")
             return True
             
@@ -153,17 +167,27 @@ class DMARCImapService:
             except Exception as e:
                 logger.error(f"Error disconnecting from IMAP: {e}")
     
-    def select_folder(self) -> bool:
-        """Select the mailbox folder"""
+    def select_folder(self, folder: Optional[str] = None) -> bool:
+        """Select a folder: as SELECT gets it (a stored single name as stored,
+        a listed one quoted). Default: the stored single folder."""
+        folder = self.folder if folder is None else folder
         try:
-            status, messages = self.connection.select(self.folder)
+            status, messages = self.connection.select(folder)
             if status != 'OK':
-                logger.error(f"Failed to select folder {self.folder}")
+                logger.error(f"Failed to select folder {folder}")
                 return False
-            
-            logger.info(f"Selected folder: {self.folder}")
+
+            logger.info(f"Selected folder: {folder}")
             return True
-            
+
+        except imaplib.IMAP4.readonly:
+            # A read-only folder (imaplib raises it as a kind of abort): the
+            # import cannot mark or delete there, so it is skipped like a missing one
+            logger.error(f"Folder {folder} is read-only")
+            return False
+        except imaplib.IMAP4.abort:
+            # The connection is gone: not a folder problem
+            raise
         except Exception as e:
             logger.error(f"Error selecting folder: {e}")
             return False
@@ -176,41 +200,37 @@ class DMARCImapService:
         Phase 2 (when scan_all_unseen=True): Search all remaining UNSEEN
         emails to catch reports with non-English subjects.
         
-        Returns list of email UIDs.
+        Returns list of email UIDs. A search the server refuses raises: it is
+        not an empty folder.
         """
-        try:
-            # Phase 1: Subject-based search (covers most DMARC/TLS-RPT providers)
-            search_criteria = '(UNSEEN (OR (SUBJECT "Report Domain:") (OR (SUBJECT "DMARC") (OR (SUBJECT "Report-ID:") (OR (SUBJECT "TLS-RPT") (SUBJECT "TLS Report"))))))'
-            
-            status, messages = self.connection.uid('SEARCH', None, search_criteria)
-            
-            if status != 'OK':
-                logger.error("Failed to search for report emails")
-                return []
-            
-            email_ids = messages[0].split()
-            logger.info(f"[Phase 1] Found {len(email_ids)} subject-matched DMARC/TLS-RPT emails")
-            
-            # Phase 2: Scan all remaining UNSEEN emails (opt-in)
-            # This catches reports from providers that use non-English subjects
-            if self.scan_all_unseen:
-                subject_matched_set = set(email_ids)
-                
-                status2, messages2 = self.connection.uid('SEARCH', None, '(UNSEEN)')
-                if status2 == 'OK':
-                    all_unseen = messages2[0].split()
-                    new_ids = [uid for uid in all_unseen if uid not in subject_matched_set]
-                    if new_ids:
-                        logger.info(f"[Phase 2] Scanning {len(new_ids)} additional unseen emails for DMARC attachments")
-                        email_ids.extend(new_ids)
-                    else:
-                        logger.debug("[Phase 2] No additional unseen emails to scan")
-            
-            return email_ids
-            
-        except Exception as e:
-            logger.error(f"Error searching for emails: {e}")
-            return []
+        # Phase 1: Subject-based search (covers most DMARC/TLS-RPT providers)
+        search_criteria = '(UNSEEN (OR (SUBJECT "Report Domain:") (OR (SUBJECT "DMARC") (OR (SUBJECT "Report-ID:") (OR (SUBJECT "TLS-RPT") (SUBJECT "TLS Report"))))))'
+
+        status, messages = self.connection.uid('SEARCH', None, search_criteria)
+
+        if status != 'OK':
+            raise RuntimeError("The IMAP server refused the search for report emails")
+
+        email_ids = (messages[0] or b'').split()
+        logger.info(f"[Phase 1] Found {len(email_ids)} subject-matched DMARC/TLS-RPT emails")
+
+        # Phase 2: Scan all remaining UNSEEN emails (opt-in, only in folders chosen themselves)
+        # This catches reports from providers that use non-English subjects
+        if self.scan_unseen_here:
+            subject_matched_set = set(email_ids)
+
+            status2, messages2 = self.connection.uid('SEARCH', None, '(UNSEEN)')
+            if status2 != 'OK':
+                raise RuntimeError("The IMAP server refused the search for unread emails")
+            all_unseen = (messages2[0] or b'').split()
+            new_ids = [uid for uid in all_unseen if uid not in subject_matched_set]
+            if new_ids:
+                logger.info(f"[Phase 2] Scanning {len(new_ids)} additional unseen emails for DMARC attachments")
+                email_ids.extend(new_ids)
+            else:
+                logger.debug("[Phase 2] No additional unseen emails to scan")
+
+        return email_ids
     
     def search_dmarc_emails(self) -> List[bytes]:
         """Alias for backward compatibility"""
@@ -461,25 +481,31 @@ class DMARCImapService:
             result['success'] = True
         return result
     
+    def _store(self, email_id: str, flag: str):
+        status, _ = self.connection.uid('STORE', email_id, '+FLAGS', flag)
+        if status != 'OK':
+            raise RuntimeError(f"The IMAP server refused to set {flag} on email {email_id}")
+
     def mark_as_processed(self, email_id: str):
-        """Mark email as processed (flag or move)"""
-        try:
-            # Add a flag to mark as processed
-            self.connection.uid('STORE', email_id, '+FLAGS', '\\Seen')
-            logger.debug(f"Marked email {email_id} as seen")
-            
-        except Exception as e:
-            logger.error(f"Error marking email as processed: {e}")
-    
+        """Mark the email as read, so the next search leaves it out. Raises when
+        the server refuses: the import must not take the same email again."""
+        self._store(email_id, '\\Seen')
+        logger.debug(f"Marked email {email_id} as seen")
+
     def delete_email(self, email_id: str):
-        """Delete email from server"""
-        try:
-            self.connection.uid('STORE', email_id, '+FLAGS', '\\Deleted')
-            self.connection.expunge()
+        """Delete this one email. A plain EXPUNGE would also remove every other
+        email of the folder that a mail client marked as deleted, so the email
+        is removed with UID EXPUNGE (RFC 4315); a server without it gets the
+        email marked as deleted and read, for a mail client to remove."""
+        self._store(email_id, '\\Deleted')
+        if self.uidplus:
+            status, _ = self.connection.uid('EXPUNGE', email_id)
+            if status != 'OK':
+                raise RuntimeError(f"The IMAP server refused to remove email {email_id}")
             logger.debug(f"Deleted email {email_id}")
-            
-        except Exception as e:
-            logger.error(f"Error deleting email: {e}")
+        else:
+            self.mark_as_processed(email_id)
+            logger.debug(f"Marked email {email_id} as deleted; the server cannot remove single emails")
     
     def sync_reports(self, sync_type: str = 'auto') -> Dict:
         """
@@ -503,9 +529,9 @@ class DMARCImapService:
         )
 
         db = SessionLocal()
-        batch_size = settings.dmarc_imap_batch_size
+        batch_size = self.batch_size
         # Kept here, not only on the record: a rollback resets the record
-        counts = {'emails_processed': 0, 'reports_created': 0,
+        counts = {'emails_found': 0, 'emails_processed': 0, 'reports_created': 0,
                   'reports_duplicate': 0, 'reports_failed': 0}
         failed_emails = []
         notified = False
@@ -517,92 +543,39 @@ class DMARCImapService:
 
             # Connect to IMAP
             self.connect()
+            if self.delete_after and not self.uidplus:
+                logger.info("The IMAP server cannot remove single emails (no UIDPLUS): imported "
+                            "emails are marked as deleted and read, for a mail client to remove")
 
-            # Select folder
-            if not self.select_folder():
-                raise Exception(f"Failed to select folder {self.folder}")
+            # The folders to read; a single stored folder is used as stored
+            targets, missing, empty, unreadable = folder_targets(self.connection, self.folder)
+            problems = []
+            if missing:
+                problems.append(f"Folder not found or not readable: {', '.join(missing)}")
+            if unreadable:
+                problems.append(f"{unreadable} folders could not be read from the server's folder list")
+            for name in empty:
+                logger.info(f"No folder to read under {name} yet")
 
-            # Initial search to count total emails
-            all_email_ids = self.search_dmarc_emails()
-            total_emails = len(all_email_ids)
-            sync_record.emails_found = total_emails
-            db.commit()
-
-            if not all_email_ids:
-                logger.info("No DMARC emails found")
-                sync_record.status = 'success'
-                sync_record.completed_at = datetime.now(timezone.utc)
-                db.commit()
-                return self._build_result(sync_record)
-
-            logger.info(f"Found {total_emails} DMARC emails, processing in batches of {batch_size}")
-
-            # Process in batches
-            batch_number = 0
-
-            while True:
-                batch_number += 1
-
-                # Re-search to get current unprocessed emails (since we delete/mark after each batch)
-                email_ids = self.search_dmarc_emails()
-
-                if not email_ids:
-                    logger.info(f"Batch {batch_number}: No more emails to process")
-                    break
-
-                # Take only batch_size emails
-                batch_emails = email_ids[:batch_size]
-                logger.info(f"Batch {batch_number}: Processing {len(batch_emails)} emails (remaining: {len(email_ids)})")
-
-                for email_id in batch_emails:
-                    email_id = email_id.decode() if isinstance(email_id, bytes) else email_id
-                    result = self.process_email(email_id, db)
-                    counts['emails_processed'] += 1
-                    # Committed reports count even when another report of the email failed
-                    counts['reports_created'] += result['reports_created']
-                    counts['reports_duplicate'] += result['reports_duplicate']
-
-                    if result['skipped']:
-                        # Not a report (e.g. a bounce): not a failure, and never deleted
-                        logger.info(f"Skipped email {email_id} ({result['skipped']}): {result['subject']}")
-                        self._save_progress(db, sync_record, counts, failed_emails)
-                        self.mark_as_processed(email_id)
-                    elif result['success']:
-                        # Every report of the email is stored: delete or mark as processed
-                        self._save_progress(db, sync_record, counts, failed_emails)
-                        if self.delete_after and not result.get('keep'):
-                            self.delete_email(email_id)
-                        else:
-                            self.mark_as_processed(email_id)
-                    else:
-                        counts['reports_failed'] += 1
-                        error_msg = result.get('error') or 'Unknown error'
-                        logger.warning(f"Failed to process email {email_id}: {error_msg}")
-
-                        failed_emails.append({
-                            'email_id': _plain_text(email_id),
-                            'message_id': _plain_text(result['message_id']),
-                            'subject': _plain_text(result['subject']),
-                            'error': _plain_text(error_msg)
-                        })
-                        self._save_progress(db, sync_record, counts, failed_emails, new_failure=True)
-                        # Kept in the mailbox, marked so it is not processed again
-                        self.mark_as_processed(email_id)
-
-                # Log batch progress
-                logger.info(f"Batch {batch_number} complete: "
-                           f"{counts['emails_processed']}/{total_emails} processed, "
-                           f"{counts['reports_created']} created, "
-                           f"{counts['reports_failed']} failed")
+            for target in targets:
+                if not self.select_folder(target.select):
+                    problems.append(f"Failed to select folder {target.label}")
+                    continue
+                # Scan all unseen only where the folder was chosen itself
+                self.scan_unseen_here = self.scan_all_unseen and target.direct
+                self._sync_folder(db, sync_record, target.label, batch_size, counts, failed_emails)
 
             # Update sync record
             _record_counts(sync_record, counts)
-            sync_record.status = 'success'
+            sync_record.status = 'error' if problems else 'success'
             sync_record.completed_at = datetime.now(timezone.utc)
             sync_record.failed_emails = list(failed_emails) or None
 
+            messages = list(problems)
             if failed_emails:
-                sync_record.error_message = f"{len(failed_emails)} emails failed to process"
+                messages.append(f"{len(failed_emails)} emails failed to process")
+            if messages:
+                sync_record.error_message = _plain_text('; '.join(messages))
 
             db.commit()
 
@@ -636,6 +609,13 @@ class DMARCImapService:
                           'error_message': _plain_text(e), 'failed_emails': list(failed_emails) or None,
                           **counts}
 
+            # Reports stored before the error are new data for the DMARC pages
+            if counts['reports_created'] > 0:
+                try:
+                    clear_dmarc_cache(db)
+                except Exception as cache_error:
+                    logger.error(f"Could not clear the DMARC cache: {cache_error}")
+
             # Return error result instead of raising exception
             # This allows the scheduler to handle it gracefully
             if not notified:
@@ -646,6 +626,89 @@ class DMARCImapService:
         finally:
             self.disconnect()
             db.close()
+
+    def _sync_folder(self, db, sync_record: DMARCSync, folder: str, batch_size: int,
+                     counts: Dict, failed_emails: List[Dict]):
+        """Import the report emails of the selected folder in batches. After
+        each batch the emails are deleted or marked and the search runs again.
+
+        Each email's counts and failure entry are committed before the email
+        is marked or deleted, so a failure is stored before its email leaves
+        the import. A search that only finds emails this run already handled
+        means the server did not keep their flags: the folder stops with an
+        error instead of taking them again."""
+        found = len(self.search_dmarc_emails())
+        counts['emails_found'] += found
+        _record_counts(sync_record, counts)
+        db.commit()
+        if not found:
+            logger.info(f"No DMARC emails found in {folder}")
+            return
+
+        logger.info(f"Found {found} DMARC emails in {folder}, processing in batches of {batch_size}")
+        handled = set()
+        batch_number = 0
+
+        while True:
+            batch_number += 1
+
+            # Re-search to get current unprocessed emails (since we delete/mark after each batch)
+            listed = self.search_dmarc_emails()
+            email_ids = [uid for uid in listed if uid not in handled]
+
+            if not email_ids:
+                if listed:
+                    raise RuntimeError(f"The server kept showing emails in {folder} that were "
+                                       f"already handled as unread")
+                logger.info(f"Batch {batch_number}: No more emails to process in {folder}")
+                break
+
+            # Take only batch_size emails
+            batch_emails = email_ids[:batch_size]
+            logger.info(f"Batch {batch_number}: Processing {len(batch_emails)} emails (remaining: {len(email_ids)})")
+
+            for raw_id in batch_emails:
+                handled.add(raw_id)
+                email_id = raw_id.decode() if isinstance(raw_id, bytes) else raw_id
+                result = self.process_email(email_id, db)
+                counts['emails_processed'] += 1
+                # Committed reports count even when another report of the email failed
+                counts['reports_created'] += result['reports_created']
+                counts['reports_duplicate'] += result['reports_duplicate']
+
+                if result['skipped']:
+                    # Not a report (e.g. a bounce): not a failure, and never deleted
+                    logger.info(f"Skipped email {email_id} ({result['skipped']}): {result['subject']}")
+                    self._save_progress(db, sync_record, counts, failed_emails)
+                    self.mark_as_processed(email_id)
+                elif result['success']:
+                    # Every report of the email is stored: delete or mark as processed
+                    self._save_progress(db, sync_record, counts, failed_emails)
+                    if self.delete_after and not result.get('keep'):
+                        self.delete_email(email_id)
+                    else:
+                        self.mark_as_processed(email_id)
+                else:
+                    counts['reports_failed'] += 1
+                    error_msg = result.get('error') or 'Unknown error'
+                    logger.warning(f"Failed to process email {email_id}: {error_msg}")
+
+                    failed_emails.append({
+                        'email_id': _plain_text(email_id),
+                        'folder': _plain_text(folder),
+                        'message_id': _plain_text(result['message_id']),
+                        'subject': _plain_text(result['subject']),
+                        'error': _plain_text(error_msg)
+                    })
+                    self._save_progress(db, sync_record, counts, failed_emails, new_failure=True)
+                    # Kept in the mailbox, marked so it is not processed again
+                    self.mark_as_processed(email_id)
+
+            # Log batch progress
+            logger.info(f"Batch {batch_number} complete: "
+                       f"{counts['emails_processed']}/{counts['emails_found']} processed, "
+                       f"{counts['reports_created']} created, "
+                       f"{counts['reports_failed']} failed")
 
     def _save_progress(self, db, sync_record: DMARCSync, counts: Dict, failed_emails: List[Dict],
                        new_failure: bool = False):
@@ -665,7 +728,8 @@ class DMARCImapService:
             logger.warning(f"Could not store the failure entry of email "
                            f"{failed_emails[-1]['email_id']} ({type(error).__name__})")
             db.rollback()
-            failed_emails[-1] = {'email_id': failed_emails[-1]['email_id'], 'message_id': None,
+            failed_emails[-1] = {'email_id': failed_emails[-1]['email_id'],
+                                 'folder': failed_emails[-1].get('folder'), 'message_id': None,
                                  'subject': None, 'error': _DETAILS_NOT_STORED}
             _record_counts(sync_record, counts)
             sync_record.failed_emails = list(failed_emails)

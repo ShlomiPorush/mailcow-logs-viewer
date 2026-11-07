@@ -579,7 +579,8 @@ class ImapSyncStarted(Fixed):
 
 
 class FailedEmail(Fixed):
-    email_id: Optional[str] = Field(description="The IMAP UID")
+    email_id: Optional[str] = Field(description="The IMAP UID, unique within its folder")
+    folder: Optional[str] = Field(None, description="The folder the email is in; missing in runs before folder lists, and for a caller who may not read Settings")
     message_id: Optional[str]
     subject: Optional[str]
     error: Optional[str]

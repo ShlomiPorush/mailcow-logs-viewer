@@ -217,8 +217,8 @@ Use a mailbox that only receives reports: the import reads its unread emails and
 | `DMARC_IMAP_VERIFY_SSL` | `false` | Certificate check, same values as `SMTP_VERIFY_SSL`. |
 | `DMARC_IMAP_USER` | Unset | Such as `reports@example.com`. |
 | `DMARC_IMAP_PASSWORD` | Unset | |
-| `DMARC_IMAP_FOLDER` | `INBOX` | |
-| `DMARC_IMAP_DELETE_AFTER` | `true` | Delete each report email after it is imported. Emails that fail stay, marked as read. |
+| `DMARC_IMAP_FOLDER` | `INBOX` | One folder name, or a JSON list of folders such as `[{"name":"INBOX/dmarc","subfolders":true},"INBOX/tls-rpt"]`. `"subfolders":true` also reads every folder below it, including folders created later. |
+| `DMARC_IMAP_DELETE_AFTER` | `true` | Delete each report email after it is imported. Emails that fail stay, marked as read. A server that cannot remove a single email gets it marked as deleted and read instead. |
 | `DMARC_IMAP_INTERVAL` | `3600` | Seconds between imports. |
 | `DMARC_IMAP_RUN_ON_STARTUP` | `true` | Import once when the app starts. |
 | `DMARC_IMAP_BATCH_SIZE` | `10` | Emails per batch. |

@@ -21,6 +21,7 @@ _PATCHED = [
     (smtp_service.SmtpService, "send_email"), (connection_test, "test_smtp_connection"),
     (connection_test, "test_imap_connection"), (settings_router, "test_smtp_connection"),
     (settings_router, "test_imap_connection"), (dmarc_imap_service.DMARCImapService, "sync_reports"),
+    (connection_test, "list_imap_folders"), (settings_router, "list_imap_folders"),
     (notification_channels, "send_to_config"), (geoip_downloader, "download_single_database"),
     (geoip_service, "lookup_ip"), (geoip_service, "is_geoip_available"),
     (MailcowAPI, "_get_client"),

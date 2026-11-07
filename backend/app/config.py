@@ -1400,6 +1400,13 @@ _settings_wrapper = SettingsWrapper()
 _settings_wrapper._inner = Settings()
 settings = _settings_wrapper
 
+
+def settings_snapshot() -> Settings:
+    """The settings in force now, as one object: a save replaces it as a whole,
+    so values read from it all belong to the same save (a host from one save
+    and a password from the next never meet)."""
+    return _settings_wrapper._inner
+
 # One reload at a time, from reading the stored settings to putting them in
 # force. A save holds it from before it writes until it has reloaded, so a
 # reload elsewhere never reads the settings before the save and puts them in
