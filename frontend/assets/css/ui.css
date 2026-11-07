@@ -2247,7 +2247,7 @@ button.ui-st-card { cursor: pointer; }
     background: none; color: var(--ui-muted); cursor: help; }
 .ui-field-help svg { display: block; }
 @media (hover: hover) { .ui-field-help:hover { color: var(--ui-ink); } }
-.ui-field-help-panel[popover] { position: fixed; inset: auto; width: 340px; max-width: calc(100vw - 16px); margin: 0; padding: 12px; border: 1px solid var(--ui-line); border-radius: var(--ui-radius);
+.ui-field-help-panel[popover] { position: fixed; inset: auto; width: 340px; max-width: calc(100vw - 16px); max-height: calc(100vh - 16px); overflow-y: auto; margin: 0; padding: 12px; border: 1px solid var(--ui-line); border-radius: var(--ui-radius);
     background: var(--ui-bg); color: var(--ui-ink); font-size: var(--ui-fs-sm); line-height: 1.5; box-shadow: 0 12px 32px rgb(0 0 0 / .14); }
 .ui-field-help-panel p { margin: 0; }
 .ui-field-help-panel p + p { margin-top: 6px; }

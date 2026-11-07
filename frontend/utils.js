@@ -491,50 +491,75 @@ function uiMenu(label, itemsHtml, { small = true, icon = '', cls = '', attrs = '
 
 // A field's longer explanation: an "i" beside its name, and the text on the popover
 // layer, so a panel's own clipping cannot cut it. Text is one paragraph or a list of them.
-// A pointer on the "i" shows it, a click or a tap opens it on a touch screen and with the
-// keyboard, and the browser closes it on Esc, on a click outside and when another opens
+// A pointer on the "i" shows it; a click, a tap, Enter or Space opens and closes it; the
+// browser closes it on Esc, on a click outside and when another opens.
+// The "i" is a span with the role of a button, not a button: the Settings form is a
+// disabled fieldset until the settings are migrated, and a button in it cannot open anything
 let uiHelpSeq = 0;
 function uiHelp(name, text) {
     const id = `ui-help-${++uiHelpSeq}`;
     const paragraphs = [].concat(text).map(p => `<p>${escapeHtml(p)}</p>`).join('');
-    return `<button type="button" class="ui-field-help" popovertarget="${id}" aria-label="More about ${escapeHtml(name)}">
-            <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="8" r="6.5"/><path d="M8 7.3V11M8 4.9v.1"/></svg></button>
+    return `<span class="ui-field-help" role="button" tabindex="0" data-help="${id}" aria-controls="${id}" aria-expanded="false" aria-label="More about ${escapeHtml(name)}">
+            <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="8" r="6.5"/><path d="M8 7.3V11M8 4.9v.1"/></svg></span>
         <div id="${id}" popover class="ui-field-help-panel">${paragraphs}</div>`;
 }
 
 // Under the whole field, so the name, the short line and the control stay readable;
-// above it when there is no room below
-function uiHelpPlace(panel, button) {
-    const name = button.parentElement.getBoundingClientRect();
-    const row = (button.closest('.ui-set-field, .ui-set-bool') || button).getBoundingClientRect();
-    const rtl = getComputedStyle(button).direction === 'rtl';
+// above it when there is no room below. Its height is capped to the screen (ui.css)
+function uiHelpPlace(panel, opener) {
+    const name = opener.parentElement.getBoundingClientRect();
+    const row = (opener.closest('.ui-set-field, .ui-set-bool') || opener).getBoundingClientRect();
+    const rtl = getComputedStyle(opener).direction === 'rtl';
     const left = rtl ? name.right - panel.offsetWidth : name.left;
     panel.style.left = `${Math.max(8, Math.min(left, window.innerWidth - panel.offsetWidth - 8))}px`;
     const below = row.bottom - 8;
     panel.style.top = `${below + panel.offsetHeight > window.innerHeight - 8 ? Math.max(8, row.top - panel.offsetHeight + 8) : below}px`;
 }
 
-// The pointer may cross from the "i" to the text without closing it, to select a value
 function uiInitHelp() {
     let closing = 0;
-    const panelAt = event => {
+    const panelOf = el => (el ? document.getElementById(el.dataset.help) : null);
+    const setOpen = (panel, open) => {
+        if (panel && panel.matches(':popover-open') !== open) (open ? panel.showPopover() : panel.hidePopover());
+    };
+    // The pointer may cross from the "i" to the text without closing it, to select a value
+    const hovered = event => {
         if (event.pointerType !== 'mouse' || !(event.target instanceof Element)) return null;
         const spot = event.target.closest('.ui-field-help, .ui-field-help-panel');
-        return spot && (spot.classList.contains('ui-field-help-panel') ? spot : document.getElementById(spot.getAttribute('popovertarget')));
+        return spot && (spot.classList.contains('ui-field-help-panel') ? spot : panelOf(spot));
     };
     document.addEventListener('pointerover', event => {
-        const panel = panelAt(event);
+        const panel = hovered(event);
         if (!panel) return;
         clearTimeout(closing);
-        if (!panel.matches(':popover-open')) panel.showPopover();
+        setOpen(panel, true);
     });
     document.addEventListener('pointerout', event => {
-        const panel = panelAt(event);
-        if (panel) closing = setTimeout(() => { if (panel.matches(':popover-open')) panel.hidePopover(); }, 250);
+        const panel = hovered(event);
+        if (panel) closing = setTimeout(() => setOpen(panel, false), 250);
     });
-    // The pointer already opened it, so a click must not close it
+    // The press on the "i" already closed an open panel as a click outside, so that
+    // click must not open it again; a mouse click only opens, as hovering opened it
     document.addEventListener('click', event => {
-        if (event.pointerType === 'mouse' && event.target instanceof Element && event.target.closest('.ui-field-help')) event.preventDefault();
+        const panel = panelOf(event.target instanceof Element && event.target.closest('.ui-field-help'));
+        if (!panel) return;
+        const justClosed = Date.now() - (Number(panel.dataset.closedAt) || 0) < 400;
+        setOpen(panel, event.pointerType === 'mouse' || (!panel.matches(':popover-open') && !justClosed));
+    });
+    document.addEventListener('keydown', event => {
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        const panel = panelOf(event.target instanceof Element && event.target.closest('.ui-field-help'));
+        if (!panel) return;
+        event.preventDefault();
+        setOpen(panel, !panel.matches(':popover-open'));
+    });
+    // Before the click that follows a press, so the click sees that the press closed it
+    document.addEventListener('beforetoggle', event => {
+        const panel = event.target;
+        if (!(panel instanceof HTMLElement) || !panel.classList.contains('ui-field-help-panel')) return;
+        const opener = document.querySelector(`[data-help="${panel.id}"]`);
+        if (opener) opener.setAttribute('aria-expanded', String(event.newState === 'open'));
+        if (event.newState === 'closed') panel.dataset.closedAt = String(Date.now());
     }, true);
 }
 
@@ -545,7 +570,7 @@ function uiInitMenus() {
         const menu = event.target;
         if (!(menu instanceof HTMLElement) || event.newState !== 'open') return;
         if (menu.classList.contains('ui-field-help-panel')) {
-            const opener = document.querySelector(`[popovertarget="${menu.id}"]`);
+            const opener = document.querySelector(`[data-help="${menu.id}"]`);
             if (opener) uiHelpPlace(menu, opener);
             return;
         }
@@ -561,8 +586,10 @@ function uiInitMenus() {
         menu.style.top = `${below + menu.offsetHeight > window.innerHeight - 8 ? Math.max(8, r.top - menu.offsetHeight - 4) : below}px`;
     }, true);
 
-    // An open menu would drift away from its button on scroll, so close it
-    window.addEventListener('scroll', () => {
+    // An open menu would drift away from its button on scroll, so close it;
+    // scrolling the text of a field's help keeps that help open
+    window.addEventListener('scroll', event => {
+        if (event.target instanceof Element && event.target.closest('.ui-field-help-panel')) return;
         document.querySelectorAll('.ui-menu:popover-open, .ui-field-help-panel:popover-open').forEach(menu => menu.hidePopover());
     }, true);
 }

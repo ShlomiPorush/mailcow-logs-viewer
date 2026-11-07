@@ -56,8 +56,11 @@ test('neither text repeats what the screen shows or uses a dash the app does not
 
 test('a field with help has a name the button can use, and its text in paragraphs', () => {
     const html = uiHelp('Rspamd URL', ['First <b>.', 'Second.']);
-    const id = html.match(/popovertarget="(ui-help-\d+)"/)[1];
+    const id = html.match(/data-help="(ui-help-\d+)"/)[1];
     assert.match(html, /aria-label="More about Rspamd URL"/);
+    assert.match(html, new RegExp(`role="button" tabindex="0" data-help="${id}" aria-controls="${id}" aria-expanded="false"`));
+    // Not a button: the Settings form is a disabled fieldset until the settings are migrated
+    assert.doesNotMatch(html, /<button/);
     assert.match(html, new RegExp(`<div id="${id}" popover class="ui-field-help-panel">`));
     assert.match(html, /<p>First &lt;b&gt;\.<\/p><p>Second\.<\/p>/);
     assert.match(uiHelp('Name', 'One text.'), /<p>One text\.<\/p>/);

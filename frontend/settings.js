@@ -315,7 +315,7 @@ var SETTINGS_FIELD_DESCRIPTIONS = {
 
     // Domains
     domain_spf_source_server_ip: 'Turn off if this IP does not send mail for your domains.',
-    domain_spf_source_manual_hosts: 'Separate hosts with commas. Add only hosts that send mail.',
+    domain_spf_source_manual_hosts: "Every host must pass every domain's SPF check. Separate hosts with commas.",
     domain_spf_source_dmarc_history: 'Can cause false warnings.',
 
     // Authentication
@@ -338,7 +338,7 @@ var SETTINGS_FIELD_DESCRIPTIONS = {
     smtp_port: '587 for STARTTLS, 465 for implicit TLS, 25 for plain.',
     smtp_use_tls: 'Keep on unless you use implicit TLS or a trusted local relay.',
     smtp_use_ssl: 'Port 465 uses implicit TLS even if this is off.',
-    smtp_verify_ssl: 'Automatic or On is recommended.',
+    smtp_verify_ssl: 'Use Off only for a trusted server with a self-signed certificate. Automatic skips localhost, IP addresses and container names.',
     smtp_from: 'Required when sending without authentication. Otherwise, leave empty to use the SMTP username.',
     smtp_relay_mode: 'Use only with a trusted relay. Requires a From address.',
 
@@ -366,7 +366,7 @@ var SETTINGS_FIELD_DESCRIPTIONS = {
     dmarc_imap_enabled: 'Use the mailbox that receives your reports.',
     dmarc_imap_port: '993 for TLS, 143 without.',
     dmarc_imap_use_ssl: 'Without TLS, the IMAP password is sent unencrypted.',
-    dmarc_imap_verify_ssl: 'Automatic or On is recommended.',
+    dmarc_imap_verify_ssl: 'Use Off only for a trusted server with a self-signed certificate. Automatic skips localhost, IP addresses and container names.',
     dmarc_imap_delete_after: 'Permanently deletes imported emails from the mailbox.',
     dmarc_imap_scan_all_unseen: 'Use a dedicated report mailbox.',
     dmarc_error_email: 'Leave empty to use Admin email. Separate addresses with commas.',
@@ -424,14 +424,14 @@ var SETTINGS_FIELD_HELP = {
 
     // Blocklists
     blacklist_dns_servers: 'Spamhaus rejects queries from public resolvers such as Google, Cloudflare and Quad9. Separate resolvers with commas. Leave empty to use the container resolver.',
-    blacklist_source_transports: 'Checks the public IPs of active mailcow transports. Each next hop is resolved to all its public IPs, so relay pools with several addresses are covered.',
+    blacklist_source_transports: 'Checks the public IPs of active mailcow transports. Each next hop is resolved to all its public IPv4 addresses, so relay pools with several addresses are covered.',
     blacklist_source_relayhosts: 'Checks the public IPs of active mailcow relayhosts (sender-dependent transports).',
-    blacklist_source_manual_hosts: 'Accepts IPv4 addresses, IPv6 addresses and hostnames. A hostname covers all its public IPs. These are checked in addition to the sources above and can be hosts unrelated to this mailcow server.',
+    blacklist_source_manual_hosts: 'Accepts IP addresses and hostnames. A hostname covers its public IPv4 addresses, so enter IPv6 addresses directly. These are checked in addition to the sources above and can be hosts unrelated to this mailcow server.',
 
     // Domains
     domain_spf_source_transports: "Checks the public IPs of active mailcow transports against each domain's SPF record. Turn on when mail leaves through transports whose IPs must be in your SPF records.",
     domain_spf_source_relayhosts: "Checks the public IPs of active mailcow relayhosts against each domain's SPF record.",
-    domain_spf_source_manual_hosts: "Accepts IPv4 addresses, IPv6 addresses and hostnames. Every entry must pass each domain's SPF check, so do not add addresses that never send mail, such as an inbound-only MX.",
+    domain_spf_source_manual_hosts: 'Accepts IP addresses and hostnames. A hostname covers its public IPv4 addresses, so enter IPv6 addresses directly. Do not add addresses that never send mail, such as an inbound-only MX.',
     domain_spf_source_dmarc_history: [
         'Uses IPs with a passing SPF result in the last 30 days of DMARC reports for each domain.',
         "With relaxed SPF alignment, an IP sending from a subdomain of an email service can pass without being in the domain's own SPF record. It then shows as a false warning.",
@@ -481,7 +481,7 @@ var SETTINGS_FIELD_HELP = {
     anomaly_alert_cooldown_hours: 'After an alert, the same alert for the same mailbox or username stays quiet for this long. This prevents a flood of alerts during one incident.',
 
     // DMARC & TLS
-    dmarc_insights_pass_threshold: 'A stricter policy is suggested only above this rate. A higher rate gives more cautious advice.',
+    dmarc_insights_pass_threshold: 'A stricter policy can be suggested at or above this rate. A higher rate gives more cautious advice.',
 
     // DMARC & TLS IMAP
     dmarc_imap_enabled: 'That is the mailbox of the rua= addresses in your DMARC and TLS-RPT records.',
