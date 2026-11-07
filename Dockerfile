@@ -53,14 +53,12 @@ COPY --chown=appuser:appuser backend/demo/ /app/demo/
 # Help panels normally fetch these from GitHub; the demo serves them locally
 COPY --chown=appuser:appuser documentation/HelpDocs/ /app/demo/HelpDocs/
 # The asyncio loop matters: uvloop connects in C and would bypass the
-# Python-level network guard in demo/network_guard.py.
+# Python-level network guard in demo/network_guard.py. The mailcow API keys
+# and the Rspamd password are generated at start (demo/main.py).
 ENV DEMO_MODE=true \
     APP_MODULE=demo.main:app \
     UVICORN_LOOP=asyncio \
     MAILCOW_URL=https://mail.example.com \
-    MAILCOW_API_KEY=demo \
-    MAILCOW_API_KEY_RW=demo \
-    RSPAMD_PASSWORD=demo \
     SETTINGS_EDIT_VIA_UI_ENABLED=true
 # Settings set in ENV cannot be changed from the UI. Visitors can change
 # everything else; these would lock every other visitor out, load other

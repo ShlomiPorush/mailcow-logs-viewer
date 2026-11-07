@@ -12,6 +12,16 @@ starts, the application's own jobs ingest that history. Once the scheduler
 runs, live traffic starts flowing and the nightly reset is scheduled.
 """
 import logging
+import os
+import secrets
+
+# The fictional mailcow and Rspamd accept any credentials, but the app needs
+# them set to turn on the read-write actions and the Rspamd maps. They are
+# read from the environment like any other deployment, before app.config
+# loads, and stay locked in Settings. The nightly reset re-executes this
+# process with the same environment, so they last until the container stops.
+for _name in ("MAILCOW_API_KEY", "MAILCOW_API_KEY_RW", "RSPAMD_PASSWORD"):
+    os.environ.setdefault(_name, secrets.token_hex(32))
 
 import app.main as app_main
 from app.config import settings
