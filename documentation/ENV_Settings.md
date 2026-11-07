@@ -21,10 +21,18 @@ The app reads these before it can reach the database, so they stay in `.env`.
 | `POSTGRES_HOST` | `db` | `db` is the database container of the supplied Compose file. |
 | `POSTGRES_PORT` | `5432` | |
 | `POSTGRES_USER` | Required | `env.example` uses `mailcowlogs`. |
-| `POSTGRES_PASSWORD` | Required | Replace the `changeme` from `env.example` with a long random value; hexadecimal avoids characters that break the database URL. |
+| `POSTGRES_PASSWORD` | Required | A long random value, for example from `openssl rand -hex 32`; hexadecimal avoids characters that break the database URL. |
 | `POSTGRES_DB` | Required | `env.example` uses `mailcowlogs`. |
 
-The `db` service in `docker-compose.yml` falls back to `mailcowlogs` and `changeme`, but the app does not: it does not start without these values in `.env`.
+The `db` service in `docker-compose.yml` falls back to `mailcowlogs` for the user and the database name, but not for the password, and the app does not start without these values in `.env`.
+
+The app does not start when `POSTGRES_PASSWORD` or `MAILCOW_API_KEY` is empty, or when any password, key or secret setting holds an example value from this project's documentation, earlier versions included, such as `changeme` or a value starting with `replace-with-`. Those values are public. The error names the setting. For `POSTGRES_PASSWORD`, change the database user's password to the new value first, then put the same value in `.env` and run `docker compose up -d`:
+
+```sh
+docker compose exec db psql -U mailcowlogs -d mailcowlogs -c "ALTER USER mailcowlogs PASSWORD 'replace-with-the-new-password'"
+```
+
+Use your own `POSTGRES_USER` and `POSTGRES_DB` if you changed them.
 
 ## Settings UI configuration
 
@@ -111,7 +119,7 @@ The names are `netfilter` (Security), `queue`, `quarantine`, `suppressions`, `rs
 | --- | --- | --- |
 | `BASIC_AUTH_ENABLED` | `false` | Sign-in with username and password. Needs a password. |
 | `AUTH_USERNAME` | `admin` | |
-| `AUTH_PASSWORD` | Empty | The Settings page will not clear it while Basic authentication is on. |
+| `AUTH_PASSWORD` | Empty | Required while Basic authentication is on: without it, the app does not start and the Settings page does not save. |
 | `AUTH_MAX_FAILURE_CLIENTS` | `10000` | How many client addresses the failed-login counter tracks, at least 1. When full, the oldest make room. |
 | `OAUTH2_ENABLED` | `false` | Sign-in through an OAuth2/OIDC provider. |
 | `OAUTH2_PROVIDER_NAME` | `OAuth2 Provider` | Text on the login button. |
@@ -121,7 +129,7 @@ The names are `netfilter` (Security), `queue`, `quarantine`, `suppressions`, `rs
 | `OAUTH2_TOKEN_URL` | Unset | Token endpoint, only without discovery. |
 | `OAUTH2_USERINFO_URL` | Unset | UserInfo endpoint, only without discovery. |
 | `OAUTH2_CLIENT_ID` | Unset | |
-| `OAUTH2_CLIENT_SECRET` | Unset | |
+| `OAUTH2_CLIENT_SECRET` | Unset | Required while OAuth2 is on: without it, the app does not start and the Settings page does not save. |
 | `OAUTH2_REDIRECT_URI` | Unset | Callback address, exactly as registered with the provider, such as `https://logs.example.com/api/auth/callback`. |
 | `OAUTH2_SCOPES` | `openid profile email` | Scopes, separated by spaces. |
 | `SESSION_SECRET_KEY` | Empty | Signs the session cookie. Empty uses a temporary key for each run. Set a long random value, for example from `openssl rand -hex 32`. Sessions live in memory, so a restart signs everyone out either way. |

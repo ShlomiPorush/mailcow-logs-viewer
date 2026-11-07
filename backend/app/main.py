@@ -20,7 +20,7 @@ from starlette.datastructures import MutableHeaders
 from contextlib import asynccontextmanager, suppress
 from typing import Optional
 
-from .config import settings, reload_settings
+from .config import settings, reload_settings, sign_in_problem, SettingsLoadError
 from .database import init_db, check_db_connection
 from .scheduler import start_scheduler, stop_scheduler
 from .raw_logs_worker import start_raw_logs_scheduler, stop_raw_logs_scheduler
@@ -109,12 +109,10 @@ def log_authentication_state() -> None:
         auth_methods = []
         if settings.is_basic_auth_enabled:
             auth_methods.append("Basic Auth")
-            if not settings.auth_password:
-                logger.warning("WARNING: Basic Auth enabled but password not set!")
         if settings.is_oauth2_enabled:
             auth_methods.append(f"OAuth2 ({settings.oauth2_provider_name})")
-            if not settings.oauth2_client_id or not settings.oauth2_client_secret:
-                logger.warning("WARNING: OAuth2 enabled but client credentials not configured!")
+            if not settings.oauth2_client_id:
+                logger.warning("WARNING: OAuth2 enabled but no client ID configured!")
 
         logger.info(f"Authentication is ENABLED: {', '.join(auth_methods)}")
     else:
@@ -204,7 +202,12 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"Failed to initialize database or load the stored settings: {e}")
         raise
-    
+
+    problem = sign_in_problem(settings)
+    if problem:
+        logger.error(problem)
+        raise SettingsLoadError(problem)
+
     # Log effective configuration (after DB overrides are loaded)
     logger.info(f"Configuration: {settings.fetch_interval}s interval, {settings.retention_days}d retention")
     
