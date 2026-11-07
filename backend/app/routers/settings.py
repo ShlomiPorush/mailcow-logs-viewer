@@ -23,7 +23,7 @@ from ..agent_access.scopes import READ
 from ..user_access import DEFAULT_ACCESS_KEY, DEFAULT_VERSION_KEY, caller_may, job_error
 from ..services import users_store
 from ..config import settings, EDITABLE_SETTING_KEYS, FEATURE_IDS, reload_settings, Settings
-from ..config import normalize_disabled_features
+from ..config import normalize_disabled_features, sign_in_problem
 from ..config import _get_field_annotations, build_settings, get_env_locked_keys, settings_reload_lock
 from ..app_time import app_tz, configured_zone_name, is_valid_zone, DATE_FORMATS, TIME_FORMATS
 from ..scheduler import last_fetch_run_time, get_job_status, update_job_status, JOB_SKIPPED, JOB_STATUS_SET, reschedule_interval_jobs, clock_schedule, clock_parts, CLOCK_JOBS, dovecot_correlation_available, cleanup_disabled_feature_data, run_feature_data_sweep_soon, _mailbox_sync_needed
@@ -1065,7 +1065,7 @@ def update_settings(body: Dict[str, Any], request: Request = None, response: Res
         raise HTTPException(status_code=400, detail=detail) from e
     except Exception as e:
         raise HTTPException(status_code=400, detail="Invalid settings. Check the submitted values.") from e
-    prev_sync_sources = (settings.blacklist_source_transports, settings.blacklist_source_relayhosts)
+    prev_sync_sources =(settings.blacklist_source_transports, settings.blacklist_source_relayhosts)
     prev_credentials = {name: check["fingerprint"]() for name, check in _CREDENTIAL_CHECKS.items()}
     operator_session = get_session_from_request(request) if request is not None else None
     from ..services.feature_data import spam_list_kept
@@ -1086,6 +1086,12 @@ def update_settings(body: Dict[str, Any], request: Request = None, response: Res
             # shared settings, which a request elsewhere may reload with older values
             before = build_settings(db)
             _validate_agent_access(allowed, before)
+            # The app would not start again with the settings this save puts in force
+            locked = get_env_locked_keys()
+            problem = sign_in_problem(before.model_copy(
+                update={k: v for k, v in allowed.items() if k not in locked}))
+            if problem:
+                raise HTTPException(status_code=400, detail=problem)
             if _changes_admin_sign_in(allowed, before):
                 # Under the users' lock until the save below commits (services/users_store.py)
                 try:

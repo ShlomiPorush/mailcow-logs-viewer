@@ -9,6 +9,7 @@ in is an admin, as before.
 import asyncio
 import base64
 import logging
+import secrets
 import threading
 import time
 from urllib.parse import parse_qs, urlsplit
@@ -897,6 +898,8 @@ def test_the_settings_save_runs_the_sign_in_check_under_the_lock(people, refused
         raise users_store.UserError(409, users_store.NO_ADMIN_LEFT)
 
     monkeypatch.setattr(settings_router.users_store, "check_sign_in_settings", refuse)
+    # OAuth2 is turned on with its secret, which the save requires
+    monkeypatch.setenv("OAUTH2_CLIENT_SECRET", secrets.token_hex(16))
     admin = _admin()
     r = admin.put("/api/settings", json={"oauth2_enabled": True, "app_title": "Mail"})
     assert r.status_code == 409 and seen == [{"oauth2_enabled": True, "app_title": "Mail"}]

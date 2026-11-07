@@ -65,8 +65,8 @@ A self-hosted dashboard for mailcow mail servers. It collects mailcow's logs and
 You need Docker with Docker Compose, and a mailcow server with a read-only API key, created in the mailcow admin interface under **System** > **Configuration** > **Access** > **Administrators** > **API**.
 
 1. In mailcow, add `always_add_missing_headers = yes` to `data/conf/postfix/extra.cf` and restart Postfix. Without a Message-ID on every message, much of the app cannot link the logs of a message; see [Getting started](documentation/GETTING_STARTED.md#2-make-postfix-add-a-message-id).
-2. Create a directory and save [docker-compose.yml](docker-compose.yml) and [env.example](env.example) in it.
-3. Copy `env.example` to `.env` and set at least `MAILCOW_URL`, `MAILCOW_API_KEY` and `POSTGRES_PASSWORD`. Turn on sign-in (`BASIC_AUTH_ENABLED=true` with `AUTH_USERNAME` and `AUTH_PASSWORD`), since anyone who can open the app can read all mail logs.
+2. Download `docker-compose.yml` and create `.env` with the commands in [Getting started](documentation/GETTING_STARTED.md#3-download-the-files). They make `.env` readable only by you and give it a random database password.
+3. In `.env`, set at least `MAILCOW_URL` and `MAILCOW_API_KEY`. Turn on sign-in (`BASIC_AUTH_ENABLED=true` with `AUTH_USERNAME` and `AUTH_PASSWORD`), since anyone who can open the app can read all mail logs.
 4. Start it with `docker compose up -d` and open `http://<your-server>:8080`.
 
 The full steps are in [Getting started](documentation/GETTING_STARTED.md). To serve the app over HTTPS, see [Reverse proxy](documentation/Reverse_Proxy.md).
