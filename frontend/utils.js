@@ -547,6 +547,8 @@ function uiInitHelp() {
         const panel = panelOf(opener);
         press = panel ? { opener, open: panel.matches(':popover-open') } : null;
     }, true);
+    // A press that turned into a scroll brings no click: it must not decide a later one
+    document.addEventListener('pointercancel', () => { press = null; }, true);
     document.addEventListener('click', event => {
         const opener = event.target instanceof Element ? event.target.closest('.ui-field-help') : null;
         const panel = panelOf(opener);
@@ -559,6 +561,7 @@ function uiInitHelp() {
         const panel = panelOf(event.target instanceof Element && event.target.closest('.ui-field-help'));
         if (!panel) return;
         event.preventDefault();
+        press = null;
         setOpen(panel, !panel.matches(':popover-open'));
     });
     document.addEventListener('beforetoggle', event => {
