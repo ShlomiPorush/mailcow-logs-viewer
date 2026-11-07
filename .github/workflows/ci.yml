@@ -36,29 +36,33 @@ jobs:
   backend-tests:
     name: Backend tests (PostgreSQL)
     runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:16-alpine
-        env:
-          POSTGRES_USER: ci
-          POSTGRES_PASSWORD: ci
-          POSTGRES_DB: ci
-        ports: ['5432:5432']
-        options: >-
-          --health-cmd "pg_isready -U ci"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
+    # The tests generate their own mailcow API key (backend/tests/conftest.py)
     env:
       MAILCOW_URL: https://mail.example.com
-      MAILCOW_API_KEY: ci-placeholder
       POSTGRES_HOST: localhost
       POSTGRES_PORT: "5432"
       POSTGRES_USER: ci
-      POSTGRES_PASSWORD: ci
       POSTGRES_DB: ci
     steps:
       - uses: actions/checkout@v5
+
+      # Started here rather than as a service container: a service cannot take
+      # a value generated during the run, and the password is new for each run
+      - name: Start PostgreSQL
+        run: |
+          password="$(openssl rand -hex 32)"
+          echo "::add-mask::${password}"
+          export POSTGRES_PASSWORD="${password}"
+          docker run -d --name ci-postgres -p 5432:5432 \
+            -e POSTGRES_USER -e POSTGRES_PASSWORD -e POSTGRES_DB \
+            postgres:16-alpine >/dev/null
+          # Over TCP: during initialisation the server listens on its socket only
+          for i in $(seq 1 60); do
+            if docker exec ci-postgres pg_isready -h 127.0.0.1 -U ci -q; then break; fi
+            [ "$i" -eq 60 ] && { echo "::error::PostgreSQL did not become ready"; docker logs ci-postgres; exit 1; }
+            sleep 1
+          done
+          echo "POSTGRES_PASSWORD=${password}" >> "$GITHUB_ENV"
 
       - uses: actions/setup-python@v6
         with:
