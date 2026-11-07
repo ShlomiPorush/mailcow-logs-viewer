@@ -2239,6 +2239,18 @@ button.ui-st-card { cursor: pointer; }
 .ui-set-field.ui-set-wide { grid-template-columns: minmax(0, 1fr); }
 .ui-set-field.ui-set-wide > * { grid-column: 1; grid-row: auto; }
 .ui-set-desc { margin: 0; color: var(--ui-muted); font-size: 12.5px; line-height: 1.5; }
+/* A field's name with its "i" (uiHelp): the mark is 15px in a 24px target that adds no height */
+.ui-set-name { display: flex; align-items: center; gap: 2px; min-width: 0; }
+.ui-set-field > .ui-set-name { grid-column: 1; grid-row: 1; }
+.ui-set-name > .ui-label { margin: 0; color: var(--ui-ink); font-size: 14px; }
+.ui-field-help { display: inline-grid; place-items: center; flex: none; width: 24px; height: 24px; margin-block: -4px; padding: 0; border: 0; border-radius: 6px;
+    background: none; color: var(--ui-muted); cursor: help; }
+.ui-field-help svg { display: block; }
+@media (hover: hover) { .ui-field-help:hover { color: var(--ui-ink); } }
+.ui-field-help-panel[popover] { position: fixed; inset: auto; width: 340px; max-width: calc(100vw - 16px); margin: 0; padding: 12px; border: 1px solid var(--ui-line); border-radius: var(--ui-radius);
+    background: var(--ui-bg); color: var(--ui-ink); font-size: var(--ui-fs-sm); line-height: 1.5; box-shadow: 0 12px 32px rgb(0 0 0 / .14); }
+.ui-field-help-panel p { margin: 0; }
+.ui-field-help-panel p + p { margin-top: 6px; }
 .ui-set-env { display: flex; align-items: center; gap: 5px; margin: 0; color: var(--ui-muted); font-size: 12px; }
 .ui-set-field.is-locked > .ui-input, .ui-set-field.is-locked > .ui-select { opacity: .7; }
 .ui-set-field.is-locked > .ui-picker .ui-select-btn:disabled { opacity: .7; }
@@ -2489,7 +2501,7 @@ html body .ui-main .ui-set-choice-opt > input[type="radio"] { accent-color: var(
 }
 @media (max-width: 760px) {
     .ui-set-field { grid-template-columns: minmax(0, 1fr); }
-    .ui-set-field > *, .ui-set-field > .ui-label, .ui-set-field > .ui-set-desc { grid-column: 1; grid-row: auto; }
+    .ui-set-field > *, .ui-set-field > .ui-label, .ui-set-field > .ui-set-name, .ui-set-field > .ui-set-desc { grid-column: 1; grid-row: auto; }
     .ui-set-field > .ui-input, .ui-set-field > .ui-select, .ui-set-field > .ui-set-secret, .ui-set-field > .ui-set-checks, .ui-set-field > .ui-seg, .ui-set-field > .ui-picker, .ui-set-field > .ui-set-folders { grid-row: auto; }
     .ui-set-tree-foot .ui-set-tree-sum { flex-basis: 100%; }
     .settings-mobile-nav { top: 0; }

@@ -489,11 +489,67 @@ function uiMenu(label, itemsHtml, { small = true, icon = '', cls = '', attrs = '
         <div id="${id}" popover class="ui-menu" role="menu" onclick="if (event.target.closest('button')) this.hidePopover()">${itemsHtml}</div>`;
 }
 
+// A field's longer explanation: an "i" beside its name, and the text on the popover
+// layer, so a panel's own clipping cannot cut it. Text is one paragraph or a list of them.
+// A pointer on the "i" shows it, a click or a tap opens it on a touch screen and with the
+// keyboard, and the browser closes it on Esc, on a click outside and when another opens
+let uiHelpSeq = 0;
+function uiHelp(name, text) {
+    const id = `ui-help-${++uiHelpSeq}`;
+    const paragraphs = [].concat(text).map(p => `<p>${escapeHtml(p)}</p>`).join('');
+    return `<button type="button" class="ui-field-help" popovertarget="${id}" aria-label="More about ${escapeHtml(name)}">
+            <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="8" r="6.5"/><path d="M8 7.3V11M8 4.9v.1"/></svg></button>
+        <div id="${id}" popover class="ui-field-help-panel">${paragraphs}</div>`;
+}
+
+// Under the whole field, so the name, the short line and the control stay readable;
+// above it when there is no room below
+function uiHelpPlace(panel, button) {
+    const name = button.parentElement.getBoundingClientRect();
+    const row = (button.closest('.ui-set-field, .ui-set-bool') || button).getBoundingClientRect();
+    const rtl = getComputedStyle(button).direction === 'rtl';
+    const left = rtl ? name.right - panel.offsetWidth : name.left;
+    panel.style.left = `${Math.max(8, Math.min(left, window.innerWidth - panel.offsetWidth - 8))}px`;
+    const below = row.bottom - 8;
+    panel.style.top = `${below + panel.offsetHeight > window.innerHeight - 8 ? Math.max(8, row.top - panel.offsetHeight + 8) : below}px`;
+}
+
+// The pointer may cross from the "i" to the text without closing it, to select a value
+function uiInitHelp() {
+    let closing = 0;
+    const panelAt = event => {
+        if (event.pointerType !== 'mouse' || !(event.target instanceof Element)) return null;
+        const spot = event.target.closest('.ui-field-help, .ui-field-help-panel');
+        return spot && (spot.classList.contains('ui-field-help-panel') ? spot : document.getElementById(spot.getAttribute('popovertarget')));
+    };
+    document.addEventListener('pointerover', event => {
+        const panel = panelAt(event);
+        if (!panel) return;
+        clearTimeout(closing);
+        if (!panel.matches(':popover-open')) panel.showPopover();
+    });
+    document.addEventListener('pointerout', event => {
+        const panel = panelAt(event);
+        if (panel) closing = setTimeout(() => { if (panel.matches(':popover-open')) panel.hidePopover(); }, 250);
+    });
+    // The pointer already opened it, so a click must not close it
+    document.addEventListener('click', event => {
+        if (event.pointerType === 'mouse' && event.target instanceof Element && event.target.closest('.ui-field-help')) event.preventDefault();
+    }, true);
+}
+
 // Called once at startup: places an opening menu and closes it on scroll
 function uiInitMenus() {
+    uiInitHelp();
     document.addEventListener('toggle', event => {
         const menu = event.target;
-        if (!(menu instanceof HTMLElement) || !menu.classList.contains('ui-menu') || event.newState !== 'open') return;
+        if (!(menu instanceof HTMLElement) || event.newState !== 'open') return;
+        if (menu.classList.contains('ui-field-help-panel')) {
+            const opener = document.querySelector(`[popovertarget="${menu.id}"]`);
+            if (opener) uiHelpPlace(menu, opener);
+            return;
+        }
+        if (!menu.classList.contains('ui-menu')) return;
         // Its button opens it natively (popovertarget) or through a handler of its own (aria-controls)
         const button = document.querySelector(`[popovertarget="${menu.id}"], [aria-controls="${menu.id}"]`);
         if (!button) return;
@@ -507,7 +563,7 @@ function uiInitMenus() {
 
     // An open menu would drift away from its button on scroll, so close it
     window.addEventListener('scroll', () => {
-        document.querySelectorAll('.ui-menu:popover-open').forEach(menu => menu.hidePopover());
+        document.querySelectorAll('.ui-menu:popover-open, .ui-field-help-panel:popover-open').forEach(menu => menu.hidePopover());
     }, true);
 }
 

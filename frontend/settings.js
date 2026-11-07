@@ -289,97 +289,225 @@ function showFeatureDisableConfirmModal(featureIds) {
     });
 }
 
-// Per-field descriptions (from env.example comments)
+// The short line under a field: only what the name does not say and what must be known
+// before changing it (a consequence, a requirement, a value that has to be right)
 var SETTINGS_FIELD_DESCRIPTIONS = {
-    // Anomaly detection
-    anomaly_detection_enabled: 'Sends alerts without blocking mailboxes or banning IPs.',
-    anomaly_check_interval: 'Each check examines this period of recent activity.',
-    anomaly_volume_multiplier: 'For example, 5 means five times the usual sending rate for that mailbox.',
-    anomaly_volume_min_messages: 'Avoids alerts when a small change looks large compared with very little usual activity.',
-    anomaly_auth_failure_threshold: 'Counts failed logins for each username during the check period.',
-    anomaly_alert_cooldown_hours: 'Applies to the same alert type for the same mailbox or username.',
+    // mailcow
+    mailcow_api_key: 'Needs read access to logs.',
+    mailcow_api_key_rw: 'Optional. Needed for actions that change mailcow.',
+    rspamd_password: 'Needed to view and edit Rspamd maps.',
+    rspamd_url: 'Leave empty for most setups.',
+    mailcow_api_verify_ssl: 'Turn off only for a trusted server with a self-signed certificate.',
 
-    // SMTP abuse protection
-    smtp_abuse_enabled: 'Blocks sending, but the mailbox can still receive mail. If SMTP is set up, the owner gets an email. Requires a read-write API key.',
-    smtp_abuse_threshold: "Set this above the busiest mailbox's expected sending volume.",
-    smtp_abuse_revoke_app_passwords: "Deletes the mailbox's app passwords, so mail apps using them lose access.",
-    smtp_abuse_help_address: 'Shown in the email sent to the mailbox owner after blocking. Leave empty to use Admin email.',
-
-    // DMARC insights
-    dmarc_insights_pass_threshold: 'A higher rate makes suggestions to tighten your DMARC policy more cautious.',
-
-    // Rspamd
-    rspamd_url: 'Leave empty to use the mailcow URL with /rspamd. Set this only to connect to Rspamd directly.',
-
-    // DNS change alerts
-    dns_change_alerts_enabled: 'Sends alerts when domain DNS records change, DNSSEC validation fails, or a TLSA record no longer matches the server certificate.',
-
-    // Blacklist checks
-    blacklist_dns_servers: 'Use your own resolver, because Spamhaus refuses public ones: 172.22.1.254 in a mailcow setup. Separate resolvers with commas; leave empty to use the container resolver.',
-    blacklist_source_server_ip: 'Turn off if your server sends only through a relay.',
-    blacklist_source_manual_hosts: 'Separate IP addresses or hostnames with commas. Hostnames include all their public IPs.',
-
-    // Domain SPF check sources
-    domain_spf_source_server_ip: 'Turn off if this IP does not send mail for your domains.',
-    domain_spf_source_manual_hosts: "Separate IP addresses or hostnames with commas. Add only hosts that must pass every domain's SPF check.",
-    domain_spf_source_dmarc_history: "Uses IPs with passing SPF results in the last 30 days of reports. Relaxed alignment can include senders that are absent from the domain's own SPF record and cause warnings.",
-
-    mailcow_api_key: 'Create an active key with read access to logs in mailcow > System > Configuration > Access > Administrators > API. Allow the IP address this app connects from.',
-    mailcow_api_key_rw: 'Optional, required for actions that change mailcow or Rspamd maps. Create a separate active key with write access and allow the IP address this app connects from.',
-    mailcow_api_verify_ssl: 'Turn off only if you trust the server and need to use a self-signed certificate.',
-    fetch_max_pages: 'Limits Postfix and Rspamd fetching in each cycle.',
+    // Fetch
     retention_days: 'Older mail logs are deleted automatically.',
+    blacklist_emails: 'Separate addresses with commas.',
+
+    // Application
     app_title: 'Shown in the browser tab.',
     app_logo_url: 'Leave empty to use the project icon.',
     debug: 'Shows detailed errors. Use only for development.',
-    blacklist_emails: 'Separate addresses with commas. Messages to or from these addresses are excluded from storage and Messages.',
-    basic_auth_enabled: 'Requires users to sign in to access the app.',
-    auth_password: 'Required for Basic Auth. To remove the password, turn off Basic Auth first.',
+
+    // Blocklists
+    blacklist_dns_servers: 'Use your own resolver. In mailcow: 172.22.1.254.',
+    blacklist_source_server_ip: 'Turn off if your server sends only through a relay.',
+    blacklist_source_manual_hosts: 'Separate hosts with commas.',
+
+    // Domains
+    domain_spf_source_server_ip: 'Turn off if this IP does not send mail for your domains.',
+    domain_spf_source_manual_hosts: 'Separate hosts with commas. Add only hosts that send mail.',
+    domain_spf_source_dmarc_history: 'Can cause false warnings.',
+
+    // Authentication
+    basic_auth_enabled: 'All pages and the API require sign-in.',
+    auth_password: 'Required for Basic Auth. To remove it, turn off Basic Auth first.',
+    auth_max_failure_clients: 'When full, sign-ins from new addresses must wait.',
     oauth2_enabled: 'Uses an external sign-in provider.',
     oauth2_provider_name: 'Shown on the sign-in button.',
-    oauth2_issuer_url: 'Use the issuer URL from your provider, such as https://mail.example.com.',
+    oauth2_issuer_url: 'Use the issuer URL from your provider.',
     oauth2_redirect_uri: 'Must match the redirect URI registered with your provider.',
-    session_secret_key: 'Required for OAuth2. Use a random secret, such as one generated with openssl rand -hex 32.',
-    session_expiry_hours: 'Counts from sign-in, even while the user is active. A shorter limit also applies to current sessions.',
-    session_max_entries: 'When full, new sign-ins must wait for a session to end.',
-    agent_access_url: 'Use an HTTPS address without a path, such as https://logs.example.com. Changing it prevents existing agents from connecting until you restore it.',
+    session_secret_key: 'Required for OAuth2.',
+    session_expiry_hours: 'Counts from sign-in, even while the user is active.',
+    session_max_entries: 'When full, new sign-ins must wait.',
+
+    // Agents
+    agent_access_url: 'Changing it disconnects every agent until you change it back.',
     agent_access_max_days: 'Applies to new access only.',
-    auth_max_failure_clients: 'When full, sign-ins from new addresses must wait.',
-    smtp_use_tls: 'Keep TLS enabled unless you use implicit TLS or a trusted local relay.',
+
+    // SMTP
+    smtp_port: '587 for STARTTLS, 465 for implicit TLS, 25 for plain.',
+    smtp_use_tls: 'Keep on unless you use implicit TLS or a trusted local relay.',
     smtp_use_ssl: 'Port 465 uses implicit TLS even if this is off.',
-    smtp_verify_ssl: 'Automatic skips certificate checks for localhost, IP addresses, and container names. Turn verification off only if you trust the server and need a self-signed certificate.',
-    smtp_from: 'Required when sending without authentication. Otherwise, leave empty to use SMTP username.',
-    smtp_relay_mode: 'Use only with a trusted relay that does not require a username and password. Requires a From address.',
+    smtp_verify_ssl: 'Automatic or On is recommended.',
+    smtp_from: 'Required when sending without authentication. Otherwise, leave empty to use the SMTP username.',
+    smtp_relay_mode: 'Use only with a trusted relay. Requires a From address.',
+
+    // Notifications
     admin_email: 'Receives system alerts and summaries. Separate addresses with commas.',
     blacklist_alert_email: 'Leave empty to use Admin email. Separate addresses with commas.',
+    enable_weekly_summary: 'Emails the weekly report to Admin email.',
+    dns_change_alerts_enabled: "Sends an alert when a domain's DNS records change.",
+
+    // Outgoing spam
+    smtp_abuse_enabled: 'Needs a read-write API key.',
+    smtp_abuse_threshold: 'Set this above your busiest normal sender.',
+    smtp_abuse_revoke_app_passwords: 'Mail apps that use them lose access.',
+    smtp_abuse_help_address: 'Leave empty to use Admin email.',
+
+    // Anomaly detection
+    anomaly_detection_enabled: 'Sends alerts without blocking mailboxes or banning IPs.',
+    anomaly_check_interval: 'Each check examines this period of recent activity.',
+
+    // DMARC & TLS
     dmarc_retention_days: 'Older DMARC and TLS reports are deleted automatically.',
     dmarc_allow_report_delete: 'Lets users with write access delete DMARC and TLS reports.',
-    enable_weekly_summary: 'Emails the weekly report to Admin email.',
-    dmarc_imap_enabled: 'Use the mailbox that receives reports for the rua= addresses in your DMARC and TLS-RPT records.',
-    dmarc_imap_use_ssl: 'Without TLS, the IMAP password is sent over an unencrypted connection.',
-    dmarc_imap_verify_ssl: 'Automatic skips certificate checks for localhost, IP addresses, and container names. Turn verification off only if you trust the server and need a self-signed certificate.',
-    dmarc_imap_folder: 'A folder read with its subfolders also covers subfolders added later.',
-    dmarc_imap_delete_after: 'Permanently deletes emails that contain successfully processed reports from the IMAP mailbox.',
-    dmarc_imap_scan_all_unseen: 'Also checks emails whose subjects do not match known report subjects. Use a dedicated report mailbox.',
+
+    // DMARC & TLS IMAP
+    dmarc_imap_enabled: 'Use the mailbox that receives your reports.',
+    dmarc_imap_port: '993 for TLS, 143 without.',
+    dmarc_imap_use_ssl: 'Without TLS, the IMAP password is sent unencrypted.',
+    dmarc_imap_verify_ssl: 'Automatic or On is recommended.',
+    dmarc_imap_delete_after: 'Permanently deletes imported emails from the mailbox.',
+    dmarc_imap_scan_all_unseen: 'Use a dedicated report mailbox.',
     dmarc_error_email: 'Leave empty to use Admin email. Separate addresses with commas.',
+
+    // Logs
     raw_logs_retention_days: 'Older service logs are deleted daily.',
     rate_limits_retention_days: 'Cannot be shorter than service log retention.',
     eas_devices_retention_days: 'Set to 0 to keep inactive devices indefinitely.',
     raw_logs_services: 'Turning a service off hides it from Logs. Services marked Always collected are still collected for other pages.',
-    rspamd_password: 'Required to view and edit Rspamd maps.',
+
+    // Outbound and Quarantine
     suppression_enabled: 'Turning this off pauses automatic handling and block expiry. Manual changes still work.',
-    suppression_rspamd_sync: "Syncs the suppression list with this app's Rspamd blocks in both directions, and deletes the local list when turned off. Requires the Rspamd password and a read-write API key.",
-    suppression_whitelist_domains: 'Excludes these domains from automatic blocking and queue deletion. Separate exact domains with commas; subdomains are not included.',
+    suppression_rspamd_sync: 'Turning it off deletes the suppression list. Needs the Rspamd password and a read-write API key.',
+    suppression_whitelist_domains: 'Separate exact domains with commas. Subdomains are not included.',
     suppression_hard_bounce_excluded_codes: 'For these codes, the app does not block the address, count the failure, or delete queued mail. Postfix still returns the message to the sender.',
     suppression_soft_bounce_excluded_codes: 'For these codes, the app does not block the address or count the failure, and the message stays in the queue.',
     suppression_hard_bounce_standard_codes: 'Includes full mailboxes, sending limits, sender or message problems, network failures, and policy rejections.',
     suppression_soft_bounce_standard_codes: 'Includes full mailboxes, sending limits, sender or message problems, network failures, and policy rejections.',
     suppression_soft_bounce_threshold: 'Each failed retry counts, including retries for the same message.',
     suppression_base_expiry_days: 'Repeated failures increase the block length.',
-    quarantine_rules_max_actions: 'Limits how many messages Auto-Rules can release or delete in one run. Requires a read-write API key.',
-    quarantine_rules_log_retention_days: 'Older action history is deleted automatically.',
     queue_cleanup_block: 'Requires Sync with Rspamd.',
+    quarantine_rules_max_actions: 'Requires a read-write API key.',
+    quarantine_rules_log_retention_days: 'Older action history is deleted automatically.',
+};
 
+// The longer explanation behind a field's "i" (uiHelp): text or a list of paragraphs.
+// Only for fields that need one, and never the only place of a warning
+var SETTINGS_FIELD_HELP = {
+    // mailcow
+    mailcow_api_key: [
+        'Create the key in mailcow > System > Configuration > Access > Administrators > API.',
+        'The key must be active, and its allowed IPs must include the address this app connects from.',
+    ],
+    mailcow_api_key_rw: [
+        'Used for quarantine, queue, Fail2Ban, rate limits and Rspamd maps.',
+        'Create a separate key with write access in mailcow > System > Configuration > Access > Administrators > API.',
+        'The key must be active, and its allowed IPs must include the address this app connects from.',
+    ],
+    rspamd_url: [
+        'Empty uses the mailcow URL with /rspamd. This works for most setups, even when this app runs on another server.',
+        'Set it only if the path through mailcow fails, for example with a 302 from a reverse proxy, and this app can reach Rspamd directly.',
+        'On the same Docker network as mailcow: http://rspamd-mailcow:11334',
+    ],
+
+    // Fetch
+    fetch_interval: 'Lower values update more often but add load on mailcow.',
+    fetch_count_postfix: 'The size of one page of logs. The app keeps fetching pages until it catches up.',
+    fetch_count_rspamd: 'The size of one page of logs. The app keeps fetching pages until it catches up.',
+    fetch_max_pages: 'A safety limit for Postfix and Rspamd. The most logs in one fetch is the logs per request multiplied by this number.',
+    retention_days: 'Recommended: 7 for most setups, 30 for compliance.',
+    blacklist_emails: 'Mail to or from these addresses is not stored or shown in Messages. Useful for a BCC archive, for example.',
+
+    // Application
+    scheduler_workers: 'Threads for blocking background jobs, such as the DMARC & TLS IMAP import. From 1 to 64.',
+
+    // Blocklists
+    blacklist_dns_servers: 'Spamhaus rejects queries from public resolvers such as Google, Cloudflare and Quad9. Separate resolvers with commas. Leave empty to use the container resolver.',
+    blacklist_source_transports: 'Checks the public IPs of active mailcow transports. Each next hop is resolved to all its public IPs, so relay pools with several addresses are covered.',
+    blacklist_source_relayhosts: 'Checks the public IPs of active mailcow relayhosts (sender-dependent transports).',
+    blacklist_source_manual_hosts: 'Accepts IPv4 addresses, IPv6 addresses and hostnames. A hostname covers all its public IPs. These are checked in addition to the sources above and can be hosts unrelated to this mailcow server.',
+
+    // Domains
+    domain_spf_source_transports: "Checks the public IPs of active mailcow transports against each domain's SPF record. Turn on when mail leaves through transports whose IPs must be in your SPF records.",
+    domain_spf_source_relayhosts: "Checks the public IPs of active mailcow relayhosts against each domain's SPF record.",
+    domain_spf_source_manual_hosts: "Accepts IPv4 addresses, IPv6 addresses and hostnames. Every entry must pass each domain's SPF check, so do not add addresses that never send mail, such as an inbound-only MX.",
+    domain_spf_source_dmarc_history: [
+        'Uses IPs with a passing SPF result in the last 30 days of DMARC reports for each domain.',
+        "With relaxed SPF alignment, an IP sending from a subdomain of an email service can pass without being in the domain's own SPF record. It then shows as a false warning.",
+    ],
+
+    // Authentication
+    auth_max_failure_clients: 'Counts client addresses with failed Basic Auth attempts, per process. Existing sessions keep working.',
+    oauth2_enabled: 'Works with mailcow, Keycloak and other OAuth2 or OIDC providers.',
+    oauth2_issuer_url: [
+        'The endpoints are discovered from this address.',
+        'mailcow: https://mail.example.com',
+        'Keycloak: https://keycloak.example.com/realms/myrealm',
+    ],
+    session_secret_key: 'Signs session cookies. Use a random secret, such as one from openssl rand -hex 32.',
+    session_expiry_hours: 'Five minutes before the end, the page says so. A shorter limit applies to open sessions at once. A longer limit applies in full from the next sign-in.',
+    session_idle_enabled: 'Typing, clicking, scrolling with the wheel and touching count as activity. Pages that refresh by themselves do not. A minute before sign-out, the page asks whether you are still there.',
+    session_max_entries: 'Counts active sessions per process. New sign-ins wait until a session expires or a user signs out. Existing sessions stay signed in.',
+
+    // Agents
+    agent_access_url: 'The HTTPS address agents use to reach this app, without a path, such as https://logs.example.com.',
+
+    // SMTP
+    smtp_verify_ssl: [
+        'Checks the server certificate before the password is sent, so nobody in between can read it.',
+        'Off: no check. Use only for a server with a self-signed certificate.',
+        'Automatic: checks host names such as smtp.example.com. Skips localhost, IP addresses and container names.',
+        'On: always checks.',
+    ],
+
+    // Notifications
+    dns_change_alerts_enabled: [
+        'Covers SPF, DKIM, DMARC, TLSA, MTA-STS and TLS-RPT records, DNSSEC that stops validating, and a TLSA record that no longer matches the mail server certificate.',
+        'The alert names the domain and shows the old and new value. A failed DNS lookup never counts as a change.',
+    ],
+
+    // Outgoing spam
+    smtp_abuse_enabled: 'Disables sending for a mailbox that goes over the limit. The mailbox can still receive mail. If SMTP is set up, the owner gets an email.',
+    smtp_abuse_threshold: 'The most messages one mailbox may send in the period below. Above this, sending is disabled for that mailbox.',
+    smtp_abuse_revoke_app_passwords: 'Recommended. A compromised mailbox usually sends through an app password, so deleting them cuts off the attacker.',
+    smtp_abuse_unblock_grace_minutes: 'After you re-enable a mailbox, it is not blocked again for this long. Without this pause it would be blocked again within a minute, because its old messages are still being counted.',
+    smtp_abuse_help_address: 'Shown in the email that tells the mailbox owner that sending was paused.',
+
+    // Anomaly detection
+    anomaly_volume_multiplier: 'How far above its usual rate a mailbox must send before an alert. For example, 5 means five times its usual rate.',
+    anomaly_volume_min_messages: 'A mailbox must send at least this many messages in the check period before a spike can alert. This avoids alerts on tiny numbers, such as 2 messages instead of the usual 0.',
+    anomaly_auth_failure_threshold: 'Alerts when one username collects this many failed logins in the check period, which usually means password guessing.',
+    anomaly_alert_cooldown_hours: 'After an alert, the same alert for the same mailbox or username stays quiet for this long. This prevents a flood of alerts during one incident.',
+
+    // DMARC & TLS
+    dmarc_insights_pass_threshold: 'A stricter policy is suggested only above this rate. A higher rate gives more cautious advice.',
+
+    // DMARC & TLS IMAP
+    dmarc_imap_enabled: 'That is the mailbox of the rua= addresses in your DMARC and TLS-RPT records.',
+    dmarc_imap_verify_ssl: [
+        'Checks the server certificate before the password is sent, so nobody in between can read it.',
+        'Off: no check. Use only for a server with a self-signed certificate.',
+        'Automatic: checks host names such as imap.example.com. Skips localhost, IP addresses and container names.',
+        'On: always checks.',
+    ],
+    dmarc_imap_folder: 'A folder read with its subfolders also covers subfolders added later.',
+    dmarc_imap_delete_after: 'If the server cannot remove single emails, they are marked as deleted and left for your mail client to remove.',
+    dmarc_imap_scan_all_unseen: [
+        'Also checks emails whose subjects do not match known report subjects. Turn on if reports arrive with subjects in other languages.',
+        'Subfolders read through With subfolders are not scanned this way. Only report subjects are checked there.',
+    ],
+
+    // Logs
+    raw_logs_enabled: 'When off, the Logs page says collection is off and shows no logs. The services other pages read are collected either way.',
+    raw_logs_fetch_count: 'Higher values catch more logs but add load on mailcow.',
+    rate_limits_retention_days: 'Keeps the senders that hit a rate limit, for the Rate Limits page.',
+
+    // Outbound and Quarantine
+    suppression_rspamd_sync: "Keeps the suppression list and this app's part of the Rspamd recipient denylist in step, in both directions. Turning it on loads this app's blocks back from Rspamd.",
+    suppression_whitelist_domains: 'These domains are excluded from automatic blocking and queue deletion.',
+    quarantine_rules_max_actions: 'The most messages Auto-Rules can release or delete in one run. This prevents mass processing from a rule that is too broad.',
+    quarantine_rules_interval: 'Lower values react faster to new quarantine items. Higher values add less load on mailcow.',
 };
 
 // Settings with a few short choices, shown as a segmented control (.ui-seg, as on the Security page).
@@ -1651,6 +1779,9 @@ function renderSettingsEditField(key, value, sensitiveKeys, description, envLock
     const displayVal = value === null || value === undefined ? '' : (isBool ? value : String(value));
     const label = settingsFieldLabel(key);
     const descHtml = (description && description.trim()) ? '<p class="ui-set-desc">' + escapeHtml(description) + '</p>' : '';
+    const help = SETTINGS_FIELD_HELP[key] ? uiHelp(label, SETTINGS_FIELD_HELP[key]) : '';
+    // The "i" sits beside the name, outside its label: a button does not belong in a label
+    const fieldName = name => help ? '<div class="ui-set-name">' + name + help + '</div>' : name;
     const disabledAttr = envLocked ? 'disabled' : '';
     const envLockedHtml = '';
     const labelLockIcon = envLocked ? ' <span class="ui-set-pill" title="Set by an environment variable, change it there">' + LOCK + ' Set by ENV</span>' : '';
@@ -1702,7 +1833,7 @@ function renderSettingsEditField(key, value, sensitiveKeys, description, envLock
     // picker (settingsChooseFolders). The hidden field carries the value into the save
     if (key === 'dmarc_imap_folder') {
         const raw = value === null || value === undefined ? '' : String(value);
-        return '<div class="ui-set-field' + (envLocked ? ' is-locked' : '') + '"><span class="ui-label" id="label-' + keyAttr + '">' + escapeHtml(label) + '</span>' +
+        return '<div class="ui-set-field' + (envLocked ? ' is-locked' : '') + '">' + fieldName('<span class="ui-label" id="label-' + keyAttr + '">' + escapeHtml(label) + '</span>') +
             descHtml +
             (envLocked ? '<p class="ui-set-env">' + LOCK + ' Set by ENV (DMARC_IMAP_FOLDER), change it there</p>' : '') +
             '<div class="ui-set-folders" role="group" aria-labelledby="label-' + keyAttr + '"><ul class="ui-set-folder-rows" data-folder-rows>' + settingsFolderRows(raw) + '</ul>' +
@@ -1717,7 +1848,7 @@ function renderSettingsEditField(key, value, sensitiveKeys, description, envLock
 
     // A stored secret: say so, and offer Replace and Remove instead of a masked field
     if (sensitive && displayVal === '********') {
-        return '<div class="ui-set-field' + (envLocked ? ' is-locked' : '') + '"><label class="ui-label">' + escapeHtml(label) + labelLockIcon + '</label>' + descHtml +
+        return '<div class="ui-set-field' + (envLocked ? ' is-locked' : '') + '">' + fieldName('<label class="ui-label">' + escapeHtml(label) + labelLockIcon + '</label>') + descHtml +
             '<div class="ui-set-secret"><span class="ui-set-secret-state">' + (envLocked ? 'Stored in the environment' : 'Stored') + '</span>' +
             (envLocked ? '' : '<button type="button" class="ui-btn ui-btn-sm" onclick="settingsReplaceSecret(this)">Replace</button>' +
                 '<button type="button" class="ui-btn ui-btn-sm" onclick="settingsRemoveSecret(this)">Remove</button>') +
@@ -1735,7 +1866,7 @@ function renderSettingsEditField(key, value, sensitiveKeys, description, envLock
         const segClearHtml = clearBtnHtml && defaultOption
             ? clearBtnHtml.replace(/\(([^()]*)\)<\/button>$/, '(' + escapeHtml(defaultOption[1]) + ')</button>')
             : clearBtnHtml;
-        return '<div class="ui-set-field ui-set-seg' + (envLocked ? ' is-locked' : '') + changed + '"><span class="ui-label" id="label-' + keyAttr + '">' + escapeHtml(label) + labelLockIcon + changedPill + '</span>' +
+        return '<div class="ui-set-field ui-set-seg' + (envLocked ? ' is-locked' : '') + changed + '">' + fieldName('<span class="ui-label" id="label-' + keyAttr + '">' + escapeHtml(label) + labelLockIcon + changedPill + '</span>') +
             descHtml +
             '<div class="ui-seg" role="group" aria-labelledby="label-' + keyAttr + '">' + buttons + '</div>' +
             '<input type="hidden" id="edit-' + keyAttr + '" name="' + keyAttr + '" value="' + escapeHtml(current) + '"' + (envLocked ? ' disabled' : '') + '>' +
@@ -1745,10 +1876,14 @@ function renderSettingsEditField(key, value, sensitiveKeys, description, envLock
     if (isBool) {
         // The whole row toggles, like a Features row: the row is the label (so its text is phrasing content)
         const asSpan = html => html.replace(/^<p /, '<span ').replace(/<\/p>$/, '</span>');
-        return '<div class="ui-set-bool' + (envLocked ? ' is-locked' : (isChanged ? ' is-changed' : '')) + '">' +
-            '<label for="edit-' + keyAttr + '" class="ui-set-bool-main">' +
-            '<input type="checkbox" id="edit-' + keyAttr + '" name="' + keyAttr + '" ' + (displayVal ? 'checked' : '') + ' ' + disabledAttr + ' class="ui-check">' +
-            '<span class="ui-set-bool-text"><span class="ui-set-bool-label">' + escapeHtml(label) + labelLockIcon + (envLocked ? '' : (isChanged ? ' <span class="ui-set-pill is-changed" title="Differs from the default">Changed</span>' : '')) + '</span>' + asSpan(descHtml) + asSpan(envLockedHtml) + '</span></label>' +
+        const boolName = escapeHtml(label) + labelLockIcon + (envLocked ? '' : (isChanged ? ' <span class="ui-set-pill is-changed" title="Differs from the default">Changed</span>' : ''));
+        const boolBox = '<input type="checkbox" id="edit-' + keyAttr + '" name="' + keyAttr + '" ' + (displayVal ? 'checked' : '') + ' ' + disabledAttr + ' class="ui-check">';
+        const boolRow = help
+            ? '<div class="ui-set-bool-main">' + boolBox + '<div class="ui-set-bool-text">' +
+                fieldName('<label for="edit-' + keyAttr + '" class="ui-set-bool-label">' + boolName + '</label>') + descHtml + '</div></div>'
+            : '<label for="edit-' + keyAttr + '" class="ui-set-bool-main">' + boolBox +
+                '<span class="ui-set-bool-text"><span class="ui-set-bool-label">' + boolName + '</span>' + asSpan(descHtml) + asSpan(envLockedHtml) + '</span></label>';
+        return '<div class="ui-set-bool' + (envLocked ? ' is-locked' : (isChanged ? ' is-changed' : '')) + '">' + boolRow +
             clearBtnHtml + '</div>';
     }
 
@@ -1772,7 +1907,7 @@ function renderSettingsEditField(key, value, sensitiveKeys, description, envLock
             ? '<small class="ui-text-warn" role="status" data-zone-note>' + escapeHtml(`"${current}" is not a known time zone, so the app uses UTC. `) +
                 (envLocked ? 'Fix TZ in the environment.' : 'Pick a time zone from the list.') + '</small>'
             : '';
-        return '<div class="ui-set-field' + (envLocked ? ' is-locked' : '') + '"><span class="ui-label" id="label-' + keyAttr + '">' + escapeHtml(label) + labelLockIcon + changedPill + '</span>' +
+        return '<div class="ui-set-field' + (envLocked ? ' is-locked' : '') + '">' + fieldName('<span class="ui-label" id="label-' + keyAttr + '">' + escapeHtml(label) + labelLockIcon + changedPill + '</span>') +
             descHtml + picker +
             '<input type="hidden" id="edit-' + keyAttr + '" name="' + keyAttr + '" value="' + escapeHtml(current) + '" data-saved="' + escapeHtml(current) + '"' + (envLocked ? ' disabled' : '') + '>' +
             note + clearBtnHtml + '</div>';
@@ -1786,7 +1921,7 @@ function renderSettingsEditField(key, value, sensitiveKeys, description, envLock
             const selected = String(displayVal) === opt.value ? 'selected' : '';
             optionsHtml += '<option value="' + escapeHtml(opt.value) + '" ' + selected + '>' + escapeHtml(opt.label) + '</option>';
         });
-        return '<div class="ui-set-field' + (envLocked ? ' is-locked' : '') + '"><label for="edit-' + keyAttr + '" class="ui-label">' + escapeHtml(label) + labelLockIcon + changedPill + '</label>' +
+        return '<div class="ui-set-field' + (envLocked ? ' is-locked' : '') + '">' + fieldName('<label for="edit-' + keyAttr + '" class="ui-label">' + escapeHtml(label) + labelLockIcon + changedPill + '</label>') +
             descHtml +
             '<select id="edit-' + keyAttr + '" name="' + keyAttr + '" ' + disabledAttr + ' class="ui-select' + changed + '">' +
             optionsHtml + '</select>' +
@@ -1798,7 +1933,7 @@ function renderSettingsEditField(key, value, sensitiveKeys, description, envLock
     const inputType = sensitive ? 'password' : (isNum ? 'number' : 'text');
     const placeholder = envLocked ? 'Set by ENV' : (sensitive ? 'Not set' : '');
     const valAttr = (isBool ? '' : displayVal);
-    return '<div class="ui-set-field' + (envLocked ? ' is-locked' : '') + '"><label for="edit-' + keyAttr + '" class="ui-label">' + escapeHtml(label) + labelLockIcon + changedPill + '</label>' +
+    return '<div class="ui-set-field' + (envLocked ? ' is-locked' : '') + '">' + fieldName('<label for="edit-' + keyAttr + '" class="ui-label">' + escapeHtml(label) + labelLockIcon + changedPill + '</label>') +
         descHtml +
         '<input type="' + inputType + '" id="edit-' + keyAttr + '" name="' + keyAttr + '" value="' + escapeHtml(valAttr) + '" placeholder="' + escapeHtml(placeholder) + '" ' + disabledAttr + ' class="ui-input' + changed + '">' +
         clearBtnHtml +
