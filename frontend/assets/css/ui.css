@@ -656,7 +656,8 @@
 .ui-fct-list { display: grid; gap: 1px; }
 .ui-fct { display: flex; align-items: center; gap: 10px; width: 100%; padding: 5px 8px; border: 0; border-radius: var(--ui-radius-sm);
     background: none; color: var(--ui-ink); font: inherit; text-align: start; cursor: pointer; }
-@media (hover: hover) { .ui-fct:hover:not(:disabled) { background: color-mix(in srgb, var(--ui-ink) 6%, transparent); } }
+/* The chosen facet keeps its accent fill on hover, or its on-accent text loses contrast */
+@media (hover: hover) { .ui-fct:hover:not(:disabled):not([aria-pressed="true"]) { background: color-mix(in srgb, var(--ui-ink) 6%, transparent); } }
 .ui-fct:disabled { opacity: .55; cursor: default; }
 .ui-fct[aria-pressed="true"] { background: var(--ui-accent); color: var(--ui-on-accent); font-weight: 700; }
 .ui-fct small { margin-inline-start: auto; color: var(--ui-muted); font-variant-numeric: tabular-nums; }
