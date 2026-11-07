@@ -538,13 +538,21 @@ function uiInitHelp() {
         const panel = hovered(event);
         if (panel) closing = setTimeout(() => setOpen(panel, false), 250);
     });
-    // The press on the "i" already closed an open panel as a click outside, so that
-    // click must not open it again; a mouse click only opens, as hovering opened it
+    // A press on the "i" of an open panel closes it as a click outside before the click
+    // comes, so the click goes by the state at the press. A click with no press (a
+    // screen reader) goes by the state it finds. A mouse click only opens: hovering opened it
+    let press = null;
+    document.addEventListener('pointerdown', event => {
+        const opener = event.target instanceof Element ? event.target.closest('.ui-field-help') : null;
+        const panel = panelOf(opener);
+        press = panel ? { opener, open: panel.matches(':popover-open') } : null;
+    }, true);
     document.addEventListener('click', event => {
-        const panel = panelOf(event.target instanceof Element && event.target.closest('.ui-field-help'));
-        if (!panel) return;
-        const justClosed = Date.now() - (Number(panel.dataset.closedAt) || 0) < 400;
-        setOpen(panel, event.pointerType === 'mouse' || (!panel.matches(':popover-open') && !justClosed));
+        const opener = event.target instanceof Element ? event.target.closest('.ui-field-help') : null;
+        const panel = panelOf(opener);
+        const wasOpen = press && press.opener === opener ? press.open : panel && panel.matches(':popover-open');
+        press = null;
+        if (panel) setOpen(panel, event.pointerType === 'mouse' || !wasOpen);
     });
     document.addEventListener('keydown', event => {
         if (event.key !== 'Enter' && event.key !== ' ') return;
@@ -553,13 +561,11 @@ function uiInitHelp() {
         event.preventDefault();
         setOpen(panel, !panel.matches(':popover-open'));
     });
-    // Before the click that follows a press, so the click sees that the press closed it
     document.addEventListener('beforetoggle', event => {
         const panel = event.target;
         if (!(panel instanceof HTMLElement) || !panel.classList.contains('ui-field-help-panel')) return;
         const opener = document.querySelector(`[data-help="${panel.id}"]`);
         if (opener) opener.setAttribute('aria-expanded', String(event.newState === 'open'));
-        if (event.newState === 'closed') panel.dataset.closedAt = String(Date.now());
     }, true);
 }
 

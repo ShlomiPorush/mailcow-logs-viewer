@@ -327,7 +327,7 @@ var SETTINGS_FIELD_DESCRIPTIONS = {
     oauth2_issuer_url: 'Use the issuer URL from your provider.',
     oauth2_redirect_uri: 'Must match the redirect URI registered with your provider.',
     session_secret_key: 'Required for OAuth2.',
-    session_expiry_hours: 'Counts from sign-in, even while the user is active.',
+    session_expiry_hours: 'Counts from sign-in, even while the user is active. Shortening it can end open sessions at once.',
     session_max_entries: 'When full, new sign-ins must wait.',
 
     // Agents
@@ -446,7 +446,7 @@ var SETTINGS_FIELD_HELP = {
         'Keycloak: https://keycloak.example.com/realms/myrealm',
     ],
     session_secret_key: 'Signs session cookies. Use a random secret, such as one from openssl rand -hex 32.',
-    session_expiry_hours: 'Five minutes before the end, the page says so. A shorter limit applies to open sessions at once. A longer limit applies in full from the next sign-in.',
+    session_expiry_hours: 'Five minutes before the end, the page says so. A longer limit applies in full from the next sign-in.',
     session_idle_enabled: 'Typing, clicking, scrolling with the wheel and touching count as activity. Pages that refresh by themselves do not. A minute before sign-out, the page asks whether you are still there.',
     session_max_entries: 'Counts active sessions per process. New sign-ins wait until a session expires or a user signs out. Existing sessions stay signed in.',
 
