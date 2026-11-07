@@ -9,6 +9,7 @@ once either is no longer current.
 """
 import asyncio
 import base64
+import secrets
 import json
 
 import pytest
@@ -25,7 +26,7 @@ from app.main import app
 from app.routers import raw_logs
 
 USERNAME = "admin"
-PASSWORD = "correct horse battery staple"
+PASSWORD = secrets.token_hex(16)
 # The test client always opens WebSockets to ws://testserver
 APP = "http://testserver"
 

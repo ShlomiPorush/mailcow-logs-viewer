@@ -3,6 +3,7 @@ the rule a new password meets: 8 to 256 characters, not one of the most common p
 import hashlib
 import json
 import random
+import secrets
 import threading
 
 import pytest
@@ -11,25 +12,30 @@ from app.services import passwords
 
 
 def test_a_hash_round_trips_and_names_its_parameters():
-    stored = passwords.hash_password("correct horse battery")
+    password = secrets.token_hex(16)
+    stored = passwords.hash_password(password)
     scheme, n, r, p, salt, digest = stored.split("$")
     assert (scheme, n, r, p) == ("scrypt", str(2 ** 15), "8", "1")
     assert salt and digest
-    assert passwords.verify_password("correct horse battery", stored)
+    assert passwords.verify_password(password, stored)
 
 
 def test_a_wrong_password_does_not_match():
-    stored = passwords.hash_password("correct horse battery")
-    assert not passwords.verify_password("correct horse batterz", stored)
+    password = secrets.token_hex(16)
+    stored = passwords.hash_password(password)
+    # One character off: "x" is not a hex digit
+    assert not passwords.verify_password(password[:-1] + "x", stored)
 
 
 def test_the_same_password_gets_a_new_salt_each_time():
-    assert passwords.hash_password("correct horse battery") != passwords.hash_password("correct horse battery")
+    password = secrets.token_hex(16)
+    assert passwords.hash_password(password) != passwords.hash_password(password)
 
 
 def test_a_non_ascii_password_round_trips():
-    stored = passwords.hash_password("pässwörd 日本語 ok")
-    assert passwords.verify_password("pässwörd 日本語 ok", stored)
+    password = "pässwörd 日本語 " + secrets.token_hex(8)
+    stored = passwords.hash_password(password)
+    assert passwords.verify_password(password, stored)
 
 
 SHORT = "Use at least 8 characters."

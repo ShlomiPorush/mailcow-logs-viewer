@@ -3,6 +3,7 @@ import csv
 import io
 import asyncio
 import inspect
+import secrets
 from contextlib import nullcontext
 from datetime import datetime
 from types import SimpleNamespace
@@ -158,10 +159,11 @@ def test_head_requires_authentication(export_client, monkeypatch, path, attribut
     client, row, db, query = export_client
     monkeypatch.setattr(settings._inner, "auth_enabled", True)
     monkeypatch.setattr(settings._inner, "basic_auth_enabled", True)
-    monkeypatch.setattr(settings._inner, "auth_password", "export-test-password")
+    password = secrets.token_hex(16)
+    monkeypatch.setattr(settings._inner, "auth_password", password)
     monkeypatch.setattr(settings._inner, "auth_username", "export-test-user")
     assert client.head(path).status_code == 401
-    credentials = ("export-test-user", "export-test-password")
+    credentials = ("export-test-user", password)
     assert client.head(path, auth=credentials).status_code == 200
     assert client.post("/api/auth/session", auth=credentials).status_code == 200
     assert client.head(path).status_code == 200

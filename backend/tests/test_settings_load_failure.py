@@ -5,6 +5,7 @@ database. Reading it used to fall back to the ENV-only defaults when the
 database did not answer, and those defaults have authentication off: a short
 PostgreSQL outage during a reload opened every API route to anyone.
 """
+import secrets
 from contextlib import contextmanager
 
 import pytest
@@ -17,7 +18,7 @@ from app.services import settings_store
 DB_AUTH = {
     "basic_auth_enabled": True,
     "auth_username": "admin",
-    "auth_password": "db-test-password",
+    "auth_password": secrets.token_hex(16),
 }
 
 
@@ -44,7 +45,7 @@ def test_runtime_reload_keeps_authentication_when_the_database_fails(db_only_aut
     with pytest.raises(Exception):
         reload_settings(object())
     assert settings.is_authentication_enabled is True
-    assert settings.auth_password == "db-test-password"
+    assert settings.auth_password == DB_AUTH["auth_password"]
 
 
 def test_settings_api_reports_the_failure_instead_of_opening_the_api(db_only_auth, monkeypatch):

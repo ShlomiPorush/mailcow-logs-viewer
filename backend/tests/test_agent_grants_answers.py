@@ -62,7 +62,7 @@ def db(monkeypatch):
     monkeypatch.setattr(inner, 'auth_enabled', False)
     monkeypatch.setattr(inner, 'oauth2_enabled', False)
     monkeypatch.setattr(inner, 'auth_username', 'admin')
-    monkeypatch.setattr(inner, 'auth_password', 'correct horse battery staple')
+    monkeypatch.setattr(inner, 'auth_password', secrets.token_hex(16))
     monkeypatch.setattr(inner, 'agent_access_enabled', True)
     monkeypatch.setattr(inner, 'agent_access_url', APP_URL)
     monkeypatch.setattr(inner, 'agent_access_max_days', 90)

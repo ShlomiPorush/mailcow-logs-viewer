@@ -4,6 +4,7 @@ mailcow answers HTTP 200 also when it refuses an item, with an entry of type
 "danger" in the reply, and reports each item it handled with its own
 "success" entry naming the item."""
 import asyncio
+import secrets
 from contextlib import contextmanager
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, Mock
@@ -19,7 +20,7 @@ def state(monkeypatch):
     monkeypatch.setattr(type(settings._inner), "is_feature_enabled", lambda self, name: True)
     monkeypatch.setattr(settings._inner, "quarantine_rules_max_actions", 10)
     monkeypatch.setattr(settings._inner, "quarantine_rules_log_retention_days", 7)
-    monkeypatch.setattr(scheduler.mailcow_api, "headers_rw", {"X-API-Key": "test-key"})
+    monkeypatch.setattr(scheduler.mailcow_api, "headers_rw", {"X-API-Key": secrets.token_hex(16)})
     monkeypatch.setattr(scheduler.mailcow_api, "aclose", AsyncMock())
     monkeypatch.setattr(scheduler, "update_job_status", Mock())
     allow = SimpleNamespace(id=1, name="Allow", match_type="sender_domain", match_value="example.com",

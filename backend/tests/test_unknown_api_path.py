@@ -8,6 +8,7 @@ there gets FastAPI's own {"detail": "Not Found"} for every method, while the
 page routes still get index.html.
 """
 import base64
+import secrets
 
 import pytest
 from fastapi.testclient import TestClient
@@ -17,7 +18,7 @@ from app import session as session_module
 
 PAGE = "<html><body>Test page</body></html>"
 USERNAME = "admin"
-PASSWORD = "correct horse battery staple"
+PASSWORD = secrets.token_hex(16)
 
 
 class _Page:

@@ -2,6 +2,7 @@
 // navigator.clipboard only on HTTPS and localhost, so over plain HTTP the call
 // is missing and must not throw before the user is told.
 const assert = require('node:assert/strict');
+const { randomBytes } = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
@@ -45,7 +46,7 @@ test('a copy that works says what was copied', async () => {
 
 test('a secret copied with a label is not shown: the notice names it only', async () => {
     const { context, toasts } = load({ clipboard: { writeText: () => Promise.resolve() } });
-    context.copyToClipboard('Secret-Pass-123!', undefined, 'Password');
+    context.copyToClipboard(randomBytes(16).toString('hex'), undefined, 'Password');
     await settle();
     assert.deepEqual(toasts, [{ message: 'Password copied', type: 'success' }]);
 });

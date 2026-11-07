@@ -9,6 +9,7 @@ a failed login for mailcow's Fail2ban. A manual Run of a failing job was marked
 a success; it keeps its failure now.
 """
 import asyncio
+import secrets
 import json
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, Mock
@@ -222,7 +223,7 @@ def test_a_mailcow_without_domains_is_not_run_again_early(monkeypatch):
 
 @pytest.fixture
 def transports(monkeypatch, features):
-    monkeypatch.setattr(settings._inner, "mailcow_api_key", "test-key")
+    monkeypatch.setattr(settings._inner, "mailcow_api_key", secrets.token_hex(16))
     monkeypatch.setattr(settings._inner, "blacklist_source_transports", False)
     monkeypatch.setattr(settings._inner, "blacklist_source_relayhosts", False)
     monkeypatch.setattr(settings._inner, "blacklist_source_server_ip", True)

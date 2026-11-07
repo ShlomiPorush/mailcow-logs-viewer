@@ -9,6 +9,7 @@
 // alone is not a change the discard question asks about.
 // Set A11Y_MODULES to jsdom's node_modules to run it locally (see layers.a11y.cjs).
 const assert = require('node:assert/strict');
+const { randomBytes } = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const { test } = require('node:test');
@@ -21,7 +22,8 @@ const frontend = path.join(__dirname, '../../frontend');
 const read = name => fs.readFileSync(path.join(frontend, name), 'utf8');
 const SHORT = 'Use at least 8 characters.';
 const COMMON = 'This password is too common. Choose another one.';
-const GOOD = 'Kp7m-Rx4Tq9wZb2n';
+// Strong: every kind of character and 14 or more of them, new for each run
+const GOOD = 'Kp7-' + randomBytes(8).toString('hex');
 
 const DATA = {
     areas: [{ id: 'messages', label: 'Messages', view: 'Messages', act: '' }],
@@ -343,7 +345,7 @@ test('Copy waits for the server to accept the password, so what is copied can be
     assert.deepEqual(p.copied, [p.checks[1].password], 'the accepted password');
     assert.equal(p.$('#user-edit-pass').value, p.checks[1].password);
     // A typed password follows the same rule
-    p.type('Typed-Pass-4u');
+    p.type('Tp4-' + randomBytes(8).toString('hex'));
     assert.ok(copy.disabled);
     await settle();
     p.checks[2].release();

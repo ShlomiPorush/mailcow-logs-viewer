@@ -1,7 +1,13 @@
 """Tests for notification channel specs, URL building and validation."""
+import secrets
+
 import pytest
 
 from app.services import notification_channels as nc
+
+# New for each run: a channel token, and the secret part of a webhook URL (10 characters)
+TOKEN = secrets.token_hex(16)
+SECRET_PATH = secrets.token_hex(5)
 
 
 def test_all_types_have_fields_and_help():
@@ -22,8 +28,8 @@ def test_each_type_only_asks_for_its_own_fields():
 
 
 def test_telegram_url_is_built_from_token():
-    url, kwargs = nc.build_request("telegram", {"bot_token": "TOK", "chat_id": "42"}, "S", "M")
-    assert url == "https://api.telegram.org/botTOK/sendMessage"
+    url, kwargs = nc.build_request("telegram", {"bot_token": TOKEN, "chat_id": "42"}, "S", "M")
+    assert url == f"https://api.telegram.org/bot{TOKEN}/sendMessage"
     assert kwargs["json"]["chat_id"] == "42"
     assert "S" in kwargs["json"]["text"] and "M" in kwargs["json"]["text"]
 
@@ -37,13 +43,13 @@ def test_ntfy_url_is_server_plus_topic():
 
 
 def test_ntfy_token_becomes_auth_header():
-    _url, kwargs = nc.build_request("ntfy", {"topic": "t", "token": "abc"}, "S", "M")
-    assert kwargs["headers"]["Authorization"] == "Bearer abc"
+    _url, kwargs = nc.build_request("ntfy", {"topic": "t", "token": TOKEN}, "S", "M")
+    assert kwargs["headers"]["Authorization"] == f"Bearer {TOKEN}"
 
 
 def test_gotify_url_includes_token():
-    url, _kw = nc.build_request("gotify", {"server_url": "https://g.example.com/", "app_token": "T"}, "S", "M")
-    assert url == "https://g.example.com/message?token=T"
+    url, _kw = nc.build_request("gotify", {"server_url": "https://g.example.com/", "app_token": TOKEN}, "S", "M")
+    assert url == f"https://g.example.com/message?token={TOKEN}"
 
 
 def test_slack_and_discord_use_their_webhook_url():
@@ -54,16 +60,16 @@ def test_slack_and_discord_use_their_webhook_url():
 
 
 def test_custom_webhook_payload_and_optional_auth():
-    url, kwargs = nc.build_request("webhook", {"url": "https://x/hook", "auth_header": "Bearer t"}, "S", "M")
+    url, kwargs = nc.build_request("webhook", {"url": "https://x/hook", "auth_header": f"Bearer {TOKEN}"}, "S", "M")
     assert url == "https://x/hook"
     assert kwargs["json"]["source"] == "mailcow-logs-viewer"
-    assert kwargs["headers"]["Authorization"] == "Bearer t"
+    assert kwargs["headers"]["Authorization"] == f"Bearer {TOKEN}"
 
 
 def test_validate_requires_mandatory_fields():
-    ok, err = nc.validate_config("telegram", {"bot_token": "x"})
+    ok, err = nc.validate_config("telegram", {"bot_token": TOKEN})
     assert not ok and "Chat ID" in err
-    ok, _ = nc.validate_config("telegram", {"bot_token": "x", "chat_id": "1"})
+    ok, _ = nc.validate_config("telegram", {"bot_token": TOKEN, "chat_id": "1"})
     assert ok
 
 
@@ -78,13 +84,13 @@ def test_optional_fields_are_not_required():
 
 
 def test_secrets_are_masked_and_preserved():
-    masked = nc.mask_config("telegram", {"bot_token": "TOK", "chat_id": "42"})
+    masked = nc.mask_config("telegram", {"bot_token": TOKEN, "chat_id": "42"})
     assert masked["bot_token"] == nc.MASK
     assert masked["chat_id"] == "42"
 
-    merged = nc.merge_config("telegram", {"bot_token": "TOK", "chat_id": "42"},
+    merged = nc.merge_config("telegram", {"bot_token": TOKEN, "chat_id": "42"},
                              {"bot_token": nc.MASK, "chat_id": "99"})
-    assert merged == {"bot_token": "TOK", "chat_id": "99"}
+    assert merged == {"bot_token": TOKEN, "chat_id": "99"}
 
 
 def test_message_truncation():
@@ -125,7 +131,7 @@ def test_validate_refuses_an_address_without_quoting_it(channel_type, config):
 @pytest.mark.parametrize("channel_type, config", [
     ("slack", {"webhook_url": "https://hooks.slack.com/services/T0/B0/X"}),
     ("discord", {"webhook_url": "HTTPS://discord.com/api/webhooks/1/x"}),
-    ("gotify", {"server_url": "http://gotify:8080", "app_token": "t"}),
+    ("gotify", {"server_url": "http://gotify:8080", "app_token": TOKEN}),
     ("ntfy", {"server_url": "http://[2001:db8::5]:8080", "topic": "t"}),
     ("ntfy", {"server_url": "", "topic": "t"}),
     ("webhook", {"url": "http://10.0.0.5/hook?x=1"}),
@@ -140,28 +146,28 @@ def test_an_unreadable_secret_url_gives_a_fixed_error():
 
 
 def test_the_secret_path_is_masked_whatever_the_case_of_the_scheme():
-    config = {"webhook_url": "HTTPS://hooks.example/services/T0/B0/SECRETPATH"}
-    error = nc._sanitize_error("slack", config, "connect failed for /services/T0/B0/SECRETPATH")
-    assert "SECRET" not in error and error.endswith("/" + nc.MASK)
+    config = {"webhook_url": "HTTPS://hooks.example/services/T0/B0/" + SECRET_PATH}
+    error = nc._sanitize_error("slack", config, "connect failed for /services/T0/B0/" + SECRET_PATH)
+    assert SECRET_PATH not in error and error.endswith("/" + nc.MASK)
 
 
 @pytest.mark.parametrize("cut", [4, 10, 20])
 def test_a_secret_cut_off_at_the_end_of_an_answer_is_masked(cut):
-    path = "/services/T0/B0/SECRETPATH"
+    path = "/services/T0/B0/" + SECRET_PATH
     error = nc._sanitize_error("slack", {"webhook_url": "https://hooks.example" + path},
                                "no such hook " + path[:cut])
     assert error == "no such hook /" + nc.MASK
 
 
 def test_the_error_is_masked_before_it_is_cut(monkeypatch):
-    path = "/services/T0/B0/SECRETPATH"
+    path = "/services/T0/B0/" + SECRET_PATH
 
     async def post(url, kwargs):
         return 404, "x" * 180 + " no hook " + path  # the cut at 200 falls inside the path
 
     monkeypatch.setattr(nc, "_post", post)
     ok, error = nc.send_to_config("slack", {"webhook_url": "https://hooks.example" + path}, "S", "M")
-    assert ok is False and "SECR" not in error and "/services" not in error
+    assert ok is False and SECRET_PATH[:4] not in error and "/services" not in error
 
 
 def test_a_send_to_an_unusable_address_is_not_tried(monkeypatch):
@@ -178,7 +184,7 @@ def test_one_channel_failing_unexpectedly_leaves_the_others_their_alert(monkeypa
     from types import SimpleNamespace
 
     rows = [SimpleNamespace(id=1, name="first", channel_type="slack", alert_types=None,
-                            config={"webhook_url": "https://hooks.example/SECRETPATH"}),
+                            config={"webhook_url": "https://hooks.example/" + SECRET_PATH}),
             SimpleNamespace(id=2, name="second", channel_type="slack", alert_types=None,
                             config={"webhook_url": "https://hooks.example/other"})]
 
@@ -199,7 +205,7 @@ def test_one_channel_failing_unexpectedly_leaves_the_others_their_alert(monkeypa
     real_send = nc.send_to_config
 
     def send(channel_type, config, subject, message):
-        if config["webhook_url"].endswith("SECRETPATH"):
+        if config["webhook_url"].endswith(SECRET_PATH):
             raise RuntimeError(f"broke on {config['webhook_url']}")
         return real_send(channel_type, config, subject, message)
 
@@ -215,19 +221,19 @@ def test_one_channel_failing_unexpectedly_leaves_the_others_their_alert(monkeypa
     assert nc.send_to_all("Alert", "Body") == {"sent": 1, "failed": 1, "skipped": 0}
     assert sent == ["https://hooks.example/other"]
     assert recorded[0] == (1, False, nc._UNEXPECTED)
-    assert "SECRET" not in caplog.text
+    assert SECRET_PATH not in caplog.text
 
 
-@pytest.mark.parametrize("quoted", ["/hook?token=TOPSECRET", "token=TOPSECRET", "/hook"])
+@pytest.mark.parametrize("quoted", ["/hook?token={}", "token={}", "/hook"])
 def test_a_secret_in_the_query_is_masked_too(quoted):
-    error = nc._sanitize_error("discord", {"webhook_url": "https://hooks.example/hook?token=TOPSECRET"},
-                               f"no such hook {quoted} here")
-    assert "TOPSECRET" not in error and "/hook" not in error
+    error = nc._sanitize_error("discord", {"webhook_url": f"https://hooks.example/hook?token={TOKEN}"},
+                               f"no such hook {quoted.format(TOKEN)} here")
+    assert TOKEN not in error and "/hook" not in error
 
 
 def test_a_query_that_holds_the_path_is_masked_whole():
     """Each copy is found before any is masked: masking the path first would
     break up the copy of the query and leave its token."""
-    url = "https://hooks.example/hook?next=/hook&token=TOPSECRET"
-    error = nc._sanitize_error("slack", {"webhook_url": url}, "bad query next=/hook&token=TOPSECRET here")
+    url = f"https://hooks.example/hook?next=/hook&token={TOKEN}"
+    error = nc._sanitize_error("slack", {"webhook_url": url}, f"bad query next=/hook&token={TOKEN} here")
     assert error == "bad query " + nc.MASK + " here"

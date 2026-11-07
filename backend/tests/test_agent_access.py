@@ -31,7 +31,7 @@ from app.config import settings  # noqa: E402
 from app.main import app  # noqa: E402
 
 USERNAME = "admin"
-PASSWORD = "correct horse battery staple"
+PASSWORD = secrets.token_hex(16)
 APP_URL = "https://logs.example.com"
 REDIRECT = "http://127.0.0.1:53682/callback"
 BASIC = "Basic " + base64.b64encode(f"{USERNAME}:{PASSWORD}".encode()).decode()
@@ -579,7 +579,7 @@ def test_refresh_and_disconnect_at_once_never_deadlock(live_agents):
 def test_a_change_while_access_is_off_still_disconnects(live_agents, monkeypatch):
     client, _, tokens = _connect()
     monkeypatch.setattr(settings._inner, "agent_access_enabled", False)
-    monkeypatch.setattr(settings._inner, "auth_password", "changed while off")
+    monkeypatch.setattr(settings._inner, "auth_password", secrets.token_hex(16))
     monkeypatch.setattr(store, "_known_fingerprint", None)
     from app.main import log_agent_access_state
     log_agent_access_state()  # what startup runs
@@ -616,7 +616,7 @@ def test_revocation_disconnects_the_agent(live_agents):
 def test_a_sign_in_change_disconnects_for_good(live_agents, monkeypatch):
     client, _, tokens = _connect()
     assert _mcp(client, tokens["access_token"], "ping").status_code == 200
-    monkeypatch.setattr(settings._inner, "auth_password", "a new password")
+    monkeypatch.setattr(settings._inner, "auth_password", secrets.token_hex(16))
     assert _mcp(client, tokens["access_token"], "ping").status_code == 401
     monkeypatch.setattr(settings._inner, "auth_password", PASSWORD)
     assert _mcp(client, tokens["access_token"], "ping").status_code == 401

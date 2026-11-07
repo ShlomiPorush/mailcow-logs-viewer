@@ -7,6 +7,7 @@ and signing in returns there. The login page itself is skipped when there is
 a session already, so neither page flashes before the other.
 """
 import base64
+import secrets
 
 import pytest
 import starlette.staticfiles as sf
@@ -21,7 +22,7 @@ from app.config import settings  # noqa: E402
 from app.main import app  # noqa: E402
 
 USERNAME = "admin"
-PASSWORD = "correct horse battery staple"
+PASSWORD = secrets.token_hex(16)
 
 
 def _basic(username: str, password: str) -> str:

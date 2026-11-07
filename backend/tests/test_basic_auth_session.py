@@ -6,6 +6,7 @@ POST /api/auth/session, and authenticates every later request with a cookie
 the page cannot read.
 """
 import base64
+import secrets
 
 import pytest
 from fastapi.testclient import TestClient
@@ -15,7 +16,7 @@ from app.config import settings
 from app.main import app
 
 USERNAME = "admin"
-PASSWORD = "correct horse battery staple"
+PASSWORD = secrets.token_hex(16)
 
 
 def _basic(username: str, password: str) -> str:

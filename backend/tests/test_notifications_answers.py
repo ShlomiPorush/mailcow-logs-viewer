@@ -3,6 +3,7 @@
 saved, changed and removed, test notifications that are delivered and that fail, a
 database that fails (500), and the requests the calls refuse (404, 422). The send
 itself is faked (notification_channels._post); nothing leaves the test."""
+import secrets
 import uuid
 from contextlib import contextmanager
 
@@ -22,7 +23,7 @@ from app.services import notification_channels as nc  # noqa: E402
 
 MARK = uuid.uuid4().hex[:8]
 TELEGRAM = {'name': f'{MARK} Ops Telegram', 'channel_type': 'telegram',
-            'config': {'bot_token': '123:ABC', 'chat_id': '456'}, 'alert_types': ['security', 'blacklist']}
+            'config': {'bot_token': f'123:{secrets.token_hex(16)}', 'chat_id': '456'}, 'alert_types': ['security', 'blacklist']}
 # A webhook URL urlparse cannot read; its path is the channel's secret
 BAD_HOOK = 'http://[hooks.example/T000/B000/SECRET'
 
@@ -113,7 +114,7 @@ def test_destinations(client, channels):
                  {**TELEGRAM, 'config': {'chat_id': '456'}}, {**TELEGRAM, 'name': ''}):
         assert c.post('/api/notifications/channels', json=body).status_code == 422
     ntfy = c.post('/api/notifications/channels', json={'name': f'{MARK} ntfy', 'channel_type': 'ntfy',
-                                                       'config': {'topic': 'alerts', 'token': 'secret'}}).json()
+                                                       'config': {'topic': 'alerts', 'token': secrets.token_hex(16)}}).json()
     moved = c.put(f"/api/notifications/channels/{ntfy['id']}",
                   json={'name': f'{MARK} ntfy', 'channel_type': 'ntfy',
                         'config': {'topic': 'alerts', 'token': nc.MASK, 'server_url': 'https://ntfy.example.net'}})

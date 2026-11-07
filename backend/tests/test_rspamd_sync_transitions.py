@@ -4,6 +4,7 @@ is deleted only after mailcow confirmed the blocks are gone, a write mailcow
 did not confirm is a failure, and an automatic sync that waited for the map
 lock does not write after automatic updates were turned off."""
 import asyncio
+import secrets
 import uuid
 from unittest.mock import AsyncMock
 
@@ -31,7 +32,7 @@ def test_the_map_splits_into_before_the_apps_part_and_after():
 @pytest.fixture
 def creds(monkeypatch):
     monkeypatch.setattr(type(settings._inner), "is_rspamd_configured", property(lambda self: True))
-    monkeypatch.setattr(suppressions.mailcow_api, "headers_rw", {"X-API-Key": "test-key"})
+    monkeypatch.setattr(suppressions.mailcow_api, "headers_rw", {"X-API-Key": secrets.token_hex(16)})
     monkeypatch.setattr(suppressions.mailcow_api, "aclose", AsyncMock())
     monkeypatch.setattr(suppressions.mailcow_api, "find_rspamd_map_id", AsyncMock(return_value=7))
     monkeypatch.setattr(suppressions.mailcow_api, "get_rspamd_map_content", AsyncMock(return_value=MAP))
@@ -167,7 +168,7 @@ def test_the_state_counts_the_apps_blocks_in_the_map(creds, rows):
 
 def test_without_the_rspamd_password_the_state_says_so(rows, monkeypatch):
     monkeypatch.setattr(type(settings._inner), "is_rspamd_configured", property(lambda self: False))
-    monkeypatch.setattr(suppressions.mailcow_api, "headers_rw", {"X-API-Key": "k"})
+    monkeypatch.setattr(suppressions.mailcow_api, "headers_rw", {"X-API-Key": secrets.token_hex(16)})
     state = asyncio.run(suppressions.rspamd_state())
     assert not state['readable'] and state['managed_count'] is None and state['reason'] == 'no_password'
 

@@ -5,6 +5,7 @@ or a link on another site) sign the operator out. POST is covered by the
 same-origin guard, which rejects a cross-site request before it runs.
 """
 import base64
+import secrets
 
 import pytest
 from fastapi.testclient import TestClient
@@ -14,7 +15,7 @@ from app.config import settings
 from app.main import app
 
 USERNAME = "admin"
-PASSWORD = "logout-test-password"
+PASSWORD = secrets.token_hex(16)
 
 
 @pytest.fixture

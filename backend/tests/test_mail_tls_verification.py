@@ -14,6 +14,7 @@ true always checks.
 import base64
 import datetime
 import logging
+import secrets
 import socket
 import ssl
 import threading
@@ -29,7 +30,7 @@ from app.services import connection_test
 from app.services.dmarc_imap_service import DMARCImapService
 from app.services.smtp_service import SmtpService
 
-PASSWORD = "Dummy-Secret-PW-42"
+PASSWORD = secrets.token_hex(16)
 DOTTED = "mail.example.com"
 UNSET = object()  # keep the setting's default
 

@@ -1,5 +1,6 @@
 """Database persistence and cleanup must not stall unrelated async requests."""
 import asyncio
+import secrets
 import threading
 from types import SimpleNamespace
 
@@ -45,8 +46,9 @@ async def run_with_heartbeat(operation, started, release):
         await asyncio.gather(task, return_exceptions=True)
 
 
-@pytest.mark.parametrize("license_key,status", [("", 204), ("fake-license", 204), ("fake-license", 401), ("fake-license", 500), ("fake-license", None)])
-def test_maxmind_persistence_keeps_loop_responsive(monkeypatch, license_key, status):
+@pytest.mark.parametrize("has_key,status", [(False, 204), (True, 204), (True, 401), (True, 500), (True, None)])
+def test_maxmind_persistence_keeps_loop_responsive(monkeypatch, has_key, status):
+    license_key = secrets.token_hex(16) if has_key else ""
     sessions, saved, responsive = [], [], []
     started, release = threading.Event(), threading.Event()
     loop_thread = threading.get_ident()

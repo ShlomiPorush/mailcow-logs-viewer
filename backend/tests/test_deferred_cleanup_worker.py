@@ -1,5 +1,6 @@
 """Deferred cleanup keeps database work off the request loop."""
 import asyncio
+import secrets
 import threading
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -23,7 +24,7 @@ def state(monkeypatch):
     }.items():
         monkeypatch.setattr(settings._inner, key, value)
     monkeypatch.setattr(type(settings._inner), "is_rspamd_configured", property(lambda self: True))
-    monkeypatch.setattr(scheduler.mailcow_api, "headers_rw", {"X-API-Key": "test-key"})
+    monkeypatch.setattr(scheduler.mailcow_api, "headers_rw", {"X-API-Key": secrets.token_hex(16)})
     monkeypatch.setattr(scheduler, "update_job_status", Mock())
     # Spam Filter's earlier Rspamd blocks are loaded (tested in test_feature_off_data.py)
     monkeypatch.setattr(scheduler, "_spam_blocks_loaded", AsyncMock(return_value=True))

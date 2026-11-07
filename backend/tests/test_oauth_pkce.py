@@ -7,6 +7,7 @@ An authorization code intercepted on its way back is useless without it.
 """
 import base64
 import hashlib
+import secrets
 from urllib.parse import parse_qs, urlsplit
 from unittest.mock import AsyncMock
 
@@ -38,7 +39,7 @@ def provider(monkeypatch):
     monkeypatch.setattr(client, "initialize", AsyncMock())
     monkeypatch.setattr(client, "issuer_url", None)
     monkeypatch.setattr(client, "client_id", "viewer-test")
-    monkeypatch.setattr(client, "client_secret", "viewer-test-secret")
+    monkeypatch.setattr(client, "client_secret", secrets.token_hex(16))
     monkeypatch.setattr(client, "redirect_uri", "https://viewer.example.com/api/auth/callback")
     monkeypatch.setattr(client, "scopes", ["openid", "profile", "email"])
     monkeypatch.setattr(client, "authorization_url", AUTHORIZE)
@@ -51,7 +52,7 @@ def provider(monkeypatch):
         if str(request.url) == TOKEN:
             form = {k: v[0] for k, v in parse_qs(request.content.decode("ascii")).items()}
             token_requests.append(form)
-            return httpx.Response(200, json={"access_token": "test-token", "token_type": "Bearer"})
+            return httpx.Response(200, json={"access_token": secrets.token_hex(16), "token_type": "Bearer"})
         if str(request.url) == USERINFO:
             return httpx.Response(200, json={"email": "user@example.com"})
         return httpx.Response(404)
@@ -79,7 +80,7 @@ def start(client):
 
 
 def finish(client, state):
-    return client.get("/api/auth/callback", params={"state": state, "code": "test-code"},
+    return client.get("/api/auth/callback", params={"state": state, "code": secrets.token_hex(16)},
                       follow_redirects=False)
 
 
@@ -205,7 +206,7 @@ def test_discovery_waits_for_a_settings_reload_on_another_thread(monkeypatch):
     import threading
 
     values = {"oauth2_issuer_url": "https://old-id.example.test", "oauth2_client_id": "viewer-test",
-              "oauth2_client_secret": "viewer-test-secret", "oauth2_scopes": "openid",
+              "oauth2_client_secret": secrets.token_hex(16), "oauth2_scopes": "openid",
               "oauth2_redirect_uri": "https://viewer.example.com/api/auth/callback",
               "oauth2_authorization_url": None, "oauth2_token_url": None, "oauth2_userinfo_url": None}
     inside, go, reload_done = threading.Event(), threading.Event(), threading.Event()

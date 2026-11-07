@@ -5,6 +5,8 @@ the only job without the feature_disabled flag, so the Status page showed a
 plain "off" tag with a generic hint instead of "feature off" like the others.
 The suppression sync now also reports the Read-Write key it needs.
 """
+import secrets
+
 import pytest
 
 import starlette.staticfiles as sf
@@ -61,7 +63,7 @@ def test_suppression_sync_without_the_rw_key_still_reads(jobs, monkeypatch):
     monkeypatch.setattr(settings._inner, 'disabled_features', '')
     monkeypatch.setattr(settings._inner, 'suppression_enabled', False)
     monkeypatch.setattr(settings._inner, 'suppression_rspamd_sync', True)
-    monkeypatch.setattr(settings._inner, 'rspamd_password', 'example-password')
+    monkeypatch.setattr(settings._inner, 'rspamd_password', secrets.token_hex(16))
     job = jobs()['sync_suppressions']
     assert job['enabled'] is True and not job.get('disabled_reason'), 'the automatic handling is not needed'
 
@@ -69,7 +71,7 @@ def test_suppression_sync_without_the_rw_key_still_reads(jobs, monkeypatch):
 def test_suppression_sync_off_says_why(jobs, monkeypatch):
     monkeypatch.setattr(settings._inner, 'disabled_features', '')
     monkeypatch.setattr(settings._inner, 'suppression_rspamd_sync', False)
-    monkeypatch.setattr(settings._inner, 'rspamd_password', 'example-password')
+    monkeypatch.setattr(settings._inner, 'rspamd_password', secrets.token_hex(16))
     job = jobs()['sync_suppressions']
     assert job['enabled'] is False
     assert 'Sync with Rspamd' in job['disabled_reason'] and job['settings_section'] == 'outbound'

@@ -5,6 +5,7 @@ the Authorization header) to wherever the first server points. A 3xx answer is
 now a failed send with a short message saying so, for every channel type and
 for the Test button, which uses the same send_to_config.
 """
+import secrets
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
@@ -48,12 +49,14 @@ def redirecting_server():
         server.server_close()
 
 
+# New for each run: the secret part of each channel
+SECRET = secrets.token_hex(16)
 CONFIGS = {
-    "slack": lambda base: {"webhook_url": f"{base}/services/T0/B0/SECRETPATH"},
-    "discord": lambda base: {"webhook_url": f"{base}/api/webhooks/1/SECRETPATH"},
-    "ntfy": lambda base: {"server_url": base, "topic": "alerts", "token": "SECRETTOKEN"},
-    "gotify": lambda base: {"server_url": base, "app_token": "SECRETTOKEN"},
-    "webhook": lambda base: {"url": f"{base}/hook", "auth_header": "Bearer SECRETTOKEN"},
+    "slack": lambda base: {"webhook_url": f"{base}/services/T0/B0/{SECRET}"},
+    "discord": lambda base: {"webhook_url": f"{base}/api/webhooks/1/{SECRET}"},
+    "ntfy": lambda base: {"server_url": base, "topic": "alerts", "token": SECRET},
+    "gotify": lambda base: {"server_url": base, "app_token": SECRET},
+    "webhook": lambda base: {"url": f"{base}/hook", "auth_header": f"Bearer {SECRET}"},
 }
 
 
@@ -64,7 +67,7 @@ def test_a_redirect_is_reported_and_not_followed(redirecting_server, channel_typ
     assert ok is False
     assert "redirect" in error.lower()
     assert "307" in error
-    assert "SECRET" not in error
+    assert SECRET not in error
     assert not any(path.startswith("/landing") for path in hits)
 
 
@@ -85,7 +88,7 @@ def test_every_send_disables_redirects(monkeypatch):
 
     monkeypatch.setattr(nc.httpx, "AsyncClient", FakeClient)
     configs = {**{k: v("https://hooks.example.com") for k, v in CONFIGS.items()},
-               "telegram": {"bot_token": "123:ABC", "chat_id": "42"}}
+               "telegram": {"bot_token": f"123:{SECRET}", "chat_id": "42"}}
     for channel_type, config in configs.items():
         ok, error = nc.send_to_config(channel_type, config, "S", "M")
         assert ok is False and "redirect" in error.lower(), channel_type

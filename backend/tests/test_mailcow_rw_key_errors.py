@@ -3,6 +3,7 @@ A Read-Write key that mailcow refuses fails at once, without retries, and the
 page is told what to fix instead of "Internal server error" (issue #384).
 """
 import asyncio
+import secrets
 
 import httpx
 import pytest
@@ -26,7 +27,7 @@ def mailcow(monkeypatch):
 
     client = httpx.AsyncClient(transport=httpx.MockTransport(handle))
     monkeypatch.setattr(mailcow_api, "_get_client", lambda: client)
-    monkeypatch.setattr(mailcow_api, "headers_rw", {"X-API-Key": "rw-key", "Content-Type": "application/json"})
+    monkeypatch.setattr(mailcow_api, "headers_rw", {"X-API-Key": secrets.token_hex(16), "Content-Type": "application/json"})
     monkeypatch.setattr(MailcowAPI._rw_attempt.retry, "wait", wait_none())
     return answer, requests
 
