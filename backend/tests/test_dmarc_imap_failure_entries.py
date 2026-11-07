@@ -86,7 +86,7 @@ def run(monkeypatch):
                                 lambda: _failing_once(SessionLocal(), commit_fails_once_when))
         service.connection = imap
         monkeypatch.setattr(service, "connect", lambda: True)
-        monkeypatch.setattr(service, "select_folder", lambda: True)
+        monkeypatch.setattr(service, "select_folder", lambda *folder: True)
         monkeypatch.setattr(service, "disconnect", lambda: None)
         if fail_after_first_batch:
             searches = []
@@ -160,8 +160,11 @@ def test_an_entry_the_database_still_refuses_keeps_the_email_and_the_counts(run,
     assert done.row.status == 'success'
     assert done.row.reports_failed == 2 and done.row.emails_processed == 2
     assert done.row.failed_emails[0]['email_id'] == '1'
-    assert done.row.failed_emails[1] == {'email_id': '2', 'message_id': None, 'subject': None,
+    # The fallback entry still says which folder the email is in
+    assert done.row.failed_emails[1] == {'email_id': '2', 'folder': done.row.failed_emails[0]['folder'],
+                                         'message_id': None, 'subject': None,
                                          'error': imap_module._DETAILS_NOT_STORED}
+    assert done.row.failed_emails[1]['folder']
     assert done.seen == [b'1', b'2']
     assert len(run.notified) == 1
 

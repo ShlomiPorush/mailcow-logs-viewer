@@ -160,7 +160,7 @@ def sync(mails, delete_after=True):
     service.scan_all_unseen = False
     service.connection = FakeImap(mails)
     service.connect = lambda: True
-    service.select_folder = lambda: True
+    service.select_folder = lambda *folder: True
     service.disconnect = lambda: None
     return service.sync_reports("manual"), service.connection
 

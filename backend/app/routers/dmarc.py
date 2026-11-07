@@ -17,6 +17,7 @@ from ..services.report_identity import ReportBudget, ReportRejectedError, report
 from ..services.report_store import conflicting_report_ids, prepare_report_file, report_sender, store_report
 from ..services.geoip_service import enrich_dmarc_record
 from ..services.dmarc_imap_service import sync_dmarc_reports_from_imap, is_sync_running
+from ..services.imap_folders import describe_setting
 from ..services.dmarc_cache import (
     get_dmarc_cache_key, 
     get_dmarc_cached, 
@@ -1710,7 +1711,7 @@ def get_imap_status(request: Request = None, db: Session = Depends(get_db)):
                 'host': settings.dmarc_imap_host if account else None,
                 'port': settings.dmarc_imap_port if account else None,
                 'user': settings.dmarc_imap_user if account else None,
-                'folder': settings.dmarc_imap_folder if account else None,
+                'folder': describe_setting(settings.dmarc_imap_folder) if account else None,
                 'delete_after': settings.dmarc_imap_delete_after if settings.dmarc_imap_enabled else None,
                 'interval_seconds': settings.dmarc_imap_interval if settings.dmarc_imap_enabled else None,
                 'interval_minutes': round(settings.dmarc_imap_interval / 60, 1) if settings.dmarc_imap_enabled else None
@@ -1803,6 +1804,19 @@ def trigger_manual_sync(background_tasks: BackgroundTasks):
 # IMAP SYNC HISTORY
 # =============================================================================
 
+def _failure_for(request, item, settings_reader: bool):
+    """A stored failure entry for this caller: the error and the folder are
+    Settings (they can name the account's folders or host)."""
+    if not isinstance(item, dict):
+        return item
+    item = dict(item)
+    if 'error' in item:
+        item['error'] = job_error(request, item.get('error'))
+    if not settings_reader:
+        item.pop('folder', None)
+    return item
+
+
 @router.get("/dmarc/imap/history", response_model=None, responses=documented(m.ImapHistory, errors={422: Invalid, 500: None}))
 def get_sync_history(
     limit: int = Query(20, ge=1, le=500),
@@ -1812,8 +1826,9 @@ def get_sync_history(
 ):
     """
     Get history of IMAP sync operations. A run's error is a plain sentence for
-    a caller who may not read Settings.
+    a caller who may not read Settings, and its failures do not name a folder.
     """
+    settings_reader = caller_may(request, "settings", READ)
     try:
         # Get total count
         total = db.query(DMARCSync).count()
@@ -1842,8 +1857,7 @@ def get_sync_history(
                     'reports_duplicate': sync.reports_duplicate,
                     'reports_failed': sync.reports_failed,
                     'error_message': job_error(request, sync.error_message),
-                    'failed_emails': [{**item, 'error': job_error(request, item.get('error'))}
-                                      if isinstance(item, dict) and 'error' in item else item
+                    'failed_emails': [_failure_for(request, item, settings_reader)
                                       for item in sync.failed_emails] if sync.failed_emails else sync.failed_emails
                 }
                 for sync in syncs

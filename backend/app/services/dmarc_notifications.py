@@ -67,6 +67,8 @@ def _create_text_content(failed_emails: List[Dict], sync_id: int) -> str:
 
     for i, email_data in enumerate(failed_emails, 1):
         lines.append(f"{i}. Email ID: {email_data.get('email_id', 'unknown')}")
+        if email_data.get('folder'):
+            lines.append(f"   Folder: {email_data['folder']}")
         lines.append(f"   Message-ID: {email_data.get('message_id', 'unknown')}")
         lines.append(f"   Subject: {email_data.get('subject', 'unknown')}")
         lines.append(f"   Error: {email_data.get('error', 'unknown')}")
@@ -88,7 +90,7 @@ def _create_html_content(failed_emails: List[Dict], sync_id: int) -> str:
                 ('Error', email_data.get('error', 'unknown'), 'fail'),
                 ('Message-ID', e.mono(email_data.get('message_id', 'unknown'))),
                 ('Email ID', email_data.get('email_id', 'unknown')),
-            ]),
+            ] + ([('Folder', email_data['folder'])] if email_data.get('folder') else [])),
         )
         for email_data in failed_emails
     ]

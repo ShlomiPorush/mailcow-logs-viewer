@@ -27,7 +27,7 @@ def test_imap_import_errors_reach_the_channels_without_smtp(monkeypatch):
     service.delete_after = False
     service.connection = FakeImap({1: BROKEN_REPORT})
     monkeypatch.setattr(service, "connect", lambda: True)
-    monkeypatch.setattr(service, "select_folder", lambda: True)
+    monkeypatch.setattr(service, "select_folder", lambda *folder: True)
     monkeypatch.setattr(service, "disconnect", lambda: None)
     monkeypatch.setattr(imap_module, "SessionLocal", Mock)
     monkeypatch.setattr(imap_module, "DMARCSync", _SyncRecord)
