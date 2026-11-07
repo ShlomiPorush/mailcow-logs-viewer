@@ -11,6 +11,7 @@ import contextlib
 import gc
 import logging
 import socket
+import secrets
 import socketserver
 import threading
 import time
@@ -21,6 +22,8 @@ import pytest
 from app.services import notification_channels as nc
 
 TOO_SLOW = "The server took too long to answer."
+# New for each run: the secret part of the webhook URL
+SECRET_PATH = secrets.token_hex(5)
 
 
 @pytest.fixture(autouse=True)
@@ -80,7 +83,7 @@ def raw_server(answer):
 
 
 def _send(base):
-    config = {"webhook_url": f"{base}/services/T0/B0/SECRETPATH"}
+    config = {"webhook_url": f"{base}/services/T0/B0/{SECRET_PATH}"}
     started = time.monotonic()
     result = nc.send_to_config("slack", config, "Subject", "Body")
     return result, time.monotonic() - started
@@ -208,12 +211,12 @@ def test_a_normal_success():
 
 
 def test_a_normal_error_keeps_its_message_without_secrets():
-    body = b'{"error": "no such hook /services/T0/B0/SECRETPATH"}'
+    body = f'{{"error": "no such hook /services/T0/B0/{SECRET_PATH}"}}'.encode()
     with raw_server(_answer(400, body, "application/json")) as (base, _state):
         (ok, error), _elapsed = _send(base)
     assert ok is False
     assert error.startswith('HTTP 400: {"error": "no such hook ')
-    assert "SECRET" not in error
+    assert SECRET_PATH not in error
 
 
 @pytest.mark.parametrize("content_type, body, shown", [
@@ -303,11 +306,12 @@ def test_a_compressed_error_answer_is_not_decoded(transport):
 
 def test_the_send_asks_for_an_uncompressed_answer(transport):
     transport["response"] = lambda: httpx.Response(200)
-    config = {"url": "https://hooks.example.com/hook", "auth_header": "Bearer t"}
+    token = secrets.token_hex(16)
+    config = {"url": "https://hooks.example.com/hook", "auth_header": f"Bearer {token}"}
     assert nc.send_to_config("webhook", config, "S", "M") == (True, "")
     request = transport["requests"][0]
     assert request.headers["Accept-Encoding"] == "identity"
-    assert request.headers["Authorization"] == "Bearer t"
+    assert request.headers["Authorization"] == f"Bearer {token}"
 
 
 def test_ntfy_sends_the_text_as_the_body(transport):

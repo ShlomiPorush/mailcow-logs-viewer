@@ -10,6 +10,7 @@ import asyncio
 import base64
 import logging
 import secrets
+import string
 import threading
 import time
 from urllib.parse import parse_qs, urlsplit
@@ -37,8 +38,11 @@ from app.services import oauth2_client as oauth2_module  # noqa: E402
 from app.services import users_store  # noqa: E402
 
 ADMIN_NAME = "admin"
-ADMIN_PASSWORD = "correct horse battery staple"
-PASSWORD = "A long enough passw0rd"
+# New for each run
+ADMIN_PASSWORD = secrets.token_hex(16)
+PASSWORD = secrets.token_hex(16)
+NEW_PASSWORD = secrets.token_hex(16)
+ACCEPTED_PASSWORD = secrets.token_hex(16)
 APP = "http://testserver"
 
 
@@ -211,8 +215,9 @@ def test_at_most_two_password_checks_run_at_once(people):
 
 def test_a_non_ascii_password_signs_in(people):
     admin = _admin()
-    _add(admin, password="Pässwört 日本 été 0k")
-    _sign_in("alice", "Pässwört 日本 été 0k")
+    password = "Pässwört 日本 été " + secrets.token_hex(8)
+    _add(admin, password=password)
+    _sign_in("alice", password)
 
 
 def test_a_local_user_cannot_use_a_basic_header_on_the_api(people):
@@ -275,8 +280,14 @@ def test_a_password_under_8_characters_is_refused_on_create(people, password):
     assert r.status_code == 422 and r.json()["detail"] == SHORT_PASSWORD
 
 
-@pytest.mark.parametrize("password", ["qzxkvbnw", "73915846", "QZXKVBNW"])
-def test_8_characters_of_any_kind_are_enough_and_sign_in(people, password):
+@pytest.mark.parametrize("kind", [string.ascii_lowercase, string.digits, string.ascii_uppercase])
+def test_8_characters_of_any_kind_are_enough_and_sign_in(people, kind):
+    from app.services import passwords
+    def draw():
+        return "".join(secrets.choice(kind) for _ in range(8))
+    password = draw()
+    while passwords.is_common(password):   # 8 digits can be a common one
+        password = draw()
     admin = _admin()
     _add(admin, "alice", password=password)
     _sign_in("alice", password)
@@ -294,7 +305,7 @@ def test_a_common_password_is_refused_on_create(people):
     ("short", {"ok": False, "problem": SHORT_PASSWORD}),
     ("Password1", {"ok": False, "problem": COMMON_PASSWORD}),
     ("A1!" + "b" * 254, {"ok": False, "problem": "Use at most 256 characters."}),
-    ("Kp7m-Rx4Tq9wZb2n", {"ok": True, "problem": None}),
+    pytest.param(ACCEPTED_PASSWORD, {"ok": True, "problem": None}, id="accepted"),
 ])
 def test_the_password_check_answers_as_create_and_reset_would(people, password, answer):
     assert _admin().post("/api/users/password-check", json={"password": password}).json() == answer
@@ -303,10 +314,10 @@ def test_the_password_check_answers_as_create_and_reset_would(people, password, 
 def test_the_password_check_is_for_admins_and_logs_no_password(people, caplog):
     _add(_admin(), "alice", access="operator")
     caplog.set_level(logging.DEBUG)
-    r = _sign_in("alice").post("/api/users/password-check", json={"password": "Kp7m-Rx4Tq9wZb2n"})
+    r = _sign_in("alice").post("/api/users/password-check", json={"password": ACCEPTED_PASSWORD})
     assert r.status_code == 403 and r.json() == {"detail": user_access.NOT_PERMITTED}
-    _admin().post("/api/users/password-check", json={"password": "Kp7m-Rx4Tq9wZb2n"})
-    assert "Kp7m-Rx4Tq9wZb2n" not in caplog.text
+    _admin().post("/api/users/password-check", json={"password": ACCEPTED_PASSWORD})
+    assert ACCEPTED_PASSWORD not in caplog.text
 
 
 @pytest.mark.parametrize("password, detail", [
@@ -581,7 +592,7 @@ def _ended(response):
     assert response.json()["reason"] == "access_changed" and response.headers["x-session-end"] == "access_changed"
 
 
-@pytest.mark.parametrize("change", [{"access": "operator"}, {"disabled": True}, {"password": "Another l0ng password"}])
+@pytest.mark.parametrize("change", [{"access": "operator"}, {"disabled": True}, {"password": NEW_PASSWORD}])
 def test_a_change_ends_the_users_sessions(people, change):
     admin = _admin()
     row = _add(admin)
@@ -626,9 +637,9 @@ def test_signing_out_works_after_the_access_ended(people, monkeypatch):
 def test_a_new_password_replaces_the_old_one(people):
     admin = _admin()
     row = _add(admin)
-    assert _change(admin, row, password="Another l0ng password").status_code == 200
+    assert _change(admin, row, password=NEW_PASSWORD).status_code == 200
     _sign_in("alice", PASSWORD, expect=401)
-    _sign_in("alice", "Another l0ng password")
+    _sign_in("alice", NEW_PASSWORD)
 
 
 def test_kind_name_and_email_cannot_be_changed(people):
@@ -721,7 +732,7 @@ USERINFO = "https://id.example.com/userinfo"
 def provider(oauth2, monkeypatch):
     client = auth_router.oauth2_client
     monkeypatch.setattr(settings._inner, "basic_auth_enabled", False)
-    for key, value in (("issuer_url", None), ("client_id", "viewer-test"), ("client_secret", "viewer-test-secret"),
+    for key, value in (("issuer_url", None), ("client_id", "viewer-test"), ("client_secret", secrets.token_hex(16)),
                        ("redirect_uri", "https://viewer.example.com/api/auth/callback"),
                        ("scopes", ["openid", "email"]), ("authorization_url", AUTHORIZE), ("token_url", TOKEN),
                        ("userinfo_url", USERINFO)):
@@ -730,7 +741,7 @@ def provider(oauth2, monkeypatch):
 
     def handler(request):
         if str(request.url) == TOKEN:
-            return httpx.Response(200, json={"access_token": "test-token", "token_type": "Bearer"})
+            return httpx.Response(200, json={"access_token": secrets.token_hex(16), "token_type": "Bearer"})
         if str(request.url) == USERINFO:
             return httpx.Response(200, json=who)
         return httpx.Response(404)
@@ -744,7 +755,7 @@ def provider(oauth2, monkeypatch):
 def _callback(client):
     location = client.get("/api/auth/login", follow_redirects=False).headers["location"]
     state = parse_qs(urlsplit(location).query)["state"][0]
-    return client.get("/api/auth/callback", params={"state": state, "code": "c"}, follow_redirects=False)
+    return client.get("/api/auth/callback", params={"state": state, "code": secrets.token_hex(16)}, follow_redirects=False)
 
 
 def _store_default(value):
@@ -884,7 +895,7 @@ def test_a_settings_save_that_would_leave_no_admin_is_refused(oauth2):
     assert refused.value.status == 409 and refused.value.detail == users_store.NO_ADMIN_LEFT
     with get_db_context() as db:
         # A new password keeps the built-in admin
-        users_store.check_sign_in_settings(db, settings, {"auth_password": "a new admin password"})
+        users_store.check_sign_in_settings(db, settings, {"auth_password": secrets.token_hex(16)})
         with pytest.raises(users_store.UserError):
             users_store.check_sign_in_settings(db, settings, {"auth_password": ""})
 
@@ -908,7 +919,7 @@ def test_the_settings_save_runs_the_sign_in_check_under_the_lock(people, refused
 def test_only_a_save_that_changes_who_can_sign_in_needs_the_check():
     from types import SimpleNamespace
     from app.routers.settings import _changes_admin_sign_in
-    before = SimpleNamespace(basic_auth_enabled=True, auth_username="admin", auth_password="secret password",
+    before = SimpleNamespace(basic_auth_enabled=True, auth_username="admin", auth_password=secrets.token_hex(16),
                              oauth2_enabled=False)
     # The form sends every key on each save
     assert not _changes_admin_sign_in({"basic_auth_enabled": True, "auth_username": "admin", "app_title": "x",
@@ -1105,7 +1116,7 @@ def test_turning_basic_auth_on_with_a_password_from_sign_in_off_passes(people):
     _store_default("none")
     with get_db_context() as db:
         users_store.check_sign_in_settings(db, _sign_in_off(), {"basic_auth_enabled": True,
-                                                                "auth_password": "a long admin password"})
+                                                                "auth_password": secrets.token_hex(16)})
     with get_db_context() as db:
         with pytest.raises(users_store.UserError):
             users_store.check_sign_in_settings(db, _sign_in_off(), {"basic_auth_enabled": True, "auth_password": ""})
@@ -1142,11 +1153,11 @@ def test_a_sign_in_after_a_password_reset_keeps_its_session(people, monkeypatch)
 
     def sign_in_meanwhile(user_id, below=None):
         # Between the commit and ending the old sessions, the user signs in with the new password
-        late["client"] = _sign_in("alice", "Another l0ng password")
+        late["client"] = _sign_in("alice", NEW_PASSWORD)
         real(user_id, below)
 
     monkeypatch.setattr(users_store, "_end_local_sessions", sign_in_meanwhile)
-    assert _change(admin, row, password="Another l0ng password").status_code == 200
+    assert _change(admin, row, password=NEW_PASSWORD).status_code == 200
     _ended(old.get("/api/messages"))
     assert late["client"].get("/api/messages").status_code == 200
 

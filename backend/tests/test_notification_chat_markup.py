@@ -6,6 +6,8 @@ as a link that hides its target; Discord pings for @everyone and @here and
 hides a link behind [label](url). Slack text is now escaped, and Discord text
 is broken up and sent with no mentions allowed.
 """
+import secrets
+
 from app.services import notification_channels as nc
 
 SENDER_TEXT = ("DMARC <!channel> @everyone @Here <https://phish.invalid/login|Sign in> "
@@ -45,5 +47,5 @@ def test_escaped_text_still_fits_the_length_limit():
 
 
 def test_plain_text_channels_are_unchanged():
-    _url, kwargs = nc.build_request("telegram", {"bot_token": "T", "chat_id": "1"}, "S", SENDER_TEXT)
+    _url, kwargs = nc.build_request("telegram", {"bot_token": secrets.token_hex(16), "chat_id": "1"}, "S", SENDER_TEXT)
     assert kwargs["json"]["text"] == f"S\n\n{SENDER_TEXT}"

@@ -1,4 +1,5 @@
 """OAuth callbacks must belong to the browser that initiated authorization."""
+import secrets
 from urllib.parse import parse_qs, urlencode, urlsplit
 from unittest.mock import AsyncMock
 
@@ -20,7 +21,7 @@ def oauth(monkeypatch):
     monkeypatch.setattr(auth.oauth2_client, "get_authorization_url",
                         lambda state, code_challenge=None: "https://id.example.com/authorize?" + urlencode({"state": state}))
     monkeypatch.setattr(auth.oauth2_client, "exchange_code_for_token",
-                        AsyncMock(return_value={"access_token": "test-token"}))
+                        AsyncMock(return_value={"access_token": secrets.token_hex(16)}))
     monkeypatch.setattr(auth.oauth2_client, "get_user_info",
                         AsyncMock(return_value={"email": "user@example.com"}))
     auth._consumed_states.clear()
@@ -37,7 +38,7 @@ def start(client):
 
 
 def finish(client, state, **params):
-    return client.get("/api/auth/callback", params={"state": state, "code": "test-code", **params},
+    return client.get("/api/auth/callback", params={"state": state, "code": secrets.token_hex(16), **params},
                       follow_redirects=False)
 
 
@@ -123,7 +124,7 @@ def test_forged_or_altered_state_is_rejected(monkeypatch, tamper):
     expires, signature = state.split(".")
     cookie = client.cookies.get(auth.OAUTH_COOKIE_PREFIX + state)
     if tamper == "secret":
-        monkeypatch.setattr(auth, "get_session_secret_key", lambda: "another-test-secret")
+        monkeypatch.setattr(auth, "get_session_secret_key", lambda: secrets.token_hex(16))
         forged = state
     elif tamper == "expiry":
         forged = f"{int(expires) + 3600}.{signature}"

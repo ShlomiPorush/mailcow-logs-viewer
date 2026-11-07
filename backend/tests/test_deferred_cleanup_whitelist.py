@@ -1,5 +1,6 @@
 """Mail to whitelisted domains stays in the queue: neither queue cleanup nor a hard bounce deletes it."""
 import asyncio
+import secrets
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, Mock
 
@@ -15,7 +16,7 @@ def test_whitelisted_domain_mail_stays_in_queue(monkeypatch):
         "suppression_whitelist_domains": "example.net",
     }.items():
         monkeypatch.setattr(settings._inner, key, value)
-    monkeypatch.setattr(scheduler.mailcow_api, "headers_rw", {"X-API-Key": "test-key"})
+    monkeypatch.setattr(scheduler.mailcow_api, "headers_rw", {"X-API-Key": secrets.token_hex(16)})
     monkeypatch.setattr(scheduler, "update_job_status", Mock())
     monkeypatch.setattr(scheduler, "_spam_blocks_loaded", AsyncMock(return_value=True))
     monkeypatch.setattr(scheduler, "_blocked_now", lambda emails: set(emails))
@@ -48,7 +49,7 @@ def test_hard_bounce_keeps_messages_that_also_go_to_a_whitelisted_domain(monkeyp
         "suppression_whitelist_domains": "example.net",
     }.items():
         monkeypatch.setattr(settings._inner, key, value)
-    monkeypatch.setattr(scheduler.mailcow_api, "headers_rw", {"X-API-Key": "test-key"})
+    monkeypatch.setattr(scheduler.mailcow_api, "headers_rw", {"X-API-Key": secrets.token_hex(16)})
     monkeypatch.setattr(scheduler, "update_job_status", Mock())
     monkeypatch.setattr(scheduler, "_spam_blocks_loaded", AsyncMock(return_value=True))
     monkeypatch.setattr(scheduler, "_blocked_now", lambda emails: set(emails))

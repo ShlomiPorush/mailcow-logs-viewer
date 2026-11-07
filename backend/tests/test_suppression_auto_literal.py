@@ -7,6 +7,7 @@ queue, so a recipient such as /.*|x@y.test/i became a map line matching every
 recipient on the server. Only entries an administrator added may be regex.
 """
 import asyncio
+import secrets
 import re
 import uuid
 from datetime import datetime, timezone
@@ -215,7 +216,7 @@ def test_deferred_cleanup_does_not_suppress_a_recipient_with_a_slash_in_the_doma
                        'queue_cleanup_threshold_minutes': 30, 'suppression_rspamd_sync': True,
                        'suppression_whitelist_domains': ''}.items():
         monkeypatch.setattr(settings._inner, key, value)
-    monkeypatch.setattr(scheduler.mailcow_api, 'headers_rw', {'X-API-Key': 'test-key'})
+    monkeypatch.setattr(scheduler.mailcow_api, 'headers_rw', {'X-API-Key': secrets.token_hex(16)})
     monkeypatch.setattr(scheduler, 'update_job_status', Mock())
     monkeypatch.setattr(scheduler, '_spam_blocks_loaded', AsyncMock(return_value=True))
     old = datetime.now(timezone.utc).timestamp() - 7200

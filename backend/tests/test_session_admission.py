@@ -21,7 +21,7 @@ from app import session
 from app.config import settings
 from app.main import app
 from app.routers import raw_logs
-from test_session_revocation import basic, signed_in, store  # noqa: F401 (store: autouse fixture)
+from test_session_revocation import NEW_PASSWORD, basic, signed_in, store  # noqa: F401 (store: autouse fixture)
 
 HOUR = 3600.0
 
@@ -125,7 +125,7 @@ def _max_age(response) -> int:
 def test_saving_sign_in_settings_near_the_end_does_not_extend_the_session(clock):
     operator = signed_in()
     clock["t"] += 23 * HOUR
-    response = operator.put("/api/settings", json={"auth_password": "new-test-password"})
+    response = operator.put("/api/settings", json={"auth_password": NEW_PASSWORD})
     assert response.status_code == 200
     assert _max_age(response) == int(HOUR)
     clock["t"] += HOUR

@@ -5,6 +5,7 @@ login, and at capacity), the OAuth2 login and callback redirects, their refusals
 while OAuth2 is off or not set up, and signing out. The OAuth2 provider is faked;
 the sessions and used login states of this test are kept apart from everyone else's."""
 import base64
+import secrets
 from collections import OrderedDict
 from urllib.parse import parse_qs, urlsplit
 
@@ -25,7 +26,7 @@ from app.routers import auth  # noqa: E402
 from app.services import oauth2_client as oauth2_module  # noqa: E402
 
 USERNAME = 'admin'
-PASSWORD = 'correct horse battery staple'
+PASSWORD = secrets.token_hex(16)
 BASIC = 'Basic ' + base64.b64encode(f'{USERNAME}:{PASSWORD}'.encode()).decode()
 AUTHORIZE = 'https://id.example.com/authorize'
 TOKEN = 'https://id.example.com/token'
@@ -64,7 +65,7 @@ def provider(monkeypatch):
     monkeypatch.setattr(settings._inner, 'oauth2_provider_name', 'Example ID')
     monkeypatch.setattr(client, 'issuer_url', None)
     monkeypatch.setattr(client, 'client_id', 'viewer-test')
-    monkeypatch.setattr(client, 'client_secret', 'viewer-test-secret')
+    monkeypatch.setattr(client, 'client_secret', secrets.token_hex(16))
     monkeypatch.setattr(client, 'redirect_uri', 'https://viewer.example.com/api/auth/callback')
     monkeypatch.setattr(client, 'scopes', ['openid', 'profile', 'email'])
     monkeypatch.setattr(client, 'authorization_url', AUTHORIZE)
@@ -73,7 +74,7 @@ def provider(monkeypatch):
 
     def handler(request: httpx.Request) -> httpx.Response:
         if str(request.url) == TOKEN:
-            return httpx.Response(200, json={'access_token': 'test-token', 'token_type': 'Bearer'})
+            return httpx.Response(200, json={'access_token': secrets.token_hex(16), 'token_type': 'Bearer'})
         if str(request.url) == USERINFO:
             return httpx.Response(200, json={'sub': '42', 'email': 'user@example.com', 'groups': ['admins']})
         return httpx.Response(404)

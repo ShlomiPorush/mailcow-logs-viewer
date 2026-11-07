@@ -6,6 +6,7 @@ to Rspamd while automatic updates are off, and a write applies only them to
 what mailcow has now. Fictional addresses only.
 """
 import asyncio
+import secrets
 import threading
 import time
 import uuid
@@ -37,7 +38,7 @@ def _sync_setting(monkeypatch, on: bool):
 
 def _rw(monkeypatch, on: bool = True):
     from app.routers import suppressions as sup
-    monkeypatch.setattr(sup.mailcow_api, 'headers_rw', {'X-API-Key': 'test-key'} if on else None)
+    monkeypatch.setattr(sup.mailcow_api, 'headers_rw', {'X-API-Key': secrets.token_hex(16)} if on else None)
 
 
 @pytest.fixture

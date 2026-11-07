@@ -1,5 +1,6 @@
 """Monitored-host persistence must not block asynchronous source discovery."""
 import asyncio
+import secrets
 import threading
 from contextlib import contextmanager
 from unittest.mock import AsyncMock, Mock
@@ -14,7 +15,7 @@ from app.config import settings
 def state(monkeypatch):
     monkeypatch.setattr(type(settings._inner), "is_feature_enabled", lambda self, name: True)
     monkeypatch.setattr(settings._inner, "mailcow_url", "https://mail.example.test")
-    monkeypatch.setattr(settings._inner, "mailcow_api_key", "test-key")
+    monkeypatch.setattr(settings._inner, "mailcow_api_key", secrets.token_hex(16))
     monkeypatch.setattr(settings._inner, "blacklist_source_transports", True)
     monkeypatch.setattr(settings._inner, "blacklist_source_relayhosts", False)
     monkeypatch.setattr(settings._inner, "blacklist_source_server_ip", False)

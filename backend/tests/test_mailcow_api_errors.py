@@ -8,6 +8,7 @@ every container as stopped. Only three reads have a deliberate answer for
 "mailcow did not answer": test_connection, get_fail2ban and get_status_host_ip.
 """
 import asyncio
+import secrets
 
 import httpx
 import pytest
@@ -61,7 +62,7 @@ def failing(server, monkeypatch):  # noqa: F811
 def _call(name, args, kwargs):
     async def go():
         api = mod.MailcowAPI()
-        api.headers_rw = {"X-API-Key": "rw", "Content-Type": "application/json"}
+        api.headers_rw = {"X-API-Key": secrets.token_hex(16), "Content-Type": "application/json"}
         try:
             return await getattr(api, name)(*args, **kwargs)
         finally:

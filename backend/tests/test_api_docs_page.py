@@ -6,6 +6,7 @@ frontend/api-docs.html with the local Scalar bundle, /redoc sends old
 bookmarks there, and all three need a session like every other page.
 """
 import base64
+import secrets
 import builtins
 import re
 from pathlib import Path
@@ -25,7 +26,7 @@ from app.main import app  # noqa: E402
 
 FRONTEND = Path(__file__).resolve().parents[2] / "frontend"
 USERNAME = "admin"
-PASSWORD = "correct horse battery staple"
+PASSWORD = secrets.token_hex(16)
 
 
 @pytest.fixture

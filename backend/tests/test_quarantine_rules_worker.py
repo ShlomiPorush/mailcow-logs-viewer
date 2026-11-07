@@ -1,5 +1,6 @@
 """Quarantine rules own blocking work and network clients in a worker."""
 import asyncio
+import secrets
 import threading
 from contextlib import contextmanager
 from types import SimpleNamespace
@@ -15,7 +16,7 @@ def state(monkeypatch):
     monkeypatch.setattr(type(settings._inner), "is_feature_enabled", lambda self, name: True)
     monkeypatch.setattr(settings._inner, "quarantine_rules_max_actions", 2)
     monkeypatch.setattr(settings._inner, "quarantine_rules_log_retention_days", 7)
-    monkeypatch.setattr(scheduler.mailcow_api, "headers_rw", {"X-API-Key": "test-key"})
+    monkeypatch.setattr(scheduler.mailcow_api, "headers_rw", {"X-API-Key": secrets.token_hex(16)})
     monkeypatch.setattr(scheduler.mailcow_api, "aclose", AsyncMock())
     monkeypatch.setattr(scheduler, "update_job_status", Mock())
     rules = [

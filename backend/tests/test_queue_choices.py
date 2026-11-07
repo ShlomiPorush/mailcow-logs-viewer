@@ -5,6 +5,7 @@ Deleting queued mail cannot be undone: these tests also pin the checks that
 keep mail in the queue. Fictional addresses only.
 """
 import asyncio
+import secrets
 import uuid
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, Mock
@@ -37,7 +38,7 @@ def base(monkeypatch):
                        'queue_cleanup_enabled': True, 'queue_cleanup_block': True, 'queue_cleanup_threshold_minutes': 30,
                        'suppression_whitelist_domains': 'safe.test', 'rspamd_password': ''}.items():
         monkeypatch.setattr(settings._inner, key, value)
-    monkeypatch.setattr(scheduler.mailcow_api, 'headers_rw', {'X-API-Key': 'test-key'})
+    monkeypatch.setattr(scheduler.mailcow_api, 'headers_rw', {'X-API-Key': secrets.token_hex(16)})
     monkeypatch.setattr(scheduler, 'update_job_status', Mock())
     monkeypatch.setattr(scheduler, '_spam_blocks_loaded', AsyncMock(return_value=True))
     monkeypatch.setattr(scheduler, '_protected_now', lambda emails: set())

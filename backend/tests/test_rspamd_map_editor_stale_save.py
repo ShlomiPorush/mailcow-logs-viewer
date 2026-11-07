@@ -8,6 +8,7 @@ save carries the map as saved with its new hash. Every write goes to a fake
 mailcow.
 """
 import hashlib
+import secrets
 
 import pytest
 
@@ -48,7 +49,7 @@ def maps(monkeypatch):
     from app.routers import rspamd_maps
     fake = FakeMaps('/^a@example\\.com$/i\n')
     monkeypatch.setattr(rspamd_maps, 'mailcow_api', fake)
-    monkeypatch.setattr(settings._inner, 'rspamd_password', 'test-password')
+    monkeypatch.setattr(settings._inner, 'rspamd_password', secrets.token_hex(16))
     return fake
 
 

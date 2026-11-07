@@ -6,6 +6,7 @@
 // or sheet it was asked from. popups.test.cjs keeps new popups on this frame.
 // Set A11Y_MODULES to jsdom's node_modules to run it locally (see layers.a11y.cjs).
 const assert = require('node:assert/strict');
+const { randomBytes } = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const { test, afterEach } = require('node:test');
@@ -231,17 +232,18 @@ const enterOn = (w, el) => {
 
 test('Verify credentials: Enter on the X cancels, Enter in a field confirms', async () => {
     const verify = DIALOGS.find(d => d.id === 'basic-auth-verify-modal');
+    const password = randomBytes(16).toString('hex');
     let { w, result, backdrop } = await open(verify);
     $(w, '#verify-auth-username').value = 'admin';
-    $(w, '#verify-auth-password').value = 'secret';
+    $(w, '#verify-auth-password').value = password;
     enterOn(w, backdrop.querySelector('.ui-dialog-head [aria-label="Close"]'));
     assert.equal(await result, null, 'the X cancels, the typed credentials are not used');
     ({ w, result } = await open(verify));
     $(w, '#verify-auth-username').value = 'admin';
-    $(w, '#verify-auth-password').value = 'secret';
+    $(w, '#verify-auth-password').value = password;
     enterOn(w, $(w, '#verify-auth-password'));
     // Compared as plain values: the answer is an object of the page's own realm
-    assert.deepEqual({ ...(await result) }, { username: 'admin', password: 'secret' });
+    assert.deepEqual({ ...(await result) }, { username: 'admin', password });
 });
 
 test('Disable features: Enter on Cancel cancels, it does not delete the data', async () => {

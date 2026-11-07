@@ -7,6 +7,7 @@ A bearer on /api is always an agent's request: a bad one never falls back to
 a cookie or to sign-in being off. Tokens work only where they were issued
 (the REST API or the MCP server).
 """
+import secrets
 from datetime import datetime, timedelta
 
 import pytest
@@ -184,7 +185,7 @@ def test_a_sign_in_change_ends_an_approved_code_before_it_is_collected(live_agen
     agent = _client()
     d = _device(agent)
     _answer(d["user_code"])
-    monkeypatch.setattr(settings._inner, "auth_password", "a new password")
+    monkeypatch.setattr(settings._inner, "auth_password", secrets.token_hex(16))
     assert _poll(agent, d["device_code"]).json()["error"] == "expired_token"
 
 

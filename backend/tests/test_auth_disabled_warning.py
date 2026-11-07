@@ -1,5 +1,6 @@
 """Running without any authentication is logged as a warning at startup, not as info."""
 import logging
+import secrets
 
 from app import main
 from app.config import settings
@@ -17,7 +18,7 @@ def test_no_authentication_is_a_startup_warning(monkeypatch, caplog):
 
 def test_enabled_authentication_is_info(monkeypatch, caplog):
     monkeypatch.setattr(settings._inner, "basic_auth_enabled", True)
-    monkeypatch.setattr(settings._inner, "auth_password", "test-password")
+    monkeypatch.setattr(settings._inner, "auth_password", secrets.token_hex(16))
     with caplog.at_level(logging.INFO, logger="app.main"):
         main.log_authentication_state()
     assert not [r for r in caplog.records if r.levelno >= logging.WARNING]

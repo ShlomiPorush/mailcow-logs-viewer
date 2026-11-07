@@ -1,4 +1,5 @@
 """Authentication capacity limits preserve live sessions and failure budgets."""
+import secrets
 from concurrent.futures import ThreadPoolExecutor
 from threading import Barrier
 from unittest.mock import AsyncMock
@@ -10,7 +11,7 @@ from pydantic import ValidationError
 from app import auth, session
 from app.config import Settings, build_settings, settings
 from app.routers import auth as auth_router
-from test_auth_request_limits import client_at, credentials
+from test_auth_request_limits import PASSWORD, client_at, credentials
 
 
 @pytest.fixture(autouse=True)
@@ -21,7 +22,7 @@ def limited_stores(monkeypatch):
     monkeypatch.setattr(settings._inner, "auth_enabled", False)
     monkeypatch.setattr(settings._inner, "oauth2_enabled", False)
     monkeypatch.setattr(settings._inner, "auth_username", "admin")
-    monkeypatch.setattr(settings._inner, "auth_password", "correct-test-password")
+    monkeypatch.setattr(settings._inner, "auth_password", PASSWORD)
     monkeypatch.setattr(session, "_next_capacity_cleanup", 0.0, raising=False)
     monkeypatch.setattr(auth, "_next_capacity_cleanup", 0.0, raising=False)
     session._session_store.clear()
@@ -188,14 +189,14 @@ def test_db_reload_rejects_invalid_capacity(monkeypatch, key):
 
 def test_oauth_capacity_consumes_state_and_returns_specific_error(monkeypatch):
     monkeypatch.setattr(settings._inner, "oauth2_enabled", True)
-    monkeypatch.setattr(auth_router.oauth2_client, "exchange_code_for_token", AsyncMock(return_value={"access_token": "test-token"}))
+    monkeypatch.setattr(auth_router.oauth2_client, "exchange_code_for_token", AsyncMock(return_value={"access_token": secrets.token_hex(16)}))
     monkeypatch.setattr(auth_router.oauth2_client, "get_user_info", AsyncMock(return_value={"email": "user@example.com"}))
     for _ in range(2):
         session.create_session({"username": "admin"}, generation=session.auth_generation())
     state, browser_value = auth_router._new_oauth_flow("/")
     client = client_at()
     client.cookies.set(auth_router.OAUTH_COOKIE_PREFIX + state, browser_value, domain="testserver.local", path="/")
-    response = client.get("/api/auth/callback", params={"state": state, "code": "test-code"}, follow_redirects=False)
+    response = client.get("/api/auth/callback", params={"state": state, "code": secrets.token_hex(16)}, follow_redirects=False)
     assert response.headers["location"] == "/login?error=session_capacity"
     assert state in auth_router._consumed_states
     assert session.SESSION_COOKIE_NAME not in client.cookies

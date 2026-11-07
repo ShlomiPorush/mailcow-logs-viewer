@@ -9,6 +9,7 @@ a server a stored secret is sent to must therefore come with the secret.
 The Settings page posts every editable key on each save, with '' for unset
 text fields, so an unchanged save must keep working.
 """
+import secrets
 import types
 
 import pytest
@@ -23,11 +24,11 @@ MASK = rs.MASK_PLACEHOLDER
 
 SEED = {
     "smtp_enabled": True, "smtp_host": "smtp.example.com", "smtp_port": 587, "smtp_use_tls": True,
-    "smtp_use_ssl": False, "smtp_user": "notify@example.com", "smtp_password": "Dummy-Smtp-Secret-1",
-    "rspamd_url": "http://rspamd.example.com:11334", "rspamd_password": "Dummy-Rspamd-Secret-2",
+    "smtp_use_ssl": False, "smtp_user": "notify@example.com", "smtp_password": secrets.token_hex(16),
+    "rspamd_url": "http://rspamd.example.com:11334", "rspamd_password": secrets.token_hex(16),
     "dmarc_imap_enabled": True, "dmarc_imap_host": "imap.example.com", "dmarc_imap_port": 993,
-    "dmarc_imap_use_ssl": True, "dmarc_imap_user": "dmarc@example.com", "dmarc_imap_password": "Dummy-Imap-Secret-3",
-    "oauth2_client_id": "dash", "oauth2_client_secret": "Dummy-OAuth-Secret-4",
+    "dmarc_imap_use_ssl": True, "dmarc_imap_user": "dmarc@example.com", "dmarc_imap_password": secrets.token_hex(16),
+    "oauth2_client_id": "dash", "oauth2_client_secret": secrets.token_hex(16),
     "oauth2_issuer_url": "https://idp.example.com", "oauth2_use_oidc_discovery": True,
 }
 
@@ -119,8 +120,9 @@ def test_moving_a_stored_secret_to_another_server_needs_the_secret(store, secret
 
 @pytest.mark.parametrize("secret,change", MOVES)
 def test_a_new_secret_may_come_with_a_new_server(store, secret, change):
-    _put({**change, secret: "Dummy-New-Secret"})
-    assert store[secret] == "Dummy-New-Secret"
+    new = secrets.token_hex(16)
+    _put({**change, secret: new})
+    assert store[secret] == new
     for key, value in change.items():
         assert store[key] == value
 
@@ -198,7 +200,7 @@ def test_env_locked_server_is_ignored(store, monkeypatch):
 
 def test_secret_from_env_cannot_follow_a_server_change(store, monkeypatch):
     # The page cannot re-enter a secret that ENV sets, so the server must be changed there too
-    monkeypatch.setenv("SMTP_PASSWORD", "Dummy-Env-Secret")
+    monkeypatch.setenv("SMTP_PASSWORD", secrets.token_hex(16))
     cfg.reload_settings(object())
     with pytest.raises(HTTPException) as exc:
         _put({"smtp_host": "collector.example.net"})

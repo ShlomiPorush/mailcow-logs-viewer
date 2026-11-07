@@ -3,6 +3,7 @@
 turned off and removed, their history, a dry run, the Read-Write key missing (403),
 a database that fails (500), mailcow not answering (502) and the requests the calls
 refuse (400, 404, 422). mailcow is faked; nothing leaves the test."""
+import secrets
 import uuid
 from contextlib import contextmanager
 from datetime import datetime
@@ -49,7 +50,7 @@ def _postgres_available() -> bool:
 def client(monkeypatch):
     for key in ('auth_enabled', 'basic_auth_enabled', 'oauth2_enabled'):
         monkeypatch.setattr(settings._inner, key, False)
-    monkeypatch.setattr(mailcow_api, 'headers_rw', {'X-API-Key': 'test-key'})
+    monkeypatch.setattr(mailcow_api, 'headers_rw', {'X-API-Key': secrets.token_hex(16)})
     state = {'quarantine': [{'id': 7, 'sender': SENDER, 'rcpt': 'user@example.com', 'subject': 'You won'},
                             {'id': 8, 'sender': 'friend@example.org', 'rcpt': 'user@example.com', 'subject': None}]}
 

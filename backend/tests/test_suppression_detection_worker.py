@@ -1,5 +1,6 @@
 """Suppression detection owns its database work outside the event loop."""
 import asyncio
+import secrets
 import threading
 from contextlib import contextmanager
 from types import SimpleNamespace
@@ -17,10 +18,10 @@ def state(monkeypatch):
     for key,value in {
         "suppression_enabled":True,"suppression_auto_detect":True,
         "suppression_rspamd_sync":True,"suppression_hard_bounce_action":"suppress",
-        "suppression_whitelist_domains":"","mailcow_api_key_rw":"test-key"
+        "suppression_whitelist_domains":"","mailcow_api_key_rw":secrets.token_hex(16)
     }.items():
         monkeypatch.setattr(settings._inner,key,value)
-    monkeypatch.setattr(scheduler.mailcow_api, "headers_rw", {"X-API-Key":"test-key"})
+    monkeypatch.setattr(scheduler.mailcow_api, "headers_rw", {"X-API-Key":secrets.token_hex(16)})
     monkeypatch.setattr(scheduler, "update_job_status", Mock())
     # Spam Filter's earlier Rspamd blocks are loaded (tested in test_feature_off_data.py)
     monkeypatch.setattr(scheduler, "_spam_blocks_loaded", AsyncMock(return_value=True))

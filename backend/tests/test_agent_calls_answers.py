@@ -2,6 +2,7 @@
 gives them (agent_access/rest.py), so the contract check (conftest.py) holds each
 one to /openapi.json: the answers, an unknown area (400), no valid token (401)
 and too many bad tokens (429). The token check is faked; no database is needed."""
+import secrets
 from datetime import datetime, timedelta
 from types import SimpleNamespace
 
@@ -16,7 +17,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 from app.agent_access import live, rest, scopes  # noqa: E402
 from app.main import app  # noqa: E402
 
-BEARER = {'Authorization': 'Bearer a-token'}
+BEARER = {'Authorization': 'Bearer ' + secrets.token_hex(16)}
 
 
 @pytest.fixture
