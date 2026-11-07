@@ -4,10 +4,15 @@ Provides detailed logging for debugging
 """
 import imaplib
 import smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
+import ssl
 from typing import Dict, List
 from ..config import settings
+from .mail_tls import mail_tls_context, certificate_error_hint, verify_mode
+
+
+def _verify_label(verify) -> str:
+    """How a *_VERIFY_SSL setting reads in the test log."""
+    return {"false": "Off", "auto": "Automatic", "true": "On"}.get(verify_mode(verify), str(verify))
 
 
 def test_smtp_connection() -> Dict:
@@ -20,6 +25,8 @@ def test_smtp_connection() -> Dict:
         logs.append(f"Host: {settings.smtp_host}")
         logs.append(f"Port: {settings.smtp_port}")
         logs.append(f"Use TLS: {settings.smtp_use_tls}")
+        logs.append(f"Use SSL: {settings.smtp_use_ssl}")
+        logs.append(f"Verify SSL: {_verify_label(settings.smtp_verify_ssl)}")
         logs.append(f"Relay Mode: {settings.smtp_relay_mode}")
         logs.append(f"User: {settings.smtp_user}")
         
@@ -35,8 +42,10 @@ def test_smtp_connection() -> Dict:
         
         logs.append("Connecting to SMTP server...")
         
-        if settings.smtp_port == 465:
-            server = smtplib.SMTP_SSL(settings.smtp_host, settings.smtp_port, timeout=10)
+        # Same connection mode as SmtpService.send_email
+        if settings.smtp_use_ssl or settings.smtp_port == 465:
+            context = mail_tls_context(settings.smtp_host, settings.smtp_verify_ssl, "SMTP_VERIFY_SSL")
+            server = smtplib.SMTP_SSL(settings.smtp_host, settings.smtp_port, timeout=10, context=context)
             logs.append("Connected using SSL")
         else:
             server = smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=10)
@@ -44,7 +53,8 @@ def test_smtp_connection() -> Dict:
             
             if settings.smtp_use_tls:
                 logs.append("Starting TLS...")
-                server.starttls()
+                context = mail_tls_context(settings.smtp_host, settings.smtp_verify_ssl, "SMTP_VERIFY_SSL")
+                server.starttls(context=context)
                 logs.append("TLS established")
         
         # Skip login in relay mode
@@ -55,14 +65,30 @@ def test_smtp_connection() -> Dict:
         else:
             logs.append("Relay mode - skipping authentication")
         
-        logs.append("Sending test email...")
-        msg = MIMEMultipart()
-        msg['From'] = settings.smtp_from or settings.smtp_user
-        msg['To'] = settings.admin_email or settings.smtp_user
-        msg['Subject'] = 'SMTP Test - mailcow Logs Viewer'
-        
+        from . import email_layout as e
+        from .smtp_service import build_message, invalid_addresses, parse_recipients
+        sender = settings.smtp_from or settings.smtp_user
+        address_setting = settings.admin_email or settings.smtp_user
+        skipped = invalid_addresses(address_setting)
+        if skipped:
+            logs.append(f"Skipping invalid address(es): {', '.join(skipped)}")
+        recipients = parse_recipients(address_setting)
+        if not recipients:
+            logs.append("ERROR: No valid recipient address. Set the Admin Email in Settings, Notifications.")
+            server.quit()
+            return {"success": False, "logs": logs}
+        recipient = ", ".join(recipients)
+        logs.append(f"Sending test email to {recipient}...")
         body = "This is a test email from mailcow Logs Viewer.\n\nIf you received this, SMTP is working correctly."
-        msg.attach(MIMEText(body, 'plain'))
+        msg = build_message(sender, recipient, 'SMTP Test - mailcow Logs Viewer', body, e.render(
+            title='SMTP works', topic='Test', tone='ok',
+            intro='This is a test email. Alerts and the weekly summary can reach you.',
+            blocks=[e.panel('Sent through', e.kv([
+                ('Server', f"{settings.smtp_host}:{settings.smtp_port}"),
+                ('From', sender),
+                ('To', recipient),
+            ]))],
+            footer='The Test SMTP button sent this email.'))
         
         server.send_message(msg)
         logs.append("Test email sent successfully")
@@ -73,6 +99,8 @@ def test_smtp_connection() -> Dict:
         success = True
         logs.append("✓ SMTP test completed successfully")
         
+    except ssl.SSLCertVerificationError as e:
+        logs.append(f"✗ {certificate_error_hint(e, 'SMTP_VERIFY_SSL')}")
     except smtplib.SMTPAuthenticationError as e:
         logs.append(f"✗ Authentication failed: {e}")
     except smtplib.SMTPException as e:
@@ -96,6 +124,7 @@ def test_imap_connection() -> Dict:
         logs.append(f"Host: {settings.dmarc_imap_host}")
         logs.append(f"Port: {settings.dmarc_imap_port}")
         logs.append(f"Use SSL: {settings.dmarc_imap_use_ssl}")
+        logs.append(f"Verify SSL: {_verify_label(settings.dmarc_imap_verify_ssl)}")
         logs.append(f"User: {settings.dmarc_imap_user}")
         logs.append(f"Folder: {settings.dmarc_imap_folder}")
         
@@ -106,7 +135,9 @@ def test_imap_connection() -> Dict:
         logs.append("Connecting to IMAP server...")
         
         if settings.dmarc_imap_use_ssl:
-            connection = imaplib.IMAP4_SSL(settings.dmarc_imap_host, settings.dmarc_imap_port, timeout=30)
+            context = mail_tls_context(settings.dmarc_imap_host, settings.dmarc_imap_verify_ssl, "DMARC_IMAP_VERIFY_SSL")
+            connection = imaplib.IMAP4_SSL(settings.dmarc_imap_host, settings.dmarc_imap_port,
+                                           ssl_context=context, timeout=30)
             logs.append("Connected using SSL")
         else:
             connection = imaplib.IMAP4(settings.dmarc_imap_host, settings.dmarc_imap_port, timeout=30)
@@ -145,6 +176,8 @@ def test_imap_connection() -> Dict:
         success = True
         logs.append("✓ IMAP test completed successfully")
         
+    except ssl.SSLCertVerificationError as e:
+        logs.append(f"✗ {certificate_error_hint(e, 'DMARC_IMAP_VERIFY_SSL')}")
     except imaplib.IMAP4.error as e:
         logs.append(f"✗ IMAP error: {e}")
     except Exception as e:

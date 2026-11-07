@@ -5,25 +5,37 @@ Automatically fetches and processes DMARC and TLS-RPT reports from email inbox
 import logging
 import imaplib
 import email
-import gzip
-import zipfile
-import io
-import json
+import re
+import threading
 from datetime import datetime, timezone
 from typing import List, Dict, Optional, Tuple
 from email.message import EmailMessage
 from email.header import decode_header as decode_rfc2047
 
 from ..config import settings
+from .mail_tls import mail_tls_context, certificate_error_hint
 from ..database import SessionLocal
-from ..models import DMARCSync, DMARCReport, DMARCRecord, TLSReport, TLSReportPolicy
-from ..services.dmarc_parser import parse_dmarc_file
-from ..services.tls_rpt_parser import parse_tls_rpt_file, is_tls_rpt_json
-from ..services.geoip_service import enrich_dmarc_record
+from ..models import DMARCSync
+from ..services.report_identity import (
+    MAX_REPORT_ATTACHMENTS_PER_EMAIL,
+    ReportBudget,
+    ReportLimitError,
+    ReportRejectedError,
+    report_kind,
+)
+from ..services.report_store import ReportNotStored, prepare_report_file, store_report
 from ..services.dmarc_notifications import send_dmarc_error_notification
 from ..services.dmarc_cache import clear_dmarc_cache
+from ..services.db_values import is_row_error, strip_nul
 
 logger = logging.getLogger(__name__)
+
+# Anyone can mail the report address, and a message is read whole into memory,
+# with each attachment decoded, before any report limit applies. Larger
+# messages are not downloaded. Real report emails are far below 1 MB; this
+# still fits a report at the 10 MB compressed limit after base64 encoding.
+MAX_REPORT_EMAIL_BYTES = 20 * 1024 * 1024
+_MB = 1024 * 1024
 
 
 def _decode_subject(raw_subject: str) -> str:
@@ -49,6 +61,46 @@ def _decode_subject(raw_subject: str) -> str:
         return raw_subject
 
 
+# What one failure entry keeps of a header or an error text
+_FAILURE_TEXT_CHARS = 1000
+_DETAILS_NOT_STORED = "The details of this email could not be stored"
+
+
+def _plain_text(value, limit: int = _FAILURE_TEXT_CHARS) -> Optional[str]:
+    """A header or error text as plain text a JSON column can store.
+
+    The sender chooses the headers and file names of a report email. A header
+    with raw 8-bit bytes comes back as a Header object, a file name can
+    decode to NUL, and either one used to fail the commit that stores the
+    import's failure entries. None stays None."""
+    if value is None:
+        return None
+    # str() of a Header shows bytes it cannot decode as U+FFFD; encoding with
+    # 'replace' drops lone surrogates, which JSONB refuses like NUL
+    text = str(value).encode('utf-8', 'replace').decode('utf-8')
+    return strip_nul(text)[:limit]
+
+
+def _is_value_error(error: Exception) -> bool:
+    """Whether a commit failed for the values it held: the database refused
+    one, or one could not be written as JSON."""
+    return is_row_error(error) or isinstance(getattr(error, 'orig', None), (TypeError, ValueError))
+
+
+def _record_counts(sync_record: DMARCSync, counts: Dict):
+    for name, value in counts.items():
+        setattr(sync_record, name, value)
+
+
+def _header_text(msg, name: str) -> str:
+    """A header of the email as bounded plain text, the subject decoded."""
+    value = msg.get(name)
+    if value is None:
+        return 'unknown'
+    text = _plain_text(value)
+    return _plain_text(_decode_subject(text)) if name == 'subject' else text
+
+
 class DMARCImapService:
     """Service to fetch DMARC reports from IMAP inbox"""
     
@@ -70,7 +122,8 @@ class DMARCImapService:
                 raise ValueError(f"IMAP server configuration incomplete: host={self.host}, port={self.port}")
             
             if self.use_ssl:
-                self.connection = imaplib.IMAP4_SSL(self.host, self.port, timeout=30)
+                context = mail_tls_context(self.host, settings.dmarc_imap_verify_ssl, "DMARC_IMAP_VERIFY_SSL")
+                self.connection = imaplib.IMAP4_SSL(self.host, self.port, ssl_context=context, timeout=30)
             else:
                 self.connection = imaplib.IMAP4(self.host, self.port, timeout=30)
             
@@ -83,8 +136,12 @@ class DMARCImapService:
             logger.error(error_msg)
             raise ConnectionError(error_msg) from e
         except Exception as e:
-            error_msg = f"Failed to connect to IMAP server {self.host}:{self.port}: {e}"
+            hint = certificate_error_hint(e, "DMARC_IMAP_VERIFY_SSL")
+            error_msg = f"Failed to connect to IMAP server {self.host}:{self.port}: {hint or e}"
             logger.error(error_msg)
+            if hint:
+                # The sync stores this message, so it has to name the setting to change
+                raise ConnectionError(error_msg) from e
             raise
     
     def disconnect(self):
@@ -159,160 +216,23 @@ class DMARCImapService:
         """Alias for backward compatibility"""
         return self.search_report_emails()
     
-    def is_valid_dmarc_email(self, msg: EmailMessage) -> bool:
+    def is_bounce(self, msg: EmailMessage) -> bool:
         """
-        Validate that this is a genuine DMARC report email
-        
-        Accepts multiple DMARC email formats:
-        - Standard: "Report Domain: X Submitter: Y Report-ID: Z"
-        - Yahoo format: "Report Domain: X Submitter: Y" (no Report-ID)
-        - Alternative: Contains "DMARC" in subject
-        - Microsoft Outlook: DMARC-like attachment filename pattern
-        
-        Primary validation is the attachment (.xml.gz or .zip with DMARC content)
+        Detect a delivery status notification (RFC 3464).
+
+        The report mailbox is often also the address that mailcow sends its
+        own DMARC reports from, so bounces of those reports land here. A bounce
+        may carry the original outgoing report, which must not be imported.
+        TLS-RPT mail is also multipart/report, but with report-type=tlsrpt.
         """
-        try:
-            subject = _decode_subject(msg.get('subject', '')).lower()
-            
-            # Check for compressed DMARC attachments FIRST (most reliable indicator)
-            has_dmarc_attachment = False
-            has_dmarc_filename = False
-            
-            for part in msg.walk():
-                filename = part.get_filename()
-                if filename:
-                    filename_lower = filename.lower()
-                    # DMARC reports come as .xml.gz, .xml, or .zip files
-                    if filename_lower.endswith('.xml.gz') or filename_lower.endswith('.zip') or filename_lower.endswith('.xml'):
-                        has_dmarc_attachment = True
-                        # Check if filename looks like a DMARC report
-                        # Microsoft format: enterprise.protection.outlook.com!domain!timestamp!timestamp.xml.gz
-                        # Standard format: domain!report-domain!timestamp!timestamp.xml.gz
-                        if '!' in filename and (filename_lower.endswith('.xml.gz') or filename_lower.endswith('.xml') or filename_lower.endswith('.zip')):
-                            has_dmarc_filename = True
-                        break
-            
-            if not has_dmarc_attachment:
-                logger.debug(f"Email has no compressed DMARC attachment: {subject}")
-                return False
-            
-            # Check subject format - be flexible to support different providers
-            has_report_domain = 'report domain:' in subject
-            has_submitter = 'submitter:' in subject
-            has_report_id = 'report-id:' in subject
-            has_dmarc_keyword = 'dmarc' in subject
-            
-            # Accept if:
-            # 1. Has "Report Domain:" and ("Submitter:" or "Report-ID:") - standard format
-            # 2. Has "Report Domain:" only (Yahoo and others) - we have verified attachment
-            # 3. Has "DMARC" keyword in subject with valid attachment
-            # 4. Has DMARC-like filename pattern (Microsoft Outlook and others) - attachment name contains '!'
-            is_valid_subject = (
-                (has_report_domain and (has_submitter or has_report_id)) or  # Standard format
-                (has_report_domain) or  # Yahoo/minimal format (attachment already verified)
-                (has_dmarc_keyword) or  # DMARC keyword with attachment
-                (has_dmarc_filename)  # Microsoft Outlook format - DMARC filename pattern
-            )
-            
-            if not is_valid_subject:
-                logger.debug(f"Email does not match DMARC subject/filename pattern: {subject}")
-                return False
-            
-            return True
-            
-        except Exception as e:
-            logger.error(f"Error validating DMARC email: {e}")
-            return False
-    
-    def is_valid_tls_rpt_email(self, msg: EmailMessage) -> bool:
-        """
-        Validate that this is a TLS-RPT report email
-        
-        TLS-RPT emails typically have:
-        - Subject containing "TLS-RPT" or "TLS Report"
-        - JSON or JSON.GZ attachment
-        - Some providers send with generic subjects like "Report Domain: ..."
-        """
-        try:
-            subject = _decode_subject(msg.get('subject', '')).lower()
-            
-            # Check for JSON/ZIP attachments
-            has_json_attachment = False
-            
-            for part in msg.walk():
-                filename = part.get_filename()
-                if filename:
-                    filename_lower = filename.lower()
-                    if filename_lower.endswith('.json') or filename_lower.endswith('.json.gz') or filename_lower.endswith('.zip'):
-                        has_json_attachment = True
-                        break
-            
-            if not has_json_attachment:
-                return False
-            
-            # Trust the attachment if it looks like a TLS report
-            # If it has a json/gz/zip attachment, we should try to process it as potential TLS-RPT
-            # The parser will validate the content anyway
-            return True
-            
-        except Exception as e:
-            logger.error(f"Error validating TLS-RPT email: {e}")
-            return False
-    
-    def detect_email_type(self, msg: EmailMessage) -> str:
-        """
-        Detect if email is DMARC or TLS-RPT by inspecting attachments
-        
-        Returns: 'dmarc', 'tls-rpt', or 'unknown'
-        """
-        try:
-            # Check attachments FIRST - content is king
-            for part in msg.walk():
-                filename = part.get_filename()
-                if not filename:
-                    continue
-                    
-                filename_lower = filename.lower()
-                content = None
-                
-                # Check explicit extensions
-                if filename_lower.endswith('.xml.gz') or filename_lower.endswith('.xml'):
-                    return 'dmarc'
-                
-                if filename_lower.endswith('.json.gz') or filename_lower.endswith('.json'):
-                    return 'tls-rpt'
-                
-                # Check ZIP content
-                if filename_lower.endswith('.zip'):
-                    try:
-                        content = part.get_payload(decode=True)
-                        if content:
-                            with zipfile.ZipFile(io.BytesIO(content)) as zf:
-                                for name in zf.namelist():
-                                    name_lower = name.lower()
-                                    if name_lower.endswith('.xml'):
-                                        logger.info(f"Found XML in ZIP {filename}, identifying as DMARC")
-                                        return 'dmarc'
-                                    if name_lower.endswith('.json'):
-                                        logger.info(f"Found JSON in ZIP {filename}, identifying as TLS-RPT")
-                                        return 'tls-rpt'
-                    except Exception as e:
-                        logger.warning(f"Failed to inspect ZIP {filename}: {e}")
-                        
-            # Fallback to subject/header heuristics if no clear attachment type found
-            # but reject ambiguous ZIPs that we couldn't inspect or were empty of relevant files
-            
-            if self.is_valid_tls_rpt_email(msg):
-                return 'tls-rpt'
-            elif self.is_valid_dmarc_email(msg):
-                return 'dmarc'
-                
-            return 'unknown'
-            
-        except Exception as e:
-            logger.error(f"Error detecting email type: {e}")
-            return 'unknown'
-    
+        if msg.get_content_type() == 'multipart/report':
+            if str(msg.get_param('report-type', '')).lower() == 'delivery-status':
+                return True
+        return any(
+            part.get_content_type() in ('message/delivery-status', 'message/global-delivery-status')
+            for part in msg.walk()
+        )
+
     def extract_attachments(self, msg: EmailMessage, include_json: bool = False) -> List[Tuple[str, bytes]]:
         """
         Extract compressed attachments from email
@@ -377,6 +297,26 @@ class DMARCImapService:
         
         return attachments
     
+    def _fetch_size(self, email_id: str) -> Optional[int]:
+        """The message size the server reports (RFC822.SIZE), or None if it gives none."""
+        status, data = self.connection.uid('FETCH', email_id, '(RFC822.SIZE)')
+        if status != 'OK':
+            return None
+        for item in data or []:
+            line = item[0] if isinstance(item, tuple) else item
+            match = re.search(rb'RFC822\.SIZE (\d+)', line) if isinstance(line, bytes) else None
+            if match:
+                return int(match.group(1))
+        return None
+
+    def _fetch_headers(self, email_id: str) -> EmailMessage:
+        """Message-ID and Subject only, without downloading the message or marking it read."""
+        status, data = self.connection.uid('FETCH', email_id, '(BODY.PEEK[HEADER.FIELDS (MESSAGE-ID SUBJECT)])')
+        for item in (data if status == 'OK' else None) or []:
+            if isinstance(item, tuple) and isinstance(item[1], bytes):
+                return email.message_from_bytes(item[1])
+        return email.message_from_bytes(b'')
+
     def process_email(self, email_id: str, db: SessionLocal) -> Dict:
         """
         Process a single DMARC or TLS-RPT email
@@ -386,7 +326,10 @@ class DMARCImapService:
         - reports_created: int
         - reports_duplicate: int
         - error: str or None
-        - report_type: 'dmarc' or 'tls-rpt'
+        - report_type: 'dmarc', 'tls-rpt' or 'mixed'
+        - skipped: why the email is not a report (bounce or no report attached), or None
+        - keep: True when a report in it shares its report ID with another stored
+          report: the email stays in the mailbox even when it was imported
         """
         result = {
             'success': False,
@@ -395,12 +338,24 @@ class DMARCImapService:
             'error': None,
             'message_id': None,
             'subject': None,
-            'report_type': None
+            'report_type': None,
+            'skipped': None,
+            'keep': False
         }
         
         try:
+            size = self._fetch_size(email_id)
+            if size is not None and size > MAX_REPORT_EMAIL_BYTES:
+                headers = self._fetch_headers(email_id)
+                result['message_id'] = _header_text(headers, 'message-id')
+                result['subject'] = _header_text(headers, 'subject')
+                result['error'] = (f"The email is {size / _MB:.0f} MB, larger than the "
+                                   f"{MAX_REPORT_EMAIL_BYTES // _MB} MB a report email may have, "
+                                   f"so it was not downloaded")
+                return result
+
             # Fetch email (email_id is already a string)
-            status, msg_data = self.connection.uid('FETCH', email_id, '(RFC822)')
+            status, msg_data = self.connection.uid('FETCH', email_id, '(BODY.PEEK[])')
             
             if status != 'OK':
                 result['error'] = f"Failed to fetch email {email_id}"
@@ -408,179 +363,102 @@ class DMARCImapService:
             
             # Parse email
             msg = email.message_from_bytes(msg_data[0][1])
-            result['message_id'] = msg.get('message-id', 'unknown')
-            result['subject'] = msg.get('subject', 'unknown')
-            
-            # Detect email type
-            email_type = self.detect_email_type(msg)
-            result['report_type'] = email_type
-            
-            if email_type == 'tls-rpt':
-                return self._process_tls_rpt_email(msg, db, result)
-            elif email_type == 'dmarc':
-                return self._process_dmarc_email(msg, db, result)
-            else:
-                result['error'] = "Not a valid DMARC or TLS-RPT report email"
+            result['message_id'] = _header_text(msg, 'message-id')
+            result['subject'] = _header_text(msg, 'subject')
+
+            if self.is_bounce(msg):
+                result['skipped'] = 'bounce'
                 return result
-            
+
+            return self._process_reports(msg, db, result)
+
         except Exception as e:
             logger.error(f"Error processing email {email_id}: {e}")
+            db.rollback()
             result['error'] = str(e)
             return result
-    
-    def _process_dmarc_email(self, msg: EmailMessage, db: SessionLocal, result: Dict) -> Dict:
-        """Process a DMARC email"""
-        # Extract attachments (DMARC: XML files)
-        attachments = self.extract_attachments(msg, include_json=False)
-        
+
+    def report_attachments(self, msg: EmailMessage) -> List[Tuple[str, bytes, str]]:
+        """Every report file of the email as (filename, content, 'dmarc' or 'tls-rpt').
+
+        Each file is classified on its own, so an email that carries a DMARC and
+        a TLS-RPT report has both read before it can count as imported.
+        """
+        return [(filename, content, report_kind(filename, content))
+                for filename, content in self.extract_attachments(msg, include_json=True)]
+
+    def _process_reports(self, msg: EmailMessage, db: SessionLocal, result: Dict) -> Dict:
+        """Import the reports of one email, all or nothing for the limits.
+
+        The email counts as imported (and may be deleted) only when every report
+        in it was stored or was already stored with the same content. Reports
+        are committed here, before the caller marks or deletes the email.
+        """
+        attachments = self.report_attachments(msg)
         if not attachments:
-            result['error'] = "No DMARC attachments found"
+            result['skipped'] = 'no report attached'
             return result
-        
-        # Process each attachment
-        attachment_errors = []
-        for filename, content in attachments:
-            try:
-                # Parse DMARC report
-                parsed_data = parse_dmarc_file(content, filename)
-                
-                if not parsed_data:
-                    attachment_errors.append(f"Failed to parse: {filename}")
-                    logger.warning(f"Failed to parse attachment: {filename}")
-                    continue
-                
-                # Extract records
-                records_data = parsed_data.pop('records', [])
-                report_data = parsed_data
-                
-                # Check for duplicate
-                existing = db.query(DMARCReport).filter(
-                    DMARCReport.report_id == report_data['report_id']
-                ).first()
-                
-                if existing:
-                    result['reports_duplicate'] += 1
-                    logger.info(f"Duplicate report: {report_data['report_id']}")
-                    continue
-                
-                # Create report
-                report = DMARCReport(**report_data)
-                db.add(report)
-                db.flush()
-                
-                # Create records with GeoIP enrichment
-                for record_data in records_data:
-                    record_data['dmarc_report_id'] = report.id
-                    enriched = enrich_dmarc_record(record_data)
-                    record = DMARCRecord(**enriched)
-                    db.add(record)
-                
-                db.commit()
-                result['reports_created'] += 1
-                logger.info(f"Created DMARC report: {report_data['report_id']}")
-                
-            except Exception as e:
-                db.rollback()
-                error_msg = f"Error processing {filename}: {str(e)}"
-                attachment_errors.append(error_msg)
-                logger.error(error_msg)
-        
-        # Determine success
-        return self._finalize_result(result, attachment_errors, "DMARC")
-    
-    def _process_tls_rpt_email(self, msg: EmailMessage, db: SessionLocal, result: Dict) -> Dict:
-        """Process a TLS-RPT email"""
-        # Extract attachments (TLS-RPT: JSON files)
-        attachments = self.extract_attachments(msg, include_json=True)
-        
-        # Filter to only JSON files (and ZIPs containing JSON)
-        json_attachments = [(f, c) for f, c in attachments if f.lower().endswith('.json') or f.lower().endswith('.json.gz') or f.lower().endswith('.zip')]
-        
-        if not json_attachments:
-            result['error'] = "No TLS-RPT JSON attachments found"
+        kinds = {kind for _, _, kind in attachments}
+        result['report_type'] = kinds.pop() if len(kinds) == 1 else 'mixed'
+
+        if len(attachments) > MAX_REPORT_ATTACHMENTS_PER_EMAIL:
+            result['error'] = (f"The email has {len(attachments)} report files, more than the "
+                               f"{MAX_REPORT_ATTACHMENTS_PER_EMAIL} allowed, so nothing from it was imported.")
             return result
-        
-        # Process each attachment
+
+        # Read every report before storing any, so an email over a limit stores nothing
+        budget = ReportBudget()
+        prepared = []
         attachment_errors = []
-        for filename, content in json_attachments:
+        for filename, content, kind in attachments:
             try:
-                # Parse TLS-RPT report
-                parsed_data = parse_tls_rpt_file(content, filename)
-                
-                if not parsed_data:
-                    attachment_errors.append(f"Failed to parse: {filename}")
-                    logger.warning(f"Failed to parse TLS-RPT attachment: {filename}")
+                report = prepare_report_file(kind, content, filename)
+                if report is not None:
+                    budget.add(report.items, report.size)
+            except ReportLimitError as e:
+                result['error'] = f"{filename}: {e} Nothing from this email was imported."
+                return result
+            except ReportRejectedError as e:
+                attachment_errors.append(f"{filename}: {e}")
+                continue
+            if report is None:
+                attachment_errors.append(f"Failed to parse: {filename}")
+                logger.warning(f"Failed to parse attachment: {filename}")
+                continue
+            prepared.append((filename, report))
+
+        created = duplicate = 0
+        keep = False
+        try:
+            # One order for the report ID locks, whatever the order of the files
+            for filename, report in sorted(prepared, key=lambda item: (item[1].kind, item[1].report_id)):
+                try:
+                    status, _ = store_report(db, report)
+                except ReportNotStored as e:
+                    # The report's own savepoint is rolled back; the others stay
+                    attachment_errors.append(f"Error processing {filename}: {e}")
+                    logger.error(f"Error processing {filename}: {e}")
                     continue
-                
-                # Extract policies
-                policies_data = parsed_data.pop('policies', [])
-                
-                # Check for duplicate
-                existing = db.query(TLSReport).filter(
-                    TLSReport.report_id == parsed_data['report_id']
-                ).first()
-                
-                if existing:
-                    result['reports_duplicate'] += 1
-                    logger.info(f"Duplicate TLS-RPT report: {parsed_data['report_id']}")
-                    continue
-                
-                # Create TLS report
-                tls_report = TLSReport(
-                    report_id=parsed_data['report_id'],
-                    organization_name=parsed_data.get('organization_name', 'Unknown'),
-                    contact_info=parsed_data.get('contact_info', ''),
-                    policy_domain=parsed_data['policy_domain'],
-                    start_datetime=parsed_data['start_datetime'],
-                    end_datetime=parsed_data['end_datetime'],
-                    raw_json=parsed_data.get('raw_json', '')
-                )
-                db.add(tls_report)
-                db.flush()
-                
-                # Create policy records
-                for policy_data in policies_data:
-                    policy = TLSReportPolicy(
-                        tls_report_id=tls_report.id,
-                        policy_type=policy_data.get('policy_type', 'unknown'),
-                        policy_domain=policy_data.get('policy_domain', ''),
-                        policy_string=policy_data.get('policy_string', []),
-                        mx_host=policy_data.get('mx_host', []),
-                        successful_session_count=policy_data.get('successful_session_count', 0),
-                        failed_session_count=policy_data.get('failed_session_count', 0),
-                        failure_details=policy_data.get('failure_details', [])
-                    )
-                    db.add(policy)
-                
-                db.commit()
-                result['reports_created'] += 1
-                logger.info(f"Created TLS-RPT report: {parsed_data['report_id']}")
-                
-            except Exception as e:
-                db.rollback()
-                error_msg = f"Error processing TLS-RPT {filename}: {str(e)}"
-                attachment_errors.append(error_msg)
-                logger.error(error_msg)
-        
-        # Determine success
-        return self._finalize_result(result, attachment_errors, "TLS-RPT")
-    
-    def _finalize_result(self, result: Dict, attachment_errors: List[str], report_type: str) -> Dict:
-        """Finalize the result based on processing outcome"""
-        if result['reports_created'] > 0:
-            result['success'] = True
-        elif result['reports_duplicate'] > 0 and result['reports_created'] == 0:
-            # All reports were duplicates - this is actually OK, mark as success
-            result['success'] = True
-            result['error'] = None  # No error - duplicates are expected
+                if status == 'duplicate':
+                    duplicate += 1
+                else:
+                    created += 1
+                    # Another report has its report ID: keep the email for a look
+                    keep = keep or status == 'conflict'
+            db.commit()
+        except Exception as e:
+            db.rollback()
+            logger.error(f"Could not save the reports of the email: {e}")
+            result['error'] = f"The reports could not be saved: {e}"
+            return result
+
+        result['reports_created'] = created
+        result['reports_duplicate'] = duplicate
+        result['keep'] = keep
+        if attachment_errors:
+            result['error'] = "; ".join(attachment_errors)
         else:
-            # No reports created and no duplicates - something went wrong
-            result['success'] = False
-            if attachment_errors:
-                result['error'] = "; ".join(attachment_errors)
-            else:
-                result['error'] = f"No valid {report_type} reports found in attachments"
-        
+            result['success'] = True
         return result
     
     def mark_as_processed(self, email_id: str):
@@ -606,11 +484,16 @@ class DMARCImapService:
     def sync_reports(self, sync_type: str = 'auto') -> Dict:
         """
         Main sync function with batch processing
-        
+
         Processes emails in batches to prevent memory issues with large mailboxes.
         After each batch, emails are deleted/marked and the search is re-run
         to get the next batch of unprocessed emails.
-        
+
+        Each email's counts and failure entry are committed before the email
+        is marked or deleted, so a failure is stored before its email leaves
+        the import. The failures are reported once, also when the import
+        itself fails; the result then says 'notified'.
+
         Returns statistics about the sync operation
         """
         sync_record = DMARCSync(
@@ -618,136 +501,190 @@ class DMARCImapService:
             started_at=datetime.now(timezone.utc),
             status='running'
         )
-        
+
         db = SessionLocal()
         batch_size = settings.dmarc_imap_batch_size
-        
+        # Kept here, not only on the record: a rollback resets the record
+        counts = {'emails_processed': 0, 'reports_created': 0,
+                  'reports_duplicate': 0, 'reports_failed': 0}
+        failed_emails = []
+        notified = False
+
         try:
             db.add(sync_record)
             db.commit()
             db.refresh(sync_record)
-            
+
             # Connect to IMAP
             self.connect()
-            
+
             # Select folder
             if not self.select_folder():
                 raise Exception(f"Failed to select folder {self.folder}")
-            
+
             # Initial search to count total emails
             all_email_ids = self.search_dmarc_emails()
             total_emails = len(all_email_ids)
             sync_record.emails_found = total_emails
             db.commit()
-            
+
             if not all_email_ids:
                 logger.info("No DMARC emails found")
                 sync_record.status = 'success'
                 sync_record.completed_at = datetime.now(timezone.utc)
                 db.commit()
                 return self._build_result(sync_record)
-            
+
             logger.info(f"Found {total_emails} DMARC emails, processing in batches of {batch_size}")
-            
+
             # Process in batches
-            failed_emails = []
             batch_number = 0
-            
+
             while True:
                 batch_number += 1
-                
+
                 # Re-search to get current unprocessed emails (since we delete/mark after each batch)
                 email_ids = self.search_dmarc_emails()
-                
+
                 if not email_ids:
                     logger.info(f"Batch {batch_number}: No more emails to process")
                     break
-                
+
                 # Take only batch_size emails
                 batch_emails = email_ids[:batch_size]
                 logger.info(f"Batch {batch_number}: Processing {len(batch_emails)} emails (remaining: {len(email_ids)})")
-                
+
                 for email_id in batch_emails:
                     email_id = email_id.decode() if isinstance(email_id, bytes) else email_id
                     result = self.process_email(email_id, db)
-                    sync_record.emails_processed += 1
-                    
-                    if result['success']:
-                        sync_record.reports_created += result['reports_created']
-                        sync_record.reports_duplicate += result['reports_duplicate']
-                        
-                        # Delete or mark as processed
-                        if self.delete_after:
+                    counts['emails_processed'] += 1
+                    # Committed reports count even when another report of the email failed
+                    counts['reports_created'] += result['reports_created']
+                    counts['reports_duplicate'] += result['reports_duplicate']
+
+                    if result['skipped']:
+                        # Not a report (e.g. a bounce): not a failure, and never deleted
+                        logger.info(f"Skipped email {email_id} ({result['skipped']}): {result['subject']}")
+                        self._save_progress(db, sync_record, counts, failed_emails)
+                        self.mark_as_processed(email_id)
+                    elif result['success']:
+                        # Every report of the email is stored: delete or mark as processed
+                        self._save_progress(db, sync_record, counts, failed_emails)
+                        if self.delete_after and not result.get('keep'):
                             self.delete_email(email_id)
                         else:
                             self.mark_as_processed(email_id)
                     else:
-                        sync_record.reports_failed += 1
-                        error_msg = result.get('error', 'Unknown error')
+                        counts['reports_failed'] += 1
+                        error_msg = result.get('error') or 'Unknown error'
                         logger.warning(f"Failed to process email {email_id}: {error_msg}")
-                        
+
                         failed_emails.append({
-                            'email_id': email_id,
-                            'message_id': result['message_id'],
-                            'subject': result['subject'],
-                            'error': error_msg
+                            'email_id': _plain_text(email_id),
+                            'message_id': _plain_text(result['message_id']),
+                            'subject': _plain_text(result['subject']),
+                            'error': _plain_text(error_msg)
                         })
-                        # Also mark failed emails as processed to avoid re-processing
+                        self._save_progress(db, sync_record, counts, failed_emails, new_failure=True)
+                        # Kept in the mailbox, marked so it is not processed again
                         self.mark_as_processed(email_id)
-                    
-                    db.commit()
-                
+
                 # Log batch progress
                 logger.info(f"Batch {batch_number} complete: "
-                           f"{sync_record.emails_processed}/{total_emails} processed, "
-                           f"{sync_record.reports_created} created, "
-                           f"{sync_record.reports_failed} failed")
-            
+                           f"{counts['emails_processed']}/{total_emails} processed, "
+                           f"{counts['reports_created']} created, "
+                           f"{counts['reports_failed']} failed")
+
             # Update sync record
+            _record_counts(sync_record, counts)
             sync_record.status = 'success'
             sync_record.completed_at = datetime.now(timezone.utc)
-            sync_record.failed_emails = failed_emails if failed_emails else None
-            
+            sync_record.failed_emails = list(failed_emails) or None
+
             if failed_emails:
                 sync_record.error_message = f"{len(failed_emails)} emails failed to process"
-            
+
             db.commit()
-            
-            logger.info(f"DMARC sync completed: {sync_record.reports_created} created, "
-                       f"{sync_record.reports_duplicate} duplicates, "
-                       f"{sync_record.reports_failed} failed")
-            
+
+            logger.info(f"DMARC sync completed: {counts['reports_created']} created, "
+                       f"{counts['reports_duplicate']} duplicates, "
+                       f"{counts['reports_failed']} failed")
+
             # Clear cache if any reports were created
-            if sync_record.reports_created > 0:
+            if counts['reports_created'] > 0:
                 clear_dmarc_cache(db)
-            
-            # Send email notification if there were failures
-            if failed_emails and settings.notification_smtp_configured:
-                logger.info(f"Sending error notification for {len(failed_emails)} failed emails")
-                try:
-                    send_dmarc_error_notification(failed_emails, sync_record.id)
-                    logger.info("Error notification sent successfully")
-                except Exception as email_error:
-                    logger.error(f"Failed to send error notification: {email_error}")
-            
+
+            notified = self._notify_failures(failed_emails, sync_record.id)
             return self._build_result(sync_record)
-            
+
         except Exception as e:
             logger.error(f"DMARC sync failed: {e}")
-            
-            sync_record.status = 'error'
-            sync_record.completed_at = datetime.now(timezone.utc)
-            sync_record.error_message = str(e)
-            db.commit()
-            
+            # A failed statement leaves the session unusable until rolled back
+            db.rollback()
+            try:
+                _record_counts(sync_record, counts)
+                sync_record.status = 'error'
+                sync_record.completed_at = datetime.now(timezone.utc)
+                sync_record.error_message = _plain_text(e)
+                sync_record.failed_emails = list(failed_emails) or None
+                db.commit()
+                result = self._build_result(sync_record)
+            except Exception as record_error:
+                logger.error(f"Could not record the failed DMARC sync: {record_error}")
+                db.rollback()
+                result = {'sync_id': None, 'sync_type': sync_type, 'status': 'error',
+                          'error_message': _plain_text(e), 'failed_emails': list(failed_emails) or None,
+                          **counts}
+
             # Return error result instead of raising exception
             # This allows the scheduler to handle it gracefully
-            return self._build_result(sync_record)
-            
+            if not notified:
+                notified = self._notify_failures(failed_emails, result.get('sync_id'))
+            result['notified'] = notified
+            return result
+
         finally:
             self.disconnect()
             db.close()
-    
+
+    def _save_progress(self, db, sync_record: DMARCSync, counts: Dict, failed_emails: List[Dict],
+                       new_failure: bool = False):
+        """Commit the counts and failure entries so far. When the failure
+        entry just added cannot be stored for its own values, it is replaced
+        with one that keeps only the email number, so the email can be marked
+        and the import does not stop on it in every run. Any other failure,
+        such as a lost connection, is raised with the entries kept."""
+        _record_counts(sync_record, counts)
+        # A new list: the session does not see a change inside a JSON value
+        sync_record.failed_emails = list(failed_emails) or None
+        try:
+            db.commit()
+        except Exception as error:
+            if not (new_failure and _is_value_error(error)):
+                raise
+            logger.warning(f"Could not store the failure entry of email "
+                           f"{failed_emails[-1]['email_id']} ({type(error).__name__})")
+            db.rollback()
+            failed_emails[-1] = {'email_id': failed_emails[-1]['email_id'], 'message_id': None,
+                                 'subject': None, 'error': _DETAILS_NOT_STORED}
+            _record_counts(sync_record, counts)
+            sync_record.failed_emails = list(failed_emails)
+            db.commit()
+
+    def _notify_failures(self, failed_emails: List[Dict], sync_id) -> bool:
+        """Report the failures; the notification goes to the channels even
+        without SMTP. True when there were failures to report, also when a
+        destination failed: sending again would repeat what did arrive."""
+        if not failed_emails:
+            return False
+        logger.info(f"Sending error notification for {len(failed_emails)} failed emails")
+        try:
+            if send_dmarc_error_notification(failed_emails, sync_id):
+                logger.info("Error notification sent successfully")
+        except Exception as email_error:
+            logger.error(f"Failed to send error notification: {email_error}")
+        return True
+
     def _build_result(self, sync_record: DMARCSync) -> Dict:
         """Build result dictionary from sync record"""
         return {
@@ -766,6 +703,31 @@ class DMARCImapService:
         }
 
 
+# One import at a time: the scheduled run, Fetch reports and Status > Run now
+# all start it, and two at once would read the same mailbox. The app runs in
+# one process, so this lock sees every import.
+_sync_lock = threading.Lock()
+
+
+def is_sync_running() -> bool:
+    """True while an IMAP import runs."""
+    return _sync_lock.locked()
+
+
+def _fail_interrupted_syncs():
+    """Mark imports still 'running' as failed. Called under the lock, so
+    none of them runs: the app stopped during them. Best effort."""
+    try:
+        with SessionLocal() as db:
+            db.query(DMARCSync).filter(DMARCSync.status == 'running').update({
+                "status": "failed",
+                "error_message": "Interrupted: the app stopped during the import"
+            })
+            db.commit()
+    except Exception as e:
+        logger.warning(f"Could not mark interrupted DMARC imports as failed: {e}")
+
+
 def sync_dmarc_reports_from_imap(sync_type: str = 'auto') -> Dict:
     """
     Convenience function to sync DMARC reports
@@ -777,6 +739,16 @@ def sync_dmarc_reports_from_imap(sync_type: str = 'auto') -> Dict:
             'status': 'disabled',
             'message': 'DMARC IMAP sync is not enabled'
         }
-    
-    service = DMARCImapService()
-    return service.sync_reports(sync_type=sync_type)
+
+    if not _sync_lock.acquire(blocking=False):
+        logger.info("DMARC IMAP import already running, not starting another")
+        return {
+            'status': 'already_running',
+            'message': 'Reports are already being fetched'
+        }
+    try:
+        _fail_interrupted_syncs()
+        service = DMARCImapService()
+        return service.sync_reports(sync_type=sync_type)
+    finally:
+        _sync_lock.release()

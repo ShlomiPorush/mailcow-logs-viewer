@@ -88,4 +88,5 @@ def test_failed_commit_does_not_trigger_blacklist_check(monkeypatch, state):
     monkeypatch.setattr(scheduler, "get_db_context", session)
     asyncio.run(scheduler.sync_transports_job())
     state.assert_not_awaited()
-    scheduler.update_job_status.assert_called_with("sync_transports", "failed", "Database unavailable")
+    # Not a mailcow outage: not run again early
+    scheduler.update_job_status.assert_called_with("sync_transports", "failed", "Database unavailable", retryable=False)

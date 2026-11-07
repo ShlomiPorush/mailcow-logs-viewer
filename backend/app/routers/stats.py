@@ -2,7 +2,7 @@
 API endpoints for statistics and dashboard data
 """
 import logging
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.orm import Session
 from sqlalchemy import func, and_, cast, Integer
 from datetime import datetime, timedelta, timezone
@@ -10,15 +10,20 @@ from typing import Optional
 
 from ..database import get_db
 from ..models import PostfixLog, RspamdLog, NetfilterLog, MessageCorrelation
+from ..services import excluded_addresses, written_recipients
+from ..agent_access.scopes import READ
+from ..user_access import caller_may
 
 from ..utils import format_datetime_for_api as format_datetime_utc
+from ..api_models import Invalid, documented
+from ..api_models import stats as m
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
 
-@router.get("/stats/dashboard")
+@router.get("/stats/dashboard", responses=documented(m.DashboardResponse))
 def get_dashboard_stats(db: Session = Depends(get_db)):
     """
     Get main dashboard statistics
@@ -41,6 +46,12 @@ def get_dashboard_stats(db: Session = Depends(get_db)):
         messages_30d = db.query(MessageCorrelation).filter(
             MessageCorrelation.first_seen >= month_ago
         ).count()
+
+        # The same figures as the Messages page counts them: a message to three
+        # recipients is one message (and three deliveries above)
+        from .messages import _count_messages, _filtered_messages_query
+        unique_24h = _count_messages(_filtered_messages_query(db, start_date=day_ago))
+        unique_7d = _count_messages(_filtered_messages_query(db, start_date=week_ago))
         
         # Blocked messages (bounced, rejected, spam) - from MessageCorrelation
         blocked_24h = db.query(MessageCorrelation).filter(
@@ -113,7 +124,9 @@ def get_dashboard_stats(db: Session = Depends(get_db)):
             "messages": {
                 "24h": messages_24h,
                 "7d": messages_7d,
-                "30d": messages_30d
+                "30d": messages_30d,
+                "unique_24h": unique_24h,
+                "unique_7d": unique_7d
             },
             "blocked": {
                 "24h": blocked_24h,
@@ -146,21 +159,25 @@ def get_dashboard_stats(db: Session = Depends(get_db)):
         }
 
 
-@router.get("/stats/timeline")
+@router.get("/stats/timeline", responses=documented(m.TimelineResponse, errors={422: Invalid}))
 def get_timeline_stats(
     hours: int = 24,
     db: Session = Depends(get_db)
 ):
     """
     Get message timeline for charts
-    Returns hourly message counts
+    Returns hourly message counts: clean and spam (Rspamd) for the bars, and
+    the dashboard figures for each hour (messages, blocked, deferred, auth
+    failures), counted the same way as /stats/dashboard, so a picked hour
+    shows its own numbers
     """
     try:
         cutoff = datetime.utcnow() - timedelta(hours=hours)
-        
+        hour = func.date_trunc('hour', RspamdLog.time).label('hour')
+
         # Query for hourly counts
         timeline = db.query(
-            func.date_trunc('hour', RspamdLog.time).label('hour'),
+            hour,
             func.count(RspamdLog.id).label('count'),
             func.sum(cast(RspamdLog.is_spam, Integer)).label('spam_count')
         ).filter(
@@ -170,16 +187,51 @@ def get_timeline_stats(
         ).order_by(
             'hour'
         ).all()
-        
+
+        corr_hour = func.date_trunc('hour', MessageCorrelation.first_seen).label('hour')
+        # As the Messages list groups them: an empty Message-ID is none
+        message_key = func.coalesce(func.nullif(MessageCorrelation.message_id, ""), MessageCorrelation.correlation_key)
+        # Messages as the Messages page counts them in that hour (one per message), beside the deliveries
+        unique = dict(db.query(corr_hour, func.count(func.distinct(message_key))).filter(
+            MessageCorrelation.first_seen >= cutoff, excluded_addresses.correlation_visible()
+        ).group_by('hour').all())
+        messages = db.query(
+            corr_hour,
+            func.count(MessageCorrelation.id),
+            func.sum(cast(MessageCorrelation.final_status.in_(['bounced', 'rejected', 'spam']), Integer)),
+            func.sum(cast(MessageCorrelation.final_status == 'deferred', Integer)),
+        ).filter(MessageCorrelation.first_seen >= cutoff).group_by('hour').all()
+
+        nf_hour = func.date_trunc('hour', NetfilterLog.time).label('hour')
+        auth_failures = dict(db.query(nf_hour, func.count(NetfilterLog.id)).filter(
+            and_(NetfilterLog.time >= cutoff, NetfilterLog.rule_id == 3)
+        ).group_by('hour').all())
+
+        hours_seen = {}
+        for row in timeline:
+            hours_seen[row.hour] = {
+                "total": row.count,
+                "spam": row.spam_count or 0,
+                "clean": row.count - (row.spam_count or 0),
+            }
+        for at, count, blocked, deferred in messages:
+            hours_seen.setdefault(at, {"total": 0, "spam": 0, "clean": 0}).update(
+                {"messages": count, "blocked": blocked or 0, "deferred": deferred or 0})
+        for at in auth_failures:
+            hours_seen.setdefault(at, {"total": 0, "spam": 0, "clean": 0})
+
         return {
             "timeline": [
                 {
-                    "hour": format_datetime_utc(row.hour),
-                    "total": row.count,
-                    "spam": row.spam_count or 0,
-                    "clean": row.count - (row.spam_count or 0)
+                    "hour": format_datetime_utc(at),
+                    **values,
+                    "messages": values.get("messages", 0),
+                    "unique_messages": unique.get(at, 0),
+                    "blocked": values.get("blocked", 0),
+                    "deferred": values.get("deferred", 0),
+                    "auth_failures": auth_failures.get(at, 0),
                 }
-                for row in timeline
+                for at, values in sorted(hours_seen.items())
             ]
         }
     except Exception as e:
@@ -187,9 +239,9 @@ def get_timeline_stats(
         return {"timeline": [], "error": "Unable to load statistics. Check the application logs."}
 
 
-@router.get("/stats/top-spam-triggers")
+@router.get("/stats/top-spam-triggers", responses=documented(m.SpamTriggersResponse, errors={422: Invalid}))
 def get_top_spam_triggers(
-    limit: int = 10,
+    limit: int = Query(10, ge=1, le=500),
     db: Session = Depends(get_db)
 ):
     """
@@ -231,14 +283,18 @@ def get_top_spam_triggers(
         return {"triggers": [], "error": "Unable to load statistics. Check the application logs."}
 
 
-@router.get("/stats/top-blocked-ips")
+@router.get("/stats/top-blocked-ips", responses=documented(m.BlockedIpsResponse, errors={422: Invalid}))
 def get_top_blocked_ips(
-    limit: int = 10,
+    limit: int = Query(10, ge=1, le=500),
+    request: Request = None,
     db: Session = Depends(get_db)
 ):
     """
-    Get top blocked/warned IP addresses
+    Get top blocked/warned IP addresses. They come from Security's Netfilter
+    events: empty for a caller without View for Security.
     """
+    if not caller_may(request, "security", READ):
+        return {"blocked_ips": []}
     try:
         cutoff = datetime.utcnow() - timedelta(days=7)
         
@@ -269,16 +325,16 @@ def get_top_blocked_ips(
         return {"blocked_ips": [], "error": "Unable to load statistics. Check the application logs."}
 
 
-@router.get("/stats/recent-activity")
+@router.get("/stats/recent-activity", responses=documented(m.RecentActivityResponse, errors={422: Invalid}))
 def get_recent_activity(
-    limit: int = 20,
+    limit: int = Query(20, ge=1, le=500),
     db: Session = Depends(get_db)
 ):
     """
     Get recent message activity stream
     """
     try:
-        recent = db.query(MessageCorrelation).order_by(
+        recent = db.query(MessageCorrelation).filter(excluded_addresses.correlation_visible()).order_by(
             MessageCorrelation.last_seen.desc()
         ).limit(limit).all()
         
@@ -287,7 +343,7 @@ def get_recent_activity(
                 {
                     "time": format_datetime_utc(msg.last_seen),
                     "sender": msg.sender,
-                    "recipient": msg.recipient,
+                    "recipient": written_recipients.shown(msg.recipient, msg.written_recipients),
                     "subject": msg.subject,
                     "direction": msg.direction,
                     "status": msg.final_status,

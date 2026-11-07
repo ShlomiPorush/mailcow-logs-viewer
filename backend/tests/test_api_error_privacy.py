@@ -56,7 +56,7 @@ def test_settings_validation_hides_input_values(monkeypatch):
 
 
 @pytest.mark.parametrize("path,target,code", [
-    ("/status/storage", "get_status_vmail", 500),
+    ("/status/storage", "get_status_vmail", 502),
     ("/status/mailcow-connection", "test_connection", 200),
 ])
 def test_upstream_errors_are_not_returned(monkeypatch, path, target, code):

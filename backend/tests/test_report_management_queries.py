@@ -57,12 +57,14 @@ def test_report_counts_and_query_budget(size):
         dates = [row["created_at"] for row in result["reports"]]
         assert dates == sorted(dates, reverse=True)
         assert all(set(row) == {"id", "type", "domain", "org_name", "begin_date", "end_date",
-                               "record_count", "created_at", "report_id"} for row in result["reports"])
+                               "record_count", "created_at", "report_id", "shared_report_id"}
+                   for row in result["reports"])
         for statement in statements:
             assert "raw_xml" not in statement
             assert "raw_json" not in statement
             assert "policy_published" not in statement
-        assert len(statements) == 2, f"Executed {len(statements)} queries for {size * 2} reports"
+        # Two for the reports, one per report type that has reports for the shared report IDs
+        assert len(statements) == (4 if size else 2), f"Executed {len(statements)} queries for {size * 2} reports"
 
         app = FastAPI()
         app.include_router(router)
@@ -87,7 +89,7 @@ def test_report_counts_and_query_budget(size):
                 assert payload["page"] == page
                 assert payload["total_pages"] == pages
                 assert payload["limit"] == 7
-                assert len(statements) <= 4
+                assert len(statements) <= 6
                 for statement in statements:
                     assert "raw_xml" not in statement
                     assert "raw_json" not in statement

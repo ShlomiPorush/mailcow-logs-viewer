@@ -12,14 +12,18 @@ from sqlalchemy import func, case, and_, or_
 from datetime import datetime, timezone, timedelta
 from typing import Optional, List
 
+from ..app_time import app_tz, as_utc, day_bounds, local_today, to_local, utc_naive
 from ..database import get_db
 from ..models import MailboxStatistics, AliasStatistics, MessageCorrelation
 
 from ..utils import format_datetime_for_api as format_datetime_utc
+from ..api_models import Invalid, documented
+from ..api_models import mailboxes as m
 
 logger = logging.getLogger(__name__)
 
 from app.services.alias_domains import get_alias_domain_map, expand_address
+from app.services import entity_values
 
 router = APIRouter()
 
@@ -34,8 +38,9 @@ _cache_ttl_seconds = 300  # 5 minutes cache TTL
 
 
 def _get_cache_key(prefix: str, **params) -> str:
-    """Generate a cache key from parameters"""
-    param_str = json.dumps(params, sort_keys=True, default=str)
+    """Generate a cache key from parameters. The app's time zone is part of it:
+    days and ranges depend on it, so a new zone never serves the old one's."""
+    param_str = json.dumps({**params, "_tz": app_tz().key}, sort_keys=True, default=str)
     hash_val = hashlib.md5(param_str.encode()).hexdigest()[:16]
     return f"{prefix}:{hash_val}"
 
@@ -77,7 +82,8 @@ def format_bytes(bytes_value) -> str:
     
     for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
         if abs(bytes_value) < 1024.0:
-            return f"{bytes_value:.1f} {unit}"
+            # Whole bytes have no fraction ("0 B", like the Domains page)
+            return f"{bytes_value:.0f} {unit}" if unit == 'B' else f"{bytes_value:.1f} {unit}"
         bytes_value /= 1024.0
     return f"{bytes_value:.1f} PB"
 
@@ -95,23 +101,28 @@ def format_unix_timestamp(timestamp: Optional[int]) -> Optional[str]:
 
 def parse_date_range(date_range: str, start_date: Optional[str] = None, end_date: Optional[str] = None) -> tuple[datetime, datetime]:
     """Parse date range string into start and end datetimes
-    
-    For custom date ranges, start_date and end_date should be ISO format strings (YYYY-MM-DD)
+
+    For custom date ranges, start_date and end_date should be ISO format strings (YYYY-MM-DD).
+    A day is a day in the app's time zone, like the activity chart; both ends return in UTC.
     """
     now = datetime.now(timezone.utc)
-    
+
     if date_range == "custom" and start_date and end_date:
         # Parse custom date range
         try:
             start = datetime.fromisoformat(start_date.replace('Z', '+00:00'))
             if start.tzinfo is None:
-                start = start.replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=timezone.utc)
-            
+                start = as_utc(day_bounds(start.date())[0])
+            else:
+                start = as_utc(start)
+
             end = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
             if end.tzinfo is None:
-                # Set end time to end of day
-                end = end.replace(hour=23, minute=59, second=59, microsecond=999999, tzinfo=timezone.utc)
-            
+                # The last moment of the end day
+                end = as_utc(day_bounds(end.date())[1]) - timedelta(microseconds=1)
+            else:
+                end = as_utc(end)
+
             return start, end
         except ValueError:
             # If parsing fails, fall back to 30 days
@@ -119,7 +130,7 @@ def parse_date_range(date_range: str, start_date: Optional[str] = None, end_date
             start = now - timedelta(days=30)
             end = now
     elif date_range == "today":
-        start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        start = as_utc(day_bounds(local_today())[0])
         end = now
     elif date_range == "7days":
         start = now - timedelta(days=7)
@@ -191,8 +202,9 @@ def _representative_legs(db: Session, address_column, emails_lower: list,
     marked leg_rank = 1 and lends the message its status and direction.
     """
     email = func.lower(address_column)
+    # An empty Message-ID is none, as in the Messages list
     message_key = func.coalesce(
-        MessageCorrelation.message_id, MessageCorrelation.correlation_key
+        func.nullif(MessageCorrelation.message_id, ""), MessageCorrelation.correlation_key
     )
     status_rank = case(
         *[(MessageCorrelation.final_status == status, rank)
@@ -203,6 +215,7 @@ def _representative_legs(db: Session, address_column, emails_lower: list,
         email.label('email'),
         MessageCorrelation.final_status.label('final_status'),
         MessageCorrelation.direction.label('direction'),
+        MessageCorrelation.first_seen.label('first_seen'),
         func.row_number().over(
             partition_by=(email, message_key),
             order_by=(status_rank, MessageCorrelation.id.asc())
@@ -298,6 +311,70 @@ def get_bulk_message_counts(db: Session, emails: list, start_date: datetime, end
     return result
 
 
+def _activity_buckets(start_date: datetime, end_date: datetime) -> tuple:
+    """
+    The time slots a mailbox's activity is drawn in: hours for a range of up
+    to two days, days beyond it. An hour slot is the naive UTC time it starts
+    at, so the repeated hour at the end of daylight saving is two slots; a day
+    slot is a date in the app's time zone.
+    """
+    unit = 'hour' if end_date - start_date <= timedelta(days=2) else 'day'
+    buckets = []
+    if unit == 'hour':
+        cursor = utc_naive(start_date).replace(minute=0, second=0, microsecond=0)
+        last = utc_naive(end_date)
+        while cursor <= last:
+            buckets.append(cursor)
+            cursor += timedelta(hours=1)
+    else:
+        day, last_day = to_local(start_date).date(), to_local(end_date).date()
+        while day <= last_day:
+            buckets.append(day)
+            day += timedelta(days=1)
+    return unit, buckets
+
+
+def get_bulk_activity(db: Session, addresses_by_mailbox: dict, start_date: datetime, end_date: datetime) -> dict:
+    """
+    Messages sent and received per time slot for each mailbox, its aliases
+    included, counted like the totals beside them (one per message and
+    address). Two aggregate queries, whatever the number of mailboxes.
+
+    Hour slots are sent as UTC instants with Z, for the page to show in the
+    app's time zone; day slots as YYYY-MM-DD days of the app's time zone.
+    """
+    unit, buckets = _activity_buckets(start_date, end_date)
+    owner = {}
+    for mailbox, addresses in addresses_by_mailbox.items():
+        for address in addresses:
+            owner.setdefault(address.lower(), mailbox)
+    series = {mailbox: {'sent': [0] * len(buckets), 'received': [0] * len(buckets)}
+              for mailbox in addresses_by_mailbox}
+    index = {bucket: i for i, bucket in enumerate(buckets)}
+    if owner:
+        for side, column in (('sent', MessageCorrelation.sender), ('received', MessageCorrelation.recipient)):
+            legs = _representative_legs(db, column, list(owner), start_date, end_date)
+            # first_seen is stored as naive UTC: an hour is cut in UTC, a day
+            # is taken in the app's time zone
+            if unit == 'hour':
+                bucket = func.date_trunc('hour', legs.c.first_seen)
+            else:
+                bucket = func.date(func.timezone(app_tz().key, func.timezone('UTC', legs.c.first_seen)))
+            rows = db.query(legs.c.email, bucket.label('bucket'), func.count().label('cnt')).filter(
+                legs.c.leg_rank == 1
+            ).group_by(legs.c.email, bucket).all()
+            for row in rows:
+                i = index.get(row.bucket)
+                mailbox = owner.get(row.email)
+                if i is not None and mailbox:
+                    series[mailbox][side][i] += row.cnt
+    if unit == 'hour':
+        keys = [format_datetime_utc(b) for b in buckets]
+    else:
+        keys = [b.isoformat() for b in buckets]
+    return {'unit': unit, 'buckets': keys, 'series': series}
+
+
 def get_message_counts_for_email(db: Session, email: str, start_date: datetime, end_date: datetime) -> dict:
     """
     Get message counts for a single email. Thin wrapper around bulk version.
@@ -307,7 +384,7 @@ def get_message_counts_for_email(db: Session, email: str, start_date: datetime, 
     return bulk.get(email.lower(), _empty_counts())
 
 
-@router.get("/mailbox-stats/summary")
+@router.get("/mailbox-stats/summary", responses=documented(m.MailboxSummaryResponse))
 def get_mailbox_stats_summary(
     date_range: str = Query("30days", description="Date range: today, 7days, 30days, 90days, custom"),
     start_date: Optional[str] = Query(None, description="Custom start date (YYYY-MM-DD) - required when date_range is 'custom'"),
@@ -389,12 +466,13 @@ def get_mailbox_stats_summary(
         return {"error": "Unable to load mailbox statistics. Check the application logs.", "total_mailboxes": 0}
 
 
-@router.get("/mailbox-stats/all")
+@router.get("/mailbox-stats/all", responses=documented(m.MailboxStatsResponse, errors={422: Invalid}))
 def get_all_mailbox_stats(
     domain: Optional[str] = None,
     active_only: bool = True,  # Changed default to True
     hide_zero: bool = False,  # Filter out mailboxes with zero activity
     search: Optional[str] = None,
+    username: Optional[str] = Query(None, max_length=320, description="Only this mailbox: its address, whole, in any case and in either form of an IDN domain (the entity card's Open mailbox). Off by default"),
     date_range: str = Query("30days", description="Date range: today, 7days, 30days, 90days, custom"),
     start_date: Optional[str] = Query(None, description="Custom start date (YYYY-MM-DD) - required when date_range is 'custom'"),
     end_date: Optional[str] = Query(None, description="Custom end date (YYYY-MM-DD) - required when date_range is 'custom'"),
@@ -415,6 +493,7 @@ def get_all_mailbox_stats(
             active_only=active_only,
             hide_zero=hide_zero,
             search=search,
+            username=username,
             date_range=date_range,
             start_date=start_date,
             end_date=end_date,
@@ -459,6 +538,14 @@ def get_all_mailbox_stats(
                 )
             )
         
+        # One mailbox by its whole address, wherever the sort and the pages would put it
+        if isinstance(username, str) and username.strip():
+            try:
+                forms = entity_values.address_forms(entity_values.normalize_address(username)[0])
+            except entity_values.InvalidValue:
+                forms = [username.strip().lower()]
+            query = query.filter(func.lower(MailboxStatistics.username).in_(forms))
+
         # Get total count before pagination
         total_count = query.count()
         
@@ -615,7 +702,15 @@ def get_all_mailbox_stats(
         start_index = (page - 1) * page_size
         end_index = start_index + page_size
         paginated_result = result[start_index:end_index]
-        
+
+        # The activity over the range, drawn beside each mailbox on this page
+        activity = get_bulk_activity(db, {
+            mb['username']: [mb['username']] + [a['alias_address'] for a in mb['aliases']]
+            for mb in paginated_result
+        }, parsed_start, parsed_end)
+        for mb in paginated_result:
+            mb['activity'] = activity['series'][mb['username']]
+
         response = {
             "total": len(result),
             "page": page,
@@ -624,7 +719,9 @@ def get_all_mailbox_stats(
             "date_range": date_range,
             "start_date": format_datetime_utc(parsed_start),
             "end_date": format_datetime_utc(parsed_end),
-            "mailboxes": paginated_result
+            "mailboxes": paginated_result,
+            "activity_unit": activity['unit'],
+            "activity_buckets": activity['buckets']
         }
         
         # Cache the result
@@ -636,7 +733,7 @@ def get_all_mailbox_stats(
         return {"error": "Unable to load mailbox statistics. Check the application logs.", "total": 0, "mailboxes": []}
 
 
-@router.get("/mailbox-stats/domains")
+@router.get("/mailbox-stats/domains", responses=documented(m.MailboxDomainsResponse))
 def get_mailbox_domains(db: Session = Depends(get_db)):
     """
     Get list of all domains for filtering
@@ -671,7 +768,7 @@ def get_mailbox_domains(db: Session = Depends(get_db)):
         return {"error": "Unable to load mailbox statistics. Check the application logs.", "domains": []}
 
 
-@router.get("/mailbox-stats/refresh")
+@router.get("/mailbox-stats/refresh", responses=documented(m.MailboxRefreshResponse))
 def refresh_mailbox_stats(db: Session = Depends(get_db)):
     """
     Get last update time for mailbox statistics

@@ -4,12 +4,16 @@
 
 async function exportCSV(type) {
     try {
-        const filters = currentFilters[type] || {};
+        // Messages with a time preset: its period up to now, as the list reads it
+        const filters = type === 'messages' && typeof messagesRangeFilters === 'function'
+            ? messagesRangeFilters(currentFilters.messages || {}) : currentFilters[type] || {};
         const params = new URLSearchParams();
         for (const [key, value] of Object.entries(filters)) {
             if (value == null || (typeof value === 'string' && !value.trim())) continue;
             params.set(key, value);
         }
+        // Messages in the order the list shows them
+        if (type === 'messages' && typeof messagesOrder !== 'undefined' && messagesOrder === 'asc') params.set('order', 'asc');
 
         const response = await authenticatedFetch(`/api/export/${type}/csv?${params}`, { method: 'HEAD' });
         if (!response.ok) {

@@ -1,0 +1,22 @@
+#!/bin/sh
+# Runs mailcow-logs: with Node 20+ when it is installed, otherwise with what the computer has (PowerShell on Windows,
+# sh, curl and awk elsewhere). Every version keeps the same connection, so it does not matter which one runs.
+here=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd -P)
+case "$(uname -s)" in MINGW* | MSYS* | CYGWIN*) windows=1 ;; *) windows=0 ;; esac
+
+if [ -z "${MAILCOW_LOGS_NO_NODE:-}" ] && command -v node >/dev/null 2>&1 &&
+  node -e 'process.exit(Number(process.versions.node.split(".")[0])>=20?0:1)' 2>/dev/null; then
+  script="$here/mailcow-logs.mjs"
+  if [ $windows = 1 ]; then
+    script=$(cygpath -w "$script")
+    # Git Bash would otherwise rewrite arguments such as /messages into Windows paths.
+    export MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*'
+  fi
+  exec node "$script" "$@"
+fi
+if [ $windows = 1 ]; then
+  script=$(cygpath -w "$here/mailcow-logs.ps1")
+  export MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*'
+  exec powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$script" "$@"
+fi
+exec sh "$here/mailcow-logs.sh" "$@"

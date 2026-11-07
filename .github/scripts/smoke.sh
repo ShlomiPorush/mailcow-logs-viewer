@@ -46,8 +46,11 @@ done
 # Start the application; extra arguments are passed to docker run (-e ...).
 # mailcow is a placeholder: nothing in this smoke test needs a reachable
 # mailcow, and every job must cope with an unreachable one without crashing.
+# The container runs read-only like the shipped docker-compose.yml: only /tmp
+# and /app/data (a tmpfs here, standing in for the data volume) are writable.
 start_app() {
     docker run -d --name "${APP}" --network "${NET}" -p "${PORT}:8080" \
+        --read-only --tmpfs /tmp:size=64m --tmpfs /app/data \
         -e MAILCOW_URL=https://mail.example.com \
         -e MAILCOW_API_KEY=ci-placeholder \
         -e POSTGRES_HOST="${DB}" -e POSTGRES_PORT=5432 \
@@ -136,6 +139,11 @@ if docker logs "${APP}" 2>&1 | grep -E "(TypeError|AttributeError|NameError|Impo
     fail "a job raised a programming error (see log lines above)"
 fi
 
+step "Nothing writes outside /app/data and /tmp"
+if docker logs "${APP}" 2>&1 | grep -E "Read-only file system|EROFS|PermissionError" ; then
+    fail "the application tried to write outside /app/data and /tmp (see log lines above)"
+fi
+
 if [ "${UI_SMOKE:-0}" = "1" ]; then
     step "Seed fake data for the browser pass"
     # Through the app's own models, so detail views (message details, DMARC
@@ -145,13 +153,14 @@ if [ "${UI_SMOKE:-0}" = "1" ]; then
 
     # Headless Chromium from the pinned Playwright image; the Python package is
     # pinned to the same release so it uses the browsers the image ships.
+    # jsonschema checks every API answer against /openapi.json.
     PW_VERSION="1.56.0"
     PW_IMAGE="mcr.microsoft.com/playwright/python:v${PW_VERSION}-noble"
     SCRIPTS="$(cd "$(dirname "$0")" && (pwd -W 2>/dev/null || pwd))"
     browser_pass() {
         MSYS_NO_PATHCONV=1 docker run --rm --network "${NET}" --ipc=host \
             -v "${SCRIPTS}:/scripts:ro" "${PW_IMAGE}" \
-            sh -c "pip install -q --disable-pip-version-check --root-user-action=ignore --break-system-packages playwright==${PW_VERSION} \
+            sh -c "pip install -q --disable-pip-version-check --root-user-action=ignore --break-system-packages playwright==${PW_VERSION} jsonschema==4.26.0 \
                    && python /scripts/ui_smoke.py http://${APP}:8080" \
             || fail "browser pass ($1) found problems (see FAIL lines above)"
     }
@@ -162,10 +171,12 @@ if [ "${UI_SMOKE:-0}" = "1" ]; then
     # The same data with every feature turned off and settings read-only, so the
     # "is disabled" pages, hidden tabs and read-only Settings render at least once
     # (see "Gated and conditional states" in documentation/UI_Behavior_Catalog.md).
+    # spam-filter is the old name of suppressions and rspamd together: it
+    # must still turn both off.
     step "Browser pass over every page (every feature off, settings read-only)"
     docker rm -f "${APP}" >/dev/null
     start_app -e SETTINGS_EDIT_VIA_UI_ENABLED=false \
-        -e DISABLED_FEATURES=netfilter,queue,quarantine,spam-filter,domains,dmarc,mailbox-stats,rate-limits,logs,blacklist
+        -e DISABLED_FEATURES=netfilter,queue,quarantine,spam-filter,domains,dmarc,mailbox-stats,rate-limits,logs,blacklist,devices
     wait_healthy
     browser_pass "locked"
 fi

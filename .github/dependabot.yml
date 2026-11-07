@@ -1,0 +1,13 @@
+# Weekly update PRs for the GitHub Actions used in .github/workflows. The
+# docker/* actions are pinned to commit SHAs; Dependabot moves the SHA and the
+# version comment together. All action updates arrive as one grouped PR.
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      github-actions:
+        patterns:
+          - "*"
