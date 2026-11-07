@@ -519,8 +519,14 @@ function uiHelpPlace(panel, opener) {
 function uiInitHelp() {
     let closing = 0;
     const panelOf = el => (el ? document.getElementById(el.dataset.help) : null);
+    // Placed in the same task that opens it, before the browser paints: placing it on the
+    // toggle event, which comes later, showed it for a frame at the top of the screen
     const setOpen = (panel, open) => {
-        if (panel && panel.matches(':popover-open') !== open) (open ? panel.showPopover() : panel.hidePopover());
+        if (!panel || panel.matches(':popover-open') === open) return;
+        if (!open) return panel.hidePopover();
+        panel.showPopover();
+        const opener = document.querySelector(`[data-help="${panel.id}"]`);
+        if (opener) uiHelpPlace(panel, opener);
     };
     // The pointer may cross from the "i" to the text without closing it, to select a value
     const hovered = event => {
@@ -577,13 +583,7 @@ function uiInitMenus() {
     uiInitHelp();
     document.addEventListener('toggle', event => {
         const menu = event.target;
-        if (!(menu instanceof HTMLElement) || event.newState !== 'open') return;
-        if (menu.classList.contains('ui-field-help-panel')) {
-            const opener = document.querySelector(`[data-help="${menu.id}"]`);
-            if (opener) uiHelpPlace(menu, opener);
-            return;
-        }
-        if (!menu.classList.contains('ui-menu')) return;
+        if (!(menu instanceof HTMLElement) || !menu.classList.contains('ui-menu') || event.newState !== 'open') return;
         // Its button opens it natively (popovertarget) or through a handler of its own (aria-controls)
         const button = document.querySelector(`[popovertarget="${menu.id}"], [aria-controls="${menu.id}"]`);
         if (!button) return;
