@@ -319,7 +319,6 @@ var SETTINGS_FIELD_DESCRIPTIONS = {
     domain_spf_source_dmarc_history: 'Can cause false warnings.',
 
     // Authentication
-    basic_auth_enabled: 'All pages and the API require sign-in.',
     auth_password: 'Required for Basic Auth. To remove it, turn off Basic Auth first.',
     auth_max_failure_clients: 'When full, sign-ins from new addresses must wait.',
     oauth2_enabled: 'Uses an external sign-in provider.',
@@ -1270,6 +1269,10 @@ async function settingsRspamdAfterSave(plan, saved) {
     return null;
 }
 
+// Texts of the session signing key's Generate and of the Basic Auth password's Remove while it is off
+const SETTINGS_GENERATE_KEY = 'Generate';
+const SETTINGS_PASSWORD_REMOVE_OFF = 'Turn off Basic Auth to remove the password.';
+
 // Predefined options for settings fields (renders as dropdown instead of text input)
 const SETTINGS_FIELD_OPTIONS = {
     webhook_type: [
@@ -1280,7 +1283,9 @@ const SETTINGS_FIELD_OPTIONS = {
         { value: 'ntfy', label: 'ntfy - topic URL' },
         { value: 'gotify', label: 'Gotify - /message?token=...' }
     ],
-    // How dates and times are written (utils.js); the example under them shows the choice
+    // The levels the backend accepts (config.py); anything else runs as WARNING
+    log_level: ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'].map(level => ({ value: level, label: level })),
+    // How dates and times are written (utils.js)
     date_format: [
         { value: 'browser', label: 'Browser' },
         { value: 'DD/MM/YYYY', label: 'DD/MM/YYYY' },
@@ -1307,13 +1312,10 @@ const SETTINGS_FIELD_OPTIONS = {
     ]
 };
 
-// Now, written as the Date Format and Time Format fields say, before they are saved
-function settingsShowFormatExample(root) {
-    const out = root && root.querySelector('#settings-format-example');
-    if (!out) return;
-    const picked = (key, fallback) => { const el = root.querySelector('#edit-' + key); return el && el.value ? el.value : fallback; };
-    const now = zonedParts(new Date());
-    out.textContent = `Example: ${writeDate(now, { fmt: picked('date_format', appDateFmt()) })}, ${writeClock(now, { fmt: picked('time_format', appTimeFmt()) })}`;
+// The log level that runs: the backend reads it in any letters and runs anything else as WARNING
+function settingsLogLevel(value) {
+    const level = String(value || '').trim().toUpperCase();
+    return SETTINGS_FIELD_OPTIONS.log_level.some(opt => opt.value === level) ? level : 'WARNING';
 }
 
 // Agents > App address for agents: the address to offer, which the person can
@@ -1463,12 +1465,8 @@ var SETTINGS_EDIT_TABS = [
             { label: 'Logs per request', keys: ['fetch_count_postfix', 'fetch_count_rspamd', 'fetch_count_netfilter'] },
             { label: 'Pagination', keys: ['fetch_max_pages'] },
             { label: 'Retention', keys: ['retention_days'] },
-            { label: 'Excluded addresses', keys: ['blacklist_emails'] }
-        ]
-    },
-    {
-        id: 'correlation', label: 'Message linking', description: 'Choose how long to keep trying to link mail logs to messages.', groups: [
-            { label: 'Settings', keys: ['max_correlation_age_minutes', 'correlation_check_interval'] }
+            { label: 'Excluded addresses', keys: ['blacklist_emails'] },
+            { label: 'Message linking', keys: ['max_correlation_age_minutes', 'correlation_check_interval'] }
         ]
     },
     {
@@ -1531,14 +1529,14 @@ var SETTINGS_EDIT_TABS = [
         ]
     },
     {
-        id: 'smtp_abuse', label: 'SMTP Abuse (Beta)', description: 'Block sending from mailboxes that exceed a fixed message limit. See and manage them in Security > Settings > Outgoing spam.', groups: [
+        id: 'smtp_abuse', label: 'SMTP Abuse', description: 'Block sending from mailboxes that exceed a fixed message limit. See and manage them in Security > Settings > Outgoing spam.', groups: [
             { label: 'Enable', keys: ['smtp_abuse_enabled'] },
             { label: 'Limit', keys: ['smtp_abuse_threshold', 'smtp_abuse_window_minutes'] },
             { label: 'Response', keys: ['smtp_abuse_revoke_app_passwords', 'smtp_abuse_unblock_grace_minutes', 'smtp_abuse_help_address'] }
         ]
     },
     {
-        id: 'anomaly', label: 'Anomaly detection (Beta)', description: 'Get alerts about unusual sending and repeated failed logins.', groups: [
+        id: 'anomaly', label: 'Anomaly detection', description: 'Get alerts about unusual sending and repeated failed logins.', groups: [
             { label: 'Enable', keys: ['anomaly_detection_enabled'] },
             { label: 'Sending spikes', keys: ['anomaly_volume_multiplier', 'anomaly_volume_min_messages', 'anomaly_baseline_days'] },
             { label: 'Failed logins', keys: ['anomaly_auth_failure_threshold'] },
@@ -1612,7 +1610,7 @@ var SETTINGS_EDIT_TABS = [
 // silently disappear).
 var SETTINGS_TAB_GROUPS = [
     { label: 'General', tabs: ['features', 'application'] },
-    { label: 'mailcow', tabs: ['mailcow', 'fetch', 'correlation', 'logs'] },
+    { label: 'mailcow', tabs: ['mailcow', 'fetch', 'logs'] },
     { label: 'Alerts', tabs: ['notifications', 'smtp'] },
     { label: 'Security', tabs: ['auth', 'users', 'agents', 'anomaly', 'smtp_abuse'] },
     { label: 'Data', tabs: ['domains', 'dmarc', 'dmarc_imap', 'maxmind', 'blacklist', 'outbound', 'quarantine', 'devices', 'other'] }
@@ -1647,6 +1645,30 @@ function settingsRemoveSecret(btn) {
     box.classList.toggle('is-removing', removing);
     btn.textContent = removing ? 'Keep' : 'Remove';
     hidden.form && hidden.form.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
+// The Basic Auth password cannot be removed while Basic Auth is on: its Remove is
+// off then, and a removal already chosen is taken back
+function settingsLockPasswordRemove(root) {
+    const btn = root && root.querySelector('[data-needs-basic-off]');
+    const basic = root && root.querySelector('#edit-basic_auth_enabled');
+    if (!btn || !basic) return;
+    const on = basic.type === 'checkbox' ? basic.checked : basic.value === 'true';
+    if (on && btn.closest('.is-removing')) settingsRemoveSecret(btn);
+    btn.disabled = on;
+    btn.title = on ? SETTINGS_PASSWORD_REMOVE_OFF : '';
+}
+
+// Session signing key: a new random key, 32 bytes as hex, into a new-value field
+function settingsGenerateSecret(btn) {
+    const field = btn.closest('.ui-set-field');
+    const replace = field && field.querySelector('.ui-set-secret button');
+    if (replace) settingsReplaceSecret(replace);
+    const input = field && field.querySelector('input[type="password"]');
+    if (!input) return;
+    input.value = Array.from(crypto.getRandomValues(new Uint8Array(32)), b => b.toString(16).padStart(2, '0')).join('');
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.focus();
 }
 
 // Raw log services other pages read (/api/settings/info), collected whatever is ticked
@@ -1846,13 +1868,16 @@ function renderSettingsEditField(key, value, sensitiveKeys, description, envLock
     const changed = (isChanged || isSensitiveChanged) && !envLocked ? ' is-changed' : '';
     const changedPill = changed ? ' <span class="ui-set-pill is-changed" title="Differs from the default">Changed</span>' : '';
 
+    const generateHtml = key === 'session_secret_key' && !envLocked
+        ? '<div><button type="button" class="ui-btn ui-btn-sm" onclick="settingsGenerateSecret(this)">' + escapeHtml(SETTINGS_GENERATE_KEY) + '</button></div>' : '';
+
     // A stored secret: say so, and offer Replace and Remove instead of a masked field
     if (sensitive && displayVal === '********') {
         return '<div class="ui-set-field' + (envLocked ? ' is-locked' : '') + '">' + fieldName('<label class="ui-label">' + escapeHtml(label) + labelLockIcon + '</label>') + descHtml +
             '<div class="ui-set-secret"><span class="ui-set-secret-state">' + (envLocked ? 'Stored in the environment' : 'Stored') + '</span>' +
             (envLocked ? '' : '<button type="button" class="ui-btn ui-btn-sm" onclick="settingsReplaceSecret(this)">Replace</button>' +
-                '<button type="button" class="ui-btn ui-btn-sm" onclick="settingsRemoveSecret(this)">Remove</button>') +
-            '<input type="hidden" id="edit-' + keyAttr + '" name="' + keyAttr + '" value="********"' + (envLocked ? ' disabled' : '') + '></div></div>';
+                '<button type="button" class="ui-btn ui-btn-sm" onclick="settingsRemoveSecret(this)"' + (key === 'auth_password' ? ' data-needs-basic-off' : '') + '>Remove</button>') +
+            '<input type="hidden" id="edit-' + keyAttr + '" name="' + keyAttr + '" value="********"' + (envLocked ? ' disabled' : '') + '></div>' + generateHtml + '</div>';
     }
 
     const segments = SETTINGS_SEGMENTED_OPTIONS[key];
@@ -1917,15 +1942,16 @@ function renderSettingsEditField(key, value, sensitiveKeys, description, envLock
     const fieldOptions = SETTINGS_FIELD_OPTIONS[key];
     if (fieldOptions) {
         let optionsHtml = '';
+        // A stored level in other letters, or one the backend does not know, shows as what runs
+        const current = key === 'log_level' ? settingsLogLevel(displayVal) : String(displayVal);
         fieldOptions.forEach(function(opt) {
-            const selected = String(displayVal) === opt.value ? 'selected' : '';
+            const selected = current === opt.value ? 'selected' : '';
             optionsHtml += '<option value="' + escapeHtml(opt.value) + '" ' + selected + '>' + escapeHtml(opt.label) + '</option>';
         });
         return '<div class="ui-set-field' + (envLocked ? ' is-locked' : '') + '">' + fieldName('<label for="edit-' + keyAttr + '" class="ui-label">' + escapeHtml(label) + labelLockIcon + changedPill + '</label>') +
             descHtml +
             '<select id="edit-' + keyAttr + '" name="' + keyAttr + '" ' + disabledAttr + ' class="ui-select' + changed + '">' +
             optionsHtml + '</select>' +
-            (key === 'time_format' ? '<small class="ui-muted" id="settings-format-example" aria-live="polite"></small>' : '') +
             clearBtnHtml +
             envLockedHtml + '</div>';
     }
@@ -1936,7 +1962,7 @@ function renderSettingsEditField(key, value, sensitiveKeys, description, envLock
     return '<div class="ui-set-field' + (envLocked ? ' is-locked' : '') + '">' + fieldName('<label for="edit-' + keyAttr + '" class="ui-label">' + escapeHtml(label) + labelLockIcon + changedPill + '</label>') +
         descHtml +
         '<input type="' + inputType + '" id="edit-' + keyAttr + '" name="' + keyAttr + '" value="' + escapeHtml(valAttr) + '" placeholder="' + escapeHtml(placeholder) + '" ' + disabledAttr + ' class="ui-input' + changed + '">' +
-        clearBtnHtml +
+        generateHtml + clearBtnHtml +
         envLockedHtml + '</div>';
 }
 
@@ -2165,7 +2191,7 @@ function renderSettings(content, data) {
         ['Time zone', escapeHtml(config.timezone || 'N/A')],
         ['Date format', escapeHtml(config.date_format || 'browser')],
         ['Time format', escapeHtml(config.time_format || '24h')],
-        ['Log level', escapeHtml(config.log_level || 'INFO')],
+        ['Log level', escapeHtml(settingsLogLevel(config.log_level))],
         ['Excluded email addresses', config.blacklist_enabled ? `Enabled (${escapeHtml(String(config.blacklist_count))} addresses)` : 'Disabled'],
         ['Background job workers', `${escapeHtml(String(config.scheduler_workers || 4))}`],
     ];
@@ -2481,6 +2507,11 @@ function renderSettings(content, data) {
         window.settingsShowTab = id => switchSettingsTab(id, false);
         const firstTabBtn = content.querySelector('.settings-edit-tab');
         settingsFirstTab = firstTabBtn ? firstTabBtn.getAttribute('data-tab') : null;
+        // Message linking was a section of its own; its old address opens Fetch, where it is now
+        if (settingsTab === 'correlation') {
+            settingsTab = 'fetch';
+            if (typeof routerSyncSubpage === 'function') routerSyncSubpage('settings', 'fetch', true);
+        }
         if (settingsTab && content.querySelector('#settings-tab-panel-' + CSS.escape(settingsTab))) {
             switchSettingsTab(settingsTab, false);
         } else if (settingsFirstTab) {
@@ -2602,9 +2633,8 @@ function renderSettings(content, data) {
             form.addEventListener('change', settingsShowCodesNeeds);
             form.addEventListener('input', settingsShowCodesNeeds);
             settingsLoadCodesSeen(content);
-            settingsShowFormatExample(content);
-            form.addEventListener('change', () => settingsShowFormatExample(content));
             settingsShowNeeds(content);
+            settingsLockPasswordRemove(content);
             settingsApplySync(false);
             settingsSuggestAgentUrl(content, true);
             settingsLockAgentAccess(content, false, data.legacy_auth_enabled);
@@ -2613,10 +2643,11 @@ function renderSettings(content, data) {
                 if (event.target && ['edit-basic_auth_enabled', 'edit-oauth2_enabled'].includes(event.target.id)) settingsLockAgentAccess(content, true, data.legacy_auth_enabled);
                 settingsSuggestAgentUrl(content, !!event.target && event.target.id === 'edit-agent_access_enabled');
                 settingsShowNeeds(content);
+                settingsLockPasswordRemove(content);
             });
             form.addEventListener('input', () => settingsSuggestAgentUrl(content, false));
             // Clearing and resetting change a field without an input event
-            content.querySelectorAll('.settings-clear-btn').forEach(btn => btn.addEventListener('click', () => setTimeout(() => { updateDirty(); settingsShowNeeds(content); settingsShowFormatExample(content); settingsSuggestAgentUrl(content, false); content.querySelectorAll('.ui-set-codes').forEach(settingsShowCodes); })));
+            content.querySelectorAll('.settings-clear-btn').forEach(btn => btn.addEventListener('click', () => setTimeout(() => { updateDirty(); settingsShowNeeds(content); settingsLockPasswordRemove(content); settingsSuggestAgentUrl(content, false); content.querySelectorAll('.ui-set-codes').forEach(settingsShowCodes); })));
         }
 
         if (form) {

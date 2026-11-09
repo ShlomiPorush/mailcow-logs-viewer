@@ -662,8 +662,7 @@ function editUser(userId) {
             <label for="user-edit-pass"><span class="ui-label">${user ? 'New password' : 'Password'}</span>
                 <input id="user-edit-pass" type="password" class="ui-input" autocomplete="new-password" placeholder="At least 8 characters" aria-describedby="user-edit-pw-status"></label>
             ${usersPasswordMeterHtml(!!user)}
-            <p class="ui-set-desc">${user ? `Leave it empty to keep the current password. A new password signs ${escapeHtml(name)} out.`
-                : 'Give the user their username and password.'}</p>
+            ${user ? `<p class="ui-set-desc">Leave it empty to keep the current password. A new password signs ${escapeHtml(name)} out.</p>` : ''}
         </div>`;
     const oauthFields = user ? (user.kind === 'oauth2' ? `<p class="ui-set-desc">Signs in with ${escapeHtml(usersProvider())}.</p>` : '') : `
         <div data-for="oauth2" class="ui-form${kind === 'oauth2' ? '' : ' hidden'}">

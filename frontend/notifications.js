@@ -87,10 +87,7 @@ function renderNotificationChannels() {
 
     panel.innerHTML = `
         <div class="ui-list-head">
-            <div>
-                <h4 class="ui-md-h">Alert destinations</h4>
-                <p class="ui-set-desc">Send selected alerts to each destination.</p>
-            </div>
+            <h4 class="ui-md-h">Alert destinations</h4>
             <button type="button" onclick="editNotificationChannel(null)" class="ui-btn ui-btn-sm ui-btn-primary ui-head-actions">+ Add destination</button>
         </div>
         <div class="ui-channels">${rows || '<p class="ui-empty">No destinations added yet.</p>'}</div>`;

@@ -1,8 +1,8 @@
 # Outgoing spam
 
-Outgoing spam protection disables a mailbox's SMTP access when it exceeds a sending threshold. Incoming delivery and IMAP stay enabled, but revoking app passwords also disconnects clients using them. The feature is **Beta**, off by default, and needs a read-write API key.
+Outgoing spam protection disables a mailbox's SMTP access when it exceeds a sending threshold. Incoming delivery and IMAP stay enabled, but revoking app passwords also disconnects clients using them. It is off by default and needs a read-write API key.
 
-Configure it on [Security](Security.md) > **Settings** > **Outgoing spam**, or under **Settings** > **SMTP Abuse (Beta)**.
+Configure it on [Security](Security.md) > **Settings** > **Outgoing spam**, or under **Settings** > **SMTP Abuse**.
 
 ## The Outgoing spam card
 
@@ -51,11 +51,11 @@ Re-enable it from this card. Turning SMTP back on in mailcow leaves the app's st
 
 Check activity over normal sending cycles. Set the threshold above legitimate bursts and whitelist known bulk senders.
 
-Anomaly detection counts mail the same way but only alerts, comparing each mailbox with its usual sending. See [Dashboard](Dashboard.md) and **Settings** > **Anomaly detection (Beta)**.
+Anomaly detection counts mail the same way but only alerts, comparing each mailbox with its usual sending. See [Dashboard](Dashboard.md) and **Settings** > **Anomaly detection**.
 
 ## Settings that change this page
 
-Defaults under **Settings** > **SMTP Abuse (Beta)**: protection off, more than 100 messages within 60 minutes, a 60-minute pause after re-enabling, app-password revocation on and help address empty. The card edits the same settings. Environment variables are listed in [environment variables](../ENV_Settings.md).
+Defaults under **Settings** > **SMTP Abuse**: protection off, more than 100 messages within 60 minutes, a 60-minute pause after re-enabling, app-password revocation on and help address empty. The card edits the same settings. Environment variables are listed in [environment variables](../ENV_Settings.md).
 
 ## When something is missing
 
@@ -64,4 +64,4 @@ Defaults under **Settings** > **SMTP Abuse (Beta)**: protection off, more than 1
 - **Editing settings is off**: set `SETTINGS_EDIT_VIA_UI_ENABLED=true` in `.env` and run `docker compose up -d`. A restart does not reread `.env`.
 - **Settings are not migrated yet**: use **Migrate Settings from ENV** on [Settings](Settings.md).
 - **A value is set by an environment variable**: change it in the environment.
-- **Security page off**: outgoing protection keeps running if enabled. Its settings remain under **Settings** > **SMTP Abuse (Beta)**.
+- **Security page off**: outgoing protection keeps running if enabled. Its settings remain under **Settings** > **SMTP Abuse**.

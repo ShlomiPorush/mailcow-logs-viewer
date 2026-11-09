@@ -219,7 +219,7 @@ test('a clock-time job is written with the time setting, in the zone it runs in'
     assert.match(c.renderJobCard('Cleanup', 'cleanup_logs', { schedule: 'Daily at 02:00 (UTC)', status: 'idle' }), /Daily at 02:00 \(UTC\)/);
 });
 
-test('Settings offers the formats under Time and shows the unsaved choice', () => {
+test('Settings offers the formats under Time', () => {
     const c = load({ files: ['settings.js'] });
     const group = vm.runInContext("SETTINGS_EDIT_TABS.find(t => t.id === 'application').groups.find(g => g.label === 'Time')", c);
     assert.deepEqual([...group.keys], ['tz', 'date_format', 'time_format']);
@@ -229,12 +229,7 @@ test('Settings offers the formats under Time and shows the unsaved choice', () =
     assert.ok(vm.runInContext("SETTINGS_READ_AT_PAGE_LOAD.includes('date_format') && SETTINGS_READ_AT_PAGE_LOAD.includes('time_format')", c));
     const html = vm.runInContext(`renderSettingsEditField('time_format', '24h', SETTINGS_SENSITIVE_KEYS,
         SETTINGS_FIELD_DESCRIPTIONS.time_format, false, '24h')`, c);
-    assert.match(html, /id="settings-format-example"/);
-
-    const out = { textContent: '' };
-    const fields = { '#settings-format-example': out, '#edit-date_format': { value: 'YYYY-MM-DD' }, '#edit-time_format': { value: '12h' } };
-    c.settingsShowFormatExample({ querySelector: sel => fields[sel] || null });
-    assert.match(out.textContent, /^Example: \d{4}-\d{2}-\d{2}, \d{1,2}:\d{2} (AM|PM)$/);
+    assert.match(html, /<option value="24h" selected>/);
 });
 
 // ---------- one way in ----------

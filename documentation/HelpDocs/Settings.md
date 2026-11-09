@@ -40,7 +40,7 @@ All features are on by default. A feature that is off disappears from the menu, 
 
 ## Application
 
-**Time zone** is the time zone the whole app works in; see [Using the app](../Using_the_App.md#time-zone). Saving a new one reloads the page and moves the scheduled jobs at once. **Date format** and **Time format** set how dates and times are written on every page and in emails; the example under them shows your choice before you save. The port is set in `docker-compose.yml`, not here.
+**Time zone** is the time zone the whole app works in; see [Using the app](../Using_the_App.md#time-zone). Saving a new one reloads the page and moves the scheduled jobs at once. **Date format** and **Time format** set how dates and times are written on every page and in emails. The port is set in `docker-compose.yml`, not here.
 
 ## Mailcow
 
@@ -74,13 +74,13 @@ Who may sign in, and what each user may see and do: **Admin**, **Operator**, **V
 
 Lets AI agents such as Claude Code and Codex connect, and lists the allowed ones with **Activity** and **Disconnect**. The list works even while editing settings is off. See [AI agents](../AI_Agents.md).
 
-## Anomaly Detection (Beta)
+## Anomaly detection
 
-This beta feature only alerts; it never blocks. It compares what each mailbox sends with its own normal rate and counts failed logins per username. Alerts go to email and your alert destinations and appear on the [Dashboard](Dashboard.md#security-alerts).
+It only alerts; it never blocks. It compares what each mailbox sends with its own normal rate and counts failed logins per username. Alerts go to email and your alert destinations and appear on the [Dashboard](Dashboard.md#security-alerts).
 
-## SMTP Abuse (Beta)
+## SMTP Abuse
 
-This beta feature stops a mailbox from sending when it goes over a limit. The mailbox still receives mail; if its app passwords are revoked too, mail apps that sign in with one stop working. It needs the read-write API key. The same values, the stopped mailboxes and the whitelist are on the **Outgoing spam** card under **Security** > **Settings**; see [Outgoing spam](Abuse_Protection.md).
+It stops a mailbox from sending when it goes over a limit. The mailbox still receives mail; if its app passwords are revoked too, mail apps that sign in with one stop working. It needs the read-write API key. The same values, the stopped mailboxes and the whitelist are on the **Outgoing spam** card under **Security** > **Settings**; see [Outgoing spam](Abuse_Protection.md).
 
 ## Domains
 

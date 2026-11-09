@@ -70,7 +70,7 @@ Text cells starting with `=`, `+`, `-` or `@` get a leading apostrophe so a spre
 
 - **Settings** > **Fetch** > **Keep mail logs (days)** (`RETENTION_DAYS`) keeps messages and their logs for 7 days by default. **Exclude email addresses** (`BLACKLIST_EMAILS`) keeps mail to or from the listed addresses out of Messages; use a comma-separated list.
 - **Settings** > **Logs** > **Keep service logs (days)** (`RAW_LOGS_RETENTION_DAYS`) keeps Dovecot lines for 2 days by default. The mailbox delivery result itself stays with the message.
-- **Settings** > **Message linking** > **Stop linking after (minutes)** and **Check for links every (seconds)** control how long and how often the app tries to link logs.
+- **Settings** > **Fetch** > **Message linking** > **Stop linking after (minutes)** and **Check for links every (seconds)** control how long and how often the app tries to link logs.
 
 ## When something is missing
 
