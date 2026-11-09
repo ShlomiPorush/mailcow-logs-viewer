@@ -61,14 +61,14 @@ def _job_off_reason(key: str):
                                'Needs the Read-Write API key or the Rspamd password', 'mailcow')],
         'send_weekly_summary': [(not settings.enable_weekly_summary, 'The weekly summary is turned off', 'notifications')],
         # Worded as the Outbound settings name them
-        'detect_suppressions': [(not settings.suppression_enabled, '"Handle undeliverable mail automatically" is off', 'outbound'),
+        'detect_suppressions': [(not settings.suppression_enabled, '"Handle failed mail automatically" is off', 'outbound'),
                                 (not settings.suppression_auto_detect, 'No choice under Outbound needs the mail logs', 'outbound')],
         # It reads the app's Rspamd blocks; it writes them only with the Read-Write key
         'sync_suppressions': [(not settings.suppression_rspamd_sync, '"Sync with Rspamd" is off', 'outbound'),
                               (not settings.is_rspamd_configured, 'Needs the Rspamd password', 'mailcow')],
-        'expire_suppressions': [(not settings.suppression_enabled, '"Handle undeliverable mail automatically" is off', 'outbound')],
+        'expire_suppressions': [(not settings.suppression_enabled, '"Handle failed mail automatically" is off', 'outbound')],
         'process_quarantine_rules': [(not rw, 'Needs the Read-Write API key (MAILCOW_API_KEY_RW)', 'mailcow')],
-        'cleanup_deferred_queue': [(not settings.suppression_enabled, '"Handle undeliverable mail automatically" is off', 'outbound'),
+        'cleanup_deferred_queue': [(not settings.suppression_enabled, '"Handle failed mail automatically" is off', 'outbound'),
                                    (not settings.queue_cleanup_enabled, 'Temporary delivery failure is set to keep retrying', 'outbound'),
                                    (not rw, 'Needs the Read-Write API key (MAILCOW_API_KEY_RW)', 'mailcow')],
         'anomaly_detection': [(not settings.anomaly_detection_enabled, 'Anomaly detection is turned off', 'anomaly')],

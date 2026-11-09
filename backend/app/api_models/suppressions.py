@@ -70,7 +70,7 @@ class SuppressionStats(Fixed):
 
 class SuppressionConfig(Fixed):
     """The suppression settings and what is set up."""
-    suppression_enabled: bool = Field(description="Handle undeliverable mail automatically")
+    suppression_enabled: bool = Field(description="Handle failed mail automatically")
     suppression_auto_detect: bool
     suppression_rspamd_sync: bool = Field(description="Sync with Rspamd")
     list_kept: bool = Field(description="The app keeps a list now: Suppressions and Sync with Rspamd are on")

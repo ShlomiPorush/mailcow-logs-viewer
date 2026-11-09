@@ -951,7 +951,7 @@ def rspamd_sync_on() -> bool:
     list (services/feature_data deletes it; turned on, it loads back from the
     app's section) and neither reads nor writes the map, apart from what the
     user asks for in Settings (removing its blocks, starting fresh).
-    Automatic blocks are made only with "Handle undeliverable mail
+    Automatic blocks are made only with "Handle failed mail
     automatically" on as well."""
     return settings.is_feature_enabled('suppressions') and bool(settings.suppression_rspamd_sync)
 

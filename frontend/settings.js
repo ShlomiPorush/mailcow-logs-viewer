@@ -525,7 +525,7 @@ var SETTINGS_FIELD_HELP = {
 
     // Outbound and Quarantine
     suppression_hard_bounce_action: [
-        'This action deletes other mail to the failed address that is still waiting to be sent.',
+        'If you choose deletion, the app deletes other mail to the failed address that is still waiting to be sent.',
         'The app deletes a message only if every address it goes to failed permanently in the same check. A message that also goes to any other address stays.',
         'Mail also stays if an address is protected or the app ignores its failure. When the action includes blocking, each address must already be blocked in the app.',
         'Deleting mail does not tell the person who sent it.',
