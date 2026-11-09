@@ -1093,8 +1093,11 @@ function settingsShowCodes(box) {
     box.querySelectorAll(':scope > .ui-set-codes-fold > summary .ui-set-pill.is-changed, :scope > .is-reset').forEach(el => { el.hidden = !changed; });
     // What the closed area leaves alone now
     const summary = box.querySelector('[data-codes-summary]');
-    if (summary) summary.textContent = settingsCodesSummary(box.querySelector('[id^="edit-suppression_"][id$="_standard_codes"]') ? standard : null,
-        codes.filter(code => !covered(code)).length);
+    if (summary) {
+        // Counted as the server reads them: each well-formed code once (5.02.2 is 5.2.2)
+        const effective = new Set(codes.map(code => settingsCodeOf(code, box.dataset.class)).filter(code => code && !covered(code)));
+        summary.textContent = settingsCodesSummary(box.querySelector('[id^="edit-suppression_"][id$="_standard_codes"]') ? standard : null, effective.size);
+    }
 }
 
 function settingsSetCodes(box, codes) {
