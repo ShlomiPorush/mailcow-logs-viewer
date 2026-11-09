@@ -362,7 +362,10 @@ class MailboxStatistics(Base):
     
     # Status
     active = Column(Boolean, default=True, index=True)
-    
+    # mailcow's active 2 (since 2026-11): the mailbox may not sign in, its mail is
+    # still delivered. Such a mailbox is active here.
+    login_disabled = Column(Boolean, nullable=False, default=False, server_default=text('false'))
+
     # Access times (Unix timestamps from API, stored as integers)
     last_imap_login = Column(BigInteger, nullable=True)
     last_pop3_login = Column(BigInteger, nullable=True)

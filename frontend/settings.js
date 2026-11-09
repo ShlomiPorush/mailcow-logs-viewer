@@ -3007,8 +3007,8 @@ const CREDENTIAL_CHECKS = {
         missing: 'Add a Read-Write API key first',
         accepted: 'mailcow accepted the Read-Write API key',
         errors: {
-            rejected: ['Rejected', 'mailcow rejected the Read-Write API key. Check in mailcow under System → Configuration → Access → Administrators → API that the key is correct and active, and that the IP address of this server is allowed.'],
-            read_only: ['Read-only key', 'This is a read-only API key. Paste the Read-Write key from System → Configuration → Access → Administrators → API in mailcow.'],
+            rejected: ['Rejected', 'mailcow rejected the Read-Write API key. Check in mailcow under System → Configuration → Access → Administrators → API that the key is correct and active, and that the IP address of this server is allowed. A key from mailcow.conf has its allowed IPs there (API_ALLOW_FROM).'],
+            read_only: ['Read-only key', 'This is a read-only API key. Paste a key with Read-Write Access from System → Configuration → Access → Administrators → API in mailcow.'],
             connection: ['Connection error', 'Could not reach mailcow to check the Read-Write API key. Check the mailcow URL and try again.'],
             unexpected: ['Unexpected answer', 'mailcow gave an unexpected answer when checking the Read-Write API key. Check the mailcow URL and the application logs.']
         }

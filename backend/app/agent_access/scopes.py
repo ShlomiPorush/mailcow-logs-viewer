@@ -159,6 +159,7 @@ POLICY: Dict[Tuple[str, str], Rule] = {
               '"ban_time_increment": <bool>}'),
     **_r("POST /api/fail2ban/unban", "POST /api/fail2ban/ban", "POST /api/fail2ban/allow",
          area="security", kind=WRITE, body='{"ip": "<address or network>"}'),
+    **_r("POST /api/fail2ban/unban-all", area="security", kind=WRITE),
     **_r("POST /api/fail2ban/remove", area="security", kind=WRITE,
          body='{"ip": "<address or network>", "list": "blacklist" | "whitelist"}'),
     **_r("POST /api/fail2ban/repair", area="security", kind=WRITE,

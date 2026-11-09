@@ -337,8 +337,13 @@ function entityCardVerdict(data) {
         if (data.excluded) return { tone: 'info', text: 'Excluded address', note: 'Messages does not keep or show its mail.' };
         const mailbox = entitySrc(data, 'mailbox');
         if (entityOk(mailbox) && mailbox.mailbox) {
-            const active = mailbox.mailbox.active !== false;
-            return { tone: suppressed ? 'warn' : active ? 'ok' : 'warn', text: active ? 'Active mailbox' : 'Inactive mailbox', note: supNote };
+            const box = mailbox.mailbox;
+            const active = box.active !== false;
+            if (active && box.login_disabled) {
+                return { tone: 'warn', text: 'Mailbox, login disabled', note: ['mailcow does not let it sign in. Mail is still delivered.', supNote].filter(Boolean).join(' ') };
+            }
+            const text = !active ? 'Inactive mailbox' : box.shared ? 'Shared mailbox' : 'Active mailbox';
+            return { tone: suppressed ? 'warn' : active ? 'ok' : 'warn', text, note: supNote };
         }
         if (entityOk(mailbox) && mailbox.alias) {
             return { tone: suppressed ? 'warn' : 'info', text: mailbox.alias.active === false ? 'Inactive alias' : 'Alias on this mailcow', note: supNote };

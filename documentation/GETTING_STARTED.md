@@ -14,8 +14,10 @@ The app needs a read-only key. A read-write key is needed only to change things 
 
 In the mailcow admin interface, open **System** > **Configuration** > **Access** > **Administrators** and expand **API**:
 
-1. Under **Read-Only Access**, enter the IP address the app connects from, tick **Activate API**, click **Save changes** and copy the **API key**.
-2. For the read-write key, do the same under **Read-Write Access**.
+1. Under **API keys**, click **Add API key**. Enter a description, choose **Read-Only Access**, enter the IP address the app connects from under **Allow API access from these IPs/CIDR network notations**, keep **Active** ticked, click **Add** and copy the key.
+2. For the read-write key, add another key with **Read-Write Access**.
+
+mailcow before 2026-11 has one key of each kind instead: under **Read-Only Access** and **Read-Write Access**, enter the IP address, tick **Activate API**, click **Save changes** and copy the **API key**. A key marked **Service key from mailcow.conf** can only be changed in `mailcow.conf`.
 
 The allowed IPs must include the address mailcow sees when the app connects. When both run on one host, this can differ from the address you expect. If mailcow rejects the key later, check this first.
 

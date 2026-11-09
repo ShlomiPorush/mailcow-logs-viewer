@@ -435,12 +435,26 @@ function toggleMailboxAlias(row, address) {
 }
 
 // What the mailbox may use, as a line of tags under its address
+// A shared mailbox (mailcow attribute shared "1"): people open it from their own mailbox
+function mailboxIsShared(mb) {
+    return String((mb.attributes || {}).shared ?? '0').trim() === '1';
+}
+
+// Inactive; or active with its login disabled in mailcow (mail is still delivered); and Shared
+function mailboxStateTags(mb) {
+    if (!mb.active) return uiTag('Inactive', 'fail');
+    return (mb.login_disabled ? '<span class="ui-tag ui-tag-warn" title="mailcow does not let it sign in. Mail is still delivered to it.">Login disabled</span>' : '')
+        + (mailboxIsShared(mb) ? ' <span class="ui-tag ui-tag-info" title="A shared mailbox: people open it from their own mailbox, it has no login of its own">Shared</span>' : '');
+}
+
 function mailboxServices(mb) {
     const at = mb.attributes || {};
+    // Nobody signs in to a shared mailbox: no "last login never" on its services
+    const shared = mailboxIsShared(mb);
     const services = [
-        ['IMAP', at.imap_access === '1', mb.last_imap_login],
-        ['POP3', at.pop3_access === '1', mb.last_pop3_login],
-        ['SMTP', at.smtp_access === '1', mb.last_smtp_login],
+        ['IMAP', at.imap_access === '1', shared ? undefined : mb.last_imap_login],
+        ['POP3', at.pop3_access === '1', shared ? undefined : mb.last_pop3_login],
+        ['SMTP', at.smtp_access === '1', shared ? undefined : mb.last_smtp_login],
         ['Sieve', at.sieve_access === '1'],
         ['TLS', at.tls_enforce_in === '1' || at.tls_enforce_out === '1'],
     ];
@@ -613,7 +627,7 @@ function renderMailboxStatsAccordion(mailboxes, page = 1, totalPages = 1, total 
         return `
             <div class="ui-tr ui-ms-row" data-ms-user="${escapeHtml(mb.username)}" onclick="if (!uiRowHeld(event)) toggleMailboxAccordion('${escapeJsArg(mb.username)}')">
                 <div class="ui-td ui-q-who">
-                    <div><button type="button" class="ui-row-chev" aria-expanded="${isExpanded}" aria-controls="accordion-content-${index}" aria-label="Details of ${escapeHtml(email)}" onclick="event.stopPropagation(); toggleMailboxAccordion('${escapeJsArg(mb.username)}')"><svg id="accordion-icon-${index}" class="ui-domain-chevron" width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"${isExpanded ? ' style="transform: rotate(90deg)"' : ''}><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg></button>${uiEntity('address', mb.username)} ${mb.active ? '' : uiTag('Inactive', 'fail')}</div>
+                    <div><button type="button" class="ui-row-chev" aria-expanded="${isExpanded}" aria-controls="accordion-content-${index}" aria-label="Details of ${escapeHtml(email)}" onclick="event.stopPropagation(); toggleMailboxAccordion('${escapeJsArg(mb.username)}')"><svg id="accordion-icon-${index}" class="ui-domain-chevron" width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"${isExpanded ? ' style="transform: rotate(90deg)"' : ''}><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg></button>${uiEntity('address', mb.username)} ${mailboxStateTags(mb)}</div>
                     ${mb.name ? `<small class="ui-ms-name">${escapeHtml(mb.name)}</small>` : ''}
                     <small class="ui-ms-sub">${escapeHtml(mb.quota_used_formatted)} · ${uiCountLabel(mb.alias_count || 0, 'alias', 'aliases')}</small>
                     ${mailboxServices(mb)}
@@ -632,9 +646,8 @@ function renderMailboxStatsAccordion(mailboxes, page = 1, totalPages = 1, total 
                         <div class="ui-md-fact ui-ms-msgs-fact"><span>Messages in Mailbox</span><div>${(mb.messages_in_mailbox || 0).toLocaleString()}</div></div>
                         <div class="ui-md-fact"><span>First seen / Last synced</span><div title="When this app first read the mailbox from mailcow">${mb.created ? formatTime(mb.created) : 'N/A'}</div><small class="ui-muted" title="When this app last read the mailbox from mailcow">${mb.modified ? formatTime(mb.modified) : 'N/A'}</small></div>
                         <div class="ui-md-fact"><span>Rate Limit</span><div>${escapeHtml(mailboxRateLimitLabel(mb))}</div></div>
-                        ${lastLogin('IMAP', mb.last_imap_login)}
-                        ${lastLogin('POP3', mb.last_pop3_login)}
-                        ${lastLogin('SMTP', mb.last_smtp_login)}
+                        ${mailboxIsShared(mb) ? '<div class="ui-md-fact"><span>Login</span><div>Shared mailbox, no login of its own</div></div>'
+                            : lastLogin('IMAP', mb.last_imap_login) + lastLogin('POP3', mb.last_pop3_login) + lastLogin('SMTP', mb.last_smtp_login)}
                     </div>
 
                     <h4 class="ui-md-h">Message Statistics</h4>

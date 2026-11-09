@@ -32,6 +32,7 @@ from sqlalchemy.orm import Session
 
 from ..app_time import utc_naive
 from ..config import cached_domains_known, is_hosted_domain, settings
+from ..mailcow_api import mailbox_shared
 from ..models import (AliasStatistics, BlacklistCheck, DMARCRecord, DMARCReport, DomainDNSCheck, EasDevice,
                       MailboxStatistics, MessageCorrelation, MonitoredHost, NetfilterLog, ProtectionHit,
                       RspamdLog, SpamSuppression)
@@ -569,7 +570,8 @@ def _mailbox(db: Session, address: str) -> dict:
             func.lower(MailboxStatistics.username) == alias.primary_mailbox.strip().lower()).limit(1).scalar()
     return {
         "local": box is not None,
-        "mailbox": {"username": box.username, "name": box.name, "domain": box.domain, "active": box.active} if box else None,
+        "mailbox": {"username": box.username, "name": box.name, "domain": box.domain, "active": box.active,
+                    "login_disabled": bool(box.login_disabled), "shared": mailbox_shared(box.attributes)} if box else None,
         "alias": {"address": alias.alias_address, "goto": alias.goto, "primary_mailbox": alias.primary_mailbox,
                   "local_mailbox": target, "active": alias.active} if alias else None,
     }

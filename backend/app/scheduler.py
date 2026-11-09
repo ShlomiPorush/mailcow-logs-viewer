@@ -23,7 +23,7 @@ from sqlalchemy.exc import IntegrityError
 from .app_time import UTC, app_tz, format_clock
 from .config import settings, set_cached_active_domains, cached_domains_known, local_domains_complete, is_hosted_domain
 from .database import get_db_context, SessionLocal
-from .mailcow_api import MailcowWriteUnknownError, mailcow_api, mailcow_handled_items
+from .mailcow_api import MailcowWriteUnknownError, mailbox_state, mailcow_api, mailcow_handled_items
 from .services.suppression_events import disabled_by_hand, record_bounces, record_stuck
 from .services.suppression_rows_lock import lock_suppression_rows
 from .services.bounce_policy import cleanup_blocks, code_excluded, codes_in_text, handling_on, hard_action, soft_action, rspamd_sync_on
@@ -3002,7 +3002,7 @@ def _store_mailbox_statistics(mailboxes):
                     existing.quota_used = safe_int(mb.get('quota_used'), 0)
                     existing.percent_in_use = safe_float(mb.get('percent_in_use'), 0.0)
                     existing.messages = safe_int(mb.get('messages'), 0)
-                    existing.active = mb.get('active', 1) == 1
+                    existing.active, existing.login_disabled = mailbox_state(mb)
                     existing.last_imap_login = safe_int(mb.get('last_imap_login'), 0) or None
                     existing.last_pop3_login = safe_int(mb.get('last_pop3_login'), 0) or None
                     existing.last_smtp_login = safe_int(mb.get('last_smtp_login'), 0) or None
@@ -3022,7 +3022,8 @@ def _store_mailbox_statistics(mailboxes):
                         quota_used=safe_int(mb.get('quota_used'), 0),
                         percent_in_use=safe_float(mb.get('percent_in_use'), 0.0),
                         messages=safe_int(mb.get('messages'), 0),
-                        active=mb.get('active', 1) == 1,
+                        active=mailbox_state(mb)[0],
+                        login_disabled=mailbox_state(mb)[1],
                         last_imap_login=safe_int(mb.get('last_imap_login'), 0) or None,
                         last_pop3_login=safe_int(mb.get('last_pop3_login'), 0) or None,
                         last_smtp_login=safe_int(mb.get('last_smtp_login'), 0) or None,

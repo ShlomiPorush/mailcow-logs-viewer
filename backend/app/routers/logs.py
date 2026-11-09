@@ -14,7 +14,7 @@ from typing import List, Optional
 from ..database import get_db
 from ..models import PostfixLog, RspamdLog, NetfilterLog, MessageCorrelation
 from ..correlation import shown_postfix_lines, split_queue_occurrences
-from ..mailcow_api import MailcowShownError, mailcow_api
+from ..mailcow_api import MailcowShownError, mailcow_api, mailcow_handled_items, mailcow_reply
 from ..config import settings
 from ..services import entity_values, excluded_addresses, geoip_service, protection_rules, security_addresses, written_recipients
 from .messages import address_equals, on_domain
@@ -881,7 +881,7 @@ async def unban_fail2ban(request: Request):
             raise HTTPException(status_code=400, detail="Missing 'ip' field")
         
         current = await mailcow_api.get_fail2ban()
-        if current is None:
+        if not security_addresses.fail2ban_answered(current):
             raise HTTPException(status_code=503, detail="Could not fetch current Fail2Ban settings")
         # mailcow answers success to any unban and its netfilter skips one it has no
         # ban for, so only an address Fail2ban banned now is sent, as the ban it is
@@ -905,6 +905,57 @@ async def unban_fail2ban(request: Request):
         raise
     except Exception as e:
         logger.error(f"Error unbanning IP from Fail2Ban: {e}")
+        if isinstance(e, MailcowShownError):
+            raise internal_error(e)
+        raise HTTPException(status_code=502, detail="mailcow did not accept the unban. Check the Read-Write API key and try again.")
+
+
+@router.post("/fail2ban/unban-all", responses=documented(m.ActionResult, errors={502: None, 503: None}))
+async def unban_all_fail2ban():
+    """
+    Lift every ban Fail2ban made, by the networks it banned (requires Read-Write API key).
+    The denylist, and the bans the protection rules wrote to it, stay. mailcow
+    queues the unbans; netfilter lifts them within seconds.
+    """
+    try:
+        current = await mailcow_api.get_fail2ban()
+        if not security_addresses.fail2ban_answered(current):
+            raise HTTPException(status_code=503, detail="Could not fetch current Fail2Ban settings")
+        # The same bans the Security page shows: not a permanent ban (the denylist),
+        # not one already queued for unbanning. mailcow's own "unban-all" action
+        # exists only since 2026-11, so the bans are sent by name with "unban".
+        permanent = {b.get("network") or b.get("ip") for b in current.get("perm_bans") or [] if isinstance(b, dict)}
+        networks = []
+        for ban in current.get("active_bans") or []:
+            key = ban.get("network") if isinstance(ban, dict) else None
+            if not key or key in permanent or key in networks or security_addresses._truthy(ban.get("queued_for_unban")):
+                continue
+            try:
+                ipaddress.ip_network(key, strict=False)
+            except ValueError:
+                continue
+            networks.append(key)
+        if not networks:
+            return {"status": "error", "msg": "Nothing is banned by Fail2ban now"}
+
+        result = await mailcow_api.unban_fail2ban(networks)
+        # mailcow confirms each network on its own and goes on after one it could not queue
+        lifted = [n for n in networks if n in mailcow_handled_items(result, networks)]
+        logger.info(f"Unban all: mailcow queued {len(lifted)} of {len(networks)} Fail2ban bans")
+        if not lifted:
+            entries = mailcow_reply(result)
+            refusal = next((e.get("msg") for e in entries if e.get("type") != "success" and e.get("msg")), None)
+            return {"status": "error", "msg": refusal or "mailcow did not take the unbans. Try again."}
+        if len(lifted) < len(networks):
+            return {"status": "error", "networks": lifted,
+                    "msg": f"Fail2ban is lifting {len(lifted)} of {len(networks)} bans. mailcow did not take the others. Try again."}
+        return {"status": "success", "networks": lifted,
+                "msg": f"Fail2ban is lifting {len(lifted)} ban{'' if len(lifted) == 1 else 's'}"}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error unbanning all from Fail2Ban: {e}")
         if isinstance(e, MailcowShownError):
             raise internal_error(e)
         raise HTTPException(status_code=502, detail="mailcow did not accept the unban. Check the Read-Write API key and try again.")

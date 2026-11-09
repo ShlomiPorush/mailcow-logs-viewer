@@ -10,7 +10,7 @@ from pydantic import BaseModel
 from datetime import datetime, timedelta, timezone
 from typing import Dict, Any
 
-from ..mailcow_api import mailcow_api
+from ..mailcow_api import mailbox_state, mailcow_api
 from ..version import __version__
 from ..scheduler import check_app_version_update, get_app_version_cache
 from ..database import SessionLocal
@@ -356,7 +356,7 @@ async def get_mailcow_info():
         
         # Count active items
         active_domains = sum(1 for d in domains if d.get('active', 0) == 1)
-        active_mailboxes = sum(1 for m in mailboxes if m.get('active', 0) == 1)
+        active_mailboxes = sum(1 for m in mailboxes if mailbox_state(m)[0])
         active_aliases = sum(1 for a in aliases if a.get('active', 0) == 1)
         
         return {

@@ -641,6 +641,7 @@ def get_all_mailbox_stats(
                 "domain": mb.domain,
                 "name": mb.name,
                 "active": mb.active,
+                "login_disabled": bool(mb.login_disabled),
                 # Quota info
                 "quota": float(mb.quota or 0),
                 "quota_formatted": format_bytes(mb.quota),
