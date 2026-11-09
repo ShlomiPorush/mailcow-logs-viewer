@@ -2170,14 +2170,13 @@ def notify_dns_changes(domain_name: str, changes: List[Dict[str, str]]) -> None:
         html = layout.render(
             title=f"DNS records changed for {domain_name}", topic='DNS', tone='warn',
             intro=f"{len(changes)} record{'s' if len(changes) != 1 else ''} changed: {types}.",
-            # A DKIM key is a few hundred characters without a space; Outlook
-            # cannot wrap it, so the HTML shows its start and end
+            # Records are shown whole: the change may be anywhere in them.
+            # A DKIM key is a few hundred characters without a space, which
+            # Outlook for Windows cannot wrap, so it gets the key in lines
             blocks=[layout.panel(change['type'], layout.table(
                 ['', 'Value'],
-                [['Before', layout.mono(change['old'], max_length=56)],
-                 ['Now', layout.mono(change['new'], max_length=56)]], head=False),
-                note=('Long values are shortened here; the plain-text part of this email has them in full.'
-                      if max(len(str(change['old'])), len(str(change['new']))) > 56 else None))
+                [['Before', layout.mono(change['old'], wrap=56)],
+                 ['Now', layout.mono(change['new'], wrap=56)]], head=False))
                 for change in changes] + [layout.banner('warn', 'What to do', advice)],
             footer=footer)
         notify(subject, "\n".join(lines), html_content=html, alert_type="dns_changes")

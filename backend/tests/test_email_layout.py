@@ -183,11 +183,65 @@ def test_address_scan_stays_fast_on_hostile_text():
     assert time.perf_counter() - started < 1
 
 
-def test_long_values_are_shortened_in_the_middle():
-    value = 'v=DKIM1;k=rsa;p=' + 'A' * 300 + 'END'
-    shown = e.mono(value, max_length=56)
-    assert 'v=DKIM1;k=rsa;p=' in shown and 'END' in shown and '…' in shown
-    assert len(shown.split('>', 1)[1].rsplit('<', 1)[0]) == 56
+def _mso_parts(html):
+    """(the copy for Outlook for Windows, the copy for every other client)"""
+    import re
+    word = re.search(r'<!--\[if mso\]>(.*?)<!\[endif\]-->', html, re.S)
+    other = re.search(r'<!--\[if !mso\]><!-->(.*?)<!--<!\[endif\]-->', html, re.S)
+    return (word.group(1) if word else None), (other.group(1) if other else None)
+
+
+def test_long_values_are_never_shortened():
+    """A DNS alert must show the whole record: a change in the middle of an
+    SPF record was hidden behind an ellipsis."""
+    key = 'MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA' + 'Ab1+/' * 60 + 'IDAQAB'
+    value = f'v=DKIM1;k=rsa;t=s;s=email;p={key}'
+    shown = e.mono(value, wrap=56)
+    assert '…' not in shown
+    word, other = _mso_parts(shown)
+    # Every other client gets the value whole, so a copy is the real record
+    assert other is not None and ''.join(_texts(other)) == value
+    # Outlook for Windows cannot break a run without spaces; it gets lines
+    # of at most 56 characters that together are the whole value
+    lines = word.split('<span', 1)[1].split('>', 1)[1].rsplit('</span>', 1)[0].split('<br>')
+    assert ''.join(lines) == value and all(len(line) <= 56 for line in lines) and len(lines) > 1
+
+
+def test_long_spf_record_keeps_its_middle():
+    value = ('v=spf1 +a include:_spf.example.net '
+             'include:spf.mail-relay.example.com ~all')
+    shown = e.mono(value, wrap=56)
+    assert ''.join(_texts(shown)) == value
+    # Words short enough to wrap at spaces need no copy for Outlook
+    assert '[if mso]' not in shown
+
+
+def test_dns_change_alert_shows_whole_records(monkeypatch):
+    from app.routers import domains
+    from app.services import notification_service
+    sent = {}
+    monkeypatch.setattr(notification_service, 'notify',
+                        lambda subject, text, html_content=None, **kw: sent.update(html=html_content))
+    old = 'v=spf1 +a include:_spf.example.net ~all'
+    new = 'v=spf1 +a include:_spf.example.net include:spf.mail-relay.example.com ~all'
+    domains.notify_dns_changes('example.com', [{'type': 'SPF', 'old': old, 'new': new}])
+    texts = ' '.join(_texts(sent['html']))
+    assert old in texts and new in texts and '…' not in sent['html']
+    assert 'shortened' not in sent['html']
+
+
+def test_long_runs_are_split_before_escaping():
+    import html
+    import re
+    # The line ends inside "&<>": an escaped entity cut there would show
+    # as "&am" and "p;" in Outlook
+    value = 'p=' + 'A' * 53 + '&<>' + 'B' * 60
+    word, other = _mso_parts(e.mono(value, wrap=56))
+    for part in (word, other):
+        text = part.split('>', 1)[1].rsplit('</span>', 1)[0]
+        assert '<' not in text.replace('<br>', '')
+        assert all(re.match(r'&(amp|lt|gt|quot|#x27);', text[i:]) for i in range(len(text)) if text[i] == '&')
+        assert html.unescape(text.replace('<br>', '')) == value
 
 
 def _summary_data():

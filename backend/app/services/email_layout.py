@@ -261,15 +261,28 @@ def strong(text, tone: Optional[str] = None) -> Safe:
     return Safe(f'<b class="{cls} m-b" style="color:{color};font-weight:650;">{_e(text, cls)}</b>')
 
 
-def mono(text, max_length: Optional[int] = None) -> Safe:
-    """Technical values (addresses, record text, keys). Long keys have no
-    spaces, so they may break anywhere instead of widening the email. Word
-    cannot break them at all, so max_length shortens them in the middle."""
+def mono(text, wrap: Optional[int] = None) -> Safe:
+    """Technical values (addresses, record text, keys), always whole. Long
+    keys have no spaces, so they may break anywhere instead of widening the
+    email. Word (Outlook for Windows) cannot break them at all: with wrap,
+    it gets its own copy in which every run longer than wrap characters is
+    cut into lines of that length. Every other client gets the value as it
+    is, so a copy of it is the real value."""
     text = '' if text is None else str(text)
-    if max_length and len(text) > max_length:
-        keep = max_length - 1
-        text = f'{text[:keep * 2 // 3]}…{text[-(keep - keep * 2 // 3):]}'
-    return Safe(f'<span class="m-mono" style="font-family:{MONO};font-size:13px;word-break:break-all;">{_e(text)}</span>')
+    span = f'<span class="m-mono" style="font-family:{MONO};font-size:13px;word-break:break-all;">'
+    whole = f'{span}{_e(text)}</span>'
+    if not wrap or not any(len(run) > wrap for run in text.split()):
+        return Safe(whole)
+
+    def lines(run):
+        if len(run) <= wrap:
+            return _e(run)
+        # Cut first, then escape, so no entity is split
+        return '<br>'.join(_attr(run[i:i + wrap]) for i in range(0, len(run), wrap))
+
+    word = ''.join(lines(part) if part.strip() else _attr(part) for part in re.split(r'(\s+)', text))
+    return Safe(f'<!--[if mso]>{span}{word}</span><![endif]-->'
+                f'<!--[if !mso]><!-->{whole}<!--<![endif]-->')
 
 
 def link(text, url) -> Safe:
