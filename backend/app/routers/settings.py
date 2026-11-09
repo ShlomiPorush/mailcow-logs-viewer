@@ -72,7 +72,7 @@ def _job_off_reason(key: str):
                                    (not settings.queue_cleanup_enabled, 'Temporary delivery failure is set to keep retrying', 'outbound'),
                                    (not rw, 'Needs the Read-Write API key (MAILCOW_API_KEY_RW)', 'mailcow')],
         'anomaly_detection': [(not settings.anomaly_detection_enabled, 'Anomaly detection is turned off', 'anomaly')],
-        'smtp_abuse': [(not settings.smtp_abuse_enabled, 'SMTP abuse protection is turned off', 'smtp_abuse'),
+        'smtp_abuse': [(not settings.smtp_abuse_enabled, 'Outgoing spam protection is turned off', 'smtp_abuse'),
                        (not rw, 'Needs the Read-Write API key (MAILCOW_API_KEY_RW)', 'mailcow')],
     }
     for off, reason, section in checks.get(key, []):

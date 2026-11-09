@@ -1550,7 +1550,7 @@ var SETTINGS_EDIT_TABS = [
         ]
     },
     {
-        id: 'smtp_abuse', label: 'SMTP Abuse', description: 'Block sending from mailboxes that exceed a fixed message limit within a set time. See and manage them in Security > Settings > Outgoing spam.', groups: [
+        id: 'smtp_abuse', label: 'Outgoing spam', description: 'Block sending from mailboxes that exceed a fixed message limit within a set time. See and manage them in Security > Settings > Outgoing spam.', groups: [
             { label: 'Enable', keys: ['smtp_abuse_enabled'] },
             { label: 'Limit', keys: ['smtp_abuse_threshold', 'smtp_abuse_window_minutes'] },
             { label: 'Response', keys: ['smtp_abuse_revoke_app_passwords', 'smtp_abuse_unblock_grace_minutes', 'smtp_abuse_help_address'] }

@@ -83,7 +83,7 @@ See [Status](Status.md) and [About](About.md) for details.
 ## Settings that change this page
 
 - **Settings** > **Anomaly detection** enables volume spike and login burst alerts and sets their limits. It is off by default (`ANOMALY_DETECTION_ENABLED`).
-- **Settings** > **SMTP Abuse** controls the protection that raises SMTP disabled alerts.
+- **Settings** > **Outgoing spam** controls the protection that raises SMTP disabled alerts.
 - **Settings** > **Features** hides the Security panel and stops its sidebar failed-login count when Security is off. **Blocklists** controls the Blocklists card and attention row; DMARC & TLS controls the DMARC row.
 - **Settings** > **Notifications** selects destinations for security alerts.
 

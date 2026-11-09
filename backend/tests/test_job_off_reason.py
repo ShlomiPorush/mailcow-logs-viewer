@@ -27,7 +27,7 @@ def test_imap_and_maxmind_point_to_their_own_sections(monkeypatch):
 def test_the_first_missing_condition_is_the_reason(monkeypatch):
     _rw(monkeypatch, False)
     monkeypatch.setattr(settings_router.settings._inner, 'smtp_abuse_enabled', False)
-    assert settings_router._job_off_reason('smtp_abuse')[0] == 'SMTP abuse protection is turned off'
+    assert settings_router._job_off_reason('smtp_abuse')[0] == 'Outgoing spam protection is turned off'
     monkeypatch.setattr(settings_router.settings._inner, 'smtp_abuse_enabled', True)
     assert 'Read-Write' in settings_router._job_off_reason('smtp_abuse')[0]
 

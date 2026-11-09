@@ -78,7 +78,7 @@ Lets AI agents such as Claude Code and Codex connect, and lists the allowed ones
 
 It only alerts; it never blocks. It compares what each mailbox sends with its own normal rate and counts failed logins per username. Alerts go to email and your alert destinations and appear on the [Dashboard](Dashboard.md#security-alerts).
 
-## SMTP Abuse
+## Outgoing spam
 
 It stops a mailbox from sending when it goes over a limit. The mailbox still receives mail; if its app passwords are revoked too, mail apps that sign in with one stop working. It needs the read-write API key. The same values, the stopped mailboxes and the whitelist are on the **Outgoing spam** card under **Security** > **Settings**; see [Outgoing spam](Abuse_Protection.md).
 
