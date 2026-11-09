@@ -208,8 +208,8 @@ def test_long_values_are_never_shortened():
 
 
 def test_long_spf_record_keeps_its_middle():
-    value = ('v=spf1 +a include:_spf.mosesmail.net '
-             'include:spf.protection.outlook.com ~all')
+    value = ('v=spf1 +a include:_spf.example.net '
+             'include:spf.mail-relay.example.com ~all')
     shown = e.mono(value, wrap=56)
     assert ''.join(_texts(shown)) == value
     # Words short enough to wrap at spaces need no copy for Outlook
@@ -222,8 +222,8 @@ def test_dns_change_alert_shows_whole_records(monkeypatch):
     sent = {}
     monkeypatch.setattr(notification_service, 'notify',
                         lambda subject, text, html_content=None, **kw: sent.update(html=html_content))
-    old = 'v=spf1 +a include:_spf.mosesmail.net ~all'
-    new = 'v=spf1 +a include:_spf.mosesmail.net include:spf.protection.outlook.com ~all'
+    old = 'v=spf1 +a include:_spf.example.net ~all'
+    new = 'v=spf1 +a include:_spf.example.net include:spf.mail-relay.example.com ~all'
     domains.notify_dns_changes('example.com', [{'type': 'SPF', 'old': old, 'new': new}])
     texts = ' '.join(_texts(sent['html']))
     assert old in texts and new in texts and '…' not in sent['html']
