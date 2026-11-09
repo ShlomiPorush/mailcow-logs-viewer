@@ -976,11 +976,16 @@ function settingsBounceCodes(kind, config, lockedKeys, defaults) {
             label: `${cls}.${code} ${name}`, value: `${cls}.${code}`, onclick: `settingsPickCode('${kind}', '${cls}.${code}')`
         }))
     });
+    // Closed at first: its line says what is excluded now (settingsShowCodes)
     return '<div class="ui-set-field ui-set-wide ui-set-codes' + (locked ? ' is-locked' : '') + '" data-codes="' + kind + '" data-class="' + cls + '" data-default="' +
             escapeHtml(String(defaults[key] ?? '')) + '">' +
-        '<div class="ui-set-choice-head"><span class="ui-label" id="label-' + id + '">Status code exceptions</span>' +
+        '<details class="ui-collapse ui-set-codes-fold"><summary>' +
+        '<span class="ui-set-choice-head"><span class="ui-label" id="label-' + id + '">' + escapeHtml(SETTINGS_CODES_HEADING) + '</span>' +
             (locked ? '<span class="ui-set-pill" title="Set by an environment variable, change it there">' + SETTINGS_LOCK_ICON + ' Set by ENV: ' + escapeHtml(key.toUpperCase()) + '</span>' : '') +
-            '<span class="ui-set-pill is-changed" title="Differs from the default" hidden>Changed</span></div>' +
+            '<span class="ui-set-pill is-changed" title="Differs from the default" hidden>Changed</span></span>' +
+            '<small class="ui-set-desc" data-codes-summary></small>' +
+            '<svg class="ui-collapse-chevron" width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>' +
+        '</summary><div class="ui-set-codes-body">' +
         '<small class="ui-set-desc">' + escapeHtml(desc) + '</small>' +
         settingsStandardCodes(kind, cls, config, lockedKeys, defaults) +
         '<span class="ui-label ui-set-codes-also" id="label-' + id + '-also">Additional codes to exclude</span>' +
@@ -994,9 +999,18 @@ function settingsBounceCodes(kind, config, lockedKeys, defaults) {
             '<small class="ui-set-codes-error ui-text-fail" data-codes-error role="status" hidden></small>') +
         '<div class="ui-set-codes-seen" data-codes-seen hidden></div>' +
         '<input type="hidden" id="edit-' + key + '" name="' + key + '" value="' + escapeHtml(String(config[key] ?? '')) + '"' + (locked ? ' disabled' : '') + '>' +
+        '</div></details>' +
         (locked ? '' : '<button type="button" class="ui-set-clear is-reset" onclick="settingsResetCodes(this)" hidden>↺ Reset to default (' +
             escapeHtml(String(defaults[key] ?? '') || 'empty') + ')</button>') +
         '</div>';
+}
+
+// The line on a closed Status code exceptions area. standard: the switch for the
+// failures unrelated to the recipient (null when the area has none); count: the codes added
+function settingsCodesSummary(standard, count) {
+    const added = count ? uiCountLabel(count, 'code', 'codes') : '';
+    if (standard) return count ? SETTINGS_CODES_SUMMARY.standardPlus.replace('{codes}', added) : SETTINGS_CODES_SUMMARY.standard;
+    return count ? SETTINGS_CODES_SUMMARY.codes.replace('{codes}', added) : SETTINGS_CODES_SUMMARY.none;
 }
 
 // The chips, the codes seen in the logs that are not in the list yet, and Changed
@@ -1040,7 +1054,10 @@ function settingsShowCodes(box) {
     const changed = !locked && field.value !== box.dataset.default;
     box.classList.toggle('is-changed', changed);
     // The list's own marker and Reset: the switch row inside has its own
-    box.querySelectorAll(':scope > .ui-set-choice-head .ui-set-pill.is-changed, :scope > .is-reset').forEach(el => { el.hidden = !changed; });
+    box.querySelectorAll(':scope > .ui-set-codes-fold > summary .ui-set-pill.is-changed, :scope > .is-reset').forEach(el => { el.hidden = !changed; });
+    // What the closed area leaves alone now
+    const summary = box.querySelector('[data-codes-summary]');
+    if (summary) summary.textContent = settingsCodesSummary(box.querySelector('[id^="edit-suppression_"][id$="_standard_codes"]') ? standard : null, codes.length);
 }
 
 function settingsSetCodes(box, codes) {
@@ -1288,6 +1305,15 @@ async function settingsRspamdAfterSave(plan, saved) {
     if (plan.action === 'fresh') return ['Sync with Rspamd is on. The list and this app\'s Rspamd blocks were cleared.', 'success'];
     return null;
 }
+
+// Outbound: the heading of a Status code exceptions area, and the line on it while it is closed
+const SETTINGS_CODES_HEADING = 'Status code exceptions';
+const SETTINGS_CODES_SUMMARY = {
+    standard: 'Failures unrelated to the recipient address are excluded.',
+    standardPlus: 'Failures unrelated to the recipient address are excluded, plus {codes}.',
+    codes: '{codes} excluded.',
+    none: 'No exceptions.'
+};
 
 // Texts of the session signing key's Generate and of the Basic Auth password's Remove while it is off
 const SETTINGS_GENERATE_KEY = 'Generate';
@@ -2044,6 +2070,7 @@ function settingsCheckFields(form, initialValues, fieldValue) {
         const tab = form.closest('#settings-content')?.querySelector(`.settings-edit-tab[data-tab="${panel.id.replace('settings-tab-panel-', '')}"]`);
         if (tab) tab.click();
     }
+    for (let fold = first.closest('details:not([open])'); fold; fold = fold.parentElement.closest('details:not([open])')) fold.open = true;
     first.focus({ preventScroll: true });   // Settings' own area scrolls, not the app frame (scrollIntoView can pan a phone's window)
     { let area = first.parentElement; while (area && !(area.scrollHeight > area.clientHeight && /auto|scroll/.test(getComputedStyle(area).overflowY))) area = area.parentElement; if (area) area.scrollTop += first.getBoundingClientRect().top - area.getBoundingClientRect().top - area.clientHeight / 2; }
     const label = first.closest('.ui-set-field, .ui-set-bool, .ui-set-wide')?.querySelector('.ui-label');

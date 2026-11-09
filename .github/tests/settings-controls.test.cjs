@@ -128,3 +128,26 @@ test('Message linking is a section of Fetch, and has no section of its own', () 
     assert.ok(!vm.runInContext('SETTINGS_TAB_GROUPS', c).some(g => g.tabs.includes('correlation')));
     // Its old address opens Fetch: outbound-area.test.cjs, with the other moved addresses
 });
+
+test('Status code exceptions start closed and say what is excluded', () => {
+    const c = load();
+    const html = vm.runInContext(`settingsBounceCodes('hard', { suppression_hard_bounce_excluded_codes: '5.2.1', suppression_hard_bounce_standard_codes: true },
+        new Set(), { suppression_hard_bounce_excluded_codes: '', suppression_hard_bounce_standard_codes: true })`, c);
+    assert.match(html, /<details class="ui-collapse ui-set-codes-fold"><summary>/);
+    assert.doesNotMatch(html, /<details class="ui-collapse ui-set-codes-fold" open/);
+    // The value and its Reset stay reachable with the area closed
+    assert.match(html, /<input type="hidden" id="edit-suppression_hard_bounce_excluded_codes"[^>]*><\/div><\/details><button type="button" class="ui-set-clear is-reset"/);
+    const says = (standard, count) => c.settingsCodesSummary(standard, count);
+    assert.match(says(true, 0), /unrelated to the recipient/);
+    assert.match(says(true, 2), /2 codes/);
+    assert.match(says(false, 1), /1 code\b/);
+    // Without the switch, or with it off, nothing but the added codes is excluded
+    assert.equal(says(false, 0), says(null, 0));
+});
+
+test('search and the save check open a closed area to reach its field', () => {
+    for (const file of ['search.js', 'settings.js']) {
+        const code = fs.readFileSync(path.join(frontend, file), 'utf8');
+        assert.match(code, /closest\('details:not\(\[open\]\)'\); fold; fold = fold\.parentElement\.closest\('details:not\(\[open\]\)'\)\) fold\.open = true;/, file);
+    }
+});

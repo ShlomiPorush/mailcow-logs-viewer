@@ -781,6 +781,8 @@ async function gsOpenSetting(setting) {
     const row = el => el.closest('.ui-set-field, .ui-set-bool, .ui-set-wide');
     const find = () => {
         const el = gsEl('edit-' + setting.key) || gsEl('setting-' + setting.key);
+        // A field in a closed area (Outbound's Status code exceptions) is reached by opening it
+        for (let fold = el && el.closest('details:not([open])'); fold; fold = fold.parentElement.closest('details:not([open])')) fold.open = true;
         // A value kept in a hidden field (the Time Zone picker, Features) is seen through its row
         const box = el && (el.type === 'hidden' || el.hidden) ? row(el) : el;
         return box && box.offsetParent ? el : null;

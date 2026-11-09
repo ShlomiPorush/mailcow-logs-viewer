@@ -2385,6 +2385,13 @@ html body .ui-main .ui-set-choice-opt > input[type="radio"] { accent-color: var(
 .ui-set-codes-groups span { display: flex; gap: 8px; font-size: 12.5px; line-height: 1.55; }
 .ui-set-codes-groups b { flex: none; min-width: 4.6em; direction: ltr; unicode-bidi: isolate; text-align: start; }
 .ui-set-codes-also { margin-top: 6px; }
+/* Status code exceptions fold: the head and what is excluded now, then the area */
+.ui-set-codes-fold > summary { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 2px 10px; margin: -4px -6px; padding: 4px 6px; border-radius: var(--ui-radius); }
+.ui-set-codes-fold > summary .ui-set-choice-head { grid-column: 1; }
+.ui-set-codes-fold > summary .ui-set-desc { grid-column: 1; }
+.ui-set-codes-fold > summary .ui-collapse-chevron { grid-column: 2; grid-row: 1 / span 2; }
+.ui-set-codes-fold[open] > summary { border-bottom: 0; }
+.ui-set-codes-body { display: grid; gap: 10px; margin-top: 10px; }
 
 /* Floating save bar (uiSaveBar), shown only with unsaved changes, on every editable page */
 .ui-savebar { position: fixed; inset: auto 0 18px 0; z-index: 60; display: flex; align-items: center; gap: 12px; width: fit-content; margin: 0 auto;
