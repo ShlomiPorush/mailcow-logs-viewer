@@ -640,7 +640,7 @@ function editUser(userId) {
     const areas = user ? (user.areas || {}) : usersPresetAreas('operator');
     const name = user ? usersName(user) : '';
     const box = (area, mode, on) => `<label class="ui-consent-box"><input type="checkbox" class="ui-check" data-area="${escapeHtml(area.id)}"
-        data-kind="${mode}" ${on ? 'checked' : ''} aria-label="${mode === 'act' ? 'Take action' : 'View'}: ${escapeHtml(area.label)}"></label>`;
+        data-kind="${mode}" ${on ? 'checked' : ''} aria-label="${mode === 'act' ? 'Action' : 'View'}: ${escapeHtml(area.label)}"></label>`;
     const rows = (usersData.areas || []).map(area => `
         <div class="ui-consent-row">
             <div class="ui-consent-area"><b>${escapeHtml(area.label)}</b><small>${escapeHtml(area.view || '')}</small>
@@ -682,7 +682,7 @@ function editUser(userId) {
         body: `
             <div>
                 <label class="ui-sec-inline"><input type="checkbox" class="ui-check" id="user-edit-disabled" ${user && user.disabled ? 'checked' : ''}> Disable sign-in</label>
-                <p class="ui-set-desc">Signs this user out immediately and prevents sign-in until re-enabled.</p>
+                <p class="ui-set-desc">${user ? 'When saved, signs this user out and prevents sign-in until you enable it again.' : 'Creates the user with sign-in disabled. You can enable it later.'}</p>
             </div>
             <input type="hidden" id="user-edit-kind-value" value="${kind}">
             <input type="hidden" id="user-edit-level-value" value="${level}">
@@ -696,7 +696,7 @@ function editUser(userId) {
                 <div id="user-edit-level-text">${usersPresetText(level)}</div>
             </div>
             <div class="ui-consent-areas${level === 'custom' ? '' : ' hidden'}" role="group" aria-label="What this user may do" id="user-edit-grid">
-                <div class="ui-consent-row ui-consent-row-head" aria-hidden="true"><span>Area</span><span>View</span><span>Take action</span></div>
+                <div class="ui-consent-row ui-consent-row-head" aria-hidden="true"><span>Area</span><span>View</span><span>Action</span></div>
                 ${rows}
             </div>`,
         footClass: 'ui-agent-edit-foot',
@@ -730,7 +730,7 @@ function editUser(userId) {
         modal.querySelector('#user-edit-kind-value').value = button.dataset.kind;
         modal.querySelectorAll('[data-for]').forEach(el => el.classList.toggle('hidden', el.dataset.for !== button.dataset.kind));
     });
-    // Take action includes View: ticking it ticks View, and clearing View clears it
+    // Action includes View: ticking it ticks View, and clearing View clears it
     grid.addEventListener('change', event => {
         const changed = event.target;
         if (!changed.dataset || !changed.dataset.area) return;

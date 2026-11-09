@@ -104,7 +104,7 @@ CHANNEL_TYPES: Dict[str, Dict] = {
     },
     "telegram": {
         "label": "Telegram",
-        "help": "Enter your bot token and the chat ID that should receive alerts. For a direct chat, message your bot first.",
+        "help": "Enter your bot token and the chat ID that should receive alerts. For a direct chat, message your bot first. For a group topic, enter its Topic ID.",
         "fields": [
             {"key": "bot_token", "label": "Bot token", "type": "text", "required": True,
              "secret": True, "placeholder": "123456789:AAExample-Token"},

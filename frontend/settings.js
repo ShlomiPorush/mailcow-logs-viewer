@@ -19,7 +19,7 @@ const SETTINGS_LABEL_OVERRIDES = {
     mailcow_api_timeout: 'API timeout (seconds)',
     mailcow_api_verify_ssl: 'Verify TLS certificates',
     rspamd_password: 'Rspamd password',
-    fetch_interval: 'Fetch every (seconds)',
+    fetch_interval: 'Fetch message and security logs every (seconds)',
     fetch_count_postfix: 'Postfix logs per request',
     fetch_count_rspamd: 'Rspamd logs per request',
     fetch_count_netfilter: 'Netfilter logs per request',
@@ -37,7 +37,7 @@ const SETTINGS_LABEL_OVERRIDES = {
     debug: 'Debug mode',
     max_search_results: 'Maximum search results',
     csv_export_limit: 'Maximum CSV rows',
-    scheduler_workers: 'Background job workers',
+    scheduler_workers: 'Background jobs at once',
     blacklist_dns_servers: 'DNS resolvers',
     blacklist_source_server_ip: 'mailcow public IP',
     blacklist_source_transports: 'Transport IPs',
@@ -51,7 +51,7 @@ const SETTINGS_LABEL_OVERRIDES = {
     basic_auth_enabled: 'Enable Basic Auth',
     auth_username: 'Username',
     auth_password: 'Password',
-    auth_max_failure_clients: 'Maximum addresses tracked for failed sign-ins',
+    auth_max_failure_clients: 'Maximum tracked sign-in addresses',
     oauth2_enabled: 'Enable OAuth2 / OIDC',
     oauth2_provider_name: 'Provider name',
     oauth2_issuer_url: 'Issuer URL',
@@ -113,8 +113,8 @@ const SETTINGS_LABEL_OVERRIDES = {
     dmarc_imap_scan_all_unseen: 'Check all unread emails',
     maxmind_account_id: 'MaxMind account ID',
     maxmind_license_key: 'MaxMind license key',
-    raw_logs_enabled: 'Collect logs for the Logs page',
-    raw_logs_fetch_interval: 'Fetch every (seconds)',
+    raw_logs_enabled: 'Collect service logs for the Logs page',
+    raw_logs_fetch_interval: 'Fetch service logs every (seconds)',
     raw_logs_fetch_count: 'Logs per service per fetch',
     raw_logs_retention_days: 'Keep service logs (days)',
     rate_limits_retention_days: 'Keep rate limit history (days)',
@@ -306,7 +306,8 @@ var SETTINGS_FIELD_DESCRIPTIONS = {
     // Application
     app_title: 'Shown in the browser tab.',
     app_logo_url: 'Leave empty to use the project icon.',
-    debug: 'Shows detailed errors. Use only for development.',
+    scheduler_workers: 'More jobs at once can speed up updates but use more database connections.',
+    debug: 'Shows detailed errors. Use only for development or troubleshooting.',
 
     // Blocklists
     blacklist_dns_servers: 'Use your own resolver. In mailcow: 172.22.1.254.',
@@ -315,23 +316,23 @@ var SETTINGS_FIELD_DESCRIPTIONS = {
 
     // Domains
     domain_spf_source_server_ip: 'Turn off if this IP does not send mail for your domains.',
-    domain_spf_source_manual_hosts: "Every host must pass every domain's SPF check. Separate hosts with commas.",
+    domain_spf_source_manual_hosts: "If a host is not allowed by a domain's SPF record, that domain shows an SPF error on the Domains page. Separate hosts with commas.",
     domain_spf_source_dmarc_history: 'Can cause false warnings.',
 
     // Authentication
-    auth_password: 'Required for Basic Auth. To remove it, turn off Basic Auth first.',
-    auth_max_failure_clients: 'When full, sign-ins from new addresses must wait.',
+    auth_password: 'Required for Basic Auth.',
+    auth_max_failure_clients: 'Tracks failed Basic Auth sign-ins by IP address. Lower values make it easier to evade limits by switching addresses.',
     oauth2_enabled: 'Uses an external sign-in provider.',
     oauth2_provider_name: 'Shown on the sign-in button.',
     oauth2_issuer_url: 'Use the issuer URL from your provider.',
     oauth2_redirect_uri: 'Must match the redirect URI registered with your provider.',
-    session_secret_key: 'Required for OAuth2.',
-    session_expiry_hours: 'Counts from sign-in, even while the user is active. Shortening it can end open sessions at once.',
+    session_secret_key: 'Changing this key signs out other users, cancels OAuth2 sign-ins in progress and disconnects all agents. Each agent must be connected again.',
+    session_expiry_hours: 'Counts from sign-in, even while the user is active. Shortening it signs out users already past the new limit.',
     session_max_entries: 'When full, new sign-ins must wait.',
 
     // Agents
-    agent_access_url: 'Changing it disconnects every agent until you change it back.',
-    agent_access_max_days: 'Applies to new access only.',
+    agent_access_url: 'Changing this address stops every agent from working. Connect each agent again using the new address.',
+    agent_access_max_days: 'Existing access keeps its end date. To change it, edit the agent in the list below.',
 
     // SMTP
     smtp_port: '587 for STARTTLS, 465 for implicit TLS, 25 for plain.',
@@ -362,12 +363,11 @@ var SETTINGS_FIELD_DESCRIPTIONS = {
     dmarc_allow_report_delete: 'Lets users with write access delete DMARC and TLS reports.',
 
     // DMARC & TLS IMAP
-    dmarc_imap_enabled: 'Use the mailbox that receives your reports.',
-    dmarc_imap_port: '993 for TLS, 143 without.',
+    dmarc_imap_port: 'Use 993 for SSL/TLS. Port 143 sends the connection unencrypted and requires Use TLS to be off.',
     dmarc_imap_use_ssl: 'Without TLS, the IMAP password is sent unencrypted.',
     dmarc_imap_verify_ssl: 'Use Off only for a trusted server with a self-signed certificate. Automatic skips localhost, IP addresses and container names.',
     dmarc_imap_delete_after: 'Permanently deletes imported emails from the mailbox.',
-    dmarc_imap_scan_all_unseen: 'Use a dedicated report mailbox.',
+    dmarc_imap_scan_all_unseen: 'Use a dedicated report mailbox. Emails without reports are marked as read, so other users could lose track of unread mail.',
     dmarc_error_email: 'Leave empty to use Admin email. Separate addresses with commas.',
 
     // Logs
@@ -411,15 +411,19 @@ var SETTINGS_FIELD_HELP = {
     ],
 
     // Fetch
-    fetch_interval: 'Lower values update more often but add load on mailcow.',
+    fetch_interval: 'Fetches Postfix, Rspamd and Netfilter logs for Messages, Message linking and Security. Lower values update these pages more often but add load on mailcow.',
     fetch_count_postfix: 'The size of one page of logs. The app keeps fetching pages until it catches up.',
     fetch_count_rspamd: 'The size of one page of logs. The app keeps fetching pages until it catches up.',
     fetch_max_pages: 'A safety limit for Postfix and Rspamd. The most logs in one fetch is the logs per request multiplied by this number.',
+    max_correlation_age_minutes: 'The app tries to link Postfix and Rspamd logs from the same message until this much time has passed since it first started tracking the message.',
     retention_days: 'Recommended: 7 for most setups, 30 for compliance.',
     blacklist_emails: 'Mail to or from these addresses is not stored or shown in Messages. Useful for a BCC archive, for example.',
 
     // Application
-    scheduler_workers: 'Threads for blocking background jobs, such as the DMARC & TLS IMAP import. From 1 to 64.',
+    scheduler_workers: [
+        'Sets how many background jobs can run at the same time, from 1 to 64.',
+        'Most background jobs share this limit, including log storage, Message linking, blocklist checks and report imports. With fewer workers, a slow report import can delay other jobs.',
+    ],
 
     // Blocklists
     blacklist_dns_servers: 'Spamhaus rejects queries from public resolvers such as Google, Cloudflare and Quad9. Separate resolvers with commas. Leave empty to use the container resolver.',
@@ -437,15 +441,26 @@ var SETTINGS_FIELD_HELP = {
     ],
 
     // Authentication
-    auth_max_failure_clients: 'Counts client addresses with failed Basic Auth attempts, per process. Existing sessions keep working.',
-    oauth2_enabled: 'Works with mailcow, Keycloak and other OAuth2 or OIDC providers.',
+    auth_max_failure_clients: [
+        'The app keeps a count of failed sign-ins for each IP address to slow down password guessing. IPv6 addresses in the same /64 network share one count.',
+        'When the table is full, the address whose last failed sign-in is oldest is removed to make room. A full table does not stop new addresses from signing in.',
+        'A larger limit makes it harder for an attacker using many addresses to push earlier counts out of the table. Tracking 10,000 addresses uses roughly 10 MB of memory.',
+    ],
+    oauth2_enabled: 'Works with mailcow, Keycloak, Authentik and other OAuth2 or OIDC providers.',
     oauth2_issuer_url: [
         'The endpoints are discovered from this address.',
         'mailcow: https://mail.example.com',
         'Keycloak: https://keycloak.example.com/realms/myrealm',
     ],
-    session_secret_key: 'Signs session cookies. Use a random secret, such as one from openssl rand -hex 32.',
-    session_expiry_hours: 'Five minutes before the end, the page says so. A longer limit applies in full from the next sign-in.',
+    session_secret_key: [
+        'Signs the cookies used to stay signed in and verifies OAuth2 sign-ins returning from the provider. It is used for Basic Auth as well as OAuth2.',
+        'Use Generate to fill in a random key, then save. If left empty, the app creates a temporary key when it starts.',
+    ],
+    session_expiry_hours: [
+        'Activity does not restart this time limit. The app warns users five minutes before it ends.',
+        'A session cannot last longer than the limit in effect when the user signed in. To use a longer limit, the user must sign in again.',
+        'Sign-out after inactivity is controlled separately by the inactivity settings.',
+    ],
     session_idle_enabled: 'Typing, clicking, scrolling with the wheel and touching count as activity. Pages that refresh by themselves do not. A minute before sign-out, the page asks whether you are still there.',
     session_max_entries: 'Counts active sessions per process. New sign-ins wait until a session expires or a user signs out. Existing sessions stay signed in.',
 
@@ -483,22 +498,27 @@ var SETTINGS_FIELD_HELP = {
     dmarc_insights_pass_threshold: 'A stricter policy can be suggested at or above this rate. A higher rate gives more cautious advice.',
 
     // DMARC & TLS IMAP
-    dmarc_imap_enabled: 'That is the mailbox of the rua= addresses in your DMARC and TLS-RPT records.',
+    dmarc_imap_enabled: 'Connects to the IMAP mailbox below on a schedule and imports the DMARC and TLS reports it finds. Use a mailbox that receives reports sent to the rua= addresses in your DMARC and TLS-RPT records.',
+    dmarc_imap_port: 'SSL/TLS protects the connection from the start. STARTTLS, which upgrades an unencrypted connection to TLS, is not supported.',
     dmarc_imap_verify_ssl: [
         'Checks the server certificate before the password is sent, so nobody in between can read it.',
         'Off: no check. Use only for a server with a self-signed certificate.',
         'Automatic: checks host names such as imap.example.com. Skips localhost, IP addresses and container names.',
         'On: always checks.',
     ],
-    dmarc_imap_folder: 'A folder read with its subfolders also covers subfolders added later.',
+    dmarc_imap_folder: 'Choose one or more folders. Turn on With subfolders for a folder to import reports from that folder and all its subfolders, including any created later.',
     dmarc_imap_delete_after: 'If the server cannot remove single emails, they are marked as deleted and left for your mail client to remove.',
     dmarc_imap_scan_all_unseen: [
-        'Also checks emails whose subjects do not match known report subjects. Turn on if reports arrive with subjects in other languages.',
-        'Subfolders read through With subfolders are not scanned this way. Only report subjects are checked there.',
+        'Normally, the app checks only unread emails whose subjects look like DMARC or TLS reports. Turn this on to check every unread email in the chosen folders and any subfolders included with With subfolders.',
+        'Useful when reports arrive with subjects in other languages. Emails without reports are never deleted.',
     ],
 
     // Logs
-    raw_logs_enabled: 'When off, the Logs page says collection is off and shows no logs. The services other pages read are collected either way.',
+    raw_logs_enabled: [
+        'Collects raw logs from the mailcow services selected below for the Logs page.',
+        'Dovecot logs are also collected for message details and Security. Ratelimited logs are collected while Rate Limits is enabled, and SOGo logs while Devices is enabled. These pages keep the logs they need when collection for the Logs page is off.',
+    ],
+    raw_logs_fetch_interval: 'Fetches raw logs from the services selected for the Logs page, plus any service logs needed by other pages. This schedule still applies to those services when collection for the Logs page is off.',
     raw_logs_fetch_count: 'Higher values catch more logs but add load on mailcow.',
     rate_limits_retention_days: 'Keeps the senders that hit a rate limit, for the Rate Limits page.',
 
@@ -536,9 +556,9 @@ function settingsPickSegment(btn) {
 // options that block are not available, and the one picked shows as its twin
 // that does not block, which is what the jobs do then.
 const SETTINGS_SOFT_BOUNCE_QUEUE = { value: 'queue', needs: 'rw sync',
-    label: 'Delete after {minutes} minutes in the queue and block the recipients', hint: 'Checked every 5 minutes.' };
+    label: 'Delete mail queued for {minutes} minutes and block new mail to those recipient addresses', hint: 'Checked every 5 minutes.' };
 const SETTINGS_SOFT_BOUNCE_QUEUE_DELETE = { value: 'queue_delete', needs: 'rw',
-    label: 'Delete after {minutes} minutes in the queue', hint: 'Does not block the recipients. Checked every 5 minutes.' };
+    label: 'Delete mail queued for {minutes} minutes', hint: 'New mail to those recipient addresses is still allowed. Checked every 5 minutes.' };
 const SETTINGS_CHOICE_NOTES = {
     rw: 'Add a read-write API key in Settings > mailcow. Nothing happens without it.',
     'rw-queue': 'Add a read-write API key in Settings > mailcow to delete queued mail.'
@@ -749,9 +769,9 @@ function settingsApplySync(toggled) {
     // Each choice says what it changed to while the sync is off
     const minutes = (field('queue_cleanup_threshold_minutes') || {}).value || '';
     const notes = {
-        delete: 'Changed to "Delete its queued mail": Sync with Rspamd is off.',
-        queue_delete: `Changed to "Delete after ${minutes} minutes in the queue": Sync with Rspamd is off.`,
-        ignore: 'Changed to "Do nothing; keep retrying": Sync with Rspamd is off.'
+        delete: 'Sync with Rspamd is off. Changed to "Delete queued mail to the failed recipient address".',
+        queue_delete: `Sync with Rspamd is off. Changed to "Delete mail queued for ${minutes} minutes".`,
+        ignore: 'Sync with Rspamd is off. Changed to "Do nothing; keep retrying delivery".'
     };
     document.querySelectorAll('.ui-set-choice').forEach(box => {
         const kind = box.dataset.choice;
@@ -1300,15 +1320,15 @@ const SETTINGS_FIELD_OPTIONS = {
     ],
     // The Outbound bounce choices (settingsBounceChoice): {count} is the number field
     suppression_hard_bounce_action: [
-        { value: 'suppress', label: 'Block new mail to the address and delete its queued mail', needs: 'logs rw-queue sync' },
-        { value: 'delete', label: 'Delete its queued mail', needs: 'logs rw-queue', hint: 'Does not block new mail to the address.' },
+        { value: 'suppress', label: 'Block new mail to the failed recipient address and delete queued mail to that address', needs: 'logs rw-queue sync' },
+        { value: 'delete', label: 'Delete queued mail to the failed recipient address', needs: 'logs rw-queue', hint: 'New mail to that recipient address is still allowed.' },
         { value: 'ignore', label: 'Do nothing' }
     ],
     suppression_soft_bounce_action: [
-        { value: 'count', label: 'Keep retrying; block new mail after {count} failures', needs: 'logs sync',
+        { value: 'count', label: 'Keep retrying delivery; block new mail to the recipient address after {count} failures', needs: 'logs sync',
             hint: 'Each failed retry counts, even for the same message.' },
-        { value: 'suppress', label: 'Keep retrying; block new mail at the first failure', needs: 'logs sync' },
-        { value: 'ignore', label: 'Do nothing; keep retrying' }
+        { value: 'suppress', label: 'Keep retrying delivery; block new mail to the recipient address after the first failure', needs: 'logs sync' },
+        { value: 'ignore', label: 'Do nothing; keep retrying delivery' }
     ]
 };
 
@@ -1460,7 +1480,7 @@ var SETTINGS_EDIT_TABS = [
         ]
     },
     {
-        id: 'fetch', label: 'Fetch', description: 'Choose how often to fetch mail logs and how long to keep them.', groups: [
+        id: 'fetch', label: 'Fetch', description: 'Choose how often to fetch mail logs, how long to keep them and how to link logs from the same message.', groups: [
             { label: 'Timing', keys: ['fetch_interval'] },
             { label: 'Logs per request', keys: ['fetch_count_postfix', 'fetch_count_rspamd', 'fetch_count_netfilter'] },
             { label: 'Pagination', keys: ['fetch_max_pages'] },
@@ -1478,7 +1498,7 @@ var SETTINGS_EDIT_TABS = [
         ]
     },
     {
-        id: 'features', label: 'Features', description: 'Choose which features to use. Turning one off deletes its stored data, and you are asked first.', groups: [
+        id: 'features', label: 'Features', description: 'Choose which features to use. Turning a feature off deletes its stored data. You will be asked to confirm when you save.', groups: [
             { label: 'Features', keys: ['disabled_features'] }
         ]
     },
@@ -1495,7 +1515,7 @@ var SETTINGS_EDIT_TABS = [
     },
     {
         id: 'auth', label: 'Authentication', description: 'Choose how users sign in and how long they stay signed in.', groups: [
-            { label: 'Basic Auth', intro: 'Changing sign-in methods, credentials, provider endpoints, or the session signing key signs out users and disconnects agents.', keys: ['basic_auth_enabled', 'auth_username', 'auth_password', 'auth_max_failure_clients'] },
+            { label: 'Basic Auth', intro: 'Changing sign-in methods, credentials or provider endpoints signs out other users and disconnects agents.', keys: ['basic_auth_enabled', 'auth_username', 'auth_password', 'auth_max_failure_clients'] },
             { label: 'OAuth2 / OIDC', keys: ['oauth2_enabled', 'oauth2_provider_name'] },
             { label: 'Endpoint discovery', keys: ['oauth2_issuer_url', 'oauth2_use_oidc_discovery'] },
             { label: 'Manual endpoints', keys: ['oauth2_authorization_url', 'oauth2_token_url', 'oauth2_userinfo_url'] },
@@ -1529,7 +1549,7 @@ var SETTINGS_EDIT_TABS = [
         ]
     },
     {
-        id: 'smtp_abuse', label: 'SMTP Abuse', description: 'Block sending from mailboxes that exceed a fixed message limit. See and manage them in Security > Settings > Outgoing spam.', groups: [
+        id: 'smtp_abuse', label: 'SMTP Abuse', description: 'Block sending from mailboxes that exceed a fixed message limit within a set time. See and manage them in Security > Settings > Outgoing spam.', groups: [
             { label: 'Enable', keys: ['smtp_abuse_enabled'] },
             { label: 'Limit', keys: ['smtp_abuse_threshold', 'smtp_abuse_window_minutes'] },
             { label: 'Response', keys: ['smtp_abuse_revoke_app_passwords', 'smtp_abuse_unblock_grace_minutes', 'smtp_abuse_help_address'] }
@@ -1657,6 +1677,8 @@ function settingsLockPasswordRemove(root) {
     if (on && btn.closest('.is-removing')) settingsRemoveSecret(btn);
     btn.disabled = on;
     btn.title = on ? SETTINGS_PASSWORD_REMOVE_OFF : '';
+    const note = root.querySelector('[data-remove-note]');
+    if (note) note.classList.toggle('hidden', !on);
 }
 
 // Session signing key: a new random key, 32 bytes as hex, into a new-value field
@@ -1877,7 +1899,9 @@ function renderSettingsEditField(key, value, sensitiveKeys, description, envLock
             '<div class="ui-set-secret"><span class="ui-set-secret-state">' + (envLocked ? 'Stored in the environment' : 'Stored') + '</span>' +
             (envLocked ? '' : '<button type="button" class="ui-btn ui-btn-sm" onclick="settingsReplaceSecret(this)">Replace</button>' +
                 '<button type="button" class="ui-btn ui-btn-sm" onclick="settingsRemoveSecret(this)"' + (key === 'auth_password' ? ' data-needs-basic-off' : '') + '>Remove</button>') +
-            '<input type="hidden" id="edit-' + keyAttr + '" name="' + keyAttr + '" value="********"' + (envLocked ? ' disabled' : '') + '></div>' + generateHtml + '</div>';
+            '<input type="hidden" id="edit-' + keyAttr + '" name="' + keyAttr + '" value="********"' + (envLocked ? ' disabled' : '') + '></div>' +
+            (key === 'auth_password' && !envLocked ? '<small class="ui-muted hidden" data-remove-note>' + escapeHtml(SETTINGS_PASSWORD_REMOVE_OFF) + '</small>' : '') +
+            generateHtml + '</div>';
     }
 
     const segments = SETTINGS_SEGMENTED_OPTIONS[key];

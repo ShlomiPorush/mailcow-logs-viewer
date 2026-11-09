@@ -118,9 +118,9 @@ function agentsConnectHelp() {
         class="ui-agent-tabpanel${agentsTab === id ? '' : ' hidden'}">${html}</div>`;
     return `<div class="ui-agent-connect">
         <div class="ui-tabs ui-agent-tabs" role="tablist" aria-label="Connection method">${tab('skill', 'Agent')}${tab('mcp', 'MCP')}</div>
-        ${panel('skill', `<p class="ui-set-desc">Send this instruction to your AI agent, then use the link and code it returns to approve access.</p>
+        ${panel('skill', `<p class="ui-set-desc">Send this instruction to your AI agent and follow the instructions it gives you to connect.</p>
             <div class="ui-md-ids ui-set-facts ui-agent-help">${line('Instruction for the agent', agentsData.skill_sentence || '')}</div>`)}
-        ${panel('mcp', `<p class="ui-set-desc">Send this instruction to your AI agent, or add the server URL in your app's MCP settings. Approve access in the browser that opens.</p>
+        ${panel('mcp', `<p class="ui-set-desc">Send this instruction to your AI agent and follow the instructions it gives you to connect. Or add the server URL in your app's MCP settings and approve access in the browser that opens.</p>
             <div class="ui-md-ids ui-set-facts ui-agent-help">
                 ${line('Instruction for the agent', agentsData.mcp_sentence || '')}
                 ${line('MCP server URL', url)}

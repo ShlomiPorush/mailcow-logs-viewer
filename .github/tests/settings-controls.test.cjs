@@ -82,18 +82,25 @@ test('Remove of the Basic Auth password is off while Basic Auth is on', () => {
     const removing = { value: false };
     const btn = { disabled: false, title: '', closest: sel => (sel === '.is-removing' && removing.value ? {} : null) };
     const basic = { type: 'checkbox', checked: true };
-    const root = { querySelector: sel => (sel === '[data-needs-basic-off]' ? btn : sel === '#edit-basic_auth_enabled' ? basic : null) };
+    // The reason is on the screen too: a disabled button's title is out of reach by keyboard
+    const hidden = new Set(['hidden']);
+    const note = { classList: { toggle: (name, force) => (force ? hidden.add(name) : hidden.delete(name)) } };
+    const parts = { '[data-needs-basic-off]': btn, '#edit-basic_auth_enabled': basic, '[data-remove-note]': note };
+    const root = { querySelector: sel => parts[sel] || null };
+    assert.match(render(c, 'auth_password', '********'), /<small class="ui-muted hidden" data-remove-note>Turn off Basic Auth to remove the password\.<\/small>/);
     let taken = 0;
     c.settingsRemoveSecret = () => { taken += 1; removing.value = false; };
 
     c.settingsLockPasswordRemove(root);
     assert.equal(btn.disabled, true);
     assert.match(btn.title, /Basic Auth/);
+    assert.equal(hidden.has('hidden'), false);
 
     basic.checked = false;
     c.settingsLockPasswordRemove(root);
     assert.equal(btn.disabled, false);
     assert.equal(btn.title, '');
+    assert.equal(hidden.has('hidden'), true);
 
     // Chosen to remove, then Basic Auth turned on: the removal is taken back
     removing.value = true;
