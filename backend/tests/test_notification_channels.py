@@ -57,6 +57,14 @@ def test_telegram_topic_must_be_a_whole_number(topic):
     assert err.startswith("Topic ID ")
 
 
+def test_telegram_topic_field_says_where_to_find_it():
+    from app.api_models.notifications import NotificationField
+    spec = next(f for f in nc.CHANNEL_TYPES["telegram"]["fields"] if f["key"] == "message_thread_id")
+    # The response model keeps the hint and the whole-number flag for the form
+    shown = NotificationField(**spec).model_dump(exclude_none=True)
+    assert shown["hint"] and shown["integer"] is True and shown["required"] is False
+
+
 def test_telegram_topic_is_optional():
     assert nc.validate_config("telegram", {"bot_token": TOKEN, "chat_id": "1"}) == (True, "")
     assert nc.validate_config("telegram", {"bot_token": TOKEN, "chat_id": "1", "message_thread_id": "42"}) == (True, "")

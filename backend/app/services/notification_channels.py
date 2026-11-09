@@ -112,7 +112,8 @@ CHANNEL_TYPES: Dict[str, Dict] = {
              "placeholder": "123456789 or -100123456789 for a group"},
             # A forum topic in a group (Bot API message_thread_id)
             {"key": "message_thread_id", "label": "Topic ID", "type": "text", "required": False,
-             "integer": True, "placeholder": "Only for a group with topics, such as 42"},
+             "integer": True, "placeholder": "42",
+             "hint": "Copy the topic link in Telegram and use its last number, for example 42 in t.me/c/1234567890/42."},
         ],
     },
     "ntfy": {
