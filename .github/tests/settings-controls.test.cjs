@@ -108,6 +108,15 @@ test('Remove of the Basic Auth password is off while Basic Auth is on', () => {
     c.settingsLockPasswordRemove(root);
     assert.equal(taken, 1);
     assert.equal(btn.disabled, true);
+
+    // AUTH_ENABLED in the environment keeps Basic Auth on with the switch off
+    basic.checked = false;
+    c.settingsLockPasswordRemove(root, true);
+    assert.equal(btn.disabled, true);
+    assert.match(btn.title, /AUTH_ENABLED/);
+    assert.equal(hidden.has('hidden'), false);
+    c.settingsLockPasswordRemove(root, false);
+    assert.equal(btn.disabled, false);
 });
 
 test('Message linking is a section of Fetch, and has no section of its own', () => {
@@ -117,6 +126,5 @@ test('Message linking is a section of Fetch, and has no section of its own', () 
     const fetch = tabs.find(t => t.id === 'fetch');
     assert.ok(fetch.groups.some(g => g.keys.includes('max_correlation_age_minutes') && g.keys.includes('correlation_check_interval')));
     assert.ok(!vm.runInContext('SETTINGS_TAB_GROUPS', c).some(g => g.tabs.includes('correlation')));
-    // Its old address opens Fetch
-    assert.match(fs.readFileSync(path.join(frontend, 'settings.js'), 'utf8'), /if \(settingsTab === 'correlation'\) \{\s+settingsTab = 'fetch';/);
+    // Its old address opens Fetch: outbound-area.test.cjs, with the other moved addresses
 });

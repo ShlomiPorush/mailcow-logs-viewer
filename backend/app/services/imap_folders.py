@@ -223,7 +223,7 @@ def resolve(folders: List[Folder], entries: List[Entry]) -> Tuple[List[Target], 
     by_key = {}
     for folder in folders:
         by_key.setdefault(_key(folder.name), folder)
-    chosen = {}  # folder raw name -> direct
+    chosen = set()  # raw names of the folders to read
     missing, empty = [], []
     for entry in entries:
         folder = by_key.get(_key(entry.name))
@@ -232,13 +232,13 @@ def resolve(folders: List[Folder], entries: List[Entry]) -> Tuple[List[Target], 
             continue
         found = False
         if folder.selectable:
-            chosen[folder.raw] = True
+            chosen.add(folder.raw)
             found = True
         if entry.subfolders and folder.can_have_children:
             prefix = folder.name + folder.delimiter
             for other in folders:
                 if other.selectable and other.name.startswith(prefix):
-                    chosen.setdefault(other.raw, False)
+                    chosen.add(other.raw)
                     found = True
         if not found:
             if entry.subfolders:

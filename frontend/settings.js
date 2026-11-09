@@ -1292,6 +1292,7 @@ async function settingsRspamdAfterSave(plan, saved) {
 // Texts of the session signing key's Generate and of the Basic Auth password's Remove while it is off
 const SETTINGS_GENERATE_KEY = 'Generate';
 const SETTINGS_PASSWORD_REMOVE_OFF = 'Turn off Basic Auth to remove the password.';
+const SETTINGS_PASSWORD_REMOVE_ENV = 'AUTH_ENABLED in the environment keeps Basic Auth on. Remove it there to remove the password.';
 
 // Predefined options for settings fields (renders as dropdown instead of text input)
 const SETTINGS_FIELD_OPTIONS = {
@@ -1667,18 +1668,24 @@ function settingsRemoveSecret(btn) {
     hidden.form && hidden.form.dispatchEvent(new Event('input', { bubbles: true }));
 }
 
-// The Basic Auth password cannot be removed while Basic Auth is on: its Remove is
-// off then, and a removal already chosen is taken back
-function settingsLockPasswordRemove(root) {
+// The Basic Auth password cannot be removed while Basic Auth is on, by its switch or by
+// AUTH_ENABLED in the environment (legacy): its Remove is off then, and a removal already
+// chosen is taken back
+function settingsLockPasswordRemove(root, legacyAuth) {
     const btn = root && root.querySelector('[data-needs-basic-off]');
     const basic = root && root.querySelector('#edit-basic_auth_enabled');
-    if (!btn || !basic) return;
-    const on = basic.type === 'checkbox' ? basic.checked : basic.value === 'true';
-    if (on && btn.closest('.is-removing')) settingsRemoveSecret(btn);
-    btn.disabled = on;
-    btn.title = on ? SETTINGS_PASSWORD_REMOVE_OFF : '';
+    if (!btn) return;
+    const on = !!basic && (basic.type === 'checkbox' ? basic.checked : basic.value === 'true');
+    const locked = on || legacyAuth === true;
+    if (locked && btn.closest('.is-removing')) settingsRemoveSecret(btn);
+    const why = on ? SETTINGS_PASSWORD_REMOVE_OFF : SETTINGS_PASSWORD_REMOVE_ENV;
+    btn.disabled = locked;
+    btn.title = locked ? why : '';
     const note = root.querySelector('[data-remove-note]');
-    if (note) note.classList.toggle('hidden', !on);
+    if (note) {
+        note.textContent = why;
+        note.classList.toggle('hidden', !locked);
+    }
 }
 
 // Session signing key: a new random key, 32 bytes as hex, into a new-value field
@@ -2531,11 +2538,6 @@ function renderSettings(content, data) {
         window.settingsShowTab = id => switchSettingsTab(id, false);
         const firstTabBtn = content.querySelector('.settings-edit-tab');
         settingsFirstTab = firstTabBtn ? firstTabBtn.getAttribute('data-tab') : null;
-        // Message linking was a section of its own; its old address opens Fetch, where it is now
-        if (settingsTab === 'correlation') {
-            settingsTab = 'fetch';
-            if (typeof routerSyncSubpage === 'function') routerSyncSubpage('settings', 'fetch', true);
-        }
         if (settingsTab && content.querySelector('#settings-tab-panel-' + CSS.escape(settingsTab))) {
             switchSettingsTab(settingsTab, false);
         } else if (settingsFirstTab) {
@@ -2658,7 +2660,7 @@ function renderSettings(content, data) {
             form.addEventListener('input', settingsShowCodesNeeds);
             settingsLoadCodesSeen(content);
             settingsShowNeeds(content);
-            settingsLockPasswordRemove(content);
+            settingsLockPasswordRemove(content, data.legacy_auth_enabled);
             settingsApplySync(false);
             settingsSuggestAgentUrl(content, true);
             settingsLockAgentAccess(content, false, data.legacy_auth_enabled);
@@ -2667,11 +2669,11 @@ function renderSettings(content, data) {
                 if (event.target && ['edit-basic_auth_enabled', 'edit-oauth2_enabled'].includes(event.target.id)) settingsLockAgentAccess(content, true, data.legacy_auth_enabled);
                 settingsSuggestAgentUrl(content, !!event.target && event.target.id === 'edit-agent_access_enabled');
                 settingsShowNeeds(content);
-                settingsLockPasswordRemove(content);
+                settingsLockPasswordRemove(content, data.legacy_auth_enabled);
             });
             form.addEventListener('input', () => settingsSuggestAgentUrl(content, false));
             // Clearing and resetting change a field without an input event
-            content.querySelectorAll('.settings-clear-btn').forEach(btn => btn.addEventListener('click', () => setTimeout(() => { updateDirty(); settingsShowNeeds(content); settingsLockPasswordRemove(content); settingsSuggestAgentUrl(content, false); content.querySelectorAll('.ui-set-codes').forEach(settingsShowCodes); })));
+            content.querySelectorAll('.settings-clear-btn').forEach(btn => btn.addEventListener('click', () => setTimeout(() => { updateDirty(); settingsShowNeeds(content); settingsLockPasswordRemove(content, data.legacy_auth_enabled); settingsSuggestAgentUrl(content, false); content.querySelectorAll('.ui-set-codes').forEach(settingsShowCodes); })));
         }
 
         if (form) {

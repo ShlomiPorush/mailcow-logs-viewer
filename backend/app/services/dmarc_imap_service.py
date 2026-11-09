@@ -122,7 +122,6 @@ class DMARCImapService:
         # Whether the server can expunge one message (RFC 4315), from its
         # capabilities after login
         self.uidplus = False
-        # Scan all unseen applies to the folder being read (only folders chosen themselves)
 
     def connect(self) -> bool:
         """Connect to IMAP server"""

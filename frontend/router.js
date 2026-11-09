@@ -42,6 +42,7 @@ function canonicalRoute(route, params = {}) {
     }
     if (route === 'quarantine' && sub === 'maps') return { route: 'rspamd', params: {} };
     if (route === 'settings' && sub === 'spam_filter') return { route, params: { ...params, sub: 'outbound' } };
+    if (route === 'settings' && sub === 'correlation') return { route, params: { ...params, sub: 'fetch' } };
     return null;
 }
 
