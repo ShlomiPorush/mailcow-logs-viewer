@@ -340,7 +340,7 @@ function entityCardVerdict(data) {
             const box = mailbox.mailbox;
             const active = box.active !== false;
             if (active && box.login_disabled) {
-                return { tone: 'warn', text: 'Mailbox, login disabled', note: ['mailcow does not let it sign in. Mail is still delivered.', supNote].filter(Boolean).join(' ') };
+                return { tone: 'warn', text: box.shared ? 'Shared mailbox, login disabled' : 'Mailbox, login disabled', note: ['mailcow does not let it sign in. Mail is still delivered.', supNote].filter(Boolean).join(' ') };
             }
             const text = !active ? (box.shared ? 'Inactive shared mailbox' : 'Inactive mailbox') : box.shared ? 'Shared mailbox' : 'Active mailbox';
             return { tone: suppressed ? 'warn' : active ? 'ok' : 'warn', text, note: supNote };
