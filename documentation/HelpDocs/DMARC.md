@@ -92,7 +92,7 @@ DMARC and TLS reports arrive by email at the addresses in the `rua=` tags of you
 How the import works:
 
 - It reads the folders chosen in **Report folders** (`INBOX` by default). **Choose folders** lists the mailbox's folders; a folder with **With subfolders** also covers every folder below it, including folders created later, for example the subfolders mailcow creates for plus-tag addresses.
-- In each folder it reads unread messages whose subject contains `Report Domain:`, `DMARC`, `Report-ID:`, `TLS-RPT` or `TLS Report`. With **Check all unread emails** on, it reads every unread message, for reports with subjects in other languages; this applies only to folders chosen themselves, not to folders read through **With subfolders**.
+- In each folder it reads unread messages whose subject contains `Report Domain:`, `DMARC`, `Report-ID:`, `TLS-RPT` or `TLS Report`. With **Check all unread emails** on, it reads every unread message, for reports with subjects in other languages, also in folders read through **With subfolders**.
 - An XML attachment is read as a DMARC report, a JSON attachment as a TLS report; a ZIP is opened to see which one it holds, and must hold only one. Each report must expand to 10 MB or less.
 - A message may hold at most 10 reports, with at most 20,000 records together (for TLS, policies and failure details) and 10 MB of report data. Identical records in a report are stored once, with their counts added up. A message over a limit is not imported at all.
 - A report counts as a duplicate, and is not imported twice, only when the same report with the same content is already stored. The sender writes the report ID, so a report with the ID of a stored report but other content is stored as well, and both are marked **Shared report ID** under **Manage Reports**. Its message stays in the mailbox, marked as read.
@@ -105,7 +105,7 @@ How the import works:
 Reading a report in a mail client before import makes it ineligible until you mark it unread again.
 
 > [!NOTE]
-> Use a mailbox that receives only reports. With **Check all unread emails** on, the import reads every unread message in the folder and marks it as read, reports or not.
+> Use a mailbox that receives only reports. With **Check all unread emails** on, the import reads every unread message in the folders it reads, subfolders included, and marks it as read, reports or not.
 
 **Fetch reports** starts an import and reloads the page after a few seconds. Only one import runs at a time: while one runs, **Fetch reports** says "Reports are already being fetched", and a scheduled import skips its turn. An import left `running` because the app stopped during it is marked `failed` when the next one starts.
 

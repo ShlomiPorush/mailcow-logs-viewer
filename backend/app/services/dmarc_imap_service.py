@@ -123,7 +123,6 @@ class DMARCImapService:
         # capabilities after login
         self.uidplus = False
         # Scan all unseen applies to the folder being read (only folders chosen themselves)
-        self.scan_unseen_here = self.scan_all_unseen
 
     def connect(self) -> bool:
         """Connect to IMAP server"""
@@ -214,9 +213,9 @@ class DMARCImapService:
         email_ids = (messages[0] or b'').split()
         logger.info(f"[Phase 1] Found {len(email_ids)} subject-matched DMARC/TLS-RPT emails")
 
-        # Phase 2: Scan all remaining UNSEEN emails (opt-in, only in folders chosen themselves)
+        # Phase 2: Scan all remaining UNSEEN emails (opt-in, in every folder read)
         # This catches reports from providers that use non-English subjects
-        if self.scan_unseen_here:
+        if self.scan_all_unseen:
             subject_matched_set = set(email_ids)
 
             status2, messages2 = self.connection.uid('SEARCH', None, '(UNSEEN)')
@@ -561,8 +560,6 @@ class DMARCImapService:
                 if not self.select_folder(target.select):
                     problems.append(f"Failed to select folder {target.label}")
                     continue
-                # Scan all unseen only where the folder was chosen itself
-                self.scan_unseen_here = self.scan_all_unseen and target.direct
                 self._sync_folder(db, sync_record, target.label, batch_size, counts, failed_emails)
 
             # Update sync record
