@@ -2085,7 +2085,7 @@ async function loadSettings() {
                 if (editableData.default_config) data.default_config = editableData.default_config;
                 if (editableData.settings_migrated !== undefined) data.settings_migrated = editableData.settings_migrated;
                 if (editableData.env_locked_keys) data.env_locked_keys = editableData.env_locked_keys;
-                data.legacy_auth_enabled = editableData.legacy_auth_enabled === true;
+                data.legacy_auth_enabled = data.legacy_auth_enabled === true || editableData.legacy_auth_enabled === true;
             }
         } catch (e) {
             console.warn('Could not load editable settings:', e);

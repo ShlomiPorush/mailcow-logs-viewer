@@ -898,6 +898,8 @@ def get_settings_info(request: Request = None, db: Session = Depends(get_db)):
             result["editable_config"] = _effective_config_for_editable(settings)
             result["default_config"] = _get_field_defaults()
             result["settings_migrated"] = has_config_overrides_in_db(db)
+            # The form locks what Basic Auth needs also when /api/settings is not read
+            result["legacy_auth_enabled"] = bool(settings.auth_enabled)
         return result
         
     except Exception as e:
