@@ -49,7 +49,7 @@ HOSTILE = [
     '2147483648 more attempts in the next 600 seconds until 1.2.3.4/32 is banned',
     'SOGo imap-login pop3-login mailcow UI',
     'a (b) c)',
-    'אדמין@example.com',
+    '\u05d0\u05d3\u05de\u05d9\u05df@example.com',
     'two\nlines',
     'sasl_username=root',
 ]
@@ -291,6 +291,27 @@ def test_a_burst_for_a_long_username_still_raises_the_alert(db):
     assert all(len(a.title) <= 255 for a in alerts)
 
 
+def test_a_username_with_a_line_break_keeps_the_email_subject_on_one_line(db):
+    from app.models import NetfilterLog
+    from app.services.anomaly_service import detect_auth_failure_bursts
+    from app.services.smtp_service import build_message
+    from app.config import settings
+    name = f'{MARKER}\r\nX-Notice: text'
+    now = datetime.utcnow()
+    for i in range(settings.anomaly_auth_failure_threshold):
+        db.add(NetfilterLog(time=now - timedelta(seconds=i + 1), priority=MARKER, ip=CLIENT, rule_id=3,
+                            action='warning', username=name, message=failed(CLIENT, name)))
+    db.commit()
+
+    pending = []
+    detect_auth_failure_bursts(db, pending)
+
+    title, detail, _, _, subject, _ = next(p for p in pending if p[4] == name)
+    assert title == f'Authentication failure burst: {MARKER}  X-Notice: text' and name in detail
+    message = build_message('a@example.com', 'b@example.com', f'[Security] {title}', detail).as_string()
+    assert '\nX-Notice' not in message
+
+
 # ---------- the upgrade ----------
 
 def _migration():
@@ -312,7 +333,9 @@ def test_the_upgrade_reads_the_username_of_lines_stored_before(db):
         (failed(CLIENT, 'unbanning'), None, 'unban'),
         (failed(CLIENT, f'x with service smtp from IP {VICTIM})'), None, 'info'),
         (failed(CLIENT, ''), None, 'info'),
-        (failed(CLIENT, 'kept'), 'already', 'warning'),
+        (failed(CLIENT, 'kept'), 'kept', 'warning'),
+        # An earlier version read the part after sasl_username= in the username
+        (failed(CLIENT, 'sasl_username=root'), 'root', 'warning'),
         (sasl(CLIENT, 'old'), None, 'warning'),
         (failed(CLIENT, 'not mailcow') + ' x', None, 'info'),
     ]
@@ -329,8 +352,9 @@ def test_the_upgrade_reads_the_username_of_lines_stored_before(db):
         ('admin', 'warning'),
         ('unbanning', 'warning'),
         (f'x with service smtp from IP {VICTIM})', 'warning'),
-        (None, 'info'),
-        ('already', 'warning'),
+        (None, 'warning'),
+        ('kept', 'warning'),
+        ('sasl_username=root', 'warning'),
         (None, 'warning'),
         (None, 'info'),
     ]
