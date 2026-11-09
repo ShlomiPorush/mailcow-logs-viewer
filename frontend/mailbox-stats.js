@@ -442,8 +442,8 @@ function mailboxIsShared(mb) {
 
 // Inactive; or active with its login disabled in mailcow (mail is still delivered); and Shared
 function mailboxStateTags(mb) {
-    if (!mb.active) return uiTag('Inactive', 'fail');
-    return (mb.login_disabled ? '<span class="ui-tag ui-tag-warn" title="mailcow does not let it sign in. Mail is still delivered to it.">Login disabled</span>' : '')
+    return (!mb.active ? uiTag('Inactive', 'fail')
+        : mb.login_disabled ? '<span class="ui-tag ui-tag-warn" title="mailcow does not let it sign in. Mail is still delivered to it.">Login disabled</span>' : '')
         + (mailboxIsShared(mb) ? ' <span class="ui-tag ui-tag-info" title="A shared mailbox: people open it from their own mailbox, it has no login of its own">Shared</span>' : '');
 }
 

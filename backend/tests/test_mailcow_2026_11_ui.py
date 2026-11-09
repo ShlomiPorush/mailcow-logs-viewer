@@ -287,3 +287,31 @@ def test_unban_all_is_a_security_write():
     from app.agent_access.scopes import POLICY, WRITE
     rule = POLICY[('POST', '/api/fail2ban/unban-all')]
     assert (rule.area, rule.kind) == ('security', WRITE)
+
+
+@pytest.mark.parametrize('reply', [
+    # Every entry a success, but none names the network: not an unban mailcow confirmed
+    [{'type': 'success', 'msg': 'f2b_modified'}],
+    [{'type': 'success', 'msg': ['object_modified', '203.0.113.200/32']}],
+])
+def test_unban_all_counts_only_the_networks_mailcow_names(mailcow, reply):
+    mailcow['f2b']['active_bans'] = [_ban('198.51.100.1/32')]
+    mailcow['reply'] = reply
+    res = _client().post('/api/fail2ban/unban-all').json()
+    assert res['status'] == 'error' and 'networks' not in res
+
+
+def test_unban_all_leaves_out_a_network_mailcow_would_refuse(mailcow):
+    # mailcow's valid_network() refuses an IPv6 scope and still answers success for it
+    mailcow['f2b']['active_bans'] = [_ban('2001:db8::1%eth0/128'), _ban('2001:db8::1%eth&0/128'),
+                                     _ban('198.51.100.1'), _ban('198.51.100.2/32')]
+    res = _client().post('/api/fail2ban/unban-all').json()
+    assert res['status'] == 'success' and res['networks'] == ['198.51.100.2/32']
+    assert [body['items'] for _, body in mailcow['calls']] == [['198.51.100.2/32']]
+
+
+def test_unban_all_reads_many_bans_at_once(mailcow):
+    bans = [f'10.{i // 65536}.{i // 256 % 256}.{i % 256}/32' for i in range(5000)]
+    mailcow['f2b']['active_bans'] = [_ban(n) for n in bans]
+    res = _client().post('/api/fail2ban/unban-all').json()
+    assert res['status'] == 'success' and len(res['networks']) == 5000

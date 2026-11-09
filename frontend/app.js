@@ -2107,7 +2107,9 @@ function fail2banLiftable() {
     if (!fail2banActiveBans) return [];
     const permanent = new Set(fail2banPermBans.map(b => b && (b.network || b.ip)));
     const queued = v => v === true || v === 1 || v === '1';
-    return [...new Set(fail2banActiveBans.filter(b => b && b.network && !permanent.has(b.network) && !queued(b.queued_for_unban)).map(b => b.network))];
+    // A plain network as mailcow keys a ban: one with an IPv6 scope (%eth0) is not sent
+    const plain = n => typeof n === 'string' && /^[0-9A-Fa-f.:]+\/\d{1,3}$/.test(n);
+    return [...new Set(fail2banActiveBans.filter(b => b && plain(b.network) && !permanent.has(b.network) && !queued(b.queued_for_unban)).map(b => b.network))];
 }
 
 async function unbanAllFail2ban(btnEl) {

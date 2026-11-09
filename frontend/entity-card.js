@@ -342,7 +342,7 @@ function entityCardVerdict(data) {
             if (active && box.login_disabled) {
                 return { tone: 'warn', text: 'Mailbox, login disabled', note: ['mailcow does not let it sign in. Mail is still delivered.', supNote].filter(Boolean).join(' ') };
             }
-            const text = !active ? 'Inactive mailbox' : box.shared ? 'Shared mailbox' : 'Active mailbox';
+            const text = !active ? (box.shared ? 'Inactive shared mailbox' : 'Inactive mailbox') : box.shared ? 'Shared mailbox' : 'Active mailbox';
             return { tone: suppressed ? 'warn' : active ? 'ok' : 'warn', text, note: supNote };
         }
         if (entityOk(mailbox) && mailbox.alias) {
