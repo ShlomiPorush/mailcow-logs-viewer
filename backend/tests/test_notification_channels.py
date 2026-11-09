@@ -23,7 +23,7 @@ def test_each_type_only_asks_for_its_own_fields():
     slack = {f["key"] for f in nc.CHANNEL_TYPES["slack"]["fields"]}
     telegram = {f["key"] for f in nc.CHANNEL_TYPES["telegram"]["fields"]}
     assert slack == {"webhook_url"}
-    assert telegram == {"bot_token", "chat_id"}
+    assert telegram == {"bot_token", "chat_id", "message_thread_id"}
     assert "chat_id" not in slack
 
 
@@ -32,6 +32,34 @@ def test_telegram_url_is_built_from_token():
     assert url == f"https://api.telegram.org/bot{TOKEN}/sendMessage"
     assert kwargs["json"]["chat_id"] == "42"
     assert "S" in kwargs["json"]["text"] and "M" in kwargs["json"]["text"]
+    # No topic: the message goes to the chat itself, as before
+    assert "message_thread_id" not in kwargs["json"]
+
+
+@pytest.mark.parametrize("topic", ["7", " 7 "])
+def test_telegram_topic_goes_to_that_topic(topic):
+    _url, kwargs = nc.build_request(
+        "telegram", {"bot_token": TOKEN, "chat_id": "-100123", "message_thread_id": topic}, "S", "M")
+    assert kwargs["json"]["message_thread_id"] == 7
+
+
+@pytest.mark.parametrize("topic", ["", "  ", None])
+def test_telegram_empty_topic_is_left_out(topic):
+    _url, kwargs = nc.build_request(
+        "telegram", {"bot_token": TOKEN, "chat_id": "-100123", "message_thread_id": topic}, "S", "M")
+    assert "message_thread_id" not in kwargs["json"]
+
+
+@pytest.mark.parametrize("topic", ["abc", "-5", "4.2", "1e3", "١٢"])
+def test_telegram_topic_must_be_a_whole_number(topic):
+    ok, err = nc.validate_config("telegram", {"bot_token": TOKEN, "chat_id": "1", "message_thread_id": topic})
+    assert not ok
+    assert err.startswith("Topic ID ")
+
+
+def test_telegram_topic_is_optional():
+    assert nc.validate_config("telegram", {"bot_token": TOKEN, "chat_id": "1"}) == (True, "")
+    assert nc.validate_config("telegram", {"bot_token": TOKEN, "chat_id": "1", "message_thread_id": "42"}) == (True, "")
 
 
 def test_ntfy_url_is_server_plus_topic():
