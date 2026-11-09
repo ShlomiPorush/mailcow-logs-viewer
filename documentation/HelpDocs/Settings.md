@@ -109,11 +109,11 @@ Which addresses **Status** > **Blocklists** checks, and the DNS resolver it asks
 
 ## Outbound
 
-What happens when outgoing mail cannot be delivered. The blocked addresses are listed on [Outbound](Outbound.md#suppressions) > **Suppressions**. **Sync with Rspamd** (on by default) keeps the list and this app's Rspamd blocks in step, both ways; off, the app keeps no list (turning it off deletes the list, turning it on loads this app's blocks back from Rspamd). Nothing is blocked automatically until **Handle undeliverable mail automatically** is on (off by default).
+What happens when outgoing mail cannot be delivered. The blocked addresses are listed on [Outbound](Outbound.md#suppressions) > **Suppressions**. **Sync with Rspamd** (on by default, under **Recipient blocking**) sends the blocked addresses to Rspamd, which rejects new mail to them, and reads back blocks changed in this app's part of the Rspamd recipient denylist; off, the app keeps no list (turning it off deletes the list and its failure history, turning it on loads this app's blocks back from Rspamd as permanent entries). Nothing is blocked automatically until **Handle undeliverable mail automatically** is on (off by default).
 
 - **Permanent delivery failure** (5.x.x) and **Temporary delivery failure** (4.x.x) are one choice each. A permanent failure blocks the address and deletes its queued mail (the default), only deletes its queued mail, or does nothing. A temporary failure is deleted after its minutes in the queue, with its recipients blocked (the default) or not, or stays in the queue while the address is blocked after a number of failures, at the first one, or not at all.
-- **Status code exceptions**, under each delivery failure card, prevent the app from blocking the address, counting the failure, or deleting queued mail for matching codes. Postfix returns permanently failed messages to the sender and keeps retrying temporarily failed messages.
-- **Exclude failures unrelated to the recipient address** applies a fixed list of codes. **View excluded codes** shows the list. Use **Additional codes to exclude** to add other codes.
+- **Status code exceptions**, under each delivery failure card, prevent the app from blocking the address, counting the failure, or deleting queued mail for matching codes. Postfix keeps retrying temporarily failed messages. Each area is closed at first; its line says what is excluded.
+- **Use built-in code exceptions** applies a fixed list of codes. **View built-in codes** shows the list. Use **Additional codes to exclude** to add other codes.
 - The options that block need **Sync with Rspamd**. With it off they are not available, and a picked one changes to the option that does the same without blocking.
 - The app reads the Postfix logs only when a choice needs them.
 - A value set in the environment closes only the options it rules out, and the choice names the variable.

@@ -138,9 +138,11 @@ test('Status code exceptions start closed and say what is excluded', () => {
     // The value and its Reset stay reachable with the area closed
     assert.match(html, /<input type="hidden" id="edit-suppression_hard_bounce_excluded_codes"[^>]*><\/div><\/details><button type="button" class="ui-set-clear is-reset"/);
     const says = (standard, count) => c.settingsCodesSummary(standard, count);
-    assert.match(says(true, 0), /unrelated to the recipient/);
-    assert.match(says(true, 2), /2 codes/);
-    assert.match(says(false, 1), /1 code\b/);
+    assert.equal(says(true, 0), 'Built-in codes excluded.');
+    assert.equal(says(true, 1), 'Built-in codes and 1 additional code excluded.');
+    assert.equal(says(true, 2), 'Built-in codes and 2 additional codes excluded.');
+    assert.equal(says(false, 1), '1 code excluded.');
+    assert.equal(says(false, 3), '3 codes excluded.');
     // Without the switch, or with it off, nothing but the added codes is excluded
     assert.equal(says(false, 0), says(null, 0));
 });

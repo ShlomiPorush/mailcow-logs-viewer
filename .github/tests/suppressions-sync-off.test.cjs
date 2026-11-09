@@ -123,7 +123,7 @@ test('Remove runs only with the token of the save that turned the sync off', asy
     const [text, kind] = await context.settingsRspamdAfterSave({ action: 'remove' }, { rspamd_off_transition: null });
     assert.equal(asked.length, 0, 'nothing is removed');
     assert.equal(kind, 'error');
-    assert.match(text, /already off \(changed in another window\)\. Nothing was removed from Rspamd\./);
+    assert.match(text, /Another window already turned Sync with Rspamd off\. No Rspamd blocks were removed by this save\./);
     const [done] = await context.settingsRspamdAfterSave({ action: 'remove' }, { rspamd_off_transition: 'T1' });
     assert.deepEqual(asked, [['/api/suppressions/rspamd/clear', JSON.stringify({ transition: 'T1' })]]);
     assert.match(done, /Removed 3 app blocks from Rspamd/);
