@@ -131,8 +131,8 @@ const SETTINGS_LABEL_OVERRIDES = {
     suppression_rspamd_sync: 'Sync with Rspamd',
     suppression_hard_bounce_action: 'Permanent delivery failure',
     suppression_soft_bounce_action: 'Temporary delivery failure',
-    suppression_hard_bounce_excluded_codes: 'Excluded permanent failure codes',
-    suppression_soft_bounce_excluded_codes: 'Excluded temporary failure codes',
+    suppression_hard_bounce_excluded_codes: 'Additional codes to exclude (permanent failures)',
+    suppression_soft_bounce_excluded_codes: 'Additional codes to exclude (temporary failures)',
     suppression_hard_bounce_standard_codes: 'Use built-in code exceptions',
     suppression_soft_bounce_standard_codes: 'Use built-in code exceptions',
     queue_cleanup_enabled: 'Delete delayed mail',
@@ -1026,7 +1026,7 @@ function settingsBounceCodes(kind, config, lockedKeys, defaults) {
         '<div class="ui-chip-row" data-codes-list aria-labelledby="label-' + id + '-also"></div>' +
         // A code the registry does not list (a provider's own, such as 5.7.509) is typed beside it
         (locked ? '' : '<div class="ui-sec-ladd ui-flush ui-set-codes-add">' + picker +
-            '<span class="ui-set-codes-other"><input type="text" class="ui-input" id="' + id + '-other" autocomplete="off" spellcheck="false" maxlength="20"' +
+            '<span class="ui-set-codes-other"><input type="text" class="ui-input" id="' + id + '-other" data-search-focus autocomplete="off" spellcheck="false" maxlength="20"' +
                 ' placeholder="Enter a ' + cls + '.x.x code" aria-label="Enter a ' + cls + '.x.x code" oninput="settingsCodeTyped(this)"' +
                 ' onkeydown="if (event.key === \'Enter\') { event.preventDefault(); settingsAddCode(this); }">' +
             '<button type="button" class="ui-btn" onclick="settingsAddCode(this)">Add</button></span></div>' +

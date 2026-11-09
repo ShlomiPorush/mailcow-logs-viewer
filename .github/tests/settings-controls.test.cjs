@@ -153,3 +153,13 @@ test('search and the save check open a closed area to reach its field', () => {
         assert.match(code, /closest\('details:not\(\[open\]\)'\); fold; fold = fold\.parentElement\.closest\('details:not\(\[open\]\)'\)\) fold\.open = true;/, file);
     }
 });
+
+test('search finds the exception lists by their name on the screen and focuses where a code is typed', () => {
+    const c = load();
+    assert.equal(c.settingsFieldLabel('suppression_hard_bounce_excluded_codes'), 'Additional codes to exclude (permanent failures)');
+    assert.equal(c.settingsFieldLabel('suppression_soft_bounce_excluded_codes'), 'Additional codes to exclude (temporary failures)');
+    const html = vm.runInContext(`settingsBounceCodes('soft', { suppression_soft_bounce_excluded_codes: '', suppression_soft_bounce_standard_codes: true },
+        new Set(), { suppression_soft_bounce_excluded_codes: '', suppression_soft_bounce_standard_codes: true })`, c);
+    assert.match(html, /<input type="text" class="ui-input" id="codes-soft-other" data-search-focus/);
+    assert.match(fs.readFileSync(path.join(frontend, 'search.js'), 'utf8'), /row\(el\)\.querySelector\('\[data-search-focus\]:not\(\[disabled\]\)'\)/);
+});

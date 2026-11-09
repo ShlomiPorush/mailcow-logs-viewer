@@ -790,8 +790,10 @@ async function gsOpenSetting(setting) {
     const show = el => {
         gsReveal(row(el) || el);
         // A hidden field takes the focus through the control that sets it
+        // or the one its row names (data-search-focus), such as where a status code is typed
         const target = el.type !== 'hidden' && !el.hidden ? el : row(el)
-            && row(el).querySelector('button:not([disabled]), select:not([disabled]), input:not([type="hidden"]):not([disabled])');
+            && (row(el).querySelector('[data-search-focus]:not([disabled])')
+                || row(el).querySelector('button:not([disabled]), select:not([disabled]), input:not([type="hidden"]):not([disabled])'));
         if (target) target.focus({ preventScroll: true });
     };
     let field = await gsWaitFor(find);
