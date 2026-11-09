@@ -83,7 +83,7 @@ def get_dashboard_stats(db: Session = Depends(get_db)):
             )
         ).count()
         
-        # Auth failures - only rule_id=3 (SASL authentication failures)
+        # Auth failures - rule_id=3: failed mail logins (SMTP only before mailcow 2026-11)
         auth_failures_24h = db.query(NetfilterLog).filter(
             and_(
                 NetfilterLog.time >= day_ago,

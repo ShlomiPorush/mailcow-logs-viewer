@@ -19,6 +19,7 @@ from ..config import settings
 from ..services import entity_values, excluded_addresses, geoip_service, protection_rules, security_addresses, written_recipients
 from .messages import address_equals, on_domain
 from ..services.security_addresses import netfilter_service  # noqa: F401  (tests import it from here)
+from ..services.netfilter_address import netfilter_address
 from ..app_time import as_utc
 from ..utils import internal_error, format_datetime_for_api as format_datetime_utc, RangeStart, RangeEnd
 from ..api_models import Invalid, documented
@@ -405,7 +406,6 @@ def get_netfilter_stats_by_country(
     the oldest line kept, when the logs are shorter than the period.
     """
     try:
-        import re
         cutoff = datetime.now(timezone.utc) - timedelta(days=days)
         
         # Fetch ALL netfilter events in the time range (including those without country_code)
@@ -427,15 +427,10 @@ def get_netfilter_stats_by_country(
             code = row.country_code
             name = row.country_name
             
-            # If no country_code, try to resolve from IP (or extract IP from message)
+            # If no country_code, try to resolve from the address netfilter named
             if not code:
-                ip = row.ip
-                if not ip and row.message:
-                    # Extract IP from message text
-                    ip_match = re.search(r'(\d+\.\d+\.\d+\.\d+)', row.message)
-                    if ip_match:
-                        ip = ip_match.group(1)
-                
+                ip = row.ip or netfilter_address(row.message)
+
                 if ip and geoip_service.is_geoip_available():
                     geo = geoip_service.lookup_ip(ip)
                     code = geo.get('country_code')
@@ -456,9 +451,13 @@ def get_netfilter_stats_by_country(
             
             action = (row.action or '').lower()
             msg_lower = (row.message or '').lower()
-            
+
+            # A rule match is an attempt whatever action an earlier version
+            # stored for it: those read the client's text in the line
+            if row.rule_id is not None:
+                action = 'warning'
             # Re-classify 'info' events by examining the message text
-            if action == 'info' and msg_lower:
+            elif action == 'info' and msg_lower:
                 if 'removed' in msg_lower and 'denylist' in msg_lower:
                     action = 'unban'
                 elif 'added' in msg_lower and 'denylist' in msg_lower:
@@ -468,7 +467,7 @@ def get_netfilter_stats_by_country(
                 countries[code]["ban"] += 1
             elif action == 'unban':
                 countries[code]["unban"] += 1
-            elif action == 'warning' and row.rule_id is not None:
+            elif row.rule_id is not None:
                 countries[code]["warning"] += 1
                 if row.ip:
                     addresses.setdefault(code, set()).add(row.ip)

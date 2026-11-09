@@ -278,7 +278,8 @@ def detect_auth_failure_bursts(db, pending) -> int:
             NetfilterLog.username == username,
         ).scalar() or 0
 
-        title = f"Authentication failure burst: {username}"
+        # The username is the client's text, up to the column's 255 characters
+        title = f"Authentication failure burst: {username}"[:255]
         detail = (
             f"{count} authentication failures for '{username}' from {distinct_ips} "
             f"source IP(s) in the last {settings.anomaly_check_interval} minutes.\n\n"

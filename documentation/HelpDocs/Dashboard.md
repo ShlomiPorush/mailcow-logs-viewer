@@ -53,7 +53,7 @@ The figures cover the chosen period: 24 hours in hourly bars, 7 days in 6-hour b
 | **Messages** | Messages first seen in the period, each counted once as on the Messages page. A message to three recipients is one message and three deliveries. |
 | **Blocked** | Deliveries that bounced, were rejected or were marked as spam. The percentage uses deliveries, not unique messages. |
 | **Deferred** | Deliveries still waiting to be retried. |
-| **Auth Fails** | Failed mail logins recorded as SASL authentication failures in Netfilter. |
+| **Auth Fails** | Failed mail logins that mailcow's Fail2ban counted. Since mailcow 2026-11 these are IMAP, POP3, Sieve and SMTP logins; before, SMTP only. |
 
 The smaller figures give the period before, for comparison, plus the delivery count under Messages. **(partial)** means that period starts before the log retention period, so its older logs may be deleted. The bars count Rspamd scans, split into clean and spam.
 
