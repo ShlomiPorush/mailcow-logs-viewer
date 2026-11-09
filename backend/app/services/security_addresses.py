@@ -21,6 +21,7 @@ from sqlalchemy.orm import Session
 
 from ..models import NetfilterLog, ProtectionHit
 from . import protection_rules
+from .netfilter_address import mailcowauth_failure
 
 LISTS = ("review", "banned")
 CACHE_SECONDS = 10
@@ -39,8 +40,23 @@ _NETFILTER_SERVICES = (
 )
 
 
+# mailcow's own failed-login line (2026-11 and later) names the service; it is
+# read before the text above, which the username in that line could contain
+_MAILCOWAUTH_SERVICES = {'imap': 'IMAP', 'pop3': 'POP3', 'sieve': 'Sieve', 'smtp': 'SMTP auth'}
+_MAILCOWAUTH_OTHER = 'Mail login'
+
+
+def _mailcowauth_pattern(service: str) -> str:
+    """The PostgreSQL pattern of mailcowauth_failure for one service token."""
+    return (r'^\S+ matched rule id \d+ \(MAILCOWAUTH: Login failed for user .* '
+            rf'with service {service} from IP [0-9a-f.:]+\)$')
+
+
 def netfilter_service(message: Optional[str]):
     """Return (service, is_login) for a netfilter line, or (None, False)."""
+    failure = mailcowauth_failure(message)
+    if failure:
+        return _MAILCOWAUTH_SERVICES.get(failure[1], _MAILCOWAUTH_OTHER), True
     text = message or ''
     for needle, service, is_login in _NETFILTER_SERVICES:
         if needle in text:
@@ -110,8 +126,13 @@ def attempt_sources(db: Session, hours: int, now: Optional[datetime] = None) -> 
     """
     cutoff = (now or datetime.utcnow()) - timedelta(hours=hours)
     text = NetfilterLog.message
-    service = case(*[(text.like(f'%{needle}%'), name) for needle, name, _ in _NETFILTER_SERVICES], else_=None)
-    login = case(*[(text.like(f'%{needle}%'), 1 if is_login else 0) for needle, _, is_login in _NETFILTER_SERVICES], else_=0)
+    mailcowauth = [(text.op('~')(_mailcowauth_pattern(token)), name) for token, name in _MAILCOWAUTH_SERVICES.items()]
+    mailcowauth.append((text.op('~')(_mailcowauth_pattern('[a-z0-9]*')), _MAILCOWAUTH_OTHER))
+    service = case(*mailcowauth, *[(text.like(f'%{needle}%'), name) for needle, name, _ in _NETFILTER_SERVICES],
+                   else_=None)
+    login = case(*[(condition, 1) for condition, _ in mailcowauth],
+                 *[(text.like(f'%{needle}%'), 1 if is_login else 0) for needle, _, is_login in _NETFILTER_SERVICES],
+                 else_=0)
     rows = db.query(
         NetfilterLog.ip, func.count(NetfilterLog.id), func.sum(login), func.max(NetfilterLog.time),
         func.array_agg(distinct(service)), func.array_agg(distinct(NetfilterLog.username)),

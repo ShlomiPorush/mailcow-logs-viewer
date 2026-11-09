@@ -28,7 +28,7 @@ from .services.suppression_events import disabled_by_hand, record_bounces, recor
 from .services.suppression_rows_lock import lock_suppression_rows
 from .services.bounce_policy import cleanup_blocks, code_excluded, codes_in_text, handling_on, hard_action, soft_action, rspamd_sync_on
 from .services.rspamd_map_lock import map_write_lock_async
-from .services.netfilter_address import netfilter_address
+from .services.netfilter_address import mailcowauth_failure, netfilter_address
 from .services.db_values import add_rows, strip_nul
 from .models import EasDevice, PostfixLog, RspamdLog, NetfilterLog, MessageCorrelation, DMARCSync, DomainDNSCheck, MailboxStatistics, AliasStatistics, MonitoredHost, BlacklistCheck, DMARCReport, DMARCRecord, TLSReport, TLSReportPolicy, SpamSuppression, SuppressionEvent, RawServiceLog, SystemSetting
 from .correlation import (
@@ -1363,19 +1363,28 @@ def parse_netfilter_message(message: str, priority: Optional[str] = None) -> Dic
     if ip:
         result['ip'] = ip
 
-    username_match = re.search(r'sasl_username=([^\s,\)]+)', message)
-    if username_match:
-        result['username'] = username_match.group(1)
-    
-    auth_match = re.search(r'SASL\s+(\w+)', message)
-    if auth_match:
-        result['auth_method'] = f"SASL {auth_match.group(1)}"
-    
-    rule_match = re.search(r'rule id\s+(\d+)', message)
+    # A rule match ends with the line it matched, which holds the client's text:
+    # nothing but netfilter's own prefix decides its rule and action. netfilter
+    # writes every match as a warning.
+    rule_match = re.match(r'\S+ matched rule id (\d+) \(', message)
     if rule_match:
         result['rule_id'] = int(rule_match.group(1))
-    
-    attempts_match = re.search(r'(\d+)\s+more\s+attempt', message)
+        result['action'] = 'warning'
+        failure = mailcowauth_failure(message)
+        if failure:
+            if failure[0]:
+                result['username'] = failure[0]
+            return result
+        # Postfix's own SASL line, which mailcow before 2026-11 counted
+        username_match = re.search(r'sasl_username=([^\s,\)]+)', message)
+        if username_match:
+            result['username'] = username_match.group(1)
+        auth_match = re.search(r'SASL\s+(\w+)', message)
+        if auth_match:
+            result['auth_method'] = f"SASL {auth_match.group(1)}"
+        return result
+
+    attempts_match = re.match(r'(\d+) more attempts? in the next', message)
     if attempts_match:
         result['attempts_left'] = int(attempts_match.group(1))
     

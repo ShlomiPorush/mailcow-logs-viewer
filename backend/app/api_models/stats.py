@@ -49,7 +49,7 @@ class DashboardResponse(Fixed):
     messages: DashboardMessages
     blocked: DashboardBlocked
     deferred: DashboardPair
-    auth_failures: DashboardPair = Field(description="Failed SASL logins (Netfilter rule 3)")
+    auth_failures: DashboardPair = Field(description="Failed mail logins (Netfilter rule 3): IMAP, POP3, Sieve and SMTP since mailcow 2026-11, SMTP only before")
     direction: DashboardDirection = Field(description="Rspamd scans in the last 24 hours, by direction")
     error: str = Field(None, description=FAILED)
 
@@ -115,7 +115,7 @@ class FlowCounts(Fixed):
     deliveries: int
     blocked: int = Field(description="Bounced, rejected or spam")
     deferred: int
-    auth_failures: int = Field(description="Failed SASL logins (Netfilter rule 3)")
+    auth_failures: int = Field(description="Failed mail logins (Netfilter rule 3): IMAP, POP3, Sieve and SMTP since mailcow 2026-11, SMTP only before")
 
 
 class FlowBar(FlowCounts):

@@ -13,6 +13,7 @@ unified notification service (email + webhook). A per-(type, subject) cooldown
 prevents alert storms. Synchronous - call from a worker thread / executor.
 """
 import logging
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Iterable, List, NamedTuple, Optional
 
@@ -278,7 +279,10 @@ def detect_auth_failure_bursts(db, pending) -> int:
             NetfilterLog.username == username,
         ).scalar() or 0
 
-        title = f"Authentication failure burst: {username}"
+        # The username is the client's text: the title is the email's subject, on
+        # one line, and fits the column's 255 characters
+        shown = re.sub(r'[\x00-\x1f\x7f]', ' ', username)
+        title = f"Authentication failure burst: {shown}"[:255]
         detail = (
             f"{count} authentication failures for '{username}' from {distinct_ips} "
             f"source IP(s) in the last {settings.anomaly_check_interval} minutes.\n\n"
