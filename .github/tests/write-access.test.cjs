@@ -20,6 +20,7 @@ const FRONTEND = path.join(ROOT, 'frontend');
 // file function -> the area it takes action in ('admin' for an admin's own)
 const WRITES = {
     'app.js unbanIP': 'security',
+    'app.js unbanAllFail2ban': 'security',
     'app.js banIP': 'security',
     'app.js allowIP': 'security',
     'app.js acknowledgeSecurityAlert': 'security',

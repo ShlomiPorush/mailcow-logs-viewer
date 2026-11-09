@@ -200,6 +200,8 @@ class MailboxFacts(Fixed):
     name: Optional[str]
     domain: str
     active: Optional[bool]
+    login_disabled: bool = Field(description="mailcow lets the mailbox not sign in; its mail is still delivered (mailcow active 2)")
+    shared: bool = Field(description="A shared mailbox: nobody signs in to it")
 
 
 class AliasFacts(Fixed):

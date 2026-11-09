@@ -2101,6 +2101,55 @@ async function unbanIP(ip, btnEl) {
     }
 }
 
+// The bans Unban all lifts: Fail2ban's own, not a permanent one (the denylist)
+// and not one already queued for unbanning, as the server picks them
+function fail2banLiftable() {
+    if (!fail2banActiveBans) return [];
+    const permanent = new Set(fail2banPermBans.map(b => b && (b.network || b.ip)));
+    const queued = v => v === true || v === 1 || v === '1';
+    // A plain network as mailcow keys a ban: one with an IPv6 scope (%eth0) is not sent
+    const plain = n => typeof n === 'string' && /^[0-9A-Fa-f.:]+\/\d{1,3}$/.test(n);
+    return [...new Set(fail2banActiveBans.filter(b => b && plain(b.network) && !permanent.has(b.network) && !queued(b.queued_for_unban)).map(b => b.network))];
+}
+
+async function unbanAllFail2ban(btnEl) {
+    if (!uiMayAct('security')) return;
+    const n = fail2banLiftable().length;
+    if (!n) return;
+    const bans = `${n.toLocaleString()} ban${n === 1 ? '' : 's'}`;
+    if (!await showConfirmModal({
+        title: 'Unban all?',
+        message: `Fail2ban lifts its ${bans}, and those addresses can try to sign in again.\nBans by the protection rules and the denylist stay.`,
+        confirmText: `Unban ${n.toLocaleString()}`, isDangerous: true, focusCancel: true,
+    })) return;
+    const label = btnEl ? btnEl.textContent : '';
+    if (btnEl) {
+        btnEl.disabled = true;
+        btnEl.textContent = 'Unbanning...';
+    }
+    let result = {};
+    try {
+        const res = await authenticatedFetch('/api/fail2ban/unban-all', { method: 'POST' });
+        result = await res.json().catch(() => ({}));
+        if (!res.ok) result = { status: 'error', msg: result.detail || `HTTP ${res.status}` };
+    } catch (err) {
+        result = { status: 'error', msg: err.message };
+    }
+    const lifted = result.networks || [];
+    if (result.status === 'success') showToast(result.msg, 'success');
+    else showToast('Unban all: ' + uiApiErrorText({ detail: result.msg }, 'Unknown error'), 'error');
+    if (lifted.length && fail2banActiveBans) fail2banActiveBans = fail2banActiveBans.filter(b => !lifted.includes(b.network));
+    if (btnEl && document.body.contains(btnEl)) {
+        btnEl.disabled = false;
+        btnEl.textContent = label;
+    }
+    // mailcow queues the unbans and netfilter lifts them a few seconds later: Fail2ban is asked again then
+    renderSecurityOverview();
+    refreshSecurityAddresses();
+    setTimeout(() => { fail2banSettingsLoaded = false; loadFail2BanSettings(); }, 5000);
+    smartRefreshNetfilter();
+}
+
 async function banIP(ip, btnEl) {
     if (!uiMayAct('security')) return;
     const ipWithMask = fail2banEntry(ip);

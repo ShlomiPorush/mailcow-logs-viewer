@@ -877,6 +877,9 @@
 .ui-sec-filter, .ui-logs-filter { display: inline-flex; align-items: center; gap: 4px; padding-block: 2px; padding-inline: 9px 4px; border-radius: 999px; background: var(--ui-ink); color: var(--ui-bg); font-size: 12px; font-weight: 600; }
 .ui-sec-filter button, .ui-logs-filter button { border: 0; background: none; color: inherit; font-size: 14px; line-height: 1; cursor: pointer; padding: 0 4px; }
 .ui-sec-note { margin: 0; padding: 4px var(--ui-pad-x) 10px; font-size: 12.5px; color: var(--ui-muted); }
+.ui-sec-bulk { display: flex; align-items: center; gap: 12px; padding: 8px var(--ui-pad-x); border-bottom: 1px solid var(--ui-line); }
+.ui-sec-bulk p { flex: 1; margin: 0; font-size: 12.5px; color: var(--ui-muted); }
+.ui-sec-bulk b { color: var(--ui-ink); }
 .ui-sec-list { display: grid; }
 .ui-sec-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 14px; align-items: center; padding: 11px var(--ui-pad-x);
     border-top: 1px solid var(--ui-line); cursor: pointer; }
@@ -1699,6 +1702,10 @@ body { font-family: var(--ui-font); background: var(--ui-bg); color: var(--ui-in
 .ui-q-who .copy-icon { display: none; }
 @media (hover: hover) { .ui-q-who .copyable:hover .copy-icon { display: inline-block; } }
 .ui-q-who .copyable { margin: 0; padding: 0; }
+/* A long address gives way to its state tags (Login disabled, Shared, Inactive) */
+.ui-ms-row > .ui-q-who > div:first-child { display: flex; align-items: center; }
+.ui-ms-row > .ui-q-who > div:first-child > :not(.ui-ent) { flex: none; }
+.ui-ms-row > .ui-q-who > div:first-child > .ui-tag { margin-inline-start: 6px; }
 .ui-row-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 6px; overflow: visible; }
 .ui-link-row { padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: start; cursor: pointer; }
 @media (hover: hover) { .ui-link-row:hover { text-decoration: underline; } }

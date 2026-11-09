@@ -701,6 +701,10 @@ function renderSecurityOverview() {
     const rwNote = !mailcowRwConfigured && securityFilter !== 'history' && userCan('security', 'write')
         ? `<div class="ui-list-note">${uiLocked('Ban, Allow and Unban are locked', `Changing Fail2ban from this list ${UI_RW_KEY_TEXT}`)}</div>` : '';
     const f2bDown = fail2banLoadError || (page && page.fail2ban_known === false);
+    // Unban all: Fail2ban's own bans; the rules' bans and the denylist stay
+    const liftable = securityFilter === 'banned' && !f2bDown && mailcowRwConfigured && userCan('security', 'write') ? fail2banLiftable().length : 0;
+    const unbanAll = liftable ? `<div class="ui-sec-bulk"><p><b>${uiCountLabel(liftable, 'ban', 'bans')} by Fail2ban.</b> Bans by the protection rules and the denylist are not changed.</p>
+        <button type="button" data-acts="security" class="ui-btn ui-btn-sm" onclick="unbanAllFail2ban(this)">Unban all (${liftable.toLocaleString()})</button></div>` : '';
     const f2bNote = f2bDown && securityFilter !== 'history'
         ? `<p class="ui-sec-note ui-text-fail">mailcow did not answer about Fail2ban, so its bans are not shown and nothing can be banned from here. The next refresh tries again.</p>` : '';
     const empty = {
@@ -733,7 +737,7 @@ function renderSecurityOverview() {
             ${securityCountry ? `<span class="ui-sec-filter">${securityFlag(securityCountryCode(securityCountry))}${escapeHtml(securityCountry)}<button type="button" onclick="pickSecurityCountry(null)" aria-label="Show every country" title="Show every country">&times;</button></span>` : ''}
             ${securityNetwork ? `<span class="ui-sec-filter">${escapeHtml(securityNetwork)}<button type="button" onclick="pickSecurityNetwork(null)" aria-label="Show every network" title="Show every network">&times;</button></span>` : ''}
         </div>
-        ${rwNote}${f2bNote}
+        ${rwNote}${f2bNote}${unbanAll}
         <div class="ui-sec-list">${rows}</div>
         ${footer}`;
     // The filters stick right under the tabs, which stick to the top on a phone

@@ -51,6 +51,19 @@ def mailcow_handled_items(response, item_ids) -> set:
     return set()
 
 
+def mailbox_state(mailbox: dict) -> tuple:
+    """(active, login_disabled) of a mailbox as mailcow reports it: active 1, or
+    2 (since mailcow 2026-11) when the mailbox may not sign in and its mail is
+    still delivered. A mailbox without the field counts as active."""
+    state = str(mailbox.get('active', 1)).strip()
+    return state in ('1', '2'), state == '2'
+
+
+def mailbox_shared(attributes) -> bool:
+    """A shared mailbox (mailcow attribute shared "1"): nobody signs in to it."""
+    return isinstance(attributes, dict) and str(attributes.get('shared', '0')).strip() == '1'
+
+
 def _not_json(constant: str):
     raise ValueError(f"{constant} is not JSON")
 
@@ -105,9 +118,10 @@ class MailcowRwKeyError(MailcowShownError):
         "rejected": "mailcow rejected the Read-Write API key. Check in mailcow under "
                     "System → Configuration → Access → Administrators → API "
                     "that the key is correct and active, and that the IP address of this server is allowed. "
+                    "A key from mailcow.conf has its allowed IPs there (API_ALLOW_FROM). "
                     "Settings → Mailcow can check the key.",
         "read_only": "The Read-Write API key is a read-only key in mailcow. "
-                     "Put the Read-Write key from System → Configuration → Access → Administrators → API "
+                     "Put a key with Read-Write Access from System → Configuration → Access → Administrators → API "
                      "in Settings → Mailcow.",
     }
 

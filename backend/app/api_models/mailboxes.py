@@ -52,6 +52,7 @@ class MailboxStats(Fixed):
     domain: str
     name: Optional[str]
     active: Optional[bool]
+    login_disabled: bool = Field(description="mailcow lets the mailbox not sign in; its mail is still delivered (mailcow active 2). Such a mailbox is active")
     quota: float = Field(description="Bytes; 0 for no quota")
     quota_formatted: str
     quota_used: float = Field(description="Bytes")

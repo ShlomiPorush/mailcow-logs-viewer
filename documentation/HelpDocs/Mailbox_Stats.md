@@ -13,7 +13,7 @@ Days, for **Today** and for custom dates, are days in the [app's time zone](../U
 
 The search finds mailbox addresses, display names and alias addresses. In **Domain**, an alias domain shows as "alias of" its target and lists the target's mailboxes.
 
-**Active Only** hides mailboxes that are inactive or deleted in mailcow. **Hide Zero Activity** hides mailboxes, and aliases inside a mailbox, with no messages in the period. Both start checked.
+**Active Only** hides mailboxes that are inactive or deleted in mailcow. A mailbox whose login is disabled in mailcow still gets its mail, so it is shown, tagged **Login disabled**. A shared mailbox is tagged **Shared**: nobody signs in to it, so it shows no last login. **Hide Zero Activity** hides mailboxes, and aliases inside a mailbox, with no messages in the period. Both start checked.
 
 ## Mailbox details
 
