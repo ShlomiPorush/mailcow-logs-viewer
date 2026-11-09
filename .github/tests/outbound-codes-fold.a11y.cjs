@@ -1,4 +1,4 @@
-// Settings > Outbound in a real DOM (jsdom): a Status code exceptions area starts closed,
+// Settings > Outbound in a real DOM (jsdom): a Failures to ignore area starts closed,
 // and its line counts each code once, the way the server reads it (5.02.2 is 5.2.2),
 // leaving out codes the built-in exceptions already cover while they are on.
 // Set A11Y_MODULES to jsdom's node_modules to run it locally (see layers.a11y.cjs).
@@ -34,14 +34,14 @@ function area(codes, standard) {
 test('the area starts closed and says what it excludes', () => {
     const { box, line } = area('', true);
     assert.equal(box.querySelector('details.ui-set-codes-fold').open, false);
-    assert.equal(line(), 'Built-in codes excluded.');
+    assert.equal(line(), 'The app ignores problems like a full mailbox.');
 });
 
 test('each code counts once, as the server reads it', () => {
-    assert.equal(area('5.2.1,5.2.1', false).line(), '1 code excluded.');
-    assert.equal(area('5.2.1,5.02.1', false).line(), '1 code excluded.');
-    assert.equal(area('5.2.1,5.1.1', false).line(), '2 codes excluded.');
-    assert.equal(area('', false).line(), 'No codes excluded.');
+    assert.equal(area('5.2.1,5.2.1', false).line(), 'The app ignores failures with 1 chosen code.');
+    assert.equal(area('5.2.1,5.02.1', false).line(), 'The app ignores failures with 1 chosen code.');
+    assert.equal(area('5.2.1,5.1.1', false).line(), 'The app ignores failures with 2 chosen codes.');
+    assert.equal(area('', false).line(), 'This list has no failures to ignore.');
 });
 
 test('a code the built-in exceptions cover does not count while they are on', () => {
@@ -50,6 +50,6 @@ test('a code the built-in exceptions cover does not count while they are on', ()
     const covered = ['5.2.2', '5.7.1', '5.4.1', '5.3.4'].find(code => w.settingsStandardCovers(code));
     assert.ok(covered, 'a built-in code to test with');
     const padded = covered.replace(/\.(\d)$/, '.0$1');
-    assert.equal(area(`${padded},5.1.1`, true).line(), 'Built-in codes and 1 additional code excluded.');
-    assert.equal(area(`${padded},5.1.1`, false).line(), '2 codes excluded.');
+    assert.equal(area(`${padded},5.1.1`, true).line(), 'The app ignores problems like a full mailbox, plus failures with 1 code you added.');
+    assert.equal(area(`${padded},5.1.1`, false).line(), 'The app ignores failures with 2 chosen codes.');
 });

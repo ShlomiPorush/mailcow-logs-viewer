@@ -129,7 +129,7 @@ test('Message linking is a section of Fetch, and has no section of its own', () 
     // Its old address opens Fetch: outbound-area.test.cjs, with the other moved addresses
 });
 
-test('Status code exceptions start closed and say what is excluded', () => {
+test('Failures to ignore start closed and say what the app ignores', () => {
     const c = load();
     const html = vm.runInContext(`settingsBounceCodes('hard', { suppression_hard_bounce_excluded_codes: '5.2.1', suppression_hard_bounce_standard_codes: true },
         new Set(), { suppression_hard_bounce_excluded_codes: '', suppression_hard_bounce_standard_codes: true })`, c);
@@ -138,11 +138,11 @@ test('Status code exceptions start closed and say what is excluded', () => {
     // The value and its Reset stay reachable with the area closed
     assert.match(html, /<input type="hidden" id="edit-suppression_hard_bounce_excluded_codes"[^>]*><\/div><\/details><button type="button" class="ui-set-clear is-reset"/);
     const says = (standard, count) => c.settingsCodesSummary(standard, count);
-    assert.equal(says(true, 0), 'Built-in codes excluded.');
-    assert.equal(says(true, 1), 'Built-in codes and 1 additional code excluded.');
-    assert.equal(says(true, 2), 'Built-in codes and 2 additional codes excluded.');
-    assert.equal(says(false, 1), '1 code excluded.');
-    assert.equal(says(false, 3), '3 codes excluded.');
+    assert.equal(says(true, 0), 'The app ignores problems like a full mailbox.');
+    assert.equal(says(true, 1), 'The app ignores problems like a full mailbox, plus failures with 1 code you added.');
+    assert.equal(says(true, 2), 'The app ignores problems like a full mailbox, plus failures with 2 codes you added.');
+    assert.equal(says(false, 1), 'The app ignores failures with 1 chosen code.');
+    assert.equal(says(false, 3), 'The app ignores failures with 3 chosen codes.');
     // Without the switch, or with it off, nothing but the added codes is excluded
     assert.equal(says(false, 0), says(null, 0));
 });
@@ -156,10 +156,24 @@ test('search and the save check open a closed area to reach its field', () => {
 
 test('search finds the exception lists by their name on the screen and focuses where a code is typed', () => {
     const c = load();
-    assert.equal(c.settingsFieldLabel('suppression_hard_bounce_excluded_codes'), 'Additional codes to exclude (permanent failures)');
-    assert.equal(c.settingsFieldLabel('suppression_soft_bounce_excluded_codes'), 'Additional codes to exclude (temporary failures)');
+    assert.equal(c.settingsFieldLabel('suppression_hard_bounce_excluded_codes'), 'Other permanent failures to ignore');
+    assert.equal(c.settingsFieldLabel('suppression_soft_bounce_excluded_codes'), 'Other temporary failures to ignore');
     const html = vm.runInContext(`settingsBounceCodes('soft', { suppression_soft_bounce_excluded_codes: '', suppression_soft_bounce_standard_codes: true },
         new Set(), { suppression_soft_bounce_excluded_codes: '', suppression_soft_bounce_standard_codes: true })`, c);
     assert.match(html, /<input type="text" class="ui-input" id="codes-soft-other" data-search-focus/);
+    // The area shows the name search finds
+    assert.match(html, />Other temporary failures to ignore<\/span>/);
     assert.match(fs.readFileSync(path.join(frontend, 'search.js'), 'utf8'), /row\(el\)\.querySelector\('\[data-search-focus\]:not\(\[disabled\]\)'\)/);
+});
+
+test('each failure Action has an "i" that says which mail is deleted, and the permanent choice has no hint under it', () => {
+    const c = load();
+    for (const kind of ['hard', 'soft']) {
+        const html = vm.runInContext(`settingsBounceChoice(${JSON.stringify(kind)}, { suppression_hard_bounce_action: 'suppress', suppression_soft_bounce_action: 'count' }, new Set(), {})`, c);
+        const name = kind === 'hard' ? 'Permanent' : 'Temporary';
+        assert.match(html, new RegExp(`>Action</span>\s*<span class="ui-field-help"[^>]*aria-label="More about ${name} delivery failure action"`), kind);
+        assert.match(html, /Deleting mail does not tell the person who sent it\./, kind);
+    }
+    const suppress = vm.runInContext("SETTINGS_FIELD_OPTIONS.suppression_hard_bounce_action.find(o => o.value === 'suppress')", c);
+    assert.equal(suppress.hint, undefined);
 });

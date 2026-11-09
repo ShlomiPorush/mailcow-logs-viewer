@@ -126,22 +126,22 @@ const SETTINGS_LABEL_OVERRIDES = {
     eas_devices_retention_days: 'Keep inactive devices (days)',
     tz: 'Time zone',
     // Outbound: what the setting does, in words; the search shows these names
-    suppression_enabled: 'Handle undeliverable mail automatically',
+    suppression_enabled: 'Handle failed mail automatically',
     suppression_auto_detect: 'Read the mail logs for failures',
     suppression_rspamd_sync: 'Sync with Rspamd',
     suppression_hard_bounce_action: 'Permanent delivery failure',
     suppression_soft_bounce_action: 'Temporary delivery failure',
-    suppression_hard_bounce_excluded_codes: 'Additional codes to exclude (permanent failures)',
-    suppression_soft_bounce_excluded_codes: 'Additional codes to exclude (temporary failures)',
-    suppression_hard_bounce_standard_codes: 'Use built-in code exceptions',
-    suppression_soft_bounce_standard_codes: 'Use built-in code exceptions',
+    suppression_hard_bounce_excluded_codes: 'Other permanent failures to ignore',
+    suppression_soft_bounce_excluded_codes: 'Other temporary failures to ignore',
+    suppression_hard_bounce_standard_codes: 'Ignore common mail problems',
+    suppression_soft_bounce_standard_codes: 'Ignore common mail problems',
     queue_cleanup_enabled: 'Delete delayed mail',
-    queue_cleanup_block: 'Block the recipients of deleted delayed mail',
-    queue_cleanup_threshold_minutes: 'Queue age before deletion (minutes)',
+    queue_cleanup_block: 'Block new mail to addresses whose delayed mail was deleted',
+    queue_cleanup_threshold_minutes: 'Delete mail after this many minutes',
     suppression_soft_bounce_threshold: 'Temporary failures before blocking',
-    suppression_base_expiry_days: 'Base block length (days)',
-    suppression_max_expiry_days: 'Maximum block length (days)',
-    suppression_whitelist_domains: 'Exclude these domains',
+    suppression_base_expiry_days: 'Days per failure',
+    suppression_max_expiry_days: 'Longest block (days)',
+    suppression_whitelist_domains: 'Ignore these domains',
     agent_access_enabled: 'Enable agent access',
     agent_access_url: 'App URL',
     agent_access_max_days: 'Maximum access duration (days)',
@@ -377,16 +377,16 @@ var SETTINGS_FIELD_DESCRIPTIONS = {
     raw_logs_services: 'Turning a service off hides it from Logs. Services marked Always collected are still collected for other pages.',
 
     // Outbound and Quarantine
-    suppression_enabled: 'Turning this off stops automatic blocking, queue deletion, and block expiry.',
-    suppression_rspamd_sync: 'Sends blocked recipients to Rspamd, which rejects new mail to them. Turning this off deletes the suppression list, expiry dates, and failure history.',
-    suppression_whitelist_domains: 'Separate domains with commas. Each domain matches exactly, without subdomains.',
-    suppression_hard_bounce_excluded_codes: 'For excluded codes, the app does not block the address, count the failure, or delete queued mail.',
-    suppression_soft_bounce_excluded_codes: 'For excluded codes, the app does not block the address, count the failure, or delete queued mail. Postfix keeps retrying.',
-    suppression_hard_bounce_standard_codes: 'Excludes listed mailbox, sender, message, server, network, and policy failures.',
-    suppression_soft_bounce_standard_codes: 'Excludes listed mailbox, sender, message, server, network, and policy failures.',
-    suppression_soft_bounce_threshold: 'Counts failures for each recipient address, including retries of the same message.',
-    suppression_base_expiry_days: 'Repeated failures can increase the length of an automatic block.',
-    suppression_max_expiry_days: 'Keep this at least as long as Base block length. Lowering it does not shorten existing blocks.',
+    suppression_enabled: 'Turning this off stops automatic blocks, mail deletion, and the removal of blocks when their time is up.',
+    suppression_rspamd_sync: 'Syncs blocked addresses with Rspamd, which rejects new mail to them. Turning this off deletes the list of blocked addresses.',
+    suppression_whitelist_domains: 'For example, example.com. Separate domains with commas.',
+    suppression_hard_bounce_excluded_codes: 'Codes such as 5.1.1 explain why mail failed. For these failures, the app takes no action: it does not block addresses, count failures, or delete waiting mail.',
+    suppression_soft_bounce_excluded_codes: 'Codes such as 4.2.2 explain why mail failed. For these failures, the app takes no action: it does not block addresses, count failures, or delete waiting mail.',
+    suppression_hard_bounce_standard_codes: 'The app ignores problems on the list below, such as full mailboxes and sending limits.',
+    suppression_soft_bounce_standard_codes: 'The app ignores problems on the list below, such as full mailboxes and sending limits.',
+    suppression_soft_bounce_threshold: 'Each failed try counts, even for the same message.',
+    suppression_base_expiry_days: 'More failures can make a block last longer.',
+    suppression_max_expiry_days: 'Keep this at least as high as Days per failure. Lowering it does not shorten blocks already set.',
     queue_cleanup_block: 'Requires Sync with Rspamd.',
     quarantine_rules_max_actions: 'Requires a read-write API key.',
     quarantine_rules_log_retention_days: 'Older action history is deleted automatically.',
@@ -524,40 +524,58 @@ var SETTINGS_FIELD_HELP = {
     rate_limits_retention_days: 'Keeps the senders that hit a rate limit, for the Rate Limits page.',
 
     // Outbound and Quarantine
+    suppression_hard_bounce_action: [
+        'This action deletes other mail to the failed address that is still waiting to be sent.',
+        'The app deletes a message only if every address it goes to failed permanently in the same check. A message that also goes to any other address stays.',
+        'Mail also stays if an address is protected or the app ignores its failure. When the action includes blocking, each address must already be blocked in the app.',
+        'Deleting mail does not tell the person who sent it.',
+    ],
+    suppression_soft_bounce_action: [
+        'For deletion, the minutes count from when mail first arrived to be sent. This includes time before the first failed try.',
+        'The app checks every 5 minutes. Mail is not always deleted at the exact minute you set.',
+        'Mail stays if an address is protected or the app ignores the failure. When the action includes blocking, all addresses must already be blocked in the app.',
+        'Deleting mail does not tell the person who sent it.',
+    ],
     suppression_rspamd_sync: [
-        'The suppression list is the list of blocked recipients on Outbound > Suppressions. The app writes active entries to its section of the Rspamd recipient denylist.',
-        'Adding or removing a block in that section through mailcow also adds or removes it from the suppression list. Entries outside that section are not added to the list.',
-        'The app checks Rspamd every 10 minutes and before writing changes. Changes to the suppression list are sent to Rspamd immediately when possible.',
-        'When you turn sync off, you can keep its Rspamd blocks or remove them if the app can write to Rspamd. Kept blocks continue to reject new mail.',
-        'Turning sync back on loads any blocks left in that section as permanent entries. Deleted expiry dates, failure counts, and history are not restored.',
-        'The Rspamd password allows the app to read blocks. A read-write API key is also needed to write changes to Rspamd.',
+        'The list of blocked addresses is on Outbound > Suppressions.',
+        'The app sends changes to Rspamd and reads changes made there. It only syncs blocks in this app\'s part of the Rspamd list.',
+        'The app checks Rspamd every 10 minutes. Changes made in the app are sent as soon as possible.',
+        'Turning sync off deletes the app\'s list, block end dates, failure counts, and saved failure details.',
+        'When you save, you can also remove this app\'s blocks from Rspamd if the app can reach and change them. Blocks kept in Rspamd can still reject new mail.',
+        'Turning sync on again loads the blocks kept in Rspamd with no end date. The old end dates, counts, and failure details do not come back.',
+        'Reading blocks needs the Rspamd password. Sending changes also needs a read-write API key.',
     ],
     suppression_enabled: [
-        'The actions below run every 5 minutes. The app checks for expired blocks every hour.',
-        'Turning this off keeps existing blocks. They stay in Rspamd until you remove them or turn automatic handling back on so expiry can resume.',
-        'Sync with Rspamd runs separately. With sync on, you can still manage the suppression list by hand.',
+        'The app checks for failed mail every 5 minutes. It checks whether blocks have ended every hour.',
+        'Turning this off keeps blocks already set.',
+        'Blocks stay in Rspamd while this is off. Remove them by hand, or turn this on again to let blocks end.',
+        'Sync with Rspamd has its own switch. With sync on, you can still add or remove blocks by hand.',
     ],
     suppression_hard_bounce_standard_codes: [
-        'These exceptions apply to the fixed list under View built-in codes. Some entries match a whole code family, such as 5.7.x.',
-        'Turning this off makes those codes follow the selected action unless you also exclude them individually.',
+        'This switch makes the app ignore failures listed under View common mail problems.',
+        'Some codes cover a whole group of failures. In 5.7.x, x means any number.',
+        'Turning this off lets the app follow your chosen action for these failures. The app still ignores failures with codes you added yourself.',
     ],
     suppression_soft_bounce_standard_codes: [
-        'These exceptions apply to the fixed list under View built-in codes. Some entries match a whole code family, such as 4.4.x.',
-        'Turning this off makes those codes follow the selected action unless you also exclude them individually.',
+        'This switch makes the app ignore failures listed under View common mail problems.',
+        'Some codes cover a whole group of failures. In 4.4.x, x means any number.',
+        'Turning this off lets the app follow your chosen action for these failures. The app still ignores failures with codes you added yourself.',
     ],
     suppression_base_expiry_days: [
-        'The app uses this duration when it first records an address. If blocking starts after several temporary failures, its duration can already be longer.',
-        'For later failures, the app multiplies this value by the total failure count for the address, up to Maximum block length. It counts permanent and temporary failures together.',
-        'The app calculates expiry from the time of the latest failure and never moves an existing expiry date earlier. Manual blocks and permanent blocks loaded from Rspamd keep their own settings.',
+        'When the app first saves an address, it uses this many days.',
+        'Each later failure can make the block last longer. The app multiplies Days per failure by the number of failures, up to Longest block.',
+        'Permanent and temporary failures count together. A block can already be longer when it starts after several temporary failures.',
+        'More failures never make a block end sooner. Blocks set by hand and blocks loaded from Rspamd keep their own end dates.',
     ],
     suppression_max_expiry_days: [
-        'Limits the duration calculated when a later failure extends an automatic block.',
-        'A new entry uses Base block length directly. An existing entry keeps its later expiry date even if you lower this limit.',
+        'Limits each block length calculated from Days per failure and the number of failures.',
+        'Lowering this does not shorten blocks already set.',
     ],
     suppression_whitelist_domains: [
-        'The app never blocks recipients at these domains automatically or automatically deletes queued messages addressed to them.',
-        'If a message has any recipient at an excluded domain, the whole message stays in the queue.',
-        'Domains hosted by this mailcow, including alias domains, are always excluded. These exceptions do not remove existing blocks or prevent blocks added by hand.',
+        'The app does not automatically block mail to these domains or delete mail waiting to be sent to them.',
+        'If a message also goes to one of these domains, the whole message stays.',
+        'Enter example.com to protect that domain. Mail to sub.example.com is not covered.',
+        'The app always ignores domains hosted on this mailcow, including alias domains. This setting does not remove existing blocks or stop you from adding blocks by hand.',
     ],
     quarantine_rules_max_actions: 'The most messages Auto-Rules can release or delete in one run. This prevents mass processing from a rule that is too broad.',
     quarantine_rules_interval: 'Lower values react faster to new quarantine items. Higher values add less load on mailcow.',
@@ -590,12 +608,12 @@ function settingsPickSegment(btn) {
 // options that block are not available, and the one picked shows as its twin
 // that does not block, which is what the jobs do then.
 const SETTINGS_SOFT_BOUNCE_QUEUE = { value: 'queue', needs: 'rw sync',
-    label: 'Delete delayed mail after {minutes} minutes in the queue and block new mail to its recipients.', hint: 'Checks run every 5 minutes. Age counts from arrival in the queue, including time before delivery was delayed.' };
+    label: 'Delete mail still waiting to be sent after {minutes} minutes. Block new mail to those addresses.', hint: 'Checks run every 5 minutes.' };
 const SETTINGS_SOFT_BOUNCE_QUEUE_DELETE = { value: 'queue_delete', needs: 'rw',
-    label: 'Delete delayed mail after {minutes} minutes in the queue.', hint: 'Uses the same age and schedule as the option above. New mail to these recipients is still allowed.' };
+    label: 'Delete mail still waiting to be sent after {minutes} minutes.', hint: 'New mail to these addresses is still allowed.' };
 const SETTINGS_CHOICE_NOTES = {
-    rw: 'Add a read-write API key in Settings > mailcow to run this action.',
-    'rw-queue': 'A read-write API key in Settings > mailcow is required to delete queued mail.'
+    rw: 'Add a read-write API key in Settings > mailcow > Connection to use this choice.',
+    'rw-queue': 'To delete waiting mail, add a read-write API key in Settings > mailcow > Connection.'
 };
 const SETTINGS_LOG_CHOICES = { hard: ['suppress', 'delete'], soft: ['count', 'suppress'] };
 // What a choice that blocks does while Sync with Rspamd is off
@@ -679,6 +697,7 @@ function settingsBounceChoice(kind, config, lockedKeys, defaults) {
     return '<div class="ui-set-field ui-set-wide ui-set-choice' + (changed ? ' is-changed' : '') + '" data-choice="' + kind + '" data-rw="' +
             (config.mailcow_api_key_rw ? '1' : '0') + '" data-defaults="' + escapeHtml(JSON.stringify(resetTo)) + '" data-loaded="' + escapeHtml(picked) + '">' +
         '<div class="ui-set-choice-head"><span class="ui-label" id="label-' + group + '">Action</span>' +
+            (SETTINGS_FIELD_HELP[actionKey] ? uiHelp((soft ? 'Temporary' : 'Permanent') + ' delivery failure action', SETTINGS_FIELD_HELP[actionKey]) : '') +
             (lockedNames.length ? '<span class="ui-set-pill" title="Set by an environment variable, change it there">' + SETTINGS_LOCK_ICON + ' Set by ENV: ' + escapeHtml(lockedNames.join(', ')) + '</span>' : '') +
             '<span class="ui-set-pill is-changed" title="Differs from the default"' + (changed ? '' : ' hidden') + '>Changed</span></div>' +
         '<small class="ui-set-choice-note" data-sync-changed hidden></small>' +
@@ -803,9 +822,9 @@ function settingsApplySync(toggled) {
     // Each choice says what it changed to while the sync is off
     const minutes = (field('queue_cleanup_threshold_minutes') || {}).value || '';
     const notes = {
-        delete: 'Sync with Rspamd is off. This action deletes queued mail without blocking new mail.',
-        queue_delete: `Sync with Rspamd is off. This action deletes delayed mail after ${minutes} minutes in the queue without blocking new mail.`,
-        ignore: 'Sync with Rspamd is off. Postfix keeps retrying without blocking new mail.'
+        delete: 'Sync with Rspamd is off. The choice changed to deleting waiting mail without blocking new mail.',
+        queue_delete: `Sync with Rspamd is off. The choice changed to deleting mail after ${minutes} minutes without blocking new mail.`,
+        ignore: 'Sync with Rspamd is off. The mail server keeps trying without blocking new mail.'
     };
     document.querySelectorAll('.ui-set-choice').forEach(box => {
         const kind = box.dataset.choice;
@@ -890,44 +909,44 @@ const SETTINGS_CODE_KEYS = { hard: 'suppression_hard_bounce_excluded_codes', sof
 // success, and the deprecated X.6.10, are left out: no failure carries them.
 const SETTINGS_STATUS_CODES = [
     ['0.0', 'Unspecified failure'],
-    ['1.0', 'Other address problem'], ['1.1', 'Invalid recipient address'], ['1.2', 'Invalid recipient domain'],
-    ['1.3', 'Invalid recipient address format'], ['1.4', 'Recipient address matches multiple mailboxes'],
-    ['1.6', 'Mailbox moved without a forwarding address'], ['1.7', 'Invalid sender address format'],
-    ['1.8', 'Invalid sender domain'], ['1.9', 'Message relayed to a non-compliant mail server'], ['1.10', 'Recipient domain does not accept mail (null MX)'],
-    ['2.0', 'Other or unspecified mailbox problem'], ['2.1', 'Mailbox disabled'], ['2.2', 'Mailbox full'],
+    ['1.0', 'Other email address problem'], ['1.1', 'Delivery address not accepted'], ['1.2', 'Delivery domain not accepted'],
+    ['1.3', 'Delivery address written in the wrong format'], ['1.4', 'Delivery address matches more than one mailbox'],
+    ['1.6', 'Mailbox moved without a forwarding address'], ['1.7', 'Sender address written in the wrong format'],
+    ['1.8', 'Sender domain not accepted'], ['1.9', 'Message relayed to a non-compliant mail server'], ['1.10', 'Delivery domain says it does not accept mail (null MX)'],
+    ['2.0', 'Other mailbox problem'], ['2.1', 'Mailbox disabled'], ['2.2', 'Mailbox full'],
     ['2.3', 'Message exceeds the mailbox size limit'], ['2.4', 'Mailing list expansion problem'],
-    ['3.0', 'Other or unspecified mail system problem'], ['3.1', 'Mail system full'], ['3.2', 'Mail system not accepting messages'],
-    ['3.3', 'Mail system does not support the requested features'], ['3.4', 'Message exceeds the mail system size limit'], ['3.5', 'Mail system configuration error'],
-    ['4.0', 'Other or unspecified network or routing problem'], ['4.1', 'No response from the receiving server'], ['4.2', 'Connection failed during delivery'],
-    ['4.3', 'Directory server failure'], ['4.4', 'Cannot find a delivery route'], ['4.5', 'Mail system congestion'], ['4.6', 'Routing loop detected'],
+    ['3.0', 'Other mail server problem'], ['3.1', 'Mail server storage full'], ['3.2', 'Mail server not accepting messages'],
+    ['3.3', 'Mail system does not support the requested features'], ['3.4', 'Message too large for the mail server'], ['3.5', 'Mail server settings are wrong'],
+    ['4.0', 'Other connection or delivery path problem'], ['4.1', 'No response from the receiving server'], ['4.2', 'Connection failed during delivery'],
+    ['4.3', 'Directory server failure'], ['4.4', 'Cannot find a path to deliver mail'], ['4.5', 'Mail servers too busy'], ['4.6', 'Mail keeps passing between the same servers'],
     ['4.7', 'Delivery time expired'],
-    ['5.0', 'Other or unspecified protocol error'], ['5.1', 'Invalid command'], ['5.2', 'Syntax error'], ['5.3', 'Too many recipients'],
-    ['5.4', 'Invalid command arguments'], ['5.5', 'Wrong protocol version'], ['5.6', 'Authentication response too long'],
-    ['6.0', 'Other or unspecified message content error'], ['6.1', 'Message format not supported'], ['6.2', 'Message conversion required but not allowed'],
-    ['6.3', 'Message conversion required but not supported'], ['6.5', 'Message conversion failed'], ['6.6', 'Message content not available'],
+    ['5.0', 'Other problem with mail commands'], ['5.1', 'Invalid command'], ['5.2', 'Command written in the wrong format'], ['5.3', 'Too many delivery addresses'],
+    ['5.4', 'Command has the wrong details'], ['5.5', 'Wrong protocol version'], ['5.6', 'Sign-in reply too long'],
+    ['6.0', 'Other problem with message contents'], ['6.1', 'Message format not supported'], ['6.2', 'Message needs a format change that is not allowed'],
+    ['6.3', 'Message needs a format change that is not supported'], ['6.5', 'Could not change the message format'], ['6.6', 'Message content not available'],
     ['6.7', 'Non-ASCII sender or recipient address not permitted'], ['6.8', 'Sending client does not allow a required UTF-8 reply'],
     ['6.9', 'Cannot deliver a message with UTF-8 headers'],
-    ['7.0', 'Other or unspecified security problem'], ['7.1', 'Delivery not authorized'], ['7.2', 'Sender not allowed to send to the mailing list'],
+    ['7.0', 'Other or unspecified security problem'], ['7.1', 'Delivery not allowed'], ['7.2', 'Sender not allowed to send to the mailing list'],
     ['7.3', 'Security conversion required but not possible'], ['7.4', 'Security features not supported'], ['7.5', 'Cryptographic failure'],
-    ['7.6', 'Cryptographic algorithm not supported'], ['7.7', 'Message integrity failure'], ['7.8', 'Invalid authentication credentials'],
-    ['7.9', 'Authentication method too weak'], ['7.10', 'Encryption required'], ['7.11', 'Encryption required for the authentication method'],
-    ['7.12', 'A password transition is needed'], ['7.13', 'User account disabled'], ['7.14', 'Trust relationship required'],
+    ['7.6', 'Cryptographic algorithm not supported'], ['7.7', 'Message integrity failure'], ['7.8', 'Wrong sign-in details'],
+    ['7.9', 'Sign-in method not secure enough'], ['7.10', 'Encryption required'], ['7.11', 'Sign-in method needs encryption'],
+    ['7.12', 'Password needs to be changed'], ['7.13', 'User account disabled'], ['7.14', 'Trust relationship required'],
     ['7.15', 'Message priority too low'], ['7.16', 'Message too large for its priority'], ['7.17', 'Mailbox owner has changed'],
     ['7.18', 'Domain owner has changed'], ['7.19', 'Cannot verify recipient ownership history (RRVS)'], ['7.20', 'No passing DKIM signature found'],
     ['7.21', 'No acceptable DKIM signature found'], ['7.22', 'No valid author-matched DKIM signature found'], ['7.23', 'SPF validation failed'],
-    ['7.24', 'SPF validation error'], ['7.25', 'Reverse DNS validation failed'], ['7.26', 'Multiple authentication checks failed'],
-    ['7.27', 'Sender domain does not accept mail (null MX)'], ['7.28', 'Mail flood detected'], ['7.29', 'ARC validation failed'], ['7.30', 'REQUIRETLS support required']
+    ['7.24', 'SPF validation error'], ['7.25', 'Reverse DNS check failed'], ['7.26', 'Several identity checks failed'],
+    ['7.27', 'Sender domain says it does not accept mail (null MX)'], ['7.28', 'Mail flood detected'], ['7.29', 'ARC validation failed'], ['7.30', 'REQUIRETLS support required']
 ];
 const SETTINGS_STATUS_CODE_NAMES = new Map(SETTINGS_STATUS_CODES);
 // Codes no registry lists, by the provider that sends them
 const SETTINGS_PROVIDER_CODE_NAMES = new Map([
-    ['5.2.121', "Recipient's hourly limit from one sender (Microsoft)"], ['5.2.122', "Recipient's hourly limit (Microsoft)"],
+    ['5.2.121', "Address reached its hourly limit for mail from one sender (Microsoft)"], ['5.2.122', "Address reached its hourly mail limit (Microsoft)"],
     ['5.4.8', 'MTA-STS validation failed (Microsoft)'], ['5.4.300', 'Message expired (Microsoft)']
 ]);
 // A whole subject: x stands for every detail, also codes no list has (Microsoft's 5.7.509)
 const SETTINGS_CODE_SUBJECT_NAMES = new Map([
-    ['4', 'All network and routing codes'], ['5', 'All protocol codes'],
-    ['6', 'All message content and media codes'], ['7', 'All security and policy codes']
+    ['4', 'All connection and delivery path problems'], ['5', 'All problems with mail commands'],
+    ['6', 'All problems with message contents'], ['7', 'All security problems and mail rules']
 ]);
 const SETTINGS_STANDARD_KEYS = { hard: 'suppression_hard_bounce_standard_codes', soft: 'suppression_soft_bounce_standard_codes' };
 // The standard codes, by subject: failures about the sender, the message, the
@@ -937,21 +956,21 @@ const SETTINGS_STANDARD_CODES = {
     5: [
         ['Sender address', ['5.1.7', '5.1.8', '5.1.9']],
         ['Mailbox', ['5.2.2', '5.2.3', '5.2.4', '5.2.121', '5.2.122']],
-        ['Mail system', ['5.3.1', '5.3.2', '5.3.3', '5.3.4', '5.3.5']],
-        ['Network and routing', ['5.4.0', '5.4.2', '5.4.3', '5.4.5', '5.4.6', '5.4.7', '5.4.8', '5.4.300']],
-        ['Protocol', ['5.5.1', '5.5.2', '5.5.3', '5.5.4', '5.5.5', '5.5.6']],
+        ['Mail server', ['5.3.1', '5.3.2', '5.3.3', '5.3.4', '5.3.5']],
+        ['Connections and delivery paths', ['5.4.0', '5.4.2', '5.4.3', '5.4.5', '5.4.6', '5.4.7', '5.4.8', '5.4.300']],
+        ['Mail commands', ['5.5.1', '5.5.2', '5.5.3', '5.5.4', '5.5.5', '5.5.6']],
         ['Message content', ['5.6.x']],
-        ['Security and policy', ['5.7.x']]
+        ['Security and mail rules', ['5.7.x']]
     ],
     4: [
         ['Unspecified failure', ['4.0.0']],
         ['Sender address', ['4.1.7', '4.1.8', '4.1.9']],
         ['Mailbox', ['4.2.1', '4.2.2', '4.2.3', '4.2.4']],
-        ['Mail system', ['4.3.1', '4.3.2', '4.3.3', '4.3.4', '4.3.5']],
-        ['Network and routing', ['4.4.x']],
-        ['Protocol', ['4.5.x']],
+        ['Mail server', ['4.3.1', '4.3.2', '4.3.3', '4.3.4', '4.3.5']],
+        ['Connections and delivery paths', ['4.4.x']],
+        ['Mail commands', ['4.5.x']],
         ['Message content', ['4.6.x']],
-        ['Security and policy', ['4.7.x']]
+        ['Security and mail rules', ['4.7.x']]
     ]
 };
 // What the mail logs had in the last days, read once per Settings load: { days, permanent, temporary }
@@ -983,7 +1002,7 @@ function settingsStandardCodes(kind, cls, config, lockedKeys, defaults) {
         codes.map(code => '<span><b>' + escapeHtml(code) + '</b>' + escapeHtml(settingsCodeName(code)) + '</span>').join('') + '</div>').join('');
     return '<div class="ui-set-codes-std">' +
         renderSettingsEditField(key, config[key], [], SETTINGS_FIELD_DESCRIPTIONS[key] || '', lockedKeys.has(key), defaults[key]) +
-        '<details class="ui-set-codes-std-list"><summary>View built-in codes</summary><div class="ui-set-codes-groups">' + groups + '</div></details></div>';
+        '<details class="ui-set-codes-std-list"><summary>View common mail problems</summary><div class="ui-set-codes-groups">' + groups + '</div></details></div>';
 }
 
 // A well-formed code of the class ('5' or '4') without leading zeros, or ''
@@ -1005,7 +1024,7 @@ function settingsBounceCodes(kind, config, lockedKeys, defaults) {
     const desc = SETTINGS_FIELD_DESCRIPTIONS[key];
     // The registered codes in the shared picker (MP-4: searchable by code and meaning); a pick adds at once
     const picker = locked ? '' : uiPicker({
-        id: 'settings-' + id, label: 'Status codes', value: 'Select a code', field: true, labelledBy: 'label-' + id + '-also',
+        id: 'settings-' + id, label: 'Failure codes', value: 'Choose a failure', field: true, labelledBy: 'label-' + id + '-also',
         search: 'Search codes', options: SETTINGS_STATUS_CODES.map(([code, name]) => ({
             label: `${cls}.${code} ${name}`, value: `${cls}.${code}`, onclick: `settingsPickCode('${kind}', '${cls}.${code}')`
         }))
@@ -1022,12 +1041,12 @@ function settingsBounceCodes(kind, config, lockedKeys, defaults) {
         '</summary><div class="ui-set-codes-body">' +
         '<small class="ui-set-desc">' + escapeHtml(desc) + '</small>' +
         settingsStandardCodes(kind, cls, config, lockedKeys, defaults) +
-        '<span class="ui-label ui-set-codes-also" id="label-' + id + '-also">Additional codes to exclude</span>' +
+        '<span class="ui-label ui-set-codes-also" id="label-' + id + '-also">' + escapeHtml(settingsFieldLabel(key)) + '</span>' +
         '<div class="ui-chip-row" data-codes-list aria-labelledby="label-' + id + '-also"></div>' +
         // A code the registry does not list (a provider's own, such as 5.7.509) is typed beside it
         (locked ? '' : '<div class="ui-sec-ladd ui-flush ui-set-codes-add">' + picker +
             '<span class="ui-set-codes-other"><input type="text" class="ui-input" id="' + id + '-other" data-search-focus autocomplete="off" spellcheck="false" maxlength="20"' +
-                ' placeholder="Enter a ' + cls + '.x.x code" aria-label="Enter a ' + cls + '.x.x code" oninput="settingsCodeTyped(this)"' +
+                ' placeholder="Or type a ' + cls + '.x.x code" aria-label="Or type a ' + cls + '.x.x code" oninput="settingsCodeTyped(this)"' +
                 ' onkeydown="if (event.key === \'Enter\') { event.preventDefault(); settingsAddCode(this); }">' +
             '<button type="button" class="ui-btn" onclick="settingsAddCode(this)">Add</button></span></div>' +
             '<small class="ui-set-codes-error ui-text-fail" data-codes-error role="status" hidden></small>') +
@@ -1060,7 +1079,7 @@ function settingsShowCodes(box) {
             (locked ? '' : '<button type="button" data-code="' + escapeHtml(code) + '" onclick="settingsRemoveCode(this)" aria-label="Remove ' +
                 escapeHtml(code) + '" title="Remove">&times;</button>') + '</span>';
     };
-    box.querySelector('[data-codes-list]').innerHTML = codes.length ? codes.map(chip).join('') : '<span class="ui-muted">No additional codes excluded.</span>';
+    box.querySelector('[data-codes-list]').innerHTML = codes.length ? codes.map(chip).join('') : '<span class="ui-muted">You have not added any failures to ignore.</span>';
     // A code the standard codes leave alone is not offered again while their switch is on
     const standard = settingsStandardOn(box);
     box.dataset.standard = String(standard);
@@ -1071,7 +1090,7 @@ function settingsShowCodes(box) {
         let tag = option.querySelector('small');
         if (on && !tag) {
             tag = document.createElement('small');
-            tag.textContent = 'Already excluded';
+            tag.textContent = 'Already ignored';
             option.appendChild(tag);
         } else if (!on && tag) tag.remove();
     });
@@ -1079,8 +1098,8 @@ function settingsShowCodes(box) {
     const seen = settingsCodesSeen && !locked
         ? (settingsCodesSeen[box.dataset.class === '5' ? 'permanent' : 'temporary'] || []).filter(s => !codes.includes(s.code) && !covered(s.code)) : [];
     seenBox.hidden = !seen.length;
-    seenBox.innerHTML = seen.length ? '<h4 class="ui-set-codes-h">Codes from mail logs in the last ' + escapeHtml(uiCountLabel(settingsCodesSeen.days, 'day', 'days')) + '</h4>' +
-        '<small class="ui-set-desc">' + escapeHtml('Select a code to exclude it. The number shows how many times it appeared in the logs.') + '</small>' +
+    seenBox.innerHTML = seen.length ? '<h4 class="ui-set-codes-h">Failures seen in the last ' + escapeHtml(uiCountLabel(settingsCodesSeen.days, 'day', 'days')) + '</h4>' +
+        '<small class="ui-set-desc">' + escapeHtml('Choose a failure for the app to ignore. The small number shows how often it happened.') + '</small>' +
         '<div class="ui-chip-row">' + seen.map(s => {
             const name = settingsCodeName(s.code);
             return '<button type="button" class="ui-chip" data-code="' + escapeHtml(s.code) + '" onclick="settingsAddSeenCode(this)" title="' +
@@ -1125,7 +1144,7 @@ function settingsAddCode(el) {
     if (!input.value.trim()) return false;
     const code = settingsCodeOf(input.value, cls);
     if (!code) {
-        error.textContent = `Enter a code such as ${cls}.2.2, or select one from the list. The code must start with ${cls}.`;
+        error.textContent = `Type a code like ${cls}.2.2 that starts with ${cls}. Or choose a failure from the list.`;
         error.hidden = false;
         input.setAttribute('aria-invalid', 'true');
         return false;
@@ -1233,7 +1252,7 @@ async function settingsRspamdTransition(payload, data, newDisabled) {
     const connectionChanged = SETTINGS_RSPAMD_CONNECTION_KEYS.some(key => key in payload && !locked.has(key)
         && payload[key] !== '********' && String(payload[key] ?? '') !== String(before[key] ?? ''));
     if (connectionChanged) {
-        showToast('Save the mailcow or Rspamd connection change first, then turn Sync with Rspamd on or off.', 'error');
+        showToast('Save your mailcow or Rspamd connection changes first. Then change Sync with Rspamd.', 'error');
         return null;
     }
     let state;
@@ -1250,25 +1269,25 @@ async function settingsRspamdTransition(payload, data, newDisabled) {
             if (!featureOff && rows > 0) {
                 const ok = await showChoiceModal({
                     title: 'Turn off sync with Rspamd?',
-                    message: `Permanently deletes the suppression list (${rows} ${settingsPlural(rows, 'entry', 'entries')}) and its failure history. No blocks are saved in Rspamd to restore the list.`,
+                    message: `Deletes the list (${rows} ${settingsPlural(rows, 'entry', 'entries')}) and everything saved with it for good. Rspamd has no blocks to load back.`,
                     choices: [{ value: 'off', label: 'Turn off', kind: 'danger' }]
                 });
                 if (!ok) return null;
             }
             return { action: 'none', feature_off: featureOff, purge_rspamd: state.writable ? 'remove' : 'keep' };
         }
-        const lead = featureOff ? 'Suppressions will turn off. The suppression list and its failure history will be permanently deleted.' : "Sync with Rspamd will turn off. The suppression list and its failure history will be permanently deleted.";
+        const lead = featureOff ? 'Turning off Suppressions deletes the app\'s list and everything saved with it for good.' : "Turning off Sync with Rspamd deletes the app's list and everything saved with it for good.";
         if (n === null || !state.writable) {
             const why = state.reason_text || 'Rspamd cannot be reached.';
             const message = n === null
-                ? `${lead} The app cannot check or remove its Rspamd blocks now. ${why}`
-                : `${lead} Rspamd still has ${blocks(n)} from this app. These blocks remain active because the app cannot remove them now. ${why}`;
+                ? `${lead}\nThe app cannot check or remove its blocks in Rspamd.\n${why}`
+                : `${lead}\nRspamd still has ${blocks(n)} from this app that may reject new mail. The app cannot remove them now.\n${why}`;
             const keep = await showChoiceModal({ title: "Keep this app's Rspamd blocks?", message, choices: [{ value: 'keep', label: 'Keep blocks', kind: 'primary' }] });
             return keep ? { action: 'keep', feature_off: featureOff } : null;
         }
         const picked = await showChoiceModal({
             title: "Keep this app's Rspamd blocks?",
-            message: `${lead} Rspamd still has ${blocks(n)} from this app. Kept blocks continue to reject new mail. Do you want to keep or remove them?`,
+            message: `${lead}\nKeep or remove this app's ${blocks(n)} in Rspamd? Blocks you keep can still reject new mail.`,
             choices: [{ value: 'keep', label: 'Keep blocks' }, { value: 'remove', label: 'Remove blocks', kind: 'danger' }]
         });
         return picked ? { action: picked, feature_off: featureOff, count: n } : null;
@@ -1285,7 +1304,7 @@ async function settingsRspamdTransition(payload, data, newDisabled) {
         const why = state.reason_text || 'Rspamd cannot be reached.';
         const ok = await showChoiceModal({
             title: 'Turn on sync with Rspamd?',
-            message: `The app cannot check its Rspamd blocks now. ${why} Turning sync on sends pending changes to Rspamd when the connection is available.`,
+            message: `The app cannot check its blocks in Rspamd now.\n${why}\nWith sync on, the app sends saved changes when it can connect.`,
             choices: [{ value: 'apply', label: 'Turn on', kind: 'primary' }]
         });
         return ok ? { action: 'apply', count: pending } : null;
@@ -1293,8 +1312,8 @@ async function settingsRspamdTransition(payload, data, newDisabled) {
     const changes = `${pending} waiting ${settingsPlural(pending, 'change', 'changes')}`;
     const picked = await showChoiceModal({
         title: 'Turn on sync with Rspamd?',
-        message: `Apply the ${changes}, or delete the suppression list and this app's Rspamd blocks? Deleting also removes the list's failure history. Other Rspamd entries stay.`,
-        choices: [{ value: 'fresh', label: 'Delete list and blocks', kind: 'danger' }, { value: 'apply', label: 'Apply changes', kind: 'primary' }]
+        message: `Apply the ${changes}, or delete the list and this app's blocks in Rspamd?\nDeleting the list removes everything saved with it for good. Other blocks in Rspamd stay.`,
+        choices: [{ value: 'fresh', label: 'Delete list and Rspamd blocks', kind: 'danger' }, { value: 'apply', label: 'Apply changes', kind: 'primary' }]
     });
     return picked ? { action: picked, count: pending } : null;
 }
@@ -1313,8 +1332,8 @@ async function settingsRspamdAfterSave(plan, saved) {
         const body = await res.json().catch(() => ({}));
         if (!res.ok) {
             return [(body.detail && body.detail.code === 'not_confirmed')
-                ? 'Sync with Rspamd is off. Block removal could not be confirmed. Check Rspamd before retrying.'
-                : `Sync with Rspamd is off, but this app's Rspamd blocks could not be removed: ${settingsErrorText(body, res.statusText)}`, 'error'];
+                ? 'Sync with Rspamd is off. Check Rspamd to see whether its blocks were removed before trying again.'
+                : `Sync with Rspamd is off. The app could not remove its blocks in Rspamd.\n${settingsErrorText(body, res.statusText)}`, 'error'];
         }
         return [`Sync with Rspamd is off. Removed ${body.removed_blocks} app ${settingsPlural(body.removed_blocks, 'block', 'blocks')} from Rspamd.`, 'success'];
     }
@@ -1323,7 +1342,7 @@ async function settingsRspamdAfterSave(plan, saved) {
         // What changed in mailcow comes in first, then the list's waiting changes are written
         const res = await authenticatedFetch('/api/suppressions/sync?after_change=true', { method: 'POST' });
         const body = await res.json().catch(() => ({}));
-        if (!res.ok) return [`Sync with Rspamd is on, but Rspamd was not updated yet: ${settingsErrorText(body, res.statusText)}`, 'error'];
+        if (!res.ok) return [`Sync with Rspamd is on. Changes have not reached Rspamd yet.\n${settingsErrorText(body, res.statusText)}`, 'error'];
         const list = (body.list_added || body.list_removed)
             ? ` List updated from Rspamd: ${body.list_added || 0} added, ${body.list_removed || 0} deleted.` : '';
         if (body.written) return [`Sync with Rspamd is on. Rspamd updated: ${body.added} added, ${body.removed} removed.${list}`, 'success'];
@@ -1334,27 +1353,27 @@ async function settingsRspamdAfterSave(plan, saved) {
         const what = plan.feature_on ? 'Suppressions are on' : 'Sync with Rspamd is on';
         const res = await authenticatedFetch('/api/suppressions/rspamd/import', { method: 'POST' });
         const body = await res.json().catch(() => ({}));
-        if (!res.ok) return [`${what}, but this app's Rspamd blocks could not be loaded yet: ${settingsErrorText(body, res.statusText)} They load on the next try.`, 'error'];
-        if (body.reason === 'no_password') return [`${what}, but this app's Rspamd blocks load only once the Rspamd password is set.`, 'error'];
+        if (!res.ok) return [`${what}. The app could not load its blocks from Rspamd yet.\n${settingsErrorText(body, res.statusText)}\nThe app will try again.`, 'error'];
+        if (body.reason === 'no_password') return [`${what}. Add the Rspamd password in Settings > mailcow > Rspamd to load the blocks.`, 'error'];
         // The count belongs to this request only when it did the load
         if (!body.loaded) return [`${what}.`, 'success'];
         return body.imported
             ? [`${what}. Loaded ${body.imported} ${settingsPlural(body.imported, 'block', 'blocks')} from Rspamd.`, 'success']
             : [`${what}. Rspamd has no saved blocks from this app to load.`, 'success'];
     }
-    if (plan.action === 'fresh') return ['Sync with Rspamd is on. The suppression list, its failure history, and this app\'s Rspamd blocks were deleted.', 'success'];
+    if (plan.action === 'fresh') return ['Sync with Rspamd is on.\nThe old list, everything saved with it, and this app\'s blocks in Rspamd were deleted.', 'success'];
     return null;
 }
 
 // Outbound: the heading of a Status code exceptions area, and the line on it while it is closed
-const SETTINGS_CODES_HEADING = 'Status code exceptions';
+const SETTINGS_CODES_HEADING = 'Failures to ignore';
 const SETTINGS_CODES_SUMMARY = {
-    standard: 'Built-in codes excluded.',
-    standardOne: 'Built-in codes and 1 additional code excluded.',
-    standardMore: 'Built-in codes and {count} additional codes excluded.',
-    none: 'No codes excluded.',
-    one: '1 code excluded.',
-    more: '{count} codes excluded.'
+    standard: 'The app ignores problems like a full mailbox.',
+    standardOne: 'The app ignores problems like a full mailbox, plus failures with 1 code you added.',
+    standardMore: 'The app ignores problems like a full mailbox, plus failures with {count} codes you added.',
+    none: 'This list has no failures to ignore.',
+    one: 'The app ignores failures with 1 chosen code.',
+    more: 'The app ignores failures with {count} chosen codes.'
 };
 
 // Texts of the session signing key's Generate and of the Basic Auth password's Remove while it is off
@@ -1389,13 +1408,13 @@ const SETTINGS_FIELD_OPTIONS = {
     ],
     // The Outbound bounce choices (settingsBounceChoice): {count} is the number field
     suppression_hard_bounce_action: [
-        { value: 'suppress', label: 'Block new mail to the failed address and delete its queued mail.', needs: 'logs rw-queue sync', hint: 'Messages also addressed to recipients without a permanent failure stay in the queue.' },
-        { value: 'delete', label: 'Delete queued mail to the failed address.', needs: 'logs rw-queue', hint: 'New mail to this address is still allowed. Messages also addressed to recipients without a permanent failure stay in the queue.' },
-        { value: 'ignore', label: 'Take no automatic action.' }
+        { value: 'suppress', label: 'Block new mail to the failed address. Delete any mail to it still waiting to be sent.', needs: 'logs rw-queue sync' },
+        { value: 'delete', label: 'Delete any mail to the failed address still waiting to be sent.', needs: 'logs rw-queue', hint: 'New mail to this address is still allowed.' },
+        { value: 'ignore', label: 'Do nothing.' }
     ],
     suppression_soft_bounce_action: [
         { value: 'count', label: 'Keep retrying. Block new mail to the address after {count} failures.', needs: 'logs sync',
-            hint: 'Counts failures for each recipient address, including retries of the same message.' },
+            hint: 'Each failed try counts, even for the same message.' },
         { value: 'suppress', label: 'Keep retrying. Block new mail to the address after the first failure.', needs: 'logs sync' },
         { value: 'ignore', label: 'Keep retrying without blocking new mail.' }
     ]
@@ -1670,20 +1689,20 @@ var SETTINGS_EDIT_TABS = [
         // Was spam_filter (Queue Management); the old address opens this one (router.js). Hidden while Suppressions is off
         id: 'outbound', label: 'Outbound', description: 'Choose what happens when outgoing mail cannot be delivered.', groups: [
             // The sync belongs to the list, not to the automatic handling: a list kept by hand syncs too
-            { label: 'Recipient blocking', keys: ['suppression_rspamd_sync'], intro: 'Requires the Rspamd password and a read-write API key in Settings > mailcow.' },
-            { label: 'Automatic handling', keys: ['suppression_enabled'], intro: 'The queue holds mail waiting to be sent. Automatic deletion permanently removes messages without notifying the sender.' },
+            { label: 'Address blocking', keys: ['suppression_rspamd_sync'], intro: 'Requires the Rspamd password and a read-write API key in Settings > mailcow.' },
+            { label: 'Automatic actions', keys: ['suppression_enabled'], intro: 'Deleted mail is gone for good. The app does not tell the person who sent it.' },
             // Reading the logs is set by the choices (settingsSyncBounce)
             // Each choice is followed by the codes it leaves alone (settingsBounceCodes)
             { label: 'Permanent delivery failure', choice: 'hard', needs: 'suppression_enabled',
                 keys: ['suppression_hard_bounce_action', 'suppression_auto_detect', 'suppression_hard_bounce_standard_codes', 'suppression_hard_bounce_excluded_codes'],
-                intro: 'Delivery has failed permanently, with a status code starting with 5, such as 5.1.1.' },
+                intro: 'The mail server has stopped trying to deliver this message to the failed address.' },
             { label: 'Temporary delivery failure', choice: 'soft', needs: 'suppression_enabled',
                 keys: ['queue_cleanup_enabled', 'queue_cleanup_block', 'suppression_soft_bounce_action', 'queue_cleanup_threshold_minutes', 'suppression_soft_bounce_threshold',
                     'suppression_soft_bounce_standard_codes', 'suppression_soft_bounce_excluded_codes'],
-                intro: 'Delivery has failed for now, with a status code starting with 4, such as 4.2.2. Postfix keeps the message in the queue and retries.' },
+                intro: 'The mail server could not deliver the message yet. It keeps trying.' },
             // A block reaches Rspamd only through the sync: without it nothing is blocked
             { label: 'Block duration', needs: 'suppression_enabled suppression_rspamd_sync', keys: ['suppression_base_expiry_days', 'suppression_max_expiry_days'] },
-            { label: 'Excluded domains', needs: 'suppression_enabled', keys: ['suppression_whitelist_domains'] }
+            { label: 'Domains to ignore', needs: 'suppression_enabled', keys: ['suppression_whitelist_domains'] }
         ]
     },
     {
