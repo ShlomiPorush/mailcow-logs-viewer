@@ -80,3 +80,18 @@ test('the check rows keep to one short line', () => {
         assert.ok(one(key, data).length <= 60, key);
     }
 });
+
+test('a DMARC line names its domain only while it fits, and blocklist counts must make sense', () => {
+    const c = load();
+    const one = (key, data) => c.attentionCheckItems(key, data)[0].detail;
+    const line = 'Only 82% passed mail identity checks.';
+    const named = length => ({ domain: 'a'.repeat(length - line.length - 2 - '.example.com'.length) + '.example.com', pass_rate: 82, new_sources: [], recommendations: [{ type: 'low_pass_rate' }] });
+    const two = first => ({ insights: [first, { ...first, domain: 'example.org' }] });
+    assert.equal(one('dmarc', two(named(60))).length, 60);
+    assert.equal(one('dmarc', two(named(61))), 'Review mail identity checks and protection settings.');
+    const host = over => ({ status: 'listed', hosts: [{ hostname: 'mail.example.com', status: 'listed', listed_count: 1, total_blacklists: 3, ...over }] });
+    assert.equal(one('blocklist', host({})), 'On 1 of 3 lists; some mail may bounce.');
+    for (const bad of [{ listed_count: null }, { listed_count: -1 }, { listed_count: 1.5 }, { listed_count: 4 }, { listed_count: '' }]) {
+        assert.equal(one('blocklist', host(bad)), 'Mail to some providers may bounce.', JSON.stringify(bad));
+    }
+});
