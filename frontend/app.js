@@ -2703,6 +2703,36 @@ function renderDismissAll(button) {
     button.classList.toggle('is-off', !attention.alerts.list.length);
 }
 
+// The one line an alert shows in Needs attention and the bell: what happened,
+// from its numbers. The stored detail (emails, channels) keeps the long text.
+// The counting window is the one the alert was made with, read from its detail
+function attentionAlertLine(a) {
+    const num = v => (v === null || v === undefined || v === '' ? NaN : Number(v));
+    const raw = num(a.metric_value);
+    const count = Number.isFinite(raw) && raw >= 0 ? Math.round(raw) : null;
+    const detail = String(a.detail || '');
+    const found = detail.match(a.alert_type === 'smtp_abuse_block' ? /\bin (\d+) minutes?\b/ : /\bin the last (\d+) minutes?\b/);
+    const minutes = found && Number(found[1]) > 0 ? Number(found[1]) : null;
+    const n = value => value.toLocaleString();
+    const period = minutes ? ` in ${n(minutes)} ${minutes === 1 ? 'minute' : 'minutes'}` : '';
+    const messages = c => `${n(c)} ${c === 1 ? 'message' : 'messages'}`;
+    if (a.alert_type === 'volume_spike') {
+        if (count === null) return 'Unusual sending was detected.';
+        const usual = num(a.baseline_value);
+        const ratio = minutes && Number.isFinite(usual) && usual > 0 ? Math.round((raw * 60 / minutes) / usual) : NaN;
+        return `Sent ${messages(count)}${period}${Number.isFinite(ratio) && ratio > 1 ? `, about ${n(ratio)} times usual` : ''}.`;
+    }
+    if (a.alert_type === 'auth_failure_burst') {
+        if (count === null) return 'Repeated sign-in failures were detected.';
+        return `${n(count)} failed ${count === 1 ? 'sign-in' : 'sign-ins'}${period}.`;
+    }
+    if (a.alert_type === 'smtp_abuse_block') {
+        if (count === null) return 'Sending was stopped by abuse protection.';
+        return `Sending stopped after ${messages(count)}${period}.`;
+    }
+    return 'Open activity for details.';
+}
+
 // The rows of the alerts. In the bell's window an action that opens another
 // window closes this one first, so the next gives the focus back to the bell
 function attentionAlertRows(where) {
@@ -2718,7 +2748,7 @@ function attentionAlertRows(where) {
                         <span class="ui-tag ${critical ? 'ui-tag-fail' : 'ui-tag-warn'}">${escapeHtml((a.severity || 'warning').toUpperCase())}</span>
                         <b>${escapeHtml(a.title)}</b>
                     </div>
-                    <p>${escapeHtml(a.detail || '')}</p>
+                    <p>${escapeHtml(attentionAlertLine(a))}</p>
                     <p class="ui-muted">${escapeHtml(formatTime(a.created_at))}</p>
                 </div>
                 <div class="ui-alert-acts">
@@ -2842,13 +2872,37 @@ function uiReplaceKeepingFocus(container, html) {
     return true;
 }
 
+// The DMARC row's line, about the first domain that needs a look and the reason
+// it does: a low pass rate first, then new failing sources, then a stronger
+// policy that looks safe. With several domains the line names the one it is about
+function attentionDmarcLine(insight, domains) {
+    const types = (insight.recommendations || []).map(r => r.type);
+    const sources = (insight.new_sources || []).length;
+    const rate = insight.pass_rate === null || insight.pass_rate === undefined || insight.pass_rate === '' ? NaN : Number(insight.pass_rate);
+    const fallback = 'Review mail identity checks and protection settings.';
+    let line;
+    if (types.includes('low_pass_rate')) {
+        if (!(Number.isFinite(rate) && rate >= 0 && rate <= 100)) return fallback;
+        line = `Only ${Math.round(rate)}% passed mail identity checks.`;
+    } else if (sources) {
+        line = sources === 1 ? 'Mail from a new source failed identity checks.' : 'Mail from new sources failed identity checks.';
+    } else if (types.includes('tighten_policy')) {
+        line = 'Reports suggest stronger protection is safe.';
+    } else {
+        return fallback;
+    }
+    if (domains <= 1) return line;
+    const named = `${insight.domain}: ${line}`;
+    return named.length <= 60 ? named : fallback;
+}
+
 // Server checks that need a look, each with the place to handle it: go is the
 // page it opens, popup an action that opens a window
 function attentionCheckItems(key, data) {
     if (!data) return [];
     if (key === 'connection') {
         if (data.connected !== false) return [];
-        const item = { tone: 'fail', title: 'mailcow is not reachable', detail: 'The mailcow API did not answer, so logs and server data may be out of date.' };
+        const item = { tone: 'fail', title: 'mailcow is not reachable', detail: 'Logs and server data may be out of date.' };
         // Only an admin can change the connection; anyone else sees it on Status
         return [userIsAdmin() ? { ...item, action: 'Open settings', onclick: "navigateTo('settings')", go: ['settings'] }
             : { ...item, action: 'Open status', onclick: "navigateTo('status')", go: ['status'] }];
@@ -2861,9 +2915,12 @@ function attentionCheckItems(key, data) {
         const title = listedHosts.length > 1
             ? `${listedHosts.length} of your addresses are on a blocklist`
             : `${first ? first.hostname : (data.server_ip || 'Your server')} is on a blocklist`;
-        const detail = listedHosts.length > 1
-            ? `${listedHosts.map(h => h.hostname).join(', ')}. Outbound mail to some providers may bounce.`
-            : `Listed on ${first ? first.listed_count : data.listed_count} of ${first && first.total_blacklists ? first.total_blacklists : data.total_blacklists} lists. Outbound mail to some providers may bounce.`;
+        // One host: its own counts, when they make sense; the title names the host
+        const whole = v => (v === null || v === undefined || v === '' ? NaN : Number(v));
+        const listed = whole(first ? first.listed_count : data.listed_count);
+        const checked = whole(first && first.total_blacklists ? first.total_blacklists : data.total_blacklists);
+        const counted = listedHosts.length <= 1 && Number.isInteger(listed) && listed >= 0 && Number.isInteger(checked) && checked > 0 && checked >= listed;
+        const detail = counted ? `On ${listed} of ${checked} ${checked === 1 ? 'list' : 'lists'}; some mail may bounce.` : 'Mail to some providers may bounce.';
         return [{ tone: 'fail', title, detail, action: 'Check listing', onclick: "navigateTo('status')", go: ['status'] }];
     }
     if (key === 'containers') {
@@ -2879,17 +2936,15 @@ function attentionCheckItems(key, data) {
         const first = legacy[0];
         return [{ tone: 'warn',
             title: legacy.length === 1 ? `A Fail2ban entry ${first.list === 'whitelist' ? 'exempts' : 'blocks'} the whole ${first.network} network` : `${legacy.length} Fail2ban entries cover whole /32 networks`,
-            detail: legacy.length === 1 ? `An earlier version wrote ${first.address} as ${first.entry}. Repair it on the Security page's Lists tab.`
-                : 'An earlier version wrote single IPv6 addresses as networks. Repair them on the Security page\'s Lists tab.',
+            detail: legacy.length === 1 ? 'Repair this entry in Security > Lists.' : 'Repair these entries in Security > Lists.',
             action: 'Open lists', onclick: "navigateTo('netfilter', { sub: 'lists' })", go: ['netfilter', { sub: 'lists' }] }];
     }
     if (key === 'dmarc') {
         const dmarc = (data.insights || []).filter(i =>
             i.recommendations.some(r => r.type === 'tighten_policy' || r.type === 'low_pass_rate') || (i.new_sources && i.new_sources.length > 0));
         if (!dmarc.length) return [];
-        const first = dmarc[0].recommendations[0];
         return [{ tone: 'warn', title: dmarc.length === 1 ? `DMARC needs attention for ${dmarc[0].domain}` : `DMARC needs attention for ${dmarc.length} domains`,
-            detail: first ? first.message : 'New sources are failing DMARC.', action: 'Open DMARC', onclick: "navigateTo('dmarc')", go: ['dmarc'] }];
+            detail: attentionDmarcLine(dmarc[0], dmarc.length), action: 'Open DMARC', onclick: "navigateTo('dmarc')", go: ['dmarc'] }];
     }
     if (key === 'appVersion') {
         if (!data.update_available) return [];

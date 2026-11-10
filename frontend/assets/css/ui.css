@@ -3312,6 +3312,7 @@ button.ui-dm-node { cursor: pointer; }
 .ui-aa-dialog .ui-dialog-head h3 { display: flex; align-items: center; gap: 8px; overflow-wrap: anywhere; }
 .ui-aa-dialog .ui-dialog-body { display: grid; grid-auto-rows: max-content; gap: 18px; }
 .ui-aa-sub { margin: -6px 0 0; font-size: 13px; }
+.ui-aa-advice { margin: 0; font-size: 13.5px; line-height: 1.5; }
 .ui-aa-strip { display: grid; grid-template-columns: repeat(4, 1fr); border: 1px solid var(--ui-line); border-radius: 12px; overflow: hidden; }
 .ui-aa-strip > div { padding: 12px 14px; border-inline-start: 1px solid var(--ui-line); }
 .ui-aa-strip > div:first-child { border-inline-start: 0; }
