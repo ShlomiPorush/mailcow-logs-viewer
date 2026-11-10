@@ -190,3 +190,84 @@ def test_the_policy_needs_one_of_the_three_areas_to_dismiss():
     assert user_access.need_for('GET', '/api/security-alerts').kind == user_access.SIGNED_IN
     # Nothing else became a write anyone may make
     assert not scopes.allows(frozenset(), scopes.Rule(scopes.ANY, scopes.WRITE))
+
+
+# ---------- past 10,000 open alerts ----------
+
+MANY = 10001
+MANY_SUBJECT = f'many-{MARK}.example.com'
+
+
+@pytest.fixture
+def many(people):
+    """10,001 open alerts of Security, the newest of all, and 10,001 of Domains just before them."""
+    from sqlalchemy import text
+    from app.database import get_db_context
+
+    def wipe():
+        with get_db_context() as db:
+            db.execute(text('DELETE FROM security_alerts WHERE subject = :s'), {'s': MANY_SUBJECT})
+    wipe()
+    with get_db_context() as db:
+        for alert_type, days in (('volume_spike', 2), ('dns_change', 1)):
+            db.execute(text(
+                "INSERT INTO security_alerts (alert_type, severity, subject, title, acknowledged, created_at) "
+                "SELECT :t, 'warning', :s, :t, false, (now() at time zone 'utc') + make_interval(days => :d, secs => g) "
+                "FROM generate_series(1, :n) AS g"), {'t': alert_type, 's': MANY_SUBJECT, 'd': days, 'n': MANY})
+        rows = db.execute(text('SELECT id, alert_type FROM security_alerts WHERE subject = :s'), {'s': MANY_SUBJECT}).all()
+    yield {t: {i for i, kind in rows if kind == t} for t in ('volume_spike', 'dns_change')}
+    wipe()
+
+
+def test_past_10000_open_alerts_each_list_of_ids_has_its_own_cap(many):
+    from app.routers.security_alerts import MAX_ACK_IDS
+    person = _person(_admin(), 'many-mixed', views=('security',), acts=('domains',))
+    body = person.get(LIST, params={'acknowledged': 'false', 'limit': 1}).json()
+    # The count goes past the cap: it is counted, not taken from the ids
+    assert (body['unacknowledged_count'], body['unacknowledged_critical']) == _counts(AREA_TYPES['security'] | AREA_TYPES['domains'])
+    assert body['unacknowledged_count'] > 2 * MAX_ACK_IDS
+    # The newest open alerts the person sees are the Security ones, which they may only view
+    assert len(body['unacknowledged_ids']) == MAX_ACK_IDS and set(body['unacknowledged_ids']) <= many['volume_spike']
+    # What they may dismiss lies past those, under a cap of its own
+    assert len(body['writable_ids']) == MAX_ACK_IDS and set(body['writable_ids']) <= many['dns_change']
+    assert not set(body['writable_ids']) & set(body['unacknowledged_ids'])
+    newest = sorted(many['dns_change'], reverse=True)[:MAX_ACK_IDS]
+    assert sorted(body['writable_ids'], reverse=True) == newest
+    # Dismiss all with them changes exactly those
+    done = person.post(f'{LIST}/acknowledge-all', json={'ids': body['writable_ids']}).json()
+    assert done['acknowledged'] == MAX_ACK_IDS
+    assert len(_open(many['dns_change'])) == 1 and len(_open(many['volume_spike'])) == MANY
+
+
+def test_past_10000_open_alerts_an_admin_gets_both_lists_capped(many):
+    from app.routers.security_alerts import MAX_ACK_IDS
+    body = _admin().get(LIST, params={'acknowledged': 'false', 'limit': 1}).json()
+    assert len(body['unacknowledged_ids']) == MAX_ACK_IDS and len(body['writable_ids']) == MAX_ACK_IDS
+    assert body['unacknowledged_ids'] == body['writable_ids']
+    assert body['unacknowledged_count'] >= 2 * MANY
+
+
+# ---------- a type that belongs to no area ----------
+
+def test_an_alert_type_of_no_area_is_an_admins_only(people, stored):
+    unknown = _alert(stored, 'future_kind', 'critical')
+    admin = _admin()
+    # Every area, View and Take action, but not an admin
+    person = _person(admin, 'everything', views=('security', 'domains', 'dmarc', 'messages'),
+                     acts=('security', 'domains', 'dmarc'))
+    body = _list(person)
+    assert unknown not in {a['id'] for a in body['alerts']}
+    assert unknown not in body['unacknowledged_ids'] and unknown not in body['writable_ids']
+    assert (body['unacknowledged_count'], body['unacknowledged_critical']) == _counts(
+        AREA_TYPES['security'] | AREA_TYPES['domains'] | AREA_TYPES['dmarc'])
+    assert person.post(f'{LIST}/{unknown}/acknowledge').status_code == 404
+    assert person.post(f'{LIST}/acknowledge-all', json={'ids': [unknown]}).json()['acknowledged'] == 0
+    assert unknown not in person.post(f'{LIST}/acknowledge-all').json()['ids']
+    assert _open([unknown]) == [unknown]
+    # An admin sees it, and dismisses it; the person cannot undo that
+    body = _list(admin)
+    assert unknown in {a['id'] for a in body['alerts']} and unknown in body['writable_ids']
+    receipt = admin.post(f'{LIST}/{unknown}/acknowledge').json()['receipt']
+    assert person.post(f'/api/security-alerts/acknowledgements/{receipt}/undo').json()['restored'] == 0
+    assert _open([unknown]) == []
+    assert admin.post(f'/api/security-alerts/acknowledgements/{receipt}/undo').json()['ids'] == [unknown]

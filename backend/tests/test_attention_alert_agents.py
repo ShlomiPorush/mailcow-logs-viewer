@@ -122,6 +122,42 @@ def test_list_endpoints_shows_the_dismissals_under_each_area_the_agent_acts_in(l
     assert listed()[('GET', '/api/security-alerts')]['kind'] == 'read'
 
 
+def test_an_agent_with_every_area_never_gets_an_alert_type_of_no_area(live_agents):
+    from app.database import get_db_context
+    from app.models import SecurityAlert
+    with get_db_context() as db:
+        row = SecurityAlert(alert_type='future_kind', severity='critical', subject=f'{MARK}.example.com',
+                            title=f'future {MARK}', created_at=datetime.utcnow())
+        db.add(row)
+        db.flush()
+        unknown = {'future_kind': row.id}
+    try:
+        client, _, tokens = _connect(views=('security', 'domains', 'dmarc'), acts=('security', 'domains', 'dmarc'))
+        token = tokens['access_token']
+        head, body = _answer(_tool(client, token, 'read_api', {'path': '/api/security-alerts', 'query': {'limit': 500}}))
+        assert head.startswith('HTTP 200')
+        assert unknown['future_kind'] not in {a['id'] for a in body['alerts']}
+        assert unknown['future_kind'] not in body['unacknowledged_ids'] + body['writable_ids']
+        head, _ = _answer(_tool(client, token, 'perform_action', {
+            'method': 'POST', 'path': f"/api/security-alerts/{unknown['future_kind']}/acknowledge"}))
+        assert head.startswith('HTTP 404')
+        head, body = _answer(_tool(client, token, 'perform_action', {
+            'method': 'POST', 'path': '/api/security-alerts/acknowledge-all', 'body': {'ids': [unknown['future_kind']]}}))
+        assert body['acknowledged'] == 0
+        head, body = _answer(_tool(client, token, 'perform_action', {
+            'method': 'POST', 'path': '/api/security-alerts/acknowledge-all'}))
+        assert unknown['future_kind'] not in body['ids']
+        assert _open(unknown) == {unknown['future_kind']}
+        # A dismissal made by an admin is not the agent's to undo
+        receipt = client.post(f"/api/security-alerts/{unknown['future_kind']}/acknowledge").json()['receipt']
+        head, body = _answer(_tool(client, token, 'perform_action', {
+            'method': 'POST', 'path': f'/api/security-alerts/acknowledgements/{receipt}/undo'}))
+        assert body['restored'] == 0 and _open(unknown) == set()
+    finally:
+        with get_db_context() as db:
+            db.query(SecurityAlert).filter(SecurityAlert.id == unknown['future_kind']).delete(synchronize_session=False)
+
+
 def _open(alerts):
     from app.database import get_db_context
     from app.models import SecurityAlert
