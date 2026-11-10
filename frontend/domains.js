@@ -19,8 +19,15 @@ const DNS_TAG = {
 
 // The answer the list shows, to tell whether a refresh brings anything new
 let domainsShownJson = null;
+// The list's last load: what opens a domain from another page waits for it
+let domainsLoading = Promise.resolve();
 
-async function loadDomains() {
+function loadDomains() {
+    domainsLoading = loadDomainsNow();
+    return domainsLoading;
+}
+
+async function loadDomainsNow() {
     const loading = document.getElementById('domains-loading');
     const content = document.getElementById('domains-content');
 

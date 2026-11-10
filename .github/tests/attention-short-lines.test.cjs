@@ -51,7 +51,40 @@ test('a sign-in burst and a sending block say what happened in one line', () => 
     assert.equal(c.attentionAlertLine({ alert_type: 'smtp_abuse_block', metric_value: 140, baseline_value: 100, detail: block }), 'Sending stopped after 140 messages in 60 minutes.');
     assert.match(c.attentionAlertAdvice({ alert_type: 'smtp_abuse_block', detail: block }), /Outgoing spam\.$/);
     assert.match(c.attentionAlertAdvice({ alert_type: 'smtp_abuse_block', detail: block.replace('revoked: 0', 'revoked: 2') }), /new app passwords\.$/);
-    assert.equal(c.attentionAlertLine({ alert_type: 'something_new', detail: 'x' }), 'Open activity for details.');
+    // A kind this version does not know has no activity: the first line it was stored with
+    assert.equal(c.attentionAlertLine({ alert_type: 'something_new', detail: 'x\n\nmore' }), 'x');
+});
+
+// The alerts that used to go only by email (stored_alerts.py) show the line they were
+// stored with, open their page instead of activity, and are dismissed in their own area
+const STORED = [
+    ['dns_change', 'domains', 'DNS changes detected for example.com', 'SPF and DKIM changed.', 'Open domain'],
+    ['dmarc_import_failed', 'dmarc', 'DMARC & TLS report import errors', 'Could not fully import 3 report emails.', 'Open fetch history'],
+    ['protection_breach', 'security', 'Possible stolen password: user@example.com', 'An unusual sign-in may mean someone else has access.', 'Open Security'],
+    ['protection_ban_failed', 'security', 'Protection rules could not ban addresses', 'Could not ban 2 addresses or networks.', 'Open Security'],
+];
+
+test('an alert that opens its page shows its stored line, its Open button and Dismiss for its area', () => {
+    const c = load();
+    for (const [type, area, title, line, open] of STORED) {
+        vm.runInContext(`attention.alerts.list = ${JSON.stringify([{ id: 7, alert_type: type, severity: 'warning', title, detail: line, created_at: '2026-11-10T10:00:00Z' }])}`, c);
+        for (const where of ['dashboard', 'bell']) {
+            const html = c.attentionAlertRows(where);
+            assert.match(html, new RegExp(`<p>${line.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}</p>`), type);
+            assert.match(html, new RegExp(`onclick="openStoredAlert\\(7, '${where === 'bell' ? 'bell' : 'page'}'\\)" class="ui-btn ui-btn-sm">${open}</button>`), type);
+            assert.doesNotMatch(html, /Show activity|openAlertActivity/, type);
+            assert.match(html, new RegExp(`onclick="acknowledgeSecurityAlert\\(7\\)"[^>]*data-acts="alerts ${area}"`), type);
+            assert.ok(!/[\u2010-\u2015\u2212]/.test(line + title + open), `${type}: no dash characters`);
+        }
+    }
+    // Activity stays with the alerts that have it
+    vm.runInContext(`attention.alerts.list = ${JSON.stringify([{ id: 8, alert_type: 'auth_failure_burst', severity: 'warning', title: 't', detail: '', created_at: '2026-11-10T10:00:00Z' }])}`, c);
+    assert.match(c.attentionAlertRows('dashboard'), /openAlertActivity\(8\)[\s\S]*data-acts="alerts security"/);
+    // A kind this version does not know: no way on, and only an admin dismisses it
+    vm.runInContext(`attention.alerts.list = ${JSON.stringify([{ id: 9, alert_type: 'something_new', severity: 'warning', title: 't', detail: 'x', created_at: '2026-11-10T10:00:00Z' }])}`, c);
+    const unknown = c.attentionAlertRows('dashboard');
+    assert.doesNotMatch(unknown, /ui-alert-go|openAlertActivity|openStoredAlert/);
+    assert.match(unknown, /data-acts="alerts admin"/);
 });
 
 test('the row shows the short line, and the activity window the advice', () => {

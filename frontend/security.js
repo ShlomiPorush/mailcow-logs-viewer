@@ -1026,7 +1026,7 @@ function openSecurityList(key) {
     securityOpenRow = null;
     securityPage = null;
     securityToTop = true;
-    navigateTo('netfilter', { sub: 'overview' });
+    return navigateTo('netfilter', { sub: 'overview' });
 }
 
 function openSecuritySettings() {

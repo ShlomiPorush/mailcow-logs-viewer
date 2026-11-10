@@ -2475,7 +2475,7 @@ html body .ui-main .ui-set-choice-opt > input[type="radio"] { accent-color: var(
 .ui-no-act-quarantine [data-acts~="quarantine"], .ui-no-act-security [data-acts~="security"],
 .ui-no-act-rspamd [data-acts~="rspamd"], .ui-no-act-dmarc [data-acts~="dmarc"],
 .ui-no-act-domains [data-acts~="domains"], .ui-no-act-mailboxes [data-acts~="mailboxes"],
-.ui-no-admin [data-acts~="admin"] { display: none !important; }
+.ui-no-act-alerts [data-acts~="alerts"], .ui-no-admin [data-acts~="admin"] { display: none !important; }
 /* A page the person cannot view leaves the menu (app.js applyPageAccess) */
 .ui-no-view { display: none !important; }
 .ui-form-split { padding-top: 14px; border-top: 1px solid var(--ui-line); gap: 10px; }
