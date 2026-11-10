@@ -871,11 +871,15 @@ async def _enforce(mailcow_api, now: Optional[datetime]) -> Dict[str, list]:
 
     current = await mailcow_api.get_fail2ban()
     if not current:
+        failed = []
         with get_db_context() as db:
+            rules = load_rules(db)
             for hit in db.query(ProtectionHit).filter(ProtectionHit.id.in_(pending_ids)).all():
                 hit.error = "Could not read the Fail2ban settings from mailcow"
+                if hit.status == "pending":
+                    failed.append((hit.ip, hit.rule, hit.reason, rules.get(hit.rule, {}).get("notify", True)))
             db.commit()
-        return {"banned": [], "lifted": [], "failed": pending_ids}
+        return {"banned": [], "lifted": [], "failed": failed}
 
     blacklist = split_ip_list(current.get("blacklist"))
     whitelist = split_ip_list(current.get("whitelist"))

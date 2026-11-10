@@ -15,9 +15,12 @@ TIME = "UTC, ISO 8601 with Z"
 
 class SecurityAlert(Fixed):
     id: int
-    alert_type: str = Field(description="Such as volume_spike, auth_failure_burst or smtp_abuse_block")
+    alert_type: str = Field(description="volume_spike, auth_failure_burst, smtp_abuse_block, protection_breach or "
+                                        "protection_ban_failed (Security), dns_change (Domains) or "
+                                        "dmarc_import_failed (DMARC & TLS)")
     severity: Optional[str] = Field(description="info, warning or critical")
-    subject: Optional[str] = Field(description="The mailbox or user name the alert is about")
+    subject: Optional[str] = Field(description="What the alert is about: a mailbox or user name, an address, or "
+                                               "a domain for dns_change; null when it is about no one thing")
     title: str
     detail: Optional[str]
     metric_value: Optional[float] = Field(description="What was seen")
@@ -27,25 +30,30 @@ class SecurityAlert(Fixed):
 
 
 class SecurityAlertsResponse(Fixed):
-    """Security alerts, newest first, and the open ones."""
-    enabled: bool = Field(description="Anomaly detection is on")
+    """The alerts of the areas the caller may view, newest first, and the open ones."""
+    enabled: bool = Field(description="Anomaly detection is on (other alerts are listed either way)")
     alerts: List[SecurityAlert]
     unacknowledged_count: int
     unacknowledged_critical: int
-    unacknowledged_ids: List[int] = Field(description="Every open alert, newest first (at most 10000): send them "
-                                                      "to acknowledge-all to dismiss exactly what this list showed")
+    unacknowledged_ids: List[int] = Field(description="Every open alert the caller may view, newest first "
+                                                      "(at most 10000)")
+    writable_ids: List[int] = Field(description="The open alerts the caller may dismiss, newest first (at most "
+                                                "10000): send them to acknowledge-all to dismiss exactly what "
+                                                "this list showed")
 
 
 class AcknowledgeResponse(Fixed):
     status: str = Field(description="success")
-    acknowledged: int = Field(description="Alerts this call acknowledged; one acknowledged already is left as it is")
+    acknowledged: int = Field(description="Alerts this call acknowledged; one acknowledged already, or of an area "
+                                          "the caller may not act in, is left as it is")
     ids: List[int]
     receipt: Optional[str] = Field(description="Undoes exactly this change; null when nothing changed")
 
 
 class UndoAcknowledgeResponse(Fixed):
     status: str = Field(description="success")
-    restored: int
+    restored: int = Field(description="Alerts this call re-opened: of those the receipt names and that are still "
+                                      "dismissed, the ones of the areas the caller may act in")
     ids: List[int]
 
 

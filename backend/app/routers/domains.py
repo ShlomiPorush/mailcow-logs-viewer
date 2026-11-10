@@ -2141,9 +2141,12 @@ def detect_dns_changes(previous: Optional[DomainDNSCheck],
 
 
 def notify_dns_changes(domain_name: str, changes: List[Dict[str, str]]) -> None:
-    """Send a DNS-change alert (email + notification destinations)."""
+    """Send a DNS-change alert (email + notification destinations), and keep it for
+    Needs attention. Called only after the new check is saved."""
     if not changes:
         return
+    from ..services import stored_alerts
+    stored_alerts.record_dns_change(domain_name, changes)
     try:
         from ..services.notification_service import notify
         from ..services import email_layout as layout

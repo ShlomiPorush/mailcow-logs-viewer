@@ -7,6 +7,7 @@ from typing import List, Dict
 
 from ..config import settings
 from . import email_layout as e
+from . import stored_alerts
 from .smtp_service import get_notification_email
 from .notification_service import notify, any_channel_configured
 
@@ -29,6 +30,9 @@ def send_dmarc_error_notification(failed_emails: List[Dict], sync_id: int) -> bo
     """
     if not failed_emails:
         return True
+
+    # Kept for Needs attention also when no email or channel is set up
+    stored_alerts.record_dmarc_import_failed(failed_emails)
 
     # Recipient: DMARC_ERROR_EMAIL or fallback to ADMIN_EMAIL (webhook, if
     # configured, is notified regardless of email configuration)

@@ -133,7 +133,7 @@ class Principal:
             return kind == policy.READ
         if area == SETTINGS_AREA:
             return False
-        return f"{area}:{kind}" in self.scopes
+        return any(f"{a}:{kind}" in self.scopes for a in policy.rule_areas(area))
 
     def ref(self) -> Optional[Dict[str, Any]]:
         """What identifies this person for access that outlives the request (Live Logs); None for the built-in admin."""
@@ -340,6 +340,19 @@ def caller_may(request, area: str, kind: str) -> bool:
     return principal.may(area, kind)
 
 
+def caller_is_admin(request) -> bool:
+    """Whether the caller is an admin person (an agent never is); for a handler that
+    shows admins what belongs to no area."""
+    if request is None:
+        return True
+    if agent_call(request.scope) is not None:
+        return False
+    principal = getattr(request.state, "principal", None)
+    if principal is None:
+        return not settings.is_authentication_enabled
+    return principal.is_admin
+
+
 FAILED_RUN = "The last run failed."
 
 
@@ -359,6 +372,7 @@ TOKEN = "token"          # a WebSocket that checks its own one-time token
 SIGNED_IN = "signed_in"  # anyone signed in
 ADMIN_ONLY = "admin"
 AREAS = "areas"          # View or Act on every area listed
+ANY_AREA = "any_area"    # View or Act on at least one area listed (a call shared by several, scopes.ALTERNATIVES)
 
 
 @dataclass(frozen=True)
@@ -371,6 +385,8 @@ class Need:
             return True
         if self.kind == AREAS:
             return all(principal.may(area, kind) for area, kind in self.areas)
+        if self.kind == ANY_AREA:
+            return any(principal.may(area, kind) for area, kind in self.areas)
         return principal.is_admin
 
 
@@ -455,6 +471,8 @@ def need_for(method: str, path: str) -> Optional[Need]:
         return _SIGNED_IN
     if rule.area == SETTINGS_AREA:
         return _ADMIN
+    if rule.area in policy.ALTERNATIVES:
+        return Need(ANY_AREA, tuple((area, rule.kind) for area in policy.ALTERNATIVES[rule.area]))
     return Need(AREAS, ((rule.area, rule.kind),))
 
 
