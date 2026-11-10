@@ -17,7 +17,7 @@ Blocklist, Fail2ban and DMARC checks are omitted while their respective features
 
 ### Security alerts
 
-The Dashboard shows up to 20 undismissed alerts, newest first:
+The Dashboard shows up to 20 undismissed alerts, newest first, each with one line of what happened; **Show activity** also says what to do:
 
 - **Outbound volume spike** means a mailbox sent far more than its usual rate.
 - **Authentication failure burst** means many failed logins for one username in a short time.
