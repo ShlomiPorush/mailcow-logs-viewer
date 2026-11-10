@@ -2819,10 +2819,10 @@ async function openStoredAlert(alertId, where) {
 }
 
 // The domain's details opened once the list has loaded, whatever the search or the
-// issues filter showed; a domain no longer on the server says so
+// issues filter showed; a domain no longer on the server says so. A list that could
+// not load says so itself, and says nothing about the domain
 async function showAlertDomain(name) {
-    await domainsLoading;
-    if (!name) return;
+    if (!(await domainsLoading) || !name) return;
     if (document.getElementById('domain-search-input')) clearDomainFilters();
     const id = domainRowId(name);
     const details = document.getElementById(`${id}-details`);
@@ -2836,15 +2836,15 @@ async function showAlertDomain(name) {
 }
 
 // Security, Overview, To review, with no country or network picked that could hide the
-// address (as gsOpenBannedNetwork in search.js opens Banned)
+// address. Nothing changes until the move is made (a move cancelled over unsaved changes
+// keeps the list as it was); then the list is chosen the way its own filter does, which
+// also loads and draws it when the page was already open on another tab
 async function openAlertSecurityReview() {
+    if (!(await navigateTo('netfilter', { sub: 'overview' }))) return false;
     securityCountry = null;
     securityNetwork = null;
-    if (currentTab === 'netfilter' && securityTab === 'overview') {
-        setSecurityFilter('review');
-        return true;
-    }
-    return openSecurityList('review');
+    setSecurityFilter('review');
+    return true;
 }
 
 // A Needs attention row whose action opens a popup opens it from anywhere on

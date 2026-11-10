@@ -19,8 +19,9 @@ const DNS_TAG = {
 
 // The answer the list shows, to tell whether a refresh brings anything new
 let domainsShownJson = null;
-// The list's last load: what opens a domain from another page waits for it
-let domainsLoading = Promise.resolve();
+// The list's last load, true once the list is shown: what opens a domain from another
+// page waits for it, and tells a list without the domain from one that did not load
+let domainsLoading = Promise.resolve(false);
 
 function loadDomains() {
     domainsLoading = loadDomainsNow();
@@ -33,7 +34,7 @@ async function loadDomainsNow() {
 
     if (!loading || !content) {
         console.error('Domains elements not found');
-        return;
+        return false;
     }
 
     loading.classList.remove('hidden');
@@ -53,6 +54,7 @@ async function loadDomainsNow() {
 
         loading.classList.add('hidden');
         content.classList.remove('hidden');
+        return true;
 
     } catch (error) {
         console.error('Failed to load domains:', error);
@@ -63,6 +65,7 @@ async function loadDomainsNow() {
                 <p><button type="button" class="ui-btn ui-btn-sm" onclick="loadDomains()">Try again</button></p>
             </div>
         `;
+        return false;
     }
 }
 
