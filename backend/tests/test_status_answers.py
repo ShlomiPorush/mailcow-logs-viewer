@@ -7,6 +7,7 @@ the test. The containers recorded and the ignored list are put back."""
 import types
 import uuid
 from contextlib import contextmanager
+from datetime import timedelta
 
 import httpx
 import pytest
@@ -204,6 +205,25 @@ def test_mailcow_version(client):
     assert c.get('/api/status/version?force=maybe').status_code == 422
     answers['/api/v1/get/status/version'] = DOWN
     assert c.get('/api/status/version?force=true').status_code == 502
+
+
+def test_mailcow_version_after_a_mailcow_update(client):
+    """The update notice goes away within an hour of updating mailcow,
+    and a dashboard refresh inside that hour asks mailcow nothing."""
+    c, answers, _ = client
+    assert c.get('/api/status/version?force=true').json()['update_available'] is True
+    answers['/api/v1/get/status/version'] = [{'version': '9.9.9'}]
+
+    status.version_cache['checked_at'] -= timedelta(minutes=50)
+    answers_before = dict(answers)
+    answers['/api/v1/get/status/version'] = DOWN
+    body = c.get('/api/status/version').json()
+    assert body['current_version'] == '2026-09' and body['update_available'] is True
+
+    answers.update(answers_before)
+    status.version_cache['checked_at'] -= timedelta(minutes=20)
+    body = c.get('/api/status/version').json()
+    assert body['current_version'] == '9.9.9' and body['update_available'] is False
 
 
 def test_app_version(client):

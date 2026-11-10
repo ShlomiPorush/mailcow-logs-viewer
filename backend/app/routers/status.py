@@ -25,7 +25,9 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-# Cache for version check (check once per day)
+# Cache for the mailcow version check. An hour keeps the "update available"
+# notice from outliving a mailcow update for long, at one check per hour.
+VERSION_CHECK_INTERVAL = timedelta(hours=1)
 version_cache = {
     "checked_at": None,
     "current_version": None,
@@ -227,16 +229,16 @@ async def get_storage_status():
 async def get_version_status(force: bool = Query(False, description="Force a fresh version check")):
     """
     Get current mailcow version and check for updates
-    Checks GitHub once per day and caches the result
+    Checks mailcow and GitHub at most once an hour and caches the result
     """
     try:
         global version_cache
         
-        # Check if we need to refresh the cache (once per day or forced)
+        # Refresh the cache when it is older than VERSION_CHECK_INTERVAL or forced
         now = datetime.now(timezone.utc)
         if (force or 
             version_cache["checked_at"] is None or 
-            now - version_cache["checked_at"] > timedelta(days=1)):
+            now - version_cache["checked_at"] > VERSION_CHECK_INTERVAL):
             
             logger.info("Checking mailcow version and updates...")
             
