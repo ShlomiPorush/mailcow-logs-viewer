@@ -1269,7 +1269,7 @@ mailcow's mail storage: `{ "disk": "/dev/sda1", "used": "45G", "total": "100G", 
 | --- | --- | --- | --- |
 | `force` | boolean | `false` | Force a fresh version check |
 
-The running mailcow version against the latest mailcow release on GitHub, checked at most once a day unless `force` is set. Returns `current_version`, `latest_version`, `update_available`, `changelog` and `last_checked`.
+The running mailcow version against the latest mailcow release on GitHub, checked at most once an hour unless `force` is set. Returns `current_version`, `latest_version`, `update_available`, `changelog` and `last_checked`.
 
 ---
 

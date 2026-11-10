@@ -42,7 +42,7 @@ class ContainerIgnored(Fixed):
 
 
 class MailcowVersion(Fixed):
-    """The running mailcow version against mailcow's latest release on GitHub, checked at most once a day."""
+    """The running mailcow version against mailcow's latest release on GitHub, checked at most once an hour."""
     current_version: Optional[str] = Field(description="As mailcow reports it")
     latest_version: str = Field(description="The latest release's tag; unknown when GitHub did not answer")
     name: Optional[str] = Field(description="The latest release's name")
