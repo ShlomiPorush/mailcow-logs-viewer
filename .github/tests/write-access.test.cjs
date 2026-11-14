@@ -6,6 +6,8 @@
 // (agent_access/scopes.py POLICY, user_access.py HUMAN_ENTRIES). Such a function
 // starts with uiMayAct('<area>') (utils.js), and every inline control that calls it
 // carries data-acts="<area>" (ui.css hides it while the person may not act there).
+// 'alerts' is a call shared by several areas (scopes.py ALTERNATIVES): Take action in
+// any one of them (utils.js ALERT_AREAS); a control for one alert also names its own area.
 // A call that changes nothing, or a page only an admin reaches, is listed below
 // with the reason. A new write call without a decision fails here.
 const assert = require('node:assert/strict');
@@ -23,9 +25,9 @@ const WRITES = {
     'app.js unbanAllFail2ban': 'security',
     'app.js banIP': 'security',
     'app.js allowIP': 'security',
-    'app.js acknowledgeSecurityAlert': 'security',
-    'app.js acknowledgeAllSecurityAlerts': 'security',
-    'app.js undoAlertDismissal': 'security',
+    'app.js acknowledgeSecurityAlert': 'alerts',
+    'app.js acknowledgeAllSecurityAlerts': 'alerts',
+    'app.js undoAlertDismissal': 'alerts',
     'app.js queueAction': 'outbound',
     'app.js queueDeleteRequest': 'outbound',
     'app.js quarantineAction': 'quarantine',
@@ -110,7 +112,7 @@ function backendRoutes() {
         add(m[1], m[2], m[3] === '_ADMIN' ? 'admin' : `${m[4]}:${m[5] === 'WRITE' ? 'write' : 'read'}`);
     }
     for (const block of scopes.matchAll(/\*\*_r\(([\s\S]*?)area="?(\w+)"?, kind=(READ|WRITE)/g)) {
-        const area = block[2] === 'ANY' ? 'any' : block[2];
+        const area = block[2] === 'ANY' ? 'any' : block[2] === 'ALERTS' ? 'alerts' : block[2];
         for (const r of block[1].matchAll(/"(GET|POST|PUT|DELETE) (\/[^"]+)"/g)) {
             add(r[1], r[2], area === 'settings' ? 'admin' : `${area}:${block[3] === 'WRITE' ? 'write' : 'read'}`);
         }
@@ -289,6 +291,22 @@ test('the backend routes are read', () => {
     assert.equal(needOf(routes, 'POST', '/api/dmarc/upload'), 'dmarc:write');
     assert.equal(needOf(routes, 'PUT', '/api/settings'), 'admin');
     assert.equal(needOf(routes, 'DELETE', '/api/users/{}'), 'admin');
+    assert.equal(needOf(routes, 'POST', '/api/security-alerts/acknowledge-all'), 'alerts:write');
+    assert.equal(needOf(routes, 'GET', '/api/security-alerts'), 'any:read');
+});
+
+test('Take action in any one alert area is enough for the alert controls, and only then', () => {
+    const vm = require('node:vm');
+    const context = vm.createContext({ document: { documentElement: { classList: { toggle() {} } } } });
+    vm.runInContext(fs.readFileSync(path.join(FRONTEND, 'utils.js'), 'utf8').split('\nfunction uiSaveBar')[0], context);
+    const can = (scopes, area, kind = 'write') => vm.runInContext(
+        `appAccess.admin = false; appAccess.scopes = new Set(${JSON.stringify(scopes)}); userCan(${JSON.stringify(area)}, ${JSON.stringify(kind)})`, context);
+    for (const area of ['security', 'domains', 'dmarc']) assert.equal(can([`${area}:write`], 'alerts'), true, area);
+    assert.equal(can(['security:read', 'domains:read', 'dmarc:read', 'outbound:write'], 'alerts'), false);
+    assert.equal(can(['domains:read'], 'alerts', 'read'), true);
+    assert.equal(can(['domains:write'], 'security'), false);
+    // The class that hides an 'alerts' control is set from the same check
+    assert.match(fs.readFileSync(path.join(FRONTEND, 'assets/css/ui.css'), 'utf8'), /\.ui-no-act-alerts \[data-acts~="alerts"\]/);
 });
 
 // A copy of the frontend with one file changed, to show the check catches it

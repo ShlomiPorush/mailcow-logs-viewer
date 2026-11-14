@@ -47,11 +47,12 @@ AREAS: Tuple[Area, ...] = (
          "Rspamd map contents and configuration",
          "Edit the Rspamd maps that filter mail"),
     Area("dmarc", "DMARC & TLS",
-         "DMARC and TLS reports, sending sources, and the IMAP import status and history",
-         "Delete single reports or all reports of a domain, fetch reports over IMAP, and clear the report cache"),
+         "DMARC and TLS reports, sending sources, the IMAP import status and history, and report import error alerts",
+         "Delete single reports or all reports of a domain, fetch reports over IMAP, clear the report cache, "
+         "and dismiss report import error alerts"),
     Area("domains", "Domains",
-         "Domains on this mail server and their saved DNS check results",
-         "Run DNS checks for domains on this mail server"),
+         "Domains on this mail server, their saved DNS check results, and DNS change alerts",
+         "Run DNS checks for domains on this mail server and dismiss DNS change alerts"),
     Area("mailboxes", "Mailboxes",
          "Mailbox statistics, devices and rate limits",
          "Set sending limits for mailboxes and domains, one at a time or in bulk, and reset rate limits"),
@@ -67,6 +68,13 @@ AREA_IDS: FrozenSet[str] = frozenset(a.id for a in AREAS)
 
 # Calls every grant may make, whatever its areas: help text and public facts
 ANY = "any"
+
+# Calls shared by several areas, whose items each belong to one of them: the
+# Needs attention alerts are Security's, DNS changes Domains' and report import
+# errors DMARC's. Such a call needs its kind (View or Act) in at least one of the
+# areas, and the route then acts only on the items of the areas the caller has
+ALERTS = "alerts"
+ALTERNATIVES: Dict[str, Tuple[str, ...]] = {ALERTS: ("security", "domains", "dmarc")}
 
 
 @dataclass(frozen=True)
@@ -93,6 +101,14 @@ _ITEMS = '{"items": ["<id>", ...]}'
 
 POLICY: Dict[Tuple[str, str], Rule] = {
     **_r("GET /api/docs/{doc_name}", "GET /api/info", "GET /api/health", area=ANY, kind=READ),
+
+    # Needs attention: the list answers with the alerts of the areas the caller
+    # may view (none for some), and a dismissal changes only those of the areas
+    # it may act in (routers/security_alerts.py)
+    **_r("GET /api/security-alerts", area=ANY, kind=READ),
+    **_r("POST /api/security-alerts/{alert_id}/acknowledge", "POST /api/security-alerts/acknowledge-all",
+         "POST /api/security-alerts/acknowledgements/{receipt}/undo",
+         area=ALERTS, kind=WRITE),
 
     # Dashboard & Status
     **_r("GET /api/stats/dashboard", "GET /api/stats/timeline", "GET /api/stats/top-spam-triggers",
@@ -146,7 +162,7 @@ POLICY: Dict[Tuple[str, str], Rule] = {
     **_r("GET /api/logs/netfilter", "GET /api/logs/netfilter/countries", "GET /api/logs/netfilter/stats/by-country",
          "GET /api/logs/netfilter/stats/by-network", "GET /api/logs/netfilter/overview",
          "GET /api/export/netfilter/csv", "GET /api/security/addresses", "GET /api/fail2ban", "GET /api/rw-status",
-         "GET /api/geoip/{ip}", "GET /api/security-alerts", "GET /api/security-alerts/{alert_id}/activity",
+         "GET /api/geoip/{ip}", "GET /api/security-alerts/{alert_id}/activity",
          "GET /api/protection/rules", "GET /api/protection/hits", "GET /api/smtp-abuse/status",
          "GET /api/smtp-abuse/whitelist", "GET /api/smtp-abuse/history",
          area="security", kind=READ),
@@ -164,8 +180,7 @@ POLICY: Dict[Tuple[str, str], Rule] = {
          body='{"ip": "<address or network>", "list": "blacklist" | "whitelist"}'),
     **_r("POST /api/fail2ban/repair", area="security", kind=WRITE,
          body='{"entry": "<entry as listed>", "list": "blacklist" | "whitelist"}'),
-    **_r("POST /api/security-alerts/{alert_id}/acknowledge", "POST /api/security-alerts/acknowledge-all",
-         "POST /api/security-alerts/acknowledgements/{receipt}/undo", "PUT /api/protection/rules",
+    **_r("PUT /api/protection/rules",
          "POST /api/protection/hits/{hit_id}/dismiss", "POST /api/protection/hits/{hit_id}/ban",
          "POST /api/protection/hits/{hit_id}/undo", "POST /api/smtp-abuse/whitelist", "PUT /api/smtp-abuse/whitelist",
          "DELETE /api/smtp-abuse/whitelist/{email}", "POST /api/smtp-abuse/mailboxes/{email}/block",
@@ -321,10 +336,21 @@ def requested_views(requested: FrozenSet[str]) -> Tuple[str, ...]:
     return areas or tuple(a.id for a in AREAS)
 
 
+def rule_areas(area: str) -> Tuple[str, ...]:
+    """The areas a rule's area stands for: itself, or the ones it shares a call between."""
+    return ALTERNATIVES.get(area, (area,))
+
+
+def area_label(area: str) -> str:
+    labels = {a.id: a.label for a in AREAS}
+    names = [labels.get(a, a) for a in rule_areas(area)]
+    return names[0] if len(names) == 1 else ", ".join(names[:-1]) + " or " + names[-1]
+
+
 def allows(scopes: FrozenSet[str], rule: Rule) -> bool:
     if rule.area == ANY:
         return rule.kind == READ
-    return f"{rule.area}:{rule.kind}" in scopes
+    return any(f"{area}:{rule.kind}" in scopes for area in rule_areas(rule.area))
 
 
 def areas_of(scopes: FrozenSet[str]) -> Dict[str, str]:

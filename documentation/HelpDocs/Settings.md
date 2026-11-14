@@ -76,7 +76,7 @@ Lets AI agents such as Claude Code and Codex connect, and lists the allowed ones
 
 ## Anomaly detection
 
-It only alerts; it never blocks. It compares what each mailbox sends with its own normal rate and counts failed logins per username. Alerts go to email and your alert destinations and appear on the [Dashboard](Dashboard.md#security-alerts).
+It only alerts; it never blocks. It compares what each mailbox sends with its own normal rate and counts failed logins per username. Alerts go to email and your alert destinations and appear on the [Dashboard](Dashboard.md#alerts).
 
 ## Outgoing spam
 

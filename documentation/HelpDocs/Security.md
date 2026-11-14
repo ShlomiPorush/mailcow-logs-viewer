@@ -97,6 +97,8 @@ Rules exclude allowlisted addresses, private, loopback and link-local networks, 
 
 **Send notifications about bans** covers successful and failed ban attempts. **Send notifications for every alert** covers **Possible stolen password**. Each run sends at most one email, grouping addresses by outcome; expiry sends none. Destinations must receive the Security topic. See [Notifications](../Notifications.md).
 
+A possible stolen password and failed bans also appear in [Needs attention](Dashboard.md#alerts) on the Dashboard, under the same notification switches. Dismissing them there does not dismiss the entry in **To review** or change a ban.
+
 #### Trap accounts
 
 Catches an address that tries a nonexistent trap account. A bare name such as `admin` matches at any domain; `test@example.com` matches only that address. Real mailboxes and aliases cannot be saved as traps and are skipped if created later. Up to 500 names; default ban length: 30 days.

@@ -56,7 +56,7 @@ is in) and is shared by all its sessions. Run `disconnect` only when the person 
    | `messages?limit=20` | Recent messages with sender, recipients, status and delivery details. |
    | `queue` | Mail waiting in the Postfix queue. |
    | `quarantine` | Quarantined messages. |
-   | `security-alerts` | Security alerts and how many wait for a look. |
+   | `security-alerts` | Alerts that wait for a look (security, DNS changes, report import errors), for the areas you may view. |
    | `logs/netfilter?limit=50` | Blocked and banned connection attempts. |
    | `fail2ban` | Fail2ban settings and bans. |
    | `suppressions` | Addresses the server does not send to. |

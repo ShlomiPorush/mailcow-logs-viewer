@@ -817,16 +817,17 @@ class MetricSnapshot(Base):
 
 class SecurityAlert(Base):
     """
-    Anomaly-detection alerts: outbound volume spikes (possible compromised
-    mailbox) and auth-failure bursts. Surfaced on the dashboard and sent via
-    the notification service. Added in v2.6.4 (first Alembic-managed table).
+    The alerts Needs attention lists: anomaly detection (outbound volume
+    spikes, auth-failure bursts), SMTP abuse blocks, the protection rules,
+    DNS changes and DMARC & TLS import errors (services/stored_alerts.py has
+    the types and their areas). Added in v2.6.4 (first Alembic-managed table).
     """
     __tablename__ = "security_alerts"
 
     id = Column(Integer, primary_key=True, index=True)
-    alert_type = Column(String(40), nullable=False, index=True)  # 'volume_spike' | 'auth_failure_burst'
+    alert_type = Column(String(40), nullable=False, index=True)  # stored_alerts.ALERT_AREAS
     severity = Column(String(20), default='warning', index=True)  # 'info' | 'warning' | 'critical'
-    subject = Column(String(255))                # mailbox/username the alert is about
+    subject = Column(String(255))                # mailbox, username, address or domain the alert is about
     title = Column(String(255), nullable=False)  # short human-readable headline
     detail = Column(Text)                        # longer explanation
     metric_value = Column(Float)                 # observed value (messages, failures, ...)

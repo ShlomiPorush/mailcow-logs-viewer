@@ -15,15 +15,23 @@ A Fail2ban warning about a whole IPv6 `/32` network identifies an entry an earli
 
 Blocklist, Fail2ban and DMARC checks are omitted while their respective features are off.
 
-### Security alerts
+### Alerts
 
-The Dashboard shows up to 20 undismissed alerts, newest first:
+The Dashboard shows up to 20 undismissed alerts, newest first, each with one line of what happened; **Show activity** also says what to do:
 
 - **Outbound volume spike** means a mailbox sent far more than its usual rate.
 - **Authentication failure burst** means many failed logins for one username in a short time.
 - **SMTP disabled (abuse protection)** means outgoing spam protection stopped the mailbox from sending. See [Outgoing spam](Abuse_Protection.md).
 
-Dismissal hides an alert; **Undo** in the message that follows brings it back for 10 seconds. **Dismiss all** dismisses every alert that was open when the list was loaded, not one that arrives later. A later incident can raise another after the cooldown. Volume spike and login burst alerts also go by email and to destinations that receive security alerts; see [Notifications](../Notifications.md).
+Alerts that also go by email or to your destinations open their page instead of activity:
+
+- **Possible stolen password** and **Protection rules could not ban addresses** open **To review** on [Security](Security.md).
+- **DNS changes detected** opens the domain on [Domains](Domains.md).
+- **DMARC & TLS report import errors** opens **Fetch history** on [DMARC & TLS](DMARC.md).
+
+Each alert belongs to Security, Domains or DMARC & TLS. A user sees the alerts of the areas they can view, and dismisses those of the areas they can act in.
+
+Dismissal hides an alert; **Undo** in the message that follows brings it back for 10 seconds. **Dismiss all** dismisses every alert you can dismiss that was open when the list was loaded, not one that arrives later. Dismissing a protection alert here does not dismiss its entry on the Security page or change a ban. A later incident can raise another after the cooldown. Volume spike and login burst alerts also go by email and to destinations that receive security alerts; see [Notifications](../Notifications.md).
 
 ### Show activity
 
@@ -90,7 +98,8 @@ See [Status](Status.md) and [About](About.md) for details.
 ## When something is missing
 
 - **All figures are 0 with no recent activity.** Logs have not been imported, or mailcow is unreachable. Check **Settings** > **mailcow**.
-- **No security alerts appear.** Anomaly detection is off by default.
+- **No volume spike or login burst alerts appear.** Anomaly detection is off by default. The other alerts appear without it.
+- **An alert you see has no Dismiss.** You can view its area but not act in it.
 - **A card shows "-".** Data has not loaded, or mailcow did not answer.
 - **Show activity says "Could not load the activity".** Try again; the message includes the server's answer.
 
