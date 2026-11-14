@@ -34,7 +34,7 @@ python-json-logger==2.0.7
 tenacity==8.2.3
 
 # DNS Queries - Required for domains management
-dnspython[doh]==2.6.1
+dnspython[doh]==2.9.2
 # TLSA matching for DANE checks (already installed through authlib)
 cryptography>=42.0.0
 
