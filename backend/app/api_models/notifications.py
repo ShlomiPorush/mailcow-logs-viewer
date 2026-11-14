@@ -16,6 +16,8 @@ class NotificationField(Fixed):
     required: bool
     secret: bool = Field(None, description="Only for a secret: true. Masked once saved")
     placeholder: str = Field(None)
+    hint: str = Field(None, description="Shown under the field, such as where to find a Telegram topic ID")
+    integer: bool = Field(None, description="Only for a whole number: true, such as the Telegram topic ID")
     default: str = Field(None, description="Only for the ntfy server URL: https://ntfy.sh")
 
 

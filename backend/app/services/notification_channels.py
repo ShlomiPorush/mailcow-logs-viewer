@@ -110,6 +110,10 @@ CHANNEL_TYPES: Dict[str, Dict] = {
              "secret": True, "placeholder": "123456789:AAExample-Token"},
             {"key": "chat_id", "label": "Chat ID", "type": "text", "required": True,
              "placeholder": "123456789 or -100123456789 for a group"},
+            # A forum topic in a group (Bot API message_thread_id)
+            {"key": "message_thread_id", "label": "Topic ID", "type": "text", "required": False,
+             "integer": True, "placeholder": "42",
+             "hint": "Copy the topic link in Telegram and use its last number, for example 42 in t.me/c/1234567890/42."},
         ],
     },
     "ntfy": {
@@ -181,6 +185,8 @@ def validate_config(channel_type: str, config: Dict) -> Tuple[bool, str]:
         value = str(config.get(field["key"]) or "").strip()
         if field.get("type") == "url" and value and not _readable_url(value):
             return False, f"{field['label']} is not a valid URL. Enter the full address, starting with https://"
+        if field.get("integer") and value and not (value.isascii() and value.isdigit()):
+            return False, f"{field['label']} must be a whole number, such as 42"
     return True, ""
 
 
@@ -222,7 +228,11 @@ def build_request(channel_type: str, config: Dict, subject: str, message: str) -
 
     if channel_type == "telegram":
         url = f"https://api.telegram.org/bot{config['bot_token']}/sendMessage"
-        return url, {"json": {"chat_id": config["chat_id"], "text": f"{subject}\n\n{text}"}}
+        payload = {"chat_id": config["chat_id"], "text": f"{subject}\n\n{text}"}
+        topic = str(config.get("message_thread_id") or "").strip()
+        if topic:
+            payload["message_thread_id"] = int(topic)
+        return url, {"json": payload}
 
     if channel_type == "ntfy":
         server = (config.get("server_url") or "https://ntfy.sh").rstrip("/")

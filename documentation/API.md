@@ -2646,7 +2646,8 @@ The fields each service type needs (the form shows only these) and the alert typ
   "types": [
     {"id": "telegram", "label": "Telegram", "help": "Create a bot with @BotFather to get the token...", "fields": [
       {"key": "bot_token", "label": "Bot token", "type": "text", "required": true, "secret": true},
-      {"key": "chat_id", "label": "Chat ID", "type": "text", "required": true}
+      {"key": "chat_id", "label": "Chat ID", "type": "text", "required": true},
+      {"key": "message_thread_id", "label": "Topic ID", "type": "text", "required": false, "integer": true}
     ]}
   ],
   "alert_types": [
