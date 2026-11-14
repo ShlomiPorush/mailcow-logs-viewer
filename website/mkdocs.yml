@@ -1,0 +1,105 @@
+# Documentation site, published to GitHub Pages by .github/workflows/docs.yml.
+# Build locally: python website/stage.py && mkdocs build --strict -f website/mkdocs.yml
+site_name: mailcow Logs Viewer
+site_description: Documentation for mailcow Logs Viewer, a self-hosted monitoring dashboard for mailcow mail servers.
+site_url: https://shlomiporush.github.io/mailcow-logs-viewer/
+repo_url: https://github.com/ShlomiPorush/mailcow-logs-viewer
+repo_name: ShlomiPorush/mailcow-logs-viewer
+edit_uri: ""
+
+docs_dir: .stage
+site_dir: .site
+
+theme:
+  name: material
+  font: false
+  logo: assets/app-icon.svg
+  favicon: assets/favicon-32x32.png
+  icon:
+    repo: fontawesome/brands/github
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark theme
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light theme
+  features:
+    - navigation.sections
+    - navigation.top
+    - navigation.footer
+    - search.highlight
+    - content.code.copy
+    - toc.follow
+
+plugins:
+  - search
+  # Click a screenshot to see it full size; auto_themed keeps the light and
+  # dark copies of an image in separate galleries
+  - glightbox:
+      auto_themed: true
+      auto_caption: false
+
+extra_css:
+  - assets/ui-tokens.css
+  - assets/v3.css
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+      # GitHub-style heading IDs, so in-page links work both on GitHub and here
+      slugify: !!python/object/apply:pymdownx.slugs.slugify
+        kwds:
+          case: lower
+  - pymdownx.details
+  - pymdownx.highlight
+  - pymdownx.inlinehilite
+  - pymdownx.superfences
+
+validation:
+  omitted_files: warn
+  absolute_links: warn
+  unrecognized_links: warn
+  anchors: warn
+
+nav:
+  - Home: index.md
+  - Setup:
+      - Getting Started: GETTING_STARTED.md
+      - Sign-in: OAuth2_Configuration.md
+      - AI Agents: AI_Agents.md
+      - Reverse Proxy: Reverse_Proxy.md
+      - Settings: HelpDocs/Settings.md
+      - Notifications: Notifications.md
+  # In the order of the app's sidebar
+  - Pages:
+      - Using the App: Using_the_App.md
+      - Dashboard: HelpDocs/Dashboard.md
+      - Search: HelpDocs/Search.md
+      - Messages: HelpDocs/Messages.md
+      - Outbound: HelpDocs/Outbound.md
+      - Quarantine: HelpDocs/Quarantine.md
+      - Security: HelpDocs/Security.md
+      - Rspamd: HelpDocs/Rspamd.md
+      - Outgoing Spam: HelpDocs/Abuse_Protection.md
+      - DMARC & TLS: HelpDocs/DMARC.md
+      - Status: HelpDocs/Status.md
+      - Blocklists: HelpDocs/IP_Blacklist_Monitor.md
+      - Domains: HelpDocs/Domains.md
+      - Mailbox Stats: HelpDocs/Mailbox_Stats.md
+      - Rate Limits: HelpDocs/Rate_Limits.md
+      - Devices: HelpDocs/Devices.md
+      - Logs: HelpDocs/Logs.md
+      - About: HelpDocs/About.md
+  - Reference:
+      - Environment Variables: ENV_Settings.md
+      - API: API.md
+      - Changelog: changelog.md

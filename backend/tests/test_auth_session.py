@@ -37,7 +37,7 @@ def test_session_fallback_key_is_stable():
 
 
 def test_session_sign_verify_roundtrip():
-    signed = session.create_session({"email": "user@example.com"})
+    signed = session.create_session({"email": "user@example.com"}, generation=session.auth_generation())
     data = session.get_session(signed)
     assert data is not None
     assert data["user_info"]["email"] == "user@example.com"
@@ -46,6 +46,6 @@ def test_session_sign_verify_roundtrip():
 
 
 def test_session_rejects_tampered_id():
-    signed = session.create_session({"email": "user@example.com"})
+    signed = session.create_session({"email": "user@example.com"}, generation=session.auth_generation())
     assert session.get_session(signed + "x") is None
     session.delete_session(signed)

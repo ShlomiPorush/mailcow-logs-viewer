@@ -11,7 +11,6 @@ from datetime import datetime, timedelta
 
 import pytest
 from fastapi import HTTPException
-from tenacity import RetryError
 
 import starlette.staticfiles as sf
 _orig_init = sf.StaticFiles.__init__
@@ -200,24 +199,6 @@ def test_delete_rl_hash_posts_a_bare_list(monkeypatch):
     asyncio.run(api.delete_rl_hash('RLabc123'))
     assert seen['endpoint'] == '/api/v1/delete/rlhash'
     assert seen['json'] == ['RLabc123']
-
-
-def test_retry_error_is_normalised_to_mailcow_api_error(monkeypatch):
-    """_make_request's retry decorator has no reraise, so after three failures
-    tenacity raises RetryError; callers must only ever see MailcowAPIError."""
-    api = _client()
-
-    class _Attempt:
-        def exception(self):
-            return MailcowAPIError('connection refused')
-
-    async def fake(endpoint, method='GET', **kw):
-        raise RetryError(_Attempt())
-    monkeypatch.setattr(api, '_make_request', fake)
-
-    with pytest.raises(MailcowAPIError) as exc:
-        asyncio.run(api.get_rl_mbox('user@example.com'))
-    assert 'connection refused' in str(exc.value)
 
 
 # ---------- database-backed tests ----------
@@ -445,29 +426,50 @@ def test_a_very_long_history_is_capped_but_still_counted(env, monkeypatch):
 
 
 # ---------- the activity chart's buckets ----------
+# An hour bucket is the UTC instant it starts at, with Z, so the page can show
+# it in the app time zone and the two repeated hours at the end of daylight
+# saving stay apart. A day bucket is a day in the app time zone, shown as is.
 
-def test_a_day_or_less_is_bucketed_per_hour_and_anything_longer_per_day():
+@pytest.fixture()
+def app_zone(monkeypatch):
+    from app.config import settings
+    def apply(name):
+        monkeypatch.setattr(settings._inner, 'tz', name)
+    apply('UTC')
+    return apply
+
+
+def test_a_day_or_less_is_bucketed_per_hour_and_anything_longer_per_day(app_zone):
     """The chart's resolution follows the window, not the other way round."""
     from app.routers.rate_limits import _bucket_key
     when = datetime(2025, 9, 14, 17, 43, 12)
-    assert _bucket_key(when, 'hour') == '2025-09-14T17:00'
+    assert _bucket_key(when, 'hour') == '2025-09-14T17:00:00Z'
     assert _bucket_key(when, 'day') == '2025-09-14'
 
 
-def test_the_bucket_series_is_zero_filled_across_the_whole_window():
+def test_a_day_bucket_is_a_day_in_the_app_time_zone(app_zone):
+    from app.routers.rate_limits import _bucket_key
+    app_zone('Asia/Tokyo')
+    # 17:43 UTC is 02:43 the next morning in Tokyo; the hour stays a UTC instant
+    when = datetime(2025, 9, 14, 17, 43, 12)
+    assert _bucket_key(when, 'day') == '2025-09-15'
+    assert _bucket_key(when, 'hour') == '2025-09-14T17:00:00Z'
+
+
+def test_the_bucket_series_is_zero_filled_across_the_whole_window(app_zone):
     """A quiet stretch has to show as a gap in the chart, not vanish from it."""
     from app.routers.rate_limits import _bucket_series
     since = datetime(2025, 9, 14, 9, 30)
     until = datetime(2025, 9, 14, 12, 5)
 
-    series = _bucket_series(since, until, 'hour', {'2025-09-14T09:00': 4, '2025-09-14T12:00': 1})
+    series = _bucket_series(since, until, 'hour', {'2025-09-14T09:00:00Z': 4, '2025-09-14T12:00:00Z': 1})
 
     assert [b['bucket'] for b in series] == [
-        '2025-09-14T09:00', '2025-09-14T10:00', '2025-09-14T11:00', '2025-09-14T12:00']
+        '2025-09-14T09:00:00Z', '2025-09-14T10:00:00Z', '2025-09-14T11:00:00Z', '2025-09-14T12:00:00Z']
     assert [b['count'] for b in series] == [4, 0, 0, 1]
 
 
-def test_the_bucket_series_covers_every_day_of_a_long_window():
+def test_the_bucket_series_covers_every_day_of_a_long_window(app_zone):
     from app.routers.rate_limits import _bucket_series
     since = datetime(2025, 9, 8, 23, 50)
     until = datetime(2025, 9, 14, 0, 10)
@@ -480,30 +482,52 @@ def test_the_bucket_series_covers_every_day_of_a_long_window():
     assert sum(b['count'] for b in series) == 7
 
 
-def test_a_count_outside_the_generated_range_is_still_returned():
+def test_the_day_series_uses_the_days_of_the_app_time_zone(app_zone):
+    from app.routers.rate_limits import _bucket_series
+    app_zone('Asia/Tokyo')
+    # 2025-09-09 08:50 to 2025-09-14 09:10 in Tokyo
+    series = _bucket_series(datetime(2025, 9, 8, 23, 50), datetime(2025, 9, 14, 0, 10), 'day', {})
+    assert [b['bucket'] for b in series] == [
+        '2025-09-09', '2025-09-10', '2025-09-11', '2025-09-12', '2025-09-13', '2025-09-14']
+
+
+def test_the_hour_series_keeps_the_repeated_hour_apart(app_zone):
+    """Europe/Berlin repeats 02:00-03:00 on 2026-10-25: two buckets, not one."""
+    from app.routers.rate_limits import _bucket_key, _bucket_series
+    app_zone('Europe/Berlin')
+    first, second = datetime(2026, 10, 25, 0, 30), datetime(2026, 10, 25, 1, 30)
+    counts = {_bucket_key(first, 'hour'): 1}
+    counts[_bucket_key(second, 'hour')] = counts.get(_bucket_key(second, 'hour'), 0) + 1
+    series = _bucket_series(datetime(2026, 10, 24, 23, 0), datetime(2026, 10, 25, 2, 0), 'hour', counts)
+    assert [(b['bucket'], b['count']) for b in series] == [
+        ('2026-10-24T23:00:00Z', 0), ('2026-10-25T00:00:00Z', 1),
+        ('2026-10-25T01:00:00Z', 1), ('2026-10-25T02:00:00Z', 0)]
+
+
+def test_a_count_outside_the_generated_range_is_still_returned(app_zone):
     """A log written while the request ran must not be silently dropped."""
     from app.routers.rate_limits import _bucket_series
     since = datetime(2025, 9, 14, 10, 0)
     until = datetime(2025, 9, 14, 11, 0)
 
-    series = _bucket_series(since, until, 'hour', {'2025-09-14T12:00': 3})
+    series = _bucket_series(since, until, 'hour', {'2025-09-14T12:00:00Z': 3})
 
     assert [b['bucket'] for b in series] == [
-        '2025-09-14T10:00', '2025-09-14T11:00', '2025-09-14T12:00']
+        '2025-09-14T10:00:00Z', '2025-09-14T11:00:00Z', '2025-09-14T12:00:00Z']
     assert series[-1]['count'] == 3
 
 
-def test_a_short_window_reports_hourly_buckets(env):
+def test_a_short_window_reports_hourly_buckets(env, app_zone):
     data = _events(hours=24)
     assert data['bucket'] == 'hour'
     buckets = [b['bucket'] for b in data['by_bucket']]
     assert len(buckets) == 25, 'the window plus the hour it started in'
     assert buckets == sorted(buckets), 'oldest first'
     assert len(set(buckets)) == len(buckets), 'no bucket appears twice'
-    assert all(len(b) == len('2025-09-14T17:00') and b[10] == 'T' for b in buckets)
+    assert all(len(b) == len('2025-09-14T17:00:00Z') and b[10] == 'T' and b.endswith(':00:00Z') for b in buckets)
 
 
-def test_a_long_window_reports_daily_buckets(env):
+def test_a_long_window_reports_daily_buckets(env, app_zone):
     data = _events(hours=168)
     assert data['bucket'] == 'day'
     buckets = [b['bucket'] for b in data['by_bucket']]

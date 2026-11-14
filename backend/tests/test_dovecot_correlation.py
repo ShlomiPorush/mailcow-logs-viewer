@@ -67,16 +67,16 @@ def test_parser_recognised_shapes(rest, verdict, mailbox, detail):
 
 
 def test_parser_real_server_lines():
-    """Ground truth captured from a live mailcow server."""
+    """The shape of lines a live mailcow server writes, with made-up values."""
     stored = parse_dovecot_message(
-        'lmtp(13163@sendmail.co.il)<3698783><QFzrJ1zXpmpfcDgAiLK9ww>: sieve: '
-        'msgid=<20260913170323.CE9116E38E2@web.sendmail.co.il>: '
+        'lmtp(4711@example.com)<2814402><Xk3vR8pLqmZ2cDgAfQ7Tnw>: sieve: '
+        'msgid=<20260101120000.A1B2C3D4E5F@web.example.com>: '
         "stored mail into mailbox 'INBOX'")
     assert stored['verdict'] == 'stored'
     assert stored['mailbox'] == 'INBOX'
-    assert stored['recipient'] == '13163@sendmail.co.il'
-    assert stored['session'] == 'QFzrJ1zXpmpfcDgAiLK9ww'
-    assert stored['message_id'] == '20260913170323.CE9116E38E2@web.sendmail.co.il'
+    assert stored['recipient'] == '4711@example.com'
+    assert stored['session'] == 'Xk3vR8pLqmZ2cDgAfQ7Tnw'
+    assert stored['message_id'] == '20260101120000.A1B2C3D4E5F@web.example.com'
 
     # Connection noise has no msgid and must be skipped cheaply
     assert parse_dovecot_message('lmtp(1015): Connect from 172.22.1.253') is None
@@ -87,8 +87,8 @@ def test_parser_real_server_lines():
 def test_parser_ignores_imap_lines_with_msgid():
     """IMAP expunge/delete lines carry msgid= but are not deliveries."""
     assert parse_dovecot_message(
-        'imap(dmarc@sendmail.co.il)<3700941><UBeVKGBbNuPAqBgB>: expunge: '
-        'box=INBOX, uid=1789, msgid=<f8768de4877d4210bf4c287cb04ad4cd@microsoft.com>, '
+        'imap(dmarc@example.com)<2816530><Hq7NcT2bWkZ4oPdE>: expunge: '
+        'box=INBOX, uid=1789, msgid=<3c9e51a07b2d4f68a1e0d7c4b5f29e83@example.net>, '
         'size=15600') is None
 
 

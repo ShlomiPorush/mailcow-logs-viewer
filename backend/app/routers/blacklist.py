@@ -2,9 +2,10 @@
 API endpoints for IP blacklist checking
 """
 import logging
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, HTTPException
+from pydantic import BaseModel
 from datetime import datetime, timezone, timedelta
-from typing import Dict, Any
+from typing import Any, Dict, Union
 from sqlalchemy import desc
 
 from app.services.blacklist_service import (
@@ -13,25 +14,29 @@ from app.services.blacklist_service import (
     get_check_progress,
     BLACKLISTS,
     CACHE_TTL_HOURS,
-    check_all_blacklists
+    check_all_blacklists,
+    apply_ignored_lists
 )
+from app.services.ignore_lists import load_ignored, set_ignored, IGNORED_BLOCKLISTS_KEY
 from app.routers.domains import get_cached_server_ip, init_server_ip
 from app.database import get_db_context
 from app.models import MonitoredHost, BlacklistCheck
+from app.utils import format_datetime_for_api
+from app.api_models import Invalid, documented
+from app.api_models import security as m
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-def format_datetime(dt: datetime) -> str:
-    """Format datetime as UTC ISO string"""
-    if not dt:
-        return None
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone(timezone.utc).isoformat().replace('+00:00', 'Z')
+# The routes say `-> Dict[str, Any]`, from which FastAPI would infer a model that
+# describes nothing; response_model=None leaves the description to responses=
 
-@router.get("/monitored")
+def format_datetime(dt: datetime) -> str:
+    """Format datetime as UTC ISO string with Z"""
+    return format_datetime_for_api(dt) if dt else None
+
+@router.get("/monitored", response_model=None, responses=documented(m.MonitoredHostsResponse))
 def get_monitored_hosts() -> Dict[str, Any]:
     """
     Get list of all monitored hosts and their latest status.
@@ -46,6 +51,7 @@ def get_monitored_hosts() -> Dict[str, Any]:
             from app.services.blacklist_service import reconcile_monitored_hosts
             reconcile_monitored_hosts(db)
             hosts = db.query(MonitoredHost).filter(MonitoredHost.active == True).all()
+            ignored = load_ignored(db, IGNORED_BLOCKLISTS_KEY)
             results = []
             for host in hosts:
                 # Get latest check for this host
@@ -74,7 +80,8 @@ def get_monitored_hosts() -> Dict[str, Any]:
                         "cache_valid": is_valid,
                         "results": check.results or []
                     })
-                
+                    status_data = apply_ignored_lists(status_data, ignored)
+
                 results.append(status_data)
                 
             return {"hosts": results}
@@ -82,7 +89,10 @@ def get_monitored_hosts() -> Dict[str, Any]:
         logger.error(f"Error getting monitored hosts: {e}")
         return {"hosts": []}
 
-@router.get("/check")
+BUSY_TEXT = "A blocklist check is already running. Try again when it is done."
+
+
+@router.post("/check", response_model=None, responses=documented(Union[m.CheckStarted, m.CheckBusy, m.BlocklistCheck], description="Without a host: the check of every monitored address started in the background. With one: its check, from the cache unless force; status error when it could not run. status busy when a check (of any address, from any page or the schedule) is already running: nothing was started", errors={422: Invalid}))
 async def check_blacklists(
     host: str = Query(None, description="Host/IP to check (default: system IP)"),
     force: bool = Query(False, description="Force new check ignoring cache")
@@ -91,7 +101,15 @@ async def check_blacklists(
     Get IP blacklist check results for a specific host
     """
     target_ip = host
-    
+    from ..scheduler import blacklist_check_admits, blacklist_check_hold
+
+    # One check at a time, whoever starts it (the schedule, Status, an entity
+    # card): checks share the progress and the batch state, so another one
+    # started now would corrupt both. A full check waiting for the lock goes
+    # first. Nothing is started; the caller says so
+    if not blacklist_check_admits():
+        return {"status": "busy", "message": BUSY_TEXT}
+
     # If no host specified, check ALL monitored hosts (background job)
     if not target_ip:
         from ..scheduler import check_monitored_hosts_job
@@ -115,14 +133,17 @@ async def check_blacklists(
               pass # use hostname as is if resolution fails
              
     try:
-        results = await get_blacklist_check_results(force=force, ip=target_ip)
+        if not blacklist_check_admits():   # taken while the host name resolved
+            return {"status": "busy", "message": BUSY_TEXT}
+        async with blacklist_check_hold("host"):
+            results = await get_blacklist_check_results(force=force, ip=target_ip)
         return results
     except Exception as e:
         logger.error(f"Error checking blacklists: {type(e).__name__} - {str(e)}")
         from app.services.blacklist_service import applicable_blacklists
         return {
             "server_ip": target_ip,
-            "checked_at": datetime.now(timezone.utc).isoformat() + 'Z',
+            "checked_at": format_datetime_for_api(datetime.now(timezone.utc)),
             "total_blacklists": len(applicable_blacklists(target_ip)) if target_ip else len(BLACKLISTS),
             "listed_count": 0,
             "clean_count": 0,
@@ -133,7 +154,7 @@ async def check_blacklists(
             "results": []
         }
 
-@router.get("/progress")
+@router.get("/progress", response_model=None, responses=documented(m.CheckProgress))
 def get_progress() -> Dict[str, Any]:
     """
     Get current blacklist check progress (for UI progress bar)
@@ -147,7 +168,7 @@ def get_progress() -> Dict[str, Any]:
         "percent": int((progress["current"] / progress["total"]) * 100) if progress["total"] > 0 else 0
     }
 
-@router.get("/config")
+@router.get("/config", response_model=None, responses=documented(m.BlocklistConfig))
 def get_blacklist_config() -> Dict[str, Any]:
     """
     Get blacklist check configuration and status
@@ -165,8 +186,18 @@ def get_blacklist_config() -> Dict[str, Any]:
         "status": cached.get("status") if cached else None
     }
 
-@router.get("/summary")
+@router.get("/summary", response_model=None, responses=documented(m.BlocklistSummary))
 def get_blacklist_summary() -> Dict[str, Any]:
+    """Compact blacklist status summary for the dashboard, with its figure (listed of
+    all monitored addresses; valid with a fresh check) that the trend samples too."""
+    from app.services.figures import blocklists_figure
+    summary = blacklist_summary_data()
+    figure = blocklists_figure(summary)
+    summary['figure'] = {'value': figure['value'], 'of': figure['of'], 'valid': figure['valid']}
+    return summary
+
+
+def blacklist_summary_data() -> Dict[str, Any]:
     """
     Get compact blacklist status summary for dashboard.
 
@@ -188,32 +219,43 @@ def get_blacklist_summary() -> Dict[str, Any]:
 
             latest_by_ip = {}
             hostnames = [h.hostname for h in hosts]
+            ignored = load_ignored(db, IGNORED_BLOCKLISTS_KEY)
             if hostnames:
                 # Latest check per host in ONE query (window function) and
-                # only the summary columns - the full results JSONB is never
-                # loaded here.
+                # only the summary columns. The full results JSONB is loaded
+                # only when some lists are ignored, to recount without them.
                 rn = func.row_number().over(
                     partition_by=BlacklistCheck.server_ip,
                     order_by=desc(BlacklistCheck.checked_at)
                 ).label("rn")
-                subq = db.query(
+                columns = [
                     BlacklistCheck.server_ip,
                     BlacklistCheck.status,
                     BlacklistCheck.listed_count,
                     BlacklistCheck.total_blacklists,
                     BlacklistCheck.checked_at,
-                    rn
-                ).filter(BlacklistCheck.server_ip.in_(hostnames)).subquery()
+                ]
+                if ignored:
+                    columns.append(BlacklistCheck.results)
+                subq = db.query(*columns, rn).filter(BlacklistCheck.server_ip.in_(hostnames)).subquery()
                 for row in db.query(subq).filter(subq.c.rn == 1).all():
                     latest_by_ip[row.server_ip] = row
 
             for h in hosts:
                 check = latest_by_ip.get(h.hostname)
+                status = check.status if check else None
+                listed_count = check.listed_count if check else None
+                if check and ignored:
+                    adjusted = apply_ignored_lists({
+                        "status": status, "listed_count": listed_count,
+                        "total_blacklists": check.total_blacklists, "results": check.results or []
+                    }, ignored)
+                    status, listed_count = adjusted["status"], adjusted["listed_count"]
                 host_rows.append({
                     "hostname": h.hostname,
                     "source": h.source,
-                    "status": check.status if check else None,
-                    "listed_count": check.listed_count if check else None,
+                    "status": status,
+                    "listed_count": listed_count,
                     "total_blacklists": check.total_blacklists if check else None,
                     "checked_at": check.checked_at if check else None
                 })
@@ -222,3 +264,26 @@ def get_blacklist_summary() -> Dict[str, Any]:
         host_rows = []
 
     return aggregate_blacklist_summary(host_rows, server_ip=get_cached_server_ip())
+
+
+class IgnoreRequest(BaseModel):
+    ignored: bool
+
+
+@router.get("/ignored", response_model=None, responses=documented(m.IgnoredListsResponse, errors={500: None}))
+def get_ignored_blocklists() -> Dict[str, Any]:
+    """Blocklists the admin chose to ignore (still checked, never counted or alerted)."""
+    with get_db_context() as db:
+        zones = load_ignored(db, IGNORED_BLOCKLISTS_KEY)
+    return {"lists": [{"name": bl["name"], "zone": bl["zone"]} for bl in BLACKLISTS if bl["zone"] in zones]}
+
+
+@router.put("/lists/{zone}/ignore", response_model=None, responses=documented(m.IgnoreChange, errors={404: None, 422: Invalid, 500: None}))
+def ignore_blocklist(zone: str, body: IgnoreRequest) -> Dict[str, Any]:
+    """Ignore or stop ignoring one blocklist for every monitored address."""
+    known = {bl["zone"]: bl["name"] for bl in BLACKLISTS}
+    if zone not in known:
+        raise HTTPException(status_code=404, detail="Unknown blocklist.")
+    with get_db_context() as db:
+        set_ignored(db, IGNORED_BLOCKLISTS_KEY, zone, body.ignored)
+    return {"zone": zone, "name": known[zone], "ignored": body.ignored}

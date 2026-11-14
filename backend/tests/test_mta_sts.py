@@ -2,6 +2,8 @@
 it, and whether the domain's MX hosts are covered. DNS and HTTPS are injected;
 no live lookups (the repository's rule for network-facing code)."""
 import asyncio
+import gzip
+import time
 
 import pytest
 
@@ -10,6 +12,7 @@ _orig_init = sf.StaticFiles.__init__
 sf.StaticFiles.__init__ = lambda s, *a, **k: _orig_init(s, *a, **{**k, 'check_dir': False})
 
 import dns.resolver
+import httpx
 
 from app.routers import domains
 
@@ -160,3 +163,113 @@ def test_policy_parser_handles_crlf_and_junk():
     assert policy['mode'] == 'enforce'
     assert policy['mx'] == ['a.example.test', '*.b.example.test']
     assert policy['max_age'] == '60'
+
+
+# --- the policy fetch itself ----------------------------------------------------
+# The policy host belongs to the domain's owner, so what it sends is untrusted:
+# a compressed body expands to whatever size it likes, and a slow one keeps the
+# check (and the background DNS job) waiting. The fetch runs against an
+# in-memory transport; nothing leaves the process.
+
+
+class FakeBody(httpx.AsyncByteStream):
+    """A response body that records how much of it the client read."""
+
+    def __init__(self, chunks, gap=0.0):
+        self.chunks = chunks
+        self.gap = gap
+        self.sent = 0
+        self.closed = False
+
+    async def __aiter__(self):
+        for chunk in self.chunks:
+            if self.gap:
+                await asyncio.sleep(self.gap)
+            self.sent += len(chunk)
+            yield chunk
+
+    async def aclose(self):
+        self.closed = True
+
+
+def _policy_host(monkeypatch, body, headers=None):
+    """Serve body for every request and return the requests seen."""
+    requests = []
+
+    def handler(request):
+        requests.append(request)
+        return httpx.Response(200, headers=headers or {}, stream=body)
+
+    real_client = httpx.AsyncClient
+
+    class Client(real_client):
+        def __init__(self, *args, **kwargs):
+            kwargs['transport'] = httpx.MockTransport(handler)
+            super().__init__(*args, **kwargs)
+
+    monkeypatch.setattr(httpx, 'AsyncClient', Client)
+    return requests
+
+
+def test_compressed_policy_is_refused_without_reading_it(monkeypatch):
+    bomb = gzip.compress(b'\0' * (4 * 1024 * 1024))
+    body = FakeBody([bomb])
+    _policy_host(monkeypatch, body, {'Content-Encoding': 'gzip'})
+    with pytest.raises(ValueError, match='compressed'):
+        asyncio.run(domains._fetch_mta_sts_policy('example.test'))
+    assert body.sent == 0
+    assert body.closed
+
+
+def test_compressed_policy_makes_the_check_an_error(monkeypatch):
+    monkeypatch.setattr(domains, 'resolve_dns_with_fallback', _dns({
+        ('_mta-sts.example.test', 'TXT'): [FakeTXT('v=STSv1; id=1;')]}))
+    _policy_host(monkeypatch, FakeBody([gzip.compress(GOOD_POLICY.encode())]),
+                 {'Content-Encoding': 'gzip'})
+    result = asyncio.run(domains.check_mta_sts_record('example.test'))
+    assert result['status'] == 'error'
+    assert 'could not be fetched' in result['message']
+
+
+def test_policy_over_the_cap_stops_reading_at_the_cap(monkeypatch):
+    # No Content-Length, so only counting the bytes read can stop it
+    chunk = b'#' * 16384
+    body = FakeBody([chunk] * 100)
+    _policy_host(monkeypatch, body)
+    with pytest.raises(ValueError, match='larger than expected'):
+        asyncio.run(domains._fetch_mta_sts_policy('example.test'))
+    assert body.sent <= domains.MTA_STS_POLICY_MAX_BYTES + len(chunk)
+    assert body.closed
+
+
+def test_declared_length_over_the_cap_is_refused_before_reading(monkeypatch):
+    body = FakeBody([b'#' * 16384] * 100)
+    _policy_host(monkeypatch, body, {'Content-Length': str(16384 * 100)})
+    with pytest.raises(ValueError, match='larger than expected'):
+        asyncio.run(domains._fetch_mta_sts_policy('example.test'))
+    assert body.sent == 0
+
+
+def test_slow_policy_is_cut_by_one_deadline(monkeypatch):
+    # Every gap is far below the per-read timeout; only a total deadline ends it
+    monkeypatch.setattr(domains, 'MTA_STS_POLICY_TIMEOUT', 0.5)
+    body = FakeBody([b'version: STSv1\n'] + [b'\n'] * 100, gap=0.05)
+    _policy_host(monkeypatch, body)
+    started = time.monotonic()
+    with pytest.raises(ValueError, match='too long'):
+        asyncio.run(domains._fetch_mta_sts_policy('example.test'))
+    assert time.monotonic() - started < 2
+    assert body.sent < 100
+
+
+def test_valid_policy_is_fetched_uncompressed_and_parsed(monkeypatch):
+    monkeypatch.setattr(domains, 'resolve_dns_with_fallback', _dns({
+        ('_mta-sts.example.test', 'TXT'): [FakeTXT('v=STSv1; id=1;')],
+        ('example.test', 'MX'): [FakeMX('mail.example.test.')],
+    }))
+    requests = _policy_host(monkeypatch, FakeBody([GOOD_POLICY[:20].encode(), GOOD_POLICY[20:].encode()]),
+                            {'Content-Type': 'text/plain'})
+    result = asyncio.run(domains.check_mta_sts_record('example.test'))
+    assert result['status'] == 'success'
+    assert [str(r.url) for r in requests] == ['https://mta-sts.example.test/.well-known/mta-sts.txt']
+    assert requests[0].headers['Accept-Encoding'] == 'identity'

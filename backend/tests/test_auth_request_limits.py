@@ -1,5 +1,6 @@
 """Exercise credential throttling through real routes and Uvicorn proxy handling."""
 import base64
+import secrets
 from unittest.mock import mock_open, patch
 
 import pytest
@@ -11,7 +12,11 @@ from app.config import settings
 from app.main import app
 
 
-def credentials(password="correct-test-password"):
+# New for each run; test_auth_capacity and test_auth_failure_keys sign in with it too
+PASSWORD = secrets.token_hex(16)
+
+
+def credentials(password=PASSWORD):
     value = base64.b64encode(f"admin:{password}".encode()).decode()
     return {"Authorization": f"Basic {value}"}
 
@@ -22,7 +27,7 @@ def basic_auth(monkeypatch):
     monkeypatch.setattr(settings._inner, "auth_enabled", False)
     monkeypatch.setattr(settings._inner, "oauth2_enabled", False)
     monkeypatch.setattr(settings._inner, "auth_username", "admin")
-    monkeypatch.setattr(settings._inner, "auth_password", "correct-test-password")
+    monkeypatch.setattr(settings._inner, "auth_password", PASSWORD)
     auth._auth_failures.clear()
     session._session_store.clear()
     yield
@@ -120,7 +125,7 @@ def test_existing_sessions_and_public_login_info_survive_lockout(monkeypatch, oa
     if oauth_only:
         monkeypatch.setattr(settings._inner, "basic_auth_enabled", False)
         monkeypatch.setattr(settings._inner, "oauth2_enabled", True)
-    cookie = session.create_session({"username": "admin"})
+    cookie = session.create_session({"username": "admin"}, generation=session.auth_generation())
     client.cookies.set(session.SESSION_COOKIE_NAME, cookie)
     assert client.get("/api/auth/status").json()["authenticated"] is True
     assert "version" in client.get("/api/info").json()
@@ -144,9 +149,9 @@ def test_successful_info_auth_resets_failures():
         assert client.get("/api/auth/verify", headers=credentials("wrong")).status_code == 401
 
 
-def test_lockout_expires(monkeypatch):
+def test_lockout_expires(monkeypatch, module_clock):
     now = [1000.0]
-    monkeypatch.setattr(auth.time, "time", lambda: now[0])
+    module_clock(auth, time=lambda: now[0])
     client = client_at()
     for _ in range(auth._AUTH_MAX_FAILURES):
         client.get("/api/auth/verify", headers=credentials("wrong"))

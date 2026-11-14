@@ -1,4 +1,5 @@
 """Tests for shared utility helpers."""
+import secrets
 from datetime import datetime, timezone, timedelta
 
 from fastapi import HTTPException
@@ -35,10 +36,11 @@ def test_ensure_timezone_aware():
 
 
 def test_internal_error_hides_details_by_default():
-    exc = internal_error(ValueError("postgres://user:secret@db/prod exploded"))
+    password = secrets.token_hex(8)
+    exc = internal_error(ValueError(f"postgres://user:{password}@db/prod exploded"))
     assert isinstance(exc, HTTPException)
     assert exc.status_code == 500
-    assert "secret" not in exc.detail
+    assert password not in exc.detail
     assert exc.detail == "Internal server error"
 
 

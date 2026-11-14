@@ -16,8 +16,36 @@ from .safe_decompress import (
     gzip_decompress_limited,
     zip_read_limited,
 )
+from .report_identity import (
+    MAX_REPORT_ITEMS,
+    MAX_STORED_COUNT,
+    REPORT_TOO_LARGE,
+    ReportLimitError,
+    ReportRejectedError,
+    zip_report_member,
+)
 
 logger = logging.getLogger(__name__)
+
+
+def _text(data: dict, key: str, default):
+    """A text field of the report: the default when it is missing, None when
+    it is null, as stored before. RFC 8460 makes them JSON strings; anything
+    else is refused rather than turned into text by the database."""
+    value = data.get(key, default)
+    if value is not None and not isinstance(value, str):
+        raise ValueError("A text field of the report is not a string")
+    return value
+
+
+def _session_count(summary: dict, key: str) -> int:
+    """0 when missing or null (the column default stores null as 0); else a whole number in range."""
+    value = summary.get(key)
+    if value is None:
+        return 0
+    if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= MAX_STORED_COUNT:
+        raise ValueError("A session count of the report is not a whole number in range")
+    return value
 
 
 def parse_tls_rpt_file(file_content: bytes, filename: str) -> Optional[Dict[str, Any]]:
@@ -36,20 +64,19 @@ def parse_tls_rpt_file(file_content: bytes, filename: str) -> Optional[Dict[str,
 
         if len(file_content) > MAX_COMPRESSED_BYTES:
             logger.error(f"TLS-RPT file {filename} exceeds compressed size limit, rejecting")
-            return None
+            raise ReportLimitError(REPORT_TOO_LARGE)
 
         # Handle ZIP files (.json.zip)
         if filename_lower.endswith('.zip'):
             try:
                 with zipfile.ZipFile(BytesIO(file_content)) as zf:
-                    # Find JSON file inside ZIP
-                    json_files = [f for f in zf.namelist() if f.lower().endswith('.json')]
-                    if not json_files:
+                    # The one JSON report in the ZIP
+                    json_file = zip_report_member(zf, '.json')
+                    if not json_file:
                         logger.error(f"No JSON file found in ZIP: {filename}")
                         return None
 
-                    # Read the first JSON file
-                    json_content = zip_read_limited(zf, json_files[0], source=filename).decode('utf-8')
+                    json_content = zip_read_limited(zf, json_file, source=filename).decode('utf-8')
             except zipfile.BadZipFile as e:
                 logger.error(f"Invalid ZIP file {filename}: {e}")
                 return None
@@ -76,8 +103,12 @@ def parse_tls_rpt_file(file_content: bytes, filename: str) -> Optional[Dict[str,
         return parse_tls_rpt_json(json_content)
 
     except DecompressionLimitError as e:
+        # A limit: nothing from the email or upload is imported
         logger.error(f"Rejected oversized TLS-RPT file {filename}: {e}")
-        return None
+        raise ReportLimitError(REPORT_TOO_LARGE) from e
+    except ReportRejectedError:
+        # The caller says why; a limit rejects the whole email or upload
+        raise
     except Exception as e:
         logger.error(f"Error parsing TLS-RPT file {filename}: {e}")
         return None
@@ -118,44 +149,56 @@ def parse_tls_rpt_json(json_content: str) -> Optional[Dict[str, Any]]:
     try:
         data = json.loads(json_content)
         
-        # Extract report metadata
-        report_id = data.get('report-id', '')
+        # Extract report metadata. The values are stored as they are and the
+        # report's identity is computed from them, so their types are checked.
+        report_id = _text(data, 'report-id', '')
         if not report_id:
             logger.error("TLS-RPT report missing report-id")
             return None
-        
-        organization_name = data.get('organization-name', 'Unknown')
-        contact_info = data.get('contact-info', '')
-        
+
+        organization_name = _text(data, 'organization-name', 'Unknown')
+        contact_info = _text(data, 'contact-info', '')
+
         # Parse date range
         date_range = data.get('date-range', {})
         start_datetime = parse_iso_datetime(date_range.get('start-datetime', ''))
         end_datetime = parse_iso_datetime(date_range.get('end-datetime', ''))
-        
+
         if not start_datetime or not end_datetime:
             logger.error("TLS-RPT report missing or invalid date-range")
             return None
-        
+
         # Parse policies
         policies = []
         policy_domain = None
-        
-        for policy_entry in data.get('policies', []):
+        entries = data.get('policies', [])
+        if not isinstance(entries, list):
+            raise ValueError("policies is not a list")
+        items = 0
+
+        for policy_entry in entries:
             policy_data = policy_entry.get('policy', {})
             summary = policy_entry.get('summary', {})
-            
+            failure_details = policy_entry.get('failure-details', [])
+            if failure_details is not None and not isinstance(failure_details, list):
+                raise ValueError("failure-details is not a list")
+            items += 1 + len(failure_details or [])
+            if items > MAX_REPORT_ITEMS:
+                raise ReportLimitError(
+                    f"The report has more than {MAX_REPORT_ITEMS:,} policies and failure details.")
+
             # Get the policy domain from the first policy
             if not policy_domain:
-                policy_domain = policy_data.get('policy-domain', '')
-            
+                policy_domain = _text(policy_data, 'policy-domain', '')
+
             parsed_policy = {
-                'policy_type': policy_data.get('policy-type', 'unknown'),
-                'policy_domain': policy_data.get('policy-domain', ''),
+                'policy_type': _text(policy_data, 'policy-type', 'unknown'),
+                'policy_domain': _text(policy_data, 'policy-domain', ''),
                 'policy_string': policy_data.get('policy-string', []),
                 'mx_host': policy_data.get('mx-host', []),
-                'successful_session_count': summary.get('total-successful-session-count', 0),
-                'failed_session_count': summary.get('total-failure-session-count', 0),
-                'failure_details': policy_entry.get('failure-details', [])
+                'successful_session_count': _session_count(summary, 'total-successful-session-count'),
+                'failed_session_count': _session_count(summary, 'total-failure-session-count'),
+                'failure_details': failure_details
             }
             policies.append(parsed_policy)
         
@@ -174,12 +217,13 @@ def parse_tls_rpt_json(json_content: str) -> Optional[Dict[str, Any]]:
             'start_datetime': start_datetime,
             'end_datetime': end_datetime,
             'policies': policies,
-            'raw_json': json_content
         }
         
     except json.JSONDecodeError as e:
         logger.error(f"Invalid JSON in TLS-RPT report: {e}")
         return None
+    except ReportRejectedError:
+        raise
     except Exception as e:
         logger.error(f"Error parsing TLS-RPT JSON: {e}")
         return None

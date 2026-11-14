@@ -1,0 +1,170 @@
+{
+  "about": "How many recipients a message has. Each case runs through the dialog's header count, messageRecipientsAll() (.github/tests/recipient-count-parity.test.cjs) and through the server's count for the Messages list and the details (backend/tests/test_recipient_count_parity.py); both must give `expected`. `recipients` is what the details answer lists (Rspamd's without excluded addresses, else Postfix's); `rspamd` is null when Rspamd did not scan it. `other_legs` are further deliveries of the same Message-ID, stored later (each with the `recipients` its own details would list and the addresses it resolves to, `resolved`); a delivery to or from an excluded address is left out. A Postfix line's text is `line` with {queue} and its own address filled in; `at` is seconds after the first sighting.",
+  "line": "{queue}: to=<{to}>, {orig}relay=dovecot, delay=0.1, delays=0/0/0/0.1, dsn=2.0.0, status=sent (250 2.0.0 Ok)",
+  "cases": [
+    {
+      "name": "one address logged in two cases",
+      "rspamd": null,
+      "recipient": "alice@parity.example.test",
+      "postfix": [
+        { "to": "alice@parity.example.test", "at": 1 },
+        { "to": "ALICE@parity.example.test", "at": 2 }
+      ],
+      "recipients": ["alice@parity.example.test", "ALICE@parity.example.test"],
+      "expected": 1
+    },
+    {
+      "name": "Rspamd and Postfix write an address in different cases",
+      "rspamd": ["Bob@parity.example.test"],
+      "recipient": "bob@parity.example.test",
+      "postfix": [{ "to": "bob@parity.example.test", "at": 1 }],
+      "recipients": ["Bob@parity.example.test"],
+      "expected": 1
+    },
+    {
+      "name": "an address only Postfix logged",
+      "rspamd": ["alice@parity.example.test"],
+      "recipient": "alice@parity.example.test",
+      "postfix": [
+        { "to": "alice@parity.example.test", "at": 1 },
+        { "to": "carol@parity.example.test", "at": 2 }
+      ],
+      "recipients": ["alice@parity.example.test"],
+      "expected": 2
+    },
+    {
+      "name": "two aliases delivered to one mailbox",
+      "rspamd": null,
+      "recipient": "box@parity.example.test",
+      "postfix": [
+        { "to": "box@parity.example.test", "orig_to": "sales@parity.example.test", "at": 1 },
+        { "to": "box@parity.example.test", "orig_to": "info@parity.example.test", "at": 2 }
+      ],
+      "recipients": ["box@parity.example.test"],
+      "expected": 2
+    },
+    {
+      "name": "one alias split to two mailboxes",
+      "rspamd": null,
+      "recipient": "m1@parity.example.test",
+      "postfix": [
+        { "to": "m1@parity.example.test", "orig_to": "team@parity.example.test", "at": 1 },
+        { "to": "m2@parity.example.test", "orig_to": "team@parity.example.test", "at": 2 }
+      ],
+      "recipients": ["m1@parity.example.test", "m2@parity.example.test"],
+      "expected": 1
+    },
+    {
+      "name": "one alias split to two mailboxes in the same second, logged in the other order",
+      "rspamd": null,
+      "recipient": "m1@parity.example.test",
+      "postfix": [
+        { "to": "m2@parity.example.test", "orig_to": "team@parity.example.test", "at": 1 },
+        { "to": "m1@parity.example.test", "orig_to": "team@parity.example.test", "at": 1 }
+      ],
+      "recipients": ["m1@parity.example.test", "m2@parity.example.test"],
+      "expected": 1
+    },
+    {
+      "name": "an alias Rspamd named, split to two mailboxes",
+      "rspamd": ["team@parity.example.test"],
+      "recipient": "m1@parity.example.test",
+      "postfix": [
+        { "to": "m1@parity.example.test", "orig_to": "team@parity.example.test", "at": 1 },
+        { "to": "m2@parity.example.test", "orig_to": "team@parity.example.test", "at": 2 }
+      ],
+      "recipients": ["team@parity.example.test"],
+      "expected": 1
+    },
+    {
+      "name": "every recipient Rspamd named is excluded",
+      "rspamd": ["listed@parity.example.test"],
+      "excluded": ["listed@parity.example.test"],
+      "recipient": "alice@parity.example.test",
+      "postfix": [{ "to": "alice@parity.example.test", "at": 1 }],
+      "recipients": ["alice@parity.example.test"],
+      "expected": 1
+    },
+    {
+      "name": "a message only Postfix logged",
+      "rspamd": null,
+      "recipient": "alice@parity.example.test",
+      "postfix": [
+        { "to": "alice@parity.example.test", "at": 1 },
+        { "to": "bob@parity.example.test", "at": 2 }
+      ],
+      "recipients": ["alice@parity.example.test", "bob@parity.example.test"],
+      "expected": 2
+    },
+    {
+      "name": "a message delivered again (a forward) counts the recipients of both deliveries",
+      "rspamd": ["alice@parity.example.test", "bob@parity.example.test"],
+      "recipient": "alice@parity.example.test",
+      "postfix": [
+        { "to": "alice@parity.example.test", "at": 1 },
+        { "to": "bob@parity.example.test", "at": 2 }
+      ],
+      "other_legs": [
+        { "rspamd": ["carol@parity.example.test"], "recipient": "carol@parity.example.test",
+          "postfix": [{ "to": "carol@parity.example.test", "at": 30 }],
+          "recipients": ["carol@parity.example.test"], "resolved": ["carol@parity.example.test"] }
+      ],
+      "recipients": ["alice@parity.example.test", "bob@parity.example.test"],
+      "expected": 3
+    },
+    {
+      "name": "two deliveries of one message, one recipient each",
+      "rspamd": ["box@parity.example.test"],
+      "recipient": "box@parity.example.test",
+      "postfix": [{ "to": "box@parity.example.test", "at": 1 }],
+      "other_legs": [
+        { "rspamd": ["friend@outside.parity.example.test"], "recipient": "friend@outside.parity.example.test",
+          "postfix": [{ "to": "friend@outside.parity.example.test", "at": 30 }],
+          "recipients": ["friend@outside.parity.example.test"], "resolved": ["friend@outside.parity.example.test"] }
+      ],
+      "recipients": ["box@parity.example.test"],
+      "expected": 2
+    },
+    {
+      "name": "two deliveries of one message to the same recipient",
+      "rspamd": ["alice@parity.example.test"],
+      "recipient": "alice@parity.example.test",
+      "postfix": [{ "to": "alice@parity.example.test", "at": 1 }],
+      "other_legs": [
+        { "rspamd": ["Alice@parity.example.test"], "recipient": "Alice@parity.example.test",
+          "postfix": [{ "to": "Alice@parity.example.test", "at": 30 }],
+          "recipients": ["Alice@parity.example.test"], "resolved": ["Alice@parity.example.test"] }
+      ],
+      "recipients": ["alice@parity.example.test"],
+      "expected": 1
+    },
+    {
+      "name": "a delivery of the message to an excluded address is left out",
+      "rspamd": ["alice@parity.example.test"],
+      "excluded": ["listed@parity.example.test"],
+      "recipient": "alice@parity.example.test",
+      "postfix": [{ "to": "alice@parity.example.test", "at": 1 }],
+      "other_legs": [
+        { "rspamd": ["listed@parity.example.test"], "recipient": "listed@parity.example.test",
+          "postfix": [{ "to": "listed@parity.example.test", "at": 30 }],
+          "recipients": ["listed@parity.example.test"], "resolved": ["listed@parity.example.test"] }
+      ],
+      "recipients": ["alice@parity.example.test"],
+      "expected": 1
+    },
+    {
+      "name": "a delivery of the message through an excluded alias is left out",
+      "rspamd": ["alice@parity.example.test"],
+      "excluded": ["listed@parity.example.test"],
+      "recipient": "alice@parity.example.test",
+      "postfix": [{ "to": "alice@parity.example.test", "at": 1 }],
+      "other_legs": [
+        { "rspamd": null, "recipient": "box@parity.example.test",
+          "postfix": [{ "to": "box@parity.example.test", "orig_to": "listed@parity.example.test", "at": 30 }],
+          "recipients": ["box@parity.example.test"], "resolved": ["listed@parity.example.test"] }
+      ],
+      "recipients": ["alice@parity.example.test"],
+      "expected": 1
+    }
+  ]
+}

@@ -113,3 +113,24 @@ async def test_revoked_key_is_still_reported(monkeypatch):
 
     assert result['match'] is False
     assert result['status'] == 'error'
+
+
+def test_strict_flag_text_follows_rfc_6376():
+    # t=s: the i= domain must be d= itself, not a subdomain of it (RFC 6376 3.6.1)
+    info = domains.parse_dkim_parameters(MAILCOW_RECORD)['info']
+    (strict,) = [i for i in info if 't=s' in i['message']]
+    assert 'i=' in strict['description'] and 'd=' in strict['description']
+    assert 'Only the main domain can send' not in strict['description']
+
+
+@pytest.mark.asyncio
+async def test_warnings_are_plain_words(monkeypatch):
+    # The Domains page shows these lines as they are: an error says so in a
+    # word, a warning is the message alone, and neither carries an emoji
+    mismatch = await _check(monkeypatch, f'v=DKIM1;k=rsa;t=s;s=email;p={OTHER_KEY}')
+    rewritten = await _check(monkeypatch, f'v=DKIM1;h=sha256;k=rsa;s=email;p={KEY}')
+
+    assert 'Error: Public key (p=) does not match the key in mailcow' in mismatch['warnings']
+    assert 't=s from the mailcow record is missing' in rewritten['warnings']
+    for line in mismatch['warnings'] + rewritten['warnings']:
+        assert line.isascii(), line

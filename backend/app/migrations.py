@@ -10,12 +10,21 @@ import logging
 from pathlib import Path
 
 from sqlalchemy import text
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, load_only
 
 from .database import SessionLocal
 from .models import MessageCorrelation, PostfixLog, RspamdLog
 
 logger = logging.getLogger(__name__)
+
+
+_MERGED_COLUMNS = (
+    MessageCorrelation.id, MessageCorrelation.correlation_key, MessageCorrelation.message_id,
+    MessageCorrelation.queue_id, MessageCorrelation.postfix_log_ids, MessageCorrelation.rspamd_log_id,
+    MessageCorrelation.sender, MessageCorrelation.recipient, MessageCorrelation.subject,
+    MessageCorrelation.direction, MessageCorrelation.final_status, MessageCorrelation.first_seen,
+    MessageCorrelation.last_seen,
+)
 
 
 def cleanup_duplicate_correlations(db: Session) -> int:
@@ -60,6 +69,13 @@ def cleanup_duplicate_correlations(db: Session) -> int:
 
         logger.info(f"Found {len(duplicates)} deliveries with duplicate correlations")
 
+        # written_recipients (revision 0027) is merged once that revision has
+        # added it; before, the table does not have it yet
+        has_written = db.execute(text(
+            "SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema() "
+            "AND table_name = 'message_correlations' AND column_name = 'written_recipients'")).first() is not None
+        columns = _MERGED_COLUMNS + ((MessageCorrelation.written_recipients,) if has_written else ())
+
         total_removed = 0
         for message_id, queue_id, correlation_keys, count in duplicates:
             # Get all correlations for this delivery (ordered by first_seen)
@@ -67,10 +83,12 @@ def cleanup_duplicate_correlations(db: Session) -> int:
                 MessageCorrelation.queue_id == queue_id if queue_id
                 else MessageCorrelation.queue_id.is_(None)
             )
-            correlations = db.query(MessageCorrelation).filter(
+            # Only the columns read here: this runs before Alembic, so a column a
+            # later revision adds is not in the table yet
+            correlations = db.query(MessageCorrelation).options(load_only(*columns)).filter(
                 MessageCorrelation.message_id == message_id,
                 leg_filter
-            ).order_by(MessageCorrelation.first_seen).all()
+            ).order_by(MessageCorrelation.first_seen, MessageCorrelation.id).all()
 
             if len(correlations) <= 1:
                 continue
@@ -130,6 +148,15 @@ def cleanup_duplicate_correlations(db: Session) -> int:
             
             # Update primary correlation with merged data
             primary.postfix_log_ids = sorted(list(all_postfix_ids))
+
+            # Written recipient addresses: the kept row's own values win
+            if has_written:
+                written = {}
+                for row in reversed(correlations):
+                    if isinstance(row.written_recipients, dict):
+                        written.update(row.written_recipients)
+                if written:
+                    primary.written_recipients = written
             
             # Update all Postfix logs to point to the primary correlation
             if all_postfix_ids:

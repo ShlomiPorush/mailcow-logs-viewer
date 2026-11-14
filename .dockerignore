@@ -5,3 +5,6 @@
 backend/tests
 documentation
 *.md
+# The demo image serves the help documents locally (see backend/demo)
+!documentation/HelpDocs
+!backend/app/agent_access/skill_files/SKILL.md
