@@ -44,7 +44,7 @@ Use your own `POSTGRES_USER` and `POSTGRES_DB` if you changed them.
 
 | Variable | Default | Effect |
 | --- | --- | --- |
-| `MAILCOW_API_KEY_RW` | Unset | Separate read-write mailcow API key, needed for every action that changes mailcow. Without it the app only monitors. It has its own allowed IPs, with the same rule as `MAILCOW_API_KEY`; check it with **Validate** under **Settings** > **Mailcow**. |
+| `MAILCOW_API_KEY_RW` | Unset | Separate read-write mailcow API key, needed for every action that changes mailcow. Without it the app only monitors. It has its own allowed IPs, with the same rule as `MAILCOW_API_KEY`; check it with **Validate** under **Settings** > **mailcow**. |
 | `RSPAMD_PASSWORD` | Unset | Rspamd UI password, needed to view Rspamd maps. Editing them also needs the read-write key. |
 | `RSPAMD_URL` | Empty | Empty reaches Rspamd through the mailcow URL plus `/rspamd`. Set a direct address, such as `http://rspamd-mailcow:11334`, only when that path fails. |
 | `MAILCOW_API_TIMEOUT` | `30` | Seconds before a mailcow API request gives up. |
@@ -259,9 +259,9 @@ Some services are collected whatever this list says, because other pages read th
 | `SUPPRESSION_RSPAMD_SYNC` | `true` | Sync with Rspamd: keep the suppression list and the app's section of Rspamd's `global_rcpt_blacklist.map` in step, both ways, so mail to the listed addresses is rejected. `false` keeps no list: the app deletes it (Rspamd is not touched), and `true` again loads the app's blocks back from Rspamd. Needs `RSPAMD_PASSWORD` and the read-write key. |
 | `SUPPRESSION_HARD_BOUNCE_ACTION` | `suppress` | For permanent failures (5.x.x): `suppress` (block the address and delete its queued mail), `delete` (only delete its queued mail) or `ignore`. With `SUPPRESSION_RSPAMD_SYNC=false`, `suppress` acts as `delete`. |
 | `SUPPRESSION_SOFT_BOUNCE_ACTION` | `count` | For temporary failures (4.x.x): `suppress`, `count` (suppress at the threshold) or `ignore`. Used only while `QUEUE_CLEANUP_ENABLED=false`. With `SUPPRESSION_RSPAMD_SYNC=false`, both that block act as `ignore`. |
-| `SUPPRESSION_HARD_BOUNCE_EXCLUDED_CODES` | Empty | Comma-separated 5.x.x codes to exclude from automatic handling, such as `5.2.2`. For these codes, the app does not block the address, count the failure, or delete queued mail. Postfix still returns the message to the sender. |
+| `SUPPRESSION_HARD_BOUNCE_EXCLUDED_CODES` | Empty | Comma-separated 5.x.x codes to exclude from automatic handling, such as `5.2.2`. For these codes, the app does not block the address, count the failure, or delete queued mail. |
 | `SUPPRESSION_SOFT_BOUNCE_EXCLUDED_CODES` | Empty | Comma-separated 4.x.x codes to exclude from automatic handling, such as `4.2.2`. For these codes, the app does not block the address or count the failure. The message stays in the queue for Postfix to retry. |
-| `SUPPRESSION_HARD_BOUNCE_STANDARD_CODES` | `true` | Exclude a fixed list of 5.x.x codes for failures unrelated to the recipient address. For these codes, the app does not block the address, count the failure, or delete queued mail. Postfix still returns the message to the sender. View the list in Settings > Outbound. |
+| `SUPPRESSION_HARD_BOUNCE_STANDARD_CODES` | `true` | Exclude a fixed list of 5.x.x codes for failures unrelated to the recipient address. For these codes, the app does not block the address, count the failure, or delete queued mail. View the list in Settings > Outbound. |
 | `SUPPRESSION_SOFT_BOUNCE_STANDARD_CODES` | `true` | Exclude a fixed list of 4.x.x codes for failures unrelated to the recipient address. For these codes, the app does not block the address or count the failure. The message stays in the queue for Postfix to retry. View the list in Settings > Outbound. |
 | `SUPPRESSION_SOFT_BOUNCE_THRESHOLD` | `3` | Soft bounces before `count` suppresses. Used only while `QUEUE_CLEANUP_ENABLED=false`. |
 | `QUEUE_CLEANUP_ENABLED` | `true` | Delete messages stuck in the deferred queue longer than the threshold. Needs the read-write key and `SUPPRESSION_ENABLED=true`. |

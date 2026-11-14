@@ -93,7 +93,7 @@ def list_channels(db: Session = Depends(get_db)):
 def create_channel(request: ChannelRequest, db: Session = Depends(get_db)):
     """Add a channel."""
     if request.channel_type not in nc.CHANNEL_TYPES:
-        raise HTTPException(status_code=422, detail=f"Unknown channel type: {request.channel_type}")
+        raise HTTPException(status_code=422, detail=f"Unknown destination service: {request.channel_type}. Select a service from the list.")
     # On create there is no stored secret behind the mask placeholder - treat
     # a literal mask as empty so validation rejects it instead of storing it
     config = {k: ("" if v == nc.MASK else v) for k, v in (request.config or {}).items()}
@@ -124,11 +124,11 @@ def create_channel(request: ChannelRequest, db: Session = Depends(get_db)):
 def update_channel(channel_id: int, request: ChannelRequest, db: Session = Depends(get_db)):
     """Update a channel. Masked secrets left untouched keep their stored value."""
     if request.channel_type not in nc.CHANNEL_TYPES:
-        raise HTTPException(status_code=422, detail=f"Unknown channel type: {request.channel_type}")
+        raise HTTPException(status_code=422, detail=f"Unknown destination service: {request.channel_type}. Select a service from the list.")
     try:
         channel = db.query(NotificationChannel).filter(NotificationChannel.id == channel_id).first()
         if not channel:
-            raise HTTPException(status_code=404, detail="Channel not found")
+            raise HTTPException(status_code=404, detail="This destination no longer exists. Reload the destination list.")
 
         # A different service never inherits the stored secrets of the old one
         stored = (channel.config or {}) if request.channel_type == channel.channel_type else {}
@@ -162,7 +162,7 @@ def delete_channel(channel_id: int, db: Session = Depends(get_db)):
     try:
         channel = db.query(NotificationChannel).filter(NotificationChannel.id == channel_id).first()
         if not channel:
-            raise HTTPException(status_code=404, detail="Channel not found")
+            raise HTTPException(status_code=404, detail="This destination no longer exists. Reload the destination list.")
         db.delete(channel)
         db.commit()
         return {"status": "success"}
@@ -188,7 +188,7 @@ async def test_saved_channel(channel_id: int):
 
     channel = await asyncio.to_thread(_load)
     if not channel:
-        raise HTTPException(status_code=404, detail="Channel not found")
+        raise HTTPException(status_code=404, detail="This destination no longer exists. Reload the destination list.")
 
     ok, error = await asyncio.to_thread(
         nc.send_to_config, channel["type"], channel["config"],
@@ -200,9 +200,9 @@ async def test_saved_channel(channel_id: int):
     return {
         "success": ok,
         "logs": [
-            f"Channel: {channel['name']} ({channel['type']})",
+            f"Destination: {channel['name']} ({channel['type']})",
             "Sending test notification...",
-            "Delivered successfully" if ok else f"Failed: {error}",
+            "The service accepted the test notification" if ok else f"Failed: {error}",
         ],
     }
 
@@ -211,7 +211,7 @@ async def test_saved_channel(channel_id: int):
 async def test_unsaved_channel(request: ChannelTestRequest):
     """Test a channel configuration before saving it."""
     if request.channel_type not in nc.CHANNEL_TYPES:
-        raise HTTPException(status_code=422, detail=f"Unknown channel type: {request.channel_type}")
+        raise HTTPException(status_code=422, detail=f"Unknown destination service: {request.channel_type}. Select a service from the list.")
     ok, error = await asyncio.to_thread(
         nc.send_to_config, request.channel_type, request.config,
         "Test notification",
@@ -221,8 +221,8 @@ async def test_unsaved_channel(request: ChannelTestRequest):
     return {
         "success": ok,
         "logs": [
-            f"Channel type: {request.channel_type}",
+            f"Service: {request.channel_type}",
             "Sending test notification...",
-            "Delivered successfully" if ok else f"Failed: {error}",
+            "The service accepted the test notification" if ok else f"Failed: {error}",
         ],
     }

@@ -13,7 +13,7 @@ The counters on the tabs show stopped containers on **Server**, listed addresses
 
 **Mail storage** turns amber above 75% and red above 90%.
 
-When a newer mailcow is out, **Update Available** shows its release notes; it does not update mailcow.
+When a newer mailcow is out, **Update available** shows its release notes; it does not update mailcow.
 
 **Message linking** counts how many messages are fully linked. The app links each message's Postfix log lines to its Rspamd scan. Expired means the app stopped waiting for more log lines, not that the message expired in the queue.
 
@@ -23,7 +23,7 @@ Only the container state `running` counts as running. An ignored container stays
 
 A recent **Last Fetch Run** with an older **Last Import** usually means mailcow had no new lines.
 
-**Waiting to be linked** lists up to five recent messages that are not fully linked yet. The app keeps trying until they are linked or reach **Max Correlation Age Minutes** (10 by default, under **Settings** > **Correlation**), then marks them expired.
+**Waiting to be linked** lists up to five recent messages that are not fully linked yet. The app keeps trying until they are linked or reach **Stop linking after (minutes)** (10 by default, under **Settings** > **Fetch** > **Message linking**), then marks them expired.
 
 ## Jobs
 

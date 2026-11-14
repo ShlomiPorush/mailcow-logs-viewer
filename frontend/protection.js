@@ -228,7 +228,7 @@ async function saveProtectionRules(quiet = false) {
         if (!quiet) showToast('Protection rules saved', 'success');
         loadProtection();
     } catch (error) {
-        showToast(`Could not save the rules: ${error.message}`, 'error');
+        showToast(`Could not save the rules. Check the values and try again. Details: ${error.message}`, 'error');
         return false;
     }
     return true;
@@ -249,7 +249,7 @@ async function protectionHitAction(id, action, button, done) {
             loadFail2BanSettings();
         }
     } catch (error) {
-        showToast(`Could not ${action === 'ban' ? 'ban' : action}: ${error.message}`, 'error');
+        showToast(`Could not ${action === 'ban' ? 'ban' : action}. Refresh Security and try again. Details: ${error.message}`, 'error');
         if (button) button.disabled = false;
     }
 }

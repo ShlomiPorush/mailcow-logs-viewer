@@ -200,7 +200,7 @@ function uiLocked(title, textHtml, action = 'settings') {
 }
 
 // The Read-Write key sentence used by every locked area that needs it
-const UI_RW_KEY_TEXT = 'needs a <strong>Read-Write API key</strong> (<code>MAILCOW_API_KEY_RW</code>). Configure it in Settings → Mailcow → Connection.';
+const UI_RW_KEY_TEXT = 'requires a <strong>read-write API key</strong>. Add it in Settings > mailcow > Connection.';
 
 // What the signed-in person may view and do, from GET /api/auth/status: area:read
 // (View) and area:write (Take action) per area, and whether they are an admin
@@ -489,8 +489,98 @@ function uiMenu(label, itemsHtml, { small = true, icon = '', cls = '', attrs = '
         <div id="${id}" popover class="ui-menu" role="menu" onclick="if (event.target.closest('button')) this.hidePopover()">${itemsHtml}</div>`;
 }
 
+// A field's longer explanation: an "i" beside its name, and the text on the popover
+// layer, so a panel's own clipping cannot cut it. Text is one paragraph or a list of them.
+// A pointer on the "i" shows it; a click, a tap, Enter or Space opens and closes it; the
+// browser closes it on Esc, on a click outside and when another opens.
+// The "i" is a span with the role of a button, not a button: the Settings form is a
+// disabled fieldset until the settings are migrated, and a button in it cannot open anything
+let uiHelpSeq = 0;
+function uiHelp(name, text) {
+    const id = `ui-help-${++uiHelpSeq}`;
+    const paragraphs = [].concat(text).map(p => `<p>${escapeHtml(p)}</p>`).join('');
+    return `<span class="ui-field-help" role="button" tabindex="0" data-help="${id}" aria-controls="${id}" aria-expanded="false" aria-label="More about ${escapeHtml(name)}">
+            <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="8" r="6.5"/><path d="M8 7.3V11M8 4.9v.1"/></svg></span>
+        <div id="${id}" popover class="ui-field-help-panel">${paragraphs}</div>`;
+}
+
+// Under the whole field, so the name, the short line and the control stay readable;
+// above it when there is no room below. Its height is capped to the screen (ui.css)
+function uiHelpPlace(panel, opener) {
+    const name = opener.parentElement.getBoundingClientRect();
+    const row = (opener.closest('.ui-set-field, .ui-set-bool') || opener).getBoundingClientRect();
+    const rtl = getComputedStyle(opener).direction === 'rtl';
+    const left = rtl ? name.right - panel.offsetWidth : name.left;
+    panel.style.left = `${Math.max(8, Math.min(left, window.innerWidth - panel.offsetWidth - 8))}px`;
+    const below = row.bottom - 8;
+    panel.style.top = `${below + panel.offsetHeight > window.innerHeight - 8 ? Math.max(8, row.top - panel.offsetHeight + 8) : below}px`;
+}
+
+function uiInitHelp() {
+    let closing = 0;
+    const panelOf = el => (el ? document.getElementById(el.dataset.help) : null);
+    // Placed in the same task that opens it, before the browser paints: placing it on the
+    // toggle event, which comes later, showed it for a frame at the top of the screen
+    const setOpen = (panel, open) => {
+        if (!panel || panel.matches(':popover-open') === open) return;
+        if (!open) return panel.hidePopover();
+        panel.showPopover();
+        const opener = document.querySelector(`[data-help="${panel.id}"]`);
+        if (opener) uiHelpPlace(panel, opener);
+    };
+    // The pointer may cross from the "i" to the text without closing it, to select a value
+    const hovered = event => {
+        if (event.pointerType !== 'mouse' || !(event.target instanceof Element)) return null;
+        const spot = event.target.closest('.ui-field-help, .ui-field-help-panel');
+        return spot && (spot.classList.contains('ui-field-help-panel') ? spot : panelOf(spot));
+    };
+    document.addEventListener('pointerover', event => {
+        const panel = hovered(event);
+        if (!panel) return;
+        clearTimeout(closing);
+        setOpen(panel, true);
+    });
+    document.addEventListener('pointerout', event => {
+        const panel = hovered(event);
+        if (panel) closing = setTimeout(() => setOpen(panel, false), 250);
+    });
+    // A press on the "i" of an open panel closes it as a click outside before the click
+    // comes, so the click goes by the state at the press. A click with no press (a
+    // screen reader) goes by the state it finds. A mouse click only opens: hovering opened it
+    let press = null;
+    document.addEventListener('pointerdown', event => {
+        const opener = event.target instanceof Element ? event.target.closest('.ui-field-help') : null;
+        const panel = panelOf(opener);
+        press = panel ? { opener, open: panel.matches(':popover-open') } : null;
+    }, true);
+    // A press that turned into a scroll brings no click: it must not decide a later one
+    document.addEventListener('pointercancel', () => { press = null; }, true);
+    document.addEventListener('click', event => {
+        const opener = event.target instanceof Element ? event.target.closest('.ui-field-help') : null;
+        const panel = panelOf(opener);
+        const wasOpen = press && press.opener === opener ? press.open : panel && panel.matches(':popover-open');
+        press = null;
+        if (panel) setOpen(panel, event.pointerType === 'mouse' || !wasOpen);
+    });
+    document.addEventListener('keydown', event => {
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        const panel = panelOf(event.target instanceof Element && event.target.closest('.ui-field-help'));
+        if (!panel) return;
+        event.preventDefault();
+        press = null;
+        setOpen(panel, !panel.matches(':popover-open'));
+    });
+    document.addEventListener('beforetoggle', event => {
+        const panel = event.target;
+        if (!(panel instanceof HTMLElement) || !panel.classList.contains('ui-field-help-panel')) return;
+        const opener = document.querySelector(`[data-help="${panel.id}"]`);
+        if (opener) opener.setAttribute('aria-expanded', String(event.newState === 'open'));
+    }, true);
+}
+
 // Called once at startup: places an opening menu and closes it on scroll
 function uiInitMenus() {
+    uiInitHelp();
     document.addEventListener('toggle', event => {
         const menu = event.target;
         if (!(menu instanceof HTMLElement) || !menu.classList.contains('ui-menu') || event.newState !== 'open') return;
@@ -505,9 +595,11 @@ function uiInitMenus() {
         menu.style.top = `${below + menu.offsetHeight > window.innerHeight - 8 ? Math.max(8, r.top - menu.offsetHeight - 4) : below}px`;
     }, true);
 
-    // An open menu would drift away from its button on scroll, so close it
-    window.addEventListener('scroll', () => {
-        document.querySelectorAll('.ui-menu:popover-open').forEach(menu => menu.hidePopover());
+    // An open menu would drift away from its button on scroll, so close it;
+    // scrolling the text of a field's help keeps that help open
+    window.addEventListener('scroll', event => {
+        if (event.target instanceof Element && event.target.closest('.ui-field-help-panel')) return;
+        document.querySelectorAll('.ui-menu:popover-open, .ui-field-help-panel:popover-open').forEach(menu => menu.hidePopover());
     }, true);
 }
 

@@ -14,27 +14,134 @@ let settingsFirstTab = null;
 
 // Labels the key cannot spell well. Next to the other addresses, "Error Email" alone would not say whose errors
 const SETTINGS_LABEL_OVERRIDES = {
-    dmarc_error_email: 'Report Import Error Email',
-    eas_devices_retention_days: 'Retention Days',
-    tz: 'Time Zone',
-    dmarc_imap_folder: 'IMAP Folders',
+    mailcow_api_key: 'Read-only API key',
+    mailcow_api_key_rw: 'Read-write API key',
+    mailcow_api_timeout: 'API timeout (seconds)',
+    mailcow_api_verify_ssl: 'Verify TLS certificates',
+    rspamd_password: 'Rspamd password',
+    fetch_interval: 'Fetch message and security logs every (seconds)',
+    fetch_count_postfix: 'Postfix logs per request',
+    fetch_count_rspamd: 'Rspamd logs per request',
+    fetch_count_netfilter: 'Netfilter logs per request',
+    fetch_max_pages: 'Maximum pages per fetch',
+    retention_days: 'Keep mail logs (days)',
+    blacklist_emails: 'Exclude email addresses',
+    max_correlation_age_minutes: 'Stop linking after (minutes)',
+    correlation_check_interval: 'Check for links every (seconds)',
+    app_port: 'Container port',
+    app_title: 'App title',
+    app_logo_url: 'Logo URL',
+    log_level: 'Log level',
+    date_format: 'Date format',
+    time_format: 'Time format',
+    debug: 'Debug mode',
+    max_search_results: 'Maximum search results',
+    csv_export_limit: 'Maximum CSV rows',
+    scheduler_workers: 'Background jobs at once',
+    blacklist_dns_servers: 'DNS resolvers',
+    blacklist_source_server_ip: 'mailcow public IP',
+    blacklist_source_transports: 'Transport IPs',
+    blacklist_source_relayhosts: 'Relayhost IPs',
+    blacklist_source_manual_hosts: 'Additional hosts',
+    domain_spf_source_server_ip: 'mailcow public IP',
+    domain_spf_source_transports: 'Transport IPs',
+    domain_spf_source_relayhosts: 'Relayhost IPs',
+    domain_spf_source_manual_hosts: 'Additional sending hosts',
+    domain_spf_source_dmarc_history: 'IPs from DMARC reports',
+    basic_auth_enabled: 'Enable Basic Auth',
+    auth_username: 'Username',
+    auth_password: 'Password',
+    auth_max_failure_clients: 'Maximum tracked sign-in addresses',
+    oauth2_enabled: 'Enable OAuth2 / OIDC',
+    oauth2_provider_name: 'Provider name',
+    oauth2_issuer_url: 'Issuer URL',
+    oauth2_authorization_url: 'Authorization URL',
+    oauth2_token_url: 'Token URL',
+    oauth2_userinfo_url: 'User info URL',
+    oauth2_client_id: 'Client ID',
+    oauth2_client_secret: 'Client secret',
+    oauth2_redirect_uri: 'Redirect URI',
+    oauth2_scopes: 'Scopes',
+    oauth2_use_oidc_discovery: 'Discover endpoints automatically',
+    session_secret_key: 'Session signing key',
+    session_max_entries: 'Maximum active sessions',
+    smtp_enabled: 'Enable email delivery',
+    smtp_host: 'SMTP host',
+    smtp_port: 'SMTP port',
+    smtp_use_tls: 'Use STARTTLS',
+    smtp_use_ssl: 'Use implicit TLS',
+    smtp_verify_ssl: 'Verify TLS certificates',
+    smtp_user: 'SMTP username',
+    smtp_password: 'SMTP password',
+    smtp_from: 'From address',
+    smtp_relay_mode: 'Send without authentication',
+    admin_email: 'Admin email',
+    blacklist_alert_email: 'Blocklist alert email',
+    enable_weekly_summary: 'Send weekly summary',
+    dns_change_alerts_enabled: 'Alert on DNS changes',
+    smtp_abuse_enabled: 'Block mailboxes over the limit',
+    smtp_abuse_threshold: 'Message limit',
+    smtp_abuse_window_minutes: 'Count messages over (minutes)',
+    smtp_abuse_revoke_app_passwords: 'Revoke app passwords when blocking',
+    smtp_abuse_unblock_grace_minutes: 'Pause blocking after re-enabling (minutes)',
+    smtp_abuse_help_address: 'Support email',
+    anomaly_detection_enabled: 'Enable anomaly alerts',
+    anomaly_check_interval: 'Check every (minutes)',
+    anomaly_volume_multiplier: 'Sending rate multiplier',
+    anomaly_volume_min_messages: 'Minimum messages before a volume alert',
+    anomaly_baseline_days: 'Learn usual sending over (days)',
+    anomaly_auth_failure_threshold: 'Failed logins before an alert',
+    anomaly_alert_cooldown_hours: 'Wait before repeating an alert (hours)',
+    dmarc_retention_days: 'Keep reports (days)',
+    dmarc_manual_upload_enabled: 'Allow report uploads',
+    dmarc_allow_report_delete: 'Allow report deletion',
+    dmarc_insights_window_days: 'Review reports from the last (days)',
+    dmarc_insights_pass_threshold: 'Minimum DMARC pass rate (%)',
+    dmarc_insights_min_volume: 'Minimum messages before a suggestion',
+    dmarc_imap_enabled: 'Import reports automatically',
+    dmarc_imap_host: 'IMAP host',
+    dmarc_imap_port: 'IMAP port',
+    dmarc_imap_use_ssl: 'Use TLS',
+    dmarc_imap_verify_ssl: 'Verify TLS certificates',
+    dmarc_imap_user: 'IMAP username',
+    dmarc_imap_password: 'IMAP password',
+    dmarc_imap_folder: 'Report folders',
+    dmarc_imap_delete_after: 'Delete emails after import',
+    dmarc_imap_interval: 'Import every (seconds)',
+    dmarc_imap_run_on_startup: 'Import when the app starts',
+    dmarc_imap_batch_size: 'Emails per batch',
+    dmarc_imap_scan_all_unseen: 'Check all unread emails',
+    maxmind_account_id: 'MaxMind account ID',
+    maxmind_license_key: 'MaxMind license key',
+    raw_logs_enabled: 'Collect service logs for the Logs page',
+    raw_logs_fetch_interval: 'Fetch service logs every (seconds)',
+    raw_logs_fetch_count: 'Logs per service per fetch',
+    raw_logs_retention_days: 'Keep service logs (days)',
+    rate_limits_retention_days: 'Keep rate limit history (days)',
+    raw_logs_services: 'Services',
+    quarantine_rules_max_actions: 'Maximum actions per run',
+    quarantine_rules_interval: 'Run Auto-Rules every (minutes)',
+    quarantine_rules_log_retention_days: 'Keep Auto-Rules history (days)',
+    dmarc_error_email: 'Report import error email',
+    eas_devices_retention_days: 'Keep inactive devices (days)',
+    tz: 'Time zone',
     // Outbound: what the setting does, in words; the search shows these names
-    suppression_enabled: 'Handle undeliverable mail automatically',
+    suppression_enabled: 'Handle failed mail automatically',
     suppression_auto_detect: 'Read the mail logs for failures',
     suppression_rspamd_sync: 'Sync with Rspamd',
     suppression_hard_bounce_action: 'Permanent delivery failure',
     suppression_soft_bounce_action: 'Temporary delivery failure',
-    suppression_hard_bounce_excluded_codes: 'Excluded permanent failure codes',
-    suppression_soft_bounce_excluded_codes: 'Excluded temporary failure codes',
-    suppression_hard_bounce_standard_codes: 'Exclude failures unrelated to the recipient address',
-    suppression_soft_bounce_standard_codes: 'Exclude failures unrelated to the recipient address',
+    suppression_hard_bounce_excluded_codes: 'Other permanent failures to ignore',
+    suppression_soft_bounce_excluded_codes: 'Other temporary failures to ignore',
+    suppression_hard_bounce_standard_codes: 'Ignore common mail problems',
+    suppression_soft_bounce_standard_codes: 'Ignore common mail problems',
     queue_cleanup_enabled: 'Delete delayed mail',
-    queue_cleanup_block: 'Block the recipients of deleted delayed mail',
-    queue_cleanup_threshold_minutes: 'Queue age before deletion (minutes)',
+    queue_cleanup_block: 'Block new mail to addresses whose delayed mail was deleted',
+    queue_cleanup_threshold_minutes: 'Delete mail after this many minutes',
     suppression_soft_bounce_threshold: 'Temporary failures before blocking',
-    suppression_base_expiry_days: 'Base block length (days)',
-    suppression_max_expiry_days: 'Maximum block length (days)',
-    suppression_whitelist_domains: 'Exclude these domains',
+    suppression_base_expiry_days: 'Days per failure',
+    suppression_max_expiry_days: 'Longest block (days)',
+    suppression_whitelist_domains: 'Ignore these domains',
     agent_access_enabled: 'Enable agent access',
     agent_access_url: 'App URL',
     agent_access_max_days: 'Maximum access duration (days)',
@@ -63,18 +170,18 @@ function showBasicAuthVerifyModal() {
         // X, Cancel, Escape and Back cancel; a click outside does nothing, since
         // the fields hold what was typed
         const { backdrop: overlay } = uiDialog({
-            id: 'basic-auth-verify-modal', title: 'Verify Credentials', size: 'sm', backdropClass: 'ui-confirm',
+            id: 'basic-auth-verify-modal', title: 'Verify credentials', size: 'sm', backdropClass: 'ui-confirm',
             close: doCancel, bodyClass: 'ui-form-stack',
             body: `
-                    <div class="ui-banner ui-banner-warn"><div><b>Confirm before enabling Basic Auth</b>
-                        <p>Type the credentials you configured to verify you can log in after enabling authentication.</p></div></div>
+                    <div class="ui-banner ui-banner-warn"><div><b>Enable Basic Auth</b>
+                        <p>Enter the username and password you configured to confirm you can sign in.</p></div></div>
                     <label class="ui-label" for="verify-auth-username">Username
                         <input type="text" id="verify-auth-username" class="ui-input" autocomplete="off" placeholder="Enter username"></label>
                     <label class="ui-label" for="verify-auth-password">Password
                         <input type="password" id="verify-auth-password" class="ui-input" autocomplete="off" placeholder="Enter password"></label>
                     <p id="verify-auth-error" class="ui-banner ui-banner-fail" style="display:none"></p>`,
             foot: `<button type="button" id="verify-auth-cancel" class="ui-btn">Cancel</button>
-                <button type="button" id="verify-auth-confirm" class="ui-btn ui-btn-primary">Verify & Enable</button>`,
+                <button type="button" id="verify-auth-confirm" class="ui-btn ui-btn-primary">Verify and enable</button>`,
         });
 
         const usernameInput = document.getElementById('verify-auth-username');
@@ -99,13 +206,13 @@ function showBasicAuthVerifyModal() {
             const username = usernameInput.value.trim();
             const password = passwordInput.value;
             if (!username) {
-                errorEl.textContent = 'Please enter a username.';
+                errorEl.textContent = 'Enter a username.';
                 errorEl.style.display = 'flex';
                 usernameInput.focus();
                 return;
             }
             if (!password) {
-                errorEl.textContent = 'Please enter a password.';
+                errorEl.textContent = 'Enter a password.';
                 errorEl.style.display = 'flex';
                 passwordInput.focus();
                 return;
@@ -149,14 +256,14 @@ function showFeatureDisableConfirmModal(featureIds) {
 
         // A question: no X; Cancel, Escape, Back, a click outside and a pull down cancel
         const { backdrop: overlay } = uiDialog({
-            id: 'feature-disable-confirm-modal', title: `Disable ${many ? featureIds.length + ' Features' : 'Feature'}?`,
+            id: 'feature-disable-confirm-modal', title: `Disable ${many ? featureIds.length + ' features' : 'feature'}?`,
             label: 'Disable features', size: 'sm', role: 'alertdialog', backdropClass: 'ui-confirm', bodyClass: 'ui-form-stack',
             body: `
                     <div class="ui-banner ui-banner-fail"><div><b>Stored data will be deleted</b>
                         <p>All database records for ${many ? 'these features' : 'this feature'} will be permanently deleted. This cannot be undone.</p></div></div>
                     <div><p class="ui-label">Features being disabled</p><ul class="ui-disable-list">${featureListHtml}</ul></div>`,
             foot: `<button type="button" id="feature-disable-cancel" class="ui-btn">Cancel</button>
-                <button type="button" id="feature-disable-confirm" class="ui-btn ui-btn-danger-solid">Disable & Delete Data</button>`,
+                <button type="button" id="feature-disable-confirm" class="ui-btn ui-btn-danger-solid">Disable and delete data</button>`,
         });
 
         const cancelBtn = document.getElementById('feature-disable-cancel');
@@ -182,159 +289,296 @@ function showFeatureDisableConfirmModal(featureIds) {
     });
 }
 
-// Per-field descriptions (from env.example comments)
+// The short line under a field: only what the name does not say and what must be known
+// before changing it (a consequence, a requirement, a value that has to be right)
 var SETTINGS_FIELD_DESCRIPTIONS = {
+    // mailcow
+    mailcow_api_key: 'Needs read access to logs.',
+    mailcow_api_key_rw: 'Optional. Needed for actions that change mailcow.',
+    rspamd_password: 'Needed to view and edit Rspamd maps.',
+    rspamd_url: 'Leave empty for most setups.',
+    mailcow_api_verify_ssl: 'Turn off only for a trusted server with a self-signed certificate.',
+
+    // Fetch
+    retention_days: 'Older mail logs are deleted automatically.',
+    blacklist_emails: 'Separate addresses with commas.',
+
+    // Application
+    app_title: 'Shown in the browser tab.',
+    app_logo_url: 'Leave empty to use the project icon.',
+    scheduler_workers: 'More jobs at once can speed up updates but use more database connections.',
+    debug: 'Shows detailed errors. Use only for development or troubleshooting.',
+
+    // Blocklists
+    blacklist_dns_servers: 'Use your own resolver. In mailcow: 172.22.1.254.',
+    blacklist_source_server_ip: 'Turn off if your server sends only through a relay.',
+    blacklist_source_manual_hosts: 'Separate hosts with commas.',
+
+    // Domains
+    domain_spf_source_server_ip: 'Turn off if this IP does not send mail for your domains.',
+    domain_spf_source_manual_hosts: "If a host is not allowed by a domain's SPF record, that domain shows an SPF error on the Domains page. Separate hosts with commas.",
+    domain_spf_source_dmarc_history: 'Can cause false warnings.',
+
+    // Authentication
+    auth_password: 'Required for Basic Auth.',
+    auth_max_failure_clients: 'Tracks failed Basic Auth sign-ins by IP address. Lower values make it easier to evade limits by switching addresses.',
+    oauth2_enabled: 'Uses an external sign-in provider.',
+    oauth2_provider_name: 'Shown on the sign-in button.',
+    oauth2_issuer_url: 'Use the issuer URL from your provider.',
+    oauth2_redirect_uri: 'Must match the redirect URI registered with your provider.',
+    session_secret_key: 'Changing this key signs out other users, cancels OAuth2 sign-ins in progress and disconnects all agents. Each agent must be connected again.',
+    session_expiry_hours: 'Counts from sign-in, even while the user is active. Shortening it signs out users already past the new limit.',
+    session_max_entries: 'When full, new sign-ins must wait.',
+
+    // Agents
+    agent_access_url: 'Changing this address stops every agent from working. Connect each agent again using the new address.',
+    agent_access_max_days: 'Existing access keeps its end date. To change it, edit the agent in the list below.',
+
+    // SMTP
+    smtp_port: '587 for STARTTLS, 465 for implicit TLS, 25 for plain.',
+    smtp_use_tls: 'Keep on unless you use implicit TLS or a trusted local relay.',
+    smtp_use_ssl: 'Port 465 uses implicit TLS even if this is off.',
+    smtp_verify_ssl: 'Use Off only for a trusted server with a self-signed certificate. Automatic skips localhost, IP addresses and container names.',
+    smtp_from: 'Required when sending without authentication. Otherwise, leave empty to use the SMTP username.',
+    smtp_relay_mode: 'Use only with a trusted relay. Requires a From address.',
+
+    // Notifications
+    admin_email: 'Receives system alerts and summaries. Separate addresses with commas.',
+    blacklist_alert_email: 'Leave empty to use Admin email. Separate addresses with commas.',
+    enable_weekly_summary: 'Emails the weekly report to Admin email.',
+    dns_change_alerts_enabled: "Sends an alert when a domain's DNS records change.",
+
+    // Outgoing spam
+    smtp_abuse_enabled: 'Needs a read-write API key.',
+    smtp_abuse_threshold: 'Set this above your busiest normal sender.',
+    smtp_abuse_revoke_app_passwords: 'Mail apps that use them lose access.',
+    smtp_abuse_help_address: 'Leave empty to use Admin email.',
+
     // Anomaly detection
-    anomaly_detection_enabled: 'Watch each mailbox against its own normal sending pattern and alert on suspicious changes. Alerts only - nothing is ever blocked by this feature.',
-    anomaly_check_interval: 'How often to look for anomalies (minutes). This is also the size of the window each run examines.',
-    anomaly_volume_multiplier: 'How many times above its own normal rate a mailbox must send before alerting. Example: 5 = sending five times more than usual for that mailbox.',
-    anomaly_volume_min_messages: 'Noise floor: a mailbox must send at least this many messages in the window before a spike can alert. Prevents alerts on tiny numbers (2 messages instead of the usual 0).',
-    anomaly_baseline_days: 'How many days of history are used to learn what "normal" looks like for each mailbox.',
-    anomaly_auth_failure_threshold: 'Alert when a username collects this many failed login attempts within the window - typically a brute-force or password-guessing attack.',
-    anomaly_alert_cooldown_hours: 'After an alert for a mailbox, stay quiet about the same problem for this many hours. Prevents alert storms during an ongoing incident.',
+    anomaly_detection_enabled: 'Sends alerts without blocking mailboxes or banning IPs.',
+    anomaly_check_interval: 'Each check examines this period of recent activity.',
 
-    // SMTP abuse protection
-    smtp_abuse_enabled: 'Automatically disable sending (SMTP) for a mailbox that crosses the limit below. The mailbox still receives mail; if its app passwords are revoked too, mail apps that sign in with one stop working. Requires a Read-Write mailcow API key.',
-    smtp_abuse_threshold: 'Maximum messages a single mailbox may send within the time window. Above this, sending is disabled for that mailbox. Set it comfortably above your busiest legitimate sender.',
-    smtp_abuse_window_minutes: 'The rolling time window used to count messages. Example: 100 messages / 60 minutes.',
-    smtp_abuse_revoke_app_passwords: 'Also delete the mailbox app passwords when blocking. Recommended: a compromised account usually sends through an app password, so revoking cuts the attacker off even if they know the password.',
-    smtp_abuse_unblock_grace_minutes: 'After you re-enable a mailbox manually, do not block it again automatically for this long. Without it the mailbox would be blocked again within a minute, because the old messages are still inside the counting window.',
-    smtp_abuse_help_address: 'Support address shown to the user in the email telling them their sending was paused. Falls back to the admin email.',
+    // DMARC & TLS
+    dmarc_retention_days: 'Older DMARC and TLS reports are deleted automatically.',
+    dmarc_allow_report_delete: 'Lets users with write access delete DMARC and TLS reports.',
 
-    // DMARC insights
-    dmarc_insights_window_days: 'How many days of DMARC reports to analyse when suggesting a policy change.',
-    dmarc_insights_pass_threshold: 'Minimum DMARC pass rate (%) before suggesting a stricter policy. Higher = more cautious advice.',
-    dmarc_insights_min_volume: 'Minimum number of reported messages before any recommendation is made, so advice is not based on a handful of messages.',
+    // DMARC & TLS IMAP
+    dmarc_imap_port: 'Use 993 for SSL/TLS. Port 143 sends the connection unencrypted and requires Use TLS to be off.',
+    dmarc_imap_use_ssl: 'Without TLS, the IMAP password is sent unencrypted.',
+    dmarc_imap_verify_ssl: 'Use Off only for a trusted server with a self-signed certificate. Automatic skips localhost, IP addresses and container names.',
+    dmarc_imap_delete_after: 'Permanently deletes imported emails from the mailbox.',
+    dmarc_imap_scan_all_unseen: 'Use a dedicated report mailbox. Emails without reports are marked as read, so other users could lose track of unread mail.',
+    dmarc_error_email: 'Leave empty to use Admin email. Separate addresses with commas.',
 
-    // Rspamd
-    rspamd_url: 'Address of the Rspamd controller. Leave empty to reach it through mailcow itself (mailcow URL + /rspamd) - correct for most setups, including when this app runs on a different server. Only set it if this app can reach Rspamd directly on the network and the path through mailcow fails (for example a 302 from a reverse proxy). Same Docker network as mailcow: http://rspamd-mailcow:11334',
+    // Logs
+    raw_logs_retention_days: 'Older service logs are deleted daily.',
+    rate_limits_retention_days: 'Cannot be shorter than service log retention.',
+    eas_devices_retention_days: 'Set to 0 to keep inactive devices indefinitely.',
+    raw_logs_services: 'Turning a service off hides it from Logs. Services marked Always collected are still collected for other pages.',
 
-    // DNS change alerts
-    dns_change_alerts_enabled: 'Alert when a domain SPF, DKIM, DMARC, TLSA, MTA-STS or TLS-RPT record changes, when DNSSEC stops validating, or when a TLSA record no longer matches the mail server certificate, so you can update the records at your registrar. The alert names the domain and shows the old and new value. A failed DNS lookup never counts as a change.',
+    // Outbound and Quarantine
+    suppression_enabled: 'Turning this off stops automatic blocks, mail deletion, and the removal of blocks when their time is up.',
+    suppression_rspamd_sync: 'Syncs blocked addresses with Rspamd, which rejects new mail to them. Turning this off deletes the list of blocked addresses.',
+    suppression_whitelist_domains: 'For example, example.com. Separate domains with commas.',
+    suppression_hard_bounce_excluded_codes: 'Codes such as 5.1.1 explain why mail failed. For these failures, the app takes no action: it does not block addresses, count failures, or delete waiting mail.',
+    suppression_soft_bounce_excluded_codes: 'Codes such as 4.2.2 explain why mail failed. For these failures, the app takes no action: it does not block addresses, count failures, or delete waiting mail.',
+    suppression_hard_bounce_standard_codes: 'The app ignores problems on the list below, such as full mailboxes and sending limits.',
+    suppression_soft_bounce_standard_codes: 'The app ignores problems on the list below, such as full mailboxes and sending limits.',
+    suppression_soft_bounce_threshold: 'Each failed try counts, even for the same message.',
+    suppression_base_expiry_days: 'More failures can make a block last longer.',
+    suppression_max_expiry_days: 'Keep this at least as high as Days per failure. Lowering it does not shorten blocks already set.',
+    queue_cleanup_block: 'Requires Sync with Rspamd.',
+    quarantine_rules_max_actions: 'Requires a read-write API key.',
+    quarantine_rules_log_retention_days: 'Older action history is deleted automatically.',
+};
 
-    // Blacklist checks
-    blacklist_dns_servers: 'DNS resolvers used for blacklist (RBL) lookups, comma-separated. Spamhaus rejects queries coming from public resolvers (Google, Cloudflare, Quad9), so this should be your own resolver - in a mailcow setup: 172.22.1.254. Leave empty to use the container default.',
-    blacklist_source_server_ip: 'Monitor the auto-detected WAN IP (reported by the mailcow status API) on spam blacklists (RBLs). Turn this off when outbound mail leaves through a relay host, so only the other sources are monitored. Default: true.',
-    blacklist_source_transports: 'Monitor the public IPs of active mailcow transports on spam blacklists. Each transport nexthop is resolved to all of its public IPs, so relay pools with several addresses are fully covered. Default: true.',
-    blacklist_source_relayhosts: 'Monitor the public IPs of active mailcow relayhosts (sender-dependent transports) on spam blacklists. Default: true.',
-    blacklist_source_manual_hosts: 'Additional hosts to monitor on spam blacklists, comma-separated. Accepts IPv4/IPv6 addresses and hostnames (a hostname is resolved to all of its public IPs). Monitored in addition to the sources above - these may also be hosts unrelated to this mailcow server.',
+// The longer explanation behind a field's "i" (uiHelp): text or a list of paragraphs.
+// Only for fields that need one, and never the only place of a warning
+var SETTINGS_FIELD_HELP = {
+    // mailcow
+    mailcow_api_key: [
+        'Create the key in mailcow > System > Configuration > Access > Administrators > API.',
+        'The key must be active, and its allowed IPs must include the address this app connects from.',
+    ],
+    mailcow_api_key_rw: [
+        'Used for quarantine, queue, Fail2Ban, rate limits and Rspamd maps.',
+        'Create a separate key with write access in mailcow > System > Configuration > Access > Administrators > API.',
+        'The key must be active, and its allowed IPs must include the address this app connects from.',
+    ],
+    rspamd_url: [
+        'Empty uses the mailcow URL with /rspamd. This works for most setups, even when this app runs on another server.',
+        'Set it only if the path through mailcow fails, for example with a 302 from a reverse proxy, and this app can reach Rspamd directly.',
+        'On the same Docker network as mailcow: http://rspamd-mailcow:11334',
+    ],
 
-    // Domain SPF check sources
-    domain_spf_source_server_ip: 'Validate the auto-detected WAN IP against each domain SPF record. Turn this off when outbound mail leaves through a relay host and the WAN IP is not supposed to be in your SPF records. Default: true.',
-    domain_spf_source_transports: 'Also validate the public IPs resolved from active mailcow transport nexthops against each domain SPF record. Enable when outbound mail leaves through transports whose IPs must be authorized in your SPF records. Default: false.',
-    domain_spf_source_relayhosts: 'Also validate the public IPs resolved from active mailcow relayhosts against each domain SPF record. Default: false.',
-    domain_spf_source_manual_hosts: 'Additional hosts that must pass each domain SPF check, comma-separated. Accepts IPv4/IPv6 addresses and hostnames. Outbound sending addresses only - every entry must pass the SPF check, so do not add addresses that never send mail (such as an inbound-only MX).',
-    domain_spf_source_dmarc_history: 'Also validate source IPs observed with a passing SPF result in the last 30 days of imported DMARC aggregate reports for each domain. Caution: with relaxed SPF alignment, an IP sending from an ESP subdomain can appear as an aligned pass without being listed in the domain own SPF record, which then shows up as a false warning here. Default: false.',
+    // Fetch
+    fetch_interval: 'Fetches Postfix, Rspamd and Netfilter logs for Messages, Message linking and Security. Lower values update these pages more often but add load on mailcow.',
+    fetch_count_postfix: 'The size of one page of logs. The app keeps fetching pages until it catches up.',
+    fetch_count_rspamd: 'The size of one page of logs. The app keeps fetching pages until it catches up.',
+    fetch_max_pages: 'A safety limit for Postfix and Rspamd. The most logs in one fetch is the logs per request multiplied by this number.',
+    max_correlation_age_minutes: 'The app tries to link Postfix and Rspamd logs from the same message until this much time has passed since it first started tracking the message.',
+    retention_days: 'Recommended: 7 for most setups, 30 for compliance.',
+    blacklist_emails: 'Mail to or from these addresses is not stored or shown in Messages. Useful for a BCC archive, for example.',
 
-    mailcow_url: 'Your mailcow instance URL (without trailing slash).',
-    mailcow_api_key: 'mailcow API key (Read-Only). Generate from System → Configuration → Access → Administrators → API in mailcow admin. Required permissions: Read access to logs. In mailcow the key must be active, and its allowed IPs must include the address this app connects from.',
-    mailcow_api_key_rw: 'mailcow API key (Read-Write). Optional. Generate a separate key from System → Configuration → Access → Administrators → API with write permissions. Used for actions such as quarantine, queue, Fail2Ban, rate limits and Rspamd maps. In mailcow the key must be active, and its allowed IPs must include the address this app connects from.',
-    mailcow_api_timeout: 'API request timeout in seconds.',
-    mailcow_api_verify_ssl: 'Verify SSL certificates when connecting to mailcow API. Set to false for development with self-signed certificates. Default: true.',
-    fetch_interval: 'Seconds between log fetches from mailcow. Lower = more frequent updates, higher load. Default: 60.',
-    fetch_count_postfix: 'Postfix logs to fetch per API request (page size for paginated fetching). The system paginates through all available logs until catching up. Default: 2000.',
-    fetch_count_rspamd: 'Rspamd logs to fetch per API request (page size for paginated fetching). The system paginates through all available logs until catching up. Default: 500.',
-    fetch_count_netfilter: 'Netfilter logs to fetch per request. Default: 500.',
-    fetch_max_pages: 'Maximum number of pages to fetch per cycle for Postfix/Rspamd. Safety limit to prevent infinite loops. Total logs per cycle = page size × max pages. Default: 50.',
-    retention_days: 'Days to keep logs in database. Older logs are automatically deleted. Recommended: 7 for most, 30 for compliance. Default: 7.',
-    max_correlation_age_minutes: 'Stop searching for correlations older than this (minutes).',
-    correlation_check_interval: 'Seconds between correlation completion checks. Default: 120.',
-    app_port: 'Application port (internal container port). Default: 8080.',
-    log_level: 'Log level: DEBUG, INFO, WARNING, ERROR, CRITICAL. Default: WARNING.',
-    app_title: 'Application title (shown in browser tab).',
-    app_logo_url: 'Logo URL (optional; leave empty to use the default project icon).',
-    tz: "The app's time zone. Default: UTC.",
-    date_format: "Select your date format. Default: Browser.",
-    time_format: "Select your time format. Default: 24-hour.",
-    debug: 'Enable debug mode (shows detailed errors). Use only for development. Never enable in production. Default: false.',
-    max_search_results: 'Maximum records to return in search results. Default: 1000.',
-    csv_export_limit: 'CSV export row limit. Default: 10000.',
-    scheduler_workers: 'Thread pool size for blocking scheduler jobs (e.g. the DMARC & TLS IMAP import). Valid range: 1-64. Default: 4.',
-    blacklist_emails: 'Comma-separated addresses, such as a BCC archive. Mail to or from them is not stored or shown in Messages.',
-    auth_enabled: 'Deprecated: use Basic auth enabled. When enabled, enables Basic Auth. Default: false.',
-    basic_auth_enabled: 'Enable Basic HTTP authentication. When enabled, ALL pages and API require login. Default: false.',
-    auth_username: 'Basic auth username. Default: admin.',
-    auth_password: 'Basic auth password (required if Basic auth enabled). Leave empty to disable. Use a strong password in production.',
-    oauth2_enabled: 'Enable OAuth2/OIDC authentication. Works with Mailcow, Keycloak, etc. Default: false.',
-    oauth2_provider_name: 'Display name for the OAuth2 provider (e.g. Mailcow, Keycloak).',
-    oauth2_issuer_url: 'OIDC Discovery: set issuer URL and endpoints are auto-discovered. Mailcow: https://mail.example.com. Keycloak: https://keycloak.example.com/realms/myrealm',
-    oauth2_authorization_url: 'Manual: OAuth2 authorization endpoint (if discovery not supported).',
-    oauth2_token_url: 'Manual: OAuth2 token endpoint.',
-    oauth2_userinfo_url: 'Manual: OAuth2 UserInfo endpoint.',
-    oauth2_client_id: 'OAuth2 Client ID from your provider.',
-    oauth2_client_secret: 'OAuth2 Client Secret from your provider.',
-    oauth2_redirect_uri: 'OAuth2 Redirect URI (callback). Must match the URI configured in your OAuth2 provider.',
-    oauth2_scopes: 'OAuth2 scopes to request. Default: openid profile email.',
-    oauth2_use_oidc_discovery: 'Enable OIDC discovery (uses .well-known/openid-configuration). Default: true.',
-    session_secret_key: 'Secret key for signing session cookies. REQUIRED if OAuth2 enabled. Generate: openssl rand -hex 32. Use a strong secret in production.',
-    session_expiry_hours: 'Longest session in hours, counted from sign-in whatever the activity. Five minutes before, the page says so. A shorter value applies to open sessions at once; a longer one applies in full from the next sign-in. Default: 24.',
-    session_idle_enabled: 'Sign out after a period without activity. Typing, clicking, scrolling with the wheel and touching count as activity; pages that refresh by themselves do not. A minute before, the page asks whether you are still there. Default: off.',
-    session_idle_timeout_minutes: 'Minutes without activity before sign-out, from 5 to 1440. Default: 60.',
-    session_max_entries: 'Maximum active login sessions per process. At capacity, new logins wait until a session expires or a user signs out. Existing sessions stay signed in. Default: 50.',
-    agent_access_enabled: 'Default: off.',
-    agent_access_url: 'The address agents use to reach this app, such as https://logs.example.com. Changing it disconnects every agent until you change it back. Default: empty.',
-    agent_access_max_days: 'The longest access you can give an agent, from 1 to 365 days. Applies to new access only. Default: 90.',
-    auth_max_failure_clients: 'Maximum client addresses tracked for failed Basic Auth attempts per process. At capacity, new addresses must wait before trying Basic Auth. Existing sessions remain usable. Default: 10000.',
-    smtp_enabled: 'Enable SMTP for sending notifications (alerts, weekly summary).',
-    smtp_host: 'SMTP server hostname.',
-    smtp_port: 'SMTP server port (587 for TLS, 465 for SSL, 25 for plain).',
-    smtp_use_tls: 'Use STARTTLS for SMTP. Recommended.',
-    smtp_use_ssl: 'Use implicit SSL for SMTP (usually port 465).',
-    smtp_verify_ssl: 'Check the SMTP server certificate before the password is sent, so nobody between this app and the server can read it. Off (default) does not check. Automatic checks host names such as smtp.example.com and skips localhost, IP addresses and container names. On always checks. Automatic or On is recommended; keep Off only for a server with a self-signed certificate.',
-    smtp_user: 'SMTP username (usually email address).',
-    smtp_password: 'SMTP password.',
-    smtp_from: 'From address for emails (defaults to SMTP user if not set).',
-    smtp_relay_mode: 'Relay mode: for local relay servers that do not require authentication. When enabled, username and password are not required.',
-    admin_email: 'Administrator email for system notifications. Separate several addresses with commas.',
-    blacklist_alert_email: 'Email for IP blacklist alerts (uses Admin email if not set). Separate several addresses with commas.',
-    dmarc_retention_days: 'How many days DMARC and TLS reports are kept. Default: 60.',
-    dmarc_manual_upload_enabled: 'Allow uploading DMARC and TLS reports by hand on the DMARC & TLS page. Default: true.',
-    dmarc_allow_report_delete: 'Allow deleting DMARC and TLS reports from the UI. Default: false.',
-    enable_weekly_summary: 'Enable weekly summary email report (sent to admin email). Default: true.',
-    dmarc_imap_enabled: 'Import DMARC and TLS reports automatically from an IMAP mailbox.',
-    dmarc_imap_host: 'IMAP server hostname (e.g. imap.gmail.com).',
-    dmarc_imap_port: 'IMAP server port (993 for SSL, 143 for non-SSL). Default: 993.',
-    dmarc_imap_use_ssl: 'Use SSL/TLS for IMAP connection. Default: true.',
-    dmarc_imap_verify_ssl: 'Check the IMAP server certificate before the password is sent, so nobody between this app and the server can read it. Off (default) does not check. Automatic checks host names such as imap.example.com and skips localhost, IP addresses and container names. On always checks. Automatic or On is recommended; keep Off only for a server with a self-signed certificate.',
-    dmarc_imap_user: 'IMAP username (email address).',
-    dmarc_imap_password: 'IMAP password.',
-    dmarc_imap_folder: 'The folders to read reports from. A folder read with its subfolders also covers subfolders added later.',
-    dmarc_imap_delete_after: 'Delete emails after successful processing. If the server cannot remove single emails, they are marked as deleted and left for your mail client to remove. Default: true.',
-    dmarc_imap_interval: 'Interval between IMAP syncs in seconds. Default: 3600 (1 hour).',
-    dmarc_imap_run_on_startup: 'Run IMAP sync once on application startup. Default: true.',
-    dmarc_imap_batch_size: 'Number of emails to process per batch. Default: 10.',
-    dmarc_imap_scan_all_unseen: 'Scan all unread emails for DMARC/TLS-RPT attachments, not just those matching known subject patterns. Enable if you receive reports from providers that use non-English subjects. Only recommended for dedicated DMARC mailboxes. Subfolders read through "With subfolders" are not scanned this way, only checked for report subjects.',
-    dmarc_error_email: 'Email for errors while importing DMARC and TLS reports (defaults to the Admin email if not set). Separate several addresses with commas.',
-    maxmind_account_id: 'MaxMind Account ID for GeoIP database downloads. Required to download GeoLite2 databases.',
-    maxmind_license_key: 'MaxMind License Key for GeoIP database downloads. Required to download GeoLite2 databases. Keep this secret.',
-    disabled_features: 'Disable features to hide their pages and stop their background jobs. Core features (Dashboard, Messages, Settings, Status) are always enabled.',
-    raw_logs_enabled: 'Collect the services ticked below for the Logs page. When off, the Logs page says collection is off and shows no logs. The services other pages read (listed under Services) are collected either way.',
-    raw_logs_fetch_interval: 'Seconds between raw log fetch cycles. Lower = more frequent updates. Default: 30.',
-    raw_logs_fetch_count: 'Number of log entries to fetch per service per cycle. Higher values catch more logs but increase API load. Default: 1000.',
-    raw_logs_retention_days: 'Days to keep raw logs in the database. Older logs are deleted once a day; Status > Jobs shows when. Default: 2.',
-    rate_limits_retention_days: 'Days to keep the senders that hit a rate limit, for the Rate Limits page. Never less than Raw Logs Retention Days. Default: 90.',
-    eas_devices_retention_days: 'Days to keep a device that stopped syncing before it is removed from the Devices page. 0 keeps every device. Default: 90.',
-    raw_logs_services: 'The services the Logs page shows. A service marked Always collected keeps coming in when switched off here, because another page reads it; the Logs page then just does not show it.',
-    rspamd_password: 'Rspamd UI/API password for reading Rspamd map data. Required to view and edit Rspamd maps.',
-    suppression_enabled: 'Off pauses automatic handling and block expiry. Manual changes still work.',
-    suppression_auto_detect: 'On when a choice below needs the mail logs. Set by those choices, not on its own.',
-    suppression_rspamd_sync: "Keeps the suppression list and this app's part of the Rspamd recipient denylist in step, both ways: changes on either side reach the other. Off, this app keeps no suppression list: turning it off deletes the list, turning it on loads this app's blocks back from Rspamd. Needs the Rspamd password and a read-write API key.",
-    suppression_whitelist_domains: 'No automatic blocks or queue deletion. Separate exact domains with commas; subdomains are not included.',
-    suppression_hard_bounce_action: 'What happens when the receiving server rejects a message permanently (5.x.x).',
-    suppression_soft_bounce_action: 'What happens when delivery fails for now (4.x.x) and the queue is not cleaned.',
-    suppression_hard_bounce_excluded_codes: 'For these codes, the app does not block the address, count the failure, or delete queued mail. Postfix still returns the message to the sender.',
-    suppression_soft_bounce_excluded_codes: 'For these codes, the app does not block the address or count the failure, and the message stays in the queue.',
-    suppression_hard_bounce_standard_codes: 'Includes full mailboxes, sending limits, sender or message problems, network failures, and policy rejections.',
-    suppression_soft_bounce_standard_codes: 'Includes full mailboxes, sending limits, sender or message problems, network failures, and policy rejections.',
-    suppression_soft_bounce_threshold: 'Failures before the address is blocked. Each failed retry counts, even for the same message.',
-    suppression_base_expiry_days: 'Repeated failures increase the block length.',
-    suppression_max_expiry_days: 'The longest a block grows with repeated failures.',
-    quarantine_rules_max_actions: 'Safety limit: maximum emails to release/delete per scheduler run. Prevents accidental mass-processing from overly broad rules. Default: 50.',
-    quarantine_rules_interval: 'Minutes between quarantine rule processing runs. Lower = faster response to new quarantine items, higher = less API load on mailcow. Default: 5.',
-    quarantine_rules_log_retention_days: 'Days to keep quarantine auto-rule action history. Older action logs are automatically cleaned up. Default: 30.',
-    queue_cleanup_enabled: 'Delete delayed mail after some time in the queue.',
-    queue_cleanup_block: 'Also block the recipients of the delayed mail deleted. Needs Sync with Rspamd.',
-    queue_cleanup_threshold_minutes: 'Minutes in the queue before delayed mail is deleted.'
+    // Application
+    scheduler_workers: [
+        'Sets how many background jobs can run at the same time, from 1 to 64.',
+        'Most background jobs share this limit, including log storage, Message linking, blocklist checks and report imports. With fewer workers, a slow report import can delay other jobs.',
+    ],
+
+    // Blocklists
+    blacklist_dns_servers: 'Spamhaus rejects queries from public resolvers such as Google, Cloudflare and Quad9. Separate resolvers with commas. Leave empty to use the container resolver.',
+    blacklist_source_transports: 'Checks the public IPs of active mailcow transports. Each next hop is resolved to all its public IPv4 addresses, so relay pools with several addresses are covered.',
+    blacklist_source_relayhosts: 'Checks the public IPs of active mailcow relayhosts (sender-dependent transports).',
+    blacklist_source_manual_hosts: 'Accepts IP addresses and hostnames. A hostname covers its public IPv4 addresses, so enter IPv6 addresses directly. These are checked in addition to the sources above and can be hosts unrelated to this mailcow server.',
+
+    // Domains
+    domain_spf_source_transports: "Checks the public IPs of active mailcow transports against each domain's SPF record. Turn on when mail leaves through transports whose IPs must be in your SPF records.",
+    domain_spf_source_relayhosts: "Checks the public IPs of active mailcow relayhosts against each domain's SPF record.",
+    domain_spf_source_manual_hosts: 'Accepts IP addresses and hostnames. A hostname covers its public IPv4 addresses, so enter IPv6 addresses directly. Do not add addresses that never send mail, such as an inbound-only MX.',
+    domain_spf_source_dmarc_history: [
+        'Uses IPs with a passing SPF result in the last 30 days of DMARC reports for each domain.',
+        "With relaxed SPF alignment, an IP sending from a subdomain of an email service can pass without being in the domain's own SPF record. It then shows as a false warning.",
+    ],
+
+    // Authentication
+    auth_max_failure_clients: [
+        'The app keeps a count of failed sign-ins for each IP address to slow down password guessing. IPv6 addresses in the same /64 network share one count.',
+        'When the table is full, the address whose last failed sign-in is oldest is removed to make room. A full table does not stop new addresses from signing in.',
+        'A larger limit makes it harder for an attacker using many addresses to push earlier counts out of the table. Tracking 10,000 addresses uses roughly 10 MB of memory.',
+    ],
+    oauth2_enabled: 'Works with mailcow, Keycloak, Authentik and other OAuth2 or OIDC providers.',
+    oauth2_issuer_url: [
+        'The endpoints are discovered from this address.',
+        'mailcow: https://mail.example.com',
+        'Keycloak: https://keycloak.example.com/realms/myrealm',
+    ],
+    session_secret_key: [
+        'Signs the cookies used to stay signed in and verifies OAuth2 sign-ins returning from the provider. It is used for Basic Auth as well as OAuth2.',
+        'Use Generate to fill in a random key, then save. If left empty, the app creates a temporary key when it starts.',
+    ],
+    session_expiry_hours: [
+        'Activity does not restart this time limit. The app warns users five minutes before it ends.',
+        'A session cannot last longer than the limit in effect when the user signed in. To use a longer limit, the user must sign in again.',
+        'Sign-out after inactivity is controlled separately by the inactivity settings.',
+    ],
+    session_idle_enabled: 'Typing, clicking, scrolling with the wheel and touching count as activity. Pages that refresh by themselves do not. A minute before sign-out, the page asks whether you are still there.',
+    session_max_entries: 'Counts active sessions per process. New sign-ins wait until a session expires or a user signs out. Existing sessions stay signed in.',
+
+    // Agents
+    agent_access_url: 'The HTTPS address agents use to reach this app, without a path, such as https://logs.example.com.',
+
+    // SMTP
+    smtp_verify_ssl: [
+        'Checks the server certificate before the password is sent, so nobody in between can read it.',
+        'Off: no check. Use only for a server with a self-signed certificate.',
+        'Automatic: checks host names such as smtp.example.com. Skips localhost, IP addresses and container names.',
+        'On: always checks.',
+    ],
+
+    // Notifications
+    dns_change_alerts_enabled: [
+        'Covers SPF, DKIM, DMARC, TLSA, MTA-STS and TLS-RPT records, DNSSEC that stops validating, and a TLSA record that no longer matches the mail server certificate.',
+        'The alert names the domain and shows the old and new value. A failed DNS lookup never counts as a change.',
+    ],
+
+    // Outgoing spam
+    smtp_abuse_enabled: 'Disables sending for a mailbox that goes over the limit. The mailbox can still receive mail. If SMTP is set up, the owner gets an email.',
+    smtp_abuse_threshold: 'The most messages one mailbox may send in the period below. Above this, sending is disabled for that mailbox.',
+    smtp_abuse_revoke_app_passwords: 'Recommended. A compromised mailbox usually sends through an app password, so deleting them cuts off the attacker.',
+    smtp_abuse_unblock_grace_minutes: 'After you re-enable a mailbox, it is not blocked again for this long. Without this pause it would be blocked again within a minute, because its old messages are still being counted.',
+    smtp_abuse_help_address: 'Shown in the email that tells the mailbox owner that sending was paused.',
+
+    // Anomaly detection
+    anomaly_volume_multiplier: 'How far above its usual rate a mailbox must send before an alert. For example, 5 means five times its usual rate.',
+    anomaly_volume_min_messages: 'A mailbox must send at least this many messages in the check period before a spike can alert. This avoids alerts on tiny numbers, such as 2 messages instead of the usual 0.',
+    anomaly_auth_failure_threshold: 'Alerts when one username collects this many failed logins in the check period, which usually means password guessing.',
+    anomaly_alert_cooldown_hours: 'After an alert, the same alert for the same mailbox or username stays quiet for this long. This prevents a flood of alerts during one incident.',
+
+    // DMARC & TLS
+    dmarc_insights_pass_threshold: 'A stricter policy can be suggested at or above this rate. A higher rate gives more cautious advice.',
+
+    // DMARC & TLS IMAP
+    dmarc_imap_enabled: 'Connects to the IMAP mailbox below on a schedule and imports the DMARC and TLS reports it finds. Use a mailbox that receives reports sent to the rua= addresses in your DMARC and TLS-RPT records.',
+    dmarc_imap_port: 'SSL/TLS protects the connection from the start. STARTTLS, which upgrades an unencrypted connection to TLS, is not supported.',
+    dmarc_imap_verify_ssl: [
+        'Checks the server certificate before the password is sent, so nobody in between can read it.',
+        'Off: no check. Use only for a server with a self-signed certificate.',
+        'Automatic: checks host names such as imap.example.com. Skips localhost, IP addresses and container names.',
+        'On: always checks.',
+    ],
+    dmarc_imap_folder: 'Choose one or more folders. Turn on With subfolders for a folder to import reports from that folder and all its subfolders, including any created later.',
+    dmarc_imap_delete_after: 'If the server cannot remove single emails, they are marked as deleted and left for your mail client to remove.',
+    dmarc_imap_scan_all_unseen: [
+        'Normally, the app checks only unread emails whose subjects look like DMARC or TLS reports. Turn this on to check every unread email in the chosen folders and any subfolders included with With subfolders.',
+        'Useful when reports arrive with subjects in other languages. Emails without reports are never deleted.',
+    ],
+
+    // Logs
+    raw_logs_enabled: [
+        'Collects raw logs from the mailcow services selected below for the Logs page.',
+        'Dovecot logs are also collected for message details and Security. Ratelimited logs are collected while Rate Limits is enabled, and SOGo logs while Devices is enabled. These pages keep the logs they need when collection for the Logs page is off.',
+    ],
+    raw_logs_fetch_interval: 'Fetches raw logs from the services selected for the Logs page, plus any service logs needed by other pages. This schedule still applies to those services when collection for the Logs page is off.',
+    raw_logs_fetch_count: 'Higher values catch more logs but add load on mailcow.',
+    rate_limits_retention_days: 'Keeps the senders that hit a rate limit, for the Rate Limits page.',
+
+    // Outbound and Quarantine
+    suppression_hard_bounce_action: [
+        'If you choose deletion, the app deletes other mail to the failed address that is still waiting to be sent.',
+        'The app deletes a message only if every address it goes to failed permanently in the same check. A message that also goes to any other address stays.',
+        'Mail also stays if an address is protected or the app ignores its failure. When the action includes blocking, each address must already be blocked in the app.',
+        'Deleting mail does not tell the person who sent it.',
+    ],
+    suppression_soft_bounce_action: [
+        'For deletion, the minutes count from when mail first arrived to be sent. This includes time before the first failed try.',
+        'The app checks every 5 minutes. Mail is not always deleted at the exact minute you set.',
+        'Mail stays if an address is protected or the app ignores the failure. When the action includes blocking, all addresses must already be blocked in the app.',
+        'Deleting mail does not tell the person who sent it.',
+    ],
+    suppression_rspamd_sync: [
+        'The list of blocked addresses is on Outbound > Suppressions.',
+        'The app sends changes to Rspamd and reads changes made there. It only syncs blocks in this app\'s part of the Rspamd list.',
+        'The app checks Rspamd every 10 minutes. Changes made in the app are sent as soon as possible.',
+        'Turning sync off deletes the app\'s list, block end dates, failure counts, and saved failure details.',
+        'When you save, you can also remove this app\'s blocks from Rspamd if the app can reach and change them. Blocks kept in Rspamd can still reject new mail.',
+        'Turning sync on again loads the blocks kept in Rspamd with no end date. The old end dates, counts, and failure details do not come back.',
+        'Reading blocks needs the Rspamd password. Sending changes also needs a read-write API key.',
+    ],
+    suppression_enabled: [
+        'The app checks for failed mail every 5 minutes. It checks whether blocks have ended every hour.',
+        'Turning this off keeps blocks already set.',
+        'Blocks stay in Rspamd while this is off. Remove them by hand, or turn this on again to let blocks end.',
+        'Sync with Rspamd has its own switch. With sync on, you can still add or remove blocks by hand.',
+    ],
+    suppression_hard_bounce_standard_codes: [
+        'This switch makes the app ignore failures listed under View common mail problems.',
+        'Some codes cover a whole group of failures. In 5.7.x, x means any number.',
+        'Turning this off lets the app follow your chosen action for these failures. The app still ignores failures with codes you added yourself.',
+    ],
+    suppression_soft_bounce_standard_codes: [
+        'This switch makes the app ignore failures listed under View common mail problems.',
+        'Some codes cover a whole group of failures. In 4.4.x, x means any number.',
+        'Turning this off lets the app follow your chosen action for these failures. The app still ignores failures with codes you added yourself.',
+    ],
+    suppression_base_expiry_days: [
+        'When the app first saves an address, it uses this many days.',
+        'Each later failure can make the block last longer. The app multiplies Days per failure by the number of failures, up to Longest block.',
+        'Permanent and temporary failures count together. A block can already be longer when it starts after several temporary failures.',
+        'More failures never make a block end sooner. Blocks set by hand and blocks loaded from Rspamd keep their own end dates.',
+    ],
+    suppression_max_expiry_days: [
+        'Limits each block length calculated from Days per failure and the number of failures.',
+        'Lowering this does not shorten blocks already set.',
+    ],
+    suppression_whitelist_domains: [
+        'The app does not automatically block mail to these domains or delete mail waiting to be sent to them.',
+        'If a message also goes to one of these domains, the whole message stays.',
+        'Enter example.com to protect that domain. Mail to sub.example.com is not covered.',
+        'The app always ignores domains hosted on this mailcow, including alias domains. This setting does not remove existing blocks or stop you from adding blocks by hand.',
+    ],
+    quarantine_rules_max_actions: 'The most messages Auto-Rules can release or delete in one run. This prevents mass processing from a rule that is too broad.',
+    quarantine_rules_interval: 'Lower values react faster to new quarantine items. Higher values add less load on mailcow.',
 };
 
 // Settings with a few short choices, shown as a segmented control (.ui-seg, as on the Security page).
@@ -364,12 +608,12 @@ function settingsPickSegment(btn) {
 // options that block are not available, and the one picked shows as its twin
 // that does not block, which is what the jobs do then.
 const SETTINGS_SOFT_BOUNCE_QUEUE = { value: 'queue', needs: 'rw sync',
-    label: 'Delete after {minutes} minutes in the queue and block the recipients', hint: 'Checked every 5 minutes.' };
+    label: 'Delete mail still waiting to be sent after {minutes} minutes. Block new mail to those addresses.', hint: 'Checks run every 5 minutes.' };
 const SETTINGS_SOFT_BOUNCE_QUEUE_DELETE = { value: 'queue_delete', needs: 'rw',
-    label: 'Delete after {minutes} minutes in the queue', hint: 'Does not block the recipients. Checked every 5 minutes.' };
+    label: 'Delete mail still waiting to be sent after {minutes} minutes.', hint: 'New mail to these addresses is still allowed.' };
 const SETTINGS_CHOICE_NOTES = {
-    rw: 'Add a read-write API key in Settings > mailcow. Nothing happens without it.',
-    'rw-queue': 'Add a read-write API key in Settings > mailcow to delete queued mail.'
+    rw: 'Add a read-write API key in Settings > mailcow > Connection to use this choice.',
+    'rw-queue': 'To delete waiting mail, add a read-write API key in Settings > mailcow > Connection.'
 };
 const SETTINGS_LOG_CHOICES = { hard: ['suppress', 'delete'], soft: ['count', 'suppress'] };
 // What a choice that blocks does while Sync with Rspamd is off
@@ -435,7 +679,7 @@ function settingsBounceChoice(kind, config, lockedKeys, defaults) {
             '<input type="radio" id="' + id + '" name="' + group + '" value="' + escapeHtml(o.value) + '" data-choice' +
             (o.value === picked ? ' checked' : '') + (open(o.value) ? '' : ' disabled data-locked="1"') + ' onchange="settingsPickBounce(this)">' +
             '<div class="ui-set-choice-text"><div>' + text + '</div>' + (o.hint ? '<small class="ui-set-desc">' + escapeHtml(o.hint) + '</small>' : '') +
-            ((o.needs || '').split(' ').includes('sync') ? '<small class="ui-set-desc" data-sync-need hidden>Needs Sync with Rspamd.</small>' : '') +
+            ((o.needs || '').split(' ').includes('sync') ? '<small class="ui-set-desc" data-sync-need hidden>Turn on Sync with Rspamd to block new mail.</small>' : '') +
             '<small class="ui-set-choice-note" data-note hidden></small></div></div>';
     }).join('');
     const checkbox = (key, on) => '<input type="checkbox" hidden id="edit-' + key + '" name="' + key + '"' + (on ? ' checked' : '') + (locked(key) ? ' disabled' : '') + '>';
@@ -453,12 +697,13 @@ function settingsBounceChoice(kind, config, lockedKeys, defaults) {
     return '<div class="ui-set-field ui-set-wide ui-set-choice' + (changed ? ' is-changed' : '') + '" data-choice="' + kind + '" data-rw="' +
             (config.mailcow_api_key_rw ? '1' : '0') + '" data-defaults="' + escapeHtml(JSON.stringify(resetTo)) + '" data-loaded="' + escapeHtml(picked) + '">' +
         '<div class="ui-set-choice-head"><span class="ui-label" id="label-' + group + '">Action</span>' +
+            (SETTINGS_FIELD_HELP[actionKey] ? uiHelp((soft ? 'Temporary' : 'Permanent') + ' delivery failure action', SETTINGS_FIELD_HELP[actionKey]) : '') +
             (lockedNames.length ? '<span class="ui-set-pill" title="Set by an environment variable, change it there">' + SETTINGS_LOCK_ICON + ' Set by ENV: ' + escapeHtml(lockedNames.join(', ')) + '</span>' : '') +
             '<span class="ui-set-pill is-changed" title="Differs from the default"' + (changed ? '' : ' hidden') + '>Changed</span></div>' +
         '<small class="ui-set-choice-note" data-sync-changed hidden></small>' +
         '<div class="ui-set-choice-list" role="radiogroup" aria-labelledby="label-' + group + '">' + rows + '</div>' +
         carriers + '<input type="hidden" id="edit-' + actionKey + '" name="' + actionKey + '" value="' + escapeHtml(action) + '" data-saved="' + escapeHtml(action) + '"' + (locked(actionKey) ? ' disabled' : '') + '>' +
-        (Object.keys(resetTo).length ? '<button type="button" class="ui-set-clear is-reset" onclick="settingsResetChoice(this)"' + (changed ? '' : ' hidden') + '>↺ Reset to default</button>' : '') +
+        (Object.keys(resetTo).length ? '<button type="button" class="ui-set-clear is-reset" onclick="settingsResetChoice(this)"' + (changed ? '' : ' hidden') + '>Reset to default</button>' : '') +
         '</div>';
 }
 
@@ -577,9 +822,9 @@ function settingsApplySync(toggled) {
     // Each choice says what it changed to while the sync is off
     const minutes = (field('queue_cleanup_threshold_minutes') || {}).value || '';
     const notes = {
-        delete: 'Changed to "Delete its queued mail": Sync with Rspamd is off.',
-        queue_delete: `Changed to "Delete after ${minutes} minutes in the queue": Sync with Rspamd is off.`,
-        ignore: 'Changed to "Do nothing; keep retrying": Sync with Rspamd is off.'
+        delete: 'Sync with Rspamd is off. The choice changed to deleting waiting mail without blocking new mail.',
+        queue_delete: `Sync with Rspamd is off. The choice changed to deleting mail after ${minutes} minutes without blocking new mail.`,
+        ignore: 'Sync with Rspamd is off. The mail server keeps trying without blocking new mail.'
     };
     document.querySelectorAll('.ui-set-choice').forEach(box => {
         const kind = box.dataset.choice;
@@ -664,44 +909,44 @@ const SETTINGS_CODE_KEYS = { hard: 'suppression_hard_bounce_excluded_codes', sof
 // success, and the deprecated X.6.10, are left out: no failure carries them.
 const SETTINGS_STATUS_CODES = [
     ['0.0', 'Unspecified failure'],
-    ['1.0', 'Other address problem'], ['1.1', 'Invalid recipient address'], ['1.2', 'Invalid recipient domain'],
-    ['1.3', 'Invalid recipient address format'], ['1.4', 'Recipient address matches multiple mailboxes'],
-    ['1.6', 'Mailbox moved without a forwarding address'], ['1.7', 'Invalid sender address format'],
-    ['1.8', 'Invalid sender domain'], ['1.9', 'Message relayed to a non-compliant mail server'], ['1.10', 'Recipient domain does not accept mail (null MX)'],
-    ['2.0', 'Other or unspecified mailbox problem'], ['2.1', 'Mailbox disabled'], ['2.2', 'Mailbox full'],
+    ['1.0', 'Other email address problem'], ['1.1', 'Delivery address not accepted'], ['1.2', 'Delivery domain not accepted'],
+    ['1.3', 'Delivery address written in the wrong format'], ['1.4', 'Delivery address matches more than one mailbox'],
+    ['1.6', 'Mailbox moved without a forwarding address'], ['1.7', 'Sender address written in the wrong format'],
+    ['1.8', 'Sender domain not accepted'], ['1.9', 'Message relayed to a non-compliant mail server'], ['1.10', 'Delivery domain says it does not accept mail (null MX)'],
+    ['2.0', 'Other mailbox problem'], ['2.1', 'Mailbox disabled'], ['2.2', 'Mailbox full'],
     ['2.3', 'Message exceeds the mailbox size limit'], ['2.4', 'Mailing list expansion problem'],
-    ['3.0', 'Other or unspecified mail system problem'], ['3.1', 'Mail system full'], ['3.2', 'Mail system not accepting messages'],
-    ['3.3', 'Mail system does not support the requested features'], ['3.4', 'Message exceeds the mail system size limit'], ['3.5', 'Mail system configuration error'],
-    ['4.0', 'Other or unspecified network or routing problem'], ['4.1', 'No response from the receiving server'], ['4.2', 'Connection failed during delivery'],
-    ['4.3', 'Directory server failure'], ['4.4', 'Cannot find a delivery route'], ['4.5', 'Mail system congestion'], ['4.6', 'Routing loop detected'],
+    ['3.0', 'Other mail server problem'], ['3.1', 'Mail server storage full'], ['3.2', 'Mail server not accepting messages'],
+    ['3.3', 'Mail server does not support the requested features'], ['3.4', 'Message too large for the mail server'], ['3.5', 'Mail server settings are wrong'],
+    ['4.0', 'Other connection or delivery path problem'], ['4.1', 'No response from the receiving server'], ['4.2', 'Connection failed during delivery'],
+    ['4.3', 'Directory server failure'], ['4.4', 'Cannot find a path to deliver mail'], ['4.5', 'Mail servers too busy'], ['4.6', 'Mail keeps passing between the same servers'],
     ['4.7', 'Delivery time expired'],
-    ['5.0', 'Other or unspecified protocol error'], ['5.1', 'Invalid command'], ['5.2', 'Syntax error'], ['5.3', 'Too many recipients'],
-    ['5.4', 'Invalid command arguments'], ['5.5', 'Wrong protocol version'], ['5.6', 'Authentication response too long'],
-    ['6.0', 'Other or unspecified message content error'], ['6.1', 'Message format not supported'], ['6.2', 'Message conversion required but not allowed'],
-    ['6.3', 'Message conversion required but not supported'], ['6.5', 'Message conversion failed'], ['6.6', 'Message content not available'],
+    ['5.0', 'Other problem with mail commands'], ['5.1', 'Invalid command'], ['5.2', 'Command written in the wrong format'], ['5.3', 'Too many delivery addresses'],
+    ['5.4', 'Command has the wrong details'], ['5.5', 'Wrong protocol version'], ['5.6', 'Sign-in reply too long'],
+    ['6.0', 'Other problem with message contents'], ['6.1', 'Message format not supported'], ['6.2', 'Message needs a format change that is not allowed'],
+    ['6.3', 'Message needs a format change that is not supported'], ['6.5', 'Could not change the message format'], ['6.6', 'Message content not available'],
     ['6.7', 'Non-ASCII sender or recipient address not permitted'], ['6.8', 'Sending client does not allow a required UTF-8 reply'],
     ['6.9', 'Cannot deliver a message with UTF-8 headers'],
-    ['7.0', 'Other or unspecified security problem'], ['7.1', 'Delivery not authorized'], ['7.2', 'Sender not allowed to send to the mailing list'],
+    ['7.0', 'Other security problem'], ['7.1', 'Delivery not allowed'], ['7.2', 'Sender not allowed to send to the mailing list'],
     ['7.3', 'Security conversion required but not possible'], ['7.4', 'Security features not supported'], ['7.5', 'Cryptographic failure'],
-    ['7.6', 'Cryptographic algorithm not supported'], ['7.7', 'Message integrity failure'], ['7.8', 'Invalid authentication credentials'],
-    ['7.9', 'Authentication method too weak'], ['7.10', 'Encryption required'], ['7.11', 'Encryption required for the authentication method'],
-    ['7.12', 'A password transition is needed'], ['7.13', 'User account disabled'], ['7.14', 'Trust relationship required'],
+    ['7.6', 'Cryptographic algorithm not supported'], ['7.7', 'Message integrity failure'], ['7.8', 'Wrong sign-in details'],
+    ['7.9', 'Sign-in method not secure enough'], ['7.10', 'Encryption required'], ['7.11', 'Sign-in method needs encryption'],
+    ['7.12', 'Password needs to be changed'], ['7.13', 'User account disabled'], ['7.14', 'Trust relationship required'],
     ['7.15', 'Message priority too low'], ['7.16', 'Message too large for its priority'], ['7.17', 'Mailbox owner has changed'],
     ['7.18', 'Domain owner has changed'], ['7.19', 'Cannot verify recipient ownership history (RRVS)'], ['7.20', 'No passing DKIM signature found'],
     ['7.21', 'No acceptable DKIM signature found'], ['7.22', 'No valid author-matched DKIM signature found'], ['7.23', 'SPF validation failed'],
-    ['7.24', 'SPF validation error'], ['7.25', 'Reverse DNS validation failed'], ['7.26', 'Multiple authentication checks failed'],
-    ['7.27', 'Sender domain does not accept mail (null MX)'], ['7.28', 'Mail flood detected'], ['7.29', 'ARC validation failed'], ['7.30', 'REQUIRETLS support required']
+    ['7.24', 'SPF validation error'], ['7.25', 'Reverse DNS check failed'], ['7.26', 'Several identity checks failed'],
+    ['7.27', 'Sender domain says it does not accept mail (null MX)'], ['7.28', 'Mail flood detected'], ['7.29', 'ARC validation failed'], ['7.30', 'REQUIRETLS support required']
 ];
 const SETTINGS_STATUS_CODE_NAMES = new Map(SETTINGS_STATUS_CODES);
 // Codes no registry lists, by the provider that sends them
 const SETTINGS_PROVIDER_CODE_NAMES = new Map([
-    ['5.2.121', "Recipient's hourly limit from one sender (Microsoft)"], ['5.2.122', "Recipient's hourly limit (Microsoft)"],
+    ['5.2.121', "Address reached its hourly limit for mail from one sender (Microsoft)"], ['5.2.122', "Address reached its hourly mail limit (Microsoft)"],
     ['5.4.8', 'MTA-STS validation failed (Microsoft)'], ['5.4.300', 'Message expired (Microsoft)']
 ]);
 // A whole subject: x stands for every detail, also codes no list has (Microsoft's 5.7.509)
 const SETTINGS_CODE_SUBJECT_NAMES = new Map([
-    ['4', 'All network and routing codes'], ['5', 'All protocol codes'],
-    ['6', 'All message content and media codes'], ['7', 'All security and policy codes']
+    ['4', 'All connection and delivery path problems'], ['5', 'All problems with mail commands'],
+    ['6', 'All problems with message contents'], ['7', 'All security problems and mail rules']
 ]);
 const SETTINGS_STANDARD_KEYS = { hard: 'suppression_hard_bounce_standard_codes', soft: 'suppression_soft_bounce_standard_codes' };
 // The standard codes, by subject: failures about the sender, the message, the
@@ -711,21 +956,21 @@ const SETTINGS_STANDARD_CODES = {
     5: [
         ['Sender address', ['5.1.7', '5.1.8', '5.1.9']],
         ['Mailbox', ['5.2.2', '5.2.3', '5.2.4', '5.2.121', '5.2.122']],
-        ['Mail system', ['5.3.1', '5.3.2', '5.3.3', '5.3.4', '5.3.5']],
-        ['Network and routing', ['5.4.0', '5.4.2', '5.4.3', '5.4.5', '5.4.6', '5.4.7', '5.4.8', '5.4.300']],
-        ['Protocol', ['5.5.1', '5.5.2', '5.5.3', '5.5.4', '5.5.5', '5.5.6']],
+        ['Mail server', ['5.3.1', '5.3.2', '5.3.3', '5.3.4', '5.3.5']],
+        ['Connections and delivery paths', ['5.4.0', '5.4.2', '5.4.3', '5.4.5', '5.4.6', '5.4.7', '5.4.8', '5.4.300']],
+        ['Mail commands', ['5.5.1', '5.5.2', '5.5.3', '5.5.4', '5.5.5', '5.5.6']],
         ['Message content', ['5.6.x']],
-        ['Security and policy', ['5.7.x']]
+        ['Security and mail rules', ['5.7.x']]
     ],
     4: [
         ['Unspecified failure', ['4.0.0']],
         ['Sender address', ['4.1.7', '4.1.8', '4.1.9']],
         ['Mailbox', ['4.2.1', '4.2.2', '4.2.3', '4.2.4']],
-        ['Mail system', ['4.3.1', '4.3.2', '4.3.3', '4.3.4', '4.3.5']],
-        ['Network and routing', ['4.4.x']],
-        ['Protocol', ['4.5.x']],
+        ['Mail server', ['4.3.1', '4.3.2', '4.3.3', '4.3.4', '4.3.5']],
+        ['Connections and delivery paths', ['4.4.x']],
+        ['Mail commands', ['4.5.x']],
         ['Message content', ['4.6.x']],
-        ['Security and policy', ['4.7.x']]
+        ['Security and mail rules', ['4.7.x']]
     ]
 };
 // What the mail logs had in the last days, read once per Settings load: { days, permanent, temporary }
@@ -757,7 +1002,7 @@ function settingsStandardCodes(kind, cls, config, lockedKeys, defaults) {
         codes.map(code => '<span><b>' + escapeHtml(code) + '</b>' + escapeHtml(settingsCodeName(code)) + '</span>').join('') + '</div>').join('');
     return '<div class="ui-set-codes-std">' +
         renderSettingsEditField(key, config[key], [], SETTINGS_FIELD_DESCRIPTIONS[key] || '', lockedKeys.has(key), defaults[key]) +
-        '<details class="ui-set-codes-std-list"><summary>View excluded codes</summary><div class="ui-set-codes-groups">' + groups + '</div></details></div>';
+        '<details class="ui-set-codes-std-list"><summary>View common mail problems</summary><div class="ui-set-codes-groups">' + groups + '</div></details></div>';
 }
 
 // A well-formed code of the class ('5' or '4') without leading zeros, or ''
@@ -779,32 +1024,47 @@ function settingsBounceCodes(kind, config, lockedKeys, defaults) {
     const desc = SETTINGS_FIELD_DESCRIPTIONS[key];
     // The registered codes in the shared picker (MP-4: searchable by code and meaning); a pick adds at once
     const picker = locked ? '' : uiPicker({
-        id: 'settings-' + id, label: 'Status codes', value: 'Select a code', field: true, labelledBy: 'label-' + id + '-also',
+        id: 'settings-' + id, label: 'Failure codes', value: 'Choose a failure', field: true, labelledBy: 'label-' + id + '-also',
         search: 'Search codes', options: SETTINGS_STATUS_CODES.map(([code, name]) => ({
             label: `${cls}.${code} ${name}`, value: `${cls}.${code}`, onclick: `settingsPickCode('${kind}', '${cls}.${code}')`
         }))
     });
+    // Closed at first: its line says what is excluded now (settingsShowCodes)
     return '<div class="ui-set-field ui-set-wide ui-set-codes' + (locked ? ' is-locked' : '') + '" data-codes="' + kind + '" data-class="' + cls + '" data-default="' +
             escapeHtml(String(defaults[key] ?? '')) + '">' +
-        '<div class="ui-set-choice-head"><span class="ui-label" id="label-' + id + '">Status code exceptions</span>' +
+        '<details class="ui-collapse ui-set-codes-fold"><summary>' +
+        '<span class="ui-set-choice-head"><span class="ui-label" id="label-' + id + '">' + escapeHtml(SETTINGS_CODES_HEADING) + '</span>' +
             (locked ? '<span class="ui-set-pill" title="Set by an environment variable, change it there">' + SETTINGS_LOCK_ICON + ' Set by ENV: ' + escapeHtml(key.toUpperCase()) + '</span>' : '') +
-            '<span class="ui-set-pill is-changed" title="Differs from the default" hidden>Changed</span></div>' +
+            '<span class="ui-set-pill is-changed" title="Differs from the default" hidden>Changed</span></span>' +
+            '<small class="ui-set-desc" data-codes-summary></small>' +
+            '<svg class="ui-collapse-chevron" width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>' +
+        '</summary><div class="ui-set-codes-body">' +
         '<small class="ui-set-desc">' + escapeHtml(desc) + '</small>' +
         settingsStandardCodes(kind, cls, config, lockedKeys, defaults) +
-        '<span class="ui-label ui-set-codes-also" id="label-' + id + '-also">Additional codes to exclude</span>' +
+        '<span class="ui-label ui-set-codes-also" id="label-' + id + '-also">' + escapeHtml(settingsFieldLabel(key)) + '</span>' +
         '<div class="ui-chip-row" data-codes-list aria-labelledby="label-' + id + '-also"></div>' +
         // A code the registry does not list (a provider's own, such as 5.7.509) is typed beside it
         (locked ? '' : '<div class="ui-sec-ladd ui-flush ui-set-codes-add">' + picker +
-            '<span class="ui-set-codes-other"><input type="text" class="ui-input" id="' + id + '-other" autocomplete="off" spellcheck="false" maxlength="20"' +
-                ' placeholder="Enter a ' + cls + '.x.x code" aria-label="Enter a ' + cls + '.x.x code" oninput="settingsCodeTyped(this)"' +
+            '<span class="ui-set-codes-other"><input type="text" class="ui-input" id="' + id + '-other" data-search-focus autocomplete="off" spellcheck="false" maxlength="20"' +
+                ' placeholder="Or type a ' + cls + '.x.x code" aria-label="Or type a ' + cls + '.x.x code" oninput="settingsCodeTyped(this)"' +
                 ' onkeydown="if (event.key === \'Enter\') { event.preventDefault(); settingsAddCode(this); }">' +
             '<button type="button" class="ui-btn" onclick="settingsAddCode(this)">Add</button></span></div>' +
             '<small class="ui-set-codes-error ui-text-fail" data-codes-error role="status" hidden></small>') +
         '<div class="ui-set-codes-seen" data-codes-seen hidden></div>' +
         '<input type="hidden" id="edit-' + key + '" name="' + key + '" value="' + escapeHtml(String(config[key] ?? '')) + '"' + (locked ? ' disabled' : '') + '>' +
-        (locked ? '' : '<button type="button" class="ui-set-clear is-reset" onclick="settingsResetCodes(this)" hidden>↺ Reset to default (' +
+        '</div></details>' +
+        (locked ? '' : '<button type="button" class="ui-set-clear is-reset" onclick="settingsResetCodes(this)" hidden>Reset to default (' +
             escapeHtml(String(defaults[key] ?? '') || 'empty') + ')</button>') +
         '</div>';
+}
+
+// The line on a closed Status code exceptions area. standard: the switch for the
+// failures unrelated to the recipient (null when the area has none); count: the codes added
+function settingsCodesSummary(standard, count) {
+    const t = SETTINGS_CODES_SUMMARY;
+    const text = standard ? (count === 0 ? t.standard : count === 1 ? t.standardOne : t.standardMore)
+        : (count === 0 ? t.none : count === 1 ? t.one : t.more);
+    return text.replace('{count}', String(count));
 }
 
 // The chips, the codes seen in the logs that are not in the list yet, and Changed
@@ -819,7 +1079,7 @@ function settingsShowCodes(box) {
             (locked ? '' : '<button type="button" data-code="' + escapeHtml(code) + '" onclick="settingsRemoveCode(this)" aria-label="Remove ' +
                 escapeHtml(code) + '" title="Remove">&times;</button>') + '</span>';
     };
-    box.querySelector('[data-codes-list]').innerHTML = codes.length ? codes.map(chip).join('') : '<span class="ui-muted">No additional codes</span>';
+    box.querySelector('[data-codes-list]').innerHTML = codes.length ? codes.map(chip).join('') : '<span class="ui-muted">You have not added any failures to ignore.</span>';
     // A code the standard codes leave alone is not offered again while their switch is on
     const standard = settingsStandardOn(box);
     box.dataset.standard = String(standard);
@@ -830,7 +1090,7 @@ function settingsShowCodes(box) {
         let tag = option.querySelector('small');
         if (on && !tag) {
             tag = document.createElement('small');
-            tag.textContent = 'Already excluded';
+            tag.textContent = 'Already ignored';
             option.appendChild(tag);
         } else if (!on && tag) tag.remove();
     });
@@ -838,7 +1098,8 @@ function settingsShowCodes(box) {
     const seen = settingsCodesSeen && !locked
         ? (settingsCodesSeen[box.dataset.class === '5' ? 'permanent' : 'temporary'] || []).filter(s => !codes.includes(s.code) && !covered(s.code)) : [];
     seenBox.hidden = !seen.length;
-    seenBox.innerHTML = seen.length ? '<h4 class="ui-set-codes-h">Seen in mail logs in the last ' + escapeHtml(uiCountLabel(settingsCodesSeen.days, 'day', 'days')) + '</h4>' +
+    seenBox.innerHTML = seen.length ? '<h4 class="ui-set-codes-h">Failures seen in the last ' + escapeHtml(uiCountLabel(settingsCodesSeen.days, 'day', 'days')) + '</h4>' +
+        '<small class="ui-set-desc">' + escapeHtml('Choose a failure for the app to ignore. The small number shows how often it happened.') + '</small>' +
         '<div class="ui-chip-row">' + seen.map(s => {
             const name = settingsCodeName(s.code);
             return '<button type="button" class="ui-chip" data-code="' + escapeHtml(s.code) + '" onclick="settingsAddSeenCode(this)" title="' +
@@ -848,7 +1109,14 @@ function settingsShowCodes(box) {
     const changed = !locked && field.value !== box.dataset.default;
     box.classList.toggle('is-changed', changed);
     // The list's own marker and Reset: the switch row inside has its own
-    box.querySelectorAll(':scope > .ui-set-choice-head .ui-set-pill.is-changed, :scope > .is-reset').forEach(el => { el.hidden = !changed; });
+    box.querySelectorAll(':scope > .ui-set-codes-fold > summary .ui-set-pill.is-changed, :scope > .is-reset').forEach(el => { el.hidden = !changed; });
+    // What the closed area leaves alone now
+    const summary = box.querySelector('[data-codes-summary]');
+    if (summary) {
+        // Counted as the server reads them: each well-formed code once (5.02.2 is 5.2.2)
+        const effective = new Set(codes.map(code => settingsCodeOf(code, box.dataset.class)).filter(code => code && !covered(code)));
+        summary.textContent = settingsCodesSummary(box.querySelector('[id^="edit-suppression_"][id$="_standard_codes"]') ? standard : null, effective.size);
+    }
 }
 
 function settingsSetCodes(box, codes) {
@@ -876,7 +1144,7 @@ function settingsAddCode(el) {
     if (!input.value.trim()) return false;
     const code = settingsCodeOf(input.value, cls);
     if (!code) {
-        error.textContent = `Enter a valid ${cls}.x.x code, such as ${cls}.2.2, or select one from the list.`;
+        error.textContent = `Type a code like ${cls}.2.2 that starts with ${cls}. Or choose a failure from the list.`;
         error.hidden = false;
         input.setAttribute('aria-invalid', 'true');
         return false;
@@ -959,7 +1227,7 @@ function settingsErrorText(body, fallback) {
 async function settingsRspamdState() {
     // The map is read even while the sync is off: the questions below need it
     const res = await authenticatedFetch('/api/suppressions/rspamd/state?check_map=true');
-    if (!res.ok) throw new Error('Could not read the Rspamd state');
+    if (!res.ok) throw new Error('Could not check the Rspamd blocks. Check the connection and try again.');
     return res.json();
 }
 
@@ -984,7 +1252,7 @@ async function settingsRspamdTransition(payload, data, newDisabled) {
     const connectionChanged = SETTINGS_RSPAMD_CONNECTION_KEYS.some(key => key in payload && !locked.has(key)
         && payload[key] !== '********' && String(payload[key] ?? '') !== String(before[key] ?? ''));
     if (connectionChanged) {
-        showToast('Save the mailcow or Rspamd connection change first, then turn Sync with Rspamd on or off.', 'error');
+        showToast('Save your mailcow or Rspamd connection changes first. Then change Sync with Rspamd.', 'error');
         return null;
     }
     let state;
@@ -1000,26 +1268,26 @@ async function settingsRspamdTransition(payload, data, newDisabled) {
             const rows = state.list_count || 0;
             if (!featureOff && rows > 0) {
                 const ok = await showChoiceModal({
-                    title: 'Turn off Sync with Rspamd?',
-                    message: `This app's saved list (${rows} ${settingsPlural(rows, 'entry', 'entries')}) will be deleted. None of its blocks is in Rspamd, so turning the sync on again does not bring them back.`,
+                    title: 'Turn off sync with Rspamd?',
+                    message: `Deletes the list (${rows} ${settingsPlural(rows, 'entry', 'entries')}) and everything saved with it for good. Rspamd has no blocks to load back.`,
                     choices: [{ value: 'off', label: 'Turn off', kind: 'danger' }]
                 });
                 if (!ok) return null;
             }
             return { action: 'none', feature_off: featureOff, purge_rspamd: state.writable ? 'remove' : 'keep' };
         }
-        const lead = featureOff ? 'Suppressions will turn off and the saved list will be deleted.' : "Sync with Rspamd will stop and this app's saved list will be deleted.";
+        const lead = featureOff ? 'Turning off Suppressions deletes the app\'s list and everything saved with it for good.' : "Turning off Sync with Rspamd deletes the app's list and everything saved with it for good.";
         if (n === null || !state.writable) {
             const why = state.reason_text || 'Rspamd cannot be reached.';
             const message = n === null
-                ? `${lead} We cannot check or remove this app's Rspamd blocks now: ${why}`
-                : `${lead} ${blocks(n)} from this app remain in Rspamd. They cannot be removed now: ${why}`;
+                ? `${lead}\nThe app cannot check or remove its blocks in Rspamd.\n${why}`
+                : `${lead}\nRspamd still has ${blocks(n)} from this app that may reject new mail. The app cannot remove them now.\n${why}`;
             const keep = await showChoiceModal({ title: "Keep this app's Rspamd blocks?", message, choices: [{ value: 'keep', label: 'Keep blocks', kind: 'primary' }] });
             return keep ? { action: 'keep', feature_off: featureOff } : null;
         }
         const picked = await showChoiceModal({
             title: "Keep this app's Rspamd blocks?",
-            message: `${lead} ${blocks(n)} from this app remain in Rspamd. Remove them or keep them?`,
+            message: `${lead}\nKeep or remove this app's ${blocks(n)} in Rspamd? Blocks you keep can still reject new mail.`,
             choices: [{ value: 'keep', label: 'Keep blocks' }, { value: 'remove', label: 'Remove blocks', kind: 'danger' }]
         });
         return picked ? { action: picked, feature_off: featureOff, count: n } : null;
@@ -1035,17 +1303,17 @@ async function settingsRspamdTransition(payload, data, newDisabled) {
         // What is in Rspamd now cannot be checked: say so before anything is written there
         const why = state.reason_text || 'Rspamd cannot be reached.';
         const ok = await showChoiceModal({
-            title: 'Turn on Sync with Rspamd?',
-            message: `We cannot check this app's Rspamd blocks now: ${why} Turning on the sync writes the list's waiting changes once Rspamd can be reached.`,
+            title: 'Turn on sync with Rspamd?',
+            message: `The app cannot check its blocks in Rspamd now.\n${why}\nWith sync on, the app sends saved changes when it can connect.`,
             choices: [{ value: 'apply', label: 'Turn on', kind: 'primary' }]
         });
         return ok ? { action: 'apply', count: pending } : null;
     }
     const changes = `${pending} waiting ${settingsPlural(pending, 'change', 'changes')}`;
     const picked = await showChoiceModal({
-        title: 'Turn on Sync with Rspamd?',
-        message: `Apply the ${changes} to Rspamd, or start fresh? Starting fresh deletes the whole list and removes this app's Rspamd blocks. Other Rspamd entries stay.`,
-        choices: [{ value: 'fresh', label: 'Start fresh', kind: 'danger' }, { value: 'apply', label: 'Apply changes', kind: 'primary' }]
+        title: 'Turn on sync with Rspamd?',
+        message: `Apply the ${changes}, or delete the list and this app's blocks in Rspamd?\nDeleting the list removes everything saved with it for good. Other blocks in Rspamd stay.`,
+        choices: [{ value: 'fresh', label: 'Delete list and Rspamd blocks', kind: 'danger' }, { value: 'apply', label: 'Apply changes', kind: 'primary' }]
     });
     return picked ? { action: picked, count: pending } : null;
 }
@@ -1056,7 +1324,7 @@ async function settingsRspamdAfterSave(plan, saved) {
         // Bound to this save: refused once another save turned the sync on or off
         // again. A save that did not turn it off (another window did first) has none
         const transition = saved && saved.rspamd_off_transition;
-        if (!transition) return ["Sync with Rspamd was already off (changed in another window). Nothing was removed from Rspamd.", 'error'];
+        if (!transition) return ["Another window already turned Sync with Rspamd off. No Rspamd blocks were removed by this save.", 'error'];
         const res = await authenticatedFetch('/api/suppressions/rspamd/clear', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ transition })
@@ -1064,8 +1332,8 @@ async function settingsRspamdAfterSave(plan, saved) {
         const body = await res.json().catch(() => ({}));
         if (!res.ok) {
             return [(body.detail && body.detail.code === 'not_confirmed')
-                ? 'Sync with Rspamd is off. Block removal could not be confirmed. Check Rspamd before retrying.'
-                : `Sync with Rspamd is off, but this app's Rspamd blocks could not be removed: ${settingsErrorText(body, res.statusText)}`, 'error'];
+                ? 'Sync with Rspamd is off. Check Rspamd to see whether its blocks were removed before trying again.'
+                : `Sync with Rspamd is off. The app could not remove its blocks in Rspamd.\n${settingsErrorText(body, res.statusText)}`, 'error'];
         }
         return [`Sync with Rspamd is off. Removed ${body.removed_blocks} app ${settingsPlural(body.removed_blocks, 'block', 'blocks')} from Rspamd.`, 'success'];
     }
@@ -1074,28 +1342,44 @@ async function settingsRspamdAfterSave(plan, saved) {
         // What changed in mailcow comes in first, then the list's waiting changes are written
         const res = await authenticatedFetch('/api/suppressions/sync?after_change=true', { method: 'POST' });
         const body = await res.json().catch(() => ({}));
-        if (!res.ok) return [`Sync with Rspamd is on, but Rspamd was not updated yet: ${settingsErrorText(body, res.statusText)}`, 'error'];
+        if (!res.ok) return [`Sync with Rspamd is on. Changes have not reached Rspamd yet.\n${settingsErrorText(body, res.statusText)}`, 'error'];
         const list = (body.list_added || body.list_removed)
             ? ` List updated from Rspamd: ${body.list_added || 0} added, ${body.list_removed || 0} deleted.` : '';
         if (body.written) return [`Sync with Rspamd is on. Rspamd updated: ${body.added} added, ${body.removed} removed.${list}`, 'success'];
-        if (body.pending_count) return [`Sync with Rspamd is on, but ${body.pending_count} ${settingsPlural(body.pending_count, 'change waits', 'changes wait')}: the Read-Write API key is not set.${list}`, 'error'];
+        if (body.pending_count) return [`Sync with Rspamd is on, but ${body.pending_count} ${settingsPlural(body.pending_count, 'change waits', 'changes wait')}: a read-write API key is missing. Add it in Settings > mailcow > Connection.${list}`, 'error'];
         return [`Sync with Rspamd is on. Rspamd is already up to date.${list}`, 'success'];
     }
     if (plan.action === 'import') {
         const what = plan.feature_on ? 'Suppressions are on' : 'Sync with Rspamd is on';
         const res = await authenticatedFetch('/api/suppressions/rspamd/import', { method: 'POST' });
         const body = await res.json().catch(() => ({}));
-        if (!res.ok) return [`${what}, but this app's Rspamd blocks could not be loaded yet: ${settingsErrorText(body, res.statusText)} They load on the next try.`, 'error'];
-        if (body.reason === 'no_password') return [`${what}, but this app's Rspamd blocks load only once the Rspamd password is set.`, 'error'];
+        if (!res.ok) return [`${what}. The app could not load its blocks from Rspamd yet.\n${settingsErrorText(body, res.statusText)}\nThe app will try again.`, 'error'];
+        if (body.reason === 'no_password') return [`${what}. Add the Rspamd password in Settings > mailcow > Rspamd to load the blocks.`, 'error'];
         // The count belongs to this request only when it did the load
         if (!body.loaded) return [`${what}.`, 'success'];
         return body.imported
             ? [`${what}. Loaded ${body.imported} ${settingsPlural(body.imported, 'block', 'blocks')} from Rspamd.`, 'success']
-            : [`${what}. No blocks of this app were in Rspamd.`, 'success'];
+            : [`${what}. Rspamd has no saved blocks from this app to load.`, 'success'];
     }
-    if (plan.action === 'fresh') return ['Started fresh. The list is empty and this app\'s Rspamd blocks are removed. Sync with Rspamd is on.', 'success'];
+    if (plan.action === 'fresh') return ['Sync with Rspamd is on.\nThe old list, everything saved with it, and this app\'s blocks in Rspamd were deleted.', 'success'];
     return null;
 }
+
+// Outbound: the heading of a Status code exceptions area, and the line on it while it is closed
+const SETTINGS_CODES_HEADING = 'Failures to ignore';
+const SETTINGS_CODES_SUMMARY = {
+    standard: 'The app ignores problems like a full mailbox.',
+    standardOne: 'The app ignores problems like a full mailbox, plus failures with 1 code you added.',
+    standardMore: 'The app ignores problems like a full mailbox, plus failures with {count} codes you added.',
+    none: 'This list has no failures to ignore.',
+    one: 'The app ignores failures with 1 chosen code.',
+    more: 'The app ignores failures with {count} chosen codes.'
+};
+
+// Texts of the session signing key's Generate and of the Basic Auth password's Remove while it is off
+const SETTINGS_GENERATE_KEY = 'Generate';
+const SETTINGS_PASSWORD_REMOVE_OFF = 'Turn off Basic Auth to remove the password.';
+const SETTINGS_PASSWORD_REMOVE_ENV = 'AUTH_ENABLED in the environment keeps Basic Auth on. Remove it there to remove the password.';
 
 // Predefined options for settings fields (renders as dropdown instead of text input)
 const SETTINGS_FIELD_OPTIONS = {
@@ -1107,7 +1391,9 @@ const SETTINGS_FIELD_OPTIONS = {
         { value: 'ntfy', label: 'ntfy - topic URL' },
         { value: 'gotify', label: 'Gotify - /message?token=...' }
     ],
-    // How dates and times are written (utils.js); the example under them shows the choice
+    // The levels the backend accepts (config.py); anything else runs as WARNING
+    log_level: ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'].map(level => ({ value: level, label: level })),
+    // How dates and times are written (utils.js)
     date_format: [
         { value: 'browser', label: 'Browser' },
         { value: 'DD/MM/YYYY', label: 'DD/MM/YYYY' },
@@ -1122,25 +1408,22 @@ const SETTINGS_FIELD_OPTIONS = {
     ],
     // The Outbound bounce choices (settingsBounceChoice): {count} is the number field
     suppression_hard_bounce_action: [
-        { value: 'suppress', label: 'Block new mail to the address and delete its queued mail', needs: 'logs rw-queue sync' },
-        { value: 'delete', label: 'Delete its queued mail', needs: 'logs rw-queue', hint: 'Does not block new mail to the address.' },
-        { value: 'ignore', label: 'Do nothing' }
+        { value: 'suppress', label: 'Block new mail to the failed address. Delete any mail to it still waiting to be sent.', needs: 'logs rw-queue sync' },
+        { value: 'delete', label: 'Delete any mail to the failed address still waiting to be sent.', needs: 'logs rw-queue', hint: 'New mail to this address is still allowed.' },
+        { value: 'ignore', label: 'Do nothing.' }
     ],
     suppression_soft_bounce_action: [
-        { value: 'count', label: 'Keep retrying; block new mail after {count} failures', needs: 'logs sync',
-            hint: 'Each failed retry counts, even for the same message.' },
-        { value: 'suppress', label: 'Keep retrying; block new mail at the first failure', needs: 'logs sync' },
-        { value: 'ignore', label: 'Do nothing; keep retrying' }
+        { value: 'count', label: 'Keep retrying. Block new mail to the address after {count} failures.', needs: 'logs sync',
+            hint: 'Each failed try counts, even for the same message.' },
+        { value: 'suppress', label: 'Keep retrying. Block new mail to the address after the first failure.', needs: 'logs sync' },
+        { value: 'ignore', label: 'Keep retrying without blocking new mail.' }
     ]
 };
 
-// Now, written as the Date Format and Time Format fields say, before they are saved
-function settingsShowFormatExample(root) {
-    const out = root && root.querySelector('#settings-format-example');
-    if (!out) return;
-    const picked = (key, fallback) => { const el = root.querySelector('#edit-' + key); return el && el.value ? el.value : fallback; };
-    const now = zonedParts(new Date());
-    out.textContent = `Example: ${writeDate(now, { fmt: picked('date_format', appDateFmt()) })}, ${writeClock(now, { fmt: picked('time_format', appTimeFmt()) })}`;
+// The log level that runs: the backend reads it in any letters and runs anything else as WARNING
+function settingsLogLevel(value) {
+    const level = String(value || '').trim().toUpperCase();
+    return SETTINGS_FIELD_OPTIONS.log_level.some(opt => opt.value === level) ? level : 'WARNING';
 }
 
 // Agents > App address for agents: the address to offer, which the person can
@@ -1207,7 +1490,7 @@ function settingsLockAgentAccess(root, signInChanged, signInElsewhere) {
         note.className = 'ui-text-warn';
         note.setAttribute('role', 'status');
         note.dataset.agentLock = '';
-        note.textContent = 'Turn on Basic Auth or OAuth2 in Settings → Authentication first.';
+        note.textContent = 'Turn on Basic Auth or OAuth2 in Settings > Authentication first.';
         row.appendChild(note);
     }
 }
@@ -1278,64 +1561,60 @@ function settingsTimeZoneKnown(name) {
 // Keys grouped logically within each tab
 var SETTINGS_EDIT_TABS = [
     {
-        id: 'mailcow', label: 'Mailcow', description: 'Your mailcow instance URL and API credentials. API key needs read access to logs (generate from System → Configuration → Access → Administrators → API in mailcow admin). Set verify SSL to false only for development with self-signed certificates.', groups: [
+        id: 'mailcow', label: 'mailcow', description: 'Connect this app to mailcow and Rspamd.', groups: [
             { label: 'Connection', keys: ['mailcow_url', 'mailcow_api_key', 'mailcow_api_key_rw'] },
             { label: 'Rspamd', keys: ['rspamd_password', 'rspamd_url'] },
             { label: 'Advanced', keys: ['mailcow_api_timeout', 'mailcow_api_verify_ssl'] }
         ]
     },
     {
-        id: 'fetch', label: 'Fetch', description: 'How often to fetch logs from mailcow and how many records per request. Lower interval = more frequent updates, higher load. Retention: how many days to keep logs in the database (older logs are deleted).', groups: [
+        id: 'fetch', label: 'Fetch', description: 'Choose how often to fetch mail logs, how long to keep them and how to link logs from the same message.', groups: [
             { label: 'Timing', keys: ['fetch_interval'] },
-            { label: 'Counts per Request', keys: ['fetch_count_postfix', 'fetch_count_rspamd', 'fetch_count_netfilter'] },
+            { label: 'Logs per request', keys: ['fetch_count_postfix', 'fetch_count_rspamd', 'fetch_count_netfilter'] },
             { label: 'Pagination', keys: ['fetch_max_pages'] },
             { label: 'Retention', keys: ['retention_days'] },
-            { label: 'Excluded addresses', keys: ['blacklist_emails'] }
+            { label: 'Excluded addresses', keys: ['blacklist_emails'] },
+            { label: 'Message linking', keys: ['max_correlation_age_minutes', 'correlation_check_interval'] }
         ]
     },
     {
-        id: 'correlation', label: 'Correlation', description: 'Correlation links Postfix logs to messages. Max age: stop searching for correlations older than this (minutes). Check interval: how often to run the correlation job (seconds).', groups: [
-            { label: 'Settings', keys: ['max_correlation_age_minutes', 'correlation_check_interval'] }
-        ]
-    },
-    {
-        id: 'application', label: 'Application', description: 'Web app port, title, logo and time zone. Log level: DEBUG, INFO, WARNING, ERROR, CRITICAL. Debug mode shows detailed errors (do not enable in production). Search/CSV limits and scheduler worker count.', groups: [
-            { label: 'Basic', keys: ['app_port', 'app_title', 'app_logo_url'] },
+        id: 'application', label: 'Application', description: 'Set the app appearance, time display, and search limits.', groups: [
+            { label: 'Appearance', keys: ['app_port', 'app_title', 'app_logo_url'] },
             { label: 'Time', keys: ['tz', 'date_format', 'time_format'] },
             { label: 'Logging', keys: ['log_level', 'debug'] },
             { label: 'Limits', keys: ['max_search_results', 'csv_export_limit', 'scheduler_workers'] }
         ]
     },
     {
-        id: 'features', label: 'Features', description: 'Turn off what you do not use. A feature that is off disappears from the menu and stops its background jobs. Turning a feature off deletes its stored data, so you are asked first.', groups: [
+        id: 'features', label: 'Features', description: 'Choose which features to use. Turning a feature off deletes its stored data. You will be asked to confirm when you save.', groups: [
             { label: 'Features', keys: ['disabled_features'] }
         ]
     },
     {
-        id: 'blacklist', label: 'IP Blacklist (RBL)', description: 'The blacklist monitor checks whether your mail server IPs are listed on spam blacklists (Spamhaus and others). Choose which hosts are monitored below. Note: Spamhaus refuses queries sent through public DNS resolvers, so point this at your own resolver if the Spamhaus checks come back as unknown.', groups: [
+        id: 'blacklist', label: 'Blocklists', description: 'Choose which sending IPs to check against blocklists.', groups: [
             { label: 'Monitoring sources', keys: ['blacklist_source_server_ip', 'blacklist_source_transports', 'blacklist_source_relayhosts', 'blacklist_source_manual_hosts'] },
             { label: 'DNS resolver', keys: ['blacklist_dns_servers'] }
         ]
     },
     {
-        id: 'domains', label: 'Domains', description: 'DNS checks for your domains (SPF, DKIM, DMARC, DNSSEC, DANE, MTA-STS) on the Domains page. Choose which sending IPs must pass each domain SPF record - with a relay setup the relay IPs matter, not the auto-detected WAN IP.', groups: [
+        id: 'domains', label: 'Domains', description: "Choose which sending IPs to check against your domains' SPF records.", groups: [
             { label: 'SPF check sources', keys: ['domain_spf_source_server_ip', 'domain_spf_source_transports', 'domain_spf_source_relayhosts', 'domain_spf_source_manual_hosts', 'domain_spf_source_dmarc_history'] }
         ]
     },
     {
-        id: 'auth', label: 'Authentication', description: 'How users sign in to this app. Basic authentication protects every page and API endpoint with a username and password. OAuth2/OIDC signs users in through an external provider (mailcow, Keycloak, ...). Both can be enabled at the same time. Changing these settings disconnects every AI agent.', groups: [
-            { label: 'Basic Auth', keys: ['basic_auth_enabled', 'auth_username', 'auth_password', 'auth_max_failure_clients'] },
+        id: 'auth', label: 'Authentication', description: 'Choose how users sign in and how long they stay signed in.', groups: [
+            { label: 'Basic Auth', intro: 'Changing sign-in methods, credentials or provider endpoints signs out other users and disconnects agents.', keys: ['basic_auth_enabled', 'auth_username', 'auth_password', 'auth_max_failure_clients'] },
             { label: 'OAuth2 / OIDC', keys: ['oauth2_enabled', 'oauth2_provider_name'] },
-            { label: 'OAuth2 - Discovery (automatic)', keys: ['oauth2_issuer_url', 'oauth2_use_oidc_discovery'] },
-            { label: 'OAuth2 - Endpoints (only without discovery)', keys: ['oauth2_authorization_url', 'oauth2_token_url', 'oauth2_userinfo_url'] },
-            { label: 'OAuth2 - Credentials', keys: ['oauth2_client_id', 'oauth2_client_secret', 'oauth2_redirect_uri', 'oauth2_scopes'] },
-            { label: 'Sign-in Security', intro: 'For people signed in to this app in a browser, with Basic Auth or OAuth2/OIDC. AI agents and API tokens are not affected.', keys: ['session_idle_enabled', 'session_idle_timeout_minutes', 'session_expiry_hours'] },
+            { label: 'Endpoint discovery', keys: ['oauth2_issuer_url', 'oauth2_use_oidc_discovery'] },
+            { label: 'Manual endpoints', keys: ['oauth2_authorization_url', 'oauth2_token_url', 'oauth2_userinfo_url'] },
+            { label: 'Provider credentials', keys: ['oauth2_client_id', 'oauth2_client_secret', 'oauth2_redirect_uri', 'oauth2_scopes'] },
+            { label: 'Session limits', intro: 'These limits apply to browser sessions, including Basic Auth and OAuth2 / OIDC. Agents and API tokens are not affected.', keys: ['session_idle_enabled', 'session_idle_timeout_minutes', 'session_expiry_hours'] },
             { label: 'Sessions', keys: ['session_secret_key', 'session_max_entries'] }
         ]
     },
     {
         // Managed outside the form (users.js), so it has no fields of its own
-        id: 'users', label: 'Users', description: 'Who may sign in to this app, and what each user may see and do.', groups: []
+        id: 'users', label: 'Users', description: 'Manage who can sign in and what each user can do.', groups: []
     },
     {
         id: 'agents', label: 'Agents', description: 'Allow AI agents, such as Claude Code and Codex, to access and use this app.', groups: [
@@ -1343,44 +1622,44 @@ var SETTINGS_EDIT_TABS = [
         ]
     },
     {
-        id: 'smtp', label: 'SMTP', description: 'SMTP for sending notifications (alerts, weekly summary). Relay mode: for local relay servers that do not require authentication (only host and from address needed).', groups: [
+        id: 'smtp', label: 'SMTP', description: 'Set up email delivery for alerts and reports.', groups: [
             { label: 'Enable', keys: ['smtp_enabled'] },
             { label: 'Server', keys: ['smtp_host', 'smtp_port'] },
             { label: 'Security', keys: ['smtp_use_tls', 'smtp_use_ssl', 'smtp_verify_ssl'] },
             { label: 'Authentication', keys: ['smtp_user', 'smtp_password', 'smtp_relay_mode'] },
-            { label: 'From Address', keys: ['smtp_from'] }
+            { label: 'Sender', keys: ['smtp_from'] }
         ]
     },
     {
-        id: 'notifications', label: 'Notifications', description: 'Where alerts are delivered. Add one or more destinations (Slack, Telegram, ntfy, ...) below and choose which alerts each one receives, plus the email addresses used for the different alert types.', groups: [
+        id: 'notifications', label: 'Notifications', description: 'Choose where to send alerts.', groups: [
             { label: 'Email addresses', keys: ['admin_email', 'blacklist_alert_email', 'dmarc_error_email', 'enable_weekly_summary'] },
             { label: 'Alert types', keys: ['dns_change_alerts_enabled'] }
         ]
     },
     {
-        id: 'smtp_abuse', label: 'SMTP Abuse (Beta)', description: 'Beta - please report issues on GitHub. Enforcement layer: automatically disables SMTP (sending) for a mailbox that exceeds a hard outbound limit - the usual signature of a compromised account. The mailbox still receives mail; if its app passwords are revoked too, mail apps that sign in with one stop working. Requires a Read-Write mailcow API key. Manage blocked mailboxes and the whitelist under Security → Settings → Outgoing spam.', groups: [
+        id: 'smtp_abuse', label: 'Outgoing spam', description: 'Block sending from mailboxes that exceed a fixed message limit within a set time. See and manage them in Security > Settings > Outgoing spam.', groups: [
             { label: 'Enable', keys: ['smtp_abuse_enabled'] },
             { label: 'Limit', keys: ['smtp_abuse_threshold', 'smtp_abuse_window_minutes'] },
             { label: 'Response', keys: ['smtp_abuse_revoke_app_passwords', 'smtp_abuse_unblock_grace_minutes', 'smtp_abuse_help_address'] }
         ]
     },
     {
-        id: 'anomaly', label: 'Anomaly Detection (Beta)', description: 'Beta - please report issues on GitHub. Detect compromised mailboxes and auth attacks. Alerts when a mailbox sends far above its own baseline (possible account takeover). Daily send patterns are learned automatically - a mailbox that sends a big batch at the same hour every day will not alert unless it bursts off-schedule or far above its usual size or when a username accumulates many auth failures. Alerts go to email + webhook and appear on the dashboard.', groups: [
+        id: 'anomaly', label: 'Anomaly detection', description: 'Get alerts about unusual sending and repeated failed logins.', groups: [
             { label: 'Enable', keys: ['anomaly_detection_enabled'] },
-            { label: 'Volume Spike', keys: ['anomaly_volume_multiplier', 'anomaly_volume_min_messages', 'anomaly_baseline_days'] },
-            { label: 'Auth Failures', keys: ['anomaly_auth_failure_threshold'] },
+            { label: 'Sending spikes', keys: ['anomaly_volume_multiplier', 'anomaly_volume_min_messages', 'anomaly_baseline_days'] },
+            { label: 'Failed logins', keys: ['anomaly_auth_failure_threshold'] },
             { label: 'Timing', keys: ['anomaly_check_interval', 'anomaly_alert_cooldown_hours'] }
         ]
     },
     {
-        id: 'dmarc', label: 'DMARC & TLS', description: 'How long DMARC and TLS reports are kept (days). Allow uploading reports by hand and deleting them from the UI. Weekly summary: enable email report sent to admin.', groups: [
+        id: 'dmarc', label: 'DMARC & TLS', description: 'Manage report retention, uploads, deletion, and policy suggestions.', groups: [
             { label: 'Retention', keys: ['dmarc_retention_days'] },
             { label: 'Features', keys: ['dmarc_manual_upload_enabled', 'dmarc_allow_report_delete'] },
-            { label: 'Insights (policy recommendations)', keys: ['dmarc_insights_window_days', 'dmarc_insights_pass_threshold', 'dmarc_insights_min_volume'] }
+            { label: 'Policy suggestions', keys: ['dmarc_insights_window_days', 'dmarc_insights_pass_threshold', 'dmarc_insights_min_volume'] }
         ]
     },
     {
-        id: 'dmarc_imap', label: 'DMARC & TLS IMAP', description: 'Import DMARC and TLS reports automatically from an IMAP mailbox: the address in the rua= of your DMARC and TLS-RPT records. Set host, port, user, password and folder (e.g. INBOX). Delete after: remove emails after processing. Interval in seconds; run on startup to sync once at start.', groups: [
+        id: 'dmarc_imap', label: 'DMARC & TLS IMAP', description: 'Import DMARC and TLS reports from a mailbox.', groups: [
             { label: 'Enable', keys: ['dmarc_imap_enabled'] },
             { label: 'Connection', keys: ['dmarc_imap_host', 'dmarc_imap_port', 'dmarc_imap_use_ssl', 'dmarc_imap_verify_ssl'] },
             { label: 'Authentication', keys: ['dmarc_imap_user', 'dmarc_imap_password'] },
@@ -1388,47 +1667,47 @@ var SETTINGS_EDIT_TABS = [
         ]
     },
     {
-        id: 'maxmind', label: 'MaxMind', description: 'MaxMind GeoIP database configuration for IP geolocation. Account ID and License Key are required to download GeoLite2 databases. Status shows whether databases are configured and up to date.', groups: [
+        id: 'maxmind', label: 'MaxMind', description: 'Set up GeoIP to show where IP addresses are located.', groups: [
             { label: 'Credentials', keys: ['maxmind_account_id', 'maxmind_license_key'] },
             { label: 'Status', keys: [] }  // Status will be displayed separately, not as editable field
         ]
     },
     {
-        id: 'logs', label: 'Logs', description: 'Live log viewer settings. Controls background collection of raw logs from mailcow services. Logs are stored in a separate database table and streamed via WebSocket to the Logs page. Adjust fetch interval and retention to balance freshness vs. storage usage.', groups: [
+        id: 'logs', label: 'Logs', description: 'Choose which service logs to collect and how long to keep them.', groups: [
             { label: 'Enable', keys: ['raw_logs_enabled'] },
-            { label: 'Fetch Settings', keys: ['raw_logs_fetch_interval', 'raw_logs_fetch_count'] },
+            { label: 'Collection', keys: ['raw_logs_fetch_interval', 'raw_logs_fetch_count'] },
             { label: 'Retention', keys: ['raw_logs_retention_days', 'rate_limits_retention_days'] },
             { label: 'Services', keys: ['raw_logs_services'] }
         ]
     },
     {
-        id: 'devices', label: 'Devices', description: 'The Devices page lists the phones and tablets that sync over ActiveSync. It reads the SOGo log through the mailcow API every minute.', groups: [
+        id: 'devices', label: 'Devices', description: 'Choose how long to keep inactive devices.', groups: [
             { label: 'Retention', keys: ['eas_devices_retention_days'] }
         ]
     },
     {
         // Was spam_filter (Queue Management); the old address opens this one (router.js). Hidden while Suppressions is off
-        id: 'outbound', label: 'Outbound', description: 'Choose what happens when outgoing mail cannot be delivered. Blocked addresses are listed on Outbound > Suppressions.', groups: [
+        id: 'outbound', label: 'Outbound', description: 'Choose what happens when outgoing mail cannot be delivered.', groups: [
             // The sync belongs to the list, not to the automatic handling: a list kept by hand syncs too
-            { label: 'Rspamd', keys: ['suppression_rspamd_sync'] },
-            { label: 'Automatic handling', keys: ['suppression_enabled'] },
+            { label: 'Address blocking', keys: ['suppression_rspamd_sync'], intro: 'Requires the Rspamd password and a read-write API key in Settings > mailcow.' },
+            { label: 'Automatic actions', keys: ['suppression_enabled'], intro: 'Deleted mail is gone for good. The app does not tell the person who sent it.' },
             // Reading the logs is set by the choices (settingsSyncBounce)
             // Each choice is followed by the codes it leaves alone (settingsBounceCodes)
             { label: 'Permanent delivery failure', choice: 'hard', needs: 'suppression_enabled',
                 keys: ['suppression_hard_bounce_action', 'suppression_auto_detect', 'suppression_hard_bounce_standard_codes', 'suppression_hard_bounce_excluded_codes'],
-                intro: 'The receiving server rejected the message permanently. (5.x.x)' },
+                intro: 'The mail server has stopped trying to deliver this message to the failed address.' },
             { label: 'Temporary delivery failure', choice: 'soft', needs: 'suppression_enabled',
                 keys: ['queue_cleanup_enabled', 'queue_cleanup_block', 'suppression_soft_bounce_action', 'queue_cleanup_threshold_minutes', 'suppression_soft_bounce_threshold',
                     'suppression_soft_bounce_standard_codes', 'suppression_soft_bounce_excluded_codes'],
-                intro: 'Postfix keeps the message and retries. (4.x.x)' },
+                intro: 'The mail server could not deliver the message yet. It keeps trying.' },
             // A block reaches Rspamd only through the sync: without it nothing is blocked
-            { label: 'How long to block', needs: 'suppression_enabled suppression_rspamd_sync', keys: ['suppression_base_expiry_days', 'suppression_max_expiry_days'] },
-            { label: 'Exceptions', needs: 'suppression_enabled', keys: ['suppression_whitelist_domains'] }
+            { label: 'Block duration', needs: 'suppression_enabled suppression_rspamd_sync', keys: ['suppression_base_expiry_days', 'suppression_max_expiry_days'] },
+            { label: 'Domains to ignore', needs: 'suppression_enabled', keys: ['suppression_whitelist_domains'] }
         ]
     },
     {
-        id: 'quarantine', label: 'Quarantine', description: 'Quarantine auto-rules settings. Rules automatically release or delete quarantined emails based on sender, domain, recipient, or subject patterns. Requires a Read-Write API key.', groups: [
-            { label: 'Auto-Rules Scheduler', keys: ['quarantine_rules_max_actions', 'quarantine_rules_interval', 'quarantine_rules_log_retention_days'] }
+        id: 'quarantine', label: 'Quarantine', description: 'Set how often Auto-Rules run and how many messages they can release or delete.', groups: [
+            { label: 'Auto-Rules schedule', keys: ['quarantine_rules_max_actions', 'quarantine_rules_interval', 'quarantine_rules_log_retention_days'] }
         ]
     }
 ];
@@ -1439,7 +1718,7 @@ var SETTINGS_EDIT_TABS = [
 // silently disappear).
 var SETTINGS_TAB_GROUPS = [
     { label: 'General', tabs: ['features', 'application'] },
-    { label: 'mailcow', tabs: ['mailcow', 'fetch', 'correlation', 'logs'] },
+    { label: 'mailcow', tabs: ['mailcow', 'fetch', 'logs'] },
     { label: 'Alerts', tabs: ['notifications', 'smtp'] },
     { label: 'Security', tabs: ['auth', 'users', 'agents', 'anomaly', 'smtp_abuse'] },
     { label: 'Data', tabs: ['domains', 'dmarc', 'dmarc_imap', 'maxmind', 'blacklist', 'outbound', 'quarantine', 'devices', 'other'] }
@@ -1474,6 +1753,38 @@ function settingsRemoveSecret(btn) {
     box.classList.toggle('is-removing', removing);
     btn.textContent = removing ? 'Keep' : 'Remove';
     hidden.form && hidden.form.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
+// The Basic Auth password cannot be removed while Basic Auth is on, by its switch or by
+// AUTH_ENABLED in the environment (legacy): its Remove is off then, and a removal already
+// chosen is taken back
+function settingsLockPasswordRemove(root, legacyAuth) {
+    const btn = root && root.querySelector('[data-needs-basic-off]');
+    const basic = root && root.querySelector('#edit-basic_auth_enabled');
+    if (!btn) return;
+    const on = !!basic && (basic.type === 'checkbox' ? basic.checked : basic.value === 'true');
+    const locked = on || legacyAuth === true;
+    if (locked && btn.closest('.is-removing')) settingsRemoveSecret(btn);
+    const why = on ? SETTINGS_PASSWORD_REMOVE_OFF : SETTINGS_PASSWORD_REMOVE_ENV;
+    btn.disabled = locked;
+    btn.title = locked ? why : '';
+    const note = root.querySelector('[data-remove-note]');
+    if (note) {
+        note.textContent = why;
+        note.classList.toggle('hidden', !locked);
+    }
+}
+
+// Session signing key: a new random key, 32 bytes as hex, into a new-value field
+function settingsGenerateSecret(btn) {
+    const field = btn.closest('.ui-set-field');
+    const replace = field && field.querySelector('.ui-set-secret button');
+    if (replace) settingsReplaceSecret(replace);
+    const input = field && field.querySelector('input[type="password"]');
+    if (!input) return;
+    input.value = Array.from(crypto.getRandomValues(new Uint8Array(32)), b => b.toString(16).padStart(2, '0')).join('');
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.focus();
 }
 
 // Raw log services other pages read (/api/settings/info), collected whatever is ticked
@@ -1606,6 +1917,9 @@ function renderSettingsEditField(key, value, sensitiveKeys, description, envLock
     const displayVal = value === null || value === undefined ? '' : (isBool ? value : String(value));
     const label = settingsFieldLabel(key);
     const descHtml = (description && description.trim()) ? '<p class="ui-set-desc">' + escapeHtml(description) + '</p>' : '';
+    const help = SETTINGS_FIELD_HELP[key] ? uiHelp(label, SETTINGS_FIELD_HELP[key]) : '';
+    // The "i" sits beside the name, outside its label: a button does not belong in a label
+    const fieldName = name => help ? '<div class="ui-set-name">' + name + help + '</div>' : name;
     const disabledAttr = envLocked ? 'disabled' : '';
     const envLockedHtml = '';
     const labelLockIcon = envLocked ? ' <span class="ui-set-pill" title="Set by an environment variable, change it there">' + LOCK + ' Set by ENV</span>' : '';
@@ -1646,10 +1960,10 @@ function renderSettingsEditField(key, value, sensitiveKeys, description, envLock
         if (hasDefault && !isUserSpecific && (isChanged || isSensitiveChanged)) {
             const defaultLabel = sensitive || String(defaultValue) === '' ? 'empty' : escapeHtml(String(defaultValue));
             clearBtnHtml = '<button type="button" class="settings-clear-btn ui-set-clear is-reset" data-key="' + keyAttr + '" data-default="' + escapeHtml(String(defaultValue)) + '" data-sensitive="' + sensitive + '" data-isbool="' + isBool + '">' +
-                '↺ Reset to default' + (isBool ? ': ' + defaultLabel : ' (' + defaultLabel + ')') + '</button>';
+                'Reset to default' + (isBool ? ': ' + defaultLabel : ' (' + defaultLabel + ')') + '</button>';
         } else if (!isBool && String(displayVal).trim() !== '' && !(sensitive && displayVal === '') && !(hasDefault && !isUserSpecific && String(displayVal) === String(defaultValue))) {
             clearBtnHtml = '<button type="button" class="settings-clear-btn ui-set-clear" data-key="' + keyAttr + '" data-default="' + (hasDefault ? escapeHtml(String(defaultValue)) : '') + '" data-sensitive="' + sensitive + '" data-isbool="false">' +
-                '× Clear</button>';
+                'Clear</button>';
         }
     }
 
@@ -1657,7 +1971,7 @@ function renderSettingsEditField(key, value, sensitiveKeys, description, envLock
     // picker (settingsChooseFolders). The hidden field carries the value into the save
     if (key === 'dmarc_imap_folder') {
         const raw = value === null || value === undefined ? '' : String(value);
-        return '<div class="ui-set-field' + (envLocked ? ' is-locked' : '') + '"><span class="ui-label" id="label-' + keyAttr + '">' + escapeHtml(label) + '</span>' +
+        return '<div class="ui-set-field' + (envLocked ? ' is-locked' : '') + '">' + fieldName('<span class="ui-label" id="label-' + keyAttr + '">' + escapeHtml(label) + '</span>') +
             descHtml +
             (envLocked ? '<p class="ui-set-env">' + LOCK + ' Set by ENV (DMARC_IMAP_FOLDER), change it there</p>' : '') +
             '<div class="ui-set-folders" role="group" aria-labelledby="label-' + keyAttr + '"><ul class="ui-set-folder-rows" data-folder-rows>' + settingsFolderRows(raw) + '</ul>' +
@@ -1670,13 +1984,18 @@ function renderSettingsEditField(key, value, sensitiveKeys, description, envLock
     const changed = (isChanged || isSensitiveChanged) && !envLocked ? ' is-changed' : '';
     const changedPill = changed ? ' <span class="ui-set-pill is-changed" title="Differs from the default">Changed</span>' : '';
 
+    const generateHtml = key === 'session_secret_key' && !envLocked
+        ? '<div><button type="button" class="ui-btn ui-btn-sm" onclick="settingsGenerateSecret(this)">' + escapeHtml(SETTINGS_GENERATE_KEY) + '</button></div>' : '';
+
     // A stored secret: say so, and offer Replace and Remove instead of a masked field
     if (sensitive && displayVal === '********') {
-        return '<div class="ui-set-field' + (envLocked ? ' is-locked' : '') + '"><label class="ui-label">' + escapeHtml(label) + labelLockIcon + '</label>' + descHtml +
+        return '<div class="ui-set-field' + (envLocked ? ' is-locked' : '') + '">' + fieldName('<label class="ui-label">' + escapeHtml(label) + labelLockIcon + '</label>') + descHtml +
             '<div class="ui-set-secret"><span class="ui-set-secret-state">' + (envLocked ? 'Stored in the environment' : 'Stored') + '</span>' +
             (envLocked ? '' : '<button type="button" class="ui-btn ui-btn-sm" onclick="settingsReplaceSecret(this)">Replace</button>' +
-                '<button type="button" class="ui-btn ui-btn-sm" onclick="settingsRemoveSecret(this)">Remove</button>') +
-            '<input type="hidden" id="edit-' + keyAttr + '" name="' + keyAttr + '" value="********"' + (envLocked ? ' disabled' : '') + '></div></div>';
+                '<button type="button" class="ui-btn ui-btn-sm" onclick="settingsRemoveSecret(this)"' + (key === 'auth_password' ? ' data-needs-basic-off' : '') + '>Remove</button>') +
+            '<input type="hidden" id="edit-' + keyAttr + '" name="' + keyAttr + '" value="********"' + (envLocked ? ' disabled' : '') + '></div>' +
+            (key === 'auth_password' && !envLocked ? '<small class="ui-muted hidden" data-remove-note>' + escapeHtml(SETTINGS_PASSWORD_REMOVE_OFF) + '</small>' : '') +
+            generateHtml + '</div>';
     }
 
     const segments = SETTINGS_SEGMENTED_OPTIONS[key];
@@ -1690,7 +2009,7 @@ function renderSettingsEditField(key, value, sensitiveKeys, description, envLock
         const segClearHtml = clearBtnHtml && defaultOption
             ? clearBtnHtml.replace(/\(([^()]*)\)<\/button>$/, '(' + escapeHtml(defaultOption[1]) + ')</button>')
             : clearBtnHtml;
-        return '<div class="ui-set-field ui-set-seg' + (envLocked ? ' is-locked' : '') + changed + '"><span class="ui-label" id="label-' + keyAttr + '">' + escapeHtml(label) + labelLockIcon + changedPill + '</span>' +
+        return '<div class="ui-set-field ui-set-seg' + (envLocked ? ' is-locked' : '') + changed + '">' + fieldName('<span class="ui-label" id="label-' + keyAttr + '">' + escapeHtml(label) + labelLockIcon + changedPill + '</span>') +
             descHtml +
             '<div class="ui-seg" role="group" aria-labelledby="label-' + keyAttr + '">' + buttons + '</div>' +
             '<input type="hidden" id="edit-' + keyAttr + '" name="' + keyAttr + '" value="' + escapeHtml(current) + '"' + (envLocked ? ' disabled' : '') + '>' +
@@ -1700,10 +2019,14 @@ function renderSettingsEditField(key, value, sensitiveKeys, description, envLock
     if (isBool) {
         // The whole row toggles, like a Features row: the row is the label (so its text is phrasing content)
         const asSpan = html => html.replace(/^<p /, '<span ').replace(/<\/p>$/, '</span>');
-        return '<div class="ui-set-bool' + (envLocked ? ' is-locked' : (isChanged ? ' is-changed' : '')) + '">' +
-            '<label for="edit-' + keyAttr + '" class="ui-set-bool-main">' +
-            '<input type="checkbox" id="edit-' + keyAttr + '" name="' + keyAttr + '" ' + (displayVal ? 'checked' : '') + ' ' + disabledAttr + ' class="ui-check">' +
-            '<span class="ui-set-bool-text"><span class="ui-set-bool-label">' + escapeHtml(label) + labelLockIcon + (envLocked ? '' : (isChanged ? ' <span class="ui-set-pill is-changed" title="Differs from the default">Changed</span>' : '')) + '</span>' + asSpan(descHtml) + asSpan(envLockedHtml) + '</span></label>' +
+        const boolName = escapeHtml(label) + labelLockIcon + (envLocked ? '' : (isChanged ? ' <span class="ui-set-pill is-changed" title="Differs from the default">Changed</span>' : ''));
+        const boolBox = '<input type="checkbox" id="edit-' + keyAttr + '" name="' + keyAttr + '" ' + (displayVal ? 'checked' : '') + ' ' + disabledAttr + ' class="ui-check">';
+        const boolRow = help
+            ? '<div class="ui-set-bool-main">' + boolBox + '<div class="ui-set-bool-text">' +
+                fieldName('<label for="edit-' + keyAttr + '" class="ui-set-bool-label">' + boolName + '</label>') + descHtml + '</div></div>'
+            : '<label for="edit-' + keyAttr + '" class="ui-set-bool-main">' + boolBox +
+                '<span class="ui-set-bool-text"><span class="ui-set-bool-label">' + boolName + '</span>' + asSpan(descHtml) + asSpan(envLockedHtml) + '</span></label>';
+        return '<div class="ui-set-bool' + (envLocked ? ' is-locked' : (isChanged ? ' is-changed' : '')) + '">' + boolRow +
             clearBtnHtml + '</div>';
     }
 
@@ -1727,7 +2050,7 @@ function renderSettingsEditField(key, value, sensitiveKeys, description, envLock
             ? '<small class="ui-text-warn" role="status" data-zone-note>' + escapeHtml(`"${current}" is not a known time zone, so the app uses UTC. `) +
                 (envLocked ? 'Fix TZ in the environment.' : 'Pick a time zone from the list.') + '</small>'
             : '';
-        return '<div class="ui-set-field' + (envLocked ? ' is-locked' : '') + '"><span class="ui-label" id="label-' + keyAttr + '">' + escapeHtml(label) + labelLockIcon + changedPill + '</span>' +
+        return '<div class="ui-set-field' + (envLocked ? ' is-locked' : '') + '">' + fieldName('<span class="ui-label" id="label-' + keyAttr + '">' + escapeHtml(label) + labelLockIcon + changedPill + '</span>') +
             descHtml + picker +
             '<input type="hidden" id="edit-' + keyAttr + '" name="' + keyAttr + '" value="' + escapeHtml(current) + '" data-saved="' + escapeHtml(current) + '"' + (envLocked ? ' disabled' : '') + '>' +
             note + clearBtnHtml + '</div>';
@@ -1737,15 +2060,16 @@ function renderSettingsEditField(key, value, sensitiveKeys, description, envLock
     const fieldOptions = SETTINGS_FIELD_OPTIONS[key];
     if (fieldOptions) {
         let optionsHtml = '';
+        // A stored level in other letters, or one the backend does not know, shows as what runs
+        const current = key === 'log_level' ? settingsLogLevel(displayVal) : String(displayVal);
         fieldOptions.forEach(function(opt) {
-            const selected = String(displayVal) === opt.value ? 'selected' : '';
+            const selected = current === opt.value ? 'selected' : '';
             optionsHtml += '<option value="' + escapeHtml(opt.value) + '" ' + selected + '>' + escapeHtml(opt.label) + '</option>';
         });
-        return '<div class="ui-set-field' + (envLocked ? ' is-locked' : '') + '"><label for="edit-' + keyAttr + '" class="ui-label">' + escapeHtml(label) + labelLockIcon + changedPill + '</label>' +
+        return '<div class="ui-set-field' + (envLocked ? ' is-locked' : '') + '">' + fieldName('<label for="edit-' + keyAttr + '" class="ui-label">' + escapeHtml(label) + labelLockIcon + changedPill + '</label>') +
             descHtml +
             '<select id="edit-' + keyAttr + '" name="' + keyAttr + '" ' + disabledAttr + ' class="ui-select' + changed + '">' +
             optionsHtml + '</select>' +
-            (key === 'time_format' ? '<small class="ui-muted" id="settings-format-example" aria-live="polite"></small>' : '') +
             clearBtnHtml +
             envLockedHtml + '</div>';
     }
@@ -1753,10 +2077,10 @@ function renderSettingsEditField(key, value, sensitiveKeys, description, envLock
     const inputType = sensitive ? 'password' : (isNum ? 'number' : 'text');
     const placeholder = envLocked ? 'Set by ENV' : (sensitive ? 'Not set' : '');
     const valAttr = (isBool ? '' : displayVal);
-    return '<div class="ui-set-field' + (envLocked ? ' is-locked' : '') + '"><label for="edit-' + keyAttr + '" class="ui-label">' + escapeHtml(label) + labelLockIcon + changedPill + '</label>' +
+    return '<div class="ui-set-field' + (envLocked ? ' is-locked' : '') + '">' + fieldName('<label for="edit-' + keyAttr + '" class="ui-label">' + escapeHtml(label) + labelLockIcon + changedPill + '</label>') +
         descHtml +
         '<input type="' + inputType + '" id="edit-' + keyAttr + '" name="' + keyAttr + '" value="' + escapeHtml(valAttr) + '" placeholder="' + escapeHtml(placeholder) + '" ' + disabledAttr + ' class="ui-input' + changed + '">' +
-        clearBtnHtml +
+        generateHtml + clearBtnHtml +
         envLockedHtml + '</div>';
 }
 
@@ -1807,6 +2131,7 @@ function settingsCheckFields(form, initialValues, fieldValue) {
         const tab = form.closest('#settings-content')?.querySelector(`.settings-edit-tab[data-tab="${panel.id.replace('settings-tab-panel-', '')}"]`);
         if (tab) tab.click();
     }
+    for (let fold = first.closest('details:not([open])'); fold; fold = fold.parentElement.closest('details:not([open])')) fold.open = true;
     first.focus({ preventScroll: true });   // Settings' own area scrolls, not the app frame (scrollIntoView can pan a phone's window)
     { let area = first.parentElement; while (area && !(area.scrollHeight > area.clientHeight && /auto|scroll/.test(getComputedStyle(area).overflowY))) area = area.parentElement; if (area) area.scrollTop += first.getBoundingClientRect().top - area.getBoundingClientRect().top - area.clientHeight / 2; }
     const label = first.closest('.ui-set-field, .ui-set-bool, .ui-set-wide')?.querySelector('.ui-label');
@@ -1848,7 +2173,7 @@ async function loadSettings() {
                 if (editableData.default_config) data.default_config = editableData.default_config;
                 if (editableData.settings_migrated !== undefined) data.settings_migrated = editableData.settings_migrated;
                 if (editableData.env_locked_keys) data.env_locked_keys = editableData.env_locked_keys;
-                data.legacy_auth_enabled = editableData.legacy_auth_enabled === true;
+                data.legacy_auth_enabled = data.legacy_auth_enabled === true || editableData.legacy_auth_enabled === true;
             }
         } catch (e) {
             console.warn('Could not load editable settings:', e);
@@ -1911,7 +2236,7 @@ async function loadSettings() {
         console.error('Failed to load settings:', error);
         loading.innerHTML = `
             <div class="ui-empty">
-                <p class="ui-text-fail">Failed to load settings</p>
+                <p class="ui-text-fail">Could not load settings. Reload this page to try again.</p>
                 <p>${escapeHtml(error.message)}</p>
             </div>
         `;
@@ -1922,8 +2247,8 @@ async function loadSettings() {
 function renderLatestVersionState(versionInfo) {
     // The server answers "unknown" when GitHub could not be reached
     if (versionInfo.latest_version === 'unknown') return `Not known ${uiTag('Check failed', 'warn')}`;
-    const tag = versionInfo.update_available ? uiTag('Update Available', 'ok')
-        : versionInfo.latest_version ? uiTag('Up to Date', 'info') : '';
+    const tag = versionInfo.update_available ? uiTag('Update available', 'ok')
+        : versionInfo.latest_version ? uiTag('Up to date', 'info') : '';
     return `${versionInfo.latest_version ? `v${escapeHtml(versionInfo.latest_version)}` : 'Checking...'} ${tag}`;
 }
 
@@ -1936,7 +2261,7 @@ function renderUpdateNote(versionInfo) {
                 <div class="ui-alert-title"><b>Update available!</b></div>
                 <p>A new version (v${escapeHtml(versionInfo.latest_version)}) is available on GitHub.</p>
                 ${versionInfo.changelog ? `<div class="update-changelog-content markdown-body ui-set-changelog"></div>` : ''}
-                <a href="https://github.com/ShlomiPorush/mailcow-logs-viewer/releases/latest" target="_blank" rel="noopener noreferrer" class="ui-link">View release notes →</a>
+                <a href="https://github.com/ShlomiPorush/mailcow-logs-viewer/releases/latest" target="_blank" rel="noopener noreferrer" class="ui-link">View release notes</a>
             </div>
         </div>`;
 }
@@ -1974,26 +2299,26 @@ function renderSettings(content, data) {
 
     const kv = (label, value, cls = '') => `<div class="ui-kv"><span>${label}</span><b class="${cls}">${value}</b></div>`;
     const readOnlyFacts = [
-        ['Fetch Interval', `${escapeHtml(String(config.fetch_interval || 0))} seconds`],
-        ['Fetch Count (Postfix)', `${escapeHtml(String(config.fetch_count_postfix || config.fetch_count || 0))} per request`],
-        ['Fetch Count (Rspamd)', `${escapeHtml(String(config.fetch_count_rspamd || config.fetch_count || 0))} per request`],
-        ['Fetch Count (Netfilter)', `${escapeHtml(String(config.fetch_count_netfilter || config.fetch_count || 0))} per request`],
-        ['Max Pages per Cycle', `${escapeHtml(String(config.fetch_max_pages || 50))}`],
+        ['Fetch interval', `${escapeHtml(String(config.fetch_interval || 0))} seconds`],
+        ['Postfix logs per request', `${escapeHtml(String(config.fetch_count_postfix || config.fetch_count || 0))} per request`],
+        ['Rspamd logs per request', `${escapeHtml(String(config.fetch_count_rspamd || config.fetch_count || 0))} per request`],
+        ['Netfilter logs per request', `${escapeHtml(String(config.fetch_count_netfilter || config.fetch_count || 0))} per request`],
+        ['Maximum pages per fetch', `${escapeHtml(String(config.fetch_max_pages || 50))}`],
         ['Retention', `${escapeHtml(String(config.retention_days || 0))} days`],
-        ['Max Correlation Age', `${escapeHtml(String(config.max_correlation_age_minutes || 10))} minutes`],
-        ['Correlation Check', `${escapeHtml(String(config.correlation_check_interval || 120))} seconds`],
-        ['Timezone', escapeHtml(config.timezone || 'N/A')],
-        ['Date Format', escapeHtml(config.date_format || 'browser')],
-        ['Time Format', escapeHtml(config.time_format || '24h')],
-        ['Log Level', escapeHtml(config.log_level || 'INFO')],
-        ['Blacklist', config.blacklist_enabled ? `Enabled (${escapeHtml(String(config.blacklist_count))} emails)` : 'Disabled'],
-        ['Scheduler Workers', `${escapeHtml(String(config.scheduler_workers || 4))}`],
+        ['Stop linking after', `${escapeHtml(String(config.max_correlation_age_minutes || 10))} minutes`],
+        ['Check for links every', `${escapeHtml(String(config.correlation_check_interval || 120))} seconds`],
+        ['Time zone', escapeHtml(config.timezone || 'N/A')],
+        ['Date format', escapeHtml(config.date_format || 'browser')],
+        ['Time format', escapeHtml(config.time_format || '24h')],
+        ['Log level', escapeHtml(settingsLogLevel(config.log_level))],
+        ['Excluded email addresses', config.blacklist_enabled ? `Enabled (${escapeHtml(String(config.blacklist_count))} addresses)` : 'Disabled'],
+        ['Background job workers', `${escapeHtml(String(config.scheduler_workers || 4))}`],
     ];
 
     const editing = !!(data.settings_edit_via_ui_enabled && data.editable_config);
     content.innerHTML = `
         ${!data.settings_edit_via_ui_enabled ? `<div class="ui-list-note ui-flush">${uiLocked('Editing settings is off',
-            'These values come from the environment and are shown read-only. To change them here, set <code>SETTINGS_EDIT_VIA_UI_ENABLED=true</code> in <code>.env</code> and run <code>docker compose up -d</code>. A restart does not read <code>.env</code> again.', '')}</div>` : ''}
+            'To edit settings here, set <code>SETTINGS_EDIT_VIA_UI_ENABLED=true</code> in <code>.env</code> and run <code>docker compose up -d</code>.', '')}</div>` : ''}
 
         ${!data.settings_edit_via_ui_enabled ? `
         <section class="ui-panel">
@@ -2001,7 +2326,7 @@ function renderSettings(content, data) {
             <div class="ui-md-ids ui-set-facts">
                 ${readOnlyFacts.map(([label, value]) => `<div class="ui-md-fact"><span>${label}</span><div>${value}</div></div>`).join('')}
                 ${Object.keys(CREDENTIAL_CHECKS).map(name => `<div class="ui-md-fact"><span>${CREDENTIAL_CHECKS[name].label}</span>${credentialCheckFact(name, config[name + '_status'], '')}</div>`).join('')}
-                <div class="ui-md-fact"><span>MaxMind Status</span>
+                <div class="ui-md-fact"><span>MaxMind status</span>
                     <div class="ui-chip-row">
                         <span id="maxmind-license-status">${renderMaxMindStatus(data.configuration.maxmind_status)}</span>
                         ${data.geoip_configuration ? renderGeoIPDbStatus(data.geoip_configuration) : ''}
@@ -2117,10 +2442,10 @@ function renderSettings(content, data) {
 
                 // Special handling for SMTP tab - add Global SMTP Configuration
                 if (tab.id === 'smtp' && data.smtp_configuration) {
-                    const facts = [['SMTP Enabled', onOff(data.smtp_configuration.enabled) + '<button type="button" onclick="testSmtpConnection()" class="ui-btn ui-btn-sm">Test SMTP</button>']];
+                    const facts = [['Email delivery', onOff(data.smtp_configuration.enabled) + '<button type="button" onclick="testSmtpConnection()" class="ui-btn ui-btn-sm">Send test email</button>']];
                     if (data.smtp_configuration.enabled) {
                         facts.push(['Server', '<span class="ui-mono">' + escapeHtml(data.smtp_configuration.host) + ':' + escapeHtml(data.smtp_configuration.port) + '</span>']);
-                        facts.push(['Admin Email', '<span class="ui-mono">' + escapeHtml(data.smtp_configuration.admin_email || 'N/A') + '</span>']);
+                        facts.push(['Admin email', '<span class="ui-mono">' + escapeHtml(data.smtp_configuration.admin_email || 'N/A') + '</span>']);
                     }
                     tabsHtml += statusBlock(facts);
                 }
@@ -2133,11 +2458,11 @@ function renderSettings(content, data) {
                 // Special handling for the DMARC & TLS IMAP tab - add the report management facts
                 if (tab.id === 'dmarc_imap' && data.dmarc_configuration) {
                     const facts = [
-                        ['IMAP Auto-Import', onOff(data.dmarc_configuration.imap_sync_enabled) + '<button type="button" onclick="testImapConnection()" class="ui-btn ui-btn-sm">Test IMAP</button>'],
-                        ['Manual Upload', onOff(data.dmarc_configuration.manual_upload_enabled, 'fail')]
+                        ['Automatic report import', onOff(data.dmarc_configuration.imap_sync_enabled) + '<button type="button" onclick="testImapConnection()" class="ui-btn ui-btn-sm">Test IMAP connection</button>'],
+                        ['Report uploads', onOff(data.dmarc_configuration.manual_upload_enabled, 'fail')]
                     ];
                     if (data.dmarc_configuration.imap_sync_enabled) {
-                        facts.push(['IMAP Server', '<span class="ui-mono">' + escapeHtml(data.dmarc_configuration.imap_host || 'N/A') + '</span>']);
+                        facts.push(['IMAP server', '<span class="ui-mono">' + escapeHtml(data.dmarc_configuration.imap_host || 'N/A') + '</span>']);
                     }
                     tabsHtml += statusBlock(facts);
                 }
@@ -2156,7 +2481,7 @@ function renderSettings(content, data) {
                     tabsHtml += statusBlock([
                         ['License', '<span id="maxmind-license-status-tab">' + renderMaxMindStatus(data.configuration.maxmind_status) + '</span>'
                             + maxmindValidateButton(data.geoip_configuration)],
-                        ['Database Health', '<span id="geoip-db-status" class="ui-chip-row">' + (renderGeoIPDbStatus(geoipCfg) || '<span class="ui-muted">Not configured</span>') + '</span>'],
+                        ['Database status', '<span id="geoip-db-status" class="ui-chip-row">' + (renderGeoIPDbStatus(geoipCfg) || '<span class="ui-muted">Not configured</span>') + '</span>'],
                         ['Databases', (cityDb.available || asnDb.available) ? dbLine('City', cityDb) + dbLine('ASN', asnDb) : '<span class="ui-muted">Not installed</span>']
                     ]);
                 }
@@ -2187,7 +2512,7 @@ function renderSettings(content, data) {
             <div class="settings-edit-content" data-keep-scroll>
                 ${!data.settings_migrated ? `<div class="ui-set-actions" id="settings-edit-actions">
                     <button type="button" id="settings-import-env-btn" class="ui-btn ui-btn-primary">Migrate Settings from ENV</button>
-                    <p class="ui-set-migrate-note">Click once to copy your current configuration into the database. After that you can edit the fields below and save.</p>
+                    <p class="ui-set-migrate-note">Copy your current configuration to the database to start editing settings here.</p>
                 </div>` : ''}
                 <form id="settings-edit-form" class="ui-set-form">
                     <!-- Until the first migration nothing can be saved, so the fields stay
@@ -2210,22 +2535,22 @@ function renderSettings(content, data) {
         <div class="ui-dash-grid ui-status-pair">
             <!-- Global SMTP Configuration -->
             <section class="ui-panel">
-                <div class="ui-panel-head">Global SMTP Configuration
-                    <button type="button" onclick="testSmtpConnection()" class="ui-btn ui-btn-sm ui-head-actions">Test SMTP</button></div>
-                <div class="ui-kv"><span>SMTP Enabled</span><b>${data.smtp_configuration?.enabled ? uiTag('Enabled', 'ok') : uiTag('Disabled', '')}</b></div>
+                <div class="ui-panel-head">SMTP configuration
+                    <button type="button" onclick="testSmtpConnection()" class="ui-btn ui-btn-sm ui-head-actions">Send test email</button></div>
+                <div class="ui-kv"><span>Email delivery</span><b>${data.smtp_configuration?.enabled ? uiTag('Enabled', 'ok') : uiTag('Disabled', '')}</b></div>
                 ${data.smtp_configuration?.enabled ? `
                 <div class="ui-kv"><span>Server</span><b class="ui-mono ui-kv-small">${escapeHtml(String(data.smtp_configuration.host))}:${escapeHtml(String(data.smtp_configuration.port))}</b></div>
-                <div class="ui-kv"><span>Admin Email</span><b class="ui-mono ui-kv-small">${escapeHtml(data.smtp_configuration.admin_email || 'N/A')}</b></div>
+                <div class="ui-kv"><span>Admin email</span><b class="ui-mono ui-kv-small">${escapeHtml(data.smtp_configuration.admin_email || 'N/A')}</b></div>
                 ` : ''}
             </section>
 
             <!-- DMARC & TLS report management -->
             <section class="ui-panel">
-                <div class="ui-panel-head">DMARC &amp; TLS Reports
-                    <button type="button" onclick="testImapConnection()" class="ui-btn ui-btn-sm ui-head-actions">Test IMAP</button></div>
-                <div class="ui-kv"><span>IMAP Auto-Import</span><b>${data.dmarc_configuration?.imap_sync_enabled ? uiTag('Enabled', 'ok') : uiTag('Disabled', '')}</b></div>
-                <div class="ui-kv"><span>Manual Upload</span><b>${data.dmarc_configuration?.manual_upload_enabled ? uiTag('Enabled', 'ok') : uiTag('Disabled', 'fail')}</b></div>
-                ${data.dmarc_configuration?.imap_sync_enabled ? `<div class="ui-kv"><span>IMAP Server</span><b class="ui-mono ui-kv-small">${escapeHtml(data.dmarc_configuration.imap_host || 'N/A')}</b></div>` : ''}
+                <div class="ui-panel-head">DMARC &amp; TLS reports
+                    <button type="button" onclick="testImapConnection()" class="ui-btn ui-btn-sm ui-head-actions">Test IMAP connection</button></div>
+                <div class="ui-kv"><span>Automatic report import</span><b>${data.dmarc_configuration?.imap_sync_enabled ? uiTag('Enabled', 'ok') : uiTag('Disabled', '')}</b></div>
+                <div class="ui-kv"><span>Report uploads</span><b>${data.dmarc_configuration?.manual_upload_enabled ? uiTag('Enabled', 'ok') : uiTag('Disabled', 'fail')}</b></div>
+                ${data.dmarc_configuration?.imap_sync_enabled ? `<div class="ui-kv"><span>IMAP server</span><b class="ui-mono ui-kv-small">${escapeHtml(data.dmarc_configuration.imap_host || 'N/A')}</b></div>` : ''}
             </section>
         </div>
 
@@ -2422,9 +2747,8 @@ function renderSettings(content, data) {
             form.addEventListener('change', settingsShowCodesNeeds);
             form.addEventListener('input', settingsShowCodesNeeds);
             settingsLoadCodesSeen(content);
-            settingsShowFormatExample(content);
-            form.addEventListener('change', () => settingsShowFormatExample(content));
             settingsShowNeeds(content);
+            settingsLockPasswordRemove(content, data.legacy_auth_enabled);
             settingsApplySync(false);
             settingsSuggestAgentUrl(content, true);
             settingsLockAgentAccess(content, false, data.legacy_auth_enabled);
@@ -2433,10 +2757,11 @@ function renderSettings(content, data) {
                 if (event.target && ['edit-basic_auth_enabled', 'edit-oauth2_enabled'].includes(event.target.id)) settingsLockAgentAccess(content, true, data.legacy_auth_enabled);
                 settingsSuggestAgentUrl(content, !!event.target && event.target.id === 'edit-agent_access_enabled');
                 settingsShowNeeds(content);
+                settingsLockPasswordRemove(content, data.legacy_auth_enabled);
             });
             form.addEventListener('input', () => settingsSuggestAgentUrl(content, false));
             // Clearing and resetting change a field without an input event
-            content.querySelectorAll('.settings-clear-btn').forEach(btn => btn.addEventListener('click', () => setTimeout(() => { updateDirty(); settingsShowNeeds(content); settingsShowFormatExample(content); settingsSuggestAgentUrl(content, false); content.querySelectorAll('.ui-set-codes').forEach(settingsShowCodes); })));
+            content.querySelectorAll('.settings-clear-btn').forEach(btn => btn.addEventListener('click', () => setTimeout(() => { updateDirty(); settingsShowNeeds(content); settingsLockPasswordRemove(content, data.legacy_auth_enabled); settingsSuggestAgentUrl(content, false); content.querySelectorAll('.ui-set-codes').forEach(settingsShowCodes); })));
         }
 
         if (form) {
@@ -2472,7 +2797,7 @@ function renderSettings(content, data) {
                     const passwordEl = form.querySelector('[name="auth_password"]');
                     const passwordVal = passwordEl ? passwordEl.value : '';
                     if (!passwordVal || passwordVal === '********' && !data.editable_config.auth_password) {
-                        showToast('Cannot enable Basic Auth without a password. Please set a password first.', 'error');
+                        showToast('Set a password before enabling Basic Auth.', 'error');
                         return;
                     }
 
@@ -2568,7 +2893,7 @@ function renderSettings(content, data) {
                     }
                     if (checkToast) showToast(...checkToast);
                     if (isEnablingBasicAuth) {
-                        showToast('Basic Auth enabled successfully! You will need to log in on your next visit.', 'success');
+                        showToast('Basic Auth enabled.', 'success');
                     }
                     
                     // Detect if MaxMind credentials were changed - show setup modal
@@ -2647,13 +2972,13 @@ function renderSettings(content, data) {
                     await loadSettings();
                 } catch (err) {
                     uiSaveBarBusy('settings-savebar', false);
-                    showToast('Failed to save: ' + (err.message || err), 'error');
+                    showToast('Could not save settings. Try again. Details: ' + (err.message || err), 'error');
                 }
             };
         }
         if (importBtn) {
             importBtn.onclick = async () => {
-                if (!await showConfirmModal({ title: 'Import from ENV', message: 'Import current configuration from ENV into DB? This will overwrite existing DB-stored values.', confirmText: 'Import' })) return;
+                if (!await showConfirmModal({ title: 'Migrate settings from ENV', message: 'Copy the current environment settings to the database? This replaces any settings already stored there.', confirmText: 'Migrate' })) return;
                 try {
                     importBtn.disabled = true;
                     const res = await authenticatedFetch('/api/settings/import-from-env', { method: 'POST' });
@@ -2664,7 +2989,7 @@ function renderSettings(content, data) {
                     }
                     await loadSettings();
                 } catch (err) {
-                    showToast('Import failed: ' + (err.message || err), 'error');
+                    showToast('Could not migrate settings. Try again. Details: ' + (err.message || err), 'error');
                 } finally {
                     importBtn.disabled = false;
                 }
@@ -2682,7 +3007,7 @@ async function showGeoIPSetupModal(reloadPage = false) {
         if (button && !button.disabled) button.click();
     };
     const { backdrop: overlay, dialog } = uiDialog({
-        id: 'geoip-setup-overlay', title: 'GeoIP Database Setup', size: 'sm',
+        id: 'geoip-setup-overlay', title: 'GeoIP database setup', size: 'sm',
         close: closeWhenDone, backdropClose: closeWhenDone,
         bodyId: 'geoip-setup-steps', bodyClass: 'ui-geo-steps',
         body: `
@@ -2695,7 +3020,7 @@ async function showGeoIPSetupModal(reloadPage = false) {
                     </div>
                     <div>
                         <p class="ui-geo-title">Checking credentials</p>
-                        <p id="geoip-step-1-detail" class="ui-set-desc">Verifying MaxMind configuration</p>
+                        <p id="geoip-step-1-detail" class="ui-set-desc">Checking MaxMind credentials</p>
                     </div>
                 </div>
                 <div id="geoip-step-2" class="ui-geo-step opacity-40">
@@ -2715,7 +3040,7 @@ async function showGeoIPSetupModal(reloadPage = false) {
                         <div class="ui-geo-pending"></div>
                     </div>
                     <div>
-                        <p class="ui-geo-title">Validate database integrity</p>
+                        <p class="ui-geo-title">Check the databases</p>
                         <p id="geoip-step-3-detail" class="ui-set-desc">Waiting...</p>
                     </div>
                 </div>`,
@@ -2760,7 +3085,7 @@ async function showGeoIPSetupModal(reloadPage = false) {
     try {
         // ── Step 1: Verify credentials are configured ──
         const credRes = await authenticatedFetch('/api/settings/geoip/status');
-        if (!credRes.ok) throw new Error('Failed to check status');
+        if (!credRes.ok) throw new Error('Could not read GeoIP status. Check your connection and try again.');
         const credStatus = await credRes.json();
         
         if (credStatus.configured) {
@@ -2773,14 +3098,14 @@ async function showGeoIPSetupModal(reloadPage = false) {
                 setStepStatus(1, 'success', 'Credentials configured');
             } else if (valLicData && valLicData.error) {
                 _cachedMaxMindStatus = valLicData;
-                setStepStatus(1, 'error', 'License validation failed: ' + valLicData.error);
+                setStepStatus(1, 'error', 'Could not validate the license. Check your MaxMind credentials. Details: ' + valLicData.error);
                 setupOver();
                 return;
             } else {
                 setStepStatus(1, 'success', 'Credentials configured');
             }
         } else {
-            setStepStatus(1, 'error', 'MaxMind Account ID or License Key is missing');
+            setStepStatus(1, 'error', 'Add a MaxMind account ID and license key in Settings > MaxMind.');
             setupOver();
             return;
         }
@@ -2794,7 +3119,7 @@ async function showGeoIPSetupModal(reloadPage = false) {
         const asnAvail = geoipStatus.databases?.ASN?.available;
         
         if (cityAvail && asnAvail) {
-            setStepStatus(2, 'success', 'Databases already installed');
+            setStepStatus(2, 'success', 'Databases installed');
         } else {
             // Need to download
             setStepStatus(2, 'running', 'Downloading GeoIP databases...');
@@ -2840,13 +3165,13 @@ async function showGeoIPSetupModal(reloadPage = false) {
             });
             
             if (downloadComplete === true) {
-                setStepStatus(2, 'success', 'Databases downloaded successfully');
+                setStepStatus(2, 'success', 'Download job finished');
             } else {
-                const errMsg = typeof downloadComplete === 'string' ? downloadComplete : 'Download failed - check logs for details';
+                const errMsg = typeof downloadComplete === 'string' ? downloadComplete : 'The download did not finish in time. Check Status for progress.';
                 // Check if it's a credentials error
                 const isCredError = errMsg.toLowerCase().includes('401') || errMsg.toLowerCase().includes('unauthorized') || errMsg.toLowerCase().includes('invalid');
                 if (isCredError) {
-                    setStepStatus(1, 'error', 'Invalid credentials - download rejected by MaxMind');
+                    setStepStatus(1, 'error', 'MaxMind rejected the download. Check your account ID and license key.');
                 }
                 setStepStatus(2, 'error', errMsg);
                 setupOver();
@@ -2855,15 +3180,15 @@ async function showGeoIPSetupModal(reloadPage = false) {
         }
         
         // ── Step 3: Validate DB integrity ──
-        setStepStatus(3, 'running', 'Running test queries...');
+        setStepStatus(3, 'running', 'Checking the databases...');
         
         const valRes = await authenticatedFetch('/api/settings/geoip/validate', { method: 'POST' });
         const valData = await valRes.json();
         
         if (valData.valid) {
-            setStepStatus(3, 'success', 'Database integrity verified - GeoIP is ready');
+            setStepStatus(3, 'success', 'Database check passed. GeoIP is ready.');
         } else {
-            setStepStatus(3, 'error', valData.error || 'Validation failed - database may be corrupt');
+            setStepStatus(3, 'error', valData.error || 'Database check failed. Check the application logs, then close this window and try Repair.');
         }
         
     } catch (err) {
@@ -2908,7 +3233,7 @@ async function validateMaxMindLicense() {
         if (result.valid) {
             showToast('MaxMind license is valid', 'success');
         } else if (result.error) {
-            showToast('MaxMind license validation failed: ' + result.error, 'error');
+            showToast('Could not validate the MaxMind license. Check your credentials. Details: ' + result.error, 'error');
         }
     } catch (error) {
         console.error('Failed to validate MaxMind license:', error);
@@ -2917,7 +3242,7 @@ async function validateMaxMindLicense() {
             const el = document.getElementById(id);
             if (el) el.innerHTML = errorHtml;
         });
-        showToast('Failed to validate MaxMind license', 'error');
+        showToast('Could not validate the MaxMind license. Check your connection and try again.', 'error');
     }
 }
 
@@ -2939,10 +3264,10 @@ async function repairGeoIPDatabase() {
         // Step 1: Trigger re-download of databases
         const downloadRes = await authenticatedFetch('/api/settings/geoip/download', { method: 'POST' });
         if (!downloadRes.ok) {
-            throw new Error('Failed to start download');
+            throw new Error('Could not start the download. Check your MaxMind credentials and try again.');
         }
 
-        showToast('GeoIP database re-download started…', 'info');
+        showToast('GeoIP download check started...', 'info');
 
         // Step 2: Poll geoip/status until download completes (max 60s)
         let attempts = 0;
@@ -2965,9 +3290,9 @@ async function repairGeoIPDatabase() {
                                 statusEl.innerHTML = renderGeoIPDbStatus(cfg);
                             }
                             if (result.valid) {
-                                showToast('GeoIP databases repaired successfully', 'success');
+                                showToast('GeoIP database check passed.', 'success');
                             } else {
-                                showToast('GeoIP databases re-downloaded but validation still failed', 'error');
+                                showToast('Database check still failed after the download. Check the application logs.', 'error');
                             }
                         }
                         return;
@@ -2980,7 +3305,7 @@ async function repairGeoIPDatabase() {
             if (attempts < maxAttempts) {
                 setTimeout(pollStatus, pollInterval);
             } else {
-                showToast('GeoIP repair timed out - check Status page for progress', 'warning');
+                showToast('The repair is taking longer than expected. Check Status for progress.', 'warning');
                 if (statusEl) {
                     statusEl.innerHTML = '<span class="text-xs text-gray-500">Check Status page</span>';
                 }
@@ -2991,7 +3316,7 @@ async function repairGeoIPDatabase() {
 
     } catch (error) {
         console.error('Failed to repair GeoIP databases:', error);
-        showToast('Failed to repair GeoIP databases: ' + error.message, 'error');
+        showToast('Could not repair the GeoIP databases. Check Status and try again. Details: ' + error.message, 'error');
         if (statusEl) {
             statusEl.innerHTML = renderGeoIPDbStatus({ db_valid: false });
         }
@@ -3002,24 +3327,24 @@ async function repairGeoIPDatabase() {
 // failure says what it means and what to do about it.
 const CREDENTIAL_CHECKS = {
     mailcow_rw_key: {
-        label: 'Read-Write API Key',
+        label: 'Read-write API key',
         endpoint: '/api/settings/mailcow/rw-key/validate',
-        missing: 'Add a Read-Write API key first',
-        accepted: 'mailcow accepted the Read-Write API key',
+        missing: 'Add a read-write API key first',
+        accepted: 'mailcow accepted the read-write API key',
         errors: {
-            rejected: ['Rejected', 'mailcow rejected the Read-Write API key. Check in mailcow under System → Configuration → Access → Administrators → API that the key is correct and active, and that the IP address of this server is allowed. A key from mailcow.conf has its allowed IPs there (API_ALLOW_FROM).'],
-            read_only: ['Read-only key', 'This is a read-only API key. Paste a key with Read-Write Access from System → Configuration → Access → Administrators → API in mailcow.'],
-            connection: ['Connection error', 'Could not reach mailcow to check the Read-Write API key. Check the mailcow URL and try again.'],
-            unexpected: ['Unexpected answer', 'mailcow gave an unexpected answer when checking the Read-Write API key. Check the mailcow URL and the application logs.']
+            rejected: ['Rejected', "mailcow rejected the read-write API key. Check that the key is active and allows this server's IP in mailcow > System > Configuration > Access > Administrators > API. A key from mailcow.conf takes its allowed IPs from API_ALLOW_FROM in that file."],
+            read_only: ['Read-only key', 'This key is read-only. Enter a read-write API key from mailcow > System > Configuration > Access > Administrators > API.'],
+            connection: ['Connection error', 'Could not reach mailcow to check the read-write API key. Check the mailcow URL and try again.'],
+            unexpected: ['Unexpected answer', 'mailcow returned an unexpected response for the read-write API key. Check the mailcow URL and the application logs.']
         }
     },
     rspamd_password: {
-        label: 'Rspamd Password',
+        label: 'Rspamd password',
         endpoint: '/api/settings/rspamd/password/validate',
         missing: 'Add the Rspamd password first',
         accepted: 'Rspamd accepted the password',
         errors: {
-            rejected: ['Rejected', 'Rspamd rejected the password. Use the Rspamd UI password set in mailcow under System → Configuration → Access → Rspamd UI.'],
+            rejected: ['Rejected', 'Rspamd rejected the password. Enter the password from mailcow > System > Configuration > Access > Rspamd UI.'],
             redirected: ['Redirected', 'A proxy answered before Rspamd could check the password. Set the Rspamd URL to reach Rspamd directly, for example http://rspamd-mailcow:11334.'],
             connection: ['Connection error', 'Could not reach Rspamd to check the password. Check the Rspamd URL, or the mailcow URL when it is empty, and try again.'],
             unexpected: ['Unexpected answer', 'Rspamd gave an unexpected answer when checking the password. Check the Rspamd URL and the application logs.']
@@ -3113,7 +3438,7 @@ function renderMaxMindStatus(status) {
     // null/undefined = not checked yet (user must click 'Validate License')
     if (status === null || status === undefined) return uiTag('Not checked', '');
     if (!status.configured) return uiTag('Not configured', '');
-    return status.valid ? uiTag('License Valid', 'ok') : uiTag(status.error || 'Invalid', 'fail');
+    return status.valid ? uiTag('License valid', 'ok') : uiTag(status.error || 'Invalid', 'fail');
 }
 
 // Validate needs a MaxMind Account ID and License Key; without them the button stays, disabled, and says so
@@ -3121,7 +3446,7 @@ function maxmindValidateButton(geoipConfig) {
     if (!geoipConfig) return '';
     return geoipConfig.enabled
         ? '<button type="button" onclick="validateMaxMindLicense()" class="ui-btn ui-btn-sm">Validate</button>'
-        : '<button type="button" class="ui-btn ui-btn-sm" disabled title="Add a MaxMind Account ID and License Key first">Validate</button>';
+        : '<button type="button" class="ui-btn ui-btn-sm" disabled title="Add a MaxMind account ID and license key first">Validate</button>';
 }
 
 function renderGeoIPDbStatus(geoipConfig) {
@@ -3132,11 +3457,11 @@ function renderGeoIPDbStatus(geoipConfig) {
 
     const dbValid = geoipConfig.db_valid;
 
-    if (dbValid === true) return uiTag('DB Healthy', 'ok');
+    if (dbValid === true) return uiTag('Databases ready', 'ok');
     if (dbValid === false) {
         return `
             <span id="geoip-db-status" class="ui-chip-row">
-                ${uiTag('DB Corrupt', 'fail')}
+                ${uiTag('Database check failed', 'fail')}
                 <button type="button" onclick="repairGeoIPDatabase()" class="ui-btn ui-btn-sm">Repair</button>
             </span>
         `;
@@ -3144,7 +3469,7 @@ function renderGeoIPDbStatus(geoipConfig) {
     // null = not checked yet - could be downloading
     const dbs = geoipConfig.databases || {};
     const cityAvail = dbs.City && dbs.City.available;
-    return cityAvail ? uiTag('Checking...', '') : uiTag('Downloading...', 'warn');
+    return cityAvail ? uiTag('Not checked', '') : uiTag('Not installed', 'warn');
 }
 
 // =============================================================================
@@ -3152,7 +3477,7 @@ function renderGeoIPDbStatus(geoipConfig) {
 // =============================================================================
 
 async function testSmtpConnection() {
-    const run = showConnectionTestModal('SMTP Connection Test', 'Testing SMTP connection...');
+    const run = showConnectionTestModal('SMTP connection test', 'Testing SMTP connection...');
 
     try {
         const response = await authenticatedFetch('/api/settings/test/smtp', {
@@ -3171,14 +3496,14 @@ async function testSmtpConnection() {
 
     } catch (error) {
         updateConnectionTestModal('error', [
-            'Failed to test SMTP connection',
+            'Could not test SMTP. Check your connection and try again.',
             `Error: ${error.message}`
         ], run);
     }
 }
 
 async function testImapConnection() {
-    const run = showConnectionTestModal('IMAP Connection Test', 'Testing IMAP connection...');
+    const run = showConnectionTestModal('IMAP connection test', 'Testing IMAP connection...');
 
     try {
         const response = await authenticatedFetch('/api/settings/test/imap', {
@@ -3197,7 +3522,7 @@ async function testImapConnection() {
 
     } catch (error) {
         updateConnectionTestModal('error', [
-            'Failed to test IMAP connection',
+            'Could not test IMAP. Check your connection and try again.',
             `Error: ${error.message}`
         ], run);
     }
@@ -3231,7 +3556,7 @@ function updateConnectionTestModal(status, logs, run) {
 
     const ok = status === 'success';
     content.innerHTML = `
-        <div class="ui-md-verdict-bar ${ok ? 'ui-md-verdict-ok' : 'ui-md-verdict-fail'}">${ok ? 'Connection Successful' : 'Connection Failed'}</div>
+        <div class="ui-md-verdict-bar ${ok ? 'ui-md-verdict-ok' : 'ui-md-verdict-fail'}">${ok ? 'Test passed' : 'Test failed'}</div>
         <div class="ui-set-log">
             ${logs.map(log => {
         let tone = '';

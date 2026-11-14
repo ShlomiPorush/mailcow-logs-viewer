@@ -61,18 +61,18 @@ def _job_off_reason(key: str):
                                'Needs the Read-Write API key or the Rspamd password', 'mailcow')],
         'send_weekly_summary': [(not settings.enable_weekly_summary, 'The weekly summary is turned off', 'notifications')],
         # Worded as the Outbound settings name them
-        'detect_suppressions': [(not settings.suppression_enabled, '"Handle undeliverable mail automatically" is off', 'outbound'),
+        'detect_suppressions': [(not settings.suppression_enabled, '"Handle failed mail automatically" is off', 'outbound'),
                                 (not settings.suppression_auto_detect, 'No choice under Outbound needs the mail logs', 'outbound')],
         # It reads the app's Rspamd blocks; it writes them only with the Read-Write key
         'sync_suppressions': [(not settings.suppression_rspamd_sync, '"Sync with Rspamd" is off', 'outbound'),
                               (not settings.is_rspamd_configured, 'Needs the Rspamd password', 'mailcow')],
-        'expire_suppressions': [(not settings.suppression_enabled, '"Handle undeliverable mail automatically" is off', 'outbound')],
+        'expire_suppressions': [(not settings.suppression_enabled, '"Handle failed mail automatically" is off', 'outbound')],
         'process_quarantine_rules': [(not rw, 'Needs the Read-Write API key (MAILCOW_API_KEY_RW)', 'mailcow')],
-        'cleanup_deferred_queue': [(not settings.suppression_enabled, '"Handle undeliverable mail automatically" is off', 'outbound'),
+        'cleanup_deferred_queue': [(not settings.suppression_enabled, '"Handle failed mail automatically" is off', 'outbound'),
                                    (not settings.queue_cleanup_enabled, 'Temporary delivery failure is set to keep retrying', 'outbound'),
                                    (not rw, 'Needs the Read-Write API key (MAILCOW_API_KEY_RW)', 'mailcow')],
         'anomaly_detection': [(not settings.anomaly_detection_enabled, 'Anomaly detection is turned off', 'anomaly')],
-        'smtp_abuse': [(not settings.smtp_abuse_enabled, 'SMTP abuse protection is turned off', 'smtp_abuse'),
+        'smtp_abuse': [(not settings.smtp_abuse_enabled, 'Outgoing spam protection is turned off', 'smtp_abuse'),
                        (not rw, 'Needs the Read-Write API key (MAILCOW_API_KEY_RW)', 'mailcow')],
     }
     for off, reason, section in checks.get(key, []):
@@ -187,7 +187,7 @@ def _normalize_booleans(allowed: Dict[str, Any]) -> None:
             continue
         parsed = False if value is None else parse_bool(value)
         if parsed is None:
-            raise HTTPException(status_code=400, detail=f"Invalid settings for: {key}")
+            raise HTTPException(status_code=400, detail=f"Enter a valid value for {key}.")
         allowed[key] = parsed
 
 
@@ -227,9 +227,9 @@ def _reject_moved_secrets(allowed: Dict[str, Any]) -> None:
 
 # Settings that take one or more email addresses
 _ADDRESS_LIST_LABELS = {
-    "admin_email": "Admin Email",
-    "blacklist_alert_email": "Blacklist Alert Email",
-    "dmarc_error_email": "Report Import Error Email",
+    "admin_email": "Admin email",
+    "blacklist_alert_email": "Blocklist alert email",
+    "dmarc_error_email": "Report import error email",
 }
 
 
@@ -331,12 +331,12 @@ def _validate_session_limits(allowed: Dict[str, Any]) -> None:
         try:
             value = _whole_number(allowed[key])
         except (TypeError, ValueError):
-            raise HTTPException(status_code=400, detail=f"Invalid settings for: {key}")
+            raise HTTPException(status_code=400, detail=f"Enter a valid value for {key}.")
         allowed[key] = value
         if value == getattr(settings, key, None):
             continue
         if value < low or (high is not None and value > high):
-            raise HTTPException(status_code=400, detail=f"Invalid settings for: {key}")
+            raise HTTPException(status_code=400, detail=f"Enter a valid value for {key}.")
 
 
 def _validate_display_formats(allowed: Dict[str, Any]) -> None:
@@ -377,7 +377,7 @@ def _validate_time_zone(allowed: Dict[str, Any], db: Session) -> None:
         if "tz" in get_env_locked_keys():
             del allowed["tz"]
         return
-    raise HTTPException(status_code=400, detail=f"Unknown time zone: {zone}")
+    raise HTTPException(status_code=400, detail=f"Unknown time zone: {zone}. Select a time zone from the list.")
 
 
 # Settings that decide who can sign in. A change to any of them ends every
@@ -898,6 +898,8 @@ def get_settings_info(request: Request = None, db: Session = Depends(get_db)):
             result["editable_config"] = _effective_config_for_editable(settings)
             result["default_config"] = _get_field_defaults()
             result["settings_migrated"] = has_config_overrides_in_db(db)
+            # The form locks what Basic Auth needs also when /api/settings is not read
+            result["legacy_auth_enabled"] = bool(settings.auth_enabled)
         return result
         
     except Exception as e:
@@ -946,7 +948,7 @@ def update_settings(body: Dict[str, Any], request: Request = None, response: Res
     """
     import secrets as _secrets
     if not settings.edit_settings_via_ui_enabled:
-        raise HTTPException(status_code=403, detail="Editing settings from UI is disabled. Set SETTINGS_EDIT_VIA_UI_ENABLED=true to enable.")
+        raise HTTPException(status_code=403, detail="Settings editing is off. Set SETTINGS_EDIT_VIA_UI_ENABLED=true in the environment to enable it.")
     # Changed only under Users, with its own version, so a form opened before a change cannot undo it
     if any(key in body for key in ("oauth2_default_access", DEFAULT_ACCESS_KEY, DEFAULT_VERSION_KEY)):
         raise HTTPException(status_code=400, detail="The OAuth2 default access is changed under Users, not in Settings.")
@@ -989,7 +991,7 @@ def update_settings(body: Dict[str, Any], request: Request = None, response: Res
         if not _eff_password or not str(_eff_password).strip():
             raise HTTPException(
                 status_code=400,
-                detail="Cannot enable Basic Auth without a password. Please set a password first."
+                detail="Set a password before enabling Basic Auth."
             )
         # Require verification credentials from the user
         _verify_user = body.get("verify_username", "")
@@ -997,7 +999,7 @@ def update_settings(body: Dict[str, Any], request: Request = None, response: Res
         if not _verify_user or not _verify_pass:
             raise HTTPException(
                 status_code=400,
-                detail="Credential verification required. Please confirm your username and password to enable Basic Auth."
+                detail="Enter your configured username and password to enable Basic Auth."
             )
         _user_ok = _secrets.compare_digest(
             str(_verify_user).encode("utf-8"),
@@ -1010,7 +1012,7 @@ def update_settings(body: Dict[str, Any], request: Request = None, response: Res
         if not (_user_ok and _pass_ok):
             raise HTTPException(
                 status_code=400,
-                detail="Credential verification failed. The username and password you entered do not match the configured credentials."
+                detail="The username or password does not match the configured credentials. Check both and try again."
             )
         logger.info("Basic Auth credential verification passed - enabling authentication")
 
@@ -1215,7 +1217,7 @@ def purge_feature_data(body: Dict[str, Any], db: Session = Depends(get_db)):
     Only allowed when SETTINGS_EDIT_VIA_UI_ENABLED is true and the feature is currently disabled.
     """
     if not settings.edit_settings_via_ui_enabled:
-        raise HTTPException(status_code=403, detail="Editing settings from UI is disabled.")
+        raise HTTPException(status_code=403, detail="Settings editing is off. Enable SETTINGS_EDIT_VIA_UI_ENABLED in the environment.")
 
     feature = body.get("feature", "").strip().lower()
     # The old name of the suppression list's switch; the maps have no data here
@@ -1263,7 +1265,7 @@ def _purge_tables(feature: str, db: Session, still_off=None):
         deleted = purge_feature(db, feature, still_off=still_off)
     except Exception as e:
         logger.error(f"Failed to purge data for feature '{feature}': {e}")
-        raise HTTPException(status_code=500, detail="Purge failed. Check the application logs.")
+        raise HTTPException(status_code=500, detail="Could not delete the feature data. Check the application logs before trying again.")
     tables = {k: v for k, v in deleted.items() if not k.startswith('system_settings:')}
     total = sum(tables.values())
     logger.info(f"Purged data for feature '{feature}': {deleted} (total {total} rows)")
@@ -1279,7 +1281,7 @@ def import_settings_from_env(db: Session = Depends(get_db)):
     Returns env_locked_keys: keys where ENV is set and overrides DB.
     """
     if not settings.edit_settings_via_ui_enabled:
-        raise HTTPException(status_code=403, detail="Editing settings from UI is disabled. Set SETTINGS_EDIT_VIA_UI_ENABLED=true to enable.")
+        raise HTTPException(status_code=403, detail="Settings editing is off. Set SETTINGS_EDIT_VIA_UI_ENABLED=true in the environment to enable it.")
     # The effective config (defaults + ENV + DB) read, saved and reloaded with no
     # reload or save elsewhere in between: values read before another save and
     # written after it would put its old password back
@@ -1292,7 +1294,7 @@ def import_settings_from_env(db: Session = Depends(get_db)):
     oauth2_client.reload_config()
     reschedule_interval_jobs()
     return {
-        "message": "Configuration imported from current environment into DB.",
+        "message": "Settings copied from the environment to the database.",
         "settings_edit_via_ui_enabled": True,
         "settings_migrated": True,
         "configuration": _effective_config_for_editable(settings),
@@ -1445,7 +1447,7 @@ def trigger_geoip_download(background_tasks: BackgroundTasks):
     Returns immediately; use GET /settings/geoip/status to poll progress.
     """
     if not is_license_configured():
-        raise HTTPException(status_code=400, detail="MaxMind license key not configured")
+        raise HTTPException(status_code=400, detail="Add a MaxMind account ID and license key in Settings > MaxMind before downloading.")
     
     logger.info("Manual GeoIP download triggered from setup modal")
     from ..scheduler import update_geoip_database
@@ -1558,7 +1560,7 @@ def validate_geoip_db():
             "valid": False,
             "city_ok": False,
             "asn_ok": False,
-            "error": "City database file not found"
+            "error": "The City database is missing. Download the GeoIP databases again."
         }
     
     # Reload readers to pick up any new files

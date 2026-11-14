@@ -32,8 +32,8 @@ logger = logging.getLogger(__name__)
 _TIMEOUT_SECONDS = 10      # one step: connect, TLS handshake, one read
 _TOTAL_SECONDS = 20        # the whole send, however slowly the server answers
 _MAX_ERROR_BYTES = 1024    # read of an error answer; its first 200 characters are shown
-_TOO_SLOW = "The server took too long to answer."
-_UNREADABLE_URL = "The send failed. Its error is not shown, as it could quote the channel's secret URL."
+_TOO_SLOW = "The destination took too long to respond. Try sending a test again."
+_UNREADABLE_URL = "Could not send the notification. Check the destination URL and credentials."
 _UNEXPECTED = "The send failed with an unexpected error. Check the application logs."
 # The shortest start of a secret masked where an error answer was cut off
 _MIN_CUT_SECRET = 4
@@ -48,22 +48,22 @@ ALERT_TYPES: List[Dict] = [
     {
         "id": "security",
         "label": "Security",
-        "description": "Compromised mailbox detected, authentication attacks, SMTP disabled by abuse protection",
+        "description": "Unusual sending, login attacks, and blocked mailbox sending.",
     },
     {
         "id": "blacklist",
-        "label": "IP blacklist",
-        "description": "Your server IP was listed on a spam blacklist, or is listed no more",
+        "label": "Blocklists",
+        "description": "Sending IPs added to or removed from blocklists.",
     },
     {
         "id": "dns_changes",
         "label": "DNS record changes",
-        "description": "A domain SPF, DKIM, DMARC, TLSA, MTA-STS or TLS-RPT record changed, DNSSEC stopped validating, or DANE broke",
+        "description": "Changed DNS records, failed DNSSEC validation, or TLSA certificate mismatches.",
     },
     {
         "id": "dmarc_errors",
-        "label": "DMARC processing errors",
-        "description": "A DMARC report could not be imported or parsed",
+        "label": "Report import errors",
+        "description": "DMARC or TLS reports that could not be imported.",
     },
 ]
 
@@ -88,15 +88,15 @@ def channel_wants(channel_alert_types, alert_type: Optional[str]) -> bool:
 CHANNEL_TYPES: Dict[str, Dict] = {
     "slack": {
         "label": "Slack",
-        "help": "Create an Incoming Webhook in your Slack workspace (Apps -> Incoming Webhooks) and paste the URL.",
+        "help": "Paste an incoming webhook URL from your Slack workspace.",
         "fields": [
-            {"key": "webhook_url", "label": "Incoming Webhook URL", "type": "url", "required": True,
+            {"key": "webhook_url", "label": "Incoming webhook URL", "type": "url", "required": True,
              "secret": True, "placeholder": "https://hooks.slack.com/services/T000/B000/XXXX"},
         ],
     },
     "discord": {
         "label": "Discord",
-        "help": "In your Discord channel: Edit Channel -> Integrations -> Webhooks -> New Webhook, then copy the URL.",
+        "help": "Paste a webhook URL from Discord > Edit Channel > Integrations > Webhooks.",
         "fields": [
             {"key": "webhook_url", "label": "Webhook URL", "type": "url", "required": True,
              "secret": True, "placeholder": "https://discord.com/api/webhooks/..."},
@@ -104,7 +104,7 @@ CHANNEL_TYPES: Dict[str, Dict] = {
     },
     "telegram": {
         "label": "Telegram",
-        "help": "Create a bot with @BotFather to get the token, then message your bot and use @userinfobot to find your chat ID.",
+        "help": "Enter your bot token and the chat ID that should receive alerts. For a direct chat, message your bot first. For a group topic, enter its Topic ID.",
         "fields": [
             {"key": "bot_token", "label": "Bot token", "type": "text", "required": True,
              "secret": True, "placeholder": "123456789:AAExample-Token"},
@@ -118,7 +118,7 @@ CHANNEL_TYPES: Dict[str, Dict] = {
     },
     "ntfy": {
         "label": "ntfy",
-        "help": "Use the public server (ntfy.sh) or your own. The topic is the channel name you subscribe to in the app.",
+        "help": "Use a topic you subscribe to in ntfy.",
         "fields": [
             {"key": "server_url", "label": "Server URL", "type": "url", "required": False,
              "default": "https://ntfy.sh", "placeholder": "https://ntfy.sh"},
@@ -140,7 +140,7 @@ CHANNEL_TYPES: Dict[str, Dict] = {
     },
     "webhook": {
         "label": "Custom webhook (JSON)",
-        "help": "Any endpoint that accepts a JSON POST - n8n, Home Assistant, your own script.",
+        "help": "Use an endpoint that accepts JSON POST requests.",
         "fields": [
             {"key": "url", "label": "Endpoint URL", "type": "url", "required": True,
              "placeholder": "https://example.com/hook"},
@@ -178,10 +178,10 @@ def validate_config(channel_type: str, config: Dict) -> Tuple[bool, str]:
     a webhook URL is the channel's secret."""
     spec = CHANNEL_TYPES.get(channel_type)
     if not spec:
-        return False, f"Unknown channel type: {channel_type}"
+        return False, f"Unknown destination service: {channel_type}. Select a service from the list."
     for field in spec["fields"]:
         if field.get("required") and not str(config.get(field["key"], "")).strip():
-            return False, f"{field['label']} is required"
+            return False, f"Enter {field['label']}."
         value = str(config.get(field["key"]) or "").strip()
         if field.get("type") == "url" and value and not _readable_url(value):
             return False, f"{field['label']} is not a valid URL. Enter the full address, starting with https://"

@@ -4,7 +4,7 @@ Values you save here are stored in the viewer's database. A value set by an envi
 
 ## Enable editing and migrate from ENV
 
-Until `SETTINGS_EDIT_VIA_UI_ENABLED=true` is set, the page only shows the current values, with **Test SMTP** and **Test IMAP**.
+Until `SETTINGS_EDIT_VIA_UI_ENABLED=true` is set, the page only shows the current values, with **Send test email** and **Test IMAP connection**.
 
 To edit settings here:
 
@@ -26,21 +26,21 @@ Passwords and keys are never shown. A stored one reads **Stored**, with **Replac
 
 Most changes apply when you save. A change to the features, the app title or logo, sign-in or the mailcow URL reloads the page. A change to sign-in settings signs out every other session; you stay signed in.
 
-![Settings, Mailcow](../../images/docs/settings-mailcow-light.webp#gh-light-mode-only)
-![Settings, Mailcow](../../images/docs/settings-mailcow-dark.webp#gh-dark-mode-only)
+![Settings, mailcow](../../images/docs/settings-mailcow-light.webp#gh-light-mode-only)
+![Settings, mailcow](../../images/docs/settings-mailcow-dark.webp#gh-dark-mode-only)
 
-Every field is also an environment variable, for example **App Title** is `APP_TITLE`. [Environment variables](../ENV_Settings.md) lists them with their defaults.
+Every field is also an environment variable, for example **App title** is `APP_TITLE`. [Environment variables](../ENV_Settings.md) lists them with their defaults.
 
 ## Features
 
 All features are on by default. A feature that is off disappears from the menu, stops the background jobs used only by it and hides its category here; shared jobs continue while another enabled page needs them. Its API routes remain available. The **Logs** category stays, because the logs other pages read are collected and kept by its settings: with the Logs page off, Dovecot still comes in for message details and Security, Ratelimited for Rate Limits and SOGo for Devices. The switches are saved in `DISABLED_FEATURES`; if that variable is set, the whole list is locked.
 
 > [!WARNING]
-> Turning a feature off deletes the data the viewer stored for it, such as DMARC reports, quarantine rules or device history. Saving asks first (**Disable & Delete Data**); only Queue and Rspamd, which store nothing, switch off without asking. The same happens at startup to a feature listed in `DISABLED_FEATURES`. Turning a feature on again reloads only what is still on the server: Suppressions loads back the blocks this app left in Rspamd (as **From Rspamd** entries), the others fetch or check again. Turning Security off takes out of Fail2ban only this app's temporary bans; permanent bans and bans added outside the app stay.
+> Turning a feature off deletes the data the viewer stored for it, such as DMARC reports, quarantine rules or device history. Saving asks first (**Disable and delete data**); only Queue and Rspamd, which store nothing, switch off without asking. The same happens at startup to a feature listed in `DISABLED_FEATURES`. Turning a feature on again reloads only what is still on the server: Suppressions loads back the blocks this app left in Rspamd (as **From Rspamd** entries), the others fetch or check again. Turning Security off takes out of Fail2ban only this app's temporary bans; permanent bans and bans added outside the app stay.
 
 ## Application
 
-**Time Zone** is the time zone the whole app works in; see [Using the app](../Using_the_App.md#time-zone). Saving a new one reloads the page and moves the scheduled jobs at once. **Date Format** and **Time Format** set how dates and times are written on every page and in emails; the example under them shows your choice before you save. The port is set in `docker-compose.yml`, not here.
+**Time zone** is the time zone the whole app works in; see [Using the app](../Using_the_App.md#time-zone). Saving a new one reloads the page and moves the scheduled jobs at once. **Date format** and **Time format** set how dates and times are written on every page and in emails. The port is set in `docker-compose.yml`, not here.
 
 ## Mailcow
 
@@ -56,15 +56,15 @@ For **Alert destinations** (Slack, Telegram, ntfy and others) and which alert go
 
 ## SMTP
 
-**Test SMTP** sends a real test email to **Admin Email** (or to **SMTP User** when that is empty) using the saved settings, and shows each step of the connection. Save your changes before you test.
+**Send test email** sends a real test email to **Admin email** (or to **SMTP username** when that is empty) using the saved settings, and shows each step of the connection. Save your changes before you test.
 
-For port 587, turn on **SMTP Use TLS** (STARTTLS); port 465 always uses implicit TLS. **SMTP Verify SSL** checks the server's certificate: **Automatic** checks host names such as `smtp.example.com` and skips `localhost`, IP addresses and container names. Keep **Off** only for a self-signed certificate.
+For port 587, turn on **Use STARTTLS** (STARTTLS); port 465 always uses implicit TLS. **Verify TLS certificates** checks the server's certificate: **Automatic** checks host names such as `smtp.example.com` and skips `localhost`, IP addresses and container names. Keep **Off** only for a self-signed certificate.
 
 ## Authentication
 
-Basic authentication and OAuth2/OIDC can be on together. Turning on **Basic Auth Enabled** asks you to type the username and password again before it saves, so a typo cannot lock you out. See [Sign-in configuration](../OAuth2_Configuration.md).
+Basic authentication and OAuth2/OIDC can be on together. Turning on **Enable Basic Auth** asks you to type the username and password again before it saves, so a typo cannot lock you out. See [Sign-in configuration](../OAuth2_Configuration.md).
 
-**Sign-in Security** limits how long a browser stays signed in, for both sign-in methods. **Longest session (hours)** counts from sign-in whatever the activity. **Sign out after inactivity**, off by default, ends a session after **Inactivity limit (minutes)** without typing, clicking, scrolling with the wheel or touching; pages that refresh by themselves do not count. A minute before, the page asks whether you are still there. A shorter longest session applies to open sessions at once, so a session already past it ends; turning on sign-out after inactivity does not sign anyone out, because their inactivity time starts then. AI agents are not affected. See [Sessions and signing out](../OAuth2_Configuration.md#sessions-and-signing-out).
+**Session limits** sets how long a browser stays signed in, for both sign-in methods. **Longest session (hours)** counts from sign-in whatever the activity. **Sign out after inactivity**, off by default, ends a session after **Inactivity limit (minutes)** without typing, clicking, scrolling with the wheel or touching; pages that refresh by themselves do not count. A minute before, the page asks whether you are still there. A shorter longest session applies to open sessions at once, so a session already past it ends; turning on sign-out after inactivity does not sign anyone out, because their inactivity time starts then. AI agents are not affected. See [Sessions and signing out](../OAuth2_Configuration.md#sessions-and-signing-out).
 
 ## Users
 
@@ -74,13 +74,13 @@ Who may sign in, and what each user may see and do: **Admin**, **Operator**, **V
 
 Lets AI agents such as Claude Code and Codex connect, and lists the allowed ones with **Activity** and **Disconnect**. The list works even while editing settings is off. See [AI agents](../AI_Agents.md).
 
-## Anomaly Detection (Beta)
+## Anomaly detection
 
-This beta feature only alerts; it never blocks. It compares what each mailbox sends with its own normal rate and counts failed logins per username. Alerts go to email and your alert destinations and appear on the [Dashboard](Dashboard.md#security-alerts).
+It only alerts; it never blocks. It compares what each mailbox sends with its own normal rate and counts failed logins per username. Alerts go to email and your alert destinations and appear on the [Dashboard](Dashboard.md#security-alerts).
 
-## SMTP Abuse (Beta)
+## Outgoing spam
 
-This beta feature stops a mailbox from sending when it goes over a limit. The mailbox still receives mail; if its app passwords are revoked too, mail apps that sign in with one stop working. It needs the read-write API key. The same values, the stopped mailboxes and the whitelist are on the **Outgoing spam** card under **Security** > **Settings**; see [Outgoing spam](Abuse_Protection.md).
+It stops a mailbox from sending when it goes over a limit. The mailbox still receives mail; if its app passwords are revoked too, mail apps that sign in with one stop working. It needs the read-write API key. The same values, the stopped mailboxes and the whitelist are on the **Outgoing spam** card under **Security** > **Settings**; see [Outgoing spam](Abuse_Protection.md).
 
 ## Domains
 
@@ -88,39 +88,39 @@ Which sending addresses must pass each domain's SPF check on [Domains](Domains.m
 
 ## DMARC & TLS
 
-**Retention Days**, **Manual Upload Enabled** and **Allow Report Delete** apply to DMARC and TLS reports alike. The **Insights** values only shape the DMARC policy recommendations; nothing here changes your DNS.
+**Keep reports (days)**, **Allow report uploads** and **Allow report deletion** apply to DMARC and TLS reports alike. The **Policy suggestions** values only shape the DMARC policy suggestions; nothing here changes your DNS.
 
 ## DMARC & TLS IMAP
 
-**Choose folders** under **IMAP Folders** lists the folders of the saved account; save the connection settings first. **Test IMAP** logs in with the saved settings and counts the emails in each folder the import reads, without importing anything. Use a mailbox that only receives reports: the import reads its unread emails and, by default, deletes each one it imports.
+**Choose folders** under **Report folders** lists the folders of the saved account; save the connection settings first. **Test IMAP connection** logs in with the saved settings and counts the emails in each folder the import reads, without importing anything. Use a mailbox that only receives reports: the import reads its unread emails and, by default, deletes each one it imports.
 
 ## MaxMind
 
-A free MaxMind account lets the app download the GeoLite2 City and ASN databases, which turn IP addresses into countries and networks. The databases update every Sunday at 03:00; saving or removing the license key adds or removes that update at once. **Repair**, shown with **DB Corrupt**, downloads the databases again.
+A free MaxMind account lets the app download the GeoLite2 City and ASN databases, which turn IP addresses into countries and networks. The databases update every Sunday at 03:00; saving or removing the license key adds or removes that update at once. **Repair**, shown with **Database check failed**, runs the database update and checks the databases again. It downloads only databases that are missing or out of date.
 
-Saving a new license key opens **GeoIP Database Setup**, which checks the key, downloads missing databases and tests them. If a step fails, fix the account ID or key and save again. After three minutes the window stops waiting for the download; check **Database Health** later.
+Saving a new license key opens **GeoIP database setup**, which checks the key, downloads missing databases and tests them. If a step fails, fix the account ID or key and save again. After three minutes the window stops waiting for the download; check **Database status** later.
 
 ![GeoIP Database Setup](../../images/docs/settings-geoip-setup-light.webp#gh-light-mode-only)
 ![GeoIP Database Setup](../../images/docs/settings-geoip-setup-dark.webp#gh-dark-mode-only)
 
 ## IP Blacklist (RBL)
 
-Which addresses **Status** > **Blocklists** checks, and the DNS resolver it asks. Spamhaus refuses queries from public resolvers such as Google or Cloudflare, so use your own resolver. Switching on **Blacklist Source Transports** or **Blacklist Source Relayhosts** adds their addresses right away. See [Blocklist monitoring](IP_Blacklist_Monitor.md).
+Which addresses **Status** > **Blocklists** checks, and the DNS resolver it asks. Spamhaus refuses queries from public resolvers such as Google or Cloudflare, so use your own resolver. Switching on **Transport IPs** or **Relayhost IPs** adds their addresses right away. See [Blocklist monitoring](IP_Blacklist_Monitor.md).
 
 ## Outbound
 
-What happens when outgoing mail cannot be delivered. The blocked addresses are listed on [Outbound](Outbound.md#suppressions) > **Suppressions**. **Sync with Rspamd** (on by default) keeps the list and this app's Rspamd blocks in step, both ways; off, the app keeps no list (turning it off deletes the list, turning it on loads this app's blocks back from Rspamd). Nothing is blocked automatically until **Handle undeliverable mail automatically** is on (off by default).
+What happens when outgoing mail cannot be delivered. The blocked addresses are listed on [Outbound](Outbound.md#suppressions) > **Suppressions**. **Sync with Rspamd** (on by default, under **Address blocking**) syncs the blocked addresses with Rspamd, which rejects new mail to them, both ways; off, the app keeps no list (turning it off deletes the list and its failure history, turning it on loads this app's blocks back from Rspamd as permanent entries). Nothing is blocked automatically until **Handle failed mail automatically** is on (off by default).
 
 - **Permanent delivery failure** (5.x.x) and **Temporary delivery failure** (4.x.x) are one choice each. A permanent failure blocks the address and deletes its queued mail (the default), only deletes its queued mail, or does nothing. A temporary failure is deleted after its minutes in the queue, with its recipients blocked (the default) or not, or stays in the queue while the address is blocked after a number of failures, at the first one, or not at all.
-- **Status code exceptions**, under each delivery failure card, prevent the app from blocking the address, counting the failure, or deleting queued mail for matching codes. Postfix returns permanently failed messages to the sender and keeps retrying temporarily failed messages.
-- **Exclude failures unrelated to the recipient address** applies a fixed list of codes. **View excluded codes** shows the list. Use **Additional codes to exclude** to add other codes.
+- **Failures to ignore**, under each delivery failure card, list failure codes the app takes no action on: it does not block the address, count the failure, or delete waiting mail. Postfix keeps retrying temporarily failed messages. Each area is closed at first; its line says what the app ignores.
+- **Ignore common mail problems** applies a fixed list of codes. **View common mail problems** shows the list. Use **Other permanent failures to ignore** and **Other temporary failures to ignore** to add other codes.
 - The options that block need **Sync with Rspamd**. With it off they are not available, and a picked one changes to the option that does the same without blocking.
 - The app reads the Postfix logs only when a choice needs them.
 - A value set in the environment closes only the options it rules out, and the choice names the variable.
 
 ## Quarantine
 
-Limits for the rules on **Quarantine** > **Auto-Rules**. A new **Quarantine Rules Interval** applies when you save it.
+Limits for the rules on **Quarantine** > **Auto-Rules**. A new **Run Auto-Rules every (minutes)** value applies when you save it.
 
 ## When something is missing
 

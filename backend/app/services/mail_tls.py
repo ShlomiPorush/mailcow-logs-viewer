@@ -76,6 +76,6 @@ def certificate_error_hint(error: BaseException, setting_name: str) -> Optional[
         return None
     reason = getattr(error, "verify_message", None) or str(error)
     section = _SETTINGS_SECTION.get(setting_name, "")
-    where = f" (Settings - {section}, or the environment)" if section else ""
+    where = f" (Settings > {section}, or the environment)" if section else ""
     return (f"The server's TLS certificate is not trusted ({reason}). If this server uses a self-signed "
             f"certificate, set {setting_name} to Off{where}; otherwise check the host name and the certificate.")

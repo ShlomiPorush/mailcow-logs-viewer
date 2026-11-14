@@ -243,6 +243,7 @@ class SettingsInfo(Fixed):
     raw_logs_required: Dict[str, List[str]] = Field(description="Raw log services other pages read, with those "
                                                                 "pages; they are always collected")
     editable_config: Dict[str, Any] = Field(None, description="While UI editing is on, for a caller who may read Settings. " + SETTINGS)
+    legacy_auth_enabled: bool = Field(None, description="With editable_config: the old AUTH_ENABLED turns Basic Auth on")
     default_config: Dict[str, Any] = Field(None, description="While UI editing is on: the defaults, by the same "
                                                              "keys; null for a required setting, empty for a "
                                                              "secret")

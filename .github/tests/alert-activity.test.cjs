@@ -85,9 +85,9 @@ const figure = (html, label) => html.match(new RegExp(`<small>${label}</small><b
 test('an SMTP block shows the mailbox sent mail, its limit and Open in Messages', () => {
     const html = harness().render(activity({ alert_type: 'smtp_abuse_block', subject: 'user@example.com', metric_value: 40, baseline_value: 30 },
         { window: 60, around: { total: 3, recipient_domains: [{ name: 'example.net', count: 3 }], results: [], subjects: [] } }));
-    assert.match(html, /What it sent/);
+    assert.match(html, /Sent messages/);
     assert.equal(figure(html, "Sent in the alert's 60 minutes"), '40');
-    assert.equal(figure(html, 'The limit, in 60 minutes'), '30');
+    assert.equal(figure(html, 'Message limit per 60 minutes'), '30');
     assert.doesNotMatch(html, /Failed logins|Open in Security|ui-aa-usual/);
     assert.match(html, /<foot><button [^>]*onclick="openAlertActivityMessages\(\)">Open in Messages<\/button><\/foot>/);
 });
@@ -98,8 +98,8 @@ test('an SMTP block whose window is not known says so instead of using today\'s 
         { window: null, around: { total: 3, from: new Date(at - 3600000).toISOString(), to: new Date(at + 3600000).toISOString(),
             recipient_domains: [{ name: 'example.net', count: 3 }], results: [], subjects: [] } }));
     assert.equal(figure(html, 'Counted for the block'), '40');
-    assert.equal(figure(html, 'The window'), 'Unknown');
-    assert.equal(figure(html, 'The limit'), '30');
+    assert.equal(figure(html, 'Counting period'), 'Unknown');
+    assert.equal(figure(html, 'Message limit'), '30');
     assert.doesNotMatch(html, /null|NaN|an hour<\/small>|is-alert"/);
     assert.match(html, /from 60 minutes before it to an hour after/);
 });
@@ -110,21 +110,21 @@ test('a spike or a burst whose window is not known says so instead of showing nu
     const spike = harness().render(activity({ alert_type: 'volume_spike', subject: 'user@example.com', metric_value: 40, baseline_value: 0.5 },
         { window: null, around: { ...around, recipient_domains: [], results: [], subjects: [] } }));
     assert.equal(figure(spike, 'Counted for the alert'), '40');
-    assert.equal(figure(spike, 'The window'), 'Unknown');
-    assert.equal(figure(spike, 'Usual, an hour \\(7 days\\)'), '0.50');
+    assert.equal(figure(spike, 'Counting period'), 'Unknown');
+    assert.equal(figure(spike, 'Usual messages per hour \\(7 days\\)'), '0.50');
     assert.doesNotMatch(spike, /null|NaN|for the block|is-alert"/);
     const burst = harness().render(activity({ alert_type: 'auth_failure_burst', subject: 'user@example.com', metric_value: 12, baseline_value: 10 },
         { window: null, around: { ...around, addresses: [], countries: [], networks: [] } }));
     assert.equal(figure(burst, 'Counted for the alert'), '12');
-    assert.equal(figure(burst, 'The window'), 'Unknown');
-    assert.equal(figure(burst, 'The alert starts at'), '10');
+    assert.equal(figure(burst, 'Counting period'), 'Unknown');
+    assert.equal(figure(burst, 'Failed login threshold'), '10');
     assert.doesNotMatch(burst, /null|NaN|is-alert"/);
     assert.match(burst, /from 60 minutes before it to an hour after/);
 });
 
 test('a volume spike keeps its usual rate and opens Messages on the mailbox that logged in', () => {
     const html = harness().render(activity({ alert_type: 'volume_spike', subject: 'user@example.com', metric_value: 40, baseline_value: 0.5 }));
-    assert.equal(figure(html, 'Usual, an hour \\(7 days\\)'), '0.50');
+    assert.equal(figure(html, 'Usual messages per hour \\(7 days\\)'), '0.50');
     assert.match(html, /ui-aa-usual/);
     assert.match(html, /onclick="openAlertActivityMessages\(\)"/);
 });
@@ -140,7 +140,7 @@ test('Open in Messages asks for the mailbox around the alert, or in the picked c
     const html = h.render(activity({ alert_type: 'volume_spike', subject: 'user@example.com', metric_value: 40, baseline_value: 0.5 }, { around }));
     assert.match(html, /aria-pressed="false"[^>]*onclick="pickAlertActivityColumn\(\d+\)"/);
     h.run(`pickAlertActivityColumn(${at})`);
-    assert.match(h.run("document.getElementById('alert-activity-open').innerHTML"), />Open this time in Messages</);
+    assert.match(h.run("document.getElementById('alert-activity-open').innerHTML"), />Open selected period in Messages</);
     h.run('openAlertActivityMessages()');
     assert.deepEqual(JSON.parse(JSON.stringify(h.opened.pop())),
         { start: new Date(at).toISOString(), endInclusive: new Date(at + 15 * 60000 - 1).toISOString().replace('Z', '999Z'), user: 'user@example.com' });
@@ -214,11 +214,11 @@ test('the columns stop where the data ends, and a zoom shows a span inside it', 
     assert.equal(h.run('alertActivityZoom'), null);
 });
 
-test('From addresses counts every address, not only the six listed', () => {
+test('Source IPs counts every address, not only the six listed', () => {
     const addresses = Array.from({ length: 6 }, (_, i) => ({ name: `192.0.2.${i + 1}`, count: 2 }));
     const html = harness().render(activity({ alert_type: 'auth_failure_burst', subject: 'user@example.com', metric_value: 18, baseline_value: 10 },
         { around: { total: 18, addresses, address_count: 9, countries: [], networks: [] } }));
-    assert.equal(figure(html, 'From addresses'), '9');
+    assert.equal(figure(html, 'Source IPs'), '9');
     assert.match(html, /<foot><button [^>]*>Open in Security<\/button><\/foot>/);
 });
 

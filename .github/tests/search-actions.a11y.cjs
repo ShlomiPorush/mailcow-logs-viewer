@@ -252,7 +252,7 @@ test('Ban and Allow ask first: Cancel writes nothing, the answer posts the singl
 
     rowOf(w, '203.0.113.45').querySelector('[data-gs-act="ban"]').click();
     await settle(w);
-    assert.match(confirmText(w), /^Ban IP \| Are you sure you want to permanently ban 203\.0\.113\.45\/32\?/);
+    assert.match(confirmText(w), /^Ban IP \| Add 203\.0\.113\.45\/32 to the Fail2ban denylist\?/);
     const before = asked(w, '/api/security/addresses').length;
     await answer(w, true);
     const bans = asked(w, '/api/fail2ban/ban', 'POST');
@@ -266,7 +266,7 @@ test('Ban and Allow ask first: Cancel writes nothing, the answer posts the singl
     assert.equal(asked(w, '/api/fail2ban/allow', 'POST').length, 0);
     rowOf(w, '203.0.113.45').querySelector('[data-gs-act="allow"]').click();
     await settle(w);
-    assert.match(confirmText(w), /^Allow IP \| Add 203\.0\.113\.45\/32 to the Fail2Ban allowlist\?/);
+    assert.match(confirmText(w), /^Allow IP \| Add 203\.0\.113\.45\/32 to the Fail2ban allowlist\?/);
     await answer(w, true);
     assert.deepEqual(JSON.parse(asked(w, '/api/fail2ban/allow', 'POST')[0].body), { ip: '203.0.113.45/32' });
 });

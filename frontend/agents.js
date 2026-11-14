@@ -16,11 +16,11 @@ function agentsProblemText(problem) {
     const form = !!document.querySelector('[data-tab-extra="agents"]');
     switch (problem) {
         case 'off': return form ? '' : 'Agent access is off. Set <code>AGENT_ACCESS_ENABLED=true</code> in <code>.env</code>.';
-        case 'no_sign_in': return form ? '' : 'Agent access needs sign-in. Turn on Basic Auth or OAuth2 in Settings → Authentication.';
+        case 'no_sign_in': return form ? '' : 'Agent access needs sign-in. Turn on Basic Auth or OAuth2 in Settings > Authentication.';
         case 'no_url': return form ? 'Fill in <strong>App URL</strong> above.'
             : 'The app URL is missing. Set <code>AGENT_ACCESS_URL</code> in <code>.env</code> to the address agents use to reach this app.';
         case 'bad_url': return 'Use an HTTPS app URL without a path, such as <code>https://logs.example.com</code>. HTTP works only on <code>localhost</code>, for a local test.';
-        default: return 'Agent access is not available. Check Settings → Agents.';
+        default: return 'Agent access is not available. Check Settings > Agents.';
     }
 }
 
@@ -117,12 +117,12 @@ function agentsConnectHelp() {
     const panel = (id, html) => `<div id="agents-connect-${id}" role="tabpanel" aria-labelledby="agents-tab-${id}"
         class="ui-agent-tabpanel${agentsTab === id ? '' : ' hidden'}">${html}</div>`;
     return `<div class="ui-agent-connect">
-        <div class="ui-tabs ui-agent-tabs" role="tablist" aria-label="How to connect">${tab('skill', 'Agent')}${tab('mcp', 'MCP')}</div>
-        ${panel('skill', `<p class="ui-set-desc">Paste this sentence to your AI agent. It replies with a link and a code that you approve from any device.</p>
-            <div class="ui-md-ids ui-set-facts ui-agent-help">${line('Sentence for the agent', agentsData.skill_sentence || '')}</div>`)}
-        ${panel('mcp', `<p class="ui-set-desc">Paste this sentence to your AI agent, or add the address yourself in your app's MCP settings. Approve the request in the browser that opens on that computer.</p>
+        <div class="ui-tabs ui-agent-tabs" role="tablist" aria-label="Connection method">${tab('skill', 'Agent')}${tab('mcp', 'MCP')}</div>
+        ${panel('skill', `<p class="ui-set-desc">Send this instruction to your AI agent and follow the instructions it gives you to connect.</p>
+            <div class="ui-md-ids ui-set-facts ui-agent-help">${line('Instruction for the agent', agentsData.skill_sentence || '')}</div>`)}
+        ${panel('mcp', `<p class="ui-set-desc">Send this instruction to your AI agent and follow the instructions it gives you to connect. Or add the server URL in your app's MCP settings and approve access in the browser that opens.</p>
             <div class="ui-md-ids ui-set-facts ui-agent-help">
-                ${line('Sentence for the agent', agentsData.mcp_sentence || '')}
+                ${line('Instruction for the agent', agentsData.mcp_sentence || '')}
                 ${line('MCP server URL', url)}
             </div>`)}
     </div>`;
@@ -312,7 +312,7 @@ async function disconnectAgent(grantId) {
     const agent = (agentsData?.agents || []).find(a => a.id === grantId);
     const confirmed = await showConfirmModal({
         title: 'Disconnect agent',
-        message: `Disconnect "${agent ? agent.name : 'this agent'}"? Its next request is refused. To use it again, connect it again from the agent.`,
+        message: `Disconnect "${agent ? agent.name : 'this agent'}"? Its next request is refused. To restore access, reconnect from the agent.`,
         confirmText: 'Disconnect',
         isDangerous: true
     });
@@ -331,7 +331,7 @@ async function disconnectAllAgents() {
     const count = (agentsData?.agents || []).filter(a => a.state === 'connected').length;
     const confirmed = await showConfirmModal({
         title: 'Disconnect all agents',
-        message: `Disconnect ${uiCountLabel(count, 'agent', 'agents')}? Their next requests are refused. Each one has to connect again from its agent.`,
+        message: `Disconnect ${uiCountLabel(count, 'agent', 'agents')}? Their next requests are refused. Reconnect each agent to restore access.`,
         confirmText: 'Disconnect all',
         isDangerous: true
     });

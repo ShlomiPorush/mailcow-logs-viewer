@@ -124,7 +124,7 @@ test('Outgoing spam counts as on only when its check can run', () => {
     const abuse = () => context.securityProtectionItems().find(p => p.key === 'abuse');
     vm.runInContext('fail2banPolicy = null; smtpAbuseStatus = { enabled: true, rw_key_configured: false }', context);
     assert.equal(abuse().state, 'off');
-    assert.match(abuse().note, /Read-Write/);
+    assert.match(abuse().note, /read-write/);
     vm.runInContext('smtpAbuseStatus = { enabled: true, rw_key_configured: true }', context);
     assert.equal(abuse().state, 'on');
 });
@@ -134,10 +134,10 @@ test('the Outgoing spam card says it stops mailboxes only with the Read-Write ke
     vm.runInContext(`securityAppSettings = { configuration: { smtp_abuse_enabled: true }, env_locked_keys: [],
         settings_edit_via_ui_enabled: true, settings_migrated: true }; mailcowRwConfigured = false`, context);
     const card = () => vm.runInContext("securityCardHtml('abuse')", context);
-    assert.doesNotMatch(card(), /Stops mailboxes/);
-    assert.match(card(), /Needs a Read-Write key/);
+    assert.doesNotMatch(card(), /Blocks sending/);
+    assert.match(card(), /Needs a read-write API key/);
     vm.runInContext('mailcowRwConfigured = true', context);
-    assert.match(card(), /Stops mailboxes/);
+    assert.match(card(), /Blocks sending/);
 });
 
 
@@ -163,14 +163,14 @@ test('the Outgoing spam card and its setting do not say IMAP is never affected',
         return panel.innerHTML.match(/ui-sa-intro">([\s\S]*?)<\/p>/)[1];
     };
     assert.doesNotMatch(intro(true), /IMAP/);
-    assert.match(intro(true), /app passwords are revoked/);
+    assert.match(intro(true), /revoked app passwords/);
     assert.doesNotMatch(intro(false), /app passwords/);
     const context = load();
     vm.runInContext(fs.readFileSync(path.join(frontend, 'settings.js'), 'utf8'), context);
     assert.doesNotMatch(context.SETTINGS_FIELD_DESCRIPTIONS.smtp_abuse_enabled, /IMAP is never affected/);
     const tab = context.SETTINGS_EDIT_TABS.find(t => t.id === 'smtp_abuse').description;
     assert.doesNotMatch(tab, /IMAP is never affected|Abuse Protection/);
-    assert.match(tab, /Security → Settings → Outgoing spam/);
+    assert.match(tab, /Security > Settings > Outgoing spam/);
 });
 
 test('Unban names and drops the network Fail2ban banned around the address', async () => {
@@ -194,7 +194,7 @@ test('Unban names and drops the network Fail2ban banned around the address', asy
     await context.unbanIP('198.51.100.7');
     assert.deepEqual(sent, [['/api/fail2ban/unban', { ip: '198.51.100.7/32' }]]);
     assert.doesNotMatch(asked[0], /\/32/);
-    assert.deepEqual(toasts, [['198.51.100.0/24 unbanned successfully', 'success']]);
+    assert.deepEqual(toasts, [['198.51.100.0/24 queued for unbanning', 'success']]);
     assert.equal(vm.runInContext('JSON.stringify(fail2banActiveBans.map(b => b.network))', context), '["203.0.113.5/32"]');
 });
 
@@ -235,7 +235,7 @@ test('a Fail2ban network ban is a row named by the network, and its attackers ar
     const net = context.securityDescribe(address({ ip: '198.51.96.0/20', state: 'banned', tries: 0, attempts: 0, f2b: ban,
         networkSize: 4096, networkRange: ['198.51.96.0', '198.51.111.255'] }));
     assert.match(net.tag, /Whole network, 4096 addresses/, 'the size is a plain figure in every locale');
-    assert.match(net.why, /Every address from 198\.51\.96\.0 to 198\.51\.111\.255 is blocked/);
+    assert.match(net.why, /Every IP from 198\.51\.96\.0 to 198\.51\.111\.255 is banned/);
     assert.match(net.acts, /unbanIP\('198\.51\.96\.0\/20'/);
     assert.doesNotMatch(net.acts, /Ban permanently/, 'a whole network is not banned for good in one click');
 

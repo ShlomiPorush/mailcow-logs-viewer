@@ -85,6 +85,8 @@ test('the old addresses open the new places', () => {
         ['/spam-filter/maps', 'rspamd', undefined, '/rspamd'],
         ['/quarantine/maps', 'rspamd', undefined, '/rspamd'],
         ['/settings/spam_filter', 'settings', 'outbound', '/settings/outbound'],
+        // Message linking is a section of Fetch now
+        ['/settings/correlation', 'settings', 'fetch', '/settings/fetch'],
     ];
     for (const [pathname, route, sub, canonical] of cases) {
         const r = loadRouter(pathname);

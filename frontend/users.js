@@ -60,16 +60,16 @@ function usersPresetAreas(level) {
 // What each level allows, in a few lines. Operator's actions are read from the areas
 // the server gives it, so the list stays true when an area is added
 function usersPresetLines(level) {
-    const settingsLine = 'No Settings, users or AI agents';
+    const settingsLine = 'Cannot manage Settings, users, or AI agents';
     if (level === 'admin') return ['Views every page and takes every action', 'Manages Settings, users and AI agents'];
-    if (level === 'viewer') return ['Views every page', 'Takes no action', settingsLine];
+    if (level === 'viewer') return ['Views all monitoring pages', 'Takes no action', settingsLine];
     if (level === 'custom') return ['Choose below what this user may view and do in each area', settingsLine];
     const operator = usersPresetAreas('operator');
     const labels = usersAreaLabels();
     const acts = (usersData.areas || []).filter(a => operator[a.id] === 'act').map(a => a.label);
     const viewOnly = (usersData.areas || []).filter(a => a.act && operator[a.id] === 'view');
     const list = acts.length > 1 ? `${acts.slice(0, -1).join(', ')} and ${acts[acts.length - 1]}` : acts.join('');
-    const lines = ['Views every page', `Takes every action: ${list}`];
+    const lines = ['Views all monitoring pages', `Takes every action: ${list}`];
     if (viewOnly.length === 1 && viewOnly[0].id === 'rspamd') lines.push('Views Rspamd maps, but cannot edit them');
     else if (viewOnly.length) lines.push(`Views ${viewOnly.map(a => labels[a.id] || a.id).join(', ')}, but takes no action there`);
     lines.push(settingsLine);
@@ -169,7 +169,7 @@ function usersPasswordMeterHtml(hidden) {
             <p class="ui-pw-label" id="user-edit-pw-label"></p>
             <p class="ui-field-problem hidden" id="user-edit-pw-problem"></p>
         </div>
-        <ul class="ui-pw-rules" aria-label="Password requirements">
+        <ul class="ui-pw-rules" aria-label="Password strength checks">
             ${USERS_PASSWORD_RULES.map(([id, label]) => `<li data-rule="${id}" data-met="false"><span class="ui-pw-mark" aria-hidden="true">✗</span>${escapeHtml(label)}<span class="ui-sr-only">, not met</span></li>`).join('')}
         </ul>
     </div>`;
@@ -483,13 +483,13 @@ function usersAskSelf(warning) {
 function usersBuiltinRow() {
     const builtin = usersData.builtin;
     const form = !!document.querySelector('[data-tab-extra="users"]');
-    const where = form ? 'Change its name and password in Authentication.' : 'Change its name and password in <code>.env</code>.';
+    const where = form ? 'Change the username and password in Settings > Authentication.' : 'Change its name and password in <code>.env</code>.';
     return `
         <div class="ui-channel ui-agent" data-key="user-builtin">
             ${USERS_ICON_KEY}
             <div class="ui-q-who">
                 <div class="ui-agent-title"><b>${escapeHtml(builtin.username || '')}</b> ${uiTag('Admin', 'warn')} ${uiTag('Built-in', 'info')}${usersYou().kind === 'builtin' && appAccess.name ? ' ' + uiTag('You', 'info') : ''}</div>
-                <small>The admin from <code>.env</code>. It always has full access and cannot be deleted. ${where}</small>
+                <small>The built-in admin always has full access and cannot be deleted. ${where}</small>
             </div>
         </div>`;
 }
@@ -524,7 +524,7 @@ function usersDefaultPanel() {
     return `
         <section class="ui-panel ui-set-channels ui-users-default" aria-labelledby="users-default-h" data-key="oauth2-default">
             <div class="ui-list-head"><h4 class="ui-md-h" id="users-default-h">Everyone else who signs in with ${escapeHtml(usersProvider())}</h4></div>
-            <p class="ui-set-desc">Users who sign in with ${escapeHtml(usersProvider())} and are not on the list above get this access. To give one user other access, add them by email.</p>
+            <p class="ui-set-desc">Sets access for ${escapeHtml(usersProvider())} users who are not listed above. Add a user by email to give them different access.</p>
             <div class="ui-sec-mode">
                 <div class="ui-seg" role="group" aria-labelledby="users-default-h">
                     ${['admin', 'operator', 'viewer', 'none'].map(level => `<button data-acts="admin" type="button" aria-pressed="${value === level}" onclick="setUsersDefault('${level}')">${USERS_ACCESS_LABELS[level]}</button>`).join('')}
@@ -572,7 +572,7 @@ function usersPanelHtml() {
                 <h4 class="ui-md-h" id="users-list-h">${uiCountLabel(count, 'user', 'users')}</h4>
                 <button type="button" onclick="editUser(null)" class="ui-btn ui-btn-sm ui-btn-primary ui-head-actions">Add user</button>
             </div>
-            ${signInOff ? uiLocked('Nobody signs in yet', 'Turn on Basic Auth or OAuth2 in Authentication. Until then, everyone who reaches this app has full access.', '') : ''}
+            ${signInOff ? uiLocked('Sign-in is off', 'Turn on Basic Auth or OAuth2 in Settings > Authentication. Until then, anyone who can reach this app has full access.', '') : ''}
             <div class="ui-channels">${builtin}${users.map(usersRow).join('') || (builtin ? '' : '<p class="ui-empty">No users yet.</p>')}</div>
         </section>
         ${usersDefaultPanel()}`;
@@ -640,7 +640,7 @@ function editUser(userId) {
     const areas = user ? (user.areas || {}) : usersPresetAreas('operator');
     const name = user ? usersName(user) : '';
     const box = (area, mode, on) => `<label class="ui-consent-box"><input type="checkbox" class="ui-check" data-area="${escapeHtml(area.id)}"
-        data-kind="${mode}" ${on ? 'checked' : ''} aria-label="${mode === 'act' ? 'Take action' : 'View'}: ${escapeHtml(area.label)}"></label>`;
+        data-kind="${mode}" ${on ? 'checked' : ''} aria-label="${mode === 'act' ? 'Action' : 'View'}: ${escapeHtml(area.label)}"></label>`;
     const rows = (usersData.areas || []).map(area => `
         <div class="ui-consent-row">
             <div class="ui-consent-area"><b>${escapeHtml(area.label)}</b><small>${escapeHtml(area.view || '')}</small>
@@ -662,8 +662,7 @@ function editUser(userId) {
             <label for="user-edit-pass"><span class="ui-label">${user ? 'New password' : 'Password'}</span>
                 <input id="user-edit-pass" type="password" class="ui-input" autocomplete="new-password" placeholder="At least 8 characters" aria-describedby="user-edit-pw-status"></label>
             ${usersPasswordMeterHtml(!!user)}
-            <p class="ui-set-desc">${user ? `Leave it empty to keep the current password. A new password signs ${escapeHtml(name)} out.`
-                : 'Give this password to the user. They sign in on the sign-in page with the username and this password.'}</p>
+            ${user ? `<p class="ui-set-desc">Leave it empty to keep the current password. A new password signs ${escapeHtml(name)} out.</p>` : ''}
         </div>`;
     const oauthFields = user ? (user.kind === 'oauth2' ? `<p class="ui-set-desc">Signs in with ${escapeHtml(usersProvider())}.</p>` : '') : `
         <div data-for="oauth2" class="ui-form${kind === 'oauth2' ? '' : ' hidden'}">
@@ -683,7 +682,7 @@ function editUser(userId) {
         body: `
             <div>
                 <label class="ui-sec-inline"><input type="checkbox" class="ui-check" id="user-edit-disabled" ${user && user.disabled ? 'checked' : ''}> Disable sign-in</label>
-                <p class="ui-set-desc">Blocks this user without deleting them, and signs them out at once.</p>
+                <p class="ui-set-desc">${user ? 'When saved, signs this user out and prevents sign-in until you enable it again.' : 'Creates the user with sign-in disabled. You can enable it later.'}</p>
             </div>
             <input type="hidden" id="user-edit-kind-value" value="${kind}">
             <input type="hidden" id="user-edit-level-value" value="${level}">
@@ -697,7 +696,7 @@ function editUser(userId) {
                 <div id="user-edit-level-text">${usersPresetText(level)}</div>
             </div>
             <div class="ui-consent-areas${level === 'custom' ? '' : ' hidden'}" role="group" aria-label="What this user may do" id="user-edit-grid">
-                <div class="ui-consent-row ui-consent-row-head" aria-hidden="true"><span>Area</span><span>View</span><span>Take action</span></div>
+                <div class="ui-consent-row ui-consent-row-head" aria-hidden="true"><span>Area</span><span>View</span><span>Action</span></div>
                 ${rows}
             </div>`,
         footClass: 'ui-agent-edit-foot',
@@ -731,7 +730,7 @@ function editUser(userId) {
         modal.querySelector('#user-edit-kind-value').value = button.dataset.kind;
         modal.querySelectorAll('[data-for]').forEach(el => el.classList.toggle('hidden', el.dataset.for !== button.dataset.kind));
     });
-    // Take action includes View: ticking it ticks View, and clearing View clears it
+    // Action includes View: ticking it ticks View, and clearing View clears it
     grid.addEventListener('change', event => {
         const changed = event.target;
         if (!changed.dataset || !changed.dataset.area) return;

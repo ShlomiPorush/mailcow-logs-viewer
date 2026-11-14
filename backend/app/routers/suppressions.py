@@ -951,7 +951,7 @@ def rspamd_sync_on() -> bool:
     list (services/feature_data deletes it; turned on, it loads back from the
     app's section) and neither reads nor writes the map, apart from what the
     user asks for in Settings (removing its blocks, starting fresh).
-    Automatic blocks are made only with "Handle undeliverable mail
+    Automatic blocks are made only with "Handle failed mail
     automatically" on as well."""
     return settings.is_feature_enabled('suppressions') and bool(settings.suppression_rspamd_sync)
 
@@ -1010,21 +1010,21 @@ class MapUnavailable(Exception):
     """The app's part of the Rspamd map cannot be read or written now."""
 
     REASONS = {
-        "no_rw_key": "The Read-Write API key is not set.",
-        "no_password": "The Rspamd password is not set.",
-        "no_rw_key_and_password": "The Read-Write API key and Rspamd password are not set.",
-        "read_failed": "The Rspamd map could not be read. Check the connection and try again.",
-        "map_not_found": "Rspamd has no recipient denylist map.",
+        "no_rw_key": "Add a read-write API key in Settings > mailcow > Connection.",
+        "no_password": "Add the Rspamd password in Settings > mailcow > Rspamd.",
+        "no_rw_key_and_password": "Add a read-write API key and the Rspamd password in Settings > mailcow.",
+        "read_failed": "The app could not read the block list in Rspamd. Check the connection and try again.",
+        "map_not_found": "The app could not find the address block list in Rspamd. Check the maps in Rspamd.",
         "feature_off": "Suppressions are off in Settings > Features.",
-        "import_failed": "This app's Rspamd blocks could not be loaded into the list.",
-        "section_missing": "The app's section is missing from the Rspamd map. Nothing was changed.",
-        "section_unclear": ("The app's section markers in the Rspamd map are missing or repeated. "
-                            "Fix them in mailcow. Nothing was changed."),
-        "map_changed": "The Rspamd map changed while syncing. Try again.",
+        "import_failed": "Could not load this app's Rspamd blocks. Check the Rspamd connection and try again.",
+        "section_missing": "This app's part of the Rspamd block list is missing. No blocks were changed.",
+        "section_unclear": ("The lines that mark this app's part of the Rspamd block list are missing or repeated. "
+                            "Fix those lines in mailcow before trying again."),
+        "map_changed": "The block list in Rspamd changed during sync. Try again.",
         "connection_changed": "The mailcow or Rspamd connection changed while syncing. Try again.",
         "sync_off": "Sync with Rspamd is off. Nothing was read from or written to Rspamd.",
         "sync_on": "Sync with Rspamd is on again. Nothing was removed from Rspamd.",
-        "transition_changed": "Sync with Rspamd was turned on or off again since this was asked. Nothing was removed from Rspamd.",
+        "transition_changed": "Sync with Rspamd changed in another save. No blocks were removed from Rspamd.",
     }
 
     def __init__(self, code: str, detail: str = ""):

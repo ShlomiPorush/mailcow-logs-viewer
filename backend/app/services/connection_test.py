@@ -25,20 +25,20 @@ def test_smtp_connection() -> Dict:
         logs.append("Starting SMTP connection test...")
         logs.append(f"Host: {settings.smtp_host}")
         logs.append(f"Port: {settings.smtp_port}")
-        logs.append(f"Use TLS: {settings.smtp_use_tls}")
-        logs.append(f"Use SSL: {settings.smtp_use_ssl}")
-        logs.append(f"Verify SSL: {_verify_label(settings.smtp_verify_ssl)}")
-        logs.append(f"Relay Mode: {settings.smtp_relay_mode}")
-        logs.append(f"User: {settings.smtp_user}")
+        logs.append(f"STARTTLS: {settings.smtp_use_tls}")
+        logs.append(f"Implicit TLS setting: {settings.smtp_use_ssl}")
+        logs.append(f"Verify TLS certificates: {_verify_label(settings.smtp_verify_ssl)}")
+        logs.append(f"Send without authentication: {settings.smtp_relay_mode}")
+        logs.append(f"SMTP username: {settings.smtp_user}")
         
         # Different validation for relay mode
         if settings.smtp_relay_mode:
             if not settings.smtp_host or not settings.smtp_from:
-                logs.append("ERROR: SMTP relay mode requires host and from address")
+                logs.append("ERROR: Set SMTP host and From address in Settings > SMTP before testing the relay.")
                 return {"success": False, "logs": logs}
         else:
             if not settings.smtp_host or not settings.smtp_user or not settings.smtp_password:
-                logs.append("ERROR: SMTP not fully configured")
+                logs.append("ERROR: Set SMTP host, SMTP username, and SMTP password in Settings > SMTP, then try again.")
                 return {"success": False, "logs": logs}
         
         logs.append("Connecting to SMTP server...")
@@ -47,7 +47,7 @@ def test_smtp_connection() -> Dict:
         if settings.smtp_use_ssl or settings.smtp_port == 465:
             context = mail_tls_context(settings.smtp_host, settings.smtp_verify_ssl, "SMTP_VERIFY_SSL")
             server = smtplib.SMTP_SSL(settings.smtp_host, settings.smtp_port, timeout=10, context=context)
-            logs.append("Connected using SSL")
+            logs.append("Connected using TLS")
         else:
             server = smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=10)
             logs.append("Connected")
@@ -75,7 +75,7 @@ def test_smtp_connection() -> Dict:
             logs.append(f"Skipping invalid address(es): {', '.join(skipped)}")
         recipients = parse_recipients(address_setting)
         if not recipients:
-            logs.append("ERROR: No valid recipient address. Set the Admin Email in Settings, Notifications.")
+            logs.append("ERROR: No valid recipient address. Set Admin email in Settings > Notifications, then try again.")
             server.quit()
             return {"success": False, "logs": logs}
         recipient = ", ".join(recipients)
@@ -92,7 +92,7 @@ def test_smtp_connection() -> Dict:
             footer='The Test SMTP button sent this email.'))
         
         server.send_message(msg)
-        logs.append("Test email sent successfully")
+        logs.append("SMTP server accepted the test email")
         
         server.quit()
         logs.append("Connection closed")
@@ -103,11 +103,11 @@ def test_smtp_connection() -> Dict:
     except ssl.SSLCertVerificationError as e:
         logs.append(f"✗ {certificate_error_hint(e, 'SMTP_VERIFY_SSL')}")
     except smtplib.SMTPAuthenticationError as e:
-        logs.append(f"✗ Authentication failed: {e}")
+        logs.append(f"✗ Sign-in failed. Check the SMTP username and password. Details: {e}")
     except smtplib.SMTPException as e:
-        logs.append(f"✗ SMTP error: {e}")
+        logs.append(f"✗ SMTP test failed. Check Settings > SMTP and try again. Details: {e}")
     except Exception as e:
-        logs.append(f"✗ Unexpected error: {type(e).__name__}: {e}")
+        logs.append(f"✗ Test failed. Check the application logs and try again. Details: {type(e).__name__}: {e}")
     
     return {
         "success": success,
@@ -150,13 +150,13 @@ def test_imap_connection() -> Dict:
         logs.append("Starting IMAP connection test...")
         logs.append(f"Host: {current.dmarc_imap_host}")
         logs.append(f"Port: {current.dmarc_imap_port}")
-        logs.append(f"Use SSL: {current.dmarc_imap_use_ssl}")
-        logs.append(f"Verify SSL: {_verify_label(current.dmarc_imap_verify_ssl)}")
-        logs.append(f"User: {current.dmarc_imap_user}")
+        logs.append(f"Use TLS: {current.dmarc_imap_use_ssl}")
+        logs.append(f"Verify TLS certificates: {_verify_label(current.dmarc_imap_verify_ssl)}")
+        logs.append(f"IMAP username: {current.dmarc_imap_user}")
         logs.append(f"Folders: {describe_setting(current.dmarc_imap_folder)}")
 
         if not current.dmarc_imap_host or not current.dmarc_imap_user or not current.dmarc_imap_password:
-            logs.append("ERROR: IMAP not fully configured")
+            logs.append("ERROR: Set IMAP host, IMAP username, and IMAP password in Settings > DMARC & TLS IMAP, then try again.")
             return {"success": False, "logs": logs}
 
         logs.append("Connecting to IMAP server...")
@@ -180,7 +180,7 @@ def test_imap_connection() -> Dict:
             if status == 'OK':
                 logs.append(f"Folder {target.label}: {data[0].decode(errors='replace')} messages")
             else:
-                logs.append(f"✗ Failed to select folder {target.label}")
+                logs.append(f"✗ Could not open folder {target.label}. Check Report folders in Settings > DMARC & TLS IMAP.")
                 problem = True
 
         if not problem:
@@ -190,9 +190,9 @@ def test_imap_connection() -> Dict:
     except ssl.SSLCertVerificationError as e:
         logs.append(f"✗ {certificate_error_hint(e, 'DMARC_IMAP_VERIFY_SSL')}")
     except imaplib.IMAP4.error as e:
-        logs.append(f"✗ IMAP error: {e}")
+        logs.append(f"✗ IMAP test failed. Check the credentials and report folder, then try again. Details: {e}")
     except Exception as e:
-        logs.append(f"✗ Unexpected error: {type(e).__name__}: {e}")
+        logs.append(f"✗ Test failed. Check the application logs and try again. Details: {type(e).__name__}: {e}")
     finally:
         if connection is not None:
             _close(connection)
@@ -216,18 +216,18 @@ def list_imap_folders() -> Dict:
         return answer
 
     if not current.dmarc_imap_host or not current.dmarc_imap_user or not current.dmarc_imap_password:
-        return failed("not_configured", "Set the IMAP host, user and password and save them first.")
+        return failed("not_configured", "Set the IMAP host, username and password, and save them first.")
     connection = None
     try:
         connection = _open_imap(current)
         folders, unreadable = list_folders(connection)
     except ssl.SSLError as e:
         hint = certificate_error_hint(e, 'DMARC_IMAP_VERIFY_SSL') if isinstance(e, ssl.SSLCertVerificationError) else None
-        return failed("tls", hint or "The secure connection to the IMAP server failed. Check the port and the SSL settings.")
+        return failed("tls", hint or "The secure connection to the IMAP server failed. Check the port and the TLS settings.")
     except imaplib.IMAP4.abort:
         return failed("unreachable", "The IMAP server closed the connection. Try again in a moment.")
     except imaplib.IMAP4.error:
-        return failed("auth_failed", "The IMAP server refused the sign-in. Check the user and the password.")
+        return failed("auth_failed", "The IMAP server refused the sign-in. Check the IMAP username and password.")
     except (OSError, TimeoutError):
         return failed("unreachable", "The IMAP server could not be reached. Check the host and the port.")
     except Exception as e:
