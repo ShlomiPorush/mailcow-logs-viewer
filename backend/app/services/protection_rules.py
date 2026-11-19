@@ -191,7 +191,7 @@ def save_rules(db: Session, rules: dict, can_ban: bool = True) -> Dict[str, dict
             if rule["mode"] not in ("watch", "enforce"):
                 raise ValueError("A rule either watches or bans")
             if rule["mode"] == "enforce" and not can_ban:
-                raise ValueError("Banning needs the Read-Write API key (MAILCOW_API_KEY_RW)")
+                raise ValueError("Banning requires a read-write API key. Add it in Settings > mailcow > Connection.")
             rule["ban_hours"] = _int(rule["ban_hours"], 0, 8760, "The ban length in hours")
 
     known, _ = _known_accounts(db)

@@ -105,13 +105,13 @@ Then:
 
 1. **About** shows whether the database and the mailcow API are connected.
 2. **Status** > **Jobs** shows errors of **Fetch Logs**.
-3. If you added the read-write key, click **Validate** next to it in **Settings** > **Mailcow**.
+3. If you added the read-write key, click **Validate** next to it in **Settings** > **mailcow**.
 
 The app fetches mail logs every 60 seconds; other data has its own schedule, so some pages fill in later. It sees only the log history that mailcow still keeps.
 
 ## 7. Move settings into the app
 
-Open **Settings** and click **Migrate Settings from ENV**, then **Import**. Until you do this, the Settings page cannot be edited.
+Open **Settings** and click **Migrate Settings from ENV**, then **Migrate**. Until you do this, the Settings page cannot be edited.
 
 A variable set in `.env`, even an empty value such as `SMTP_HOST=`, always wins over the saved value, and its field shows **Set by ENV**. To manage a value in the app, delete its line from `.env` and run `docker compose up -d`. Keep `MAILCOW_URL`, `MAILCOW_API_KEY`, the `POSTGRES_` values and `SETTINGS_EDIT_VIA_UI_ENABLED=true` in `.env`: the app needs them before it can read the saved settings.
 
@@ -143,6 +143,6 @@ The app updates its database on startup and does not start if that fails; the re
 | `/api/health` returns 503 | The `POSTGRES_` values. |
 | No new messages | **Fetch Logs** in **Status** > **Jobs**, `MAILCOW_URL`, and that the read-only key is active and allows the app's IP address. |
 | Messages have no subject or spam score | [Step 2](#2-make-postfix-add-a-message-id). |
-| An action is locked | Add the read-write key and click **Validate** in **Settings** > **Mailcow**. |
+| An action is locked | Add the read-write key and click **Validate** in **Settings** > **mailcow**. |
 | Saving returns 403 behind a proxy | The proxy must pass the original host name; see [Reverse proxy](Reverse_Proxy.md). |
 | Port 8080 is taken | Change the host side of the port mapping in `docker-compose.yml`, for example `127.0.0.1:8081:8080`. |

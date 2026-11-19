@@ -87,14 +87,13 @@ def test_subfolders_are_matched_by_exact_name_never_as_a_pattern():
     assert missing == [] and empty == []
 
 
-def test_folders_added_later_are_read_and_direct_choice_wins():
+def test_folders_added_later_are_read_once():
     folders = _folders('INBOX', 'INBOX/dmarc', 'INBOX/dmarc/google.com', 'INBOX/dmarc/new-tag', 'INBOX/tls-rpt')
     targets, missing, empty = resolve(folders, [Entry('inbox/dmarc', True), Entry('INBOX/dmarc', True),
                                                 Entry('INBOX/dmarc/new-tag'), Entry('gone')])
     # Names other than INBOX itself are exact: inbox/dmarc is not INBOX/dmarc
     assert missing == ['inbox/dmarc', 'gone']
-    assert [(t.label, t.direct) for t in targets] == [
-        ('INBOX/dmarc', True), ('INBOX/dmarc/google.com', False), ('INBOX/dmarc/new-tag', True)]
+    assert [t.label for t in targets] == ['INBOX/dmarc', 'INBOX/dmarc/google.com', 'INBOX/dmarc/new-tag']
     assert targets[0].select == '"INBOX/dmarc"'
 
 
@@ -102,7 +101,7 @@ def test_inbox_is_case_insensitive_and_noselect_parents():
     folders = _folders('INBOX', 'Archive', 'Archive/2026', 'Empty', noselect=('Archive', 'Empty'))
     targets, missing, empty = resolve(folders, [Entry('inbox'), Entry('Archive', True), Entry('Empty', True),
                                                 Entry('Empty')])
-    assert [(t.label, t.direct) for t in targets] == [('INBOX', True), ('Archive/2026', False)]
+    assert [t.label for t in targets] == ['INBOX', 'Archive/2026']
     # A parent with subfolders and nothing to read yet is not missing; a \Noselect folder named itself is
     assert empty == ['Empty'] and missing == ['Empty']
 
@@ -257,14 +256,14 @@ def test_without_uidplus_imported_emails_are_only_marked(monkeypatch):
     assert not [c for c in server.calls if c[0] == 'EXPUNGE']
 
 
-def test_scan_all_unseen_only_in_folders_chosen_themselves(monkeypatch):
-    personal = {'result': {'skipped': 'no report attached', 'reports_created': 0}}
-    server = Server({'INBOX': {1: personal}, 'INBOX/sub': {1: personal, 2: REPORT}})
+def test_scan_all_unseen_also_in_subfolders(monkeypatch):
+    other = {'result': {'skipped': 'no report attached', 'reports_created': 0}}
+    server = Server({'INBOX': {1: other}, 'INBOX/sub': {1: other, 2: REPORT}})
     result, processed, *_ = _run(monkeypatch, server, '[{"name":"INBOX","subfolders":true}]', scan_all_unseen=True)
     assert result['status'] == 'success'
-    assert processed == [('INBOX', '1'), ('INBOX/sub', '2')]
-    # The personal email under the parent is not marked as read
-    assert 'flags' not in server.folders['INBOX/sub']['1']
+    # A subfolder read through With subfolders is checked like a folder chosen itself
+    # (subject matches first, then the other unread emails)
+    assert processed == [('INBOX', '1'), ('INBOX/sub', '2'), ('INBOX/sub', '1')]
 
 
 def test_a_missing_folder_does_not_stop_the_others(monkeypatch):

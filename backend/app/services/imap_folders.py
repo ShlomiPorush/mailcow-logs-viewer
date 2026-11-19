@@ -47,11 +47,9 @@ class Folder:
 
 @dataclass(frozen=True)
 class Target:
-    """A folder to read: select is what SELECT gets, label the readable name.
-    direct: chosen itself, so Scan all unseen applies to it."""
+    """A folder to read: select is what SELECT gets, label the readable name."""
     select: str
     label: str
-    direct: bool
 
 
 def parse_setting(value: Optional[str]) -> Tuple[Optional[List[Entry]], Optional[str]]:
@@ -225,7 +223,7 @@ def resolve(folders: List[Folder], entries: List[Entry]) -> Tuple[List[Target], 
     by_key = {}
     for folder in folders:
         by_key.setdefault(_key(folder.name), folder)
-    chosen = {}  # folder raw name -> direct
+    chosen = set()  # raw names of the folders to read
     missing, empty = [], []
     for entry in entries:
         folder = by_key.get(_key(entry.name))
@@ -234,13 +232,13 @@ def resolve(folders: List[Folder], entries: List[Entry]) -> Tuple[List[Target], 
             continue
         found = False
         if folder.selectable:
-            chosen[folder.raw] = True
+            chosen.add(folder.raw)
             found = True
         if entry.subfolders and folder.can_have_children:
             prefix = folder.name + folder.delimiter
             for other in folders:
                 if other.selectable and other.name.startswith(prefix):
-                    chosen.setdefault(other.raw, False)
+                    chosen.add(other.raw)
                     found = True
         if not found:
             if entry.subfolders:
@@ -251,7 +249,7 @@ def resolve(folders: List[Folder], entries: List[Entry]) -> Tuple[List[Target], 
     targets = []
     for folder in folders:
         if folder.raw in chosen:
-            targets.append(Target(select=quote(folder.raw), label=folder.name, direct=chosen.pop(folder.raw)))
+            targets.append(Target(select=quote(folder.raw), label=folder.name))
     return targets, missing, empty
 
 
@@ -268,7 +266,7 @@ def folder_targets(connection, value: Optional[str]) -> Tuple[List[Target], List
     A single folder name is used as stored, without listing (as before)."""
     entries, legacy = parse_setting(value)
     if entries is None:
-        return [Target(select=legacy, label=legacy, direct=True)], [], [], 0
+        return [Target(select=legacy, label=legacy)], [], [], 0
     folders, unreadable = list_folders(connection)
     targets, missing, empty = resolve(folders, entries)
     return targets, missing, empty, unreadable

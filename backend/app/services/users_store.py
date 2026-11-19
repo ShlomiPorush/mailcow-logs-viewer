@@ -33,11 +33,11 @@ EMAIL_MAX = 320
 # At most two password hashes at once for sign-ins: each takes 32 MiB and a CPU
 SIGN_IN_HASHES = threading.BoundedSemaphore(2)
 
-NO_ADMIN_LEFT = "This change would leave no admin who can sign in."
+NO_ADMIN_LEFT = "Keep at least one admin who can sign in before making this change."
 STALE_USER = "Someone else changed this user. Reload and try again."
 STALE_DEFAULT = "Someone else changed the OAuth2 default access. Reload and try again."
 NO_VIEW = "Select View for at least one area."
-NOT_FOUND = "This user does not exist."
+NOT_FOUND = "This user no longer exists. Reload the user list."
 BUSY = "Too many sign-in attempts at once. Try again in a moment."
 
 
@@ -260,8 +260,8 @@ def create_user(db: Session, *, kind: str, username: Optional[str], email: Optio
     except IntegrityError:
         db.rollback()
         if kind == "local":
-            raise UserError(409, "A user with this username already exists.")
-        raise UserError(409, "There is already an entry for this email address.")
+            raise UserError(409, "This username is already in use. Choose another one.")
+        raise UserError(409, "This email address already has a user entry. Edit that user instead.")
     db.refresh(user)
     return row(user)
 

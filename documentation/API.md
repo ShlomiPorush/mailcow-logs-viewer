@@ -807,7 +807,7 @@ How many messages matching the filters came after the list was read: `{ "count":
 | `cursor` | string | Unset | The `next_cursor` of the page before |
 | `since` | array of strings | `[]` | Time ranges to count as well, as in `GET /api/messages/facets`; the search applies, `start_date` and `end_date` do not |
 
-Messages whose header held no usable Message-ID (an empty one, `<>`, or none), described from their Postfix lines; the Messages page calls them unlinked messages. `GET /api/messages` links Postfix and Rspamd by Message-ID, so these messages are not in it. A row has the fields of a `GET /api/messages` row: `subject`, `direction`, `spam_score` and `is_spam` are null, `user` and `ip` come from the Postfix `client=` line, and `correlation_key` is `noid-<number>`. Open it with `GET /api/message/{correlation_key}/details`. A message to or from an address in **Blacklist Emails** is left out. `total` counts every match; `limit=1` gives the count alone. With `since`, `time` holds an `all` count and one count per valid range.
+Messages whose header held no usable Message-ID (an empty one, `<>`, or none), described from their Postfix lines; the Messages page calls them unlinked messages. `GET /api/messages` links Postfix and Rspamd by Message-ID, so these messages are not in it. A row has the fields of a `GET /api/messages` row: `subject`, `direction`, `spam_score` and `is_spam` are null, `user` and `ip` come from the Postfix `client=` line, and `correlation_key` is `noid-<number>`. Open it with `GET /api/message/{correlation_key}/details`. A message to or from an address in **Exclude email addresses** is left out. `total` counts every match; `limit=1` gives the count alone. With `since`, `time` holds an `all` count and one count per valid range.
 
 **`queue_id_reused`:** Postfix gave the same queue ID to another message within 6 days. The row then shows only the line that queued it: `sender`, `recipient` and `final_status` are null and `recipient_count` is 0, because the other lines cannot be told apart.
 
@@ -1861,7 +1861,7 @@ Queues an import and returns at once: `{ "status": "started", "message": "IMAP i
 
 Only one import runs at a time. While one runs, scheduled or manual, the response is HTTP 200 with `{ "status": "already_running", "message": "Reports are already being fetched" }` and nothing starts. Read the result from the status or history endpoint. When an import starts, runs still marked `running` (left by an app that stopped during them) become `failed` with "Interrupted: the app stopped during the import".
 
-Manual and scheduled imports send the same notification when some emails fail: by email when SMTP is set up, and to the destinations that receive **DMARC processing errors**. Bounces and emails without reports are skipped, not counted as failures.
+Manual and scheduled imports send the same notification when some emails fail: by email when SMTP is set up, and to the destinations that receive **Report import errors**. Bounces and emails without reports are skipped, not counted as failures.
 
 ---
 

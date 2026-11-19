@@ -169,5 +169,5 @@ def cleanup_blocks() -> bool:
 
 
 def handling_on() -> bool:
-    """Suppressions on and "Handle undeliverable mail automatically" on."""
+    """Suppressions on and "Handle failed mail automatically" on."""
     return settings.is_feature_enabled('suppressions') and bool(settings.suppression_enabled)

@@ -83,9 +83,9 @@ Each message is handled by at most one rule. Delete rules are checked before rel
 
 ### How the rules run
 
-**Process Quarantine Rules** checks current quarantine every **Quarantine Rules Interval** (5 minutes by default). It uses enabled rules and handles at most **Quarantine Rules Max Actions** messages (50 by default) per run; the rest wait.
+**Process Quarantine Rules** checks current quarantine every **Run Auto-Rules every (minutes)** (5 minutes by default). It uses enabled rules and handles at most **Maximum actions per run** messages (50 by default) per run; the rest wait.
 
-Only actions confirmed by mailcow enter history and increase Hits. Failed actions stay unrecorded, are logged as errors and leave the messages for the next run. Other messages in the same run still count. History is kept for **Quarantine Rules Log Retention Days** (30 by default).
+Only actions confirmed by mailcow enter history and increase Hits. Failed actions stay unrecorded, are logged as errors and leave the messages for the next run. Other messages in the same run still count. History is kept for **Keep Auto-Rules history (days)** (30 by default).
 
 Use **Run** under **Status** > **Jobs** > **Quarantine** to process immediately. Interval changes apply on save without a restart. The job runs only when the Quarantine feature and read-write API key are both enabled.
 
@@ -101,9 +101,9 @@ History shows the last 20 confirmed actions. Deleting a rule does not remove the
 
 ## Settings that change this page
 
-Set the action limit, interval and history retention under **Settings** > **Quarantine** > **Auto-Rules Scheduler**. The action limit bounds the damage from a rule matching more messages than intended.
+Set the action limit, interval and history retention under **Settings** > **Quarantine** > **Auto-Rules schedule**. The action limit bounds the damage from a rule matching more messages than intended.
 
-Configure **mailcow API Key (read-write)** under **Settings** > **Mailcow** > **Connection**. See [Environment settings](../ENV_Settings.md) for environment-variable configuration.
+Configure **Read-write API key** under **Settings** > **mailcow** > **Connection**. See [Environment settings](../ENV_Settings.md) for environment-variable configuration.
 
 ## When something is missing
 

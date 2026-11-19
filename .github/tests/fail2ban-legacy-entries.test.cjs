@@ -56,7 +56,7 @@ test('an entry an earlier version wrote as a /32 network is tagged with what it 
     const row = entry => rows.find(r => r.includes(`>${entry}<`) || r.includes(`'${entry}'`));
     const denied = row('2001:db8::1/32');
     assert.match(denied, /ui-tag-warn">Whole network</);
-    assert.match(denied, /Blocks the whole 2001:db8::\/32 network\. An earlier version wrote this single address as a network\./);
+    assert.match(denied, /Bans the whole 2001:db8::\/32 network\. An earlier version wrote this single address as a network\./);
     assert.match(denied, /securityRepairListEntry\('blacklist', '2001:db8::1\/32', this\)/);
     assert.match(denied, /Replace it with 2001:db8::1\/128/);
     const allowed = row('2001:db8::2/32');

@@ -320,7 +320,7 @@ async def _notify_operator_blocked(email: str, count: int, revoked: int) -> None
                      + ("Its app passwords were revoked, so mail apps that used one need a new one."
                         if revoked else "Receiving mail (IMAP) still works.")),
         ],
-        footer="SMTP abuse protection is on in Settings, SMTP Abuse.")
+        footer="Outgoing spam protection is on in Settings, Outgoing spam.")
     await asyncio.to_thread(notify, subject, text, html, None, "security")
 
 

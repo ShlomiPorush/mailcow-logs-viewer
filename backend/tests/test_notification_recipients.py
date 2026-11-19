@@ -72,5 +72,5 @@ def test_settings_refuse_an_entry_that_is_not_an_address():
     with pytest.raises(HTTPException) as err:
         _normalize_address_lists({'dmarc_error_email': 'a@example.com, dmarc-team'})
     assert err.value.status_code == 400
-    assert err.value.detail == ('Report Import Error Email: "dmarc-team" is not an email address. '
+    assert err.value.detail == ('Report import error email: "dmarc-team" is not an email address. '
                                 'Separate several addresses with commas.')

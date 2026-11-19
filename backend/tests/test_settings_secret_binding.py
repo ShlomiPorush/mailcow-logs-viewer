@@ -272,7 +272,7 @@ def test_a_flag_that_is_neither_on_nor_off_is_refused(store):
         with pytest.raises(HTTPException) as exc:
             _put({"smtp_use_tls": value, "smtp_password": MASK})
         assert exc.value.status_code == 400
-        assert exc.value.detail == "Invalid settings for: smtp_use_tls"
+        assert exc.value.detail == "Enter a valid value for smtp_use_tls."
     assert store == before
 
 
