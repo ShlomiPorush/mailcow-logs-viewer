@@ -111,11 +111,14 @@ function _renderChannelFields() {
     const cfg = notificationEditing.config || {};
     const fields = type.fields.map(f => {
         const value = cfg[f.key] !== undefined ? cfg[f.key] : (f.default || '');
+        // A field's hint, such as where to find a Telegram topic ID, under its box
+        const hintId = `nc-field-${escapeHtml(f.key)}-hint`;
         return `
             <label for="nc-field-${escapeHtml(f.key)}">
                 <span class="ui-label">${escapeHtml(f.label)}${f.required ? ' <span class="ui-text-fail">*</span>' : ' <small class="ui-muted">(optional)</small>'}</span>
-                <input type="text" id="nc-field-${escapeHtml(f.key)}" data-field="${escapeHtml(f.key)}"
+                <input type="text" id="nc-field-${escapeHtml(f.key)}" data-field="${escapeHtml(f.key)}"${f.hint ? ` aria-describedby="${hintId}"` : ''}
                     value="${escapeHtml(value)}" placeholder="${escapeHtml(f.placeholder || '')}" class="nc-config-field ui-input">
+                ${f.hint ? `<small class="ui-muted" id="${hintId}">${escapeHtml(f.hint)}</small>` : ''}
             </label>`;
     }).join('');
     return `<p class="ui-set-desc">${escapeHtml(type.help)}</p>${fields}`;
