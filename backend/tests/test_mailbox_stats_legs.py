@@ -154,6 +154,15 @@ def test_correlations_without_a_message_id_are_never_merged(env):
     assert _mailboxes()[LOCAL_USER]['mailbox_counts']['sent_total'] == 2
 
 
+def test_correlations_with_an_empty_message_id_are_never_merged(env):
+    # Two messages whose Message-ID came in empty: each counts, and a failure is not hidden by the other's success
+    _leg(LOCAL_USER, REMOTE, 'delivered', '', direction='outbound')
+    _leg(LOCAL_USER, REMOTE, 'bounced', '', direction='outbound')
+    counts = _mailboxes()[LOCAL_USER]['mailbox_counts']
+    assert counts['sent_total'] == 2
+    assert counts['sent_failed'] == 1
+
+
 def test_two_messages_from_one_mailbox_count_twice(env):
     _leg(LOCAL_USER, REMOTE, 'delivered', _msgid(), direction='outbound')
     _leg(LOCAL_USER, REMOTE, 'bounced', _msgid(), direction='outbound', age_minutes=2)

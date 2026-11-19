@@ -1,5 +1,6 @@
 """The quarantine dry run loads detached rules outside the request loop."""
 import asyncio
+import secrets
 import threading
 from contextlib import contextmanager
 from types import SimpleNamespace
@@ -37,7 +38,7 @@ def test_preview_http_keeps_loop_responsive_and_closes_session(monkeypatch):
         return [{"id": "ITEM", "sender": "user@example.com", "rcpt": "recipient@example.com", "subject": "blocked"}]
 
     monkeypatch.setattr(rules, "get_db_context", session)
-    monkeypatch.setattr(rules.mailcow_api, "headers_rw", {"X-API-Key": "test-key"})
+    monkeypatch.setattr(rules.mailcow_api, "headers_rw", {"X-API-Key": secrets.token_hex(16)})
     monkeypatch.setattr(rules.mailcow_api, "get_quarantine", quarantine)
     monkeypatch.setattr(rules.mailcow_api, "release_quarantine", AsyncMock())
     monkeypatch.setattr(rules.mailcow_api, "delete_quarantine", AsyncMock())

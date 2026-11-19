@@ -1,0 +1,19 @@
+{
+  "ncsc_100k_passwords.txt": {
+    "name": "SecLists 100k-most-used-passwords-NCSC",
+    "origin": "The UK National Cyber Security Centre's list of the 100,000 passwords most often seen in breaches (PwnedPasswordsTop100k, from Have I Been Pwned), as published in SecLists",
+    "project": "https://github.com/danielmiessler/SecLists",
+    "path": "Passwords/Common-Credentials/100k-most-used-passwords-NCSC.txt",
+    "commit": "1a7bb9127eca9e6ff2fc0301c597fe6e16a0cb56",
+    "source": "https://raw.githubusercontent.com/danielmiessler/SecLists/1a7bb9127eca9e6ff2fc0301c597fe6e16a0cb56/Passwords/Common-Credentials/100k-most-used-passwords-NCSC.txt",
+    "license": "MIT (SecLists); SecLists states no separate licence for this list",
+    "license_file": "seclists.LICENSE.txt",
+    "license_source": "https://raw.githubusercontent.com/danielmiessler/SecLists/1a7bb9127eca9e6ff2fc0301c597fe6e16a0cb56/LICENSE",
+    "license_sha256": "3dbdc93d5f8829de0941744841730a09c106d0732e5ae0e98ca1d77be7ded66c",
+    "source_lines": 99840,
+    "lines": 99830,
+    "change": "Removed the 10 lines that are email addresses (people who used their address as a password), so the repository holds no real addresses; every other line is the published file",
+    "source_sha256": "c2e5696882c603b76bb67a47ee970897e5a76fc4c3f5547abe3d0ca340c576e0",
+    "sha256": "810080fa3cffd43994068c7f793a5e2c493b1d4b33584587ee09bdc0405e1667"
+  }
+}

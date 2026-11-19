@@ -97,7 +97,8 @@ def test_expiry_boundaries_and_bulk_query(monkeypatch, extra_rows):
     def capture(conn, cursor, statement, parameters, context, executemany):
         statements.append(statement)
     try:
-        Base.metadata.create_all(isolated, tables=[SpamSuppression.__table__])
+        from app.models import SuppressionEvent
+        Base.metadata.create_all(isolated, tables=[SpamSuppression.__table__, SuppressionEvent.__table__])
         expected = {}
         cases = list(product((None, -1, 0, 1), (False, True), (False, True)))
         cases += [(-1, True, True)] * extra_rows
@@ -123,8 +124,10 @@ def test_expiry_boundaries_and_bulk_query(monkeypatch, extra_rows):
                 active, synced, stamp = expected[row.email]
                 assert (row.active, row.synced_to_rspamd, row.expires_at) == (active, synced, stamp)
                 assert row.notes == "Preserve this text"
-        assert len(statements) == 1
-        assert statements[0].lstrip().upper().startswith("UPDATE ")
+        # The row lock first (services/suppression_rows_lock), then one bulk update
+        assert len(statements) == 2
+        assert "pg_advisory_xact_lock" in statements[0]
+        assert statements[1].lstrip().upper().startswith("UPDATE ")
         # Repeated expiry is harmless and still succeeds.
         asyncio.run(scheduler.expire_suppressions_job())
         assert scheduler.job_status["expire_suppressions"]["status"] == "success"

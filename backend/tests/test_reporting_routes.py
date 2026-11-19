@@ -1,4 +1,5 @@
 """The documented reporting API must be reachable through the real application."""
+import secrets
 from unittest.mock import AsyncMock
 
 import pytest
@@ -21,6 +22,7 @@ def report_client(monkeypatch):
     return TestClient(app), data, send, summary
 
 
+@pytest.mark.no_contract(reason="stubs get_system_summary_data with a partial answer")
 def test_summary_get_returns_report_json_from_main_app(report_client):
     client, data, send, summary = report_client
     response = client.get("/api/system/summary")
@@ -49,15 +51,17 @@ def test_summary_email_validates_force_before_scheduling(report_client):
 
 
 @pytest.mark.parametrize("method,path", [("GET", "/api/system/summary"), ("POST", "/api/system/summary/email")])
+@pytest.mark.no_contract(reason="stubs get_system_summary_data with a partial answer")
 def test_summary_routes_require_authentication(report_client, monkeypatch, method, path):
     client, data, send, summary = report_client
     monkeypatch.setattr(settings._inner, "basic_auth_enabled", True)
     monkeypatch.setattr(settings._inner, "auth_username", "report-test-user")
-    monkeypatch.setattr(settings._inner, "auth_password", "report-test-password")
+    password = secrets.token_hex(16)
+    monkeypatch.setattr(settings._inner, "auth_password", password)
     assert client.request(method, path).status_code == 401
     data.assert_not_awaited()
     send.assert_not_awaited()
-    response = client.request(method, path, auth=("report-test-user", "report-test-password"))
+    response = client.request(method, path, auth=("report-test-user", password))
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("application/json")
 

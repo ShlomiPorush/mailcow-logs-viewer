@@ -2,7 +2,7 @@
 import asyncio
 import threading
 from contextlib import contextmanager
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, MagicMock, Mock
 
 import pytest
 from app import scheduler
@@ -22,7 +22,7 @@ def isolated_state(monkeypatch):
 def test_ingestion_keeps_loop_responsive(monkeypatch):
     started, release, finished = threading.Event(), threading.Event(), threading.Event()
     threads, api_threads = [], []
-    db = Mock()
+    db = MagicMock()
     db.query.return_value.filter.return_value.all.return_value = []
     db.commit.side_effect = lambda: threads.append(threading.get_ident())
     async def fetch(**kwargs):

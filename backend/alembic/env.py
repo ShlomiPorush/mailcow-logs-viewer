@@ -41,7 +41,8 @@ def run_migrations_offline() -> None:
 
 
 def run_migrations_online() -> None:
-    connectable = create_engine(get_url(), poolclass=pool.NullPool)
+    # UTC sessions, like the app (app/database.py)
+    connectable = create_engine(get_url(), poolclass=pool.NullPool, connect_args={"options": "-c timezone=UTC"})
     with connectable.connect() as connection:
         context.configure(connection=connection, target_metadata=target_metadata)
         with context.begin_transaction():

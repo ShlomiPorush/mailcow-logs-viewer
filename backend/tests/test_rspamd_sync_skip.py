@@ -95,7 +95,15 @@ def test_unchanged_map_is_not_rewritten(monkeypatch, two_suppressions):
 
 def test_changed_map_is_rewritten(monkeypatch, two_suppressions):
     from app.routers.suppressions import MANAGED_MARKER_START, MANAGED_MARKER_END
+    from app.database import get_db_context
+    from app.models import SpamSuppression
 
+    # skip-b waits to be added (a block in Rspamd that is missing was deleted
+    # there, and leaves the list: test_rspamd_two_way.py)
+    with get_db_context() as db:
+        db.query(SpamSuppression).filter(SpamSuppression.email == 'skip-b@test.example').update(
+            {SpamSuppression.synced_to_rspamd: False}, synchronize_session=False)
+        db.commit()
     content = "\n".join([
         MANAGED_MARKER_START,
         "# Last sync: 2026-07-01T00:00:00Z | Active: 1",

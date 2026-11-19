@@ -25,12 +25,17 @@ def _postgres_available() -> bool:
 
 
 def _seed_burst(db, count, when):
-    from app.models import MessageCorrelation
+    from app.models import MessageCorrelation, RspamdLog
+    # Only authenticated submissions count as the mailbox's own sending
+    scan = RspamdLog(time=when, message_id=f"<{uuid.uuid4().hex}@pattern.example>",
+                     sender_smtp=SENDER, has_auth=True, user=SENDER, direction='outbound')
+    db.add(scan)
+    db.flush()
     for i in range(count):
         db.add(MessageCorrelation(
             correlation_key=uuid.uuid4().hex,
             message_id=f"<{uuid.uuid4().hex}@pattern.example>",
-            sender=SENDER, direction='outbound',
+            sender=SENDER, direction='outbound', rspamd_log_id=scan.id,
             first_seen=when + timedelta(seconds=i), last_seen=when,
             created_at=when))
 
@@ -40,7 +45,7 @@ def anomaly_env(monkeypatch):
     if not _postgres_available():
         pytest.skip('PostgreSQL not available')
     from app.database import init_db, get_db_context
-    from app.models import MessageCorrelation, MailboxStatistics, SecurityAlert
+    from app.models import MessageCorrelation, MailboxStatistics, RspamdLog, SecurityAlert
     init_db()
     monkeypatch.setattr(settings._inner, 'anomaly_check_interval', 15)
     monkeypatch.setattr(settings._inner, 'anomaly_volume_multiplier', 10.0)
@@ -51,6 +56,8 @@ def anomaly_env(monkeypatch):
     def cleanup():
         with get_db_context() as db:
             db.query(MessageCorrelation).filter(MessageCorrelation.sender == SENDER).delete(
+                synchronize_session=False)
+            db.query(RspamdLog).filter(RspamdLog.sender_smtp == SENDER).delete(
                 synchronize_session=False)
             db.query(SecurityAlert).filter(SecurityAlert.subject == SENDER).delete(
                 synchronize_session=False)

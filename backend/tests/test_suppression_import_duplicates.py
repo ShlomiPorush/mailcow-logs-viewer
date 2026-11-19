@@ -29,7 +29,8 @@ def test_import_keeps_first_new_row_and_skips_normalized_duplicates(monkeypatch,
     sessions = sessionmaker(bind=isolated, autoflush=False)
     address = "user@example.test" if entry_type == "email" else "example.test"
     try:
-        Base.metadata.create_all(isolated, tables=[SpamSuppression.__table__])
+        from app.models import SuppressionEvent
+        Base.metadata.create_all(isolated, tables=[SpamSuppression.__table__, SuppressionEvent.__table__])
         with sessions() as db:
             db.add(SpamSuppression(email="existing@example.test", active=False, reason="manual", source="manual", notes="unchanged"))
             db.commit()

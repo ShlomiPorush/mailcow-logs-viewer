@@ -61,6 +61,7 @@ def test_overview_database_wait_keeps_http_responsive(monkeypatch, stage):
     monkeypatch.setattr(dmarc, "check_dmarc_record", dns)
     tls_dns = AsyncMock()
     monkeypatch.setattr(dmarc, "check_tls_rpt_record", tls_dns)
+    monkeypatch.setattr(dmarc, "get_cached_active_domains", lambda: [])
     app = FastAPI()
     app.include_router(dmarc.router)
     app.dependency_overrides[dmarc.get_db] = lambda: db
@@ -131,6 +132,7 @@ def test_live_dns_runs_after_cache_session_closes(monkeypatch, fail_at):
     monkeypatch.setattr(dmarc, "get_cached_dns_check", lambda *args: None)
     monkeypatch.setattr(dmarc, "check_dmarc_record", dns)
     monkeypatch.setattr(dmarc, "check_tls_rpt_record", tls_dns)
+    monkeypatch.setattr(dmarc, "get_cached_active_domains", lambda: [])
     app = FastAPI()
     app.include_router(dmarc.router)
     app.dependency_overrides[dmarc.get_db] = lambda: db
@@ -145,7 +147,8 @@ def test_live_dns_runs_after_cache_session_closes(monkeypatch, fail_at):
                 "dmarc_fail": 0, "unique_ips": 0, "unique_reporters": 0},
                 "dmarc_record": {"status": "error", "record": None},
                 "tls_rpt_record": {"status": "warning", "message": "TLS-RPT record not published",
-                                   "record": None}}
+                                   "record": None},
+                "on_mailcow": None}
     asyncio.run(run())
     assert not active
     assert len(closed) == (1 if fail_at == "dns" else 2)

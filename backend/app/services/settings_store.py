@@ -2,13 +2,16 @@
 Load/save app config overrides from DB (system_settings table, keys config.*).
 Used when SETTINGS_EDIT_VIA_UI_ENABLED is True.
 """
+import functools
+import hashlib
 import json
 import logging
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 from sqlalchemy.orm import Session
 
 from ..models import SystemSetting
+from ..utils import format_datetime_for_api
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +27,30 @@ def _serialize_value(value: Any) -> str:
     if isinstance(value, (int, float)):
         return str(value)
     return str(value)
+
+
+_TRUE = frozenset({"true", "1", "yes", "on", "t", "y"})
+_FALSE = frozenset({"false", "0", "no", "off", "f", "n"})
+
+
+def parse_bool(value: Any) -> Optional[bool]:
+    """A boolean setting as saved, loaded and compared: the one parser for all three.
+
+    Takes the spellings the Settings model accepts for a bool (true/false,
+    1/0, yes/no, on/off, t/f, y/n in any case, blanks around ignored).
+    Returns None for anything else.
+    """
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int) and value in (0, 1):
+        return bool(value)
+    if isinstance(value, str):
+        text = value.strip().lower()
+        if text in _TRUE:
+            return True
+        if text in _FALSE:
+            return False
+    return None
 
 
 def _get_effective_type(annotation: type) -> type:
@@ -48,7 +75,7 @@ def _deserialize_value(value_str: str, field_name: str, annotation: type) -> Any
             return 0
         return ""
     if effective == bool:
-        return value_str.lower() in ("true", "1", "yes")
+        return parse_bool(value_str) is True
     if effective == int:
         try:
             return int(value_str)
@@ -116,6 +143,19 @@ def delete_all_config_overrides_from_db(db: Session) -> None:
 
 _MAXMIND_PREFIX = "maxmind."
 
+
+def _utc_z(stored: str):
+    """A stored check time as the API sends every time: UTC with Z. Results
+    saved by earlier versions hold +00:00 and microseconds."""
+    if not stored:
+        return None
+    from datetime import datetime
+    try:
+        return format_datetime_for_api(datetime.fromisoformat(stored.replace("Z", "+00:00")))
+    except ValueError:
+        return None
+
+
 def get_maxmind_validation_status(db: Session) -> dict:
     """Read the last MaxMind license validation result from DB.
     Returns None if never checked, or a dict with configured/valid/error/checked_at."""
@@ -132,7 +172,7 @@ def get_maxmind_validation_status(db: Session) -> dict:
         "configured": configured,
         "valid": valid,
         "error": error,
-        "checked_at": checked_at or None
+        "checked_at": _utc_z(checked_at)
     }
 
 
@@ -143,7 +183,7 @@ def save_maxmind_validation_status(db: Session, result: dict) -> None:
         "license_configured": "true" if result.get("configured") else "false",
         "license_valid": "true" if result.get("valid") else "false",
         "license_error": result.get("error") or "",
-        "license_checked_at": datetime.now(timezone.utc).isoformat(),
+        "license_checked_at": format_datetime_for_api(datetime.now(timezone.utc)),
     }
     for suffix, value in pairs.items():
         key = _MAXMIND_PREFIX + suffix
@@ -159,4 +199,55 @@ def save_maxmind_validation_status(db: Session, result: dict) -> None:
 def clear_maxmind_validation_status(db: Session) -> None:
     """Delete all maxmind.* keys from system_settings (e.g. after credentials change)."""
     db.query(SystemSetting).filter(SystemSetting.key.startswith(_MAXMIND_PREFIX)).delete(synchronize_session=False)
+    db.commit()
+
+
+# ── Credential check status persistence (mailcow Read-Write key, Rspamd password) ──
+
+_CREDENTIAL_CHECK_PREFIX = "credential_check."
+
+
+@functools.lru_cache(maxsize=16)
+def credential_fingerprint(*parts: str) -> str:
+    """Short hash of the address and secret a check ran against; the secret itself is never stored here.
+
+    PBKDF2, not a plain hash: the fingerprint is stored, and a fast hash of a
+    password lets anyone holding the database try guesses cheaply. It is read
+    on every settings load, so the result is kept in memory.
+    """
+    return hashlib.pbkdf2_hmac(
+        "sha256",
+        "\n".join(p or "" for p in parts).encode("utf-8"),
+        b"mailcow-logs-viewer credential check",
+        100_000,
+    ).hex()[:16]
+
+
+def get_credential_check_status(db: Session, name: str, fingerprint: str) -> dict:
+    """The last check of a credential, or None if never checked or its address or secret changed since."""
+    row = db.query(SystemSetting).filter(SystemSetting.key == _CREDENTIAL_CHECK_PREFIX + name).first()
+    if not row or not row.value:
+        return None
+    try:
+        data = json.loads(row.value)
+    except ValueError:
+        return None
+    if data.get("fingerprint") != fingerprint:
+        return None
+    data.pop("fingerprint", None)
+    if "checked_at" in data:
+        data["checked_at"] = _utc_z(data["checked_at"])
+    return data
+
+
+def save_credential_check_status(db: Session, name: str, result: dict, fingerprint: str) -> None:
+    """Persist a credential check result with the address and secret it ran against."""
+    from datetime import datetime, timezone
+    data = {**result, "fingerprint": fingerprint, "checked_at": format_datetime_for_api(datetime.now(timezone.utc))}
+    key = _CREDENTIAL_CHECK_PREFIX + name
+    row = db.query(SystemSetting).filter(SystemSetting.key == key).first()
+    if row:
+        row.value = json.dumps(data)
+    else:
+        db.add(SystemSetting(key=key, value=json.dumps(data)))
     db.commit()

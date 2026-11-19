@@ -12,7 +12,7 @@ from app.services import alias_domains
 
 @pytest.fixture
 def state(monkeypatch):
-    monkeypatch.setattr(scheduler.mailcow_api, "get_active_domains", AsyncMock(return_value=["primary.test"]))
+    monkeypatch.setattr(scheduler.mailcow_api, "get_domains", AsyncMock(return_value=[{"domain_name": "primary.test", "active": 1}]))
     monkeypatch.setattr(scheduler.mailcow_api, "get_alias_domain_map", AsyncMock(return_value={"alias.test": "primary.test"}))
     active, cached = Mock(), Mock()
     monkeypatch.setattr(scheduler, "set_cached_active_domains", active)
@@ -28,9 +28,9 @@ def test_database_work_keeps_loop_responsive(monkeypatch, state):
     db.query.return_value.filter.return_value.first.return_value = None
     db.commit.side_effect = lambda: threads.append(threading.get_ident())
 
-    async def domains():
+    async def domains(**kwargs):
         api_threads.append(threading.get_ident())
-        return ["primary.test"]
+        return [{"domain_name": "primary.test", "active": 1}]
 
     @contextmanager
     def session():
@@ -43,7 +43,7 @@ def test_database_work_keeps_loop_responsive(monkeypatch, state):
             threads.append(threading.get_ident())
             finished.set()
 
-    monkeypatch.setattr(scheduler.mailcow_api, "get_active_domains", domains)
+    monkeypatch.setattr(scheduler.mailcow_api, "get_domains", domains)
     monkeypatch.setattr(scheduler, "get_db_context", session)
 
     async def run():
@@ -56,10 +56,12 @@ def test_database_work_keeps_loop_responsive(monkeypatch, state):
         finally:
             release.set()
             result = await task
-        assert result is True
+        assert result == scheduler.JOB_STATUS_SET
+        scheduler.update_job_status.assert_called_with('sync_local_domains', 'success')
         assert api_threads == [loop_thread]
         assert len(threads) == 3 and len(set(threads)) == 1 and threads[0] != loop_thread
-        state[0].assert_called_once_with(["primary.test", "alias.test"])
+        state[0].assert_called_once_with(
+            ["primary.test", "alias.test"], complete_for=scheduler.mailcow_api.base_url, hosted=["primary.test", "alias.test"])
         state[1].assert_called_once_with({"alias.test": "primary.test"})
         db.add.assert_called_once()
         assert db.add.call_args.args[0].value == '{"alias.test": "primary.test"}'
@@ -77,17 +79,21 @@ def test_failed_commit_keeps_previous_alias_cache(monkeypatch, state):
         yield db
 
     monkeypatch.setattr(scheduler, "get_db_context", session)
-    assert asyncio.run(scheduler.sync_local_domains()) is True
-    state[0].assert_called_once_with(["primary.test", "alias.test"])
+    assert asyncio.run(scheduler.sync_local_domains()) == scheduler.JOB_STATUS_SET
+    scheduler.update_job_status.assert_called_with('sync_local_domains', 'success')
+    state[0].assert_called_once_with(
+        ["primary.test", "alias.test"], complete_for=scheduler.mailcow_api.base_url, hosted=["primary.test", "alias.test"])
     state[1].assert_not_called()
 
 
 def test_no_domains_does_not_replace_persisted_mapping(monkeypatch, state):
-    monkeypatch.setattr(scheduler.mailcow_api, "get_active_domains", AsyncMock(return_value=[]))
+    monkeypatch.setattr(scheduler.mailcow_api, "get_domains", AsyncMock(return_value=[]))
     monkeypatch.setattr(scheduler.mailcow_api, "get_alias_domain_map", AsyncMock(return_value={}))
     session = Mock()
     monkeypatch.setattr(scheduler, "get_db_context", session)
-    assert asyncio.run(scheduler.sync_local_domains()) is False
+    assert asyncio.run(scheduler.sync_local_domains()) == scheduler.JOB_STATUS_SET
+    scheduler.update_job_status.assert_called_with('sync_local_domains', 'failed', 'No domains')
     session.assert_not_called()
-    state[0].assert_not_called()
+    # mailcow answered that it has none: the list is read, empty
+    state[0].assert_called_once_with([], complete_for=scheduler.mailcow_api.base_url, hosted=[])
     state[1].assert_not_called()

@@ -12,6 +12,9 @@ let logsState = {
     activeService: 'postfix',
     isPaused: false,
     autoScroll: true,
+    // Live entries that came while auto-scroll was off, for the New lines
+    // button (counted against the filter shown at the time)
+    newEntries: [],
     // Display order (issue #69): false = newest at the bottom (classic tail -f),
     // true = newest at the top. allEntries stays chronological either way.
     newestFirst: localStorage.getItem('logsNewestFirst') === 'true',
@@ -66,19 +69,8 @@ async function loadLogViewer() {
         if (data.raw_logs_enabled === false) {
             const output = document.getElementById('logs-output');
             if (output) {
-                output.innerHTML = `
-                    <div class="flex flex-col items-center justify-center py-16 text-center">
-                        <svg class="w-16 h-16 text-gray-400 dark:text-gray-500 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"></path>
-                        </svg>
-                        <h3 class="text-lg font-semibold text-gray-300 mb-2">Live Log Viewer is Disabled</h3>
-                        <p class="text-sm text-gray-500 max-w-md">
-                            Raw log collection is currently turned off. Enable it in
-                            <a href="#" onclick="event.preventDefault(); navigateTo('settings')" class="text-blue-400 hover:text-blue-300 underline">Settings → Raw Logs</a>
-                            to start viewing live logs.
-                        </p>
-                    </div>
-                `;
+                output.innerHTML = `<div class="ui-logs-locked">${uiLocked('Live Log Viewer is Disabled',
+                    'Raw log collection is currently turned off. Enable it in Settings → Logs to start viewing live logs.')}</div>`;
             }
             // Hide the service sidebar
             const sidebar = document.getElementById('logs-service-list');
@@ -98,7 +90,7 @@ async function loadLogViewer() {
         } else {
             const output = document.getElementById('logs-output');
             if (output) {
-                output.innerHTML = '<span class="text-yellow-400">No log services available. Enable services in Settings → Raw Logs.</span>';
+                output.innerHTML = `<div class="ui-logs-locked">${uiLocked('No log services available', 'Enable services in Settings → Logs.')}</div>`;
             }
         }
     } catch (error) {
@@ -115,42 +107,45 @@ function renderLogServiceList(services) {
     if (!container) return;
     
     if (services.length === 0) {
-        container.innerHTML = '<p class="text-xs text-gray-500 dark:text-gray-400 text-center py-4">No services enabled</p>';
+        container.innerHTML = '<p class="ui-empty">No services enabled</p>';
         return;
     }
     
     container.innerHTML = services.map(svc => {
         const iconPath = LOG_SERVICE_ICONS[svc.icon] || LOG_SERVICE_ICONS.file;
         const isActive = svc.id === logsState.activeService;
-        const countStr = svc.log_count >= 1000 ? (svc.log_count / 1000).toFixed(1) + 'K' : svc.log_count.toString();
+        const countStr = svc.log_count >= 1000 ? (svc.log_count / 1000).toFixed(1) + 'K' : String(Number(svc.log_count));
         
         return `
-            <button onclick="selectLogService('${escapeJsArg(svc.id)}')" 
-                id="log-svc-${escapeHtml(svc.id)}"
-                class="w-full flex items-center gap-2 px-3 py-2 rounded-md text-left text-sm transition-colors log-service-btn ${
-                    isActive 
-                    ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-700' 
-                    : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
-                }" data-service="${escapeHtml(svc.id)}">
-                <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <button onclick="selectLogService('${escapeJsArg(svc.id)}')" id="log-svc-${escapeHtml(svc.id)}"
+                class="log-service-btn ui-log-svc"${isActive ? ' aria-current="true"' : ''} data-service="${escapeHtml(svc.id)}">
+                <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="${iconPath}"></path>
                 </svg>
-                <span class="flex-1 truncate font-medium">${escapeHtml(svc.name)}</span>
-                <span class="text-xs text-gray-400 dark:text-gray-500 font-mono">${countStr}</span>
+                <span class="ui-log-svc-name">${escapeHtml(svc.name)}</span>
+                <small>${countStr}</small>
             </button>
         `;
     }).join('');
+    updateLogServiceToggle();
 }
 
+// Narrow screens: the service list folds into one row that names the current service
+function toggleLogServices(open) {
+    const side = document.getElementById('logs-side');
+    const toggle = document.getElementById('logs-side-toggle');
+    if (!side) return;
+    const show = typeof open === 'boolean' ? open : !side.classList.contains('is-open');
+    side.classList.toggle('is-open', show);
+    if (toggle) toggle.setAttribute('aria-expanded', show);
+}
 
-function filterLogServices(query) {
-    const buttons = document.querySelectorAll('.log-service-btn');
-    const q = query.toLowerCase();
-    buttons.forEach(btn => {
-        const service = btn.dataset.service || '';
-        const text = btn.textContent.toLowerCase();
-        btn.style.display = (text.includes(q) || service.includes(q)) ? '' : 'none';
-    });
+function updateLogServiceToggle() {
+    const active = document.querySelector('#logs-service-list .ui-log-svc[aria-current="true"]');
+    const name = document.getElementById('logs-side-current');
+    const count = document.getElementById('logs-side-count');
+    if (name) name.textContent = active ? (active.querySelector('.ui-log-svc-name') || active).textContent.trim() : '-';
+    if (count) count.textContent = active && active.querySelector('small') ? active.querySelector('small').textContent.trim() : '';
 }
 
 async function selectLogService(serviceId) {
@@ -160,18 +155,11 @@ async function selectLogService(serviceId) {
     
     // Update sidebar active state
     document.querySelectorAll('.log-service-btn').forEach(btn => {
-        const isActive = btn.dataset.service === serviceId;
-        if (isActive) {
-            btn.className = btn.className.replace(
-                /text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700/g, ''
-            );
-            btn.classList.add('bg-blue-50', 'dark:bg-blue-900/30', 'text-blue-700', 'dark:text-blue-300', 'border', 'border-blue-200', 'dark:border-blue-700');
-            btn.classList.remove('hover:bg-gray-100', 'dark:hover:bg-gray-700');
-        } else {
-            btn.classList.remove('bg-blue-50', 'dark:bg-blue-900/30', 'text-blue-700', 'dark:text-blue-300', 'border', 'border-blue-200', 'dark:border-blue-700');
-            btn.classList.add('text-gray-700', 'dark:text-gray-300', 'hover:bg-gray-100', 'dark:hover:bg-gray-700');
-        }
+        if (btn.dataset.service === serviceId) btn.setAttribute('aria-current', 'true');
+        else btn.removeAttribute('aria-current');
     });
+    updateLogServiceToggle();
+    toggleLogServices(false);
     
     // Update status bar
     const activeServiceEl = document.getElementById('logs-active-service');
@@ -186,10 +174,8 @@ async function selectLogService(serviceId) {
     // Reset date range
     logsState.dateRange = null;
     logsState.timeRangeMinutes = '';
-    const fromInput = document.getElementById('logs-date-from');
-    const toInput = document.getElementById('logs-date-to');
-    if (fromInput) fromInput.value = '';
-    if (toInput) toInput.value = '';
+    setLogDateInput(document.getElementById('logs-date-from'), null);
+    setLogDateInput(document.getElementById('logs-date-to'), null);
     
     // Load smart filters
     await loadSmartFilters(serviceId);
@@ -221,35 +207,64 @@ async function loadSmartFilters(serviceId) {
         
         container.classList.remove('hidden');
         
-        const colorClasses = {
-            red: 'border-red-300 dark:border-red-700 text-red-700 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20',
-            orange: 'border-orange-300 dark:border-orange-700 text-orange-700 dark:text-orange-400 hover:bg-orange-50 dark:hover:bg-orange-900/20',
-            yellow: 'border-yellow-300 dark:border-yellow-700 text-yellow-700 dark:text-yellow-400 hover:bg-yellow-50 dark:hover:bg-yellow-900/20',
-            blue: 'border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20',
-        };
-        
-        const activeColorClasses = {
-            red: 'bg-red-500 border-red-500 text-white',
-            orange: 'bg-orange-500 border-orange-500 text-white',
-            yellow: 'bg-yellow-500 border-yellow-500 text-white',
-            blue: 'bg-blue-500 border-blue-500 text-white',
-        };
-        
-        chipsContainer.innerHTML = logsState.smartFilters.map(f => {
-            const colors = colorClasses[f.color] || colorClasses.blue;
-            return `<button onclick="toggleSmartFilter('${f.id}')" 
-                id="smart-filter-${f.id}"
-                class="px-2.5 py-1 text-xs font-medium rounded-full border transition-colors ${colors}"
-                title="${escapeHtml(f.description || '')}"
-                data-filter-id="${f.id}" data-color="${f.color}">
-                ${escapeHtml(f.label)}
-            </button>`;
-        }).join('');
+        chipsContainer.innerHTML = logsState.smartFilters.map(f => `<button onclick="toggleSmartFilter('${escapeJsArg(f.id)}')"
+                id="smart-filter-${escapeHtml(f.id)}" class="ui-chip ui-chip-${escapeHtml(f.color || 'blue')}" aria-pressed="false"
+                title="${escapeHtml(f.description || '')}" data-filter-id="${escapeHtml(f.id)}" data-color="${escapeHtml(f.color || 'blue')}">${escapeHtml(f.label)}</button>`).join('');
+        fitQuickFilters();
         
     } catch (error) {
         console.error('[LOGS] Failed to load smart filters:', error);
         container.classList.add('hidden');
     }
+}
+
+// Quick filters fold to a row and a half, so the cut second row shows there is more
+let quickFiltersOpen = false;
+function fitQuickFilters() {
+    const chips = document.getElementById('logs-smart-filter-chips');
+    const more = document.getElementById('logs-quick-more');
+    if (!chips || !more) return;
+    if (!quickFiltersObserver && typeof ResizeObserver === 'function') {
+        let lastWidth = 0;
+        quickFiltersObserver = new ResizeObserver(entries => {
+            const width = Math.round(entries[0].contentRect.width);
+            if (width && width !== lastWidth) { lastWidth = width; fitQuickFilters(); }
+        });
+        quickFiltersObserver.observe(chips);
+    }
+    chips.classList.remove('is-folded');
+    const first = chips.firstElementChild;
+    if (!first) { more.classList.add('hidden'); return; }
+    // Fold only when it saves at least a row; otherwise show them all, no link
+    const rowH = first.offsetHeight;
+    const foldH = Math.round(rowH * 1.6 + 6);
+    const overflows = chips.scrollHeight > foldH + rowH;
+    // An active filter never hides in the folded part
+    const activeHidden = [...chips.querySelectorAll('[aria-pressed="true"]')].some(c => c.offsetTop - chips.offsetTop > rowH);
+    if (activeHidden) quickFiltersOpen = true;
+    more.classList.toggle('hidden', !overflows);
+    chips.classList.toggle('is-folded', overflows && !quickFiltersOpen);
+    chips.style.setProperty('--ui-fold-h', `${foldH}px`);
+    more.textContent = quickFiltersOpen ? 'Show less' : `Show all ${chips.children.length}`;
+    more.setAttribute('aria-expanded', quickFiltersOpen);
+}
+
+function toggleQuickFilters() {
+    quickFiltersOpen = !quickFiltersOpen;
+    fitQuickFilters();
+}
+// Refit when the chips get their size: the page was hidden, or the width changed
+let quickFiltersObserver = null;
+
+// The custom date range opens from its chip; the presets fill it and load
+function toggleLogCustomRange(open) {
+    const box = document.getElementById('logs-custom-range');
+    const btn = document.getElementById('logs-custom-range-btn');
+    if (!box) return;
+    const show = typeof open === 'boolean' ? open : box.classList.contains('hidden');
+    box.classList.toggle('hidden', !show);
+    if (btn) { btn.setAttribute('aria-expanded', show); btn.setAttribute('aria-pressed', show); }
+    if (show) { const from = document.getElementById('logs-date-from'); if (from) from.focus(); }
 }
 
 async function toggleSmartFilter(filterId) {
@@ -261,23 +276,9 @@ async function toggleSmartFilter(filterId) {
     }
     
     // Update chip visual
-    const colorClasses = {
-        red: { inactive: 'border-red-300 dark:border-red-700 text-red-700 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20', active: 'bg-red-500 border-red-500 text-white' },
-        orange: { inactive: 'border-orange-300 dark:border-orange-700 text-orange-700 dark:text-orange-400 hover:bg-orange-50 dark:hover:bg-orange-900/20', active: 'bg-orange-500 border-orange-500 text-white' },
-        yellow: { inactive: 'border-yellow-300 dark:border-yellow-700 text-yellow-700 dark:text-yellow-400 hover:bg-yellow-50 dark:hover:bg-yellow-900/20', active: 'bg-yellow-500 border-yellow-500 text-white' },
-        blue: { inactive: 'border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20', active: 'bg-blue-500 border-blue-500 text-white' },
-    };
-    
     const btn = document.getElementById(`smart-filter-${filterId}`);
-    if (btn) {
-        const color = btn.dataset.color || 'blue';
-        const isActive = logsState.activeSmartFilters.includes(filterId);
-        const classes = colorClasses[color] || colorClasses.blue;
-        
-        // Reset classes
-        btn.className = `px-2.5 py-1 text-xs font-medium rounded-full border transition-colors ${isActive ? classes.active : classes.inactive}`;
-    }
-    
+    if (btn) btn.setAttribute('aria-pressed', logsState.activeSmartFilters.includes(filterId) ? 'true' : 'false');
+
     // Client-side filter: show/hide existing log lines
     applyLogFilter();
 }
@@ -331,6 +332,8 @@ async function fetchOlderLogs() {
     if (logsState.isLoadingMore || logsState.oldestPageLoaded <= 1) return;
     
     logsState.isLoadingMore = true;
+    // Clear during the request makes its result stale
+    const view = logsState.viewId;
     const pageToLoad = logsState.oldestPageLoaded - 1;
     
     // Show loading indicator at the history edge (top normally, bottom in
@@ -361,6 +364,7 @@ async function fetchOlderLogs() {
         
         const data = await response.json();
         const entries = data.data || [];
+        if (view !== logsState.viewId) return;
         
         if (entries.length > 0) {
             logsState.oldestPageLoaded = pageToLoad;
@@ -389,7 +393,7 @@ async function fetchOlderLogs() {
         
     } catch (error) {
         console.error('[LOGS] Failed to load older logs:', error);
-        if (loader) loader.textContent = '✕ Failed to load older logs';
+        if (loader) loader.textContent = 'Failed to load older logs';
         setTimeout(() => { if (loader) loader.remove(); }, 3000);
     } finally {
         logsState.isLoadingMore = false;
@@ -400,7 +404,21 @@ function setupTerminalScrollHandler() {
     const terminal = document.getElementById('logs-terminal');
     if (!terminal || terminal._scrollHandlerAttached) return;
     
+    // Scrolling by hand (wheel, touch, keys, the scroll bar), as opposed to the
+    // log growing or a filter shrinking it
+    let byHandAt = 0;
+    const byHand = () => { byHandAt = Date.now(); };
+    ['wheel', 'touchmove', 'keydown'].forEach(type => terminal.addEventListener(type, byHand, { passive: true }));
     terminal.addEventListener('scroll', () => {
+        // Reaching the newest lines by hand clears the New lines button (a
+        // press on the terminal itself, not on a line, is on its scroll bar)
+        const onBar = uiPress && uiPress.down && uiPress.target === terminal;
+        if (logsState.newEntries.length && (onBar || Date.now() - byHandAt < 1000)) {
+            const atNewest = logsState.newestFirst
+                ? terminal.scrollTop < 4
+                : terminal.scrollTop + terminal.clientHeight > terminal.scrollHeight - 4;
+            if (atNewest) { logsState.newEntries = []; updateLogNewLines(); }
+        }
         // Load older entries when scrolled near the history edge (within
         // 50px): the top normally, the bottom in newest-first mode
         if (logsState.isLoadingMore || logsState.oldestPageLoaded <= 1) return;
@@ -457,6 +475,11 @@ function renderLogEntries(entries, serviceId, replace = false, prepend = false) 
     if (replace) {
         output.innerHTML = '';
         logsState.allEntries = [];
+        logsState.newEntries = [];
+        updateLogNewLines();
+    } else if (entries.length) {
+        // New lines after a Clear replace its note
+        output.querySelectorAll('.logs-placeholder').forEach(el => el.remove());
     }
     
     // Store entries
@@ -471,6 +494,10 @@ function renderLogEntries(entries, serviceId, replace = false, prepend = false) 
         return;
     }
     
+    // While the user selects or has selected text, new lines neither scroll
+    // it away nor trim the lines it is in, and auto-scroll turns off
+    const held = !replace && !prepend && uiTextHeld(output);
+    if (held && logsState.autoScroll) setLogAutoScroll(false);
     const fragment = document.createDocumentFragment();
     const hasFilters = logsState.searchQuery || logsState.activeSmartFilters.length > 0;
 
@@ -510,7 +537,7 @@ function renderLogEntries(entries, serviceId, replace = false, prepend = false) 
     // Trim oldest entries beyond the cap (live stream only - prepend means
     // the user is deliberately paging back through history). The oldest
     // lines sit at the top normally, at the bottom in newest-first mode.
-    if (!prepend && logsState.allEntries.length > MAX_LIVE_LOG_ENTRIES) {
+    if (!prepend && !held && logsState.allEntries.length > MAX_LIVE_LOG_ENTRIES) {
         const excess = logsState.allEntries.length - MAX_LIVE_LOG_ENTRIES;
         logsState.allEntries.splice(0, excess);
         for (let i = 0; i < excess; i++) {
@@ -733,22 +760,8 @@ function formatLogTimestamp(timeVal) {
         
         if (isNaN(date.getTime())) return String(timeVal);
         
-        // Use the same format as the Messages page (DD.MM.YYYY, HH:mm:ss)
-        const options = {
-            day: '2-digit',
-            month: '2-digit',
-            year: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit',
-            second: '2-digit',
-            hour12: false
-        };
-        
-        if (appTimezone && appTimezone !== 'UTC') {
-            options.timeZone = appTimezone;
-        }
-        
-        return date.toLocaleString(undefined, options);
+        // The same format as the Messages page (formatTime), in the app's zone
+        return formatTime(date);
     } catch {
         return String(timeVal);
     }
@@ -770,7 +783,12 @@ async function connectLogWebSocket(serviceId) {
         
         // Fetch a one-time auth token via the authenticated REST API
         try {
-            const tokenResp = await authenticatedFetch('/api/raw-logs/ws-token');
+            const tokenResp = await authenticatedFetch('/api/raw-logs/ws-token', { ownNotPermitted: true });
+            // No View for Logs (any more): no stream, and no retry
+            if (tokenResp.status === 403) {
+                logsNotPermitted();
+                return;
+            }
             if (tokenResp.ok) {
                 const tokenData = await tokenResp.json();
                 if (tokenData.token) {
@@ -795,8 +813,13 @@ async function connectLogWebSocket(serviceId) {
                 const data = JSON.parse(event.data);
                 
                 if (data.type === 'new_logs' && data.entries && data.entries.length > 0) {
-                    if (!logsState.isPaused) {
+                    // A loaded time range shows only its own lines, until Live
+                    if (!logsState.isPaused && !logsState.dateRange) {
                         renderLogEntries(data.entries, data.service, false);
+                        if (!logsState.autoScroll) {
+                            logsState.newEntries = logsState.newEntries.concat(data.entries).slice(-MAX_LIVE_LOG_ENTRIES);
+                            updateLogNewLines();
+                        }
                         logsState.entryCount += data.entries.length;
                         logsState.totalEntries = logsState.entryCount;
                         logsState.lastUpdateTime = new Date();
@@ -808,11 +831,12 @@ async function connectLogWebSocket(serviceId) {
                     for (const [svcId, count] of Object.entries(data.counts)) {
                         const btn = document.getElementById(`log-svc-${svcId}`);
                         if (!btn) continue;
-                        const badge = btn.querySelector('.font-mono');
+                        const badge = btn.querySelector('small');
                         if (badge) badge.textContent = fmtNum(count);
                     }
-                    // Keep active service's totalEntries in sync
-                    if (logsState.activeService && data.counts[logsState.activeService] !== undefined) {
+                    updateLogServiceToggle();
+                    // Keep active service's totalEntries in sync (a loaded range keeps its own count)
+                    if (logsState.activeService && !logsState.dateRange && data.counts[logsState.activeService] !== undefined) {
                         logsState.totalEntries = data.counts[logsState.activeService];
                         logsState.entryCount = data.counts[logsState.activeService];
                         updateLogStatusBar();
@@ -836,6 +860,12 @@ async function connectLogWebSocket(serviceId) {
             logsState.isConnected = false;
             updateWsIndicator(false);
             
+            // The person has no View for Logs: say so, and do not reconnect
+            if (event.code === 4403) {
+                logsNotPermitted();
+                return;
+            }
+
             // Don't reconnect on authentication failure
             if (event.code === 4401 || logsState._authFailed) {
                 console.warn('[LOGS WS] Authentication failed - not reconnecting');
@@ -865,6 +895,20 @@ async function connectLogWebSocket(serviceId) {
     }
 }
 
+const LOGS_NOT_PERMITTED = 'You do not have permission to view live logs.';
+
+// The stream stopped for good: the status line and a notice say why
+function logsNotPermitted() {
+    updateWsIndicator(false);
+    const status = document.getElementById('logs-ws-status');
+    if (status) {
+        status.textContent = 'No permission';
+        status.title = LOGS_NOT_PERMITTED;
+    }
+    showToast(LOGS_NOT_PERMITTED, 'error');
+    if (typeof refreshAppAccess === 'function') refreshAppAccess();
+}
+
 function disconnectLogWebSocket() {
     if (logsState.ws) {
         logsState.ws.onclose = null; // Prevent auto-reconnect
@@ -880,7 +924,7 @@ function updateWsIndicator(connected) {
     const status = document.getElementById('logs-ws-status');
     
     if (indicator) {
-        indicator.className = `w-2 h-2 rounded-full ${connected ? 'bg-green-500' : logsState.isPaused ? 'bg-yellow-500' : 'bg-red-500'}`;
+        indicator.className = `ui-mdot ${connected ? 'ui-mdot-ok' : logsState.isPaused ? 'ui-mdot-warn' : 'ui-mdot-fail'}`;
     }
     if (status) {
         status.textContent = connected ? 'Connected' : logsState.isPaused ? 'Paused' : 'Disconnected';
@@ -905,12 +949,7 @@ function updateLogStatusBar() {
     }
     
     if (updateEl) {
-        if (logsState.lastUpdateTime) {
-            const seconds = Math.floor((new Date() - logsState.lastUpdateTime) / 1000);
-            updateEl.textContent = `Last update: ${seconds}s ago`;
-        } else {
-            updateEl.textContent = 'Last update: just now';
-        }
+        uiAgo(updateEl, (logsState.lastUpdateTime || new Date()).toISOString(), 'Updated ');
     }
 }
 
@@ -929,19 +968,13 @@ function toggleLogPause() {
         // Paused → show Resume
         if (text) text.textContent = 'Resume';
         if (icon) icon.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>';
-        if (btn) {
-            btn.classList.add('border-yellow-500', 'bg-yellow-500', 'text-white');
-            btn.classList.remove('border-gray-300', 'dark:border-gray-600', 'text-gray-700', 'dark:text-gray-300');
-        }
+        if (btn) btn.setAttribute('aria-pressed', 'true');
         disconnectLogWebSocket();
     } else {
         // Resumed → show Pause
         if (text) text.textContent = 'Pause';
         if (icon) icon.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>';
-        if (btn) {
-            btn.classList.remove('border-yellow-500', 'bg-yellow-500', 'text-white');
-            btn.classList.add('border-gray-300', 'dark:border-gray-600', 'text-gray-700', 'dark:text-gray-300');
-        }
+        if (btn) btn.setAttribute('aria-pressed', 'false');
         connectLogWebSocket(logsState.activeService);
     }
     
@@ -949,23 +982,56 @@ function toggleLogPause() {
 }
 
 function toggleAutoScroll() {
-    logsState.autoScroll = !logsState.autoScroll;
-    
+    setLogAutoScroll(!logsState.autoScroll);
+}
+
+// Auto-scroll on goes to the newest line (the bottom, or the top when newest
+// come first) and drops a selection in the log, which would turn it off again
+function setLogAutoScroll(on) {
+    logsState.autoScroll = on;
     const btn = document.getElementById('logs-autoscroll-btn');
-    if (btn) {
-        if (logsState.autoScroll) {
-            btn.classList.add('border-blue-500', 'bg-blue-500', 'text-white');
-            btn.classList.remove('border-gray-300', 'dark:border-gray-600', 'text-gray-700', 'dark:text-gray-300');
-        } else {
-            btn.classList.remove('border-blue-500', 'bg-blue-500', 'text-white');
-            btn.classList.add('border-gray-300', 'dark:border-gray-600', 'text-gray-700', 'dark:text-gray-300');
-        }
+    if (btn) btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    if (!on) return;
+    const output = document.getElementById('logs-output');
+    const selection = window.getSelection();
+    if (output && selection && selection.rangeCount && selection.getRangeAt(0).intersectsNode(output)) selection.removeAllRanges();
+    logsState.newEntries = [];
+    updateLogNewLines();
+    const terminal = document.getElementById('logs-terminal');
+    if (terminal) terminal.scrollTop = logsState.newestFirst ? 0 : terminal.scrollHeight;
+}
+
+// Selecting text in the log (a click on a line, or a drag) stops auto-scroll,
+// and the Auto-scroll button shows it
+document.addEventListener('selectionchange', () => {
+    if (!logsState.autoScroll) return;
+    const output = document.getElementById('logs-output');
+    if (output && output.offsetParent && uiTextHeld(output)) setLogAutoScroll(false);
+});
+
+// The New lines button: shown while auto-scroll is off and live lines came in,
+// at the edge where the newest lines are; a click goes to them
+function updateLogNewLines() {
+    const wrap = document.getElementById('logs-new-wrap');
+    const terminal = document.getElementById('logs-terminal');
+    if (!wrap || !terminal) return;
+    const hasFilters = logsState.searchQuery || logsState.activeSmartFilters.length > 0;
+    const count = hasFilters ? logsState.newEntries.filter(entryMatchesFilters).length : logsState.newEntries.length;
+    wrap.hidden = !count;
+    if (!count) return;
+    const top = logsState.newestFirst;
+    wrap.classList.toggle('is-top', top);
+    if (top ? terminal.firstElementChild !== wrap : terminal.lastElementChild !== wrap) {
+        if (top) terminal.prepend(wrap); else terminal.append(wrap);
     }
-    
-    if (logsState.autoScroll) {
-        const terminal = document.getElementById('logs-terminal');
-        if (terminal) terminal.scrollTop = terminal.scrollHeight;
-    }
+    const label = document.getElementById('logs-new-text');
+    if (label) label.textContent = `${count.toLocaleString()} new ${count === 1 ? 'line' : 'lines'}`;
+    const arrow = document.getElementById('logs-new-arrow');
+    if (arrow) arrow.setAttribute('d', top ? 'M5 15l7-7 7 7' : 'M19 9l-7 7-7-7');
+}
+
+function jumpToNewestLogs() {
+    setLogAutoScroll(true);
 }
 
 function setLogFontSize(size) {
@@ -987,15 +1053,7 @@ function toggleWordWrap() {
         output.style.wordWrap = logsState.wordWrap ? 'break-word' : 'normal';
     }
     
-    if (btn) {
-        if (logsState.wordWrap) {
-            btn.classList.add('border-blue-500', 'bg-blue-500', 'text-white');
-            btn.classList.remove('border-gray-300', 'dark:border-gray-600', 'text-gray-700', 'dark:text-gray-300');
-        } else {
-            btn.classList.remove('border-blue-500', 'bg-blue-500', 'text-white');
-            btn.classList.add('border-gray-300', 'dark:border-gray-600', 'text-gray-700', 'dark:text-gray-300');
-        }
-    }
+    if (btn) btn.setAttribute('aria-pressed', logsState.wordWrap ? 'true' : 'false');
 }
 
 function searchLogs() {
@@ -1006,24 +1064,36 @@ function searchLogs() {
     applyLogFilter();
 }
 
+// A date input holding an exact instant: it shows the wall time in the app's
+// zone, and the instant is sent while the field still shows it. A wall time
+// alone cannot tell the two hours apart when the clocks go back.
+function setLogDateInput(input, date) {
+    if (!input) return;
+    input.value = date ? toZonedInputValue(date) : '';
+    input.dataset.shown = input.value;
+    input.dataset.instant = date ? date.toISOString() : '';
+}
+
+// The instant a date input means: the one a preset put there, else the wall
+// time typed, read in the app's zone ("To" covers its whole minute)
+function readLogDateInput(input, isEnd) {
+    if (!input || !input.value) return null;
+    if (input.dataset.instant && input.value === input.dataset.shown) return input.dataset.instant;
+    const date = fromZonedInputValue(input.value);
+    if (!date) return null;
+    return (isEnd ? new Date(date.getTime() + (input.value.length > 16 ? 999 : 59999)) : date).toISOString();
+}
+
 /** Fill date inputs with a preset (minutes ago → now) */
-function setLogTimePreset(minutes) {
-    const now = new Date();
+function setLogTimePreset(minutes, now = new Date()) {
     const from = new Date(now.getTime() - minutes * 60 * 1000);
     
-    // Format for datetime-local input (YYYY-MM-DDTHH:MM)
-    const fmt = (d) => {
-        const pad = (n) => String(n).padStart(2, '0');
-        return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-    };
-    
-    const fromInput = document.getElementById('logs-date-from');
-    const toInput = document.getElementById('logs-date-to');
-    if (fromInput) fromInput.value = fmt(from);
-    if (toInput) toInput.value = fmt(now);
+    // The inputs show wall times in the app's zone; the exact instants are sent
+    setLogDateInput(document.getElementById('logs-date-from'), from);
+    setLogDateInput(document.getElementById('logs-date-to'), now);
     
     // Auto-load
-    loadDateRangeLogs();
+    return loadDateRangeLogs();
 }
 
 /** Load ALL logs within the selected date range */
@@ -1032,8 +1102,9 @@ async function loadDateRangeLogs() {
     const toInput = document.getElementById('logs-date-to');
     const loadingEl = document.getElementById('logs-range-loading');
     
-    const startDate = fromInput?.value ? new Date(fromInput.value).toISOString() : null;
-    const endDate = toInput?.value ? new Date(toInput.value).toISOString() : null;
+    // Wall times in the app's zone, or the instants of a preset; "To" covers its whole minute
+    const startDate = readLogDateInput(fromInput, false);
+    const endDate = readLogDateInput(toInput, true);
     
     if (!startDate) {
         // No date selected - do nothing
@@ -1118,10 +1189,8 @@ async function resetToLiveLogs() {
     logsState.timeRangeMinutes = '';
     
     // Clear date inputs
-    const fromInput = document.getElementById('logs-date-from');
-    const toInput = document.getElementById('logs-date-to');
-    if (fromInput) fromInput.value = '';
-    if (toInput) toInput.value = '';
+    setLogDateInput(document.getElementById('logs-date-from'), null);
+    setLogDateInput(document.getElementById('logs-date-to'), null);
     
     // Mark Live as active
     setLiveButtonActive(true);
@@ -1137,11 +1206,7 @@ function setLiveButtonActive(active) {
     const btn = document.getElementById('logs-live-btn');
     if (!btn) return;
     
-    if (active) {
-        btn.className = 'inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md border border-green-500 bg-green-500 text-white transition-colors';
-    } else {
-        btn.className = 'inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors';
-    }
+    btn.setAttribute('aria-pressed', active ? 'true' : 'false');
 }
 
 function clearLogSearch() {
@@ -1153,16 +1218,7 @@ function clearLogSearch() {
     if (logsState.activeSmartFilters.length > 0) {
         logsState.activeSmartFilters.forEach(filterId => {
             const btn = document.getElementById(`smart-filter-${filterId}`);
-            if (btn) {
-                const color = btn.dataset.color || 'blue';
-                const inactiveClasses = {
-                    red: 'border-red-300 dark:border-red-700 text-red-700 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20',
-                    orange: 'border-orange-300 dark:border-orange-700 text-orange-700 dark:text-orange-400 hover:bg-orange-50 dark:hover:bg-orange-900/20',
-                    yellow: 'border-yellow-300 dark:border-yellow-700 text-yellow-700 dark:text-yellow-400 hover:bg-yellow-50 dark:hover:bg-yellow-900/20',
-                    blue: 'border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20',
-                };
-                btn.className = `px-2.5 py-1 text-xs font-medium rounded-full border transition-colors ${inactiveClasses[color] || inactiveClasses.blue}`;
-            }
+            if (btn) btn.setAttribute('aria-pressed', 'false');
         });
         logsState.activeSmartFilters = [];
     }
@@ -1202,8 +1258,9 @@ function applyLogFilter() {
         }
     });
     
-    // Update the filter badge
+    // Update the filter badge, and the New lines count for the new filter
     updateFilterBadge(hasFilters, visibleCount, lines.length);
+    updateLogNewLines();
 }
 
 function updateFilterBadge(hasFilters, visible, total) {
@@ -1213,14 +1270,12 @@ function updateFilterBadge(hasFilters, visible, total) {
         return;
     }
     if (!badge) {
-        badge = document.createElement('div');
+        // In the status bar, next to the count: inside the terminal it scrolled away with the lines
+        badge = document.createElement('span');
         badge.id = 'logs-filter-badge';
-        badge.className = 'absolute bottom-12 left-1/2 -translate-x-1/2 bg-blue-600 text-white text-xs px-3 py-1.5 rounded-full shadow-lg flex items-center gap-2 z-10';
-        const terminal = document.getElementById('logs-terminal');
-        if (terminal) {
-            terminal.style.position = 'relative';
-            terminal.appendChild(badge);
-        }
+        badge.className = 'ui-logs-filter';
+        const count = document.getElementById('logs-entry-count');
+        if (count) count.after(badge);
     }
     // Build description of active filters
     const parts = [];
@@ -1230,22 +1285,30 @@ function updateFilterBadge(hasFilters, visible, total) {
     if (logsState.activeSmartFilters.length > 0) {
         const filterNames = logsState.activeSmartFilters.map(id => {
             const f = logsState.smartFilters.find(sf => sf.id === id);
-            return f ? f.label : id;
+            return escapeHtml(f ? f.label : id);
         });
         parts.push(filterNames.join(', '));
     }
     badge.innerHTML = `<span>Showing ${visible} of ${total} - filter: <strong>${parts.join(' + ')}</strong></span>` +
-        `<button onclick="clearLogSearch()" class="ml-1 hover:text-yellow-300 font-bold" title="Clear all filters">✕</button>`;
+        `<button type="button" onclick="clearLogSearch()" aria-label="Clear all filters" title="Clear all filters">&times;</button>`;
 }
 
 function clearLogDisplay() {
     // Clear display
     const output = document.getElementById('logs-output');
     if (output) {
-        output.innerHTML = '<span class="text-gray-500">Display cleared. New logs will appear here.</span>';
+        output.innerHTML = '<span class="text-gray-500 logs-placeholder">Display cleared. New logs will appear here.</span>';
     }
     logsState.entryCount = 0;
     logsState.allEntries = [];
+    logsState.newEntries = [];
+    updateLogNewLines();
+    // A cleared screen does not refill with history: no older pages, and a
+    // history request already on its way is dropped
+    logsState.oldestPageLoaded = 1;
+    logsState.viewId = (logsState.viewId || 0) + 1;
+    const loader = document.getElementById('logs-load-more-indicator');
+    if (loader) loader.remove();
     
     // Clear search
     const searchInput = document.getElementById('logs-search-input');
@@ -1256,19 +1319,14 @@ function clearLogDisplay() {
     if (logsState.activeSmartFilters.length > 0) {
         logsState.activeSmartFilters.forEach(filterId => {
             const chip = document.querySelector(`[data-filter-id="${filterId}"]`);
-            if (chip) {
-                chip.classList.remove('bg-blue-100', 'dark:bg-blue-900/40', 'text-blue-700', 'dark:text-blue-300', 'border-blue-300', 'dark:border-blue-600');
-                chip.classList.add('bg-gray-100', 'dark:bg-gray-700', 'text-gray-600', 'dark:text-gray-400', 'border-gray-300', 'dark:border-gray-600');
-            }
+            if (chip) chip.setAttribute('aria-pressed', 'false');
         });
         logsState.activeSmartFilters = [];
     }
     
     // Clear date range
-    const fromInput = document.getElementById('logs-date-from');
-    const toInput = document.getElementById('logs-date-to');
-    if (fromInput) fromInput.value = '';
-    if (toInput) toInput.value = '';
+    setLogDateInput(document.getElementById('logs-date-from'), null);
+    setLogDateInput(document.getElementById('logs-date-to'), null);
     logsState.dateRange = null;
     logsState.timeRangeMinutes = '';
     
