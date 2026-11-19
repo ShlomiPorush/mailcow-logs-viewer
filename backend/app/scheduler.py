@@ -2921,7 +2921,7 @@ def login_time(value):
     """A last-login time as mailcow sends it: Unix seconds, or None for 0 (never,
     or SHOW_LAST_LOGIN off), a missing field and a value that is no time. A value
     the database column cannot hold would fail the whole mailbox sync."""
-    if isinstance(value, bool):
+    if isinstance(value, (bool, float)):
         return None
     seconds = safe_int(value, 0)
     return seconds if 0 < seconds <= _LAST_LOGIN_MAX else None

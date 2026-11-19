@@ -21,7 +21,7 @@ WHEN = 1763500000  # 2025-11-18T21:06:40Z
 @pytest.mark.parametrize('value, stored', [
     (WHEN, WHEN), (str(WHEN), WHEN), (f' {WHEN} ', WHEN),
     (0, None), ('0', None), (None, None), ('', None), ('-', None), ('x', None),
-    (-5, None), (True, None), (False, None),
+    (-5, None), (True, None), (False, None), (WHEN + 0.5, None), (f'{WHEN}.5', None),
     # Past 9999 a date cannot show it; past BIGINT the column cannot hold it
     (253402300800, None), (2 ** 63, None), (str(10 ** 30), None),
 ])
@@ -29,34 +29,20 @@ def test_a_login_time_is_unix_seconds_or_none(value, stored):
     assert login_time(value) == stored
 
 
-def _postgres_available() -> bool:
-    try:
-        from app.database import engine
-        with engine.connect():
-            return True
-    except Exception:
-        return False
-
-
-def _cleanup():
+@pytest.fixture()
+def db(app_schema):
+    """The test's own mailboxes; the sync marks every other mailbox inactive,
+    so the mailboxes of other tests are made active again afterwards."""
     from app.database import get_db_context
     from app.models import MailboxStatistics
     with get_db_context() as session:
-        session.query(MailboxStatistics).filter(MailboxStatistics.domain == DOMAIN).delete(synchronize_session=False)
-        session.commit()
-
-
-@pytest.fixture()
-def db():
-    if not _postgres_available():
-        pytest.skip('PostgreSQL not available')
-    from app.database import get_db_context, init_db
-    import app.models  # noqa: F401  (the tables init_db creates)
-    init_db()
-    _cleanup()
-    with get_db_context() as session:
+        others = [r.id for r in session.query(MailboxStatistics.id).filter(MailboxStatistics.active.is_(True))]
         yield session
-    _cleanup()
+        session.rollback()
+        session.query(MailboxStatistics).filter(MailboxStatistics.domain == DOMAIN).delete(synchronize_session=False)
+        session.query(MailboxStatistics).filter(MailboxStatistics.id.in_(others)).update(
+            {MailboxStatistics.active: True}, synchronize_session=False)
+        session.commit()
 
 
 def _mailbox(name, **fields):
@@ -76,24 +62,26 @@ def test_the_sync_keeps_the_last_sogo_login_and_the_page_shows_it(db):
     from app.scheduler import _store_mailbox_statistics
     _store_mailbox_statistics([
         _mailbox('webmail', last_sogo_login=WHEN),
+        _mailbox('downgraded', last_sogo_login=WHEN),
         _mailbox('never', last_sogo_login=0),
         _mailbox('old-mailcow'),
         # One odd value does not cost the other mailboxes their sync
         _mailbox('odd', last_sogo_login=2 ** 63, last_imap_login=10 ** 30),
     ])
     mailbox_stats.clear_stats_cache()
-    assert _shown() == {'webmail': ('2025-11-18T21:06:40Z', 1024), 'never': (None, 1024),
-                        'old-mailcow': (None, 1024), 'odd': (None, 1024)}
+    assert _shown() == {'webmail': ('2025-11-18T21:06:40Z', 1024), 'downgraded': ('2025-11-18T21:06:40Z', 1024),
+                        'never': (None, 1024), 'old-mailcow': (None, 1024), 'odd': (None, 1024)}
 
     # A later sync that reports none, or no field at all, clears a stored time
     _store_mailbox_statistics([
         _mailbox('webmail', last_sogo_login=0, quota=2048),
+        _mailbox('downgraded'),
         _mailbox('never', last_sogo_login=WHEN),
         _mailbox('old-mailcow'),
         _mailbox('odd', last_sogo_login='x'),
     ])
     mailbox_stats.clear_stats_cache()
-    assert _shown() == {'webmail': (None, 2048), 'never': ('2025-11-18T21:06:40Z', 1024),
+    assert _shown() == {'webmail': (None, 2048), 'downgraded': (None, 1024), 'never': ('2025-11-18T21:06:40Z', 1024),
                         'old-mailcow': (None, 1024), 'odd': (None, 1024)}
 
 
@@ -105,29 +93,44 @@ def _migration():
     return module
 
 
-def test_the_upgrade_adds_the_column_empty_for_stored_mailboxes(db):
+def test_the_upgrade_adds_the_column_empty_for_stored_mailboxes(app_schema):
     from alembic.migration import MigrationContext
     from alembic.operations import Operations
-    from sqlalchemy import inspect, text
+    from sqlalchemy import create_engine, inspect, text
     from app.database import engine
-    from app.scheduler import _store_mailbox_statistics
-    _store_mailbox_statistics([_mailbox('before', last_sogo_login=WHEN, last_imap_login=WHEN)])
-    db.commit()
-    db.close()
+    from app.models import Base, MailboxStatistics
+    # A schema of its own: the migration never touches the suite's tables
+    schema = 'sogo_login_' + uuid.uuid4().hex[:8]
+    with engine.begin() as conn:
+        conn.execute(text(f'CREATE SCHEMA {schema}'))
+    isolated = create_engine(engine.url, connect_args={'options': f'-csearch_path={schema}'})
 
     def run(step):
-        with engine.begin() as connection:
-            with Operations.context(MigrationContext.configure(connection)):
+        with isolated.begin() as conn:
+            with Operations.context(MigrationContext.configure(conn)):
                 step()
 
+    def stored():
+        with isolated.connect() as conn:
+            return conn.execute(text('SELECT username, last_imap_login FROM mailbox_statistics')).all()
+
     try:
+        # As 0031 left it: the table without the column, with a mailbox in it
+        Base.metadata.create_all(isolated, tables=[MailboxStatistics.__table__])
+        with isolated.begin() as conn:
+            conn.execute(text('ALTER TABLE mailbox_statistics DROP COLUMN last_sogo_login'))
+            conn.execute(text("INSERT INTO mailbox_statistics (username, domain, last_imap_login) "
+                              f"VALUES ('before@{DOMAIN}', '{DOMAIN}', {WHEN})"))
+        run(_migration().upgrade)
+        # A restart, or a fresh install whose table already has it, changes nothing
+        run(_migration().upgrade)
+        with isolated.connect() as conn:
+            assert conn.execute(text('SELECT last_sogo_login FROM mailbox_statistics')).all() == [(None,)]
+        assert stored() == [(f'before@{DOMAIN}', WHEN)]
         run(_migration().downgrade)
-        assert 'last_sogo_login' not in {c['name'] for c in inspect(engine).get_columns('mailbox_statistics')}
+        assert 'last_sogo_login' not in {c['name'] for c in inspect(isolated).get_columns('mailbox_statistics')}
+        assert stored() == [(f'before@{DOMAIN}', WHEN)]
     finally:
-        run(_migration().upgrade)
-        # A second run (the fresh-install start made the column already) changes nothing
-        run(_migration().upgrade)
-    with engine.connect() as connection:
-        row = connection.execute(text('SELECT last_sogo_login, last_imap_login FROM mailbox_statistics '
-                                      'WHERE username = :u'), {'u': f'before@{DOMAIN}'}).one()
-    assert tuple(row) == (None, WHEN)
+        isolated.dispose()
+        with engine.begin() as conn:
+            conn.execute(text(f'DROP SCHEMA {schema} CASCADE'))
