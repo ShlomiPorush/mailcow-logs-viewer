@@ -14,7 +14,7 @@ from fastapi.testclient import TestClient
 
 from app.scheduler import login_time
 
-DOMAIN = f'sogo-{uuid.uuid4().hex[:8]}.example'
+DOMAIN = f'sogo-{uuid.uuid4().hex[:8]}.test'
 WHEN = 1763500000  # 2025-11-18T21:06:40Z
 
 
