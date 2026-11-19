@@ -32,17 +32,17 @@ def test_a_login_time_is_unix_seconds_or_none(value, stored):
 @pytest.fixture()
 def db(app_schema):
     """The test's own mailboxes; the sync marks every other mailbox inactive,
-    so the mailboxes of other tests are made active again afterwards."""
+    so the other tests' mailboxes get their state back afterwards."""
     from app.database import get_db_context
     from app.models import MailboxStatistics
     with get_db_context() as session:
-        others = [r.id for r in session.query(MailboxStatistics.id).filter(MailboxStatistics.active.is_(True))]
-        yield session
-        session.rollback()
+        others = session.query(MailboxStatistics.id, MailboxStatistics.active, MailboxStatistics.updated_at).all()
+    yield
+    with get_db_context() as session:
         session.query(MailboxStatistics).filter(MailboxStatistics.domain == DOMAIN).delete(synchronize_session=False)
-        session.query(MailboxStatistics).filter(MailboxStatistics.id.in_(others)).update(
-            {MailboxStatistics.active: True}, synchronize_session=False)
-        session.commit()
+        for row_id, active, updated_at in others:
+            session.query(MailboxStatistics).filter(MailboxStatistics.id == row_id).update(
+                {MailboxStatistics.active: active, MailboxStatistics.updated_at: updated_at}, synchronize_session=False)
 
 
 def _mailbox(name, **fields):

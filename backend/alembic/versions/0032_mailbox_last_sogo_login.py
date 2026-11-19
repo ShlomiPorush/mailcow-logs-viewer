@@ -12,7 +12,6 @@ Revises: 0031
 Create Date: 2026-11-19
 """
 from alembic import op
-import sqlalchemy as sa
 
 
 revision = "0032"
@@ -22,8 +21,7 @@ depends_on = None
 
 
 def upgrade() -> None:
-    if "last_sogo_login" not in {c["name"] for c in sa.inspect(op.get_bind()).get_columns("mailbox_statistics")}:
-        op.add_column("mailbox_statistics", sa.Column("last_sogo_login", sa.BigInteger(), nullable=True))
+    op.execute("ALTER TABLE mailbox_statistics ADD COLUMN IF NOT EXISTS last_sogo_login BIGINT")
 
 
 def downgrade() -> None:
