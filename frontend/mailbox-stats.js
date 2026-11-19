@@ -647,7 +647,9 @@ function renderMailboxStatsAccordion(mailboxes, page = 1, totalPages = 1, total 
                         <div class="ui-md-fact"><span>First seen / Last synced</span><div title="When this app first read the mailbox from mailcow">${mb.created ? formatTime(mb.created) : 'N/A'}</div><small class="ui-muted" title="When this app last read the mailbox from mailcow">${mb.modified ? formatTime(mb.modified) : 'N/A'}</small></div>
                         <div class="ui-md-fact"><span>Rate Limit</span><div>${escapeHtml(mailboxRateLimitLabel(mb))}</div></div>
                         ${mailboxIsShared(mb) ? '<div class="ui-md-fact"><span>Login</span><div>Shared mailbox, no login of its own</div></div>'
-                            : lastLogin('IMAP', mb.last_imap_login) + lastLogin('POP3', mb.last_pop3_login) + lastLogin('SMTP', mb.last_smtp_login)}
+                            : lastLogin('IMAP', mb.last_imap_login) + lastLogin('POP3', mb.last_pop3_login) + lastLogin('SMTP', mb.last_smtp_login)
+                                // Only with a time: mailcow before 2026-11a does not report it, and "Never" would be false
+                                + (mb.last_sogo_login ? lastLogin('SOGo', mb.last_sogo_login) : '')}
                     </div>
 
                     <h4 class="ui-md-h">Message Statistics</h4>
