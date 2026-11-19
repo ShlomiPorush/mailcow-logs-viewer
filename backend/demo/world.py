@@ -187,6 +187,8 @@ def build_mailboxes(now=None):
             "last_imap_login": last_imap,
             "last_pop3_login": 0,
             "last_smtp_login": last_smtp,
+            # Webmail or a phone through SOGo for every other person
+            "last_sogo_login": 0 if service_account or not active or i % 2 else now - (i * 2113 + 900),
             "spam_aliases": 1 if local in ("alice", "grace") else 0,
             "rl": {"value": str(rl), "frame": "h"} if rl else False,
             "smtp_access": 1,

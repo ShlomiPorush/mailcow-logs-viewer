@@ -653,6 +653,7 @@ def get_all_mailbox_stats(
                 "last_imap_login": format_unix_timestamp(mb.last_imap_login),
                 "last_pop3_login": format_unix_timestamp(mb.last_pop3_login),
                 "last_smtp_login": format_unix_timestamp(mb.last_smtp_login),
+                "last_sogo_login": format_unix_timestamp(mb.last_sogo_login),
                 # Rate limiting
                 "rl_value": mb.rl_value,
                 "rl_frame": mb.rl_frame,

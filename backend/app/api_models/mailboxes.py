@@ -62,6 +62,7 @@ class MailboxStats(Fixed):
     last_imap_login: Optional[str] = Field(description=TIME)
     last_pop3_login: Optional[str] = Field(description=TIME)
     last_smtp_login: Optional[str] = Field(description=TIME)
+    last_sogo_login: Optional[str] = Field(description=TIME + "; webmail and phones that sync through SOGo. null when mailcow reports no time, also on mailcow before 2026-11a")
     rl_value: Optional[int] = Field(description="Its rate limit, messages per frame; null for none")
     rl_frame: Optional[str]
     attributes: Dict[str, Any] = Field(description="mailcow's mailbox attributes, as mailcow reports them")
