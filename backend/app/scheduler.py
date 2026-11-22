@@ -2948,6 +2948,19 @@ def safe_int(value, default=0):
     except (ValueError, TypeError):
         return default
 
+# 9999-12-31 23:59:59 UTC: the last second a date can show
+_LAST_LOGIN_MAX = 253402300799
+
+
+def login_time(value):
+    """A last-login time as mailcow sends it: Unix seconds, or None for 0 (never,
+    or SHOW_LAST_LOGIN off), a missing field and a value that is no time. A value
+    the database column cannot hold would fail the whole mailbox sync."""
+    if isinstance(value, (bool, float)):
+        return None
+    seconds = safe_int(value, 0)
+    return seconds if 0 < seconds <= _LAST_LOGIN_MAX else None
+
 def safe_float(value, default=0.0):
     """Safely convert a value to float, handling '- ', None, and other invalid values"""
     if value is None:
@@ -3038,9 +3051,10 @@ def _store_mailbox_statistics(mailboxes):
                     existing.percent_in_use = safe_float(mb.get('percent_in_use'), 0.0)
                     existing.messages = safe_int(mb.get('messages'), 0)
                     existing.active, existing.login_disabled = mailbox_state(mb)
-                    existing.last_imap_login = safe_int(mb.get('last_imap_login'), 0) or None
-                    existing.last_pop3_login = safe_int(mb.get('last_pop3_login'), 0) or None
-                    existing.last_smtp_login = safe_int(mb.get('last_smtp_login'), 0) or None
+                    existing.last_imap_login = login_time(mb.get('last_imap_login'))
+                    existing.last_pop3_login = login_time(mb.get('last_pop3_login'))
+                    existing.last_smtp_login = login_time(mb.get('last_smtp_login'))
+                    existing.last_sogo_login = login_time(mb.get('last_sogo_login'))
                     existing.spam_aliases = safe_int(mb.get('spam_aliases'), 0)
                     existing.rl_value = rl_value
                     existing.rl_frame = rl_frame
@@ -3059,9 +3073,10 @@ def _store_mailbox_statistics(mailboxes):
                         messages=safe_int(mb.get('messages'), 0),
                         active=mailbox_state(mb)[0],
                         login_disabled=mailbox_state(mb)[1],
-                        last_imap_login=safe_int(mb.get('last_imap_login'), 0) or None,
-                        last_pop3_login=safe_int(mb.get('last_pop3_login'), 0) or None,
-                        last_smtp_login=safe_int(mb.get('last_smtp_login'), 0) or None,
+                        last_imap_login=login_time(mb.get('last_imap_login')),
+                        last_pop3_login=login_time(mb.get('last_pop3_login')),
+                        last_smtp_login=login_time(mb.get('last_smtp_login')),
+                        last_sogo_login=login_time(mb.get('last_sogo_login')),
                         spam_aliases=safe_int(mb.get('spam_aliases'), 0),
                         rl_value=rl_value,
                         rl_frame=rl_frame,
