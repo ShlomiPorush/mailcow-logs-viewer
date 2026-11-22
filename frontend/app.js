@@ -2816,9 +2816,11 @@ function attentionAlertRows(where) {
         const action = label ? `openStoredAlert(${id}, '${place}')` : activity ? `${first} openAlertActivity(${id})` : '';
         const button = label ? `<button type="button" onclick="openStoredAlert(${id}, '${place}')" class="ui-btn ui-btn-sm">${escapeHtml(label)}</button>`
             : activity ? `<button type="button" onclick="${first} openAlertActivity(${id})" class="ui-btn ui-btn-sm" title="What happened before and around this alert">Show activity</button>` : '';
+        // The bell keeps its rows short: no buttons under them (the row click and the
+        // Dashboard still open the alert). The X in the row's top corner dismisses it, and
+        // so does a swipe on a touch screen (data-swipe, utils.js uiSwipeDown)
         return `
-            <div class="ui-alert${action ? ' ui-alert-go' : ''} ${critical ? 'ui-alert-fail' : 'ui-alert-warn'}" data-key="alert-${id}"${action ? ` onclick="if (uiAlertRowClick(event)) { ${action} }"` : ''}>
-                <span class="ui-alert-bar"></span>
+            <div class="ui-alert${action ? ' ui-alert-go' : ''} ${critical ? 'ui-alert-fail' : 'ui-alert-warn'}" data-key="alert-${id}" data-swipe${action ? ` onclick="if (uiAlertRowClick(event)) { ${action} }"` : ''}>
                 <div class="ui-alert-text">
                     <div class="ui-alert-title">
                         <span class="ui-tag ${critical ? 'ui-tag-fail' : 'ui-tag-warn'}">${escapeHtml((a.severity || 'warning').toUpperCase())}</span>
@@ -2827,10 +2829,8 @@ function attentionAlertRows(where) {
                     <p>${escapeHtml(attentionAlertLine(a))}</p>
                     <p class="ui-muted">${escapeHtml(formatTime(a.created_at))}</p>
                 </div>
-                <div class="ui-alert-acts">
-                    ${button}
-                    <button type="button" onclick="acknowledgeSecurityAlertOnce(${id}, this)" class="ui-btn ui-btn-sm" title="Dismiss" data-acts="alerts ${alertArea(a)}">Dismiss</button>
-                </div>
+                ${button && where !== 'bell' ? `<div class="ui-alert-acts">${button}</div>` : ''}
+                <button type="button" onclick="acknowledgeSecurityAlertOnce(${id}, this)" class="ui-icon-btn ui-icon-btn-sm ui-alert-x" title="Dismiss alert" aria-label="Dismiss alert" data-acts="alerts ${alertArea(a)}">${UI_CLOSE_ICON}</button>
             </div>`;
     }).join('');
 }
@@ -3135,9 +3135,8 @@ function attentionCheckRows(where) {
             : item.go ? `attnBellGo(${escapeHtml(JSON.stringify(item.go))})` : `attnBellOpen(); ${item.onclick}`;
         return `
         <div class="ui-alert ui-alert-${item.tone}${item.popup ? ' ui-alert-go' : ''}" data-key="check-${escapeHtml(item.title)}"${item.popup ? ` onclick="if (uiAlertRowClick(event)) { ${act} }"` : ''}>
-            <span class="ui-alert-bar"></span>
             <div class="ui-alert-text"><div class="ui-alert-title"><b>${escapeHtml(item.title)}</b></div><p>${escapeHtml(item.detail)}</p></div>
-            <button type="button" class="ui-btn ui-btn-sm" onclick="${act}">${escapeHtml(item.action)}</button>
+            ${where === 'bell' ? '' : `<button type="button" class="ui-btn ui-btn-sm" onclick="${act}">${escapeHtml(item.action)}</button>`}
         </div>`;
     }).join('');
 }
@@ -3756,7 +3755,8 @@ function openMailFlowHourMessages() {
 // changed, for 10 seconds (longer while the pointer or the focus is on the toast)
 // A double click does not dismiss it twice (the second would find it gone)
 function acknowledgeSecurityAlertOnce(alertId, button) {
-    return uiOnce(`alert-ack:${alertId}`, () => acknowledgeSecurityAlert(alertId), button, 'Dismissing...');
+    // The X keeps its icon while busy: disabled and aria-busy say it is working
+    return uiOnce(`alert-ack:${alertId}`, () => acknowledgeSecurityAlert(alertId), button);
 }
 async function acknowledgeSecurityAlert(alertId) {
     if (!uiMayAct('alerts')) return;
@@ -3831,13 +3831,13 @@ async function undoAlertDismissal(receipt, undoName, areas = ALERT_AREAS) {
             return;
         }
         // With the bell's window open the keyboard goes to the first alert back there (its
-        // Dismiss), else to its list; on the Dashboard the same in Needs attention; on
+        // X), else to its list; on the Dashboard the same in Needs attention; on
         // another page it stays with the message
         const place = attnWindow ? ['#attn-win-alerts', attnWindow.phone ? '#attn-sheet .ui-sheet-body' : '#attn-win-scroll']
             : typeof currentTab === 'undefined' || currentTab === 'dashboard' ? ['#dashboard-security-alerts', '#dashboard-attention-scroll'] : null;
         if (place) {
             const row = done.ids && done.ids.map(id => document.querySelector(`${place[0]} [data-key="alert-${Number(id)}"]`)).find(Boolean);
-            const target = row ? [...row.querySelectorAll('button')].find(b => b.textContent.trim() === 'Dismiss') : document.querySelector(place[1]);
+            const target = row ? row.querySelector('.ui-alert-x') : document.querySelector(place[1]);
             if (target) target.focus({ preventScroll: false });
         }
         // Nothing back: dismissed again since, or no longer the person's to change
@@ -5206,7 +5206,6 @@ function _showQuarantineRuleModal(rule, prefill) {
                     <textarea id="qrule-notes" rows="2" class="ui-textarea" placeholder="Why this rule exists...">${defaultNotes}</textarea>
                 </label>
                 <div class="ui-alert ui-alert-warn ui-qr-note">
-                    <span class="ui-alert-bar"></span>
                     <div class="ui-alert-text"><p><b>Priority:</b> Delete rules always take priority over Release rules. If both match, the email will be deleted.</p></div>
                 </div>`;
 
@@ -5991,7 +5990,6 @@ function renderStatusAttention() {
     }
     box.innerHTML = items.map(item => `
         <div class="ui-alert ui-alert-${item.tone}">
-            <span class="ui-alert-bar"></span>
             <div class="ui-alert-text"><div class="ui-alert-title"><b>${escapeHtml(item.title)}</b></div><p>${escapeHtml(item.detail)}</p></div>
             <div class="ui-st-acts">${item.actions}</div>
         </div>`).join('');

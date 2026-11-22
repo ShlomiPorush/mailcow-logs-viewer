@@ -2259,7 +2259,6 @@ function renderUpdateNote(versionInfo) {
     if (!versionInfo.update_available) return '';
     return `
         <div class="ui-alert ui-alert-info ui-set-update">
-            <span class="ui-alert-bar"></span>
             <div class="ui-alert-text">
                 <div class="ui-alert-title"><b>Update available!</b></div>
                 <p>A new version (v${escapeHtml(versionInfo.latest_version)}) is available on GitHub.</p>
