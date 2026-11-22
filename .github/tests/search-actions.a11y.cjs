@@ -779,3 +779,28 @@ test('a search the server could not run is not "nothing found": the panel names 
     assert.match(text, /Could not search .+\. Try again in a moment\./);
     assert.match(text, /Nothing found for “zzqq”\. Could not search/);
 });
+
+test('"/" on a page without the top bar (Messages) goes to the page\'s own search, even with the details docked beside it', async () => {
+    const w = page();
+    await settle(w, 2);
+    // Messages: the top bar and its search are hidden, the message details are docked
+    $(w, '#ui-topbar').classList.add('hidden');
+    for (let el = $(w, '#messages-filter-search'); el; el = el.parentElement) el.classList.remove('hidden');
+    // Without the stylesheet, the sheets and dialogs CSS keeps hidden count as shown: hide them
+    w.document.querySelectorAll('.ui-sheet, [role="dialog"], .modal').forEach(el => el.classList.add('hidden'));
+    const docked = w.document.createElement('div');
+    docked.setAttribute('role', 'dialog');
+    docked.className = 'ui-dialog-backdrop ui-docked';
+    w.document.body.appendChild(docked);
+    w.document.body.focus();
+    const key = new w.KeyboardEvent('keydown', { key: '/', bubbles: true, cancelable: true });
+    w.document.body.dispatchEvent(key);
+    assert.equal(w.document.activeElement.id, 'messages-filter-search');
+    assert.equal(key.defaultPrevented, true);
+    // A real dialog over the page keeps the key
+    docked.classList.remove('ui-docked');
+    w.document.body.focus();
+    const again = new w.KeyboardEvent('keydown', { key: '/', bubbles: true, cancelable: true });
+    w.document.body.dispatchEvent(again);
+    assert.equal(again.defaultPrevented, false);
+});

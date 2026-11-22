@@ -1038,11 +1038,14 @@ function initGlobalSearch() {
         if (event.key !== '/' || event.ctrlKey || event.metaKey || event.altKey) return;
         const target = event.target;
         if (target && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName))) return;
-        // Not over a dialog or a sheet
-        if ([...document.querySelectorAll('.ui-sheet, [role="dialog"], .modal')].some(el => el.getClientRects().length)) return;
+        // Not over a dialog or a sheet; a docked panel (the message details beside Messages) is not over the page
+        if ([...document.querySelectorAll('.ui-sheet, [role="dialog"], .modal')].some(el => el.getClientRects().length && !el.classList.contains('ui-docked'))) return;
+        // No top bar (Messages): the page's own search takes the key; with no field, the key is left alone
+        const field = gsPhone() || input.getClientRects().length ? null : document.getElementById('messages-filter-search');
+        if (!gsPhone() && !input.getClientRects().length && !(field && field.getClientRects().length)) return;
         event.preventDefault();
         if (gsPhone()) gsEl('ui-gs-phone')?.click();
-        else input.focus();
+        else (field || input).focus();
     });
 }
 

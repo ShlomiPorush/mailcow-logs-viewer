@@ -252,6 +252,7 @@ async function checkAuthentication() {
             if (statusData.authenticated) {
                 const logoutBtn = document.getElementById('logout-btn');
                 if (logoutBtn) logoutBtn.classList.remove('hidden');
+                document.getElementById('mobile-logout')?.classList.remove('hidden');
                 // What this person may view and do, for the menu and the controls
                 setAppAccess(statusData);
                 return true;
@@ -764,6 +765,7 @@ async function loadAppInfo() {
                 logoutBtn.classList.add('hidden');
             }
         }
+        document.getElementById('mobile-logout')?.classList.toggle('hidden', !data.auth_enabled);
 
         // Without any sign-in, everyone who reaches the app has full access: say so
         // on the Dashboard. Only an explicit false shows it, never a missing field.

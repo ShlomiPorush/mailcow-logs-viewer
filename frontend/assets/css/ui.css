@@ -1385,8 +1385,8 @@ body { font-family: var(--ui-font); background: var(--ui-bg); color: var(--ui-in
     .ui-mtop .ui-bell-n { top: -2px; inset-inline-end: -3px; box-shadow: 0 0 0 2px var(--ui-bg); }
     .ui-mtop-actions { display: flex; }
     .ui-mtop-actions .ui-utilities { flex-direction: row; margin: 0; flex-wrap: nowrap; }
-    .ui-mtop-actions .ui-utilities > :not(#theme-toggle):not(#logout-btn) { display: none; }
-    .ui-mtop-actions .ui-utilities > #logout-btn.hidden { display: none; }
+    /* Sign out is in the More sheet on a phone (mobile-logout), away from the theme switch */
+    .ui-mtop-actions .ui-utilities > :not(#theme-toggle) { display: none; }
     .ui-mtop-home { display: flex; flex: none; border-radius: var(--ui-radius-sm); }
     .ui-mtop-home:focus-visible { outline: 2px solid var(--ui-focus); outline-offset: 2px; }
     .ui-mtop-titles { display: grid; min-width: 0; line-height: 1.15; }
@@ -3505,3 +3505,25 @@ button.ui-aa-col:focus-visible { outline: 2px solid var(--ui-focus); outline-off
 .ui-head-tools:not(:has(> :not(.hidden))) { display: none; }
 /* The copy icon of a value that wraps stays on its last line, instead of a line of its own */
 .copyable.ui-copy-wrap .copy-icon { display: inline-block; vertical-align: -2px; margin-inline-start: 4px; }
+
+/* Touch: the controls keep their size (28 to 34px, above the 24px WCAG 2.5.8 asks);
+   only what is smaller than that grows to it */
+@media (pointer: coarse) {
+    .ui-sec-chip button, .ui-set-clear { min-width: 24px; min-height: 24px; }
+    /* A switch (Settings, features) keeps its drawn size: its whole row is the target */
+    input[type="checkbox"]:not(:is(.ui-set-bool, .ui-feature) .ui-check), input[type="radio"] { min-width: 20px; min-height: 20px; }
+    .ui-line-copy { min-height: 24px; }
+    /* The phone's top bar: its buttons as big as the bell beside them */
+    .ui-mtop-actions .ui-icon-btn, .ui-gs-phone { width: 36px; height: 36px; }
+}
+
+/* Tablet rail: each icon has its name under it, as a navigation rail does; a finger
+   has no hover to show a title */
+@media (min-width: 761px) and (max-width: 1100px) {
+    .ui-shell { grid-template-columns: 80px minmax(0, 1fr); }
+    .ui-sidenav { padding-inline: 6px; }
+    .ui-sidenav .ui-nav-item { flex-direction: column; justify-content: center; gap: 3px; width: 68px; height: auto; min-height: 52px; padding: 6px 2px; }
+    .ui-sidenav .ui-nav-label, .ui-sidenav .ui-nav-item.has-sub .ui-nav-label { display: block; flex: none; font-size: 10.5px; font-weight: 600;
+        line-height: 1.15; text-align: center; overflow-wrap: anywhere; }
+    .ui-sidenav .ui-nav-item.has-sub::after { display: none; }
+}
