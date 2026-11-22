@@ -118,6 +118,8 @@
     --ui-side-card: #F4F6F5;
     --ui-side-on: #111814;
     --ui-side-on-ink: #FFFFFF;
+    /* The window around the page's panel: the top bar, the side menu and the gaps (wider than a phone) */
+    --ui-page: var(--ui-panel);
 }
 
 .dark {
@@ -146,6 +148,8 @@
     --ui-dir-in: #A5B4FC;
     --ui-dir-out: #93C5FD;
     --ui-dir-int: #5EEAD4;
+    /* A shade darker than the page, so the panel reads raised */
+    --ui-page: color-mix(in srgb, var(--ui-bg) 60%, #000);
 }
 
 /* ---------- Base ---------- */
@@ -3538,3 +3542,18 @@ button.ui-aa-col:focus-visible { outline: 2px solid var(--ui-focus); outline-off
 /* The spinner keeps turning (its own spin, index.html) while it fades in */
 .ui-loading > .loading { animation: ui-appear .15s ease-out .3s both, spin 1s linear infinite; }
 .ui-loading:has(> .loading)::after { content: "This is taking longer than usual."; animation: ui-appear .3s ease-out 8s both; }
+
+/* The page in its own panel, wider than a phone: the window, the top bar and the side menu on
+   the page tone; the page under the bar on its own surface, with a thin edge, rounded top
+   corners and a small gap at the far side. Messages has no top bar: its panel starts just
+   below the window's top. Phones keep the full width; print is not a screen */
+@media screen and (min-width: 761px) {
+    body, .ui-sidenav { background: var(--ui-page); }
+    .ui-sidenav .ui-server { background: var(--ui-bg); }
+    html.ui-has-topbar .ui-topbar { background: var(--ui-page); border-bottom: 0; }
+    .ui-topbar .ui-gs-box, .ui-topbar .ui-bell { background: var(--ui-bg); }
+    .ui-topbar .ui-bell-n { box-shadow: 0 0 0 2px var(--ui-page); }
+    .ui-main { margin-inline-end: 8px; background: var(--ui-bg); border: 1px solid var(--ui-line); border-bottom: 0;
+        border-start-start-radius: var(--ui-radius); border-start-end-radius: var(--ui-radius); }
+    html:not(.ui-has-topbar) .ui-main { margin-block-start: 8px; height: calc(100vh - 8px); height: calc(100dvh - 8px); }
+}
