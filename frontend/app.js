@@ -2628,10 +2628,30 @@ const attention = {
     checks: { seq: 0, busy: null, latest: null, at: 0, ok: {}, items: {} },
 };
 
-// The alerts Needs attention shows (by id, for the words of an Undo), and every
-// open alert the last list had: Dismiss all changes those and no alert that came after
+// The alerts Needs attention shows (by id, for the words of an Undo), and the open
+// alerts of the last list the person may dismiss (also those past the rows shown):
+// Dismiss all changes those and no alert that came after
 const dashboardAlerts = new Map();
-let dashboardOpenAlertIds = [];
+let dashboardWritableAlertIds = [];
+
+// The area each kind of alert belongs to (stored_alerts.py ALERT_AREAS): who sees it
+// and who may dismiss it. A kind not listed is an admin's only
+const ALERT_TYPE_AREAS = {
+    volume_spike: 'security', auth_failure_burst: 'security', smtp_abuse_block: 'security',
+    protection_breach: 'security', protection_ban_failed: 'security',
+    dns_change: 'domains', dmarc_import_failed: 'dmarc',
+};
+// The kinds whose activity can be shown (Show activity)
+const ALERT_ACTIVITY_TYPES = ['volume_spike', 'auth_failure_burst', 'smtp_abuse_block'];
+// The kinds that open their page instead, with the button's words
+const ALERT_OPEN_LABELS = {
+    dns_change: 'Open domain', dmarc_import_failed: 'Open fetch history',
+    protection_breach: 'Open Security', protection_ban_failed: 'Open Security',
+};
+
+function alertArea(alert) {
+    return (alert && ALERT_TYPE_AREAS[alert.alert_type]) || 'admin';
+}
 
 // One load of a source at a time. With force (after a Dismiss or an Undo, or a
 // Retry) a load on its way is replaced and its answer dropped; without, it is joined
@@ -2666,12 +2686,13 @@ function attentionRead(url) {
     ]);
 }
 
-// The open security alerts (anomaly detection); true when the list was read
+// The open alerts (Security, Domains, DMARC & TLS); true when the list was read
 function loadDashboardSecurityAlerts({ force = true } = {}) {
     const s = attention.alerts;
     return attentionLoad(s, force, async () => {
-        // Alerts are part of Security: without View there, none to show
-        const read = userCan('security') ? await attentionRead('/api/security-alerts?acknowledged=false&limit=20') : { alerts: [] };
+        // The server answers with the alerts of the areas the person may view: without
+        // View in any of them, none to show
+        const read = userCan('alerts') ? await attentionRead('/api/security-alerts?acknowledged=false&limit=20') : { alerts: [] };
         const data = read === ATTENTION_FAILED ? null : read;
         return () => {
             s.at = Date.now();
@@ -2686,47 +2707,144 @@ function loadDashboardSecurityAlerts({ force = true } = {}) {
                 : alerts.filter(a => a.severity === 'critical').length;
             dashboardAlerts.clear();
             alerts.forEach(a => dashboardAlerts.set(Number(a.id), a));
-            dashboardOpenAlertIds = data.unacknowledged_ids || alerts.map(a => Number(a.id));
+            // Only what the person may dismiss; an alert they may only view stays
+            dashboardWritableAlertIds = Array.isArray(data.writable_ids) ? data.writable_ids.map(Number) : [];
             renderAttention();
             return true;
         };
     });
 }
 
-// "Dismiss all 25 alerts"; one alone is "Dismiss 1 alert" (a narrow panel drops the last word)
+// "Dismiss all 25 alerts"; one alone is "Dismiss 1 alert" (a narrow panel drops the last
+// word). It counts, and is there for, the alerts the person may dismiss
 function renderDismissAll(button) {
     if (!button) return;
-    const count = dashboardOpenAlertIds.length, n = count.toLocaleString();
+    const count = dashboardWritableAlertIds.length, n = count.toLocaleString();
     const words = count === 1 ? ['Dismiss 1', 'alert'] : [`Dismiss all ${n}`, 'alerts'];
     button.innerHTML = `${words[0]}<span class="ui-attn-wide">&nbsp;${words[1]}</span>`;
     button.setAttribute('aria-label', words.join(' '));
-    button.classList.toggle('is-off', !attention.alerts.list.length);
+    button.classList.toggle('is-off', !attention.alerts.list.length || !count);
+}
+
+// The one line an alert shows in Needs attention and the bell: what happened,
+// from its numbers. The stored detail (emails, channels) keeps the long text.
+// The counting window is the one the alert was made with, read from its detail
+function attentionAlertLine(a) {
+    // The alerts without activity keep one short line of their own (stored_alerts.py)
+    if (!ALERT_ACTIVITY_TYPES.includes(a.alert_type)) return String(a.detail || '').split('\n')[0];
+    const num = v => (v === null || v === undefined || v === '' ? NaN : Number(v));
+    const raw = num(a.metric_value);
+    const count = Number.isFinite(raw) && raw >= 0 ? Math.round(raw) : null;
+    const detail = String(a.detail || '');
+    const found = detail.match(a.alert_type === 'smtp_abuse_block' ? /\bin (\d+) minutes?\b/ : /\bin the last (\d+) minutes?\b/);
+    const minutes = found && Number(found[1]) > 0 ? Number(found[1]) : null;
+    const n = value => value.toLocaleString();
+    const period = minutes ? ` in ${n(minutes)} ${minutes === 1 ? 'minute' : 'minutes'}` : '';
+    const messages = c => `${n(c)} ${c === 1 ? 'message' : 'messages'}`;
+    if (a.alert_type === 'volume_spike') {
+        if (count === null) return 'Unusual sending was detected.';
+        const usual = num(a.baseline_value);
+        const ratio = minutes && Number.isFinite(usual) && usual > 0 ? Math.round((raw * 60 / minutes) / usual) : NaN;
+        return `Sent ${messages(count)}${period}${Number.isFinite(ratio) && ratio > 1 ? `, about ${n(ratio)} times usual` : ''}.`;
+    }
+    if (a.alert_type === 'auth_failure_burst') {
+        if (count === null) return 'Repeated sign-in failures were detected.';
+        return `${n(count)} failed ${count === 1 ? 'sign-in' : 'sign-ins'}${period}.`;
+    }
+    if (a.alert_type === 'smtp_abuse_block') {
+        if (count === null) return 'Sending was stopped by abuse protection.';
+        return `Sending stopped after ${messages(count)}${period}.`;
+    }
+    return '';
 }
 
 // The rows of the alerts. In the bell's window an action that opens another
-// window closes this one first, so the next gives the focus back to the bell
+// window closes this one first, so the next gives the focus back to the bell;
+// one that opens a page closes it once the move is made (openStoredAlert).
+// An alert with activity shows it; the others open their page. Dismiss is there
+// for the alerts of an area the person may act in
 function attentionAlertRows(where) {
     return attention.alerts.list.map(a => {
         const id = Number(a.id);
         const critical = a.severity === 'critical';
         const first = where === 'bell' ? 'attnBellOpen();' : '';
+        const label = ALERT_OPEN_LABELS[a.alert_type];
+        const place = where === 'bell' ? 'bell' : 'page';
+        const activity = !label && ALERT_ACTIVITY_TYPES.includes(a.alert_type);
+        const action = label ? `openStoredAlert(${id}, '${place}')` : activity ? `${first} openAlertActivity(${id})` : '';
+        const button = label ? `<button type="button" onclick="openStoredAlert(${id}, '${place}')" class="ui-btn ui-btn-sm">${escapeHtml(label)}</button>`
+            : activity ? `<button type="button" onclick="${first} openAlertActivity(${id})" class="ui-btn ui-btn-sm" title="What happened before and around this alert">Show activity</button>` : '';
         return `
-            <div class="ui-alert ui-alert-go ${critical ? 'ui-alert-fail' : 'ui-alert-warn'}" data-key="alert-${id}" onclick="if (uiAlertRowClick(event)) { ${first} openAlertActivity(${id}) }">
+            <div class="ui-alert${action ? ' ui-alert-go' : ''} ${critical ? 'ui-alert-fail' : 'ui-alert-warn'}" data-key="alert-${id}"${action ? ` onclick="if (uiAlertRowClick(event)) { ${action} }"` : ''}>
                 <span class="ui-alert-bar"></span>
                 <div class="ui-alert-text">
                     <div class="ui-alert-title">
                         <span class="ui-tag ${critical ? 'ui-tag-fail' : 'ui-tag-warn'}">${escapeHtml((a.severity || 'warning').toUpperCase())}</span>
                         <b>${escapeHtml(a.title)}</b>
                     </div>
-                    <p>${escapeHtml(a.detail || '')}</p>
+                    <p>${escapeHtml(attentionAlertLine(a))}</p>
                     <p class="ui-muted">${escapeHtml(formatTime(a.created_at))}</p>
                 </div>
                 <div class="ui-alert-acts">
-                    <button type="button" onclick="${first} openAlertActivity(${id})" class="ui-btn ui-btn-sm" title="What happened before and around this alert">Show activity</button>
-                    <button type="button" onclick="acknowledgeSecurityAlert(${id})" class="ui-btn ui-btn-sm" title="Dismiss" data-acts="security">Dismiss</button>
+                    ${button}
+                    <button type="button" onclick="acknowledgeSecurityAlert(${id})" class="ui-btn ui-btn-sm" title="Dismiss" data-acts="alerts ${alertArea(a)}">Dismiss</button>
                 </div>
             </div>`;
     }).join('');
+}
+
+// Where an alert that opens a page goes: the domain in Domains, the fetch history
+// on DMARC & TLS, the addresses to review on Security. go makes the move (true
+// once made), then shows what the alert is about on the page
+const ALERT_OPEN = {
+    dns_change: { go: () => navigateTo('domains'), then: a => showAlertDomain(a.subject) },
+    dmarc_import_failed: { go: () => navigateTo('dmarc'), then: () => {
+        // With DMARC & TLS turned off the page says so, and there is no history to open
+        if (!(window.disabledFeatures || []).includes('dmarc')) showDmarcSyncHistory();
+    } },
+    protection_breach: { go: openAlertSecurityReview },
+    protection_ban_failed: { go: openAlertSecurityReview },
+};
+
+// The bell's window closes once the move is made (a move cancelled over unsaved
+// changes leaves it open, as attnBellGo does), before the page shows the alert's place
+async function openStoredAlert(alertId, where) {
+    const alert = dashboardAlerts.get(Number(alertId));
+    const place = alert && ALERT_OPEN[alert.alert_type];
+    if (!place) return;
+    const moved = await place.go(alert);
+    if (!moved) return;
+    if (where === 'bell' && attnWindow) attnWindowClose({ toPage: true });
+    if (place.then) await place.then(alert);
+}
+
+// The domain's details opened once the list has loaded, whatever the search or the
+// issues filter showed; a domain no longer on the server says so. A list that could
+// not load says so itself, and says nothing about the domain
+async function showAlertDomain(name) {
+    if (!(await domainsLoading) || !name) return;
+    if (document.getElementById('domain-search-input')) clearDomainFilters();
+    const id = domainRowId(name);
+    const details = document.getElementById(`${id}-details`);
+    if (!details) {
+        showToast(`${name} is not in the domain list any more.`, 'info');
+        return;
+    }
+    if (details.classList.contains('hidden')) toggleDomainDetails(id);
+    const row = [...document.querySelectorAll('[data-domain-row]')].find(el => el.dataset.domainRow === name);
+    (row || details).scrollIntoView({ block: 'start' });
+}
+
+// Security, Overview, To review, with no country or network picked that could hide the
+// address. Nothing changes until the move is made (a move cancelled over unsaved changes
+// keeps the list as it was); then the list is chosen the way its own filter does, which
+// also loads and draws it when the page was already open on another tab
+async function openAlertSecurityReview() {
+    if (!(await navigateTo('netfilter', { sub: 'overview' }))) return false;
+    securityCountry = null;
+    securityNetwork = null;
+    setSecurityFilter('review');
+    return true;
 }
 
 // A Needs attention row whose action opens a popup opens it from anywhere on
@@ -2842,13 +2960,37 @@ function uiReplaceKeepingFocus(container, html) {
     return true;
 }
 
+// The DMARC row's line, about the first domain that needs a look and the reason
+// it does: a low pass rate first, then new failing sources, then a stronger
+// policy that looks safe. With several domains the line names the one it is about
+function attentionDmarcLine(insight, domains) {
+    const types = (insight.recommendations || []).map(r => r.type);
+    const sources = (insight.new_sources || []).length;
+    const rate = insight.pass_rate === null || insight.pass_rate === undefined || insight.pass_rate === '' ? NaN : Number(insight.pass_rate);
+    const fallback = 'Review mail identity checks and protection settings.';
+    let line;
+    if (types.includes('low_pass_rate')) {
+        if (!(Number.isFinite(rate) && rate >= 0 && rate <= 100)) return fallback;
+        line = `Only ${Math.round(rate)}% passed mail identity checks.`;
+    } else if (sources) {
+        line = sources === 1 ? 'Mail from a new source failed identity checks.' : 'Mail from new sources failed identity checks.';
+    } else if (types.includes('tighten_policy')) {
+        line = 'Reports suggest stronger protection is safe.';
+    } else {
+        return fallback;
+    }
+    if (domains <= 1) return line;
+    const named = `${insight.domain}: ${line}`;
+    return named.length <= 60 ? named : fallback;
+}
+
 // Server checks that need a look, each with the place to handle it: go is the
 // page it opens, popup an action that opens a window
 function attentionCheckItems(key, data) {
     if (!data) return [];
     if (key === 'connection') {
         if (data.connected !== false) return [];
-        const item = { tone: 'fail', title: 'mailcow is not reachable', detail: 'The mailcow API did not answer, so logs and server data may be out of date.' };
+        const item = { tone: 'fail', title: 'mailcow is not reachable', detail: 'Logs and server data may be out of date.' };
         // Only an admin can change the connection; anyone else sees it on Status
         return [userIsAdmin() ? { ...item, action: 'Open settings', onclick: "navigateTo('settings')", go: ['settings'] }
             : { ...item, action: 'Open status', onclick: "navigateTo('status')", go: ['status'] }];
@@ -2861,9 +3003,12 @@ function attentionCheckItems(key, data) {
         const title = listedHosts.length > 1
             ? `${listedHosts.length} of your addresses are on a blocklist`
             : `${first ? first.hostname : (data.server_ip || 'Your server')} is on a blocklist`;
-        const detail = listedHosts.length > 1
-            ? `${listedHosts.map(h => h.hostname).join(', ')}. Outbound mail to some providers may bounce.`
-            : `Listed on ${first ? first.listed_count : data.listed_count} of ${first && first.total_blacklists ? first.total_blacklists : data.total_blacklists} lists. Outbound mail to some providers may bounce.`;
+        // One host: its own counts, when they make sense; the title names the host
+        const whole = v => (v === null || v === undefined || v === '' ? NaN : Number(v));
+        const listed = whole(first ? first.listed_count : data.listed_count);
+        const checked = whole(first && first.total_blacklists ? first.total_blacklists : data.total_blacklists);
+        const counted = listedHosts.length <= 1 && Number.isInteger(listed) && listed >= 0 && Number.isInteger(checked) && checked > 0 && checked >= listed;
+        const detail = counted ? `On ${listed} of ${checked} ${checked === 1 ? 'list' : 'lists'}; some mail may bounce.` : 'Mail to some providers may bounce.';
         return [{ tone: 'fail', title, detail, action: 'Check listing', onclick: "navigateTo('status')", go: ['status'] }];
     }
     if (key === 'containers') {
@@ -2879,17 +3024,15 @@ function attentionCheckItems(key, data) {
         const first = legacy[0];
         return [{ tone: 'warn',
             title: legacy.length === 1 ? `A Fail2ban entry ${first.list === 'whitelist' ? 'exempts' : 'blocks'} the whole ${first.network} network` : `${legacy.length} Fail2ban entries cover whole /32 networks`,
-            detail: legacy.length === 1 ? `An earlier version wrote ${first.address} as ${first.entry}. Repair it on the Security page's Lists tab.`
-                : 'An earlier version wrote single IPv6 addresses as networks. Repair them on the Security page\'s Lists tab.',
+            detail: legacy.length === 1 ? 'Repair this entry in Security > Lists.' : 'Repair these entries in Security > Lists.',
             action: 'Open lists', onclick: "navigateTo('netfilter', { sub: 'lists' })", go: ['netfilter', { sub: 'lists' }] }];
     }
     if (key === 'dmarc') {
         const dmarc = (data.insights || []).filter(i =>
             i.recommendations.some(r => r.type === 'tighten_policy' || r.type === 'low_pass_rate') || (i.new_sources && i.new_sources.length > 0));
         if (!dmarc.length) return [];
-        const first = dmarc[0].recommendations[0];
         return [{ tone: 'warn', title: dmarc.length === 1 ? `DMARC needs attention for ${dmarc[0].domain}` : `DMARC needs attention for ${dmarc.length} domains`,
-            detail: first ? first.message : 'New sources are failing DMARC.', action: 'Open DMARC', onclick: "navigateTo('dmarc')", go: ['dmarc'] }];
+            detail: attentionDmarcLine(dmarc[0], dmarc.length), action: 'Open DMARC', onclick: "navigateTo('dmarc')", go: ['dmarc'] }];
     }
     if (key === 'appVersion') {
         if (!data.update_available) return [];
@@ -3003,7 +3146,7 @@ function attnWindowOpen(bell) {
     attnWindow = null;
     const phone = window.matchMedia('(max-width: 760px)').matches;
     const head = `<h2 id="attn-win-title" class="ui-attn-win-title">Needs attention <span id="attn-win-count" class="ui-count"></span></h2>
-        <button type="button" id="attn-win-dismiss-all" class="ui-btn ui-btn-sm is-off" onclick="acknowledgeAllSecurityAlerts()" data-acts="security"></button>`;
+        <button type="button" id="attn-win-dismiss-all" class="ui-btn ui-btn-sm is-off" onclick="acknowledgeAllSecurityAlerts()" data-acts="alerts"></button>`;
     const list = `<div id="attn-win-checks"></div><div id="attn-win-alerts" class="hidden"></div><p id="attn-win-state" class="ui-dash-clear hidden"></p>`;
     const foot = `<div class="ui-attn-win-foot"><button type="button" class="ui-link-row ui-attn-win-go" onclick="attnBellGo(['dashboard'])">Open the Dashboard</button></div>`;
     uiLayerOpener(bell);
@@ -3548,8 +3691,11 @@ function openMailFlowHourMessages() {
 // Dismissing acts at once; the answer's receipt lets Undo re-open exactly what it
 // changed, for 10 seconds (longer while the pointer or the focus is on the toast)
 async function acknowledgeSecurityAlert(alertId) {
-    if (!uiMayAct('security')) return;
+    if (!uiMayAct('alerts')) return;
     const alert =dashboardAlerts.get(Number(alertId)) || (typeof alertActivity !== 'undefined' && alertActivity && Number(alertActivity.alert.id) === Number(alertId) ? alertActivity.alert : null);
+    // Each alert in its own area: Take action in another one is not enough
+    const area = alert ? alertArea(alert) : null;
+    if (area && !uiMayAct(area)) return;
     // Its title, with the mailbox or username when the title does not already name it
     const name = !alert ? 'the alert' : alert.subject && !String(alert.title).includes(alert.subject) ? `${alert.title}: ${alert.subject}` : alert.title;
     try {
@@ -3558,16 +3704,18 @@ async function acknowledgeSecurityAlert(alertId) {
         const done = await res.json();
         loadDashboardSecurityAlerts();
         if (!done.receipt) { showToast('Already dismissed', 'info'); return; }
-        offerAlertUndo(done.receipt, 'Alert dismissed', `Undo dismissing ${name}`);
+        offerAlertUndo(done.receipt, 'Alert dismissed', `Undo dismissing ${name}`, area ? [area] : ALERT_AREAS);
     } catch (e) {
         showToast(`Could not dismiss the alert: ${e.message || 'no answer'}. Try again.`, 'error');
     }
 }
 
 async function acknowledgeAllSecurityAlerts() {
-    if (!uiMayAct('security')) return;
-    const ids = dashboardOpenAlertIds.slice();
+    if (!uiMayAct('alerts')) return;
+    const ids = dashboardWritableAlertIds.slice();
     if (!ids.length) return;
+    // The areas of what it dismisses: Undo asks again for Take action in one of them
+    const areas = ALERT_AREAS.filter(a => userCan(a, 'write'));
     try {
         const res = await authenticatedFetch('/api/security-alerts/acknowledge-all', {
             method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids }),
@@ -3577,14 +3725,14 @@ async function acknowledgeAllSecurityAlerts() {
         loadDashboardSecurityAlerts();
         if (!done.receipt) { showToast('Already dismissed', 'info'); return; }
         const words = `${uiCountLabel(done.acknowledged, 'alert', 'alerts')} dismissed`;
-        offerAlertUndo(done.receipt, words, `Undo dismissing ${uiCountLabel(done.acknowledged, 'alert', 'alerts')}`);
+        offerAlertUndo(done.receipt, words, `Undo dismissing ${uiCountLabel(done.acknowledged, 'alert', 'alerts')}`, areas);
     } catch (e) {
         showToast(`Could not dismiss the alerts: ${e.message || 'no answer'}. Try again.`, 'error');
     }
 }
 
-function offerAlertUndo(receipt, message, undoName) {
-    showToast(message, 'success', { duration: 10000, action: { label: 'Undo', ariaLabel: undoName, onAction: () => undoAlertDismissal(receipt, undoName) } });
+function offerAlertUndo(receipt, message, undoName, areas) {
+    showToast(message, 'success', { duration: 10000, action: { label: 'Undo', ariaLabel: undoName, onAction: () => undoAlertDismissal(receipt, undoName, areas) } });
 }
 
 function offerAlertsRefresh(message) {
@@ -3596,8 +3744,11 @@ function offerAlertsRefresh(message) {
 }
 
 // Re-open what a dismissal changed. A failure says so and offers Retry until closed.
-async function undoAlertDismissal(receipt, undoName) {
-    if (!uiMayAct('security')) return;
+// areas: those of what was dismissed; the access is checked again now, and the
+// server re-opens only the alerts of the areas the person may still act in
+async function undoAlertDismissal(receipt, undoName, areas = ALERT_AREAS) {
+    if (!uiMayAct('alerts')) return;
+    if (!areas.some(a => userCan(a, 'write'))) { uiNotPermitted(); return; }
     try {
         const res = await authenticatedFetch(`/api/security-alerts/acknowledgements/${encodeURIComponent(receipt)}/undo`, { method: 'POST' });
         if (!res.ok) throw new Error(`the server answered ${res.status}`);
@@ -3618,9 +3769,10 @@ async function undoAlertDismissal(receipt, undoName) {
             const target = row ? [...row.querySelectorAll('button')].find(b => b.textContent.trim() === 'Dismiss') : document.querySelector(place[1]);
             if (target) target.focus({ preventScroll: false });
         }
-        showToast(back ? `${back} in Needs attention` : 'Nothing to undo: dismissed again since', back ? 'success' : 'info');
+        // Nothing back: dismissed again since, or no longer the person's to change
+        showToast(back ? `${back} in Needs attention` : 'Nothing to undo: dismissed again, or your access changed', back ? 'success' : 'info');
     } catch (e) {
-        showToast(`Could not undo: ${e.message || 'no answer'}.`, 'error', { duration: Infinity, action: { label: 'Retry', ariaLabel: `Retry: ${undoName}`, onAction: () => undoAlertDismissal(receipt, undoName) } });
+        showToast(`Could not undo: ${e.message || 'no answer'}.`, 'error', { duration: Infinity, action: { label: 'Retry', ariaLabel: `Retry: ${undoName}`, onAction: () => undoAlertDismissal(receipt, undoName, areas) } });
     }
 }
 

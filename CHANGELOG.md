@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **What led to a security alert** - An outbound volume spike or an authentication failure burst on the Dashboard has Show activity: a window with the mailbox's sent mail (or the username's failed logins) over the last day, two days or week, its usual rate, and what happened around the alert: recipient domains, delivery results and subjects, or the addresses, countries and networks that tried. It helps tell a hijacked mailbox from a legitimate mailing. The alert email now shows the same picture: a chart of the last 24 hours, hour by hour.
 - **Several folders for DMARC and TLS reports** - Settings > DMARC & TLS IMAP lets you choose the folders to read reports from, from the mailbox's folder list. A folder can include its subfolders, also ones created later, such as the folders mailcow creates for plus-tag addresses. [#564](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/564). Thanks to [@MrWeez](https://github.com/MrWeez).
 - **Telegram alerts to a topic** - A Telegram destination has an optional Topic ID, so alerts can go to one topic of a group with topics instead of its General topic.
+- **More alerts in Needs attention** - The Dashboard and the bell also show DNS record changes, report emails that could not be imported, a possible stolen password and addresses the protection rules could not ban, each with a button to its page.
 
 ### Changed
 

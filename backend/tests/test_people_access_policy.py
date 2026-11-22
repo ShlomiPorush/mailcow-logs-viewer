@@ -102,6 +102,11 @@ def test_people_follow_the_agent_policys_areas_elsewhere():
         if rule.area in (scopes.ANY, "settings") or (method, path) in differs:
             continue
         need = user_access.need_for(method, path)
+        if rule.area in scopes.ALTERNATIVES:
+            # A call shared by several areas: its kind in at least one of them
+            assert need.kind == user_access.ANY_AREA, (method, path)
+            assert need.areas == tuple((a, rule.kind) for a in scopes.ALTERNATIVES[rule.area]), (method, path)
+            continue
         assert need.kind == user_access.AREAS and need.areas == ((rule.area, rule.kind),), (method, path)
 
 

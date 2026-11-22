@@ -109,7 +109,7 @@ async function attention(fail2ban, disabled = []) {
 test('Needs attention has a row while such an entry is left, and opens the Lists tab', async () => {
     const one = await attention({ legacy_entries: [LEGACY[1]] });
     assert.match(one.html, /A Fail2ban entry blocks the whole 2001:db8::\/32 network/);
-    assert.match(one.html, /An earlier version wrote 2001:db8::1 as 2001:db8::1\/32\./);
+    assert.match(one.html, /Repair this entry in Security &gt; Lists\./);
     assert.match(one.html, /navigateTo\('netfilter', \{ sub: 'lists' \}\)">Open lists</);
     const both = await attention({ legacy_entries: LEGACY });
     assert.match(both.html, /2 Fail2ban entries cover whole \/32 networks/);

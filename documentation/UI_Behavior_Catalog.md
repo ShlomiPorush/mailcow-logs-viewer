@@ -118,7 +118,7 @@ The v3 redesign replaces these with one consistent locked-area component that sa
 | Page | Condition | What the user sees | Rendered by |
 |---|---|---|---|
 | Dashboard | `blacklist` disabled | The blacklist card is hidden | `#dashboard-blacklist-card` |
-| Dashboard | Unacknowledged security alerts | Rows in Needs attention with a severity tag, the time and Dismiss, and a Dismiss all alerts button in the panel head | `loadDashboardSecurityAlerts` |
+| Dashboard | Unacknowledged alerts of Security, Domains and DMARC & TLS | Rows in Needs attention with a severity tag, the time, Show activity or an Open button for the alert's page, and Dismiss where the user can act in its area; a Dismiss all alerts button in the panel head counts the alerts the user can dismiss | `loadDashboardSecurityAlerts`, `openStoredAlert` |
 | Dashboard | A server check needs a look | Needs attention lists mailcow not reachable, a blocklist listing, stopped containers, DMARC insights and app or mailcow updates, each with a button to where it is handled; with nothing, "Nothing needs attention right now."; a check that could not run keeps what it showed and says "Some checks could not run." with Retry | `loadDashboardAttention` |
 | Every page with the top bar, and every page on a phone | Needs attention has items | The header bell counts every open item (red for a failing one or a critical alert, amber for warnings, plain for news, a grey dot when a check could not run) and opens the same rows in a window under it, a sheet on a phone; desktop Messages has no top bar and no bell | `updateAttentionBell`, `attnWindowOpen` |
 | Message details | `netfilter` disabled | The Security tab of the modal is hidden | `#modal-tab-netfilter` |

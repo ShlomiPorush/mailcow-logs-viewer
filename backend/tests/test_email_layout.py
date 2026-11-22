@@ -324,10 +324,12 @@ def test_protection_rules_email(monkeypatch):
 
 def test_dns_change_email(monkeypatch):
     from app.routers import domains
-    from app.services import notification_service
+    from app.services import notification_service, stored_alerts
     sent = {}
     monkeypatch.setattr(notification_service, 'notify',
                         lambda subject, text, html_content=None, **kw: sent.update(html=html_content, kw=kw))
+    # The email is what this checks; the alert it also stores is test_attention_alert_writers.py's
+    monkeypatch.setattr(stored_alerts, 'record_dns_change', lambda domain, changes: True)
     domains.notify_dns_changes('example.com', [{'type': 'SPF', 'old': 'v=spf1 -all', 'new': f'v=spf1 {PAYLOAD}'}])
     assert LAYOUT_MARK in sent['html']
     _inert(sent['html'])

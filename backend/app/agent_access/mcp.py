@@ -223,13 +223,19 @@ def endpoints_info(app, grant: store.GrantInfo, area: Optional[str]) -> Dict[str
     paths, components = spec.get("paths", {}), spec.get("components", {}).get("schemas", {})
     out = []
     for (method, path), rule in policy.POLICY.items():
-        if area and rule.area != area:
+        areas = policy.rule_areas(rule.area)
+        if area and area not in areas:
             continue
         if not policy.allows(grant.scopes, rule):
             continue
+        # A call shared by several areas is listed under each one the grant has it in
+        if len(areas) > 1:
+            areas = tuple(a for a in areas if f"{a}:{rule.kind}" in grant.scopes)
+            if area and area not in areas:
+                continue
         operation = (paths.get(path) or {}).get(method.lower()) or {}
         entry = {"method": method, "path": path, "kind": "act" if rule.kind == policy.WRITE else "read",
-                 "area": rule.area}
+                 "area": area or " or ".join(areas)}
         summary = operation.get("summary")
         description = (operation.get("description") or "").strip()
         if summary:

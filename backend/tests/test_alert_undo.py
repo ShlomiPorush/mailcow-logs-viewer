@@ -211,3 +211,5 @@ def test_the_list_and_its_ids_come_from_one_snapshot(db_ready):
         event.remove(engine, 'after_cursor_execute', between)
     assert late, 'the alert was committed during the request'
     assert late[0] not in listed['unacknowledged_ids'] and late[0] not in [a['id'] for a in listed['alerts']]
+    # The ids Dismiss all sends come from the same snapshot
+    assert late[0] not in listed['writable_ids'] and set(listed['writable_ids']) <= set(listed['unacknowledged_ids'])

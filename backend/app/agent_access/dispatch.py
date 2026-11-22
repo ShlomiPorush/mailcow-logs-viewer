@@ -100,9 +100,9 @@ def decide(app, call: AgentCall, endpoint, method: str, path_params: Dict[str, A
             return "This call changes something: use perform_action."
         return "This call only reads: use read_api."
     if not policy.allows(call.grant.scopes, rule):
-        label = next((a.label for a in policy.AREAS if a.id == rule.area), rule.area)
         what = "Take action" if rule.kind == policy.WRITE else "View"
-        return (f"This connection does not have {what} for {label} ({rule.area}:{rule.kind}). "
+        needed = " or ".join(f"{area}:{rule.kind}" for area in policy.rule_areas(rule.area))
+        return (f"This connection does not have {what} for {policy.area_label(rule.area)} ({needed}). "
                 "The person who connected you can reconnect you with that permission.")
     return _guard_problem(rule.guard, path_params)
 

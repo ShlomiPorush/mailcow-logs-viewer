@@ -386,7 +386,7 @@ READS = {
     "messages": ("GET", "/api/messages", {}),
     "outbound": ("GET", "/api/suppressions/stats", {}),
     "quarantine": ("GET", "/api/quarantine/rules", {}),
-    "security": ("GET", "/api/security-alerts", {}),
+    "security": ("GET", "/api/protection/rules", {}),
     "dmarc": ("GET", "/api/dmarc/imap/history", {}),
     "mailboxes": ("GET", "/api/devices", {}),
     "logs": ("GET", "/api/raw-logs/services", {}),
@@ -412,7 +412,9 @@ ADMIN_ONLY = [
     ("GET", "/api/notifications/channels", {}),
     ("PUT", "/api/users/not-a-number", {"json": {}}),
 ]
-ANYONE = [("GET", "/api/rw-status", {}), ("GET", "/api/auth/status", {}), ("GET", "/api/auth/verify", {})]
+# The alert list answers each person with the alerts of the areas they may view
+ANYONE = [("GET", "/api/rw-status", {}), ("GET", "/api/auth/status", {}), ("GET", "/api/auth/verify", {}),
+          ("GET", "/api/security-alerts", {})]
 
 
 def _call(client, method, path, kwargs):

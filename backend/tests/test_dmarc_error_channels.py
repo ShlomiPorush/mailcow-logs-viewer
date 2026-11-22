@@ -44,8 +44,10 @@ def test_imap_import_errors_reach_the_channels_without_smtp(monkeypatch):
 
 
 def test_the_notification_itself_goes_to_the_channels_without_smtp(monkeypatch):
-    from app.services import dmarc_notifications
+    from app.services import dmarc_notifications, stored_alerts
     _channels_only(monkeypatch)
+    # The channels are what this checks; the alert it also stores is test_attention_alert_writers.py's
+    monkeypatch.setattr(stored_alerts, 'record_dmarc_import_failed', lambda failed: True)
     sent = []
     monkeypatch.setattr(dmarc_notifications, "notify",
                         lambda subject, text, html, email_recipient, alert_type: sent.append(alert_type)

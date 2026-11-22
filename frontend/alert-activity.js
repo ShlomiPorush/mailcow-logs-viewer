@@ -276,6 +276,19 @@ function alertActivityList(title, rows, total, tone) {
         <span class="ui-aa-bar"><i style="width:${total ? r.count / total * 100 : 0}%;${tone ? `background:var(--ui-${tone(r.name)})` : ''}"></i></span><b>${Number(r.count).toLocaleString()}</b></div>`).join('')}</div>`;
 }
 
+// What to do about an alert, in its Show activity window
+function attentionAlertAdvice(a) {
+    if (a.alert_type === 'volume_spike') return 'Review recent sent messages. If you do not recognize them, reset the mailbox password.';
+    if (a.alert_type === 'auth_failure_burst') return 'Check mail apps for an old password. If the attempts are unfamiliar, reset the account password and consider blocking the source addresses.';
+    if (a.alert_type === 'smtp_abuse_block') {
+        const revoked = String(a.detail || '').match(/App passwords revoked: (\d+)/);
+        return revoked && Number(revoked[1]) > 0
+            ? 'Review recent messages and reset the mailbox password. Then re-enable sending in Security > Settings > Outgoing spam and reconnect mail apps with new app passwords.'
+            : 'Review recent messages and reset the mailbox password. Then re-enable sending in Security > Settings > Outgoing spam.';
+    }
+    return '';
+}
+
 function renderAlertActivity() {
     const data = alertActivity;
     const content = document.getElementById('alert-activity-content');
@@ -332,6 +345,7 @@ function renderAlertActivity() {
     if (alertActivityZoomer) { alertActivityZoomer.destroy(); alertActivityZoomer = null; }
     uiRedrawKeepingFocus(content, () => { content.innerHTML = `
         <p class="ui-muted ui-aa-sub">${escapeHtml(a.title)} · ${escapeHtml(formatTime(a.created_at))}</p>
+        ${attentionAlertAdvice(a) ? `<p class="ui-aa-advice">${escapeHtml(attentionAlertAdvice(a))}</p>` : ''}
         <div class="ui-aa-strip">${figures.map(([label, value, bad]) => `<div><small>${escapeHtml(label)}</small><b${bad ? ' class="ui-text-fail"' : ''}>${escapeHtml(value)}</b></div>`).join('')}</div>
         <section>${alertActivityChart(data, span)}${pickedLine}</section>
         <section><div class="ui-aa-head"><b>Around the alert</b><span class="ui-muted">${uiCountLabel(around.total, sent ? 'message' : 'failed login', sent ? 'messages' : 'failed logins')}, from ${escapeHtml(String(lead))} minutes before it to an hour after</span></div>

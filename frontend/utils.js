@@ -214,6 +214,12 @@ const appAccess = { admin: true, scopes: new Set(), name: '' };
 // person may not (ui.css); the function it calls starts with uiMayAct(area)
 const ACCESS_ACT_AREAS = ['status', 'outbound', 'quarantine', 'security', 'rspamd', 'dmarc', 'domains', 'mailboxes'];
 
+// The areas Needs attention's alerts belong to, each alert to one (stored_alerts.py
+// ALERT_AREAS). 'alerts' stands for any one of them: the list is read with View in
+// one, and Dismiss all and Undo are offered with Take action in one; the server
+// changes only the alerts of the areas the person may act in
+const ALERT_AREAS = ['security', 'domains', 'dmarc'];
+
 // The access the page was drawn with (the first status read): a later status that says
 // otherwise reloads the page, so every part of it follows the new access (appAccessCheck)
 let appAccessLoaded = null;
@@ -231,6 +237,7 @@ function setAppAccess(status) {
     appAccess.name = status && typeof status.user_name === 'string' ? status.user_name : '';
     const root = document.documentElement;
     ACCESS_ACT_AREAS.forEach(area => root.classList.toggle(`ui-no-act-${area}`, !userCan(area, 'write')));
+    root.classList.toggle('ui-no-act-alerts', !userCan('alerts', 'write'));
     root.classList.toggle('ui-no-admin', !appAccess.admin);
 }
 
@@ -255,10 +262,12 @@ function userIsAdmin() {
     return appAccess.admin;
 }
 
-// kind: 'read' (View) or 'write' (Take action); area 'admin' is the admin's own
+// kind: 'read' (View) or 'write' (Take action); area 'admin' is the admin's own,
+// 'alerts' any one of ALERT_AREAS
 function userCan(area, kind = 'read') {
     if (appAccess.admin) return true;
     if (area === 'admin' || area === 'settings') return false;
+    if (area === 'alerts') return ALERT_AREAS.some(a => appAccess.scopes.has(`${a}:${kind}`));
     return appAccess.scopes.has(`${area}:${kind}`);
 }
 

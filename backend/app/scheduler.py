@@ -11,7 +11,7 @@ import httpx
 import ipaddress
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
-from typing import Set, Optional, List, Dict, Any
+from typing import Set, Optional, List, Dict, Any, NamedTuple
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 from apscheduler.triggers.cron import CronTrigger
@@ -1594,13 +1594,33 @@ async def _protection_context():
     return context
 
 
+class BreachFound(NamedTuple):
+    """A new possible stolen password, as plain values taken out of the evaluation's session."""
+    hit_id: int
+    ip: str
+    rule: str
+    reason: str
+    usernames: tuple
+
+
 def _run_protection_rules_sync(context):
     """Evaluate the rules; returns the new breach alerts to notify about."""
     from .services import protection_rules
     with get_db_context() as db:
         created = protection_rules.evaluate(db, context)
         notify_on = protection_rules.load_rules(db)['breach'].get('notify', True)
-        return [(h.ip, h.rule, h.reason) for h in created if h.rule == 'breach' and notify_on]
+        return [BreachFound(h.id, h.ip, h.rule, h.reason, tuple(h.usernames or ()))
+                for h in created if h.rule == 'breach' and notify_on]
+
+
+def _store_protection_alerts(breaches, failed):
+    """Keep the run's possible stolen passwords and its failed bans for Needs attention,
+    each in its own session; a failure is logged and the notification still goes."""
+    from .services import stored_alerts
+    for breach in breaches:
+        stored_alerts.record_protection_breach(breach.ip, breach.usernames)
+    if failed:
+        stored_alerts.record_protection_ban_failed(f[0] for f in failed)
 
 
 def _notify_protection(banned, failed, alerts):
@@ -1677,19 +1697,34 @@ async def _run_protection_rules_locked():
             geoip=geoip_service.is_geoip_available(),
             raw_logs='dovecot' in settings.raw_logs_collected_list,
         )
-        alerts = await asyncio.to_thread(_run_protection_rules_sync, context)
+        breaches = await asyncio.to_thread(_run_protection_rules_sync, context)
+        # Kept before the bans are written: the evaluation has committed these hits, and
+        # a later run only adds to them, so a failure from here on must not lose them
+        if breaches:
+            await asyncio.to_thread(_store_protection_alerts, breaches, [])
+        alerts = [(b.ip, b.rule, b.reason) for b in breaches]
         banned, failed = [], []
+        enforce_error = None
         if mailcow_api.has_rw_key:
             from .services.protection_rules import enforce
             # Bans reviewed by hand and bans that ended are written even with every rule off
-            result = await enforce(mailcow_api)
-            banned = [b for b in result['banned'] if b[3]]
-            failed = [f for f in result['failed'] if isinstance(f, tuple) and f[3]]
+            try:
+                result = await enforce(mailcow_api)
+            except Exception as e:
+                # The breach alerts found above are still sent; the run then fails
+                enforce_error = e
+            else:
+                banned = [b for b in result['banned'] if b[3]]
+                failed = [f for f in result['failed'] if isinstance(f, tuple) and f[3]]
+                if failed:
+                    await asyncio.to_thread(_store_protection_alerts, [], failed)
         if alerts or banned or failed:
             try:
                 await asyncio.to_thread(_notify_protection, banned, failed, alerts)
             except Exception as e:
                 logger.warning(f"Protection rules: could not send the notification: {e}")
+        if enforce_error is not None:
+            raise enforce_error
         update_job_status('protection_rules', 'success')
     except asyncio.CancelledError:
         raise

@@ -31,6 +31,8 @@ Unticking all topics is the same as ticking all; to stop a destination, turn off
 
 Protection rule messages follow each rule's **Send notifications about bans** box (**Send notifications for every alert** for **Possible stolen password**), which covers destinations as well; see [Protection rules](HelpDocs/Security.md#protection-rules). Adding a destination does not turn on any of these features.
 
+DNS record changes, report import errors, a possible stolen password and failed bans also appear in **Needs attention** on the [Dashboard](HelpDocs/Dashboard.md#alerts), even with no address or destination set up. **Alert on DNS changes** and the rules' notification boxes keep them out of it when off.
+
 ## Email addresses
 
 Each address field takes several addresses separated by commas; they all get one message and see each other in `To`. Settings refuses an entry that is not an email address, and an invalid address from the environment is skipped and logged.
