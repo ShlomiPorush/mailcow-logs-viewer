@@ -5204,7 +5204,6 @@ function _showQuarantineRuleModal(rule, prefill) {
                     <textarea id="qrule-notes" rows="2" class="ui-textarea" placeholder="Why this rule exists...">${defaultNotes}</textarea>
                 </label>
                 <div class="ui-alert ui-alert-warn ui-qr-note">
-                    <span class="ui-alert-bar"></span>
                     <div class="ui-alert-text"><p><b>Priority:</b> Delete rules always take priority over Release rules. If both match, the email will be deleted.</p></div>
                 </div>`;
 
@@ -5989,7 +5988,6 @@ function renderStatusAttention() {
     }
     box.innerHTML = items.map(item => `
         <div class="ui-alert ui-alert-${item.tone}">
-            <span class="ui-alert-bar"></span>
             <div class="ui-alert-text"><div class="ui-alert-title"><b>${escapeHtml(item.title)}</b></div><p>${escapeHtml(item.detail)}</p></div>
             <div class="ui-st-acts">${item.actions}</div>
         </div>`).join('');

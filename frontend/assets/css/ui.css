@@ -329,10 +329,7 @@
 .ui-msg-meta time { color: var(--ui-muted); font-size: 12px; white-space: nowrap; font-variant-numeric: tabular-nums; }
 
 /* Alerts that need attention (a coloured bar, the text, one action) */
-.ui-alert { display: flex; align-items: flex-start; gap: 14px; padding-block: var(--ui-pad-y); padding-inline: 0 var(--ui-pad-x); border-top: 1px solid var(--ui-line); }
-.ui-alert-bar { width: 4px; align-self: stretch; flex: none; border-radius: 0; border-start-end-radius: 4px; border-end-end-radius: 4px; background: var(--ui-info); }
-.ui-alert-fail .ui-alert-bar { background: var(--ui-fail); }
-.ui-alert-warn .ui-alert-bar { background: var(--ui-warn); }
+.ui-alert { display: flex; align-items: flex-start; gap: 14px; padding-block: var(--ui-pad-y); padding-inline: var(--ui-pad-x); border-top: 1px solid var(--ui-line); }
 .ui-alert-text { flex: 1; min-width: 0; }
 .ui-alert-title { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
 .ui-alert-text p { margin: 3px 0 0; font-size: var(--ui-fs-sm); overflow-wrap: anywhere; }
@@ -411,7 +408,6 @@
     /* Phones: search, Apply and Clear stay; the other filters open with "Filters" */
     .ui-filters:not(.is-open) .ui-filter-extra { display: none; }
     .ui-filters-toggle { display: inline-flex; }
-    .ui-alert > .ui-btn { margin-inline-start: 18px; }
 }
 
 /* ---------- Dialog, tabs and the Messages reading pane ---------- */
@@ -1470,16 +1466,14 @@ body { font-family: var(--ui-font); background: var(--ui-bg); color: var(--ui-in
     #dashboard-attention-panel { order: -2; }
     #dashboard-security-panel { order: -1; }
 }
-.ui-alert-info .ui-alert-bar { background: var(--ui-info); }
 .ui-alert > .ui-btn { align-self: center; flex: none; }
 .ui-alert-go { cursor: pointer; }
 @media (hover: hover) { .ui-alert-go:hover { background: color-mix(in srgb, var(--ui-ink) 3%, transparent); } }
 @media (max-width: 760px) {
     /* Phones: the text takes the whole width, the actions go under it */
-    #dashboard-attention-panel .ui-alert { display: grid; grid-template-columns: 4px minmax(0, 1fr); column-gap: 14px; row-gap: 8px; }
-    #dashboard-attention-panel .ui-alert-bar { grid-row: 1 / span 2; }
+    #dashboard-attention-panel .ui-alert { display: grid; grid-template-columns: minmax(0, 1fr); row-gap: 8px; }
     #dashboard-attention-panel .ui-alert > .ui-btn,
-    #dashboard-attention-panel .ui-alert-acts { grid-column: 2; justify-self: start; align-self: start; margin-inline-start: 0; }
+    #dashboard-attention-panel .ui-alert-acts { justify-self: start; align-self: start; margin-inline-start: 0; }
 }
 .ui-dash-clear { margin: 0; padding: var(--ui-pad-y) var(--ui-pad-x); border-top: 1px solid var(--ui-line); color: var(--ui-muted); }
 
@@ -1527,17 +1521,12 @@ body { font-family: var(--ui-font); background: var(--ui-bg); color: var(--ui-in
 .ui-attn-win-foot { padding: 10px var(--ui-pad-x); border-top: 1px solid var(--ui-line); }
 .ui-attn-win-foot .ui-attn-win-go { font-weight: 600; font-size: 13px; }
 @media (hover: hover) { .ui-attn-win-foot .ui-attn-win-go:hover { text-decoration: underline; } }
-:is(.ui-attn-win, #attn-sheet) .ui-alert { display: grid; grid-template-columns: 4px minmax(0, 1fr); column-gap: 14px; row-gap: 8px; }
-:is(.ui-attn-win, #attn-sheet) .ui-alert-bar { grid-row: 1 / span 2; }
-:is(.ui-attn-win, #attn-sheet) :is(.ui-alert > .ui-btn, .ui-alert-acts) { grid-column: 2; justify-self: start; align-self: start; margin-inline-start: 0; }
+:is(.ui-attn-win, #attn-sheet) .ui-alert { display: grid; grid-template-columns: minmax(0, 1fr); row-gap: 8px; }
+:is(.ui-attn-win, #attn-sheet) :is(.ui-alert > .ui-btn, .ui-alert-acts) { justify-self: start; align-self: start; margin-inline-start: 0; }
 #attn-sheet .ui-sheet-head { justify-content: flex-start; }
 #attn-sheet .ui-sheet-head .ui-sheet-x { margin-inline-start: 4px; }
 #attn-sheet .ui-sheet-body { display: block; padding: 0 0 env(safe-area-inset-bottom); }
 #attn-sheet .ui-alert:first-child { border-top: 0; }
-/* Needs attention rows have no coloured bar: the severity tag carries the tone. Another
-   list drops it by adding its container to both selectors and the bar from its rows */
-:is(#dashboard-attention-panel, .ui-attn-win, #attn-sheet) .ui-alert { padding-inline-start: var(--ui-pad-x); grid-template-columns: minmax(0, 1fr); }
-:is(#dashboard-attention-panel, .ui-attn-win, #attn-sheet) :is(.ui-alert > .ui-btn, .ui-alert-acts) { grid-column: 1; }
 /* The mail flow: a period picker, bars that zoom in time (utils.js uiTimeZoom) */
 #dashboard-flow-period { margin-inline-start: auto; }
 .ui-flow-view { position: relative; overflow: hidden; }
@@ -1869,7 +1858,7 @@ button.ui-st-card { cursor: pointer; }
     .ui-jobrow-tag:empty { display: none; }
     .ui-jobrow-act { grid-column: 3; grid-row: 1; }
     #status-attention .ui-alert { flex-wrap: wrap; }
-    #status-attention .ui-st-acts { flex: 1 1 100%; justify-content: flex-start; padding-inline-start: 18px; }
+    #status-attention .ui-st-acts { flex: 1 1 100%; justify-content: flex-start; }
     .ui-st-host-tools { margin-inline-start: 0; }
     .ui-st-listing { flex-wrap: wrap; }
     .ui-stack .ui-tr-group { flex: 1 1 100%; }
@@ -3235,11 +3224,9 @@ button.ui-dm-node { cursor: pointer; }
 .ui-dm-node b::before { content: ""; flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--dm-t); }
 .ui-dm-node small { display: block; margin-top: 2px; color: var(--ui-muted); font-size: 12px; }
 /* The side column: to do and the records */
-.ui-alerts-stack .ui-alert { display: grid; grid-template-columns: 4px minmax(0, 1fr); column-gap: 14px; row-gap: 8px; }
-.ui-alerts-stack .ui-alert-bar { grid-row: 1 / span 2; }
-.ui-alerts-stack .ui-alert > .ui-btn { grid-column: 2; justify-self: start; align-self: start; margin-inline-start: 0; }
+.ui-alerts-stack .ui-alert { display: grid; grid-template-columns: minmax(0, 1fr); row-gap: 8px; }
+.ui-alerts-stack .ui-alert > .ui-btn { justify-self: start; align-self: start; margin-inline-start: 0; }
 .ui-alerts-stack > header + .ui-alert { border-top: 0; }
-.ui-alert-ok .ui-alert-bar { background: var(--ui-ok); }
 .ui-dm-task-domain { display: block; font-weight: 600; font-size: 12px; }
 .ui-dm-rec { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 10px; align-items: center; width: 100%; padding: 11px 16px; border: 0; border-bottom: 1px solid var(--dm-line);
     background: none; color: inherit; font: inherit; text-align: start; cursor: pointer; }
@@ -3375,7 +3362,7 @@ button.ui-aa-col:focus-visible { outline: 2px solid var(--ui-focus); outline-off
     .ui-aa-strip > div:nth-child(3) { border-inline-start: 0; }
     .ui-aa-two { grid-template-columns: 1fr; }
     .ui-alert { flex-wrap: wrap; }
-    .ui-alert-acts { margin-inline-start: 18px; justify-content: flex-start; }
+    .ui-alert-acts { justify-content: flex-start; }
 }
 
 /* Phones: every dialog is a sheet like the help sheet, four fifths of the

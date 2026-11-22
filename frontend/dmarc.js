@@ -468,7 +468,6 @@ function dmarcTodoCard(tasks, withDomain = false) {
     if (!tasks.length) return '<div class="ui-dm-card"><header>To do</header><p class="ui-dm-empty">Nothing to do. The records are in place and every sender passes.</p></div>';
     return `<div class="ui-dm-card ui-alerts-stack"><header>To do <span class="ui-count">${tasks.length}</span></header>${tasks.slice(0, 8).map(t => `
         <div class="ui-alert ui-alert-${t.tone === 'mut' ? 'info' : t.tone}">
-            <span class="ui-alert-bar"></span>
             <div class="ui-alert-text"><div class="ui-alert-title"><b>${escapeHtml(t.title)}</b></div>${withDomain ? `<small class="ui-dm-task-domain">${escapeHtml(t.domain)}</small>` : ''}<p>${escapeHtml(t.text)}</p></div>
             <button type="button" class="ui-btn ui-btn-sm" onclick="${t.action}">${escapeHtml(t.label)}</button>
         </div>`).join('')}
