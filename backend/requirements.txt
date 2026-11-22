@@ -25,7 +25,7 @@ pydantic-settings==2.1.0
 tenacity==8.2.3
 
 # DNS Queries - Required for domains management
-dnspython[doh]==2.6.1
+dnspython[doh]==2.9.2
 # TLSA matching for DANE checks
 cryptography>=42.0.0
 

@@ -370,6 +370,8 @@ class MailboxStatistics(Base):
     last_imap_login = Column(BigInteger, nullable=True)
     last_pop3_login = Column(BigInteger, nullable=True)
     last_smtp_login = Column(BigInteger, nullable=True)
+    # Webmail, and phones that sync through SOGo; mailcow reports it since 2026-11a
+    last_sogo_login = Column(BigInteger, nullable=True)
     
     # Spam filter settings
     spam_aliases = Column(Integer, default=0)
