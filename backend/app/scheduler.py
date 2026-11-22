@@ -2192,8 +2192,19 @@ async def check_credentials_job():
     return JOB_STATUS_SET
 
 
+def geoip_download_error(names) -> str:
+    """The job's error when the download of these GeoIP databases failed: City is the
+    location database, ASN the network information database."""
+    plain = {'City': 'location', 'ASN': 'network information'}
+    which = ' and '.join(plain.get(name, name) for name in names)
+    return (f"Could not download the {which} database{'s' if len(names) > 1 else ''} from MaxMind. "
+            "Check your account ID and license key in Settings > MaxMind, then try again. "
+            "If it still fails, check the application logs for details.")
+
+
 async def update_geoip_database():
-    """Background job: Update GeoIP databases"""
+    """Background job: Update GeoIP databases. Returns JOB_STATUS_SET once it
+    recorded its outcome, so Run on the Status page keeps a failed download failed."""
     from .services.geoip_downloader import (
         update_geoip_database_if_needed,
         is_license_configured
@@ -2204,7 +2215,7 @@ async def update_geoip_database():
         
         if not is_license_configured():
             update_job_status('update_geoip', 'idle', 'Add a MaxMind account ID and license key in Settings > MaxMind.')
-            return
+            return JOB_STATUS_SET
         
         # Run blocking download in thread pool to avoid blocking the event loop
         loop = asyncio.get_event_loop()
@@ -2215,30 +2226,38 @@ async def update_geoip_database():
             # and reader objects are refreshed with the new database files
             await asyncio.to_thread(geoip_service.reload_geoip_readers)
             logger.info("GeoIP readers reloaded after database update")
-            update_job_status('update_geoip', 'success')
-        else:
+        elif geoip_service.get_geoip_db_valid() is not True:
             # Ensure readers are loaded and validated even when no download was needed
             # (handles case where DB exists but validation hasn't run yet)
-            if geoip_service.get_geoip_db_valid() is not True:
-                await asyncio.to_thread(geoip_service.reload_geoip_readers)
+            await asyncio.to_thread(geoip_service.reload_geoip_readers)
+        # A download that was needed and did not succeed fails the run, also when
+        # an older file stays in use: Status and Setup must not call it a success
+        missing = [name for name in ('City', 'ASN') if status[name].get('failed')]
+        if missing:
+            update_job_status('update_geoip', 'failed', geoip_download_error(missing))
+        else:
             update_job_status('update_geoip', 'success')
         
         # Successful download implies valid license - persist to DB
-        # so the settings page shows "License Valid" without a manual check
-        if status['City']['available'] or status['ASN']['available']:
+        # so the settings page shows "License Valid" without a manual check;
+        # a download MaxMind refused proves nothing, even with an older file
+        if not missing and (status['City']['available'] or status['ASN']['available']):
             try:
                 await asyncio.get_running_loop().run_in_executor(
                     get_thread_pool_executor(), _persist_geoip_license_status
                 )
             except Exception as e:
                 logger.debug(f"Failed to persist license status after GeoIP update: {e}")
-        
+        return JOB_STATUS_SET
+
     except asyncio.CancelledError:
+        # Not a finished run: Run on the Status page must not record it as a success
         logger.info("GeoIP update cancelled by shutdown")
-        return
+        raise
     except Exception as e:
         logger.error(f"GeoIP update failed: {e}")
         update_job_status('update_geoip', 'failed', str(e))
+        return JOB_STATUS_SET
 
 
 _BLACKLIST_TODO = ("Find out why the host was listed and fix the cause, then ask each blacklist to remove it. "

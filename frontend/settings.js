@@ -3127,43 +3127,20 @@ async function showGeoIPSetupModal(reloadPage = false) {
             const progressFill = document.getElementById('geoip-progress-fill');
             progressBar.classList.remove('hidden');
             
-            // Trigger download
-            await authenticatedFetch('/api/settings/geoip/download', { method: 'POST' });
-            
-            // Poll for completion
+            // Start the download and wait for that run's own result
             let progress = 5;
             progressFill.style.width = progress + '%';
-            
-            const downloadComplete = await new Promise((resolve) => {
-                let polls = 0;
-                const interval = setInterval(async () => {
-                    polls++;
-                    if (polls > 90) { // 90 * 2s = 3 minutes
-                        clearInterval(interval);
-                        resolve(false);
-                        return;
-                    }
-                    
-                    // Animate progress (fake but smooth)
-                    progress = Math.min(90, progress + (90 - progress) * 0.08);
-                    progressFill.style.width = progress + '%';
-                    
-                    try {
-                        const res = await authenticatedFetch('/api/settings/geoip/status');
-                        const st = await res.json();
-                        
-                        if (st.job_status === 'success') {
-                            progressFill.style.width = '100%';
-                            clearInterval(interval);
-                            setTimeout(() => resolve(true), 400);
-                        } else if (st.job_status === 'failed') {
-                            clearInterval(interval);
-                            resolve(st.job_error || 'Download failed');
-                        }
-                    } catch (e) { /* continue */ }
-                }, 2000);
-            });
-            
+            const run = await geoipDownloadRun({ onTick: () => {
+                // Animate progress (fake but smooth)
+                progress = Math.min(90, progress + (90 - progress) * 0.08);
+                progressFill.style.width = progress + '%';
+            } });
+            if (run.ok === true) {
+                progressFill.style.width = '100%';
+                await new Promise(resolve => setTimeout(resolve, 400));
+            }
+            const downloadComplete = run.ok === true ? true : run.ok === false ? run.error : false;
+
             if (downloadComplete === true) {
                 setStepStatus(2, 'success', 'Download job finished');
             } else {
@@ -3246,6 +3223,54 @@ async function validateMaxMindLicense() {
     }
 }
 
+// The update_geoip job as GET /api/settings/geoip/status reports it, or null
+// (also when it did not answer within timeout ms)
+async function geoipJobState(timeout = 15000) {
+    try {
+        const res = await authenticatedFetch('/api/settings/geoip/status', { timeout });
+        return res.ok ? await res.json() : null;
+    } catch (e) {
+        return null;
+    }
+}
+
+// Start a GeoIP download and wait for the result of that run, not one left
+// from before: the job's last_run changes when a run starts (update_job_status
+// writes it on every change; the status gives it to the microsecond), and the
+// run ends in success or failed. Every request is bounded, and so is the wait.
+// Answers { started, ok: true | false | null (did not finish in time), error, status }
+async function geoipDownloadRun({ onStarted, onTick, every = 2000, limit = 3 * 60 * 1000, now = () => Date.now() } = {}) {
+    const deadline = now() + limit;
+    const left = () => Math.max(1, Math.min(15000, deadline - now()));
+    const before = await geoipJobState(left());
+    let res = null;
+    try {
+        res = await authenticatedFetch('/api/settings/geoip/download', { method: 'POST', timeout: left() });
+    } catch (e) {
+        // No answer in time: the server may still have started the run, so watch for it
+        res = null;
+    }
+    if (res && !res.ok) {
+        const body = await res.json().catch(() => ({}));
+        return { started: false, ok: false, error: (body && typeof body.detail === 'string' && body.detail) || 'Could not start the download. Check your MaxMind credentials and try again.' };
+    }
+    if (onStarted) onStarted();
+    // Without the state before, only a run seen running counts
+    let seenRun = !!before;
+    for (let i = 0; now() < deadline; i++) {
+        await new Promise(resolve => setTimeout(resolve, every));
+        if (now() >= deadline) break;
+        if (onTick) onTick(i);
+        const st = await geoipJobState(left());
+        if (!st) continue;
+        if (st.job_status === 'running') { seenRun = true; continue; }
+        if (!seenRun || (before && st.job_last_run === before.job_last_run)) continue;
+        if (st.job_status === 'success') return { started: true, ok: true, status: st };
+        return { started: true, ok: false, error: st.job_error || 'The download failed.', status: st };
+    }
+    return { started: true, ok: null };
+}
+
 async function repairGeoIPDatabase() {
     const statusEl = document.getElementById('geoip-db-status');
     if (statusEl) {
@@ -3261,58 +3286,31 @@ async function repairGeoIPDatabase() {
     }
 
     try {
-        // Step 1: Trigger re-download of databases
-        const downloadRes = await authenticatedFetch('/api/settings/geoip/download', { method: 'POST' });
-        if (!downloadRes.ok) {
-            throw new Error('Could not start the download. Check your MaxMind credentials and try again.');
+        // Start a new download and wait for that run's own result
+        const run = await geoipDownloadRun({ onStarted: () => showToast('GeoIP download check started...', 'info') });
+        if (run.ok === null) {
+            showToast('The repair is taking longer than expected. Check Status for progress.', 'warning');
+            if (statusEl) {
+                statusEl.innerHTML = '<span class="text-xs text-gray-500">Check Status page</span>';
+            }
+            return;
         }
+        if (!run.started) throw new Error(run.error);
 
-        showToast('GeoIP download check started...', 'info');
-
-        // Step 2: Poll geoip/status until download completes (max 60s)
-        let attempts = 0;
-        const maxAttempts = 30;
-        const pollInterval = 2000;
-        
-        const pollStatus = async () => {
-            attempts++;
-            try {
-                const statusRes = await authenticatedFetch('/api/settings/geoip/status');
-                if (statusRes.ok) {
-                    const data = await statusRes.json();
-                    if (data.job_status === 'idle' && attempts > 2) {
-                        // Download finished - now validate
-                        const validateRes = await authenticatedFetch('/api/settings/geoip/validate', { method: 'POST' });
-                        if (validateRes.ok) {
-                            const result = await validateRes.json();
-                            if (statusEl) {
-                                const cfg = { db_valid: result.valid, databases: data.databases };
-                                statusEl.innerHTML = renderGeoIPDbStatus(cfg);
-                            }
-                            if (result.valid) {
-                                showToast('GeoIP database check passed.', 'success');
-                            } else {
-                                showToast('Database check still failed after the download. Check the application logs.', 'error');
-                            }
-                        }
-                        return;
-                    }
-                }
-            } catch (e) {
-                console.error('Poll error:', e);
-            }
-            
-            if (attempts < maxAttempts) {
-                setTimeout(pollStatus, pollInterval);
-            } else {
-                showToast('The repair is taking longer than expected. Check Status for progress.', 'warning');
-                if (statusEl) {
-                    statusEl.innerHTML = '<span class="text-xs text-gray-500">Check Status page</span>';
-                }
-            }
-        };
-
-        setTimeout(pollStatus, pollInterval);
+        // The databases as they are now: an older file can still be in use after a failed download
+        const validateRes = await authenticatedFetch('/api/settings/geoip/validate', { method: 'POST' });
+        const result = validateRes.ok ? await validateRes.json() : null;
+        if (statusEl && result) {
+            statusEl.innerHTML = renderGeoIPDbStatus({ db_valid: result.valid, databases: run.status && run.status.databases });
+        }
+        if (!run.ok) {
+            // The error says what to check; an older file that still checks out keeps working
+            showToast(run.error + (result && result.valid ? ' Previously installed data is still in use.' : ''), 'error');
+        } else if (result && result.valid) {
+            showToast('GeoIP database check passed.', 'success');
+        } else {
+            showToast('Database check still failed after the download. Check the application logs.', 'error');
+        }
 
     } catch (error) {
         console.error('Failed to repair GeoIP databases:', error);
