@@ -1457,6 +1457,28 @@ function uiCloseSavedDialog(id) {
     modal?.remove();
 }
 
+// A field whose value cannot be sent says why under it, as Settings does
+// (settingsCheckFields): marked, focused, and clear again once it is changed.
+// after: the element the note goes after (the field itself, or its row)
+function uiFieldProblem(field, text, after = field) {
+    if (!field) return;
+    const id = `${field.id}-invalid`;
+    document.getElementById(id)?.remove();
+    const note = document.createElement('small');
+    note.className = 'ui-set-invalid ui-text-fail';
+    note.id = id;
+    note.textContent = text;
+    (after || field).insertAdjacentElement('afterend', note);
+    field.setAttribute('aria-invalid', 'true');
+    const described = (field.getAttribute('aria-describedby') || '').split(' ').filter(Boolean);
+    if (!described.includes(id)) field.setAttribute('aria-describedby', [...described, id].join(' '));
+    field.addEventListener('input', () => {
+        field.removeAttribute('aria-invalid');
+        note.remove();
+    }, { once: true });
+    field.focus();
+}
+
 // What the server said went wrong, in words: its detail text, a detail object's
 // message, or a validation list (FastAPI 422) as "field: problem" for each field
 function uiApiErrorText(body, fallback) {
@@ -2583,7 +2605,6 @@ function uiFilterBarSync() {
             const button = host.querySelector('.ui-picker-btn');
             if (input && button) button.classList.toggle('is-set', uiFilterChanged(input));
         });
-        const fields = [...bar.querySelectorAll('input, select')].filter(el => !el.closest('.ui-picker-panel') || el.matches('[data-filter-default]'));
         const more = bar.querySelector('.ui-fbar-more');
         const badge = bar.querySelector('.ui-filters-toggle .ui-msg-filter-n');
         if (more && badge) {
@@ -2597,9 +2618,17 @@ function uiFilterBarSync() {
         }
         const summary = bar.nextElementSibling;
         const clear = summary && summary.classList.contains('ui-list-summary') && summary.querySelector('.ui-clear-filters');
-        if (clear) clear.classList.toggle('hidden', !fields.some(uiFilterChanged));
+        if (clear) clear.classList.toggle('hidden', !uiFilterBarOn(bar));
     });
     uiPickerRefocus();
+}
+
+// A filter bar with a filter in use: what shows its "Clear filters" (a picker's own
+// search field is not a filter)
+function uiFilterBarOn(bar) {
+    return [...bar.querySelectorAll('input, select')]
+        .filter(el => !el.closest('.ui-picker-panel') || el.matches('[data-filter-default]'))
+        .some(uiFilterChanged);
 }
 
 // =============================================================================

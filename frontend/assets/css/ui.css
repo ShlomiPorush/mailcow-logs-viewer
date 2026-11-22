@@ -156,7 +156,9 @@
 .ui-num { font-variant-numeric: tabular-nums; }
 .ui-h1 { margin: 0; font-size: var(--ui-h1); line-height: 1.1; font-weight: 800; letter-spacing: -.035em; }
 .ui-h2 { margin: 0; font-size: 16px; font-weight: 650; letter-spacing: -.01em; }
-:where(.ui) :focus-visible { outline: 2px solid var(--ui-focus); outline-offset: 2px; }
+/* The app's focus ring on everything the keyboard reaches; zero specificity, so a
+   control's own focus style (an input's border, an inset ring) still wins */
+:where(:focus-visible) { outline: 2px solid var(--ui-focus); outline-offset: 2px; }
 
 /* The JavaScript shows and hides elements with the "hidden" class. A component
    that sets its own display must still yield to it, whatever the order in which
@@ -1714,8 +1716,8 @@ body { font-family: var(--ui-font); background: var(--ui-bg); color: var(--ui-in
     background: var(--ui-bg); color: var(--ui-ink); box-shadow: 0 8px 24px rgba(0, 0, 0, .14); }
 .ui-menu button { display: block; width: 100%; padding: 7px 10px; border: 0; border-radius: 6px; background: none; color: inherit; font: inherit;
     font-size: var(--ui-fs-sm); text-align: start; cursor: pointer; }
-.ui-menu button:focus-visible { background: color-mix(in srgb, var(--ui-ink) 7%, transparent); outline: none; }
-@media (hover: hover) { .ui-menu button:hover { background: color-mix(in srgb, var(--ui-ink) 7%, transparent); outline: none; } }
+.ui-menu button:focus-visible { background: color-mix(in srgb, var(--ui-ink) 7%, transparent); outline: 2px solid var(--ui-focus); outline-offset: -2px; }
+@media (hover: hover) { .ui-menu button:hover:not(:focus-visible) { background: color-mix(in srgb, var(--ui-ink) 7%, transparent); outline: none; } }
 
 /* ---------- Status: attention list, tabs, one card per area ---------- */
 .ui-list-head .ui-head-actions { margin-inline-start: auto; }
@@ -2790,8 +2792,8 @@ html .markdown-body .markdown-alert-caution .markdown-alert-title { color: var(-
 .ui-fly-title { padding: 6px 10px 4px; color: var(--ui-muted); font-size: 12px; font-weight: 650; }
 .ui-fly-item { display: flex; align-items: center; gap: 8px; width: 100%; padding: 7px 10px; border: 0; border-radius: 8px;
     background: none; color: inherit; font: inherit; font-size: 14px; text-align: start; cursor: pointer; }
-.ui-fly-item:focus-visible { background: color-mix(in srgb, var(--ui-ink) 7%, transparent); outline: none; }
-@media (hover: hover) { .ui-fly-item:hover { background: color-mix(in srgb, var(--ui-ink) 7%, transparent); outline: none; } }
+.ui-fly-item:focus-visible { background: color-mix(in srgb, var(--ui-ink) 7%, transparent); outline: 2px solid var(--ui-focus); outline-offset: -2px; }
+@media (hover: hover) { .ui-fly-item:hover:not(:focus-visible) { background: color-mix(in srgb, var(--ui-ink) 7%, transparent); outline: none; } }
 .ui-fly-item.is-on { font-weight: 700; }
 .ui-fly-item.is-on::after { content: ""; width: 6px; height: 6px; margin-inline-start: auto; border-radius: 3px; background: currentColor; }
 .ui-fly-item .ui-nav-count { margin-inline-start: auto; }

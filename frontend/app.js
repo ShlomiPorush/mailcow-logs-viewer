@@ -1635,7 +1635,7 @@ function renderMessagesData(data) {
 }
 
 // A first page of the list, from a full load or the auto refresh: the rows (or
-// "No messages found"), the count, where the next page starts, and the answer
+// the empty note), the count, where the next page starts, and the answer
 // the refresh compares the next one with
 function showMessagesFirstPage(container, data) {
     // The watermark moves with any new mail, also mail the filters leave out: not part of the comparison
@@ -1649,7 +1649,12 @@ function showMessagesFirstPage(container, data) {
     currentPage.messages = 1;
     setMessagesCount(messagesPaging.total);
     if (!rows.length) {
-        container.innerHTML = '<p class="ui-empty">No messages found</p>';
+        // As on Devices: with filters on, the way back is right there
+        container.innerHTML = messagesFiltersOn() ? `
+            <div class="ui-empty">
+                <p><b>No messages match these filters</b></p>
+                <p><button onclick="clearMessagesFilters()" class="ui-btn ui-btn-sm">Clear filters</button></p>
+            </div>` : '<p class="ui-empty">No messages yet. Mail that mailcow sends and receives shows up here.</p>';
         return;
     }
     renderMessagesList(container, data);
@@ -1987,7 +1992,11 @@ function renderNetfilterData(data) {
     if (!container) return;
 
     if (!data.data || data.data.length === 0) {
-        container.innerHTML = '<p class="ui-empty">No logs found</p>';
+        container.innerHTML = Object.values(currentFilters.netfilter || {}).some(Boolean) ? `
+            <div class="ui-empty">
+                <p><b>No events match these filters</b></p>
+                <p><button onclick="clearNetfilterFilters()" class="ui-btn ui-btn-sm">Clear filters</button></p>
+            </div>` : '<p class="ui-empty">No events yet. Fail2ban bans, unbans and warnings show up here.</p>';
         const emptyCount = document.getElementById('security-count');
         if (emptyCount) emptyCount.textContent = uiCountLabel(0, 'event', 'events');
         return;
@@ -4328,7 +4337,11 @@ function drawQueueRows() {
     }
 
     if (filteredData.length === 0) {
-        container.innerHTML = '<p class="ui-empty">No matching queue entries</p>';
+        container.innerHTML = searchTerm || queueId ? `
+            <div class="ui-empty">
+                <p><b>No queued messages match these filters</b></p>
+                <p><button onclick="clearQueueFilters()" class="ui-btn ui-btn-sm">Clear filters</button></p>
+            </div>` : '<p class="ui-empty">Mail waiting to be delivered or retried shows up here.</p>';
         return;
     }
 
@@ -4450,14 +4463,14 @@ function queueGetSelectedIds() {
 async function queueBulkRetry() {
     const ids = queueGetSelectedIds();
     if (ids.length === 0) return;
-    if (!await showConfirmModal({ title: 'Retry Delivery', message: `Retry delivery of ${ids.length} message(s)?`, confirmText: 'Retry' })) return;
+    if (!await showConfirmModal({ title: 'Retry delivery', message: `Retry delivery of ${ids.length} message(s)?`, confirmText: 'Retry' })) return;
     await queueAction('deliver', ids);
 }
 
 async function queueBulkDelete() {
     const ids = queueGetSelectedIds();
     if (ids.length === 0) return;
-    if (!await showConfirmModal({ title: 'Delete Messages', message: `Permanently delete ${ids.length} message(s) from the queue?`, confirmText: 'Delete', isDangerous: true })) return;
+    if (!await showConfirmModal({ title: 'Delete messages', message: `Permanently delete ${ids.length} message(s) from the queue? This cannot be undone.`, confirmText: 'Delete', isDangerous: true })) return;
     await queueDeleteRequest(ids);
 }
 
@@ -4476,17 +4489,17 @@ async function queueUnhold(qid) {
 }
 
 async function queueDeleteItem(qid) {
-    if (!await showConfirmModal({ title: 'Delete Message', message: 'Delete this message from the queue?', confirmText: 'Delete', isDangerous: true })) return;
+    if (!await showConfirmModal({ title: 'Delete message', message: 'Delete this message from the queue? This cannot be undone.', confirmText: 'Delete', isDangerous: true })) return;
     await queueDeleteRequest([String(qid)]);
 }
 
 async function queueFlushAll() {
-    if (!await showConfirmModal({ title: 'Flush Queue', message: 'Flush (retry delivery of) ALL messages in the queue?', confirmText: 'Flush All' })) return;
+    if (!await showConfirmModal({ title: 'Flush queue', message: 'Flush (retry delivery of) ALL messages in the queue?', confirmText: 'Flush all' })) return;
     await queueAction('flush', ['mailqitems-all']);
 }
 
 async function queueDeleteAll() {
-    if (!await showConfirmModal({ title: 'Delete All', message: 'Permanently delete ALL messages from the queue? This cannot be undone.', confirmText: 'Delete All', isDangerous: true })) return;
+    if (!await showConfirmModal({ title: 'Delete all', message: 'Permanently delete ALL messages from the queue? This cannot be undone.', confirmText: 'Delete all', isDangerous: true })) return;
     await queueAction('super_delete', ['mailqitems-all']);
 }
 
@@ -4630,7 +4643,7 @@ function drawQuarantineRows(data) {
     }
 
     if (!data.data || data.data.length === 0) {
-        container.innerHTML = '<p class="ui-empty">No quarantined messages</p>';
+        container.innerHTML = '<p class="ui-empty">Messages that mailcow holds as likely spam show up here.</p>';
         return;
     }
 
@@ -4737,59 +4750,59 @@ async function quarantineRelease(itemId) {
 }
 
 async function quarantineDelete(itemId) {
-    if (!await showConfirmModal({ title: 'Delete Message', message: 'Are you sure you want to permanently delete this quarantined message?', confirmText: 'Delete', isDangerous: true })) return;
+    if (!await showConfirmModal({ title: 'Delete message', message: 'Delete this quarantined message permanently? This cannot be undone.', confirmText: 'Delete', isDangerous: true })) return;
     await quarantineAction('delete', [String(itemId)]);
 }
 
 async function quarantineLearnHam(itemId) {
-    if (!await showConfirmModal({ title: 'Not Spam', message: 'Release this message and train Rspamd that it is not spam?', confirmText: 'Not Spam' })) return;
+    if (!await showConfirmModal({ title: 'Not spam', message: 'Release this message and train Rspamd that it is not spam?', confirmText: 'Not spam' })) return;
     await quarantineAction('learnham', [String(itemId)]);
 }
 
 async function quarantineLearnSpam(itemId) {
-    if (!await showConfirmModal({ title: 'Mark as Spam', message: 'Delete this message and train Rspamd that it IS spam?', confirmText: 'Spam', isDangerous: true })) return;
+    if (!await showConfirmModal({ title: 'Mark as spam', message: 'Delete this message and train Rspamd that it is spam? This cannot be undone.', confirmText: 'Mark as spam', isDangerous: true })) return;
     await quarantineAction('learnspam', [String(itemId)]);
 }
 
 async function quarantineBulkRelease() {
     const ids = quarantineGetSelectedIds();
     if (ids.length === 0) return;
-    if (!await showConfirmModal({ title: 'Release Messages', message: `Release ${ids.length} quarantined message(s)?`, confirmText: 'Release' })) return;
+    if (!await showConfirmModal({ title: 'Release messages', message: `Release ${ids.length} quarantined message(s)?`, confirmText: 'Release' })) return;
     await quarantineAction('release', ids);
 }
 
 async function quarantineBulkDelete() {
     const ids = quarantineGetSelectedIds();
     if (ids.length === 0) return;
-    if (!await showConfirmModal({ title: 'Delete Messages', message: `Permanently delete ${ids.length} quarantined message(s)?`, confirmText: 'Delete', isDangerous: true })) return;
+    if (!await showConfirmModal({ title: 'Delete messages', message: `Permanently delete ${ids.length} quarantined message(s)? This cannot be undone.`, confirmText: 'Delete', isDangerous: true })) return;
     await quarantineAction('delete', ids);
 }
 
 async function quarantineBulkLearnHam() {
     const ids = quarantineGetSelectedIds();
     if (ids.length === 0) return;
-    if (!await showConfirmModal({ title: 'Not Spam', message: `Release ${ids.length} message(s) and train Rspamd as not spam?`, confirmText: 'Not Spam' })) return;
+    if (!await showConfirmModal({ title: 'Not spam', message: `Release ${ids.length} message(s) and train Rspamd as not spam?`, confirmText: 'Not spam' })) return;
     await quarantineAction('learnham', ids);
 }
 
 async function quarantineBulkLearnSpam() {
     const ids = quarantineGetSelectedIds();
     if (ids.length === 0) return;
-    if (!await showConfirmModal({ title: 'Mark as Spam', message: `Delete ${ids.length} message(s) and train Rspamd as spam?`, confirmText: 'Spam', isDangerous: true })) return;
+    if (!await showConfirmModal({ title: 'Mark as spam', message: `Delete ${ids.length} message(s) and train Rspamd as spam? This cannot be undone.`, confirmText: 'Mark as spam', isDangerous: true })) return;
     await quarantineAction('learnspam', ids);
 }
 
 async function quarantineReleaseAll() {
     const allIds = Array.from(document.querySelectorAll('.quarantine-checkbox')).map(cb => cb.value).filter(Boolean);
     if (allIds.length === 0) return;
-    if (!await showConfirmModal({ title: 'Release All', message: `Release ALL ${allIds.length} quarantined message(s)?`, confirmText: 'Release All' })) return;
+    if (!await showConfirmModal({ title: 'Release all', message: `Release ALL ${allIds.length} quarantined message(s)?`, confirmText: 'Release all' })) return;
     await quarantineAction('release', allIds);
 }
 
 async function quarantineDeleteAll() {
     const allIds = Array.from(document.querySelectorAll('.quarantine-checkbox')).map(cb => cb.value).filter(Boolean);
     if (allIds.length === 0) return;
-    if (!await showConfirmModal({ title: 'Delete All', message: `Permanently delete ALL ${allIds.length} quarantined message(s)? This cannot be undone.`, confirmText: 'Delete All', isDangerous: true })) return;
+    if (!await showConfirmModal({ title: 'Delete all', message: `Permanently delete ALL ${allIds.length} quarantined message(s)? This cannot be undone.`, confirmText: 'Delete all', isDangerous: true })) return;
     await quarantineAction('delete', allIds);
 }
 
@@ -5159,7 +5172,7 @@ function _showQuarantineRuleModal(rule, prefill) {
 
     const body = `
                 ${prefillButtons}
-                <label><span class="ui-label">Rule Name</span>
+                <label><span class="ui-label">Rule Name <span class="ui-text-fail">*</span></span>
                     <input type="text" id="qrule-name" value="${defaultName}" class="ui-input" placeholder="e.g., Allow notifications from service X">
                 </label>
                 <div class="ui-qr-pair">
@@ -5178,7 +5191,7 @@ function _showQuarantineRuleModal(rule, prefill) {
                         </select>
                     </label>
                 </div>
-                <label><span class="ui-label">Match Value</span>
+                <label><span class="ui-label">Match Value <span class="ui-text-fail">*</span></span>
                     <input type="text" id="qrule-match-value" value="${defaultMatchValue}" class="ui-input ui-mono" placeholder="e.g., noreply@example.com">
                 </label>
                 <label><span class="ui-label">Match Mode</span>
@@ -5253,8 +5266,8 @@ async function saveQuarantineRule(ruleId) {
     const action = document.getElementById('qrule-action')?.value;
     const notes = document.getElementById('qrule-notes')?.value?.trim() || null;
     
-    if (!name) { showToast('Rule name is required', 'error'); return; }
-    if (!matchValue) { showToast('Match value is required', 'error'); return; }
+    if (!name) { uiFieldProblem(document.getElementById('qrule-name'), 'Enter a name for the rule.'); return; }
+    if (!matchValue) { uiFieldProblem(document.getElementById('qrule-match-value'), 'Enter the value to match.'); return; }
     
     // Convert match mode to is_regex + match_value
     let isRegex = false;
@@ -5307,7 +5320,7 @@ async function repairQuarantineRule(ruleId) {
 
 async function deleteQuarantineRule(ruleId, ruleName) {
     if (!uiMayAct('quarantine')) return;
-    if (!await showConfirmModal({ title: 'Delete Rule', message: `Delete rule "${ruleName}"?`, confirmText: 'Delete', isDangerous: true })) return;
+    if (!await showConfirmModal({ title: 'Delete rule', message: `Delete rule "${ruleName}"? This cannot be undone.`, confirmText: 'Delete', isDangerous: true })) return;
     
     try {
         const res = await authenticatedFetch(`/api/quarantine/rules/${ruleId}`, { method: 'DELETE' });
@@ -5489,13 +5502,19 @@ function toggleMessagesFilters(open) {
     if (show) { const first = panel.querySelector('input'); if (first) first.focus(); }
 }
 
+// The filters the Filters button counts; with the bar's own, any of them on narrows the list
+const MESSAGES_MORE_FILTERS = ['sender', 'recipient', 'user', 'ip', 'address', 'domain'];
+function messagesFiltersOn(f = currentFilters.messages || {}) {
+    return !!(MESSAGES_MORE_FILTERS.some(k => f[k]) || f.search || f.status || f.direction || f.start_date || f.end_date || f.date_range);
+}
+
 // How many filters are on, for the button badge and the Clear filters link
 function updateMessagesFilterState() {
     // Filters set since by anything but the card's (openMessagesRange, a search): its whole values went with them
     if (messagesExact && messagesExact.filters && currentFilters.messages !== messagesExact.filters) messagesExact = null;
     const f = currentFilters.messages || {};
-    const advanced = ['sender', 'recipient', 'user', 'ip', 'address', 'domain'].filter(k => f[k]).length;
-    const any = advanced || f.search || f.status || f.direction || f.start_date || f.end_date || f.date_range;
+    const advanced = MESSAGES_MORE_FILTERS.filter(k => f[k]).length;
+    const any = messagesFiltersOn(f);
     const badge = document.getElementById('messages-filters-n');
     if (badge) { badge.textContent = advanced || ''; badge.classList.toggle('hidden', !advanced); }
     const button = document.getElementById('messages-filters-btn');

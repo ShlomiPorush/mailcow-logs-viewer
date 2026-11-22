@@ -958,7 +958,9 @@ async function applyRateLimitBulk() {
 
     const value = parseInt(rateLimitBulkValue, 10);
     if (!Number.isFinite(value) || value < 0) {
-        showToast('Enter how many messages to allow, as a whole number', 'error');
+        const field = document.getElementById('rate-limit-bulk-value');
+        if (field) uiFieldProblem(field, 'Enter how many messages to allow, as a whole number.', field.closest('.ui-rl-form-row'));
+        else showToast('Enter how many messages to allow, as a whole number', 'error');
         return;
     }
 
@@ -1136,7 +1138,7 @@ async function saveRateLimit(kind, name) {
 
     const value = parseInt(valueInput.value, 10);
     if (!Number.isFinite(value) || value < 0) {
-        showToast('Enter how many messages to allow, as a whole number', 'error');
+        uiFieldProblem(valueInput, 'Enter how many messages to allow, as a whole number.', valueInput.closest('.ui-rl-form-row'));
         return;
     }
 

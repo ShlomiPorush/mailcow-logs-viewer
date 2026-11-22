@@ -132,7 +132,7 @@ function renderDomains(container, data) {
     renderDomainsHead(data);
 
     if (domains.length === 0) {
-        container.innerHTML = '<p class="ui-empty ui-panel">No domains found</p>';
+        container.innerHTML = '<p class="ui-empty ui-panel">The domains set up in mailcow show up here.</p>';
         return;
     }
 
@@ -218,7 +218,12 @@ function filterDomains() {
         const noResultsMessage = showIssuesOnly && searchTerm === ''
             ? 'No domains with DNS issues found'
             : `No domains found matching "${escapeHtml(searchTerm)}"`;
-        domainsList.innerHTML = `<p class="ui-empty">${noResultsMessage}</p>`;
+        // As on Devices: the way back is right there
+        domainsList.innerHTML = `
+            <div class="ui-empty">
+                <p><b>${noResultsMessage}</b></p>
+                <p><button onclick="clearDomainFilters()" class="ui-btn ui-btn-sm">Clear filters</button></p>
+            </div>`;
     } else {
         // Open rows stay open, the row in view stays where it was, and the focus on its row
         const opened = domainsOpened(domainsList);

@@ -152,7 +152,7 @@ function renderSmtpAbusePanel() {
                     <div class="ui-list-head">
                         <div>
                             <label for="smtp-abuse-whitelist-textarea" class="ui-md-h">Allowlist</label>
-                            <p class="ui-set-desc">One mailbox address per line. These mailboxes are excluded from automatic blocking.</p>
+                            <p class="ui-set-desc">One mailbox address per line, or separated by commas. These mailboxes are excluded from automatic blocking.</p>
                         </div>
                     </div>
                     <textarea id="smtp-abuse-whitelist-textarea" rows="4" placeholder="newsletter@example.com&#10;monitoring@example.com" ${locked ? 'disabled' : ''} oninput="onSmtpAbuseWhitelistInput(this.value)" class="ui-textarea ui-mono">${escapeHtml(smtpAbuseWhitelistDraft ?? smtpAbuseWhitelistSavedText())}</textarea>
@@ -223,8 +223,10 @@ function smtpAbuseWhitelistSavedText() {
     return smtpAbuseWhitelist.map(i => i.email).join('\n');
 }
 
+// One address per line, or several on a line apart by commas, semicolons or spaces
 function smtpAbuseWhitelistLines(text) {
-    return text.split(/\r?\n/).map(e => e.trim()).filter(Boolean);
+    // A quoted local part ("a,b"@example.com, escapes such as \" included) keeps its commas and spaces
+    return text.match(/(?:"(?:[^"\\]|\\.)*"|[^\s,;"])+/g) || [];
 }
 
 // The whitelist counts as one change, however many lines were edited
@@ -263,6 +265,7 @@ function removeSmtpAbuseWhitelistOnce(email, button) {
 }
 async function removeSmtpAbuseWhitelist(email) {
     if (!uiMayAct('security')) return;
+    if (!await showConfirmModal({ title: 'Remove from the allowlist', message: `Remove ${email} from the allowlist? It can then be blocked automatically again.`, confirmText: 'Remove', focusCancel: true })) return;
     try {
         const response = await authenticatedFetch(
             `/api/smtp-abuse/whitelist/${encodeURIComponent(email)}`, { method: 'DELETE' });
