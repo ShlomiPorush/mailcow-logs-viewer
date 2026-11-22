@@ -1534,6 +1534,10 @@ body { font-family: var(--ui-font); background: var(--ui-bg); color: var(--ui-in
 #attn-sheet .ui-sheet-head .ui-sheet-x { margin-inline-start: 4px; }
 #attn-sheet .ui-sheet-body { display: block; padding: 0 0 env(safe-area-inset-bottom); }
 #attn-sheet .ui-alert:first-child { border-top: 0; }
+/* Needs attention rows have no coloured bar: the severity tag carries the tone. Another
+   list drops it by adding its container to both selectors and the bar from its rows */
+:is(#dashboard-attention-panel, .ui-attn-win, #attn-sheet) .ui-alert { padding-inline-start: var(--ui-pad-x); grid-template-columns: minmax(0, 1fr); }
+:is(#dashboard-attention-panel, .ui-attn-win, #attn-sheet) :is(.ui-alert > .ui-btn, .ui-alert-acts) { grid-column: 1; }
 /* The mail flow: a period picker, bars that zoom in time (utils.js uiTimeZoom) */
 #dashboard-flow-period { margin-inline-start: auto; }
 .ui-flow-view { position: relative; overflow: hidden; }

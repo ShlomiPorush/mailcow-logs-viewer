@@ -2818,7 +2818,6 @@ function attentionAlertRows(where) {
             : activity ? `<button type="button" onclick="${first} openAlertActivity(${id})" class="ui-btn ui-btn-sm" title="What happened before and around this alert">Show activity</button>` : '';
         return `
             <div class="ui-alert${action ? ' ui-alert-go' : ''} ${critical ? 'ui-alert-fail' : 'ui-alert-warn'}" data-key="alert-${id}"${action ? ` onclick="if (uiAlertRowClick(event)) { ${action} }"` : ''}>
-                <span class="ui-alert-bar"></span>
                 <div class="ui-alert-text">
                     <div class="ui-alert-title">
                         <span class="ui-tag ${critical ? 'ui-tag-fail' : 'ui-tag-warn'}">${escapeHtml((a.severity || 'warning').toUpperCase())}</span>
@@ -3135,7 +3134,6 @@ function attentionCheckRows(where) {
             : item.go ? `attnBellGo(${escapeHtml(JSON.stringify(item.go))})` : `attnBellOpen(); ${item.onclick}`;
         return `
         <div class="ui-alert ui-alert-${item.tone}${item.popup ? ' ui-alert-go' : ''}" data-key="check-${escapeHtml(item.title)}"${item.popup ? ` onclick="if (uiAlertRowClick(event)) { ${act} }"` : ''}>
-            <span class="ui-alert-bar"></span>
             <div class="ui-alert-text"><div class="ui-alert-title"><b>${escapeHtml(item.title)}</b></div><p>${escapeHtml(item.detail)}</p></div>
             <button type="button" class="ui-btn ui-btn-sm" onclick="${act}">${escapeHtml(item.action)}</button>
         </div>`;
