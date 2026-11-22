@@ -1010,12 +1010,14 @@ async function loadNavCounters() {
     navCountersAt = Date.now();
     // A counter of a feature that is off, or of an area the person cannot view, is not read
     const off = (feature, area) => (window.disabledFeatures || []).includes(feature) || !userCan(area);
+    // A read that failed is not a count of 0: its counter stays as it was
+    const FAILED = Symbol('failed');
     const get = async url => {
         try {
             const res = await authenticatedFetch(url);
-            return res.ok ? await res.json() : null;
+            return res.ok ? await res.json() : FAILED;
         } catch (e) {
-            return null;
+            return FAILED;
         }
     };
     const [dashboard, queue, quarantine, insights, summary, blacklist, info] = await Promise.all([
@@ -1028,26 +1030,38 @@ async function loadNavCounters() {
         off('', 'status') ? null : get('/api/settings/info'),
     ]);
 
-    const failedLogins = dashboard ? dashboard.failed_logins || 0 : 0;
-    setNavCount('netfilter', failedLogins, false, `${failedLogins} failed logins in the last 24 hours`);
-    const queued = queue && Array.isArray(queue.data) ? queue.data.length : 0;
-    setNavCount('outbound', queued, false, `${queued} messages in the queue`);
-    const held = quarantine ? (quarantine.total || (quarantine.data || []).length) : 0;
-    setNavCount('quarantine', held, false, `${held} quarantined messages`);
-    const dmarcActions = insights ? (insights.insights || []).filter(i =>
-        i.recommendations.some(r => r.type === 'tighten_policy' || r.type === 'low_pass_rate') ||
-        (i.new_sources && i.new_sources.length > 0)).length : 0;
-    setNavCount('dmarc', dmarcActions, false, `${dmarcActions} DMARC insights`);
+    if (dashboard !== FAILED) {
+        const failedLogins = dashboard ? dashboard.failed_logins || 0 : 0;
+        setNavCount('netfilter', failedLogins, false, `${failedLogins} failed logins in the last 24 hours`);
+    }
+    if (queue !== FAILED) {
+        const queued = queue && Array.isArray(queue.data) ? queue.data.length : 0;
+        setNavCount('outbound', queued, false, `${queued} messages in the queue`);
+    }
+    if (quarantine !== FAILED) {
+        const held = quarantine ? (quarantine.total || (quarantine.data || []).length) : 0;
+        setNavCount('quarantine', held, false, `${held} quarantined messages`);
+    }
+    if (insights !== FAILED) {
+        const dmarcActions = insights ? (insights.insights || []).filter(i =>
+            i.recommendations.some(r => r.type === 'tighten_policy' || r.type === 'low_pass_rate') ||
+            (i.new_sources && i.new_sources.length > 0)).length : 0;
+        setNavCount('dmarc', dmarcActions, false, `${dmarcActions} DMARC insights`);
+    }
 
     const problems = [];
     const indicator = document.getElementById('mailcow-connection-indicator');
     if (indicator && indicator.title === 'Not connected to mailcow') problems.push('not connected to mailcow');
-    const stopped = summary && summary.containers ? summary.containers.stopped || 0 : 0;
+    const stopped = summary && summary !== FAILED && summary.containers ? summary.containers.stopped || 0 : 0;
     if (stopped > 0) problems.push(`${stopped} container${stopped === 1 ? '' : 's'} stopped`);
-    if (blacklist && blacklist.status === 'listed') problems.push('listed on a blocklist');
-    setNavCount('status', problems.length, true, problems.join(', '));
+    if (blacklist && blacklist !== FAILED && blacklist.status === 'listed') problems.push('listed on a blocklist');
+    // A check that could not run is not "No problems"
+    const unchecked = summary === FAILED || blacklist === FAILED
+        || (summary && summary.containers_known === false) || (blacklist && blacklist.status === 'error');
+    if (problems.length || !unchecked) setNavCount('status', problems.length, true, problems.join(', '));
 
-    const label = problems.length === 0 ? 'No problems' : `${problems.length} problem${problems.length === 1 ? '' : 's'}`;
+    const label = problems.length ? `${problems.length} problem${problems.length === 1 ? '' : 's'}`
+        : unchecked ? 'Could not check' : 'No problems';
     const small = document.getElementById('ui-server-problems');
     if (small) {
         small.textContent = label;
@@ -1056,7 +1070,7 @@ async function loadNavCounters() {
     }
     // On a phone the header bell has these too, with the rest of Needs attention
     const pip = document.getElementById('tabbar-pip-status');
-    if (pip) pip.classList.toggle('hidden', problems.length === 0);
+    if (pip && (problems.length || !unchecked)) pip.classList.toggle('hidden', problems.length === 0);
 
     const host = document.getElementById('ui-server-host');
     const url = info && info.configuration ? info.configuration.mailcow_url : '';
@@ -3279,6 +3293,9 @@ function setDashFlowPeriod(period) {
     dashFlow.zoom = null;
     dashFlow.pick = null;
     dashFlow.full = null;
+    // The last period's answer is not this one's: nothing draws it again
+    dashFlow.data = null;
+    mailFlowFiguresUnknown();
     dashFlow.view++;
     document.querySelectorAll('#dashboard-flow-period button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.period === period)));
     loadMailFlowChart();
@@ -3364,6 +3381,25 @@ function mailFlowFailed() {
     const view = chart.querySelector('.ui-flow-view');
     if (view) view.innerHTML = failed;
     else chart.innerHTML = mailFlowFrame(failed);
+    // A refresh that failed keeps the figures of the answer it had
+    if (!dashFlow.data) mailFlowFiguresUnknown();
+}
+
+// No answer for the period shown: its figures are not known, so none is shown
+// (not 0, nor the last period's)
+function mailFlowFiguresUnknown() {
+    for (const id of ['stat-messages-24h', 'stat-blocked-24h', 'stat-deferred-24h', 'stat-auth-failures-24h']) {
+        const el = document.getElementById(id);
+        if (el) el.textContent = '-';
+    }
+    for (const id of ['stat-messages-note', 'stat-blocked-note', 'stat-deferred-note', 'stat-auth-failures-note']) {
+        const el = document.getElementById(id);
+        if (el) { el.textContent = ''; el.title = ''; }
+    }
+    const figure = document.getElementById('dashboard-flow-messages');
+    if (figure) figure.disabled = true;
+    const long = document.querySelector('#dashboard-flow-title .ui-flow-long');
+    if (long) long.textContent = `Mail flow, ${DASH_PERIODS[dashFlow.period].last}`;
 }
 
 function loadMailFlowChart() {
@@ -3825,6 +3861,20 @@ function setDashKpi(id, value, tone, note) {
     const noteEl = document.getElementById(`${id}-note`);
     if (noteEl && note !== undefined) noteEl.textContent = note;
 }
+// A read that failed: the card keeps what it shows and says it is not current
+function dashKpiFailed(...ids) {
+    for (const id of ids) {
+        const el = document.getElementById(id);
+        const noteEl = document.getElementById(`${id}-note`);
+        if (noteEl) noteEl.textContent = !el || el.textContent === '-' ? 'Could not load' : 'Could not update';
+    }
+}
+// mailcow did not tell it: a reading shown before stays, said to be not current; none yet is Unknown
+function dashKpiUnknown(id) {
+    const shown = document.getElementById(id)?.textContent;
+    if (shown && shown !== '-' && shown !== 'Unknown') dashKpiFailed(id);
+    else setDashKpi(id, 'Unknown', '', 'mailcow did not answer');
+}
 
 // The Security card: whether the protections are on, and the Security page's two
 // lists with the same real counts. Which protections are on is read once; the
@@ -3880,8 +3930,8 @@ function renderDashboardSecurity(page = dashboardSecurityPage) {
     const lineState = on.some(p => p.state === 'on') ? 'on' : on.length ? 'watch' : 'off';
     box.innerHTML = `
         <div class="ui-stats ui-dash-sec-stats">
-            <button type="button" class="ui-stat" onclick="openSecurityList('review')"><span>To review</span><b>${n('review')}</b><small>${known ? 'Not banned' : 'Fail2ban did not answer'}</small><span class="ui-spark" data-trend="security_review"></span></button>
-            <button type="button" class="ui-stat" onclick="openSecurityList('banned')"><span>Banned now</span><b${counts && counts.banned ? ' class="ui-text-fail"' : ''}>${n('banned')}</b><small>${known ? 'By Fail2ban and the rules' : 'Fail2ban did not answer'}</small><span class="ui-spark" data-trend="security_banned"></span></button>
+            <button type="button" class="ui-stat" onclick="openSecurityList('review')"><span>To review</span><b>${n('review')}</b><small>${!page ? 'Could not load' : known ? 'Not banned' : 'Fail2ban did not answer'}</small><span class="ui-spark" data-trend="security_review"></span></button>
+            <button type="button" class="ui-stat" onclick="openSecurityList('banned')"><span>Banned now</span><b${counts && counts.banned ? ' class="ui-text-fail"' : ''}>${n('banned')}</b><small>${!page ? 'Could not load' : known ? 'By Fail2ban and the rules' : 'Fail2ban did not answer'}</small><span class="ui-spark" data-trend="security_banned"></span></button>
         </div>
         <button type="button" class="ui-dash-sec-prot is-${lineState}" aria-expanded="${dashboardProtectionsOpen}" aria-controls="dashboard-protections"
             onclick="dashboardProtectionsOpen = !dashboardProtectionsOpen; renderDashboardSecurity()">
@@ -3906,13 +3956,16 @@ async function loadDashboardHealth() {
             else setDashKpi('dash-kpi-linking', `${c.completion_rate || 0}%`, c.incomplete ? 'warn' : '',
                 `${(c.complete || 0).toLocaleString()} of ${(c.total || 0).toLocaleString()} complete`);
         }
+        else dashKpiFailed('dash-kpi-jobs', 'dash-kpi-linking');
         if (versionRes.ok) {
             const v = await versionRes.json();
             setDashKpi('dash-kpi-version', v.current_version || '-', '', v.update_available ? `${v.latest_version} available`
                 : v.latest_version === 'unknown' ? 'Update check failed' : 'Up to date');
         }
+        else dashKpiFailed('dash-kpi-version');
     } catch (error) {
         console.error('Failed to load dashboard health:', error);
+        dashKpiFailed('dash-kpi-jobs', 'dash-kpi-linking', 'dash-kpi-version');
     }
 }
 
@@ -3930,18 +3983,24 @@ async function loadDashboardStatusSummary() {
 
         // Containers: red when one is stopped; ignored ones are only mentioned
         const containers = data.containers || {};
-        setDashKpi('dash-kpi-containers', `${containers.running || 0} of ${containers.total || 0} running`, containers.stopped > 0 ? 'fail' : '',
+        if (data.containers_known === false) dashKpiUnknown('dash-kpi-containers');
+        else setDashKpi('dash-kpi-containers', `${containers.running || 0} of ${containers.total || 0} running`, containers.stopped > 0 ? 'fail' : '',
             [containers.stopped ? `${containers.stopped} stopped` : 'All running', containers.ignored ? `${containers.ignored} ignored` : ''].filter(Boolean).join(', '));
 
         // Storage: amber above 75%, red above 90%
         const storage = data.storage || {};
         const usedPercent = parseInt(storage.used_percent) || 0;
         const storageLevel = usedPercent > 90 ? 'fail' : usedPercent > 75 ? 'warn' : '';
-        if (storage.known === false) setDashKpi('dash-kpi-storage', 'Unknown', '', 'mailcow did not answer');
+        if (storage.known === false) dashKpiUnknown('dash-kpi-storage');
         else setDashKpi('dash-kpi-storage', `${storage.used_percent || '0%'} used`, storageLevel, `${storage.used || '0'} of ${storage.total || '0'}`);
 
         const systemDiv = document.getElementById('dashboard-system-summary');
         const system = data.system || {};
+        // mailcow did not answer: counts shown before stay; none shown yet says so, not 0
+        if (system.known === false) {
+            if (!systemDiv.querySelector('.ui-kv')) systemDiv.innerHTML = '<p class="ui-empty ui-text-fail">Could not load: mailcow did not answer</p>';
+            return;
+        }
         systemDiv.innerHTML = `
             <div class="ui-kv"><span>Domains</span><b>${Number(system.domains || 0).toLocaleString()}</b></div>
             <div class="ui-kv"><span>Mailboxes</span><b>${Number(system.mailboxes || 0).toLocaleString()}</b></div>
@@ -3949,6 +4008,12 @@ async function loadDashboardStatusSummary() {
         `;
     } catch (error) {
         console.error('Failed to load status summary:', error);
+        dashKpiFailed('dash-kpi-containers', 'dash-kpi-storage');
+        // Never loaded: say why instead of loading forever; loaded once: what it shows stays
+        const systemDiv = document.getElementById('dashboard-system-summary');
+        if (systemDiv && systemDiv.querySelector('.ui-loading')) {
+            systemDiv.innerHTML = `<p class="ui-empty ui-text-fail">Could not load: ${escapeHtml(uiErrorText(error))}</p>`;
+        }
     }
 }
 
@@ -6344,7 +6409,7 @@ async function loadDashboardBlacklistSummary() {
         }
     } catch (error) {
         console.error('Failed to load blacklist summary:', error);
-        setDashKpi('dash-kpi-blocklists', '-', '', 'Could not load');
+        dashKpiFailed('dash-kpi-blocklists');
     }
 }
 

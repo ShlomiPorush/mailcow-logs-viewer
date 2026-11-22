@@ -93,6 +93,7 @@ class SummarySystem(Fixed):
     domains: int
     mailboxes: int
     aliases: int
+    known: bool = Field(description="false when mailcow did not answer: the zeros are not a reading")
 
 
 class StatusSummary(Fixed):

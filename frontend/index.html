@@ -621,10 +621,10 @@
                                 <button type="button" id="dashboard-flow-clear" class="ui-icon-btn ui-icon-btn-sm hidden" onclick="pickMailFlowHour(null)" aria-label="Clear" title="Clear">&times;</button>
                                 <span id="dashboard-flow-period" class="ui-seg" role="group" aria-label="Period"><button type="button" data-period="24h" aria-pressed="true" onclick="setDashFlowPeriod('24h')">24<span class="ui-flow-long"> hours</span><span class="ui-flow-short">h</span></button><button type="button" data-period="7d" aria-pressed="false" onclick="setDashFlowPeriod('7d')">7<span class="ui-flow-long"> days</span><span class="ui-flow-short">d</span></button><button type="button" data-period="30d" aria-pressed="false" onclick="setDashFlowPeriod('30d')">30<span class="ui-flow-long"> days</span><span class="ui-flow-short">d</span></button></span></div>
                             <div class="ui-stats">
-                                <button type="button" id="dashboard-flow-messages" class="ui-stat" disabled onclick="openMailFlowHourMessages()" title="Opens these messages. Each message counts once, as on the Messages page; a message to three recipients is one message and three deliveries"><span>Messages<i class="ui-stat-go" aria-hidden="true">&rsaquo;</i></span><b id="stat-messages-24h">0</b><small id="stat-messages-note"></small></button>
-                                <div class="ui-stat"><span>Blocked</span><b id="stat-blocked-24h" class="ui-text-fail">0</b><small id="stat-blocked-note"></small></div>
-                                <div class="ui-stat"><span>Deferred</span><b id="stat-deferred-24h" class="ui-text-warn">0</b><small id="stat-deferred-note"></small></div>
-                                <div class="ui-stat"><span>Auth Fails</span><b id="stat-auth-failures-24h">0</b><small id="stat-auth-failures-note"></small></div>
+                                <button type="button" id="dashboard-flow-messages" class="ui-stat" disabled onclick="openMailFlowHourMessages()" title="Opens these messages. Each message counts once, as on the Messages page; a message to three recipients is one message and three deliveries"><span>Messages<i class="ui-stat-go" aria-hidden="true">&rsaquo;</i></span><b id="stat-messages-24h">-</b><small id="stat-messages-note"></small></button>
+                                <div class="ui-stat"><span>Blocked</span><b id="stat-blocked-24h" class="ui-text-fail">-</b><small id="stat-blocked-note"></small></div>
+                                <div class="ui-stat"><span>Deferred</span><b id="stat-deferred-24h" class="ui-text-warn">-</b><small id="stat-deferred-note"></small></div>
+                                <div class="ui-stat"><span>Auth Fails</span><b id="stat-auth-failures-24h">-</b><small id="stat-auth-failures-note"></small></div>
                             </div>
                             <div id="dashboard-flow-chart" class="ui-flow"></div>
                         </section>
@@ -1593,7 +1593,7 @@
     <script src="/static/smtp-abuse.js?v=10"></script>
     <script src="/static/protection.js?v=5"></script>
     <script src="/static/security.js?v=19"></script>
-    <script src="/static/search.js?v=20"></script>
+    <script src="/static/search.js?v=21"></script>
     <script src="/static/notifications.js?v=12"></script>
     <script src="/static/agents.js?v=3"></script>
     <script src="/static/users.js?v=17"></script>

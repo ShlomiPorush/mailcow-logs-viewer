@@ -1303,7 +1303,7 @@ Total and active counts from mailcow: `{ "domains": {"total": 5, "active": 5}, "
 
 ### GET /status/summary
 
-Containers, storage and mailcow counts in one call, for the dashboard: `containers` (the summary of `GET /status/containers`), `containers_known` (false when mailcow did not answer, or nothing is running, so the counts come from containers seen before and are not a reading), `storage` (`used_percent`, `used`, `total`, and `known`: false when mailcow did not tell it, so the zeros are not a reading) and `system` (`domains`, `mailboxes`, `aliases` totals). A part that cannot be read falls back to zeros.
+Containers, storage and mailcow counts in one call, for the dashboard: `containers` (the summary of `GET /status/containers`), `containers_known` (false when mailcow did not answer, or nothing is running, so the counts come from containers seen before and are not a reading), `storage` (`used_percent`, `used`, `total`, and `known`: false when mailcow did not tell it, so the zeros are not a reading) and `system` (`domains`, `mailboxes`, `aliases` totals, and `known`: false when mailcow did not answer, so the zeros are not a reading). A part that cannot be read falls back to zeros.
 
 ---
 
