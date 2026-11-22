@@ -48,7 +48,7 @@ test('without sign-in the switch is locked and says where to turn sign-in on', (
     assert.equal(p.row.inert, false, 'the note stays outside the locked part');
     assert.ok(main.classList.contains('is-off'));
     assert.ok(!p.row.classList.contains('is-off'), 'the note is not dimmed');
-    assert.match(p.note().textContent, /Turn on Basic Auth or OAuth2 in Settings → Authentication first/);
+    assert.match(p.note().textContent, /Turn on Basic Auth or OAuth2 in Settings > Authentication first/);
 });
 
 test('either sign-in method unlocks it', () => {

@@ -40,9 +40,9 @@ AREAS: Tuple[Area, ...] = (
          "Release or delete quarantined messages, train the spam filter with them, "
          "and create, change or delete quarantine rules"),
     Area("security", "Security",
-         "Netfilter logs, Fail2ban status, security alerts, protection rules and matches, and SMTP abuse history",
+         "Netfilter logs, Fail2ban status, security alerts, protection rules and matches, and outgoing spam history",
          "Ban, unban or allow IP addresses and networks. Change Fail2ban and protection rules, dismiss alerts "
-         "and matches, manage SMTP abuse exceptions, and block or unblock mailbox sending"),
+         "and matches, manage outgoing spam exceptions, and block or unblock mailbox sending"),
     Area("rspamd", "Rspamd",
          "Rspamd map contents and configuration",
          "Edit the Rspamd maps that filter mail"),

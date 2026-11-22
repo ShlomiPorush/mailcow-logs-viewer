@@ -48,11 +48,11 @@ Other modifiers (`name=value`), such as `ra=` from RFC 6652, are ignored, as RFC
 
 | Setting | Source label | Default |
 |---|---|---|
-| **Domain SPF Source Server IP** | Auto-detected WAN | On |
-| **Domain SPF Source Transports** | Transport | Off |
-| **Domain SPF Source Relayhosts** | Relay host | Off |
-| **Domain SPF Source Manual Hosts** | Configured | Empty |
-| **Domain SPF Source DMARC History** | DMARC history | Off |
+| **mailcow public IP** | Auto-detected WAN | On |
+| **Transport IPs** | Transport | Off |
+| **Relayhost IPs** | Relay host | Off |
+| **Additional sending hosts** | Configured | Empty |
+| **IPs from DMARC reports** | DMARC history | Off |
 
 - **Auto-detected WAN** is the public IP mailcow reports for the server. Turn it off when your mail leaves through a relay host and the server's own IP is not meant to be in SPF.
 - **Transport** and **Relay host** are the public IPs of the active transports and relay hosts in mailcow. Private and loopback addresses are skipped.
@@ -115,7 +115,7 @@ The same checks also read the TLS-RPT record at `_smtp._tls.<domain>`. It has no
 
 ## DNS change alerts
 
-Each check compares the records with the previous results. A change sends an alert with the old and new values to **Admin Email** and to the destinations that receive **DNS record changes**, for example `DNS records changed for example.com: SPF, DKIM`. An alert is sent when:
+Each check compares the records with the previous results. A change sends an alert with the old and new values to **Admin email** and to the destinations that receive **DNS record changes**, for example `DNS records changed for example.com: SPF, DKIM`. An alert is sent when:
 
 - An SPF, DKIM, DMARC, TLSA, MTA-STS or TLS-RPT record has a new value, appeared, or verifiably disappeared.
 - DNSSEC stops validating for a domain that validated before.
@@ -123,7 +123,7 @@ Each check compares the records with the previous results. A change sends an ale
 
 A failed lookup or a timeout never counts as a change, so a DNS hiccup does not raise an alarm. The first check of a domain has nothing to compare with and sends no alert. Alias domains are watched the same way.
 
-**DNS Change Alerts Enabled** under **Settings** > **Notifications** is on by default. See [Notifications](../Notifications.md).
+**Alert on DNS changes** under **Settings** > **Notifications** is on by default. See [Notifications](../Notifications.md).
 
 ## The weekly summary
 

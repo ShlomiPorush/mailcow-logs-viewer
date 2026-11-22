@@ -157,7 +157,7 @@ function alertActivityChart(data, span) {
     const per = minutes === 60 ? 'hour' : minutes > 60 ? `${minutes / 60} hours` : `${minutes} minutes`;
     const zoomed = !!alertActivityZoom;
     const limits = alertActivityLimits(data);
-    return `<div class="ui-aa-head"><b>${sent ? 'What it sent' : 'Failed logins'}</b><span class="ui-muted">${sent ? 'this mailbox only' : 'this username only'}</span>
+    return `<div class="ui-aa-head"><b>${sent ? 'Sent messages' : 'Failed logins'}</b><span class="ui-muted">${sent ? 'This mailbox' : 'This username'}</span>
             <span class="ui-seg ui-head-actions" role="group" aria-label="Period">${ranges.map(([k, l]) => `<button type="button" aria-pressed="${!zoomed && alertActivityRange === k}" onclick="setAlertActivityRange('${k}')">${l}</button>`).join('')}</span></div>
         <div class="ui-aa-chart">
             <div class="ui-aa-grid">${[top, top * .75, top * .5, top * .25, 0].map(v => `<i><span>${Math.round(v)}</span></i>`).join('')}</div>
@@ -175,9 +175,9 @@ function alertActivityChart(data, span) {
             <div class="ui-flow-band hidden" aria-hidden="true"></div>
         </div>
         <div class="ui-aa-x"><span>${escapeHtml(fmt(cols[0].start))}</span><span>${escapeHtml(fmt(cols[cols.length - 1].start))}</span></div>
-        <div class="ui-ov" data-zoom role="group" aria-label="All the data, with the span shown"></div>
+        <div class="ui-ov" data-zoom role="group" aria-label="Full timeline and selected period"></div>
         <div class="ui-flow-foot">
-            <p class="ui-aa-legend"><span><i></i>${sent ? 'Sent' : 'Failed logins'}, per ${escapeHtml(per)}</span>${from ? `<span><i class="is-alert"></i>The alert's ${escapeHtml(String(data.window_minutes))} minutes</span>` : ''}${usual !== null ? `<span><i class="is-usual"></i>Its usual rate over ${escapeHtml(String(data.baseline_days))} days</span>` : ''}</p>
+            <p class="ui-aa-legend"><span><i></i>${sent ? 'Sent' : 'Failed logins'}, per ${escapeHtml(per)}</span>${from ? `<span><i class="is-alert"></i>The alert's ${escapeHtml(String(data.window_minutes))} minutes</span>` : ''}${usual !== null ? `<span><i class="is-usual"></i>Usual sending over ${escapeHtml(String(data.baseline_days))} days</span>` : ''}</p>
             <div class="ui-flow-zoom" role="group" aria-label="Zoom the chart">
                 <button type="button" class="ui-icon-btn ui-icon-btn-sm" onclick="alertActivityStep('earlier')" aria-label="Earlier" title="Earlier"${span.from > limits.from ? '' : ' disabled'}>&lsaquo;</button>
                 <button type="button" class="ui-icon-btn ui-icon-btn-sm" onclick="alertActivityStep('out')" aria-label="Zoom out" title="Zoom out"${span.to - span.from < limits.to - limits.from ? '' : ' disabled'}>&minus;</button>
@@ -301,26 +301,26 @@ function renderAlertActivity() {
     const unknown = data.window_minutes == null;
     const figures = sent && unknown ? [
         [spike ? 'Counted for the alert' : 'Counted for the block', (a.metric_value || 0).toLocaleString(), true],
-        ['The window', 'Unknown'],
-        spike ? [`Usual, an hour (${data.baseline_days} days)`, (a.baseline_value || 0).toFixed(2)]
-            : ['The limit', (a.baseline_value || 0).toLocaleString()],
+        ['Counting period', 'Unknown'],
+        spike ? [`Usual messages per hour (${data.baseline_days} days)`, (a.baseline_value || 0).toFixed(2)]
+            : ['Message limit', (a.baseline_value || 0).toLocaleString()],
         [`Sent in the ${data.baseline_days} days before`, before.toLocaleString()]
     ] : unknown ? [
         ['Counted for the alert', (a.metric_value || 0).toLocaleString(), true],
-        ['The window', 'Unknown'],
-        ['The alert starts at', (a.baseline_value || 0).toLocaleString()],
+        ['Counting period', 'Unknown'],
+        ['Failed login threshold', (a.baseline_value || 0).toLocaleString()],
         [`Failed in the ${data.baseline_days} days before`, before.toLocaleString()]
     ] : sent ? [
         [`Sent in the alert's ${data.window_minutes} minutes`, (a.metric_value || 0).toLocaleString(), true],
-        ['That is, an hour', Math.round((a.metric_value || 0) * 60 / data.window_minutes).toLocaleString(), true],
+        ['Equivalent messages per hour', Math.round((a.metric_value || 0) * 60 / data.window_minutes).toLocaleString(), true],
         // A block has no usual rate: its baseline value is the abuse protection limit
-        spike ? [`Usual, an hour (${data.baseline_days} days)`, (a.baseline_value || 0).toFixed(2)]
-            : [`The limit, in ${data.window_minutes} minutes`, (a.baseline_value || 0).toLocaleString()],
+        spike ? [`Usual messages per hour (${data.baseline_days} days)`, (a.baseline_value || 0).toFixed(2)]
+            : [`Message limit per ${data.window_minutes} minutes`, (a.baseline_value || 0).toLocaleString()],
         [`Sent in the ${data.baseline_days} days before`, before.toLocaleString()]
     ] : [
         [`Failed logins in ${data.window_minutes} minutes`, (a.metric_value || 0).toLocaleString(), true],
-        ['The alert starts at', (a.baseline_value || 0).toLocaleString()],
-        ['From addresses', (around.address_count ?? (around.addresses || []).length).toLocaleString()],
+        ['Failed login threshold', (a.baseline_value || 0).toLocaleString()],
+        ['Source IPs', (around.address_count ?? (around.addresses || []).length).toLocaleString()],
         [`Failed in the ${data.baseline_days} days before`, before.toLocaleString()]
     ];
     const span = alertActivityZoom || alertActivityRangeSpan(data) || { from: 0, to: 1 };
@@ -336,20 +336,20 @@ function renderAlertActivity() {
         <section>${alertActivityChart(data, span)}${pickedLine}</section>
         <section><div class="ui-aa-head"><b>Around the alert</b><span class="ui-muted">${uiCountLabel(around.total, sent ? 'message' : 'failed login', sent ? 'messages' : 'failed logins')}, from ${escapeHtml(String(lead))} minutes before it to an hour after</span></div>
             ${around.total ? `<div class="ui-aa-two">${sent
-                ? alertActivityList('Recipient domains', around.recipient_domains, around.total) + alertActivityList('What happened to them', around.results, around.total, n => results[n] || 'muted')
+                ? alertActivityList('Recipient domains', around.recipient_domains, around.total) + alertActivityList('Delivery results', around.results, around.total, n => results[n] || 'muted')
                     + `<div class="ui-aa-box ui-aa-wide"><h4>Subjects</h4>${around.subjects.map(s => `<div class="ui-aa-subj"><span title="${escapeHtml(s.name)}" dir="auto">${escapeHtml(s.name)}</span><small>${uiCountLabel(s.count, 'message', 'messages')}</small></div>`).join('')}</div>`
-                : alertActivityList('Addresses', around.addresses, around.total) + alertActivityList('Countries', around.countries, around.total) + alertActivityList('Networks', around.networks, around.total)}</div>`
-            : '<p class="ui-empty">Nothing in the logs around the alert. They may have been cleaned up since.</p>'}</section>
+                : alertActivityList('Source IPs', around.addresses, around.total) + alertActivityList('Countries', around.countries, around.total) + alertActivityList('Networks', around.networks, around.total)}</div>`
+            : '<p class="ui-empty">No log entries around this alert; older logs may have been deleted.</p>'}</section>
         <p class="ui-muted ui-aa-note">${sent
-            ? 'Spam from a hijacked mailbox usually goes to many unrelated domains with the same few subjects, and much of it bounces or is rejected. Mail the user really sent goes to people they write to.'
-            : 'Many addresses or networks trying one username point to an attack spread out to stay under the ban; one address is a single machine, possibly a device with an old password.'}</p>
+            ? 'Spam from a compromised mailbox usually goes to many unrelated domains with the same few subjects.'
+            : 'Many IPs trying one username point to a spread-out attack. One IP may be a single device with an old password.'}</p>
 `;
         alertActivityOverview(data, span); });
     // The way on, in the footer
     document.getElementById('alert-activity-foot')?.classList.remove('hidden');
     const open = document.getElementById('alert-activity-open');
     if (open) uiRedrawKeepingFocus(open, () => {
-        open.innerHTML = sent ? `<button type="button" class="ui-btn ui-btn-primary" onclick="openAlertActivityMessages()">${picked ? 'Open this time in Messages' : 'Open in Messages'}</button>`
+        open.innerHTML = sent ? `<button type="button" class="ui-btn ui-btn-primary" onclick="openAlertActivityMessages()">${picked ? 'Open selected period in Messages' : 'Open in Messages'}</button>`
             : `<button type="button" class="ui-btn ui-btn-primary" onclick="closeAlertActivity(); openAlertSecurityEvents('${escapeJsArg(a.subject)}')">Open in Security</button>`;
     });
     // Zoom by gesture over the columns (a preview stretches them; the end draws the span)

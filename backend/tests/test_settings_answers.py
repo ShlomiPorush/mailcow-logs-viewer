@@ -165,6 +165,14 @@ def test_settings_info(client, rows, monkeypatch):
         body = client.get('/api/settings/info').json()
         assert body['configuration']['maxmind_status']['error'] == 'Invalid'
         assert 'editable_config' in body and body['geoip_configuration']['enabled'] is True
+        # The form locks the Basic Auth password's Remove under AUTH_ENABLED from /info alone
+        assert body['legacy_auth_enabled'] is False
+        password = secrets.token_hex(16)
+        _set(monkeypatch, 'auth_password', password)
+        _set(monkeypatch, 'auth_username', 'info-test-user')
+        _set(monkeypatch, 'auth_enabled', True)
+        body = client.get('/api/settings/info', auth=('info-test-user', password)).json()
+        assert body['legacy_auth_enabled'] is True
     finally:
         with database.get_db_context() as db:
             db.query(MessageCorrelation).filter(MessageCorrelation.correlation_key == f'k{MARK}').delete()
@@ -417,7 +425,7 @@ def test_geoip_validation(client, monkeypatch):
     files = get_geoip_status()
     missing = {**files, 'City': {**files['City'], 'available': False}}
     monkeypatch.setattr(settings_router, 'get_geoip_status', lambda: missing)
-    assert client.post('/api/settings/geoip/validate').json()['error'] == 'City database file not found'
+    assert client.post('/api/settings/geoip/validate').json()['error'] == 'The City database is missing. Download the GeoIP databases again.'
     # The file is there: the readers are reloaded and the lookups tried
     there = {**files, 'City': {**files['City'], 'available': True}}
     monkeypatch.setattr(settings_router, 'get_geoip_status', lambda: there)

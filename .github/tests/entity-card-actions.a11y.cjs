@@ -438,7 +438,7 @@ test('without the Read-Write key Ban and Allow are locked, not hidden, and a lis
     const lock = $(w, '#entity-card-header .ui-locked');
     assert.ok(lock, 'the locked note shows');
     assert.match(lock.textContent, /Ban and Allow are locked/);
-    assert.match(lock.textContent, /Read-Write API key/);
+    assert.match(lock.textContent, /read-write API key/);
     w.entityCardAct('ban');
     await settle(w);
     assert.equal($(w, '#app-confirm-modal'), null, 'no ban without the key');

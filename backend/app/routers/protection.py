@@ -130,9 +130,9 @@ async def ban_hit(hit_id: int, db: Session = Depends(get_db)):
     if hit.rule not in rules_service.BAN_RULES:
         raise HTTPException(status_code=400, detail="This rule only alerts; it does not ban")
     if not mailcow_api.has_rw_key:
-        raise HTTPException(status_code=400, detail="Banning needs the Read-Write API key (MAILCOW_API_KEY_RW)")
+        raise HTTPException(status_code=400, detail="Banning requires a read-write API key. Add it in Settings > mailcow > Connection.")
     if hit.status != "watching":
-        raise HTTPException(status_code=409, detail="Only a hit that is being watched can be banned")
+        raise HTTPException(status_code=409, detail="This match is no longer being watched. Refresh Security to see its current status.")
     async with _protection_lock:
         rules_service.request_ban(db, hit_id)
         await rules_service.enforce(mailcow_api)
@@ -151,9 +151,9 @@ async def undo_hit(hit_id: int, db: Session = Depends(get_db)):
     from ..scheduler import _protection_lock
     hit = _get_or_404(db, hit_id)
     if hit.status not in ("banned", "pending"):
-        raise HTTPException(status_code=409, detail="Only a ban can be undone")
+        raise HTTPException(status_code=409, detail="This match is no longer banned. Refresh Security to see its current status.")
     if hit.status == "banned" and hit.owned and not mailcow_api.has_rw_key:
-        raise HTTPException(status_code=400, detail="Lifting a ban needs the Read-Write API key (MAILCOW_API_KEY_RW)")
+        raise HTTPException(status_code=400, detail="Unbanning requires a read-write API key. Add it in Settings > mailcow > Connection.")
     async with _protection_lock:
         try:
             done = await rules_service.undo(mailcow_api, hit_id)

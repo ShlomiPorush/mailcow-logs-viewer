@@ -74,7 +74,7 @@ def test_saving_an_unknown_zone_is_refused(store):
         _put({"tz": "Europe/Berlinn"})
 
     assert refused.value.status_code == 400
-    assert refused.value.detail == "Unknown time zone: Europe/Berlinn"
+    assert refused.value.detail == "Unknown time zone: Europe/Berlinn. Select a time zone from the list."
     assert "tz" not in store.data
 
 
@@ -125,7 +125,7 @@ def test_a_new_unknown_zone_is_refused_while_env_locks_the_field(store, monkeypa
         _put({"tz": "Europe/Berlinn", "app_title": "Mail logs"})
 
     assert refused.value.status_code == 400
-    assert refused.value.detail == "Unknown time zone: Europe/Berlinn"
+    assert refused.value.detail == "Unknown time zone: Europe/Berlinn. Select a time zone from the list."
     assert store.data == {}
 
 

@@ -32,7 +32,7 @@ Dismissal hides an alert; **Undo** in the message that follows brings it back fo
 ![Show activity window](../../images/docs/dashboard-alert-activity-light.webp#gh-light-mode-only)
 ![Show activity window](../../images/docs/dashboard-alert-activity-dark.webp#gh-dark-mode-only)
 
-The check window comes from the alert, or from the outgoing spam block, rather than today's settings. Volume spike alerts also supply their original baseline period; other alerts use the current **Anomaly Baseline Days**. **Unknown** means the app cannot recover the original window.
+The check window comes from the alert, or from the outgoing spam block, rather than today's settings. Volume spike alerts also supply their original baseline period; other alerts use the current **Learn usual sending over (days)**. **Unknown** means the app cannot recover the original window.
 
 The hourly rate is the alert-window count converted to an hour, not a separate count. For SMTP blocks it is compared with the sending limit; for volume spikes, with the mailbox's usual rate. Login bursts show the threshold and the number of distinct source addresses.
 
@@ -82,14 +82,14 @@ See [Status](Status.md) and [About](About.md) for details.
 
 ## Settings that change this page
 
-- **Settings** > **Anomaly Detection (Beta)** enables volume spike and login burst alerts and sets their limits. It is off by default (`ANOMALY_DETECTION_ENABLED`).
-- **Settings** > **SMTP Abuse (Beta)** controls the protection that raises SMTP disabled alerts.
-- **Settings** > **Features** hides the Security panel and stops its sidebar failed-login count when Security is off. IP Blacklist Monitor controls the Blocklists card and attention row; DMARC & TLS controls the DMARC row.
+- **Settings** > **Anomaly detection** enables volume spike and login burst alerts and sets their limits. It is off by default (`ANOMALY_DETECTION_ENABLED`).
+- **Settings** > **Outgoing spam** controls the protection that raises SMTP disabled alerts.
+- **Settings** > **Features** hides the Security panel and stops its sidebar failed-login count when Security is off. **Blocklists** controls the Blocklists card and attention row; DMARC & TLS controls the DMARC row.
 - **Settings** > **Notifications** selects destinations for security alerts.
 
 ## When something is missing
 
-- **All figures are 0 with no recent activity.** Logs have not been imported, or mailcow is unreachable. Check **Settings** > **Mailcow**.
+- **All figures are 0 with no recent activity.** Logs have not been imported, or mailcow is unreachable. Check **Settings** > **mailcow**.
 - **No security alerts appear.** Anomaly detection is off by default.
 - **A card shows "-".** Data has not loaded, or mailcow did not answer.
 - **Show activity says "Could not load the activity".** Try again; the message includes the server's answer.
@@ -100,12 +100,12 @@ Anomaly detection runs every check interval (15 minutes by default) and looks ba
 
 **Outbound volume spike** counts authenticated submissions for the mailbox that logged in, including mail sent from aliases. Forged external senders do not count. All conditions must hold:
 
-- At least **Anomaly Volume Min Messages** were sent in the window (default 30).
-- The hourly rate is at least **Anomaly Volume Multiplier** times the usual rate over **Anomaly Baseline Days** (defaults 5 and 7). A mailbox with no history counts as 1 message an hour.
+- At least **Minimum messages before a volume alert** were sent in the window (default 30).
+- The hourly rate is at least **Sending rate multiplier** times the usual rate over **Learn usual sending over (days)** (defaults 5 and 7). A mailbox with no history counts as 1 message an hour.
 - The burst does not match time slots on at least two earlier baseline days. A slot includes the check window plus an hour on either side; at least half the current volume counts as similar.
 
 The alert is **CRITICAL** at twice the multiplier, otherwise **WARNING**.
 
-**Authentication failure burst** triggers at **Anomaly Auth Failure Threshold** failed logins per username in the window (default 20). It is **CRITICAL** at three times the threshold.
+**Authentication failure burst** triggers at **Failed logins before an alert** failed logins per username in the window (default 20). It is **CRITICAL** at three times the threshold.
 
-The same mailbox or username cannot alert again for the same reason for **Anomaly Alert Cooldown Hours** (default 6). Anomaly detection never blocks anything. [Outgoing spam protection](Abuse_Protection.md) handles sending blocks.
+The same mailbox or username cannot alert again for the same reason for **Wait before repeating an alert (hours)** (default 6). Anomaly detection never blocks anything. [Outgoing spam protection](Abuse_Protection.md) handles sending blocks.

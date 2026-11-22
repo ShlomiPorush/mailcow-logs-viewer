@@ -62,24 +62,24 @@ The export uses the list's filters and search, with two differences:
 
 <!-- VERIFY: owner's decision pending (finding 20): the export's row structure (one row per delivery) and its order (latest activity). Update the next item once decided. -->
 - It has one row per delivery, not per message, ordered by the latest activity.
-- It stops at **CSV Export Limit** rows (**Settings** > **Application**, 10000 by default).
+- It stops at **Maximum CSV rows** (**Settings** > **Application**, 10000 by default).
 
 Text cells starting with `=`, `+`, `-` or `@` get a leading apostrophe so a spreadsheet does not treat them as formulas. **Export CSV** is available only in the wide layout with the filters column.
 
 ## Settings that change this page
 
-- **Settings** > **Fetch** > **Retention Days** (`RETENTION_DAYS`) keeps messages and their logs for 7 days by default. **Blacklist Emails** (`BLACKLIST_EMAILS`) keeps mail to or from the listed addresses out of Messages; use a comma-separated list.
-- **Settings** > **Logs** > **Raw Logs Retention Days** (`RAW_LOGS_RETENTION_DAYS`) keeps Dovecot lines for 2 days by default. The mailbox delivery result itself stays with the message.
-- **Settings** > **Correlation** > **Max Correlation Age Minutes** and **Correlation Check Interval** control how long and how often the app tries to link logs.
+- **Settings** > **Fetch** > **Keep mail logs (days)** (`RETENTION_DAYS`) keeps messages and their logs for 7 days by default. **Exclude email addresses** (`BLACKLIST_EMAILS`) keeps mail to or from the listed addresses out of Messages; use a comma-separated list.
+- **Settings** > **Logs** > **Keep service logs (days)** (`RAW_LOGS_RETENTION_DAYS`) keeps Dovecot lines for 2 days by default. The mailbox delivery result itself stays with the message.
+- **Settings** > **Fetch** > **Message linking** > **Stop linking after (minutes)** and **Check for links every (seconds)** control how long and how often the app tries to link logs.
 
 ## When something is missing
 
-- **Pending.** The Rspamd scan arrived before the Postfix logs. The app keeps trying for **Max Correlation Age Minutes**. If many messages stay pending while mail flows, check **Message linking** on [Status](Status.md).
-- **No folder and no mailbox delivery step.** The message was not delivered to a local mailbox, or the app could not link its Dovecot lines to it. The folder and result stay after the Dovecot lines pass **Raw Logs Retention Days**.
+- **Pending.** The Rspamd scan arrived before the Postfix logs. The app keeps trying for **Stop linking after (minutes)**. If many messages stay pending while mail flows, check **Message linking** on [Status](Status.md).
+- **No folder and no mailbox delivery step.** The message was not delivered to a local mailbox, or the app could not link its Dovecot lines to it. The folder and result stay after the Dovecot lines pass **Keep service logs (days)**.
 - **No Spam Analysis.** Quarantine releases, for example, are delivered again without a new scan.
 - **No country for the client IP.** MaxMind GeoIP is not configured, or the address has no known location.
 - **Failed to load messages.** The app's database did not answer. Check **View Container Logs**.
-- **An expected message is absent.** It may be older than **Retention Days**, involve an address in **Blacklist Emails**, or have no usable Message-ID (**+ N unlinked messages**).
+- **An expected message is absent.** It may be older than **Keep mail logs (days)**, involve an address in **Exclude email addresses**, or have no usable Message-ID (**+ N unlinked messages**).
 
 ## How a message is put together
 
