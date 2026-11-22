@@ -14,15 +14,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Protection rules** - The Security page can watch or ban addresses that try trap accounts or unknown accounts, fail from a watched country or many times from one network, or keep coming back, each rule with its own ban length.
 - **Cards for addresses, domains and IPs** - A click on an IP address, an email address or a domain opens a card with what the app stores about it, and buttons such as Ban, Allow or Open messages.
 - **Search everything** - The search in the top bar finds pages, settings, messages, domains, mailboxes, suppressions, background jobs and Security addresses and acts on them, such as Ban an IP or Run a job; it replaces the Dashboard search box, and the status filter is on the Messages page.
-- **Needs attention from any page** - A bell in the header counts what needs a look, including DNS record changes, report emails that could not be imported, a possible stolen password and addresses the protection rules could not ban.
+- **Needs attention bell** - A bell in the header counts what needs a look, including DNS record changes, report emails that could not be imported, a possible stolen password and addresses the protection rules could not ban.
 - **Dashboard period and zoom** - The Dashboard can show another period than the last 24 hours, its charts zoom in time, the key figures show a week's trend, and a dismissed alert can be undone.
-- **What led to a security alert** - Show activity on an outbound volume spike or an authentication failure burst shows the mail or logins around it, to tell a hijacked mailbox from a legitimate mailing.
+- **What led to a security alert** - Show activity on an outbound volume spike, an authentication failure burst or an Outgoing spam block shows the mail or logins around it, and the alert emails chart the last 24 hours, to tell a hijacked mailbox from a legitimate mailing.
 - **Devices page** - Lists the phones, tablets and Outlook clients that sync over ActiveSync, with user, last IP and country, read from the SOGo log (`EAS_DEVICES_RETENTION_DAYS`, `devices` in `DISABLED_FEATURES`). Thanks to AonH and DocFraggle on the [mailcow community forum](https://community.mailcow.email/d/6177-kleines-eas-monitoringscript).
 - **Mailbox activity** - Mailbox Stats shows each mailbox's sent and received mail as a small chart and the services it may use.
 - **Block details** - Outbound > Suppressions shows why each address is blocked: its delivery failures, queue deletions and changes by hand.
 - **About page and credential checks** - About shows the health of everything the app depends on, the version and the configuration, and the Read-Write API key and the Rspamd password are checked when saved and every 6 hours.
 - **Ignore a stopped container or a blocklist** - Status can ignore a container stopped on purpose or a blocklist that does not matter, so it no longer counts in warnings, alerts or the blocklist email.
-- **Delete all reports of a domain** - With report deletion on, Manage Reports on the DMARC & TLS page lists the domains with their report counts and deletes every report of one domain at once; the report list can be searched and sorted across all pages. Related to [#412](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/412). Thanks to [@eakteam](https://github.com/eakteam).
+- **Delete all reports of a domain** - Manage Reports on the DMARC & TLS page lists the domains with their report counts and, with report deletion on, deletes every report of one domain at once; the report list can be searched and sorted across all pages. Related to [#412](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/412). Thanks to [@eakteam](https://github.com/eakteam).
 - **Several folders for DMARC and TLS reports** - Settings > DMARC & TLS IMAP reads reports from the folders you pick, with their subfolders if you want. [#564](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/564). Thanks to [@MrWeez](https://github.com/MrWeez).
 - **Notifications** - `ADMIN_EMAIL`, `BLACKLIST_ALERT_EMAIL` and `DMARC_ERROR_EMAIL` take several addresses separated by commas, and a Telegram destination can send to one topic of a group with its optional Topic ID.
 - **Date and time format** - Settings > Application sets how dates and times are written on every page and in emails (`DATE_FORMAT`, `TIME_FORMAT`).
@@ -33,7 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **New interface** - Every page is redesigned around a sidebar that folds to icons, every tab has its own address, and lists sort by any column.
+- **New interface** - Every page is redesigned around a sidebar that folds to icons, every tab has its own address, lists sort by any column, and Messages loads as you scroll, with the details beside the list on a wide screen.
 - **Pages update by themselves** - Every page refreshes on its own, so the Refresh button is gone.
 - **DMARC & TLS page redesigned** - One page without tabs: all domains with a To do list, and for each domain its mail flow, senders, reports and records, with a record to copy for the next policy.
 - **Security page rebuilt** - Every address that tried is listed once under To review, Banned or History with what happened to it, beside the countries and networks the attacks come from, and Banned has Unban all for Fail2ban's own bans.
@@ -41,9 +41,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Outbound and Rspamd pages** - Queue and the suppression list are now one page, Outbound, and the Rspamd maps have their own page, Rspamd, so `spam-filter` in `DISABLED_FEATURES` is now `suppressions` and `rspamd` (the old name turns off both).
 - **Outbound settings** - Settings > Outbound can delete stuck mail without blocking its recipients, and by default leaves failures unrelated to the recipient address alone, such as a full mailbox or a content rejection. [#562](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/562). Thanks to [@mumsa5054-source](https://github.com/mumsa5054-source).
 - **Two-way sync with Rspamd** - A change in the suppression list or in the app's part of the Rspamd map reaches the other side, and the Sync button is gone. With `SUPPRESSION_RSPAMD_SYNC=false` the app keeps no list of its own (the blocks in Rspamd stay), so export the list before upgrading: the first start deletes it.
-- **A feature that is off keeps no data** - A feature that is off, in Settings or in `DISABLED_FEATURES`, now loses all of its data, such as its DMARC reports or quarantine rules. Turn it on before upgrading to keep its data.
+- **A feature that is off keeps no data** - A feature that is off, in Settings or in `DISABLED_FEATURES`, now loses the data that only it uses, such as its DMARC reports or quarantine rules. Turn it on before upgrading to keep its data.
 - **One time zone** - Every page, email and job follows `TZ` or Settings > Application > Time zone instead of the browser's time zone, and every database session stays in UTC. Without either the app shows UTC, so set one to keep local times. [#19](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/19). Thanks to [@seal-82](https://github.com/seal-82).
 - **SMTP abuse protection is now Outgoing spam** - The SMTP Abuse tab in Settings and the Abuse Protection card on the Security page are both called Outgoing spam, and it and Anomaly detection are no longer marked Beta.
+- **Message linking settings** - The Correlation tab of Settings is now Message linking under Settings > Fetch.
 - **Emails redesigned** - Every email has the new look, in light and dark mode and on phones, with a plain-text part. The blacklist, weekly summary and report import error subjects changed, and the blacklist ones lost their emoji, so update mail filters that match them.
 - **Rate Limits history** - Kept for 90 days by default (`RATE_LIMITS_RETENTION_DAYS`), apart from the other raw logs.
 - **mailcow version check** - The Dashboard notices a mailcow update within an hour instead of a day.
@@ -63,7 +64,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Reverse proxy guide: trust the proxy** - Explains `FORWARDED_ALLOW_IPS`, so each visitor is counted separately.
 - **Certificate check for SMTP and IMAP** - New `SMTP_VERIFY_SSL` and `DMARC_IMAP_VERIFY_SSL` settings (Off, Automatic, On) are Off by default, and Automatic is recommended.
 - **Stored passwords stay with their server** - Changing the SMTP, IMAP, Rspamd, OAuth2 or notification server needs its password or token again.
-- **DMARC and TLS report limits** - A report may expand to 10 MB instead of 50 MB, an email over 20 MB or with more than 10 reports or 20,000 records is left in the mailbox as failed, and the unused original text of reports is no longer stored (cleared on upgrade).
+- **DMARC and TLS report limits** - An email over 20 MB, with more than 10 reports or 20,000 records, or whose reports expand to more than 10 MB together (instead of 50 MB per report) is left in the mailbox as failed, and the unused original text of reports is no longer stored (cleared on upgrade).
 - **A report ID cannot be taken over** - A forged report with the ID of a real one no longer replaces it, and both are marked Shared report ID.
 - **Forged bounces no longer suppress recipients** - Only a delivery agent's own result counts as a bounce.
 - **Automatic suppressions block one address only** - An address that looks like a regular expression is written as the exact address, and the next sync corrects lines already in the map.
@@ -90,18 +91,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Domains without recent reports** - A rate with no messages behind it shows "-" instead of 0% in red, and a domain not on the server is marked. [#412](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/412). Thanks to [@eakteam](https://github.com/eakteam).
 - **DNS failures shown as missing records** - The record cards say the check failed. [#360](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/360). Thanks to [@piperino721](https://github.com/piperino721).
 - **DNS checks** - The SPF check follows RFC 7208, a DMARC record with `sp=` first shows its `p=` policy, and checking one domain no longer resets the time of the last full check.
-- **Suppressions and the queue** - Each delivery failure counts once, a block you set or turned off by hand stays as you left it, and mail to an excluded or hosted domain is never blocked or deleted automatically.
+- **Suppressions and the queue** - Each delivery failure counts once, a block you set or turned off by hand stays as you left it, and mail to an excluded or hosted domain is never blocked or deleted automatically; with Count then suppress, the upgrade lifts automatic soft bounce blocks and counts their bounces again from 0.
 - **Suppression list** - No repeated or skipped rows, and saving no longer moves the expiry.
 - **Rspamd maps** - The suppression sync no longer writes the map when it cannot read it, and the map editor refuses a save over a change made meanwhile, keeping your edits.
-- **Fail2ban** - A single IPv6 address is banned as /128, not /32 (old entries get Repair), and Unban works when Fail2ban bans networks.
+- **Fail2ban** - A single IPv6 address is banned as /128, not /32, and Unban works when Fail2ban bans networks. An old /32 entry still covers its whole network, so use Repair on Security > Lists for one that was meant as one address.
 - **Security** - IPv6 attackers are listed with their own address, and the Events CSV export follows the filters.
 - **Blacklist alerts** - The alert counts and lists only hosts that need attention, not those listed only on blocklists that never alert, such as UCEPROTECT Level 2 and 3.
 - **Quarantine rules** - Editing a rule no longer changes it (changed rules get Repair), and Exact Match on Subject ignores case.
-- **Queue and Quarantine actions** - No longer hidden after a direct load with the Read-Write key set.
 - **Messages and Logs** - Time ranges hold after a refresh, and the CSV export follows every filter.
 - **Pages that went empty with the Logs page off** - The log services other pages need are always collected.
 - **Status and jobs** - Every job is listed, a manual run no longer stalls the log fetch, and a failed update check no longer reads Up to Date.
-- **GeoIP download failures** - A failed MaxMind download, such as one with a wrong license key, now shows as failed on Status and in Setup and Repair with what to check, instead of success while the old database stays in use.
+- **GeoIP download failures** - Status, Setup and Repair now show a failed MaxMind download, such as one with a wrong license key, and what to check, while the last working database stays in use.
 - **Feature switches** - Turning off Mailbox Stats keeps the Rate Limits data, and a MaxMind license starts GeoIP updates without a restart.
 - **Passwords with letters outside English** - The login page now accepts them.
 - **One notification destination stopping the others** - A webhook URL that is not a valid address is refused when saved and no longer holds up the other destinations.
