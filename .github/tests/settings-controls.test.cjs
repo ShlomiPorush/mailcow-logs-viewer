@@ -171,7 +171,7 @@ test('each failure Action has an "i" that says which mail is deleted, and the pe
     for (const kind of ['hard', 'soft']) {
         const html = vm.runInContext(`settingsBounceChoice(${JSON.stringify(kind)}, { suppression_hard_bounce_action: 'suppress', suppression_soft_bounce_action: 'count' }, new Set(), {})`, c);
         const name = kind === 'hard' ? 'Permanent' : 'Temporary';
-        assert.match(html, new RegExp(`>Action</span>\s*<span class="ui-field-help"[^>]*aria-label="More about ${name} delivery failure action"`), kind);
+        assert.match(html, new RegExp(`>Action</span>\\s*<span class="ui-field-help"[^>]*aria-label="More about ${name} delivery failure action"`), kind);
         assert.match(html, /Deleting mail does not tell the person who sent it\./, kind);
     }
     const suppress = vm.runInContext("SETTINGS_FIELD_OPTIONS.suppression_hard_bounce_action.find(o => o.value === 'suppress')", c);
