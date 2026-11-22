@@ -35,7 +35,7 @@ const tab = id => vm.runInContext('SETTINGS_EDIT_TABS', context).find(t => t.id 
 const needsOf = (id, label) => tab(id).groups.find(g => g.label === label).needs;
 
 test('the OAuth2 settings need OAuth2 on', () => {
-    for (const label of ['OAuth2 - Discovery (automatic)', 'OAuth2 - Endpoints (only without discovery)', 'OAuth2 - Credentials']) {
+    for (const label of ['Endpoint discovery', 'Manual endpoints', 'Provider credentials']) {
         assert.equal(needsOf('auth', label), 'oauth2_enabled', label);
     }
     // The provider name shares a group with the switch itself, so it says so on its own
@@ -43,7 +43,7 @@ test('the OAuth2 settings need OAuth2 on', () => {
 });
 
 test('the SMTP settings need SMTP on', () => {
-    for (const label of ['Server', 'Security', 'Authentication', 'From Address']) assert.equal(needsOf('smtp', label), 'smtp_enabled', label);
+    for (const label of ['Server', 'Security', 'Authentication', 'Sender']) assert.equal(needsOf('smtp', label), 'smtp_enabled', label);
 });
 
 test('the Outgoing spam limit and response need it on', () => {
