@@ -2237,7 +2237,7 @@ async function loadSettings() {
         console.error('Failed to load settings:', error);
         loading.innerHTML = `
             <div class="ui-empty">
-                <p class="ui-text-fail">Could not load settings. Reload this page to try again.</p>
+                <p class="ui-text-fail">Could not load settings.</p>
                 <p>${escapeHtml(uiErrorText(error))}</p>
                 <p><button type="button" class="ui-btn ui-btn-sm" onclick="loadSettings()">Try again</button></p>
             </div>
