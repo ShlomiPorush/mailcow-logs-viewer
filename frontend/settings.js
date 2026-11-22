@@ -3224,9 +3224,10 @@ async function validateMaxMindLicense() {
 }
 
 // The update_geoip job as GET /api/settings/geoip/status reports it, or null
-async function geoipJobState() {
+// (also when it did not answer within timeout ms)
+async function geoipJobState(timeout = 15000) {
     try {
-        const res = await authenticatedFetch('/api/settings/geoip/status');
+        const res = await authenticatedFetch('/api/settings/geoip/status', { timeout });
         return res.ok ? await res.json() : null;
     } catch (e) {
         return null;
@@ -3235,11 +3236,19 @@ async function geoipJobState() {
 
 // Start a GeoIP download and wait for the result of that run, not one left
 // from before: the job's last_run changes when a run starts (update_job_status
-// writes it on every change), and the run ends in success or failed.
+// writes it on every change; the status gives it to the microsecond), and the
+// run ends in success or failed. Every request is bounded, and so is the wait.
 // Answers { started, ok: true | false | null (did not finish in time), error, status }
-async function geoipDownloadRun({ onStarted, onTick, polls = 90, every = 2000 } = {}) {
-    const before = await geoipJobState();
-    const res = await authenticatedFetch('/api/settings/geoip/download', { method: 'POST' });
+async function geoipDownloadRun({ onStarted, onTick, every = 2000, limit = 3 * 60 * 1000, now = () => Date.now() } = {}) {
+    const deadline = now() + limit;
+    const left = () => Math.max(1, Math.min(15000, deadline - now()));
+    const before = await geoipJobState(left());
+    let res;
+    try {
+        res = await authenticatedFetch('/api/settings/geoip/download', { method: 'POST', timeout: left() });
+    } catch (e) {
+        return { started: false, ok: false, error: 'Could not start the download. Check your MaxMind credentials and try again.' };
+    }
     if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         return { started: false, ok: false, error: (body && typeof body.detail === 'string' && body.detail) || 'Could not start the download. Check your MaxMind credentials and try again.' };
@@ -3247,10 +3256,11 @@ async function geoipDownloadRun({ onStarted, onTick, polls = 90, every = 2000 } 
     if (onStarted) onStarted();
     // Without the state before, only a run seen running counts
     let seenRun = !!before;
-    for (let i = 0; i < polls; i++) {
+    for (let i = 0; now() < deadline; i++) {
         await new Promise(resolve => setTimeout(resolve, every));
+        if (now() >= deadline) break;
         if (onTick) onTick(i);
-        const st = await geoipJobState();
+        const st = await geoipJobState(left());
         if (!st) continue;
         if (st.job_status === 'running') { seenRun = true; continue; }
         if (!seenRun || (before && st.job_last_run === before.job_last_run)) continue;
@@ -3293,7 +3303,8 @@ async function repairGeoIPDatabase() {
             statusEl.innerHTML = renderGeoIPDbStatus({ db_valid: result.valid, databases: run.status && run.status.databases });
         }
         if (!run.ok) {
-            showToast('Could not repair the GeoIP databases. Check Status and try again. Details: ' + run.error, 'error');
+            // The error says what to check; an older file that still checks out keeps working
+            showToast(run.error + (result && result.valid ? ' Previously installed data is still in use.' : ''), 'error');
         } else if (result && result.valid) {
             showToast('GeoIP database check passed.', 'success');
         } else {

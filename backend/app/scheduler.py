@@ -2193,14 +2193,18 @@ async def check_credentials_job():
 
 
 def geoip_download_error(names) -> str:
-    """The job's error when the download of these GeoIP databases failed."""
-    which = ' and '.join(names)
-    return (f"Could not download the GeoIP {which} database{'s' if len(names) > 1 else ''} from MaxMind. "
-            "Check the MaxMind account ID and license key in Settings > MaxMind, and the application logs.")
+    """The job's error when the download of these GeoIP databases failed: City is the
+    location database, ASN the network information database."""
+    plain = {'City': 'location', 'ASN': 'network information'}
+    which = ' and '.join(plain.get(name, name) for name in names)
+    return (f"Could not download the {which} database{'s' if len(names) > 1 else ''} from MaxMind. "
+            "Check your account ID and license key in Settings > MaxMind, then try again. "
+            "If it still fails, check the application logs for details.")
 
 
 async def update_geoip_database():
-    """Background job: Update GeoIP databases"""
+    """Background job: Update GeoIP databases. Returns JOB_STATUS_SET once it
+    recorded its outcome, so Run on the Status page keeps a failed download failed."""
     from .services.geoip_downloader import (
         update_geoip_database_if_needed,
         is_license_configured
@@ -2211,7 +2215,7 @@ async def update_geoip_database():
         
         if not is_license_configured():
             update_job_status('update_geoip', 'idle', 'Add a MaxMind account ID and license key in Settings > MaxMind.')
-            return
+            return JOB_STATUS_SET
         
         # Run blocking download in thread pool to avoid blocking the event loop
         loop = asyncio.get_event_loop()
@@ -2244,13 +2248,15 @@ async def update_geoip_database():
                 )
             except Exception as e:
                 logger.debug(f"Failed to persist license status after GeoIP update: {e}")
-        
+        return JOB_STATUS_SET
+
     except asyncio.CancelledError:
         logger.info("GeoIP update cancelled by shutdown")
         return
     except Exception as e:
         logger.error(f"GeoIP update failed: {e}")
         update_job_status('update_geoip', 'failed', str(e))
+        return JOB_STATUS_SET
 
 
 _BLACKLIST_TODO = ("Find out why the host was listed and fix the cause, then ask each blacklist to remove it. "

@@ -1411,6 +1411,15 @@ def _persist_maxmind_validation_worker(result: Dict[str, Any]) -> None:
 
 
 
+def _precise_utc(value):
+    """An ISO UTC time with microseconds, or None."""
+    if not value:
+        return None
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
 @router.get("/settings/geoip/status", responses=documented(m.GeoipStatus, errors={500: None}))
 def get_geoip_detailed_status():
     """
@@ -1435,7 +1444,8 @@ def get_geoip_detailed_status():
         "databases": geoip_status,
         "job_status": geoip_job.get('status', 'idle'),
         "job_error": geoip_job.get('error'),
-        "job_last_run": format_datetime_utc(geoip_job.get('last_run')) if geoip_job.get('last_run') else None,
+        # To the microsecond: Setup and Repair tell their own run from an earlier one by it
+        "job_last_run": _precise_utc(geoip_job.get('last_run')),
     }
 
 

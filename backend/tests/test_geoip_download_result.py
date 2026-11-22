@@ -35,7 +35,7 @@ def _run(monkeypatch, result):
 def test_a_failed_download_with_an_older_file_fails_the_run(monkeypatch):
     entry, marked = _run(monkeypatch, {'City': _db(True, False, True), 'ASN': _db(True, False, False)})
     assert entry['status'] == 'failed'
-    assert 'City' in entry['error'] and 'ASN' not in entry['error']
+    assert 'location database' in entry['error'] and 'network' not in entry['error']
     assert 'Settings > MaxMind' in entry['error']
     # A refused download proves nothing about the license
     assert marked is False
@@ -44,7 +44,7 @@ def test_a_failed_download_with_an_older_file_fails_the_run(monkeypatch):
 def test_both_downloads_failing_without_files_fail_the_run(monkeypatch):
     entry, marked = _run(monkeypatch, {'City': _db(False, False, True), 'ASN': _db(False, False, True)})
     assert entry['status'] == 'failed'
-    assert 'City and ASN databases' in entry['error']
+    assert 'location and network information databases' in entry['error']
     assert marked is False
 
 
@@ -70,3 +70,36 @@ def test_the_downloader_says_which_needed_download_failed(monkeypatch, tmp_path)
     status = geoip_downloader.update_geoip_database_if_needed()
     assert status['City'] == {'available': True, 'updated': False, 'failed': True}
     assert status['ASN'] == {'available': False, 'updated': False, 'failed': True}
+
+
+def test_run_on_the_status_page_keeps_a_failed_download_failed(monkeypatch):
+    # The manual runner marks a job success unless the job says it set its own status
+    from fastapi.testclient import TestClient
+    from app.main import app
+    from app.routers import settings as settings_router
+
+    monkeypatch.setattr(settings_router, 'is_license_configured', lambda: True, raising=False)
+    monkeypatch.setattr(geoip_downloader, 'is_license_configured', lambda: True)
+    monkeypatch.setattr(geoip_downloader, 'update_geoip_database_if_needed',
+                        lambda: {'City': _db(True, False, True), 'ASN': _db(True, False, False)})
+    monkeypatch.setattr(geoip_service, 'reload_geoip_readers', lambda: True)
+    monkeypatch.setattr(geoip_service, 'get_geoip_db_valid', lambda: True)
+    monkeypatch.setattr(scheduler, '_persist_geoip_license_status', lambda: None)
+    monkeypatch.setitem(scheduler.job_status, 'update_geoip', {})
+
+    res = TestClient(app).post("/api/settings/jobs/update_geoip/run")
+    assert res.status_code == 200, res.text
+    entry = scheduler.job_status['update_geoip']
+    assert entry['status'] == 'failed'
+    assert 'location database' in entry['error']
+
+
+def test_the_status_tells_two_runs_in_one_second_apart(monkeypatch):
+    from datetime import datetime, timezone
+    from app.routers import settings as settings_router
+
+    first = datetime(2026, 11, 22, 8, 0, 0, 100000, tzinfo=timezone.utc)
+    second = datetime(2026, 11, 22, 8, 0, 0, 900000, tzinfo=timezone.utc)
+    assert settings_router._precise_utc(first) != settings_router._precise_utc(second)
+    assert settings_router._precise_utc(first) == '2026-11-22T08:00:00.100000Z'
+    assert settings_router._precise_utc(None) is None
