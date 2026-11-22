@@ -332,11 +332,12 @@
 .ui-alert { display: flex; align-items: flex-start; gap: 14px; padding-block: var(--ui-pad-y); padding-inline: var(--ui-pad-x); border-top: 1px solid var(--ui-line); }
 .ui-alert-text { flex: 1; min-width: 0; }
 .ui-alert-title { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
-/* An alert's tag and title wrap on their own; the X to dismiss it stays at the end of the first line */
-.ui-alert-name { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; flex: 1 1 0; min-width: 0; }
-/* The small icon button (24px); .ui-icon-btn comes later in this file and would make it 34px */
-.ui-alert-title > .ui-alert-x { width: 24px; height: 24px; align-self: flex-start; margin-block: -1px; }
-.ui-alert-title > .ui-alert-x svg { width: 14px; height: 14px; }
+/* The X that dismisses an alert sits in the row's top corner, at the title's height, after the
+   row's buttons. The small icon button (24px): .ui-icon-btn comes later in this file and would make it 34px */
+.ui-alert > .ui-alert-x { width: 24px; height: 24px; flex: none; align-self: flex-start; margin-block: -1px; }
+.ui-alert > .ui-alert-x svg { width: 14px; height: 14px; }
+/* A touch swipe of the row dismisses it too (utils.js uiSwipeDown); up and down stay scrolling */
+.ui-alert[data-swipe] { touch-action: pan-y; }
 .ui-alert-text p { margin: 3px 0 0; font-size: var(--ui-fs-sm); overflow-wrap: anywhere; }
 
 /* Filter panels */
@@ -1527,6 +1528,11 @@ body { font-family: var(--ui-font); background: var(--ui-bg); color: var(--ui-in
 .ui-attn-win-foot .ui-attn-win-go { font-weight: 600; font-size: 13px; }
 @media (hover: hover) { .ui-attn-win-foot .ui-attn-win-go:hover { text-decoration: underline; } }
 :is(.ui-attn-win, #attn-sheet) .ui-alert { display: grid; grid-template-columns: minmax(0, 1fr); row-gap: 8px; }
+/* Alerts with an X, in the bell and on a phone's Dashboard: the text and its buttons in the first column,
+   the X beside the title in the second */
+:is(#dashboard-attention-panel, .ui-attn-win, #attn-sheet) .ui-alert:has(> .ui-alert-x) { grid-template-columns: minmax(0, 1fr) auto; column-gap: 8px; }
+:is(#dashboard-attention-panel, .ui-attn-win, #attn-sheet) .ui-alert:has(> .ui-alert-x) > :not(.ui-alert-x) { grid-column: 1; }
+:is(#dashboard-attention-panel, .ui-attn-win, #attn-sheet) .ui-alert > .ui-alert-x { grid-column: 2; grid-row: 1; }
 #attn-sheet .ui-sheet-head { justify-content: flex-start; }
 #attn-sheet .ui-sheet-head .ui-sheet-x { margin-inline-start: 4px; }
 #attn-sheet .ui-sheet-body { display: block; padding: 0 0 env(safe-area-inset-bottom); }

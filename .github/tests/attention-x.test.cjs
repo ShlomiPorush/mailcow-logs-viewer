@@ -1,5 +1,6 @@
-// Needs attention alerts (app.js attentionAlertRows) are dismissed with an X at the end of
-// the title line, on the Dashboard and in the bell. The bell's rows have no buttons under
+// Needs attention alerts (app.js attentionAlertRows) are dismissed with an X in the row's
+// top corner, after the row's buttons, on the Dashboard and in the bell (a touch swipe
+// does the same, attention-swipe.a11y.cjs). The bell's rows have no buttons under
 // them (alerts and checks); the Dashboard keeps its action buttons. Checks cannot be
 // dismissed and get no X.
 const assert = require('node:assert/strict');
@@ -40,7 +41,7 @@ function rows(html) {
     return html.split(/(?=<div class="ui-alert[ "])/).filter(r => r.startsWith('<div class="ui-alert'));
 }
 
-test('each alert has one X at the end of its title line, and no Dismiss button', () => {
+test('each alert has one X, the row\'s last child after its buttons, and no Dismiss button', () => {
     const c = load();
     vm.runInContext(`attention.alerts.list = ${JSON.stringify(ALERTS)}`, c);
     for (const where of ['dashboard', 'bell']) {
@@ -54,9 +55,12 @@ test('each alert has one X at the end of its title line, and no Dismiss button',
             assert.match(x[0], /title="Dismiss alert"/);
             assert.match(x[0], /aria-label="Dismiss alert"/);
             assert.match(x[0], /data-acts="alerts \w+"/);
-            // Inside the title line, after the tag and the title
+            // Not in the title line: the row's last child, after the text and the buttons,
+            // so it sits in the row's far corner (D10); the row can be swiped
             const title = row.slice(row.indexOf('<div class="ui-alert-title">'), row.indexOf('</div>', row.indexOf('<div class="ui-alert-title">')));
-            assert.match(title, /<span class="ui-alert-name">[\s\S]*<\/span>\s*<button[^>]*ui-alert-x/, `${where} ${id}`);
+            assert.doesNotMatch(title, /ui-alert-x/, `${where} ${id}`);
+            assert.match(row, /<\/div>\s*<button[^>]*ui-alert-x[^>]*>[\s\S]*?<\/button>\s*<\/div>\s*$/, `${where} ${id}`);
+            assert.match(row, /^<div class="ui-alert[^"]*" data-key="alert-\d+" data-swipe/, `${where} ${id}`);
             assert.doesNotMatch(row, />Dismiss<\/button>/, `${where} ${id}`);
         }
     }
@@ -95,10 +99,16 @@ test('the X keeps its icon while busy: Dismiss passes no busy text', () => {
     assert.match(app, /function acknowledgeSecurityAlertOnce\(alertId, button\) \{[\s\S]*?return uiOnce\(`alert-ack:\$\{alertId\}`, \(\) => acknowledgeSecurityAlert\(alertId\), button\);\n\}/);
 });
 
-test('the title line keeps the X at its end, at the small icon button size', () => {
+test('the X sits in the row\'s top corner at the small icon button size, also in the grid rows', () => {
     const css = fs.readFileSync(path.join(frontend, 'assets/css/ui.css'), 'utf8');
-    assert.ok(css.includes('.ui-alert-name { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; flex: 1 1 0; min-width: 0; }'));
     // Two classes, so it wins over .ui-icon-btn (34px) that comes later in the file
-    assert.ok(css.includes('.ui-alert-title > .ui-alert-x { width: 24px; height: 24px;'));
-    assert.ok(css.includes('.ui-alert-title > .ui-alert-x svg { width: 14px; height: 14px; }'));
+    assert.ok(css.includes('.ui-alert > .ui-alert-x { width: 24px; height: 24px; flex: none; align-self: flex-start;'));
+    assert.ok(css.includes('.ui-alert > .ui-alert-x svg { width: 14px; height: 14px; }'));
+    // The bell and a phone's Dashboard: the X in a second column, beside the title
+    const lists = ':is(#dashboard-attention-panel, .ui-attn-win, #attn-sheet)';
+    assert.ok(css.includes(`${lists} .ui-alert:has(> .ui-alert-x) { grid-template-columns: minmax(0, 1fr) auto;`));
+    assert.ok(css.includes(`${lists} .ui-alert:has(> .ui-alert-x) > :not(.ui-alert-x) { grid-column: 1; }`));
+    assert.ok(css.includes(`${lists} .ui-alert > .ui-alert-x { grid-column: 2; grid-row: 1; }`));
+    assert.ok(css.includes('.ui-alert[data-swipe] { touch-action: pan-y; }'));
+    assert.doesNotMatch(css, /ui-alert-name/);
 });

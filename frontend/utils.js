@@ -2529,6 +2529,87 @@ function uiSheetSwipe(sheet, body, id) {
     panel.addEventListener('touchcancel', end);
 }
 
+// A touch swipe of a row marked data-swipe, to either side, presses the row's X (the
+// Needs attention alerts): the row follows the finger, goes away past a short distance
+// and slides back when let go before it. As in the sheet's pull above and the overview
+// strip (uiTimeOverview), the first 6px decide: up or down is left to scrolling
+// (touch-action: pan-y in ui.css). Only while the X is shown and enabled, so the swipe
+// follows the X's access and its Once guard; a mouse or a pen drag does nothing
+let uiSwipe = null;
+let uiSwipeEndedAt = 0;
+
+function uiSwipeDistance(row) {
+    return Math.min(96, row.offsetWidth * 0.35);
+}
+
+function uiSwipeStill() {
+    return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+}
+
+function uiSwipeBack(row, still) {
+    row.style.transition = still ? 'none' : 'transform .2s ease, opacity .2s ease';
+    row.style.transform = '';
+    row.style.opacity = '';
+}
+
+function uiSwipeDown(event) {
+    if (event.pointerType !== 'touch' || uiSwipe) return;
+    const row = event.target.closest && event.target.closest('[data-swipe]');
+    const x = row && row.querySelector(':scope > .ui-alert-x');
+    if (!x || x.disabled || x.hasAttribute('aria-busy') || !x.getClientRects().length) return;
+    uiSwipe = { row, x, id: event.pointerId, x0: event.clientX, y0: event.clientY, dx: 0, moved: false };
+}
+
+function uiSwipeMove(event) {
+    const s = uiSwipe;
+    if (!s || event.pointerId !== s.id) return;
+    const dx = event.clientX - s.x0, dy = event.clientY - s.y0;
+    if (!s.moved) {
+        if (Math.hypot(dx, dy) < 6) return;
+        if (Math.abs(dy) > Math.abs(dx)) { uiSwipe = null; return; }
+        s.moved = true;
+        try { s.row.setPointerCapture(event.pointerId); } catch (e) { /* the pointer may be gone */ }
+        s.row.style.transition = 'none';
+    }
+    s.dx = dx;
+    s.row.style.transform = `translateX(${dx}px)`;
+    s.row.style.opacity = String(Math.max(0.3, 1 - Math.abs(dx) / (s.row.offsetWidth || 1)));
+}
+
+function uiSwipeEnd(event) {
+    const s = uiSwipe;
+    if (!s || event.pointerId !== s.id) return;
+    uiSwipe = null;
+    if (!s.moved) return;
+    uiSwipeEndedAt = Date.now();
+    const still = uiSwipeStill();
+    if (event.type !== 'pointerup' || Math.abs(s.dx) < uiSwipeDistance(s.row)) { uiSwipeBack(s.row, still); return; }
+    s.row.style.transition = still ? 'none' : 'transform .2s ease, opacity .2s ease';
+    s.row.style.transform = `translateX(${s.dx < 0 ? '-' : ''}100%)`;
+    s.row.style.opacity = '0';
+    s.x.click();
+    // Gone once dismissed (the list is drawn again without it); back when the X did not
+    // go through (no access, an error) and the row is still there
+    const done = () => { if (s.row.isConnected) uiSwipeBack(s.row, still); };
+    if (!s.x.hasAttribute('aria-busy')) { done(); return; }
+    const watch = new MutationObserver(() => {
+        if (s.x.hasAttribute('aria-busy')) return;
+        watch.disconnect();
+        done();
+    });
+    watch.observe(s.x, { attributes: true, attributeFilter: ['aria-busy'] });
+}
+
+document.addEventListener('pointerdown', uiSwipeDown);
+document.addEventListener('pointermove', uiSwipeMove);
+document.addEventListener('pointerup', uiSwipeEnd);
+document.addEventListener('pointercancel', uiSwipeEnd);
+// The click a swipe may end with does not also open the row (Show activity, Open ...)
+document.addEventListener('click', event => {
+    if (Date.now() - uiSwipeEndedAt > 400 || !event.target.closest || event.target.closest('.ui-alert-x')) return;
+    if (event.target.closest('[data-swipe]')) { event.stopPropagation(); event.preventDefault(); }
+}, true);
+
 // Filter bars: a search, the common filters as pickers, the rarer ones behind
 // "Filters", and under the bar one line with the count and "Clear filters".
 //   <section class="ui-filters ui-fbar">
