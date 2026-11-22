@@ -277,15 +277,16 @@ def update_geoip_database_if_needed() -> dict:
     
     Returns:
         {
-            'City': {'available': bool, 'updated': bool},
-            'ASN': {'available': bool, 'updated': bool}
+            'City': {'available': bool, 'updated': bool, 'failed': bool},
+            'ASN': {'available': bool, 'updated': bool, 'failed': bool}
         }
+        failed: an update was needed and its download did not succeed
     """
     if not is_license_configured():
         logger.info("MaxMind license key not configured, GeoIP features will be disabled")
         return {
-            'City': {'available': False, 'updated': False},
-            'ASN': {'available': False, 'updated': False}
+            'City': {'available': False, 'updated': False, 'failed': False},
+            'ASN': {'available': False, 'updated': False, 'failed': False}
         }
     
     status = {}
@@ -298,7 +299,8 @@ def update_geoip_database_if_needed() -> dict:
             # Already up-to-date
             status[db_name] = {
                 'available': True,
-                'updated': False  # Didn't need update
+                'updated': False,  # Didn't need update
+                'failed': False
             }
             continue
         
@@ -308,7 +310,8 @@ def update_geoip_database_if_needed() -> dict:
         if success:
             status[db_name] = {
                 'available': True,
-                'updated': True
+                'updated': True,
+                'failed': False
             }
         else:
             # Check if old database exists
@@ -316,13 +319,15 @@ def update_geoip_database_if_needed() -> dict:
                 logger.info(f"Using existing (outdated) {db_name} database")
                 status[db_name] = {
                     'available': True,
-                    'updated': False
+                    'updated': False,
+                    'failed': True
                 }
             else:
                 logger.error(f"No {db_name} database available")
                 status[db_name] = {
                     'available': False,
-                    'updated': False
+                    'updated': False,
+                    'failed': True
                 }
     
     return status
