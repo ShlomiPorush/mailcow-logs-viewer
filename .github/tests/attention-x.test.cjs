@@ -1,5 +1,5 @@
-// Needs attention alerts (app.js attentionAlertRows) are dismissed with an X in the row's
-// top corner, after the row's buttons, on the Dashboard and in the bell (a touch swipe
+// Needs attention alerts (app.js attentionAlertRows) are dismissed with an X, the row's
+// last child after its buttons, on the Dashboard and in the bell (a touch swipe
 // does the same, attention-swipe.a11y.cjs). The bell's rows have no buttons under
 // them (alerts and checks); the Dashboard keeps its action buttons. Checks cannot be
 // dismissed and get no X.
@@ -55,11 +55,12 @@ test('each alert has one X, the row\'s last child after its buttons, and no Dism
             assert.match(x[0], /title="Dismiss alert"/);
             assert.match(x[0], /aria-label="Dismiss alert"/);
             assert.match(x[0], /data-acts="alerts \w+"/);
-            // Not in the title line: the row's last child, after the text and the buttons,
-            // so it sits in the row's far corner (D10); the row can be swiped
+            // Not in the title line: the row's last child, after the text and the buttons, so on
+            // a wide Dashboard it ends the row after the button and the keyboard meets them in
+            // that order (D16); the row can be swiped
             const title = row.slice(row.indexOf('<div class="ui-alert-title">'), row.indexOf('</div>', row.indexOf('<div class="ui-alert-title">')));
             assert.doesNotMatch(title, /ui-alert-x/, `${where} ${id}`);
-            assert.match(row, /<\/div>\s*<button[^>]*ui-alert-x[^>]*>[\s\S]*?<\/button>\s*<\/div>\s*$/, `${where} ${id}`);
+            assert.match(row, /<\/div>\s*(?:<div class="ui-alert-acts">[\s\S]*?<\/div>\s*)?<button[^>]*ui-alert-x[^>]*>[\s\S]*?<\/button>\s*<\/div>\s*$/, `${where} ${id}`);
             assert.match(row, /^<div class="ui-alert[^"]*" data-key="alert-\d+" data-swipe/, `${where} ${id}`);
             assert.doesNotMatch(row, />Dismiss<\/button>/, `${where} ${id}`);
         }

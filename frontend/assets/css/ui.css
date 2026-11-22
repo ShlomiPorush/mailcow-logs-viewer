@@ -343,6 +343,8 @@
 /* A touch swipe of the row dismisses it too (utils.js uiSwipeDown); up and down stay scrolling */
 .ui-alert[data-swipe] { touch-action: pan-y; }
 .ui-alert-text p { margin: 3px 0 0; font-size: var(--ui-fs-sm); overflow-wrap: anywhere; }
+/* A long address in a title (a mailbox, a domain) breaks instead of running into the X or the button */
+.ui-alert-title b { overflow-wrap: anywhere; }
 
 /* Filter panels */
 .ui-filters { display: grid; gap: 10px; padding: 12px; overflow: visible; }
@@ -1537,6 +1539,14 @@ body { font-family: var(--ui-font); background: var(--ui-bg); color: var(--ui-in
 :is(#dashboard-attention-panel, .ui-attn-win, #attn-sheet) .ui-alert:has(> .ui-alert-x) { grid-template-columns: minmax(0, 1fr) auto; column-gap: 8px; }
 :is(#dashboard-attention-panel, .ui-attn-win, #attn-sheet) .ui-alert:has(> .ui-alert-x) > :not(.ui-alert-x) { grid-column: 1; }
 :is(#dashboard-attention-panel, .ui-attn-win, #attn-sheet) .ui-alert > .ui-alert-x { grid-column: 2; grid-row: 1; }
+/* Wider than a phone, the Dashboard's Needs attention keeps an X's slot (24px and the 8px gap) at
+   the end of every row: an alert's X sits in it, after the button and centered in the row, and a
+   row without one (a check, or an alert the person may not dismiss) leaves it empty. So every
+   button ends at one edge and every X at the row's end */
+@media screen and (min-width: 761px) {
+    #dashboard-attention-panel .ui-alert { padding-inline-end: calc(var(--ui-pad-x) + 32px); }
+    #dashboard-attention-panel .ui-alert > .ui-alert-x { align-self: center; margin-block: 0; margin-inline-end: -32px; }
+}
 #attn-sheet .ui-sheet-head { justify-content: flex-start; }
 #attn-sheet .ui-sheet-head .ui-sheet-x { margin-inline-start: 4px; }
 #attn-sheet .ui-sheet-body { display: block; padding: 0 0 env(safe-area-inset-bottom); }

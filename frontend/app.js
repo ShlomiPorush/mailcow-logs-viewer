@@ -2817,8 +2817,9 @@ function attentionAlertRows(where) {
         const button = label ? `<button type="button" onclick="openStoredAlert(${id}, '${place}')" class="ui-btn ui-btn-sm">${escapeHtml(label)}</button>`
             : activity ? `<button type="button" onclick="${first} openAlertActivity(${id})" class="ui-btn ui-btn-sm" title="What happened before and around this alert">Show activity</button>` : '';
         // The bell keeps its rows short: no buttons under them (the row click and the
-        // Dashboard still open the alert). The X in the row's top corner dismisses it, and
-        // so does a swipe on a touch screen (data-swipe, utils.js uiSwipeDown)
+        // Dashboard still open the alert). The X after the row's button, at the row's end,
+        // dismisses it (in the bell and on a phone, beside the title), and so does a swipe on
+        // a touch screen (data-swipe, utils.js uiSwipeDown)
         return `
             <div class="ui-alert${action ? ' ui-alert-go' : ''} ${critical ? 'ui-alert-fail' : 'ui-alert-warn'}" data-key="alert-${id}" data-swipe${action ? ` onclick="if (uiAlertRowClick(event)) { ${action} }"` : ''}>
                 <div class="ui-alert-text">
