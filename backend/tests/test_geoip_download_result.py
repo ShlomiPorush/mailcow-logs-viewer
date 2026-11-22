@@ -103,3 +103,15 @@ def test_the_status_tells_two_runs_in_one_second_apart(monkeypatch):
     assert settings_router._precise_utc(first) != settings_router._precise_utc(second)
     assert settings_router._precise_utc(first) == '2026-11-22T08:00:00.100000Z'
     assert settings_router._precise_utc(None) is None
+
+
+def test_a_cancelled_run_is_not_reported_as_finished(monkeypatch):
+    # Cancellation goes on to the runner, which then records no success
+    def cancelled():
+        raise asyncio.CancelledError()
+    monkeypatch.setattr(geoip_downloader, 'is_license_configured', lambda: True)
+    monkeypatch.setattr(geoip_downloader, 'update_geoip_database_if_needed', cancelled)
+    monkeypatch.setitem(scheduler.job_status, 'update_geoip', {})
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(scheduler.update_geoip_database())
+    assert scheduler.job_status['update_geoip']['status'] == 'running'

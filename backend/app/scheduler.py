@@ -2251,8 +2251,9 @@ async def update_geoip_database():
         return JOB_STATUS_SET
 
     except asyncio.CancelledError:
+        # Not a finished run: Run on the Status page must not record it as a success
         logger.info("GeoIP update cancelled by shutdown")
-        return
+        raise
     except Exception as e:
         logger.error(f"GeoIP update failed: {e}")
         update_job_status('update_geoip', 'failed', str(e))

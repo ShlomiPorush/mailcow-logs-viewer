@@ -3243,13 +3243,14 @@ async function geoipDownloadRun({ onStarted, onTick, every = 2000, limit = 3 * 6
     const deadline = now() + limit;
     const left = () => Math.max(1, Math.min(15000, deadline - now()));
     const before = await geoipJobState(left());
-    let res;
+    let res = null;
     try {
         res = await authenticatedFetch('/api/settings/geoip/download', { method: 'POST', timeout: left() });
     } catch (e) {
-        return { started: false, ok: false, error: 'Could not start the download. Check your MaxMind credentials and try again.' };
+        // No answer in time: the server may still have started the run, so watch for it
+        res = null;
     }
-    if (!res.ok) {
+    if (res && !res.ok) {
         const body = await res.json().catch(() => ({}));
         return { started: false, ok: false, error: (body && typeof body.detail === 'string' && body.detail) || 'Could not start the download. Check your MaxMind credentials and try again.' };
     }

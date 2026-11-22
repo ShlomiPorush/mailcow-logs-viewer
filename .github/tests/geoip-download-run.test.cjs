@@ -34,7 +34,10 @@ function load(states, { start = { ok: true, body: { status: 'started' } }, valid
     let i = 0;
     context.authenticatedFetch = async (url, opts = {}) => {
         calls.push(`${opts.method || 'GET'} ${url}${opts.timeout ? ' timeout' : ''}`);
-        if (url === '/api/settings/geoip/download') return { ok: start.ok, json: async () => start.body };
+        if (url === '/api/settings/geoip/download') {
+            if (start.hang) throw new Error('The request timed out.');
+            return { ok: start.ok, json: async () => start.body };
+        }
         if (url === '/api/settings/geoip/validate') return { ok: true, json: async () => validate };
         // A status request that never answers ends at its timeout, as authenticatedFetch aborts it
         if (hang && i++ > 0) throw new Error('The request timed out.');
@@ -104,4 +107,12 @@ test('Repair shows a failed download as failed, and a successful one as passed',
     const passed = load([earlier, { job_status: 'success', job_last_run: '2026-11-22T08:00:05Z' }]);
     await passed.context.repairGeoIPDatabase();
     assert.ok(passed.toasts.some(([type, message]) => type === 'success' && /check passed/.test(message)), JSON.stringify(passed.toasts));
+});
+
+test('a start that does not answer in time still reports the run the server began', async () => {
+    const { context } = load([earlier, { job_status: 'failed', job_last_run: '2026-11-22T08:00:05Z', job_error: 'Could not download the location database from MaxMind.' }], { start: { hang: true } });
+    const run = await context.geoipDownloadRun({ every: 0 });
+    assert.equal(run.started, true);
+    assert.equal(run.ok, false);
+    assert.match(run.error, /location database/);
 });
