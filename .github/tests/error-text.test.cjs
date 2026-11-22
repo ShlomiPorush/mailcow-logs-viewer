@@ -137,3 +137,11 @@ test('an action mailcow refused says so in words, and its codes stay out of the 
     assert.equal(context.mailcowWords(['item_released', '1']), '');
     assert.equal(context.mailcowWords('Message(s) released'), 'Message(s) released');
 });
+
+test('settingsErrorText is handed the response, then its body', () => {
+    // Its words come from the status too (uiHttpErrorText); a body alone has no status
+    const found = pages.flatMap(({ name, lines }) => lines
+        .filter(({ text }) => /settingsErrorText\(/.test(text) && !/function settingsErrorText\(/.test(text) && !/settingsErrorText\(res,/.test(text))
+        .map(({ text, line }) => `${name}:${line}: ${text.trim()}`));
+    assert.deepEqual(found, [], 'call settingsErrorText(res, body)');
+});

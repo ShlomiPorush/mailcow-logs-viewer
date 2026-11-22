@@ -2141,14 +2141,14 @@ async function unbanAllFail2ban(btnEl) {
     let result = {};
     try {
         const res = await authenticatedFetch('/api/fail2ban/unban-all', { method: 'POST' });
-        result = await res.json().catch(() => ({}));
-        if (!res.ok) result = { status: 'error', msg: result.detail || `HTTP ${res.status}` };
+        result = (await uiReadJson(res)) || {};
+        if (!res.ok || result.status !== 'success') result = { ...result, status: 'error', msg: actionErrorText(res, result) };
     } catch (err) {
-        result = { status: 'error', msg: err.message };
+        result = { status: 'error', msg: uiErrorText(err) };
     }
     const lifted = result.networks || [];
     if (result.status === 'success') showToast(result.msg, 'success');
-    else showToast('Unban all: ' + uiApiErrorText({ detail: result.msg }, 'Unknown error'), 'error');
+    else showToast('Unban all: ' + result.msg, 'error');
     if (lifted.length && fail2banActiveBans) fail2banActiveBans = fail2banActiveBans.filter(b => !lifted.includes(b.network));
     if (btnEl && document.body.contains(btnEl)) {
         btnEl.disabled = false;

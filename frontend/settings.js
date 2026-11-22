@@ -3669,11 +3669,11 @@ async function settingsChooseFolders() {
     let failure = '';
     try {
         const res = await authenticatedFetch('/api/settings/imap/folders', { method: 'POST' });
-        const data = await res.json().catch(() => ({}));
+        const data = (await uiReadJson(res)) || {};
         if (res.ok) result = data;
-        else failure = settingsErrorText(data, '');
+        else failure = settingsErrorText(res, data);
     } catch (err) {
-        failure = '';
+        failure = uiErrorText(err);
     }
     if (run !== settingsFoldersRun || !body.isConnected) return;
     if (!result) {
