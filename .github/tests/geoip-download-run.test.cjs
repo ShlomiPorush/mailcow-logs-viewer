@@ -36,7 +36,8 @@ function load(states, { start = { ok: true, body: { status: 'started' } }, valid
         calls.push(`${opts.method || 'GET'} ${url}${opts.timeout ? ' timeout' : ''}`);
         if (url === '/api/settings/geoip/download') {
             if (start.hang) throw new Error('The request timed out.');
-            return { ok: start.ok, json: async () => start.body };
+            // start.html: a proxy's error page, which is not JSON
+            return { ok: start.ok, status: start.status || (start.ok ? 200 : 400), json: async () => { if (start.html) throw new SyntaxError('Unexpected token <'); return start.body; } };
         }
         if (url === '/api/settings/geoip/validate') return { ok: true, json: async () => validate };
         // A status request that never answers ends at its timeout, as authenticatedFetch aborts it
@@ -71,6 +72,18 @@ test('a refused start says why and polls nothing', async () => {
     assert.equal(run.started, false);
     assert.match(run.error, /Settings > MaxMind/);
     assert.equal(calls.filter(c => c.startsWith('GET /api/settings/geoip/status')).length, 1);
+});
+
+test('a refused start without a reason says what the status means, not "check your credentials"', async () => {
+    // The server's catch-all for an unexpected error, and a proxy's HTML page in front of the app
+    for (const [start, words] of [[{ ok: false, status: 500, body: { detail: 'An error occurred' } }, /The server hit an error/],
+        [{ ok: false, status: 502, html: true }, /The server did not answer/]]) {
+        const { context } = load([earlier], { start });
+        const run = await context.geoipDownloadRun({ every: 0 });
+        assert.equal(run.started, false);
+        assert.match(run.error, words);
+        assert.doesNotMatch(run.error, /MaxMind credentials/);
+    }
 });
 
 // A clock that moves ten seconds on every look

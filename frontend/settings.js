@@ -3259,8 +3259,8 @@ async function geoipDownloadRun({ onStarted, onTick, every = 2000, limit = 3 * 6
         res = null;
     }
     if (res && !res.ok) {
-        const body = await res.json().catch(() => ({}));
-        return { started: false, ok: false, error: (body && typeof body.detail === 'string' && body.detail) || 'Could not start the download. Check your MaxMind credentials and try again.' };
+        // The server's reason, or what its status means (a proxy's error page is not a credentials problem)
+        return { started: false, ok: false, error: uiHttpErrorText(res.status, await uiReadJson(res)) };
     }
     if (onStarted) onStarted();
     // Without the state before, only a run seen running counts
