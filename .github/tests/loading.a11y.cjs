@@ -104,7 +104,7 @@ test('Try again that fails again shows the failure again, also in a quiet Status
     w.reply = () => FAIL;
     for (const [loader, id] of [['loadUsersPanel()', 'users-panel'], ['loadQuarantineRules()', 'quarantine-rules-list'], ['loadStatusSystem()', 'status-system']]) {
         const box = w.document.getElementById(id);
-        if (!box) { assert.equal(id, 'quarantine-rules-list', `${id} is on the page`); continue; }
+        assert.ok(box, `${id} is on the page`);
         await w.eval(loader);
         await settle(w);
         // A refresh of Status is on (statusQuiet) while Try again is pressed
