@@ -38,12 +38,12 @@ async function loadAgentsPanel() {
     if (!panel) return;
     try {
         const response = await authenticatedFetch('/api/agents');
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        if (!response.ok) throw await responseError(response);
         agentsData = await response.json();
         renderAgentsPanel();
     } catch (e) {
         console.error('Agents error:', e);
-        panel.innerHTML = '<section class="ui-panel ui-set-channels"><p class="ui-empty ui-text-fail">Could not load agents. Reload this page to try again.</p></section>';
+        panel.innerHTML = `<section class="ui-panel ui-set-channels"><p class="ui-empty ui-text-fail">Could not load agents: ${escapeHtml(uiErrorText(e))}</p></section>`;
     }
 }
 
@@ -202,13 +202,13 @@ async function loadAgentActivity(grantId) {
     box.innerHTML = '<p class="ui-muted">Loading activity...</p>';
     try {
         const response = await authenticatedFetch(`/api/agents/${grantId}/activity`);
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        if (!response.ok) throw await responseError(response);
         const rows = (await response.json()).activity || [];
         box.innerHTML = rows.length
             ? `<ul class="ui-agent-log">${rows.map(agentsActivityRow).join('')}</ul>${rows.length >= 50 ? '<p class="ui-set-desc">Showing the latest 50 entries.</p>' : ''}`
             : '<p class="ui-muted">No activity yet.</p>';
     } catch (e) {
-        box.innerHTML = '<p class="ui-text-fail">Could not load activity. Close and open it again to retry.</p>';
+        box.innerHTML = `<p class="ui-text-fail">Could not load activity: ${escapeHtml(uiErrorText(e))}</p>`;
     }
 }
 
@@ -290,11 +290,11 @@ async function saveAgentAccess(event, grantId) {
         });
         if (!response.ok) {
             const body = await response.json().catch(() => ({}));
-            const text = typeof body.detail === 'string' ? body.detail : 'Could not save the change. Try again.';
+            const text = uiHttpErrorText(response.status, body);
             if (response.status === 409 || response.status === 404) {
                 // Changed or disconnected meanwhile: show the list as it is now
                 closeAgentEditModal(true);
-                showToast(text, 'error');
+                showToast(`Could not save the change: ${text}`, 'error');
                 loadAgentsPanel();
                 return;
             }
@@ -303,7 +303,7 @@ async function saveAgentAccess(event, grantId) {
         closeAgentEditModal(true);
         showToast('Access changed', 'success');
     } catch (e) {
-        return say('Could not save the change. Check your connection and try again.');
+        return say(`Could not save the change: ${uiErrorText(e)}`);
     }
     loadAgentsPanel();
 }
@@ -319,10 +319,10 @@ async function disconnectAgent(grantId) {
     if (!confirmed) return;
     try {
         const response = await authenticatedFetch(`/api/agents/${grantId}`, { method: 'DELETE' });
-        if (!response.ok && response.status !== 404) throw new Error(`HTTP ${response.status}`);
+        if (!response.ok && response.status !== 404) throw await responseError(response);
         showToast('Agent disconnected', 'success');
     } catch (e) {
-        showToast('Could not disconnect the agent. Try again.', 'error');
+        showToast(`Could not disconnect the agent: ${uiErrorText(e)}`, 'error');
     }
     loadAgentsPanel();
 }
@@ -338,10 +338,10 @@ async function disconnectAllAgents() {
     if (!confirmed) return;
     try {
         const response = await authenticatedFetch('/api/agents', { method: 'DELETE' });
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        if (!response.ok) throw await responseError(response);
         showToast('All agents disconnected', 'success');
     } catch (e) {
-        showToast('Could not disconnect all agents. Try again.', 'error');
+        showToast(`Could not disconnect all agents: ${uiErrorText(e)}`, 'error');
     }
     loadAgentsPanel();
 }

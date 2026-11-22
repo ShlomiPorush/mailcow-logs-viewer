@@ -25,7 +25,8 @@ async function loadSmtpAbusePanel() {
             authenticatedFetch('/api/smtp-abuse/status?limit=200'),
             authenticatedFetch('/api/smtp-abuse/whitelist')
         ]);
-        if (!statusResponse.ok || !whitelistResponse.ok) throw new Error('HTTP error');
+        if (!statusResponse.ok) throw await responseError(statusResponse);
+        if (!whitelistResponse.ok) throw await responseError(whitelistResponse);
         smtpAbuseStatus = await statusResponse.json();
         smtpAbuseWhitelist = await whitelistResponse.json();
         renderSmtpAbusePanel();
@@ -33,7 +34,7 @@ async function loadSmtpAbusePanel() {
     } catch (error) {
         console.error('SMTP abuse panel error:', error);
         const panel = document.getElementById('smtp-abuse-panel');
-        if (panel) panel.innerHTML = '<p class="ui-empty ui-text-fail">Could not load outgoing spam protection. Reload this page to try again.</p>';
+        if (panel) panel.innerHTML = `<p class="ui-empty ui-text-fail">Could not load outgoing spam protection: ${escapeHtml(uiErrorText(error))}</p>`;
     }
 }
 
@@ -204,13 +205,13 @@ async function smtpAbuseAction(email, action) {
             `/api/smtp-abuse/mailboxes/${encodeURIComponent(email)}/${action}`, { method: 'POST' });
         if (!response.ok) {
             const detail = await response.json().catch(() => ({}));
-            showToast(detail.detail || `Could not ${action} SMTP. Refresh this list and try again.`, 'error');
+            showToast(`Could not ${action} SMTP: ${uiHttpErrorText(response.status, detail)}`, 'error');
             return;
         }
         showToast(action === 'block' ? 'SMTP disabled' : 'SMTP re-enabled', 'success');
         loadSmtpAbusePanel();
     } catch (e) {
-        showToast(`Could not ${action} SMTP. Refresh this list and try again.`, 'error');
+        showToast(`Could not ${action} SMTP: ${uiErrorText(e)}`, 'error');
     }
 }
 
@@ -240,7 +241,7 @@ async function saveSmtpAbuseWhitelist(quiet = false) {
         });
         if (!response.ok) {
             const detail = await response.json().catch(() => ({}));
-            showToast(detail.detail || 'Could not save the allowlist. Check the addresses and try again.', 'error');
+            showToast(`Could not save the allowlist: ${uiHttpErrorText(response.status, detail)}`, 'error');
             return false;
         }
         smtpAbuseWhitelistDraft = null;
@@ -248,7 +249,7 @@ async function saveSmtpAbuseWhitelist(quiet = false) {
         await loadSmtpAbusePanel();
         return true;
     } catch (e) {
-        showToast('Could not save the allowlist. Check the addresses and try again.', 'error');
+        showToast(`Could not save the allowlist: ${uiErrorText(e)}`, 'error');
         return false;
     }
 }
@@ -258,10 +259,10 @@ async function removeSmtpAbuseWhitelist(email) {
     try {
         const response = await authenticatedFetch(
             `/api/smtp-abuse/whitelist/${encodeURIComponent(email)}`, { method: 'DELETE' });
-        if (!response.ok) { showToast('Could not remove the allowlist entry. Reload the list and try again.', 'error'); return; }
+        if (!response.ok) throw await responseError(response);
         showToast('Allowlist entry removed', 'success');
         loadSmtpAbusePanel();
     } catch (e) {
-        showToast('Could not remove the allowlist entry. Reload the list and try again.', 'error');
+        showToast(`Could not remove the allowlist entry: ${uiErrorText(e)}`, 'error');
     }
 }

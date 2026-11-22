@@ -33,7 +33,8 @@ async function loadProtection() {
             authenticatedFetch('/api/protection/rules'),
             authenticatedFetch('/api/protection/hits?status=active&limit=500')
         ]);
-        if (!rulesRes.ok || !hitsRes.ok) throw new Error(`HTTP ${rulesRes.ok ? hitsRes.status : rulesRes.status}`);
+        if (!rulesRes.ok) throw await responseError(rulesRes);
+        if (!hitsRes.ok) throw await responseError(hitsRes);
         const rulesData = await rulesRes.json();
         const hitsData = await hitsRes.json();
         // Unsaved edits stay on screen through the page's own refresh
@@ -50,7 +51,7 @@ async function loadProtection() {
         renderProtection();
     } catch (error) {
         console.error('Failed to load protection rules:', error);
-        protectionLoadError = error.message;
+        protectionLoadError = uiErrorText(error);
         renderSecuritySettings();
     }
     loadProtectionOverview();
@@ -220,15 +221,15 @@ async function saveProtectionRules(quiet = false) {
         const res = await authenticatedFetch('/api/protection/rules', {
             method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ rules: protectionRules })
         });
+        if (!res.ok) throw await responseError(res);
         const data = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
         protectionRules = data.rules;
         protectionSaved = JSON.parse(JSON.stringify(data.rules));
         protectionDirty = false;
         if (!quiet) showToast('Protection rules saved', 'success');
         loadProtection();
     } catch (error) {
-        showToast(`Could not save the rules. Check the values and try again. Details: ${error.message}`, 'error');
+        showToast(`Could not save the rules: ${uiErrorText(error)}`, 'error');
         return false;
     }
     return true;
@@ -239,8 +240,8 @@ async function protectionHitAction(id, action, button, done) {
     if (button) button.disabled = true;
     try {
         const res = await authenticatedFetch(`/api/protection/hits/${id}/${action}`, { method: 'POST' });
+        if (!res.ok) throw await responseError(res);
         const data = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
         if (done) showToast(done(data), 'success');
         refreshProtectionHits();
         if (action !== 'dismiss') {
@@ -249,7 +250,7 @@ async function protectionHitAction(id, action, button, done) {
             loadFail2BanSettings();
         }
     } catch (error) {
-        showToast(`Could not ${action === 'ban' ? 'ban' : action}. Refresh Security and try again. Details: ${error.message}`, 'error');
+        showToast(`Could not ${action === 'ban' ? 'ban' : action}: ${uiErrorText(error)}`, 'error');
         if (button) button.disabled = false;
     }
 }

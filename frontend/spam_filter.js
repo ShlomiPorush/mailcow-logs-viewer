@@ -54,7 +54,7 @@ async function loadRspamdMaps() {
     
     try {
         const response = await authenticatedFetch('/api/rspamd/maps');
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        if (!response.ok) throw await responseError(response);
         
         const data = await response.json();
         rspamdMapsConfigured = data.configured;
@@ -78,7 +78,7 @@ async function loadRspamdMaps() {
         
     } catch (error) {
         console.error('Failed to load Rspamd maps:', error);
-        container.innerHTML = `<p class="ui-empty ui-text-fail">Failed to load maps: ${escapeHtml(error.message)}. <button type="button" class="ui-link-row ui-link" onclick="loadRspamdMaps()">Try again</button></p>`;
+        container.innerHTML = `<p class="ui-empty ui-text-fail">Failed to load maps: ${escapeHtml(uiSentence(uiErrorText(error)))} <button type="button" class="ui-link-row ui-link" onclick="loadRspamdMaps()">Try again</button></p>`;
     }
 }
 
@@ -184,7 +184,7 @@ async function openMapEditor(filename) {
 
     try {
         const response = await authenticatedFetch(`/api/rspamd/maps/${encodeURIComponent(filename)}`);
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        if (!response.ok) throw await responseError(response);
 
         const data = await response.json();
         const meta = data.metadata || {};
@@ -264,7 +264,7 @@ async function openMapEditor(filename) {
         console.error('Failed to load map content:', error);
         container.innerHTML = `
             ${rspamdMapCrumbs(filename)}
-            <p class="ui-empty ui-text-fail">Failed to load map: ${escapeHtml(error.message)}</p>
+            <p class="ui-empty ui-text-fail">Failed to load map: ${escapeHtml(uiErrorText(error))}</p>
         `;
     }
 }
@@ -312,6 +312,7 @@ async function validateMapContent(filename) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ content, filename })
         });
+        if (!response.ok) throw await responseError(response);
 
         const data = await response.json();
 
@@ -338,7 +339,9 @@ async function validateMapContent(filename) {
             errorsEl.innerHTML = data.errors.map(e => line(e, 'fail')).join('') + warningHtml;
         }
     } catch (error) {
+        // The tag stays short; the message says why
         statusEl.innerHTML = uiTag('Validation failed', 'fail');
+        showToast(`Could not check the map: ${uiErrorText(error)}`, 'error');
     }
 }
 
@@ -379,15 +382,16 @@ async function saveMapContentOnce(filename) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ content, filename })
         });
+        if (!valRes.ok) throw await responseError(valRes);
         const valData = await valRes.json();
-        
+
         if (!valData.valid) {
             showToast(`Cannot save: ${valData.errors.length} validation error(s). Fix them first.`, 'error');
             validateMapContent(filename);
             return;
         }
     } catch (e) {
-        showToast('Validation failed: ' + e.message, 'error');
+        showToast('Validation failed: ' + uiErrorText(e), 'error');
         return;
     }
     if (opened !== mapEditorOpened) return;
@@ -408,13 +412,13 @@ async function saveMapContentOnce(filename) {
         }
 
         if (!response.ok) {
-            const err = await response.json();
-            if (response.status === 409 && err.detail?.code === 'map_changed') {
+            const err = await uiReadJson(response);
+            if (response.status === 409 && err?.detail?.code === 'map_changed') {
                 // The edits stay in the editor; Reload shows the map as it is now
                 showMapConflict(filename, true);
                 return;
             }
-            throw new Error(err.detail?.message || err.detail || 'Save failed');
+            throw new Error(uiHttpErrorText(response.status, err));
         }
 
         const result = await response.json();
@@ -452,7 +456,7 @@ async function saveMapContentOnce(filename) {
         document.getElementById('map-entry-count').textContent = uiCountLabel(result.entry_count, 'entry', 'entries');
         
     } catch (error) {
-        showToast('Failed to save map: ' + error.message, 'error');
+        showToast('Failed to save map: ' + uiErrorText(error), 'error');
     } finally {
         uiSaveBarBusy('map-savebar', false);
     }
@@ -483,15 +487,10 @@ function updateSuppressionSyncLock() {
 // is synced with it ("Sync with Rspamd")
 let suppressionRspamdState = null;
 
-// What the server said went wrong: a message ({code, message}) or a plain detail
-function suppressionErrorText(body, fallback) {
-    const detail = body && body.detail;
-    if (detail && typeof detail === 'object' && !Array.isArray(detail)) return detail.message || fallback;
-    return typeof detail === 'string' && detail ? detail : fallback;
-}
-
-async function suppressionFailure(response, fallback) {
-    return new Error(suppressionErrorText(await response.json().catch(() => ({})), fallback));
+// What could not be done, and why: the server's reason ({code, message} or a plain
+// detail) or, when it gave none, what its status means
+async function suppressionFailure(response, what) {
+    return new Error(`${what}: ${uiHttpErrorText(response.status, await uiReadJson(response))}`);
 }
 
 // With the sync off the app keeps no list: the page shows only a note that
@@ -585,8 +584,8 @@ function fetchSuppressionPage(page, query) {
     params.append('sort_by', query.sortBy);
     params.append('sort_dir', query.sortDir);
 
-    return authenticatedFetch(`/api/suppressions?${params}`).then(response => {
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return authenticatedFetch(`/api/suppressions?${params}`).then(async response => {
+        if (!response.ok) throw await responseError(response);
         return response.json();
     });
 }
@@ -659,7 +658,7 @@ async function loadSuppressions(page) {
         if (seq !== suppressionSeq) return;
         suppressionListLoading = false;
         console.error('Failed to load suppressions:', error);
-        container.innerHTML = `<p class="ui-empty ui-text-fail">Failed to load: ${escapeHtml(error.message)}</p>`;
+        container.innerHTML = `<p class="ui-empty ui-text-fail">Failed to load: ${escapeHtml(uiErrorText(error))}</p>`;
     }
 }
 
@@ -864,14 +863,14 @@ async function showBlockDetails(id, more) {
     state.loading = true;
     try {
         const res = await authenticatedFetch(`/api/suppressions/${Number(id)}/events?page=${state.page + 1}`);
-        if (!res.ok) throw new Error();
+        if (!res.ok) throw await responseError(res);
         const data = await res.json();
         state.page += 1;
         state.events = state.events.concat(data.events);
         state.total = data.total;
         state.email = _cleanRegexDomain(data.suppression.email);
     } catch (e) {
-        body.innerHTML = '<p class="ui-text-fail">Could not load block details. Try again.</p>';
+        body.innerHTML = `<p class="ui-text-fail">Could not load block details: ${escapeHtml(uiErrorText(e))}</p>`;
         return;
     } finally {
         state.loading = false;
@@ -1027,7 +1026,7 @@ async function createSuppression() {
                 showToast('This address is already suppressed', 'error');
                 return;
             }
-            throw new Error(suppressionErrorText(err, 'Failed to create suppression'));
+            throw new Error(`Failed to create suppression: ${uiHttpErrorText(response.status, err)}`);
         }
         
         showToast(`Suppression added: ${email}`, 'success');
@@ -1041,7 +1040,7 @@ async function createSuppression() {
         if (after) after();
         
     } catch (error) {
-        showToast(error.message, 'error');
+        showToast(uiErrorText(error), 'error');
     }
 }
 
@@ -1152,7 +1151,7 @@ async function saveEditSuppression(id) {
         loadSuppressionStats();
         autoSyncToRspamd();
     } catch (error) {
-        showToast(error.message, 'error');
+        showToast(uiErrorText(error), 'error');
     }
 }
 
@@ -1173,7 +1172,7 @@ async function toggleSuppression(id, newActive) {
         // Fix #4: Auto-sync to Rspamd after changes
         autoSyncToRspamd();
     } catch (error) {
-        showToast(error.message, 'error');
+        showToast(uiErrorText(error), 'error');
     }
 }
 
@@ -1191,7 +1190,7 @@ async function deleteSuppression(id, email) {
         // Fix #4: Auto-sync to Rspamd after changes
         autoSyncToRspamd();
     } catch (error) {
-        showToast(error.message, 'error');
+        showToast(uiErrorText(error), 'error');
     }
 }
 
@@ -1249,7 +1248,7 @@ async function importSuppressions(event) {
             body: formData
         });
         
-        if (!response.ok) throw await suppressionFailure(response, 'The file could not be imported');
+        if (!response.ok) throw await responseError(response);
         
         const result = await response.json();
         showToast(`Imported ${result.imported} suppressions (${result.skipped} skipped)`, 'success');
@@ -1258,7 +1257,7 @@ async function importSuppressions(event) {
         // Fix #4: Auto-sync after import too
         autoSyncToRspamd();
     } catch (error) {
-        showToast('Import failed: ' + error.message, 'error');
+        showToast('Import failed: ' + uiErrorText(error), 'error');
     }
     
     event.target.value = '';

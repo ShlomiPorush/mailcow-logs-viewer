@@ -60,7 +60,7 @@ async function loadLogViewer() {
         // Fetch service list
         const response = await authenticatedFetch('/api/raw-logs/services');
         if (!response.ok) {
-            throw new Error(`HTTP ${response.status}`);
+            throw await responseError(response);
         }
         
         const data = await response.json();
@@ -97,7 +97,7 @@ async function loadLogViewer() {
         console.error('[LOGS] Failed to load log viewer:', error);
         const output = document.getElementById('logs-output');
         if (output) {
-            output.innerHTML = `<span class="text-red-400">Failed to load log services: ${escapeHtml(error.message)}</span>`;
+            output.innerHTML = `<span class="text-red-400">Failed to load log services: ${escapeHtml(uiErrorText(error))}</span>`;
         }
     }
 }
@@ -194,7 +194,7 @@ async function loadSmartFilters(serviceId) {
     
     try {
         const response = await authenticatedFetch(`/api/raw-logs/${serviceId}/smart-filters`);
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        if (!response.ok) throw await responseError(response);
         
         const data = await response.json();
         logsState.smartFilters = data.filters || [];
@@ -291,7 +291,7 @@ async function fetchInitialLogs(serviceId) {
         const countParams = new URLSearchParams({ page: 1, limit: limit, order: 'asc' });
         
         const response = await authenticatedFetch(`/api/raw-logs/${serviceId}?${countParams}`);
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        if (!response.ok) throw await responseError(response);
         
         const data = await response.json();
         const total = data.total || 0;
@@ -310,7 +310,7 @@ async function fetchInitialLogs(serviceId) {
             // Fetch the last page (newest entries)
             const lastParams = new URLSearchParams({ page: totalPages, limit: limit, order: 'asc' });
             const lastResp = await authenticatedFetch(`/api/raw-logs/${serviceId}?${lastParams}`);
-            if (!lastResp.ok) throw new Error(`HTTP ${lastResp.status}`);
+            if (!lastResp.ok) throw await responseError(lastResp);
             const lastData = await lastResp.json();
             renderLogEntries(lastData.data || [], serviceId, true);
         }
@@ -323,7 +323,7 @@ async function fetchInitialLogs(serviceId) {
         console.error('[LOGS] Failed to fetch logs:', error);
         const output = document.getElementById('logs-output');
         if (output) {
-            output.innerHTML = `<span class="text-red-400">Failed to load logs: ${escapeHtml(error.message)}</span>`;
+            output.innerHTML = `<span class="text-red-400">Failed to load logs: ${escapeHtml(uiErrorText(error))}</span>`;
         }
     }
 }
@@ -360,7 +360,7 @@ async function fetchOlderLogs() {
         });
         
         const response = await authenticatedFetch(`/api/raw-logs/${logsState.activeService}?${params}`);
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        if (!response.ok) throw await responseError(response);
         
         const data = await response.json();
         const entries = data.data || [];
@@ -1130,7 +1130,7 @@ async function loadDateRangeLogs() {
         if (endDate) params.set('end_date', endDate);
         
         const response = await authenticatedFetch(`/api/raw-logs/${logsState.activeService}?${params}`);
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        if (!response.ok) throw await responseError(response);
         
         const data = await response.json();
         const total = data.total || 0;
@@ -1171,7 +1171,7 @@ async function loadDateRangeLogs() {
         console.error('[LOGS] Date range load failed:', error);
         const output = document.getElementById('logs-output');
         if (output) {
-            output.innerHTML = `<span class="text-red-400">Failed to load date range: ${escapeHtml(error.message)}</span>`;
+            output.innerHTML = `<span class="text-red-400">Failed to load date range: ${escapeHtml(uiErrorText(error))}</span>`;
         }
     } finally {
         if (loadingEl) {

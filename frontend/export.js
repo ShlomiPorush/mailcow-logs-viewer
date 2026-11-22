@@ -38,6 +38,6 @@ async function exportCSV(type) {
         showToast('Download started.', 'success');
     } catch (error) {
         console.error('Failed to export CSV:', error);
-        showToast(error.message || 'Could not export CSV. Please try again.', 'error');
+        showToast(uiErrorText(error), 'error');
     }
 }

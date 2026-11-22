@@ -83,10 +83,10 @@ async function loadRateLimits() {
         ]);
 
         if (!eventsResponse.ok) {
-            throw new Error(`HTTP ${eventsResponse.status}`);
+            throw await responseError(eventsResponse);
         }
         if (!limitsResponse.ok) {
-            throw new Error(`HTTP ${limitsResponse.status}`);
+            throw await responseError(limitsResponse);
         }
 
         rateLimitEventsData = await eventsResponse.json();
@@ -108,7 +108,7 @@ async function loadRateLimits() {
         loading.innerHTML = `
             <div class="ui-empty">
                 <p class="ui-text-fail">Failed to load rate limits</p>
-                <p>${escapeHtml(error.message)}</p>
+                <p>${escapeHtml(uiErrorText(error))}</p>
                 <button type="button" onclick="loadRateLimits()" class="ui-btn ui-btn-sm">Try again</button>
             </div>
         `;
@@ -570,7 +570,7 @@ async function loadRateLimitSenderHistory(user) {
         const response = await authenticatedFetch(
             `/api/rate-limits/sender-events?user=${encodeURIComponent(user)}`);
         if (!response.ok) {
-            throw new Error(`HTTP ${response.status}`);
+            throw await responseError(response);
         }
         const data = await response.json();
         const events = data.events || [];
@@ -641,7 +641,7 @@ async function resetRateLimitCounter(user, rlHash) {
 
         if (!response.ok) {
             const detail = await response.json().catch(() => ({}));
-            showToast(detail.detail || 'Could not reset the counter', 'error');
+            showToast(`Could not reset the counter: ${uiHttpErrorText(response.status, detail)}`, 'error');
             return;
         }
 
@@ -654,7 +654,7 @@ async function resetRateLimitCounter(user, rlHash) {
         renderRateLimitSendersCard();
     } catch (error) {
         console.error('Failed to reset rate limit counter:', error);
-        showToast('Could not reset the counter', 'error');
+        showToast(`Could not reset the counter: ${uiErrorText(error)}`, 'error');
     }
 }
 
@@ -984,7 +984,7 @@ async function applyRateLimitBulk() {
 
         if (!response.ok) {
             const detail = await response.json().catch(() => ({}));
-            showToast(detail.detail || 'Could not apply the rate limit', 'error');
+            showToast(`Could not apply the rate limit: ${uiHttpErrorText(response.status, detail)}`, 'error');
             return;
         }
 
@@ -1036,7 +1036,7 @@ async function applyRateLimitBulk() {
             : `Limit set on ${changed}${tail}`, 'success');
     } catch (error) {
         console.error('Failed to apply the rate limit in bulk:', error);
-        showToast('Could not apply the rate limit', 'error');
+        showToast(`Could not apply the rate limit: ${uiErrorText(error)}`, 'error');
     }
 }
 
@@ -1165,7 +1165,7 @@ async function submitRateLimit(kind, name, value, frame) {
 
         if (!response.ok) {
             const detail = await response.json().catch(() => ({}));
-            showToast(detail.detail || 'Could not save the rate limit', 'error');
+            showToast(`Could not save the rate limit: ${uiHttpErrorText(response.status, detail)}`, 'error');
             return;
         }
 
@@ -1201,6 +1201,6 @@ async function submitRateLimit(kind, name, value, frame) {
         }
     } catch (error) {
         console.error('Failed to save rate limit:', error);
-        showToast('Could not save the rate limit', 'error');
+        showToast(`Could not save the rate limit: ${uiErrorText(error)}`, 'error');
     }
 }

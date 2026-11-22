@@ -50,7 +50,7 @@ async function loadDevices(page, { quiet = false } = {}) {
 
     try {
         const response = await authenticatedFetch(`/api/devices?${params}`, quiet ? { timeout: PAGE_REFRESH_TIMEOUT } : {});
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        if (!response.ok) throw await responseError(response);
         const data = await response.json();
         // A slower answer to an older filter must not replace a newer one
         if (request !== devicesRequest) return;
@@ -66,7 +66,7 @@ async function loadDevices(page, { quiet = false } = {}) {
         // A refresh that failed leaves the list as it was
         if (quiet && devicesShownJson !== null) return;
         devicesShownJson = null;
-        container.innerHTML = `<p class="ui-empty ui-text-fail">Could not load the devices: ${escapeHtml(error.message)}. <button type="button" class="ui-link-row ui-link" onclick="loadDevices()">Try again</button></p>`;
+        container.innerHTML = `<p class="ui-empty ui-text-fail">Could not load the devices: ${escapeHtml(uiSentence(uiErrorText(error)))} <button type="button" class="ui-link-row ui-link" onclick="loadDevices()">Try again</button></p>`;
     }
 }
 

@@ -213,6 +213,7 @@ function wireVersionPanel(content, appVersion, versionInfo) {
         if (text) text.textContent = 'Checking...';
         try {
             const response = await authenticatedFetch('/api/status/app-version?force=true');
+            if (!response.ok) throw await responseError(response);
             const fresh = await response.json();
             versionInfoCache.version_info = fresh;
             updateVersionInfoUI(fresh);

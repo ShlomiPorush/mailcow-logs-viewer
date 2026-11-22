@@ -8,6 +8,10 @@ const { test } = require('node:test');
 const source = fs.readFileSync(path.join(__dirname, '../../frontend/export.js'), 'utf8');
 const handler = source.match(/async function exportCSV\(type\) \{[\s\S]*?\n\}/)?.[0];
 assert.ok(handler, 'The CSV download handler must be present');
+// The words a failure is shown with (utils.js)
+const utils = fs.readFileSync(path.join(__dirname, '../../frontend/utils.js'), 'utf8');
+const errorStart = utils.indexOf('function uiApiErrorText(');
+const errorHelpers = utils.slice(errorStart, utils.indexOf('\n// ====', errorStart));
 
 function harness(filters, status = 200, contentType = 'text/csv; charset=utf-8') {
     const result = { urls: [], downloads: 0, blobs: 0, notices: [] };
@@ -29,6 +33,7 @@ function harness(filters, status = 200, contentType = 'text/csv; charset=utf-8')
         alert: message => result.notices.push({ message }),
         console: { error: () => {} }
     });
+    vm.runInContext(errorHelpers, context);
     vm.runInContext(handler, context);
     return { result, run: () => context.exportCSV('messages') };
 }

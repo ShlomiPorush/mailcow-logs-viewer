@@ -1426,6 +1426,46 @@ function uiApiErrorText(body, fallback) {
     return detail || fallback;
 }
 
+// A failed request in words a person can act on, never the browser's own text
+// ("Failed to fetch"), a parser's ("Unexpected token '<'") or a bare status code.
+// The server's own words come first; its catch-all for an unexpected error says
+// nothing, and a proxy's error page in front of the app is not JSON at all.
+const UI_SERVER_SAYS_NOTHING = new Set(['An error occurred', 'Internal Server Error', 'Internal server error']);
+function uiHttpErrorText(status, body) {
+    const said = uiApiErrorText(body, '');
+    if (said && !UI_SERVER_SAYS_NOTHING.has(said)) return said;
+    if (status === 502 || status === 503 || status === 504) return 'The server did not answer. It may be restarting';
+    if (status === 404) return 'Not found. It may have been removed';
+    if (status === 413) return 'Too large for the server';
+    if (status === 429) return 'Too many requests. Wait a moment';
+    if (status >= 500) return 'The server hit an error. If it keeps happening, check the app log';
+    return `The server refused the request (HTTP ${status})`;
+}
+// The text of what a request or its handling threw: an Error that already has
+// readable words keeps them; a network failure, a timeout, a body that is not
+// JSON and a fault in the page itself get plain words instead
+function uiErrorText(error) {
+    if (!error) return 'Something went wrong';
+    if (typeof error === 'string') return error;
+    if (error.name === 'AbortError' || error.name === 'TimeoutError') return 'The server took too long to answer';
+    if (error.name === 'SyntaxError') return 'The server sent an answer the app could not read';
+    if (error.name === 'TypeError' && /fetch|network|load failed/i.test(error.message || '')) return 'Could not reach the server. Check the connection';
+    if (['TypeError', 'ReferenceError', 'RangeError'].includes(error.name)) return 'Something went wrong in the page. Reload it';
+    return error.message || 'Something went wrong';
+}
+// Text as a sentence: a full stop unless it already ends with one (the server's words may)
+function uiSentence(text) {
+    return String(text).replace(/[^.!?]$/, '$&.');
+}
+// The body of a response as JSON, or null when it is not JSON (a proxy's error page)
+async function uiReadJson(response) {
+    try {
+        return await response.json();
+    } catch (e) {
+        return null;
+    }
+}
+
 // =============================================================================
 // Changes not saved yet. A page or an editor that would lose them registers how
 // many it holds: uiUnsavedRegister(key, { count, keeps }). Moving away (another

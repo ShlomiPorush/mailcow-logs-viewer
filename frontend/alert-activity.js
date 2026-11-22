@@ -38,7 +38,7 @@ async function openAlertActivity(alertId) {
     modal.classList.remove('hidden');
     try {
         const response = await authenticatedFetch(`/api/security-alerts/${encodeURIComponent(alertId)}/activity`, control ? { signal: control.signal } : {});
-        if (!response.ok) throw new Error(`The server answered ${response.status}`);
+        if (!response.ok) throw await responseError(response);
         const data = await response.json();
         if (gen !== alertActivityGen) return;
         alertActivity = data;
@@ -47,7 +47,7 @@ async function openAlertActivity(alertId) {
         renderAlertActivity();
     } catch (error) {
         if (gen !== alertActivityGen || (error && error.name === 'AbortError')) return;
-        content.innerHTML = `<p class="ui-empty">Could not load the activity: ${escapeHtml(error.message)}. Try again in a moment.</p>`;
+        content.innerHTML = `<p class="ui-empty">Could not load the activity: ${escapeHtml(uiSentence(uiErrorText(error)))}</p>`;
     }
 }
 

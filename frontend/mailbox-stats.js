@@ -130,9 +130,8 @@ async function loadMailboxStats() {
             authenticatedFetch('/api/mailbox-stats/domains')
         ]);
 
-        if (!summaryRes.ok || !domainsRes.ok) {
-            throw new Error('Failed to fetch mailbox statistics');
-        }
+        if (!summaryRes.ok) throw await responseError(summaryRes);
+        if (!domainsRes.ok) throw await responseError(domainsRes);
 
         const summary = await summaryRes.json();
         const domains = await domainsRes.json();
@@ -167,7 +166,7 @@ async function loadMailboxStats() {
             loading.innerHTML = `
                 <div class="ui-empty">
                     <p class="ui-text-fail">Failed to load mailbox statistics</p>
-                    <p>${escapeHtml(error.message)}</p>
+                    <p>${escapeHtml(uiErrorText(error))}</p>
                     <button onclick="loadMailboxStats()" class="ui-btn ui-btn-sm">Retry</button>
                 </div>
             `;
@@ -360,7 +359,7 @@ async function loadMailboxStatsList(page = 1) {
 
     try {
         const response = await authenticatedFetch(url);
-        if (!response.ok) throw new Error('Failed to fetch mailboxes');
+        if (!response.ok) throw await responseError(response);
 
         const data = await response.json();
         if (seq !== mailboxStatsSeq) return;

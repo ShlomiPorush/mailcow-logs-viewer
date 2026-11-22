@@ -126,7 +126,7 @@ async function viewMessageDetails(correlationKey) {
     try {
         const response = await authenticatedFetch(`/api/message/${encodeURIComponent(correlationKey)}/details`);
         if (!response.ok) {
-            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            throw await responseError(response);
         }
 
         const data = await response.json();
@@ -172,7 +172,7 @@ async function viewMessageDetails(correlationKey) {
         // A failure of a message no longer open says nothing about the one shown
         if (window.openMessageKey !== correlationKey) return;
         console.error('Failed to load message details:', error);
-        content.innerHTML = `<p class="ui-empty ui-text-fail">Failed to load message details: ${escapeHtml(error.message)}</p>`;
+        content.innerHTML = `<p class="ui-empty ui-text-fail">Failed to load message details: ${escapeHtml(uiErrorText(error))}</p>`;
     }
 }
 

@@ -62,7 +62,7 @@ function dmarcTag(tone, label, solid = false) {
 // timeout (the page's refresh): a read that has not answered by then has failed
 async function dmarcGet(url, timeout = 0) {
     const response = await authenticatedFetch(url, timeout ? { timeout } : {});
-    if (!response.ok) throw new Error(`The server answered ${response.status}`);
+    if (!response.ok) throw await responseError(response);
     return response.json();
 }
 
@@ -80,7 +80,7 @@ function dmarcLoading(text) {
 function dmarcFailed(error) {
     const view = dmarcView();
     dmarcShownHtml = null;
-    if (view) view.innerHTML = `<div class="ui-dm-card"><p class="ui-dm-empty">Could not load this: ${escapeHtml(error.message)}. <button type="button" class="ui-dm-link" onclick="dmarcReload()">Try again</button></p></div>`;
+    if (view) view.innerHTML = `<div class="ui-dm-card"><p class="ui-dm-empty">Could not load this: ${escapeHtml(uiSentence(uiErrorText(error)))} <button type="button" class="ui-dm-link" onclick="dmarcReload()">Try again</button></p></div>`;
     if (typeof pageRefreshRetry === 'function') pageRefreshRetry('dmarc');
 }
 
@@ -748,7 +748,7 @@ async function openDmarcRecord(kind, domain) {
         dmarcRecordDomain = x;
         content.innerHTML = kind === 'tls' ? dmarcTlsRecord(x) : kind === 'spf' || kind === 'dkim' ? dmarcAuthRecord(x, kind) : dmarcDmarcRecord(x);
     } catch (error) {
-        content.innerHTML = `<p class="ui-dm-empty">Could not read the record: ${escapeHtml(error.message)}.</p>`;
+        content.innerHTML = `<p class="ui-dm-empty">Could not read the record: ${escapeHtml(uiSentence(uiErrorText(error)))}</p>`;
     }
 }
 
@@ -1092,7 +1092,7 @@ async function uploadDmarcReport(event) {
             return;
         }
 
-        if (!response.ok) throw new Error('Upload failed');
+        if (!response.ok) throw await responseError(response);
 
         const result = await response.json();
         const reportType = result.report_type === 'tls-rpt' ? 'TLS-RPT' : 'DMARC';
@@ -1110,7 +1110,7 @@ async function uploadDmarcReport(event) {
 
     } catch (error) {
         console.error('Upload error:', error);
-        showToast('Failed to upload report', 'error');
+        showToast(`Failed to upload report: ${uiErrorText(error)}`, 'error');
     }
 
     event.target.value = '';
@@ -1204,6 +1204,7 @@ async function triggerDmarcSync() {
         const response = await authenticatedFetch('/api/dmarc/imap/sync', {
             method: 'POST'
         });
+        if (!response.ok) throw await responseError(response);
 
         const result = await response.json();
 
@@ -1220,11 +1221,14 @@ async function triggerDmarcSync() {
                 await loadDmarcImapStatus();
                 await loadDmarcDomains();
             }, 5000); // Increased to 5s to give the sync time to work
+        } else {
+            // An answer that neither started nor found one running: nothing was started
+            throw new Error(uiApiErrorText(result, (result && result.message) || 'The server did not start it'));
         }
 
     } catch (error) {
         console.error('Error triggering sync:', error);
-        showToast('Could not start fetching reports. Try again.', 'error');
+        showToast(`Could not start fetching reports: ${uiErrorText(error)}`, 'error');
     } finally {
         btn.disabled = false;
         btnText.textContent = 'Fetch reports';
@@ -1248,6 +1252,7 @@ async function showDmarcSyncHistory() {
 
     try {
         const response = await authenticatedFetch('/api/dmarc/imap/history?limit=20');
+        if (!response.ok) throw await responseError(response);
         const data = await response.json();
 
         if (data.data.length === 0) {
@@ -1276,7 +1281,7 @@ async function showDmarcSyncHistory() {
 
     } catch (error) {
         console.error('Error loading the fetch history:', error);
-        content.innerHTML = '<p class="ui-empty ui-text-fail">Could not load the fetch history. Try again.</p>';
+        content.innerHTML = `<p class="ui-empty ui-text-fail">Could not load the fetch history: ${escapeHtml(uiErrorText(error))}</p>`;
     }
 }
 
@@ -1290,7 +1295,7 @@ function closeDmarcSyncHistoryModal() {
 // This part runs in the pagination test with only document, authenticatedFetch,
 // escapeHtml, escapeJsArg, encodeURIComponent, setTimeout, clearTimeout, console,
 // showToast, showConfirmModal, uiLocked, dmarcState, dmarcGet,
-// dmarcUpdateManageButton and loadDmarcDomains.
+// dmarcUpdateManageButton, loadDmarcDomains, responseError and uiErrorText.
 
 const REPORTS_DEFAULT_SORT = { by: 'created_at', dir: 'desc' };
 const reportsManagementState = { page: 1, limit: 50, request: 0, search: '', searchTimer: null, busyTimer: null, sort: { ...REPORTS_DEFAULT_SORT }, domains: [], allowDelete: false, domainsRequest: 0 };
@@ -1341,7 +1346,7 @@ async function loadReportsDomains() {
     }
     try {
         const response = await authenticatedFetch('/api/dmarc/reports/domains');
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        if (!response.ok) throw await responseError(response);
         const data = await response.json();
         if (request !== reportsManagementState.domainsRequest) return;
         reportsManagementState.domains = data.domains || [];
@@ -1351,7 +1356,7 @@ async function loadReportsDomains() {
     } catch (error) {
         if (request !== reportsManagementState.domainsRequest) return;
         console.error('Error loading reports by domain:', error);
-        content.innerHTML = `<div class="ui-empty"><p class="ui-text-fail">Failed to load the domains. Please try again.</p>
+        content.innerHTML = `<div class="ui-empty"><p class="ui-text-fail">Failed to load the domains: ${escapeHtml(uiErrorText(error))}</p>
             <button onclick="loadReportsDomains()" class="ui-btn ui-btn-sm">Retry</button></div>`;
     }
 }
@@ -1402,7 +1407,7 @@ async function deleteDomainReports(domain) {
             showToast('Report deletion is disabled', 'error');
             return;
         }
-        if (!response.ok && response.status !== 404) throw new Error(`HTTP ${response.status}`);
+        if (!response.ok && response.status !== 404) throw await responseError(response);
         if (response.ok) {
             const result = await response.json();
             showToast(`Deleted ${reportsCount(result.dmarc_reports, 'DMARC')} and ${reportsCount(result.tls_reports, 'TLS')} for ${domain}`, 'success');
@@ -1412,7 +1417,7 @@ async function deleteDomainReports(domain) {
         await refreshAfterReportDelete();
     } catch (error) {
         console.error('Error deleting the reports of a domain:', error);
-        showToast('Failed to delete the reports', 'error');
+        showToast(`Failed to delete the reports: ${uiErrorText(error)}`, 'error');
     }
 }
 
@@ -1449,7 +1454,7 @@ async function loadReportsManagementPage(page) {
         const sorted = sort.by === REPORTS_DEFAULT_SORT.by && sort.dir === REPORTS_DEFAULT_SORT.dir
             ? '' : `&sort_by=${encodeURIComponent(sort.by)}&sort_dir=${encodeURIComponent(sort.dir)}`;
         const response = await authenticatedFetch(`/api/dmarc/reports/all?page=${page}&limit=${limit}${search ? `&search=${encodeURIComponent(search)}` : ''}${sorted}`);
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        if (!response.ok) throw await responseError(response);
         const data = await response.json();
         if (request !== reportsManagementState.request) return;
         settled();
@@ -1460,7 +1465,7 @@ async function loadReportsManagementPage(page) {
         if (request !== reportsManagementState.request) return;
         settled();
         console.error('Error loading reports:', error);
-        content.innerHTML = `<div class="ui-empty"><p class="ui-text-fail">Failed to load reports. Please try again.</p>
+        content.innerHTML = `<div class="ui-empty"><p class="ui-text-fail">Failed to load reports: ${escapeHtml(uiErrorText(error))}</p>
             <button onclick="loadReportsManagementPage(${page})" class="ui-btn ui-btn-sm">Retry</button></div>`;
     }
 }
@@ -1540,7 +1545,7 @@ async function deleteReport(reportType, reportId, domain) {
         }
 
         if (!response.ok) {
-            throw new Error('Failed to delete report');
+            throw await responseError(response);
         }
 
         showToast(`${reportType.toUpperCase()} report deleted`, 'success');
@@ -1548,6 +1553,6 @@ async function deleteReport(reportType, reportId, domain) {
 
     } catch (error) {
         console.error('Error deleting report:', error);
-        showToast('Failed to delete report', 'error');
+        showToast(`Failed to delete report: ${uiErrorText(error)}`, 'error');
     }
 }

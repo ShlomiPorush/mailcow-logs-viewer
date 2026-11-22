@@ -1220,8 +1220,9 @@ const SETTINGS_RSPAMD_CONNECTION_KEYS = ['mailcow_url', 'mailcow_api_key_rw', 'r
 
 function settingsPlural(n, one, many) { return n === 1 ? one : many; }
 
-function settingsErrorText(body, fallback) {
-    return uiApiErrorText(body, fallback);
+// A failed request in words (uiHttpErrorText), as a sentence: some messages go on after it
+function settingsErrorText(res, body) {
+    return uiSentence(uiHttpErrorText(res.status, body));
 }
 
 async function settingsRspamdState() {
@@ -1333,7 +1334,7 @@ async function settingsRspamdAfterSave(plan, saved) {
         if (!res.ok) {
             return [(body.detail && body.detail.code === 'not_confirmed')
                 ? 'Sync with Rspamd is off. Check Rspamd to see whether its blocks were removed before trying again.'
-                : `Sync with Rspamd is off. The app could not remove its blocks in Rspamd.\n${settingsErrorText(body, res.statusText)}`, 'error'];
+                : `Sync with Rspamd is off. The app could not remove its blocks in Rspamd.\n${settingsErrorText(res, body)}`, 'error'];
         }
         return [`Sync with Rspamd is off. Removed ${body.removed_blocks} app ${settingsPlural(body.removed_blocks, 'block', 'blocks')} from Rspamd.`, 'success'];
     }
@@ -1342,7 +1343,7 @@ async function settingsRspamdAfterSave(plan, saved) {
         // What changed in mailcow comes in first, then the list's waiting changes are written
         const res = await authenticatedFetch('/api/suppressions/sync?after_change=true', { method: 'POST' });
         const body = await res.json().catch(() => ({}));
-        if (!res.ok) return [`Sync with Rspamd is on. Changes have not reached Rspamd yet.\n${settingsErrorText(body, res.statusText)}`, 'error'];
+        if (!res.ok) return [`Sync with Rspamd is on. Changes have not reached Rspamd yet.\n${settingsErrorText(res, body)}`, 'error'];
         const list = (body.list_added || body.list_removed)
             ? ` List updated from Rspamd: ${body.list_added || 0} added, ${body.list_removed || 0} deleted.` : '';
         if (body.written) return [`Sync with Rspamd is on. Rspamd updated: ${body.added} added, ${body.removed} removed.${list}`, 'success'];
@@ -1353,7 +1354,7 @@ async function settingsRspamdAfterSave(plan, saved) {
         const what = plan.feature_on ? 'Suppressions are on' : 'Sync with Rspamd is on';
         const res = await authenticatedFetch('/api/suppressions/rspamd/import', { method: 'POST' });
         const body = await res.json().catch(() => ({}));
-        if (!res.ok) return [`${what}. The app could not load its blocks from Rspamd yet.\n${settingsErrorText(body, res.statusText)}\nThe app will try again.`, 'error'];
+        if (!res.ok) return [`${what}. The app could not load its blocks from Rspamd yet.\n${settingsErrorText(res, body)}\nThe app will try again.`, 'error'];
         if (body.reason === 'no_password') return [`${what}. Add the Rspamd password in Settings > mailcow > Rspamd to load the blocks.`, 'error'];
         // The count belongs to this request only when it did the load
         if (!body.loaded) return [`${what}.`, 'success'];
@@ -2157,7 +2158,7 @@ async function loadSettings() {
         const settingsResponse = await authenticatedFetch('/api/settings/info');
 
         if (!settingsResponse.ok) {
-            throw new Error(`HTTP ${settingsResponse.status}`);
+            throw await responseError(settingsResponse);
         }
 
         const data = await settingsResponse.json();
@@ -2237,7 +2238,7 @@ async function loadSettings() {
         loading.innerHTML = `
             <div class="ui-empty">
                 <p class="ui-text-fail">Could not load settings. Reload this page to try again.</p>
-                <p>${escapeHtml(error.message)}</p>
+                <p>${escapeHtml(uiErrorText(error))}</p>
             </div>
         `;
     }
@@ -2848,11 +2849,11 @@ function renderSettings(content, data) {
                         const res = await authenticatedFetch('/api/suppressions/start-fresh', { method: 'POST' });
                         if (!res.ok) {
                             const body = await res.json().catch(() => ({}));
-                            showToast(`Sync with Rspamd is still off. ${settingsErrorText(body, res.statusText)}`, 'error');
+                            showToast(`Sync with Rspamd is still off. ${settingsErrorText(res, body)}`, 'error');
                             return;
                         }
                     } catch (freshErr) {
-                        showToast(`Sync with Rspamd is still off. Rspamd could not be reached: ${freshErr.message || freshErr}`, 'error');
+                        showToast(`Sync with Rspamd is still off: ${uiErrorText(freshErr)}`, 'error');
                         return;
                     }
                 }
@@ -2861,8 +2862,7 @@ function renderSettings(content, data) {
                     uiSaveBarBusy('settings-savebar', true);
                     const res = await authenticatedFetch('/api/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
                     if (!res.ok) {
-                        const err = await res.json().catch(() => ({}));
-                        throw new Error(uiApiErrorText(err, res.statusText));
+                        throw await responseError(res);
                     }
                     const saved = await res.json().catch(() => ({}));
                     // Saved: these values are the new start, so a reload asks nothing about them
@@ -2881,7 +2881,7 @@ function renderSettings(content, data) {
                     try {
                         rspamdToast = await settingsRspamdAfterSave(rspamdPlan, saved);
                     } catch (rspamdErr) {
-                        rspamdToast = [`Settings saved, but Rspamd could not be reached: ${rspamdErr.message || rspamdErr}`, 'error'];
+                        rspamdToast = [`Settings saved, but Rspamd could not be reached: ${uiErrorText(rspamdErr)}`, 'error'];
                     }
                     if (rspamdToast && !(checkToast && checkToast[1] === 'error')) checkToast = rspamdToast;
                     // The list of Suppressions (or a sync) turned off could not be deleted yet:
@@ -2926,9 +2926,9 @@ function renderSettings(content, data) {
                                         headers: { 'Content-Type': 'application/json' },
                                         body: JSON.stringify(body)
                                     });
-                                    if (!res.ok) failed = settingsErrorText(await res.json().catch(() => ({})), res.statusText);
+                                    if (!res.ok) failed = settingsErrorText(res, await uiReadJson(res));
                                 } catch (purgeErr) {
-                                    failed = purgeErr.message || String(purgeErr);
+                                    failed = uiErrorText(purgeErr);
                                 }
                                 if (feature === 'suppressions') {
                                     const toast = notOurs && rspamdPlan.action === 'remove' && !failed
@@ -2972,7 +2972,7 @@ function renderSettings(content, data) {
                     await loadSettings();
                 } catch (err) {
                     uiSaveBarBusy('settings-savebar', false);
-                    showToast('Could not save settings. Try again. Details: ' + (err.message || err), 'error');
+                    showToast('Could not save settings: ' + uiErrorText(err), 'error');
                 }
             };
         }
@@ -2982,14 +2982,14 @@ function renderSettings(content, data) {
                 try {
                     importBtn.disabled = true;
                     const res = await authenticatedFetch('/api/settings/import-from-env', { method: 'POST' });
-                    if (!res.ok) throw new Error(uiApiErrorText(await res.json().catch(() => ({})), res.statusText));
+                    if (!res.ok) throw await responseError(res);
                     const result = await res.json();
                     if (result.env_locked_keys) {
                         data.env_locked_keys = result.env_locked_keys;
                     }
                     await loadSettings();
                 } catch (err) {
-                    showToast('Could not migrate settings. Try again. Details: ' + (err.message || err), 'error');
+                    showToast('Could not migrate settings: ' + uiErrorText(err), 'error');
                 } finally {
                     importBtn.disabled = false;
                 }
@@ -3063,7 +3063,10 @@ async function showGeoIPSetupModal(reloadPage = false) {
         await loadSettings();
     });
     
+    // The step in progress: a request that fails shows its reason there
+    let stepNow = 1;
     const setStepStatus = (step, status, detail) => {
+        stepNow = step;
         const iconEl = document.getElementById(`geoip-step-${step}-icon`);
         const stepEl = document.getElementById(`geoip-step-${step}`);
         const detailEl = document.getElementById(`geoip-step-${step}-detail`);
@@ -3085,7 +3088,7 @@ async function showGeoIPSetupModal(reloadPage = false) {
     try {
         // ── Step 1: Verify credentials are configured ──
         const credRes = await authenticatedFetch('/api/settings/geoip/status');
-        if (!credRes.ok) throw new Error('Could not read GeoIP status. Check your connection and try again.');
+        if (!credRes.ok) throw await responseError(credRes);
         const credStatus = await credRes.json();
         
         if (credStatus.configured) {
@@ -3114,6 +3117,7 @@ async function showGeoIPSetupModal(reloadPage = false) {
         setStepStatus(2, 'running', 'Checking existing databases...');
         
         const statusRes = await authenticatedFetch('/api/settings/geoip/status');
+        if (!statusRes.ok) throw await responseError(statusRes);
         const geoipStatus = await statusRes.json();
         const cityAvail = geoipStatus.databases?.City?.available;
         const asnAvail = geoipStatus.databases?.ASN?.available;
@@ -3160,6 +3164,7 @@ async function showGeoIPSetupModal(reloadPage = false) {
         setStepStatus(3, 'running', 'Checking the databases...');
         
         const valRes = await authenticatedFetch('/api/settings/geoip/validate', { method: 'POST' });
+        if (!valRes.ok) throw await responseError(valRes);
         const valData = await valRes.json();
         
         if (valData.valid) {
@@ -3170,6 +3175,7 @@ async function showGeoIPSetupModal(reloadPage = false) {
         
     } catch (err) {
         console.error('GeoIP setup error:', err);
+        setStepStatus(stepNow, 'error', uiErrorText(err));
     }
     
     setupOver();
@@ -3196,7 +3202,9 @@ async function validateMaxMindLicense() {
 
     try {
         const response = await authenticatedFetch('/api/settings/maxmind/validate', { method: 'POST' });
-        const result = response.ok ? await response.json() : { configured: true, valid: false, error: 'Request failed' };
+        // A failed request: the tag stays short, the message says why
+        const result = response.ok ? await response.json()
+            : { configured: true, valid: false, error: 'Request failed', failure: uiHttpErrorText(response.status, await uiReadJson(response)) };
         
         // Cache the result so re-renders preserve it
         _cachedMaxMindStatus = result;
@@ -3210,7 +3218,7 @@ async function validateMaxMindLicense() {
         if (result.valid) {
             showToast('MaxMind license is valid', 'success');
         } else if (result.error) {
-            showToast('Could not validate the MaxMind license. Check your credentials. Details: ' + result.error, 'error');
+            showToast('Could not validate the MaxMind license: ' + (result.failure || result.error), 'error');
         }
     } catch (error) {
         console.error('Failed to validate MaxMind license:', error);
@@ -3219,7 +3227,7 @@ async function validateMaxMindLicense() {
             const el = document.getElementById(id);
             if (el) el.innerHTML = errorHtml;
         });
-        showToast('Could not validate the MaxMind license. Check your connection and try again.', 'error');
+        showToast('Could not validate the MaxMind license: ' + uiErrorText(error), 'error');
     }
 }
 
@@ -3251,8 +3259,8 @@ async function geoipDownloadRun({ onStarted, onTick, every = 2000, limit = 3 * 6
         res = null;
     }
     if (res && !res.ok) {
-        const body = await res.json().catch(() => ({}));
-        return { started: false, ok: false, error: (body && typeof body.detail === 'string' && body.detail) || 'Could not start the download. Check your MaxMind credentials and try again.' };
+        // The server's reason, or what its status means (a proxy's error page is not a credentials problem)
+        return { started: false, ok: false, error: uiHttpErrorText(res.status, await uiReadJson(res)) };
     }
     if (onStarted) onStarted();
     // Without the state before, only a run seen running counts
@@ -3314,7 +3322,7 @@ async function repairGeoIPDatabase() {
 
     } catch (error) {
         console.error('Failed to repair GeoIP databases:', error);
-        showToast('Could not repair the GeoIP databases. Check Status and try again. Details: ' + error.message, 'error');
+        showToast('Could not repair the GeoIP databases: ' + uiErrorText(error), 'error');
         if (statusEl) {
             statusEl.innerHTML = renderGeoIPDbStatus({ db_valid: false });
         }
@@ -3483,7 +3491,7 @@ async function testSmtpConnection() {
         });
 
         if (!response.ok) {
-            throw new Error(`HTTP ${response.status}`);
+            throw await responseError(response);
         }
 
         const result = await response.json();
@@ -3495,7 +3503,7 @@ async function testSmtpConnection() {
     } catch (error) {
         updateConnectionTestModal('error', [
             'Could not test SMTP. Check your connection and try again.',
-            `Error: ${error.message}`
+            `Error: ${uiErrorText(error)}`
         ], run);
     }
 }
@@ -3509,7 +3517,7 @@ async function testImapConnection() {
         });
 
         if (!response.ok) {
-            throw new Error(`HTTP ${response.status}`);
+            throw await responseError(response);
         }
 
         const result = await response.json();
@@ -3521,7 +3529,7 @@ async function testImapConnection() {
     } catch (error) {
         updateConnectionTestModal('error', [
             'Could not test IMAP. Check your connection and try again.',
-            `Error: ${error.message}`
+            `Error: ${uiErrorText(error)}`
         ], run);
     }
 }
@@ -3661,11 +3669,11 @@ async function settingsChooseFolders() {
     let failure = '';
     try {
         const res = await authenticatedFetch('/api/settings/imap/folders', { method: 'POST' });
-        const data = await res.json().catch(() => ({}));
+        const data = (await uiReadJson(res)) || {};
         if (res.ok) result = data;
-        else failure = settingsErrorText(data, '');
+        else failure = settingsErrorText(res, data);
     } catch (err) {
-        failure = '';
+        failure = uiErrorText(err);
     }
     if (run !== settingsFoldersRun || !body.isConnected) return;
     if (!result) {

@@ -11,6 +11,12 @@ assert.ok(start > 0 && end > start);
 // The time helpers the page formats dates with (the app's zone is UTC here)
 const utilsSource = fs.readFileSync(path.join(__dirname, '../../frontend/utils.js'), 'utf8');
 const zoneHelpers = utilsSource.slice(utilsSource.indexOf('function appTz()'), utilsSource.indexOf('function formatSeconds('));
+// The words a failure is shown with (utils.js) and responseError (app.js)
+const errorStart = utilsSource.indexOf('function uiApiErrorText(');
+const errorHelpers = utilsSource.slice(errorStart, utilsSource.indexOf('\n// ====', errorStart));
+const appSource = fs.readFileSync(path.join(__dirname, '../../frontend/app.js'), 'utf8');
+const responseErrorStart = appSource.indexOf('async function responseError(');
+const responseErrorSource = appSource.slice(responseErrorStart, appSource.indexOf('\n}\n', responseErrorStart) + 3);
 
 // What GET /api/dmarc/reports/domains answers in these tests
 const DOMAINS = [
@@ -53,6 +59,7 @@ function harness({ allowDelete = true, confirm = true } = {}) {
         userCan: () => true, uiMayAct: () => true,
     });
     vm.runInContext(zoneHelpers, context);
+    vm.runInContext(errorHelpers + responseErrorSource, context);
     vm.runInContext(source.slice(start, end), context);
     const run = expression => vm.runInContext(expression, context);
     function resolve(index, page = 1, status = 200, total = 101) {
