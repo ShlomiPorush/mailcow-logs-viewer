@@ -399,7 +399,7 @@ function renderRateLimitSendersTable(senders) {
         const resetButton = !group.last_rl_hash ? ''
             : canWrite ? `
                 <button data-acts="mailboxes" type="button"
-                    onclick="event.stopPropagation(); resetRateLimitCounter('${escapeJsArg(group.user)}', '${escapeJsArg(group.last_rl_hash)}')"
+                    onclick="event.stopPropagation(); resetRateLimitCounterOnce('${escapeJsArg(group.user)}', '${escapeJsArg(group.last_rl_hash)}', this)"
                     class="ui-btn ui-btn-sm ui-btn-primary">
                     Reset counter
                 </button>
@@ -484,7 +484,7 @@ function renderRateLimitSenderDetail(group) {
     const resetButton = !group.last_rl_hash ? ''
         : canWrite ? `
             <button data-acts="mailboxes" type="button"
-                onclick="resetRateLimitCounter('${escapeJsArg(group.user)}', '${escapeJsArg(group.last_rl_hash)}')"
+                onclick="resetRateLimitCounterOnce('${escapeJsArg(group.user)}', '${escapeJsArg(group.last_rl_hash)}', this)"
                 class="ui-btn ui-btn-sm ui-btn-primary">
                 Reset counter
             </button>
@@ -622,6 +622,9 @@ function renderRateLimitEventRow(event) {
 }
 
 
+function resetRateLimitCounterOnce(user, rlHash, button) {
+    return uiOnce(`rate-limit-reset:${user}`, () => resetRateLimitCounter(user, rlHash), button, 'Resetting...');
+}
 async function resetRateLimitCounter(user, rlHash) {
     if (!uiMayAct('mailboxes')) return;
     rateLimitsGen++;
@@ -862,7 +865,7 @@ function renderRateLimitBulkPanel() {
                 <select id="rate-limit-bulk-frame" onchange="setRateLimitBulkFrame(this.value)" class="ui-select ui-select-auto">
                     ${frames}
                 </select>
-                <button data-acts="mailboxes" type="button" data-rl-bulk-apply onclick="applyRateLimitBulk()" ${nothing ? 'disabled' : ''}
+                <button data-acts="mailboxes" type="button" data-rl-bulk-apply onclick="applyRateLimitBulkOnce(this)" ${nothing ? 'disabled' : ''}
                     class="${RATE_LIMIT_SAVE_BUTTON}">
                     Apply
                 </button>
@@ -944,6 +947,9 @@ function closeRateLimitBulkPanel() {
 }
 
 
+function applyRateLimitBulkOnce(button) {
+    return uiOnce('rate-limit-bulk', applyRateLimitBulk, button, 'Applying...');
+}
 async function applyRateLimitBulk() {
     if (!uiMayAct('mailboxes')) return;
     rateLimitsGen++;
@@ -1089,7 +1095,7 @@ function renderRateLimitEditForm(kind, name, value, frame) {
                     <select id="rate-limit-frame" class="ui-select ui-select-auto">
                         ${frames}
                     </select>
-                    <button type="button" onclick="saveRateLimit('${kind}', '${escapeJsArg(name)}')"
+                    <button type="button" onclick="saveRateLimitOnce('${kind}', '${escapeJsArg(name)}', this)"
                         class="${RATE_LIMIT_SAVE_BUTTON}">
                         Save
                     </button>
@@ -1119,6 +1125,10 @@ function closeRateLimitEdit() {
 }
 
 
+// One save at a time per mailbox or domain
+function saveRateLimitOnce(kind, name, button) {
+    return uiOnce(button || `rate-limit:${kind}:${name}`, () => saveRateLimit(kind, name), button, 'Saving...');
+}
 async function saveRateLimit(kind, name) {
     const valueInput = document.getElementById('rate-limit-value');
     const frameSelect = document.getElementById('rate-limit-frame');

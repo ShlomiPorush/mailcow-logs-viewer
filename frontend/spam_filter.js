@@ -749,7 +749,7 @@ function renderSuppressionItem(s) {
             <span class="ui-td ui-td-end ui-row-actions">
                 <button onclick="showBlockDetails(${Number(s.id)})" class="ui-btn ui-btn-sm">Block details</button>
                 <button onclick="showEditSuppressionModalById(${Number(s.id)})" class="ui-btn ui-btn-sm" title="Edit suppression" data-acts="outbound">Edit</button>
-                <button onclick="toggleSuppression(${Number(s.id)}, ${!s.active})" class="ui-btn ui-btn-sm" data-acts="outbound" title="${s.active ? 'Deactivate' : 'Reactivate'}">${s.active ? 'Disable' : 'Enable'}</button>
+                <button onclick="toggleSuppressionOnce(${Number(s.id)}, ${!s.active}, this)" class="ui-btn ui-btn-sm" data-acts="outbound" title="${s.active ? 'Deactivate' : 'Reactivate'}">${s.active ? 'Disable' : 'Enable'}</button>
                 <button onclick="deleteSuppression(${Number(s.id)}, '${escapeJsArg(s.email)}')" class="ui-btn ui-btn-sm ui-btn-danger" title="Delete permanently" data-acts="outbound">Delete</button>
             </span>
         </div>
@@ -931,7 +931,7 @@ function showAddSuppressionModal(prefillEmail, queueId, { notes = 'Added from qu
         </div>
     `, `
         <button onclick="uiCancelDialog('add-suppression-modal')" class="ui-btn">Cancel</button>
-        <button data-acts="outbound" onclick="createSuppression()" class="ui-btn ui-btn-primary">Add Suppression</button>
+        <button data-acts="outbound" onclick="createSuppressionOnce(this)" class="ui-btn ui-btn-primary">Add Suppression</button>
     `);
 
     // Pre-fill email if provided (e.g., from queue page)
@@ -976,6 +976,10 @@ function toggleCreateExpiryField() {
     }
 }
 
+// One add at a time: a double click would add it, then say it is already there
+function createSuppressionOnce(button) {
+    return uiOnce(button || 'suppression-add', createSuppression, button, 'Adding...');
+}
 async function createSuppression() {
     if (!uiMayAct('outbound')) return;
     let email = document.getElementById('new-suppression-email').value.trim();
@@ -1088,7 +1092,7 @@ function showEditSuppressionModal(s) {
         </div>
     `, `
         <button onclick="uiCancelDialog('edit-suppression-modal')" class="ui-btn">Cancel</button>
-        <button data-acts="outbound" onclick="saveEditSuppression(${Number(s.id)})" class="ui-btn ui-btn-primary">Save Changes</button>
+        <button data-acts="outbound" onclick="saveEditSuppressionOnce(${Number(s.id)}, this)" class="ui-btn ui-btn-primary">Save Changes</button>
     `);
     uiGuardDialog(document.getElementById('edit-suppression-modal'));
 }
@@ -1115,6 +1119,9 @@ function extendExpiryBy(days) {
     input.value = toZonedInputValue(addDaysInZone(base, days));
 }
 
+function saveEditSuppressionOnce(id, button) {
+    return uiOnce(button || `suppression-edit:${id}`, () => saveEditSuppression(id), button, 'Saving...');
+}
 async function saveEditSuppression(id) {
     if (!uiMayAct('outbound')) return;
     const notes = document.getElementById('edit-suppression-notes')?.value.trim() || null;
@@ -1155,6 +1162,10 @@ async function saveEditSuppression(id) {
     }
 }
 
+// A double click does not switch it back
+function toggleSuppressionOnce(id, newActive, button) {
+    return uiOnce(`suppression-toggle:${id}`, () => toggleSuppression(id, newActive), button);
+}
 async function toggleSuppression(id, newActive) {
     if (!uiMayAct('outbound')) return;
     try {

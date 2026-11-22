@@ -527,7 +527,7 @@ function usersDefaultPanel() {
             <p class="ui-set-desc">Sets access for ${escapeHtml(usersProvider())} users who are not listed above. Add a user by email to give them different access.</p>
             <div class="ui-sec-mode">
                 <div class="ui-seg" role="group" aria-labelledby="users-default-h">
-                    ${['admin', 'operator', 'viewer', 'none'].map(level => `<button data-acts="admin" type="button" aria-pressed="${value === level}" onclick="setUsersDefault('${level}')">${USERS_ACCESS_LABELS[level]}</button>`).join('')}
+                    ${['admin', 'operator', 'viewer', 'none'].map(level => `<button data-acts="admin" type="button" aria-pressed="${value === level}" onclick="setUsersDefaultOnce('${level}', this)">${USERS_ACCESS_LABELS[level]}</button>`).join('')}
                 </div>
                 <span class="ui-muted">${note}</span>
             </div>
@@ -578,6 +578,10 @@ function usersPanelHtml() {
         ${usersDefaultPanel()}`;
 }
 
+// One change at a time: a second press would send the same version and be told "changed meanwhile"
+function setUsersDefaultOnce(value, button) {
+    return uiOnce('users-default', () => setUsersDefault(value), button);
+}
 async function setUsersDefault(value) {
     if (!uiMayAct('admin')) return;
     const oauth2 = usersData && usersData.oauth2;
@@ -678,7 +682,7 @@ function editUser(userId) {
         // The version of the user this dialog shows: a save after a change made meanwhile is refused
         dataset: { version: user ? String(user.row_version) : '' },
         bodyClass: 'ui-form ui-agent-edit',
-        form: { id: 'user-edit-form', onsubmit: `saveUser(event, ${user ? Number(user.id) : 'null'})` },
+        form: { id: 'user-edit-form', onsubmit: `saveUserOnce(event, ${user ? Number(user.id) : 'null'})` },
         body: `
             <div>
                 <label class="ui-sec-inline"><input type="checkbox" class="ui-check" id="user-edit-disabled" ${user && user.disabled ? 'checked' : ''}> Disable sign-in</label>
@@ -754,6 +758,12 @@ function closeUserEditModal(saved = false) {
     } else uiCloseGuarded(modal, close);
 }
 
+// One save at a time: a second press would answer "changed meanwhile" to the first
+function saveUserOnce(event, userId) {
+    event.preventDefault();
+    const button = event.submitter || document.getElementById('user-edit-save');
+    return uiOnce(button || 'user-save', () => saveUser(event, userId), button, 'Saving...');
+}
 async function saveUser(event, userId) {
     event.preventDefault();
     if (!uiMayAct('admin')) return;

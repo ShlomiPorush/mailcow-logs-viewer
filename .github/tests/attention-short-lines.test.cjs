@@ -73,7 +73,7 @@ test('an alert that opens its page shows its stored line, its Open button and Di
             assert.match(html, new RegExp(`<p>${line.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}</p>`), type);
             assert.match(html, new RegExp(`onclick="openStoredAlert\\(7, '${where === 'bell' ? 'bell' : 'page'}'\\)" class="ui-btn ui-btn-sm">${open}</button>`), type);
             assert.doesNotMatch(html, /Show activity|openAlertActivity/, type);
-            assert.match(html, new RegExp(`onclick="acknowledgeSecurityAlert\\(7\\)"[^>]*data-acts="alerts ${area}"`), type);
+            assert.match(html, new RegExp(`onclick="acknowledgeSecurityAlertOnce\\(7, this\\)"[^>]*data-acts="alerts ${area}"`), type);
             assert.ok(!/[\u2010-\u2015\u2212]/.test(line + title + open), `${type}: no dash characters`);
         }
     }

@@ -310,6 +310,33 @@ function uiSaveBarUpdate(id, count) {
     if (label) label.textContent = `${count} unsaved change${count === 1 ? '' : 's'}`;
 }
 
+// One press, one action: a second press while the first is still on its way (a
+// double click, a held Enter) does nothing, so nothing is created twice and a
+// switch is not flipped back. The button, when given, shows it: off, saying
+// busyText, and with its own content back after.
+const uiActionsRunning = new Set();
+async function uiOnce(key, work, button = null, busyText = '') {
+    if (uiActionsRunning.has(key)) return undefined;
+    uiActionsRunning.add(key);
+    const kept = button ? [...button.childNodes] : null;
+    const wasDisabled = button ? button.disabled : false;
+    if (button) {
+        button.disabled = true;
+        button.setAttribute('aria-busy', 'true');
+        if (busyText) button.textContent = busyText;
+    }
+    try {
+        return await work();
+    } finally {
+        uiActionsRunning.delete(key);
+        if (button) {
+            button.replaceChildren(...kept);
+            button.disabled = wasDisabled;
+            button.removeAttribute('aria-busy');
+        }
+    }
+}
+
 // While saving: both buttons off and Save says so
 function uiSaveBarBusy(id, busy) {
     const bar = document.getElementById(id);

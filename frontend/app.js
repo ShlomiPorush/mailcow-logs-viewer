@@ -2086,6 +2086,8 @@ function fail2banBare(entry) {
 
 async function unbanIP(ip, btnEl) {
     if (!uiMayAct('security')) return;
+    // The button gets its own words back after a failure (Unban, or a card's own)
+    const label = btnEl ? btnEl.textContent : '';
     const ipWithMask = fail2banEntry(ip);
     if (!await showConfirmModal({ title: 'Unban IP', message: 'Unban ' + ip + '? If it is part of a network ban, the whole network is unbanned.', confirmText: 'Unban', focusCancel: true })) return;
     try {
@@ -2114,14 +2116,14 @@ async function unbanIP(ip, btnEl) {
             showToast('Could not unban the IP: ' + actionErrorText(res, result), 'error');
             if (btnEl) {
                 btnEl.disabled = false;
-                btnEl.textContent = 'Unban';
+                btnEl.textContent = label;
             }
         }
     } catch (err) {
         showToast('Could not unban the IP: ' + uiErrorText(err), 'error');
         if (btnEl) {
             btnEl.disabled = false;
-            btnEl.textContent = 'Unban';
+            btnEl.textContent = label;
         }
     }
 }
@@ -2177,6 +2179,8 @@ async function unbanAllFail2ban(btnEl) {
 
 async function banIP(ip, btnEl) {
     if (!uiMayAct('security')) return;
+    // The button gets its own words back after a failure (Add, Ban permanently, a card's own)
+    const label = btnEl ? btnEl.textContent : '';
     const ipWithMask = fail2banEntry(ip);
     if (!await showConfirmModal({ title: 'Ban IP', message: `Add ${ipWithMask} to the Fail2ban denylist? It stays banned until removed.`, confirmText: 'Ban', isDangerous: true, focusCancel: true })) return;
 
@@ -2206,20 +2210,22 @@ async function banIP(ip, btnEl) {
             showToast('Could not ban the IP: ' + actionErrorText(response, result), 'error');
             if (btnEl) {
                 btnEl.disabled = false;
-                btnEl.textContent = 'Ban';
+                btnEl.textContent = label;
             }
         }
     } catch (err) {
         showToast('Could not ban the IP: ' + uiErrorText(err), 'error');
         if (btnEl) {
             btnEl.disabled = false;
-            btnEl.textContent = 'Ban';
+            btnEl.textContent = label;
         }
     }
 }
 
 async function allowIP(ip, btnEl) {
     if (!uiMayAct('security')) return;
+    // The button gets its own words back after a failure (Add, Allow, a card's own)
+    const label = btnEl ? btnEl.textContent : '';
     const ipWithMask = fail2banEntry(ip);
     if (!await showConfirmModal({ title: 'Allow IP', message: `Add ${ipWithMask} to the Fail2ban allowlist? It is exempt from bans unless also on the denylist.`, confirmText: 'Allow', focusCancel: true })) return;
     if (btnEl) {
@@ -2246,7 +2252,7 @@ async function allowIP(ip, btnEl) {
     }
     if (btnEl) {
         btnEl.disabled = false;
-        btnEl.textContent = 'Allow';
+        btnEl.textContent = label;
     }
 }
 
@@ -2812,7 +2818,7 @@ function attentionAlertRows(where) {
                 </div>
                 <div class="ui-alert-acts">
                     ${button}
-                    <button type="button" onclick="acknowledgeSecurityAlert(${id})" class="ui-btn ui-btn-sm" title="Dismiss" data-acts="alerts ${alertArea(a)}">Dismiss</button>
+                    <button type="button" onclick="acknowledgeSecurityAlertOnce(${id}, this)" class="ui-btn ui-btn-sm" title="Dismiss" data-acts="alerts ${alertArea(a)}">Dismiss</button>
                 </div>
             </div>`;
     }).join('');
@@ -3171,7 +3177,7 @@ function attnWindowOpen(bell) {
     attnWindow = null;
     const phone = window.matchMedia('(max-width: 760px)').matches;
     const head = `<h2 id="attn-win-title" class="ui-attn-win-title">Needs attention <span id="attn-win-count" class="ui-count"></span></h2>
-        <button type="button" id="attn-win-dismiss-all" class="ui-btn ui-btn-sm is-off" onclick="acknowledgeAllSecurityAlerts()" data-acts="alerts"></button>`;
+        <button type="button" id="attn-win-dismiss-all" class="ui-btn ui-btn-sm is-off" onclick="acknowledgeAllSecurityAlertsOnce(this)" data-acts="alerts"></button>`;
     const list = `<div id="attn-win-checks"></div><div id="attn-win-alerts" class="hidden"></div><p id="attn-win-state" class="ui-dash-clear hidden"></p>`;
     const foot = `<div class="ui-attn-win-foot"><button type="button" class="ui-link-row ui-attn-win-go" onclick="attnBellGo(['dashboard'])">Open the Dashboard</button></div>`;
     uiLayerOpener(bell);
@@ -3737,6 +3743,10 @@ function openMailFlowHourMessages() {
 
 // Dismissing acts at once; the answer's receipt lets Undo re-open exactly what it
 // changed, for 10 seconds (longer while the pointer or the focus is on the toast)
+// A double click does not dismiss it twice (the second would find it gone)
+function acknowledgeSecurityAlertOnce(alertId, button) {
+    return uiOnce(`alert-ack:${alertId}`, () => acknowledgeSecurityAlert(alertId), button, 'Dismissing...');
+}
 async function acknowledgeSecurityAlert(alertId) {
     if (!uiMayAct('alerts')) return;
     const alert =dashboardAlerts.get(Number(alertId)) || (typeof alertActivity !== 'undefined' && alertActivity && Number(alertActivity.alert.id) === Number(alertId) ? alertActivity.alert : null);
@@ -3757,6 +3767,9 @@ async function acknowledgeSecurityAlert(alertId) {
     }
 }
 
+function acknowledgeAllSecurityAlertsOnce(button) {
+    return uiOnce('alert-ack-all', acknowledgeAllSecurityAlerts, button, 'Dismissing...');
+}
 async function acknowledgeAllSecurityAlerts() {
     if (!uiMayAct('alerts')) return;
     const ids = dashboardWritableAlertIds.slice();
@@ -5054,7 +5067,7 @@ async function loadQuarantineRules({ quiet = false } = {}) {
                 </div>
                 <span class="ui-td ui-td-end ui-row-actions">
                     ${repair ? `<button onclick="repairQuarantineRule(${Number(rule.id)})" title="${escapeHtml(`Look for "${repair.text}" instead`)}" class="ui-btn ui-btn-sm" data-acts="quarantine">Repair</button>` : ''}
-                    <button onclick="toggleQuarantineRule(${Number(rule.id)})" title="${rule.enabled ? 'Click to disable this rule' : 'Click to enable this rule'}"
+                    <button onclick="toggleQuarantineRuleOnce(${Number(rule.id)}, this)" title="${rule.enabled ? 'Click to disable this rule' : 'Click to enable this rule'}"
                         class="ui-btn ui-btn-sm${rule.enabled ? ' ui-btn-on' : ''}" data-acts="quarantine">${rule.enabled ? 'Enabled' : 'Disabled'}</button>
                     <button onclick="showEditQuarantineRuleModal(${Number(rule.id)})" title="Edit" class="ui-btn ui-btn-sm" data-acts="quarantine">Edit</button>
                     <button onclick="deleteQuarantineRule(${Number(rule.id)}, '${escapeJsArg(rule.name)}')" title="Delete" class="ui-btn ui-btn-sm ui-btn-danger" data-acts="quarantine">Delete</button>
@@ -5183,7 +5196,7 @@ function _showQuarantineRuleModal(rule, prefill) {
     uiDialog({
         id: 'quarantine-rule-modal-overlay', title, size: 'sm', close: closeQuarantineRuleModal, bodyClass: 'ui-form', body,
         foot: `<button onclick="closeQuarantineRuleModal()" class="ui-btn">Cancel</button>
-            <button onclick="saveQuarantineRule(${isEdit ? Number(rule.id) : 'null'})" class="ui-btn ui-btn-primary">${isEdit ? 'Save Changes' : 'Create Rule'}</button>`,
+            <button onclick="saveQuarantineRuleOnce(${isEdit ? Number(rule.id) : 'null'}, this)" class="ui-btn ui-btn-primary">${isEdit ? 'Save Changes' : 'Create Rule'}</button>`,
     });
     updateQRuleMatchHelp();
     uiGuardDialog(document.getElementById('quarantine-rule-modal-overlay'));
@@ -5224,6 +5237,10 @@ function closeQuarantineRuleModal(saved = false) {
     } else uiCloseGuarded(overlay, () => overlay.remove());
 }
 
+// One save at a time: a double click does not create the rule twice
+function saveQuarantineRuleOnce(ruleId, button) {
+    return uiOnce(button || 'quarantine-rule', () => saveQuarantineRule(ruleId), button, ruleId === null ? 'Creating...' : 'Saving...');
+}
 async function saveQuarantineRule(ruleId) {
     const name = document.getElementById('qrule-name')?.value?.trim();
     const matchType = document.getElementById('qrule-match-type')?.value;
@@ -5299,6 +5316,10 @@ async function deleteQuarantineRule(ruleId, ruleName) {
     }
 }
 
+// A double click does not switch the rule back
+function toggleQuarantineRuleOnce(ruleId, button) {
+    return uiOnce(`quarantine-rule-toggle:${ruleId}`, () => toggleQuarantineRule(ruleId), button);
+}
 async function toggleQuarantineRule(ruleId) {
     if (!uiMayAct('quarantine')) return;
     try {
@@ -5313,6 +5334,9 @@ async function toggleQuarantineRule(ruleId) {
     }
 }
 
+function testQuarantineRulesOnce(button) {
+    return uiOnce('quarantine-rules-test', testQuarantineRules, button, 'Testing...');
+}
 async function testQuarantineRules() {
     const opener = layerLastAction || document.activeElement;
     try {

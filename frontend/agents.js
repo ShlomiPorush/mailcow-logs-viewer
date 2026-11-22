@@ -235,7 +235,7 @@ function editAgentAccess(grantId) {
         // reloaded meanwhile must not pass for an edit of the newer access
         dataset: { version: agent.version || '' },
         bodyClass: 'ui-form ui-agent-edit',
-        form: { id: 'agent-edit-form', onsubmit: `saveAgentAccess(event, ${Number(agent.id)})` },
+        form: { id: 'agent-edit-form', onsubmit: `saveAgentAccessOnce(event, ${Number(agent.id)})` },
         body: `
                 <p class="ui-set-desc">Changes to <b>${escapeHtml(agent.name)}</b> apply from its next request.</p>
                 <div class="ui-consent-areas" role="group" aria-label="What it may do">
@@ -272,6 +272,11 @@ function closeAgentEditModal(saved = false) {
     } else uiCloseGuarded(modal, close);
 }
 
+// One save at a time: a second press would answer "changed meanwhile" to the first
+function saveAgentAccessOnce(event, grantId) {
+    event.preventDefault();
+    return uiOnce(event.submitter || 'agent-access', () => saveAgentAccess(event, grantId), event.submitter, 'Saving...');
+}
 async function saveAgentAccess(event, grantId) {
     event.preventDefault();
 

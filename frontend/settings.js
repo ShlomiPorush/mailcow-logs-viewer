@@ -2768,8 +2768,12 @@ function renderSettings(content, data) {
         if (form) {
             // The fields are checked here, so a problem is named under its field (not in a browser bubble)
             form.noValidate = true;
-            form.onsubmit = async (e) => {
+            // One save at a time: a second press while the first still asks or saves does nothing
+            form.onsubmit = (e) => {
                 e.preventDefault();
+                return uiOnce('settings-save', () => settingsSubmit());
+            };
+            const settingsSubmit = async () => {
                 if (!settingsCheckFields(form, initialValues, fieldValue)) return;
                 const payload = {};
                 const sensitiveKeys = SETTINGS_SENSITIVE_KEYS;
