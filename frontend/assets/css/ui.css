@@ -343,6 +343,8 @@
 /* A touch swipe of the row dismisses it too (utils.js uiSwipeDown); up and down stay scrolling */
 .ui-alert[data-swipe] { touch-action: pan-y; }
 .ui-alert-text p { margin: 3px 0 0; font-size: var(--ui-fs-sm); overflow-wrap: anywhere; }
+/* A long address in a title (a mailbox, a domain) breaks instead of running into the X or the button */
+.ui-alert-title b { overflow-wrap: anywhere; }
 
 /* Filter panels */
 .ui-filters { display: grid; gap: 10px; padding: 12px; overflow: visible; }
@@ -1537,13 +1539,11 @@ body { font-family: var(--ui-font); background: var(--ui-bg); color: var(--ui-in
 :is(#dashboard-attention-panel, .ui-attn-win, #attn-sheet) .ui-alert:has(> .ui-alert-x) { grid-template-columns: minmax(0, 1fr) auto; column-gap: 8px; }
 :is(#dashboard-attention-panel, .ui-attn-win, #attn-sheet) .ui-alert:has(> .ui-alert-x) > :not(.ui-alert-x) { grid-column: 1; }
 :is(#dashboard-attention-panel, .ui-attn-win, #attn-sheet) .ui-alert > .ui-alert-x { grid-column: 2; grid-row: 1; }
-/* Wider than a phone, the Dashboard's alerts put the X and the button in one column at the row's end,
-   the X on top: every button in Needs attention ends at the same edge, with an X or without */
+/* Wider than a phone, the Dashboard's alerts put the X just before the button, both centered in the
+   row: every button in Needs attention ends at the same edge, with an X or without, and an X with no
+   button sits at that edge */
 @media screen and (min-width: 761px) {
-    #dashboard-attention-panel .ui-alert:has(> .ui-alert-x) { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 14px; row-gap: 6px; }
-    #dashboard-attention-panel .ui-alert:has(> .ui-alert-x) > .ui-alert-text { grid-column: 1; grid-row: 1 / span 2; }
-    #dashboard-attention-panel .ui-alert:has(> .ui-alert-x) > .ui-alert-x { grid-column: 2; grid-row: 1; justify-self: end; }
-    #dashboard-attention-panel .ui-alert:has(> .ui-alert-x) > .ui-alert-acts { grid-column: 2; grid-row: 2; justify-self: end; align-self: center; }
+    #dashboard-attention-panel .ui-alert > .ui-alert-x { align-self: center; margin-block: 0; }
 }
 #attn-sheet .ui-sheet-head { justify-content: flex-start; }
 #attn-sheet .ui-sheet-head .ui-sheet-x { margin-inline-start: 4px; }

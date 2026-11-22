@@ -2817,8 +2817,9 @@ function attentionAlertRows(where) {
         const button = label ? `<button type="button" onclick="openStoredAlert(${id}, '${place}')" class="ui-btn ui-btn-sm">${escapeHtml(label)}</button>`
             : activity ? `<button type="button" onclick="${first} openAlertActivity(${id})" class="ui-btn ui-btn-sm" title="What happened before and around this alert">Show activity</button>` : '';
         // The bell keeps its rows short: no buttons under them (the row click and the
-        // Dashboard still open the alert). The X in the row's top corner dismisses it, and
-        // so does a swipe on a touch screen (data-swipe, utils.js uiSwipeDown)
+        // Dashboard still open the alert). The X just before the row's button dismisses it
+        // (in the bell and on a phone, beside the title), and so does a swipe on a touch
+        // screen (data-swipe, utils.js uiSwipeDown)
         return `
             <div class="ui-alert${action ? ' ui-alert-go' : ''} ${critical ? 'ui-alert-fail' : 'ui-alert-warn'}" data-key="alert-${id}" data-swipe${action ? ` onclick="if (uiAlertRowClick(event)) { ${action} }"` : ''}>
                 <div class="ui-alert-text">
@@ -2829,8 +2830,8 @@ function attentionAlertRows(where) {
                     <p>${escapeHtml(attentionAlertLine(a))}</p>
                     <p class="ui-muted">${escapeHtml(formatTime(a.created_at))}</p>
                 </div>
-                ${button && where !== 'bell' ? `<div class="ui-alert-acts">${button}</div>` : ''}
                 <button type="button" onclick="acknowledgeSecurityAlertOnce(${id}, this)" class="ui-icon-btn ui-icon-btn-sm ui-alert-x" title="Dismiss alert" aria-label="Dismiss alert" data-acts="alerts ${alertArea(a)}">${UI_CLOSE_ICON}</button>
+                ${button && where !== 'bell' ? `<div class="ui-alert-acts">${button}</div>` : ''}
             </div>`;
     }).join('');
 }
