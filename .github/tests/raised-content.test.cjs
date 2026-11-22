@@ -10,8 +10,17 @@ const { test } = require('node:test');
 
 const css = fs.readFileSync(path.join(__dirname, '../../frontend/assets/css/ui.css'), 'utf8');
 
+// The panel's block: the one with the page tone on the body (other blocks share the query)
+const PANEL = 'body, .ui-sidenav { background: var(--ui-page); }';
+
+function panelStart(query) {
+    const marker = css.indexOf(PANEL);
+    assert.ok(marker >= 0, 'no panel rules');
+    return css.lastIndexOf(`@media ${query} {`, marker);
+}
+
 function block(query) {
-    const at = css.indexOf(`@media ${query} {`);
+    const at = panelStart(query);
     assert.ok(at >= 0, `no @media ${query} block`);
     let depth = 0;
     for (let i = css.indexOf('{', at); i < css.length; i++) {
@@ -44,7 +53,7 @@ test('only screens wider than a phone get the panel, from the existing tokens', 
 });
 
 test('the panel block comes after the rules it overrides', () => {
-    const at = css.indexOf('@media screen and (min-width: 761px) {');
+    const at = panelStart('screen and (min-width: 761px)');
     assert.ok(at > css.indexOf('html.ui-has-topbar .ui-topbar { grid-area: top;'));
     assert.ok(at > css.lastIndexOf('.ui-main { display: flex;'));
     assert.ok(at > css.indexOf('.ui-gs-box { display: flex;'));
