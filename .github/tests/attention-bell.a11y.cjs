@@ -259,8 +259,8 @@ test('Show activity from the window closes it, and the activity window gives the
         dlg.innerHTML = `<div role="dialog" aria-label="Activity ${id}"><button type="button" aria-label="Close" onclick="document.getElementById('activity').remove()">x</button></div>`;
         w.document.body.appendChild(dlg);
     };
-    const show = [...w.document.querySelectorAll('#attn-win-alerts button')].find(b => b.textContent === 'Show activity');
-    show.focus();
+    // The window has no Show activity button: a click on the alert's row opens its activity
+    const show = w.document.querySelector('#attn-win-alerts .ui-alert-go[onclick*="openAlertActivity("]');
     show.click();
     await settle(w);
     assert.equal(w.document.getElementById('attn-window'), null);
@@ -280,7 +280,7 @@ test('Undo with the window open puts the keyboard on the alert back in the windo
     w.answers['/api/security-alerts'] = { alerts: [alert(1), alert(2)], unacknowledged_count: 2, unacknowledged_critical: 0, unacknowledged_ids: [1, 2] };
     await w.undoAlertDismissal('r1', 'Undo');
     const focused = w.document.activeElement;
-    assert.equal(focused.textContent, 'Dismiss');
+    assert.equal(focused.getAttribute('aria-label'), 'Dismiss alert');
     assert.ok(focused.closest('#attn-win-alerts [data-key="alert-1"]'));
 });
 
@@ -396,7 +396,7 @@ test('Dismiss and Undo ask for Take action in the area of the alert, in the wind
         w.document.getElementById('ui-bell').click();
         await settle(w);
         for (const where of ['#attn-win-alerts', '#dashboard-security-alerts']) {
-            const dismiss = id => [...w.document.querySelectorAll(`${where} [data-key="alert-${id}"] button`)].find(b => b.textContent === 'Dismiss');
+            const dismiss = id => w.document.querySelector(`${where} [data-key="alert-${id}"] button[aria-label="Dismiss alert"]`);
             assert.equal(dismiss(mine).dataset.acts, `alerts ${area}`, where);
             assert.notEqual(dismiss(other).dataset.acts, `alerts ${area}`, where);
         }
@@ -455,7 +455,8 @@ test('Open on an alert moves to its page and then shows its place; from the wind
         function showDmarcSyncHistory() { opened.push('history'); }
         var securityCountry = 'DE', securityNetwork = 'Example Net', securityTab = 'settings';
         function setSecurityFilter(key) { opened.push('security:' + key); }`);
-    const openButton = (id, label) => [...w.document.querySelectorAll(`#attn-win-alerts [data-key="alert-${id}"] button`)].find(b => b.textContent === label);
+    // The window has no buttons under its rows: a click on the row opens the alert
+    const openRow = id => w.document.querySelector(`#attn-win-alerts [data-key="alert-${id}"][onclick*="openStoredAlert(${id}, 'bell')"]`);
     w.document.getElementById('ui-bell').click();
     await settle(w);
     // Unsaved changes, and the answer is Stay: the window stays and nothing opens
@@ -465,7 +466,7 @@ test('Open on an alert moves to its page and then shows its place; from the wind
     assert.ok(w.document.getElementById('attn-window'));
     assert.equal(w.eval('JSON.stringify(opened)'), '[]');
     w.uiUnsavedCount = () => 0;
-    assert.ok(openButton(6, 'Open fetch history'));
+    assert.ok(openRow(6));
     await w.openStoredAlert(6, 'bell');
     await settle(w);
     assert.equal(w.document.getElementById('attn-window'), null);
@@ -474,7 +475,7 @@ test('Open on an alert moves to its page and then shows its place; from the wind
     // The domain: its details open in the list, whatever the filters showed
     w.document.getElementById('ui-bell').click();
     await settle(w);
-    assert.ok(openButton(5, 'Open domain'));
+    assert.ok(openRow(5));
     await w.openStoredAlert(5, 'bell');
     await settle(w);
     assert.equal(w.document.getElementById('attn-window'), null);

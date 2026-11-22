@@ -45,7 +45,7 @@ test('no frontend file draws or styles the bar', () => {
     for (const file of files) assert.doesNotMatch(fs.readFileSync(file, 'utf8'), /ui-alert-bar/, path.relative(frontend, file));
 });
 
-test('stored alerts keep their severity tag and Dismiss', () => {
+test('stored alerts keep their severity tag and their X', () => {
     const c = load();
     vm.runInContext(`attention.alerts.list = ${JSON.stringify([
         { id: 1, alert_type: 'auth_failure_burst', severity: 'warning', title: 'Sign-in burst', detail: 'x', created_at: '2026-11-10T10:00:00Z' },
@@ -59,14 +59,15 @@ test('stored alerts keep their severity tag and Dismiss', () => {
     }
 });
 
-test('checks (such as a new version) keep their action', () => {
+test('checks (such as a new version) keep their action on the Dashboard', () => {
     const c = load();
     vm.runInContext(`attention.checks.items.appVersion = [{ tone: 'info', title: 'Version 9.9.9 is available', detail: 'Read what changed.',
         action: 'Read changes', onclick: 'showChangelog()' }]`, c);
     for (const where of ['dashboard', 'bell']) {
         const html = c.attentionCheckRows(where);
         assert.match(html, /class="ui-alert ui-alert-info/, where);
-        assert.match(html, />Read changes<\/button>/, where);
+        // The bell has no buttons under its rows; the Dashboard keeps the action
+        if (where === 'dashboard') assert.match(html, />Read changes<\/button>/, where);
     }
 });
 
