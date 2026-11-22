@@ -3153,6 +3153,11 @@ async function showGeoIPSetupModal(reloadPage = false) {
             if (downloadComplete === true) {
                 setStepStatus(2, 'success', 'Download job finished');
             } else {
+                // The bar ends in the state color meters use (app.js mailbox storage):
+                // red for a failed download, amber for one that did not finish in time
+                progressBar.classList.remove('ui-meter-info');
+                progressBar.classList.add(run.ok === null ? 'ui-warn' : 'ui-fail');
+                progressFill.style.width = '100%';
                 const errMsg = typeof downloadComplete === 'string' ? downloadComplete : 'The download did not finish in time. Check Status for progress.';
                 // Check if it's a credentials error
                 const isCredError = errMsg.toLowerCase().includes('401') || errMsg.toLowerCase().includes('unauthorized') || errMsg.toLowerCase().includes('invalid');
