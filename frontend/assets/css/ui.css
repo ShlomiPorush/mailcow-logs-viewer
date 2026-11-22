@@ -3527,3 +3527,11 @@ button.ui-aa-col:focus-visible { outline: 2px solid var(--ui-focus); outline-off
         line-height: 1.15; text-align: center; overflow-wrap: anywhere; }
     .ui-sidenav .ui-nav-item.has-sub::after { display: none; }
 }
+
+/* Loading: a load that ends at once shows no spinner (no flash), and one that takes
+   long says so. Only the spinner and its words wait; an error put in their place does not */
+@keyframes ui-appear { from { opacity: 0; } to { opacity: 1; } }
+.ui-loading > p { animation: ui-appear .15s ease-out .3s both; }
+/* The spinner keeps turning (its own spin, index.html) while it fades in */
+.ui-loading > .loading { animation: ui-appear .15s ease-out .3s both, spin 1s linear infinite; }
+.ui-loading:has(> .loading)::after { content: "This is taking longer than usual."; animation: ui-appear .3s ease-out 8s both; }

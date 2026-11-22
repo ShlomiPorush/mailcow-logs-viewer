@@ -158,7 +158,7 @@ test('a check that cannot run says so, keeps what it showed, and a container cou
     const w = page({ '/api/blacklist/summary': 'fail', '/api/status/summary': { containers: { running: 17, stopped: 1, total: 18 }, containers_known: true } });
     await loadAll(w);
     const note = w.document.getElementById('dashboard-attention-clear');
-    assert.match(note.textContent, /Some checks could not run\. Retry/);
+    assert.match(note.textContent, /Some checks could not run\. Try again/);
     assert.match(w.document.getElementById('dashboard-attention').innerHTML, /A mailcow container is stopped/);
     // Next time mailcow does not answer: zeros that must not drop the stopped container
     w.answers['/api/status/summary'] = { containers: { running: 0, stopped: 0, total: 0 }, containers_known: false };

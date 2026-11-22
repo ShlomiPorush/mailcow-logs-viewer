@@ -66,7 +66,7 @@ async function loadRateLimits() {
         return;
     }
 
-    loading.classList.remove('hidden');
+    uiLoadingShow(loading);
     content.classList.add('hidden');
     rateLimitsGen++;
     rateLimitEditing = null;

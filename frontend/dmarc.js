@@ -1357,7 +1357,7 @@ async function loadReportsDomains() {
         if (request !== reportsManagementState.domainsRequest) return;
         console.error('Error loading reports by domain:', error);
         content.innerHTML = `<div class="ui-empty"><p class="ui-text-fail">Failed to load the domains: ${escapeHtml(uiErrorText(error))}</p>
-            <button onclick="loadReportsDomains()" class="ui-btn ui-btn-sm">Retry</button></div>`;
+            <button type="button" onclick="loadReportsDomains()" class="ui-btn ui-btn-sm">Try again</button></div>`;
     }
 }
 
@@ -1466,7 +1466,7 @@ async function loadReportsManagementPage(page) {
         settled();
         console.error('Error loading reports:', error);
         content.innerHTML = `<div class="ui-empty"><p class="ui-text-fail">Failed to load reports: ${escapeHtml(uiErrorText(error))}</p>
-            <button onclick="loadReportsManagementPage(${page})" class="ui-btn ui-btn-sm">Retry</button></div>`;
+            <button type="button" onclick="loadReportsManagementPage(${page})" class="ui-btn ui-btn-sm">Try again</button></div>`;
     }
 }
 
