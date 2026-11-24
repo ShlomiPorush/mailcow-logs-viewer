@@ -874,7 +874,7 @@ async function gsOpenAddress(ip) {
     });
     const field = gsEl('netfilter-filter-ip');
     if (field) field.value = ip;
-    currentFilters.netfilter = { ip, username: '', action: '', country_code: '' };
+    setNetfilterFilters({ ip, username: '', action: '', country_code: '' });
     currentPage.netfilter = 1;
     const already = gsPageOpen('netfilter');
     if (!(await navigateTo('netfilter', { sub: 'events' }))) return;

@@ -89,6 +89,7 @@ function harness(filters, appTimezone = 'Europe/Berlin') {
         extract('messagesShowRange'),
         extract('mailFlowHour'),
         extract('mailFlowSpan'),
+        extract('setMessagesFilters'),
         extract('openMessagesWith'),
         extract('openMessagesRange'),
         extract('openMailFlowHourMessages'),

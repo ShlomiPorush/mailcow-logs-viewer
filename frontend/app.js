@@ -1743,20 +1743,22 @@ const MESSAGES_FILTER_KEYS = ['search', 'sender', 'recipient', 'direction', 'use
 // added keeps them and is matched as a part, as on any visit; they go when the
 // IP the card filled is changed or cleared. A chip above the list names them and
 // takes them off (updateMessagesFilterState). Filters set any other way drop
-// them: they hold only while the filters in use are the ones they made (filters).
-let messagesExact = null;   // { ip, address, domain, filters } or null
+// them (setMessagesFilters).
+let messagesExact = null;   // { ip, address, domain } or null
 const MESSAGES_EXACT_FIELDS = ['ip'];
+
+// Filters set from elsewhere: the card's whole values go with the ones they replace
+function setMessagesFilters(filters) {
+    messagesExact = null;
+    currentFilters.messages = filters;
+}
 
 // The fields' filters with the whole-value ones that still hold
 function messagesWithExact(fields) {
-    // Filters set since by anything but the card's: its whole values went with them
-    if (messagesExact && messagesExact.filters && currentFilters.messages !== messagesExact.filters) messagesExact = null;
     const x = messagesExact;
     if (x && MESSAGES_EXACT_FIELDS.some(key => x[key] && (fields[key] || '') !== x[key])) messagesExact = null;
     if (!messagesExact) return fields;
-    const filters = { ...fields, ...(x.ip ? { exact_ip: 'true' } : {}), ...(x.address ? { address: x.address } : {}), ...(x.domain ? { domain: x.domain } : {}) };
-    x.filters = filters;
-    return filters;
+    return { ...fields, ...(x.ip ? { exact_ip: 'true' } : {}), ...(x.address ? { address: x.address } : {}), ...(x.domain ? { domain: x.domain } : {}) };
 }
 
 // What the chip says: each whole value, as a person reads the filter
@@ -1804,11 +1806,10 @@ function showMessagesWithoutId(on) {
             const field = document.getElementById(`messages-filter-${name}`);
             if (field) field.value = '';
         });
-        messagesExact = null;
         toggleMessagesFilters(false);
         const kept = currentFilters.messages || {};
-        currentFilters.messages = Object.fromEntries(['search', 'date_range', 'start_date', 'end_date']
-            .filter(key => kept[key]).map(key => [key, kept[key]]));
+        setMessagesFilters(Object.fromEntries(['search', 'date_range', 'start_date', 'end_date']
+            .filter(key => kept[key]).map(key => [key, kept[key]])));
     }
     const page = document.getElementById('content-messages');
     if (page) page.classList.toggle('is-noid', messagesNoId);
@@ -3748,9 +3749,8 @@ function openMessagesRange({ start, endInclusive, user = '', label = '' }) {
             const field = document.getElementById('messages-filter-user');
             if (field) field.value = user;
         }
-        messagesExact = null;
         messagesShowRange(start, endInclusive, label);
-        currentFilters.messages = { start_date: start, end_date: endInclusive, ...(user ? { user } : {}) };
+        setMessagesFilters({ start_date: start, end_date: endInclusive, ...(user ? { user } : {}) });
         currentPage.messages = 1;
     });
 }
@@ -4066,9 +4066,14 @@ async function loadDashboardStatusSummary() {
 // Username field it filled is changed or cleared (another condition added keeps
 // them); a chip beside the count names them and takes them off. Filters set any
 // other way (the search's address row, an alert, Security's own links) drop
-// them: they hold only while the filters in use are the ones they made
-// (filters). The CSV export sends them too (currentFilters.netfilter).
-let netfilterExact = null;   // { ip, username, domain, start_date, end_date, period, filters } or null
+// them (setNetfilterFilters). The CSV export sends them too (currentFilters.netfilter).
+let netfilterExact = null;   // { ip, username, domain, start_date, end_date, period } or null
+
+// Filters set from elsewhere: the card's whole values go with the ones they replace
+function setNetfilterFilters(filters) {
+    netfilterExact = null;
+    currentFilters.netfilter = filters;
+}
 
 function netfilterFilterFields() {
     return {
@@ -4081,24 +4086,18 @@ function netfilterFilterFields() {
 
 // The fields' filters with the whole-value ones that still hold
 function netfilterWithExact(fields) {
-    // Filters set since by anything but the card's (an alert, the search): its whole values went with them
-    if (netfilterExact && netfilterExact.filters && currentFilters.netfilter !== netfilterExact.filters) netfilterExact = null;
     const x = netfilterExact;
     if (x && ((x.ip && (fields.ip || '') !== x.ip) || (x.username && (fields.username || '') !== x.username))) netfilterExact = null;
     if (!netfilterExact) return fields;
-    const filters = {
+    return {
         ...fields, ...(x.ip ? { exact_ip: 'true' } : {}), ...(x.username ? { exact_username: 'true' } : {}),
         ...(x.domain ? { username_domain: x.domain } : {}),
         ...(x.start_date ? { start_date: x.start_date } : {}), ...(x.end_date ? { end_date: x.end_date } : {}),
     };
-    x.filters = filters;
-    return filters;
 }
 
 // The chip, as the Security Overview's country and network chips (security.js renderSecurityOverview)
 function renderNetfilterExact() {
-    // Filters set since by anything but the card's: its whole values went with them
-    if (netfilterExact && netfilterExact.filters && currentFilters.netfilter !== netfilterExact.filters) netfilterExact = null;
     const slot = document.getElementById('netfilter-exact');
     if (!slot) return;
     const x = netfilterExact;
@@ -4127,8 +4126,7 @@ function clearNetfilterFilters() {
     document.getElementById('netfilter-filter-username').value = '';
     document.getElementById('netfilter-filter-action').value = '';
     document.getElementById('netfilter-filter-country').value = '';
-    netfilterExact = null;
-    currentFilters.netfilter = {};
+    setNetfilterFilters({});
     currentPage.netfilter = 1;
     loadNetfilterLogs();
 }
@@ -5529,8 +5527,6 @@ function messagesFiltersOn(f = currentFilters.messages || {}) {
 
 // How many filters are on, for the button badge and the Clear filters link
 function updateMessagesFilterState() {
-    // Filters set since by anything but the card's (openMessagesRange, a search): its whole values went with them
-    if (messagesExact && messagesExact.filters && currentFilters.messages !== messagesExact.filters) messagesExact = null;
     const f = currentFilters.messages || {};
     const advanced = MESSAGES_MORE_FILTERS.filter(k => f[k]).length;
     const any = messagesFiltersOn(f);
@@ -5543,7 +5539,7 @@ function updateMessagesFilterState() {
     // The whole values an entity card set, as the Security page's filter chip (security.js renderSecurityOverview)
     const chips = document.getElementById('messages-exact');
     if (chips) {
-        const parts = messagesExact && messagesExact.filters === f ? messagesExactParts(messagesExact) : [];
+        const parts = messagesExact ? messagesExactParts(messagesExact) : [];
         chips.innerHTML = parts.length ? `<span class="ui-sec-filter" title="Matched whole, not as a part of a longer value"><span>${parts.map(([label, value]) =>
             `${escapeHtml(label)} <bdi>${escapeHtml(value)}</bdi>`).join(', ')}</span><button type="button" onclick="clearMessagesExact()" aria-label="Remove this filter" title="Remove this filter">&times;</button></span>` : '';
     }
@@ -5557,7 +5553,6 @@ function clearMessagesFilters() {
     document.getElementById('messages-filter-user').value = '';
     document.getElementById('messages-filter-status').value = '';
     document.getElementById('messages-filter-ip').value = '';
-    messagesExact = null;
     // Reset date range
     document.getElementById('messages-date-range').value = '';
     document.getElementById('messages-start-date').value = '';
@@ -5566,7 +5561,7 @@ function clearMessagesFilters() {
     document.getElementById('messages-date-range-end').value = '';
     document.getElementById('messages-date-range-label').textContent = 'All Time';
     setMessagesDatePresetActive('');
-    currentFilters.messages = {};
+    setMessagesFilters({});
     currentPage.messages = 1;
     loadMessages();
 }
