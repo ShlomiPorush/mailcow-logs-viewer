@@ -85,6 +85,7 @@ def create_channel(request: ChannelRequest, db: Session = Depends(get_db)):
     """Add a channel."""
     if request.channel_type not in nc.CHANNEL_TYPES:
         raise HTTPException(status_code=422, detail=f"Unknown destination service: {request.channel_type}. Select a service from the list.")
+    # Storing the literal mask would save it as the secret.
     config = {k: ("" if v == nc.MASK else v) for k, v in (request.config or {}).items()}
     ok, error = nc.validate_config(request.channel_type, config)
     if not ok:

@@ -5,6 +5,7 @@ const SESSION_GUARD_ASK_BEFORE = 60000;
 const SESSION_GUARD_NOTICE_BEFORE = 300000;
 const SESSION_GUARD_TICK = 5000;
 const SESSION_GUARD_TIMEOUT = 15000;
+// mousemove and scroll can come from the page itself and would keep a session alive.
 const SESSION_GUARD_ACTIVITY_EVENTS = ['keydown', 'pointerdown', 'click', 'input', 'wheel', 'touchstart'];
 const SESSION_GUARD_CLOSE_ICON = '<svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>';
 

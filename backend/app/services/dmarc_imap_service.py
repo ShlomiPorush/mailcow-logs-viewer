@@ -54,6 +54,7 @@ _DETAILS_NOT_STORED = "The details of this email could not be stored"
 def _plain_text(value, limit: int = _FAILURE_TEXT_CHARS) -> Optional[str]:
     if value is None:
         return None
+    # Without it, a lone surrogate reaches JSONB, which refuses it.
     text = str(value).encode('utf-8', 'replace').decode('utf-8')
     return strip_nul(text)[:limit]
 

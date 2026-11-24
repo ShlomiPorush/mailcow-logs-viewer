@@ -86,6 +86,7 @@ class _BoundedSMTP(smtplib.SMTP):
             raise smtplib.SMTPServerDisconnected('the server took too long to answer')
         return min(SMTP_TIMEOUT, remaining)
 
+    # socket.create_connection would wait a full timeout on every published address.
     def _get_socket(self, host, port, timeout):
         last_error: OSError = OSError(f'no address found for {host}')
         for family, socktype, proto, _, address in _pick_addresses(

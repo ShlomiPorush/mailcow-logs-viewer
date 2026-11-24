@@ -13,7 +13,9 @@
     <link rel="apple-touch-icon" sizes="180x180" href="/static/assets/icons/apple-touch-icon.png">
     <meta name="theme-color" content="#0f172a">
 
+    <!-- Run any later, a folded sidebar would flash open while the page draws. -->
     <script>try { if (localStorage.getItem('navCollapsed') === '1') document.documentElement.classList.add('ui-nav-collapsed'); } catch (e) {}</script>
+    <!-- Any later, the elements the scripts hide could show while the stylesheets load. -->
     <style>.hidden{display:none}</style>
     <script src="/static/assets/libs/marked.min.js"></script>
     <script src="/static/assets/libs/purify.min.js?v="></script>

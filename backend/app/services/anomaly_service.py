@@ -309,6 +309,7 @@ def run_anomaly_detection() -> dict:
         with get_db_context() as db:
             spikes = detect_volume_spikes(db, pending)
             bursts = detect_auth_failure_bursts(db, pending)
+    # Outside finally, a detector crash drops the notifications of alerts already stored, and the cooldown blocks a retry.
     finally:
         for title, detail, severity, alert_type, subject, chart in pending:
             try:

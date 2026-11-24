@@ -1144,6 +1144,7 @@ def import_settings_from_env(db: Session = Depends(get_db)):
     }
 
 
+# async def here would block the event loop for the whole 10-30 s connection test.
 @router.post("/settings/test/smtp", responses=documented(m.ConnectionTest, description="The test's outcome and its steps; a failed test is still 200"))
 def test_smtp():
     """Test SMTP connection with detailed logging"""

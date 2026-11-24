@@ -259,6 +259,7 @@ def complete_incomplete_correlations():
                     logger.warning(f"Failed to complete correlation {correlation.id}: {e}")
                     continue
 
+            # One commit would hide a delivery line the ingest stores meanwhile.
             db.commit()
 
             if sum(written_recipients.record(db, correlation) for correlation in completed):

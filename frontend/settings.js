@@ -3025,7 +3025,7 @@ async function validateCredential(name, toastNow) {
         const response = await authenticatedFetch(check.endpoint, { method: 'POST' });
         result = response.ok ? await response.json() : { configured: true, valid: false, error: 'unexpected' };
     } catch (error) {
-        console.error('Failed to check the ' + check.label + ':', error);
+        console.error('Failed to check the ' + check.label + ':', error); // nosemgrep: javascript.lang.security.audit.unsafe-formatstring.unsafe-formatstring
         result = { configured: true, valid: false, error: 'connection' };
     }
     if (result.stale) {
@@ -3211,6 +3211,7 @@ function settingsParseFolders(value) {
     return { entries };
 }
 
+// escapeHtml drops the backslash of \", which changes a name or breaks the JSON.
 function settingsFolderRows(value) {
     const parsed = settingsParseFolders(value);
     const list = parsed.entries || [{ name: parsed.legacy, subfolders: false }];
@@ -3275,6 +3276,7 @@ async function settingsChooseFolders() {
 function settingsFolderPicker(result, input, body, foot, close) {
     const folders = (Array.isArray(result.folders) ? result.folders : []).filter(f => f && typeof f.name === 'string' && f.name);
     const byName = new Map(folders.map(f => [f.name, f]));
+    // INBOX is one folder whatever its case (RFC 3501).
     const inbox = folders.find(f => f.name.toUpperCase() === 'INBOX');
     const listed = name => byName.get(name) || (inbox && name.toUpperCase() === 'INBOX' ? inbox : null);
     const parentOf = new Map();

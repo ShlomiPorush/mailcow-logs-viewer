@@ -378,6 +378,7 @@ class MailcowAPI:
             raise MailcowAPIError(f"RW API request failed with status {response.status_code}: {response.text}")
 
         if response.headers.get('content-type', '').startswith('application/json'):
+            # Some mailcow delete endpoints answer 200 with an empty body; that is a success.
             if not response.text.strip():
                 return None
             try:

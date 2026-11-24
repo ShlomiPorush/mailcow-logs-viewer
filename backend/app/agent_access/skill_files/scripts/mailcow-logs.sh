@@ -417,6 +417,7 @@ http() {
   tmpdir
   RESP="$TMPD/resp.$(rand 6)"
   errf="$TMPD/err.$(rand 6)"
+  # Tokens on curl's command line would be visible to other users.
   out=$(printf 'url = "%s"\nrequest = "%s"\nheader = "Accept: application/json"\n%s\n' "$2" "$1" "${3:-}" |
     curl -q -sS -K - --proto "=$PROTO" --max-time "${4:-15}" --connect-timeout 10 -o "$RESP" -w '%{http_code} %{content_type}' 2>"$errf")
   rc=$?

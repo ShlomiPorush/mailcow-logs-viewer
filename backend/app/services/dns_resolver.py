@@ -26,6 +26,7 @@ BLACKLIST_UDP_DNS_SERVERS = [
     [],
     ['9.9.9.9', '149.112.112.112'],
     ['1.1.1.1', '1.0.0.1'],
+    # Google must stay last: through it Spamhaus returns a false NXDOMAIN, so a listed IP looks clean.
     ['8.8.8.8', '8.8.4.4'],
 ]
 

@@ -454,6 +454,7 @@ function Invoke-Ops($ctx, [string]$method, [string]$url, $form, [string]$bearer,
         $left = $timeoutMs - [int]$clock.ElapsedMilliseconds
         if ($left -le 0) { throw 'the connection timed out' }
         $tcp.ReceiveTimeout = $left; $tcp.SendTimeout = $left
+        # None means the system's TLS versions; the certificate is still checked.
         $handshake = $ssl.AuthenticateAsClientAsync($u.DnsSafeHost, $null, [Security.Authentication.SslProtocols]::None, $true)
         if (-not $handshake.Wait($left)) { $tcp.Close(); throw 'the TLS handshake timed out' }
         $stream = $ssl

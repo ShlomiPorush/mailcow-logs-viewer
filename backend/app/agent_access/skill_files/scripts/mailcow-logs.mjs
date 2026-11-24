@@ -567,6 +567,7 @@ async function request(ctx, method, url, { form, bearer, json, timeout = OAUTH_T
       method,
       headers,
       body: payload,
+      // Following a redirect would send the token to another address.
       redirect: "manual",
       signal: AbortSignal.timeout(timeout),
     })

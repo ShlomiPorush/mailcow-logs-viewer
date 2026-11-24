@@ -8,6 +8,7 @@ const { JSDOM } = require(path.join(modules, 'jsdom'));
 
 const frontend = path.join(__dirname, '../../frontend');
 const read = name => fs.readFileSync(path.join(frontend, name), 'utf8');
+// A regex here brings back CodeQL's incomplete HTML sanitizing alert.
 const PAGE = new JSDOM(read('index.html')).window.document;
 PAGE.querySelectorAll('script').forEach(el => el.remove());
 const BODY = PAGE.body.innerHTML;

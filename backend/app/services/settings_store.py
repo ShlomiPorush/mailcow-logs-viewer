@@ -173,6 +173,7 @@ def clear_maxmind_validation_status(db: Session) -> None:
 _CREDENTIAL_CHECK_PREFIX = "credential_check."
 
 
+# A fast hash here lets anyone holding the database test password guesses cheaply.
 @functools.lru_cache(maxsize=16)
 def credential_fingerprint(*parts: str) -> str:
     return hashlib.pbkdf2_hmac(

@@ -31,6 +31,7 @@ function frontendFiles(dir) {
 
 function stripComments(text) {
     let prev;
+    // A single pass lets two pieces join into a new "<!--" that hides markup (CodeQL alert from #524).
     do {
         prev = text;
         text = text.replace(/<!--[\s\S]*?-->/g, '');

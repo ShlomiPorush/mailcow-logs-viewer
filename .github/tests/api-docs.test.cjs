@@ -9,6 +9,7 @@ const LIBS = path.join(FRONTEND, 'assets', 'libs');
 const SECOND_REFERENCE_ID = /\bid\s*=\s*["']?api-reference(?=["'\s>/])/i;
 
 function withoutComments(html) {
+    // An empty replacement lets two pieces join into a new "<!--" that hides markup (CodeQL alert from #524).
     return html.replace(/<!--[\s\S]*?-->/g, ' ');
 }
 

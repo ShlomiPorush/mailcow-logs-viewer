@@ -378,6 +378,7 @@ function uiCountLabel(n, one, many) {
     return `${count.toLocaleString()} ${count === 1 ? one : many}`;
 }
 
+// escapeHtml is not enough here: the browser decodes &#039; before the JS runs, so a quote breaks out.
 function escapeJsArg(text) {
     if (text === null || text === undefined) return '';
     return String(text)
