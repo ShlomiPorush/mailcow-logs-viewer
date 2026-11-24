@@ -892,7 +892,7 @@ async function loadMailcowConnectionStatus() {
     try {
         const response = await authenticatedFetch('/api/status/mailcow-connection');
         if (!response.ok) {
-            mailcowConnection = READ_FAILED;
+            if (!mailcowConnection) mailcowConnection = READ_FAILED;
             return;
         }
 
@@ -922,7 +922,7 @@ async function loadMailcowConnectionStatus() {
         }
     } catch (error) {
         console.error('Failed to load mailcow connection status:', error);
-        mailcowConnection = READ_FAILED;
+        if (!mailcowConnection) mailcowConnection = READ_FAILED;
         const indicator = document.getElementById('mailcow-connection-indicator');
         if (indicator) {
             indicator.classList.remove('hidden');

@@ -147,6 +147,19 @@ test('the server card reads the checks as Needs attention does: a connection che
     assert.equal(w.document.getElementById('ui-server-problems').title, 'not connected to mailcow');
 });
 
+test('a connection read that fails keeps the problem the last one found', async () => {
+    const w = page();
+    w.reply = url => url.startsWith('/api/status/mailcow-connection') ? { connected: false } : {};
+    await w.eval('loadMailcowConnectionStatus()');
+    await w.eval('loadNavCounters()');
+    assert.equal(text(w, 'ui-server-problems'), '1 problem');
+    w.reply = url => url.startsWith('/api/status/mailcow-connection') ? FAIL : {};
+    await w.eval('loadMailcowConnectionStatus()');
+    await w.eval('loadNavCounters()');
+    assert.equal(text(w, 'ui-server-problems'), '1 problem');
+    assert.equal(w.document.getElementById('ui-server-problems').title, 'not connected to mailcow');
+});
+
 test('the phone\'s problem mark stays when the next read fails', async () => {
     const w = page();
     w.reply = url => url.startsWith('/api/status/summary') ? { containers: { running: 17, total: 18, stopped: 1 } } : {};
