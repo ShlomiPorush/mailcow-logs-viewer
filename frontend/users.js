@@ -521,8 +521,16 @@ async function setUsersDefault(value) {
             if (response.status === 409) loadUsersPanel();
             return;
         }
-        showToast(value === 'none' ? 'Only users on the list can sign in now' : 'Access changed', 'success');
-        await loadUsersPanel();
+        usersSeq++;
+        const current = usersData.oauth2;
+        const latest = Number(body.version) >= Number(current.version);
+        if (latest) {
+            current.default_access = body.default_access || value;
+            current.version = body.version;
+        }
+        renderUsersPanel();
+        if (latest) showToast(value === 'none' ? 'Only users on the list can sign in now' : 'Access changed', 'success');
+        else showToast('Someone else changed this access since. It is shown as it is now.', 'info');
     } catch (e) {
         showToast(`Could not change the access: ${uiErrorText(e)}`, 'error');
     }
