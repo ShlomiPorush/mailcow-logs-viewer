@@ -116,12 +116,6 @@ def _signed_state(browser_value: str) -> str:
     return f"{expires}.{_state_signature(nonce, expires, return_to)}"
 
 
-def _new_oauth_flow(return_to: str) -> tuple[str, str]:
-    """A signed state for the provider and the matching value for the browser cookie."""
-    browser_value = _new_browser_value(return_to)
-    return _signed_state(browser_value), browser_value
-
-
 def _verify_oauth_flow(state: Optional[str], cookie_value: str) -> Optional[str]:
     """The page to return to when state and cookie belong together and are current, else None."""
     match = _STATE_RE.fullmatch(state or "")

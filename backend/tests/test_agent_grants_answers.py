@@ -99,7 +99,7 @@ def db(monkeypatch):
 def browser(db):
     """A signed-in browser: its session cookie, and its session's key."""
     signed = session_module.create_session({'username': 'admin', 'auth_method': 'basic'},
-                                           generation=session_module.auth_generation())
+                                           generation=session_module.auth_generation(), principal={'kind': 'builtin'})
     client = TestClient(app, raise_server_exceptions=False)
     client.cookies.set(session_module.SESSION_COOKIE_NAME, signed)
     key = session_module.get_serializer().loads(signed)

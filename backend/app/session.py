@@ -212,8 +212,7 @@ _config.set_settings_publisher(_publish_settings)
 
 # ── Sessions ───────────────────────────────────────────────────────────────
 
-def create_session(user_info: Dict[str, Any], *, generation: int,
-                   principal: Optional[Dict[str, Any]] = None) -> str:
+def create_session(user_info: Dict[str, Any], *, generation: int, principal: Dict[str, Any]) -> str:
     """
     Create a new session and return session ID
 
@@ -245,9 +244,8 @@ def create_session(user_info: Dict[str, Any], *, generation: int,
             "login_at": now,
             "active_at": now,
             "issued_hours": _longest_hours(),
+            "principal": principal,
         }
-        if principal is not None:
-            _session_store[session_id]["principal"] = principal
 
         # Sign the session ID
         serializer = get_serializer()
@@ -295,17 +293,8 @@ def delete_session(session_id: str) -> bool:
         return False
 
 
-def revoke_all_sessions() -> int:
-    """End every session, for example after the sign-in credentials changed.
-
-    Returns the generation this revocation started. A session issued with it
-    is refused once any later revocation has run.
-    """
-    return revoke_all_sessions_keeping(None, None)[0]
-
-
 def revoke_all_sessions_keeping(keep: Optional[Dict[str, Any]], admitted: Optional[int]) -> Tuple[int, Optional[str]]:
-    """revoke_all_sessions, keeping one session under a new key: the operator
+    """End every session, keeping one session under a new key: the operator
     who saved a sign-in change stays signed in (routers/settings.py).
 
     Done in the same step as the revocation, so the kept session is never out
@@ -334,7 +323,7 @@ def revoke_all_sessions_keeping(keep: Optional[Dict[str, Any]], admitted: Option
 
 
 def auth_generation() -> int:
-    """The current value of the counter that revoke_all_sessions advances."""
+    """The current value of the counter that revoke_all_sessions_keeping advances."""
     with _session_lock:
         return _auth_generation
 

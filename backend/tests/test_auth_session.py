@@ -1,11 +1,13 @@
 """Tests for auth rate limiting and session signing (no DB required)."""
+import pytest
+
 from app.auth import (
     _AUTH_MAX_FAILURES,
     _clear_auth_failures,
     _is_rate_limited,
     _record_auth_failure,
 )
-from app import session
+from app import session, user_access
 
 
 def test_rate_limiter_blocks_after_max_failures():
@@ -36,8 +38,16 @@ def test_session_fallback_key_is_stable():
     assert session.get_session_secret_key() == session.get_session_secret_key()
 
 
+USER_INFO = {"email": "user@example.com"}
+
+
+def _create():
+    return session.create_session(USER_INFO, generation=session.auth_generation(),
+                                  principal=user_access.oauth2_ref(USER_INFO))
+
+
 def test_session_sign_verify_roundtrip():
-    signed = session.create_session({"email": "user@example.com"}, generation=session.auth_generation())
+    signed = _create()
     data = session.get_session(signed)
     assert data is not None
     assert data["user_info"]["email"] == "user@example.com"
@@ -46,6 +56,11 @@ def test_session_sign_verify_roundtrip():
 
 
 def test_session_rejects_tampered_id():
-    signed = session.create_session({"email": "user@example.com"}, generation=session.auth_generation())
+    signed = _create()
     assert session.get_session(signed + "x") is None
     session.delete_session(signed)
+
+
+def test_a_session_cannot_be_created_without_its_principal():
+    with pytest.raises(TypeError):
+        session.create_session(USER_INFO, generation=session.auth_generation())

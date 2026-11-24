@@ -20,6 +20,7 @@ from app.config import settings
 from app.main import app
 from app.routers import auth
 from app.services import oauth2_client as oauth2_module
+from sign_in_helpers import revoke_all_sessions
 
 AUTHORIZE = "https://id.example.com/authorize"
 TOKEN = "https://id.example.com/token"
@@ -146,7 +147,7 @@ def test_a_sign_in_change_during_the_callback_issues_no_session(provider, monkey
 
     async def answer_then_change(access_token):
         info = await user_info(access_token)
-        session.revoke_all_sessions()
+        revoke_all_sessions()
         return info
 
     monkeypatch.setattr(auth.oauth2_client, "get_user_info", answer_then_change)

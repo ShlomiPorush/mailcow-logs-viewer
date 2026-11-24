@@ -20,6 +20,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 from app import main as main_module  # noqa: E402
 from app import session as session_module  # noqa: E402
+from app import user_access  # noqa: E402
 from app.config import settings  # noqa: E402
 from app.frontend_assets import stamp_asset_versions  # noqa: E402
 from app.main import app  # noqa: E402
@@ -63,8 +64,9 @@ def _sign_in(client, mode):
         client.post("/api/auth/session", headers={"Authorization": "Basic " + raw})
     elif mode == "oauth2":
         # What the OAuth2 callback stores, without a provider
-        cookie = session_module.create_session({"email": "admin@example.com", "auth_method": "oauth2"},
-                                               generation=session_module.auth_generation())
+        user_info = {"email": "admin@example.com", "auth_method": "oauth2"}
+        cookie = session_module.create_session(user_info, generation=session_module.auth_generation(),
+                                               principal=user_access.oauth2_ref(user_info))
         client.cookies.set(session_module.SESSION_COOKIE_NAME, cookie)
 
 

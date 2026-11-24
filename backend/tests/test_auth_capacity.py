@@ -11,7 +11,10 @@ from pydantic import ValidationError
 from app import auth, session
 from app.config import Settings, build_settings, settings
 from app.routers import auth as auth_router
+from sign_in_helpers import new_oauth_flow
 from test_auth_request_limits import PASSWORD, client_at, credentials
+
+BUILTIN = {"kind": "builtin"}
 
 
 @pytest.fixture(autouse=True)
@@ -37,7 +40,7 @@ def limited_stores(monkeypatch):
 def test_full_sessions_reject_new_login_and_preserve_cookies():
     first = client_at()
     assert first.post("/api/auth/session", headers=credentials()).status_code == 200
-    session.create_session({"username": "admin"}, generation=session.auth_generation())
+    session.create_session({"username": "admin"}, generation=session.auth_generation(), principal=BUILTIN)
     response = client_at("192.0.2.51").post("/api/auth/session", headers=credentials())
     assert response.status_code == 503
     assert response.headers["Retry-After"] == "60"
@@ -73,16 +76,16 @@ def test_failure_capacity_accepts_correct_password_and_counts_wrong_ones(peer, t
 
 
 def test_expired_sessions_are_reclaimed_on_admission():
-    active = session.create_session({"username": "admin"}, generation=session.auth_generation())
-    expired = session.create_session({"username": "admin"}, generation=session.auth_generation())
+    active = session.create_session({"username": "admin"}, generation=session.auth_generation(), principal=BUILTIN)
+    expired = session.create_session({"username": "admin"}, generation=session.auth_generation(), principal=BUILTIN)
     key = session.get_serializer().loads(expired)
     session._session_store[key]["login_at"] -= session._session_store[key]["issued_hours"] * 3600 + 1
-    new = session.create_session({"username": "admin"}, generation=session.auth_generation())
+    new = session.create_session({"username": "admin"}, generation=session.auth_generation(), principal=BUILTIN)
     assert len(session._session_store) == 2
     assert session.get_session(active)
     assert session.get_session(new)
     assert session.delete_session(active)
-    assert session.create_session({"username": "admin"}, generation=session.auth_generation())
+    assert session.create_session({"username": "admin"}, generation=session.auth_generation(), principal=BUILTIN)
 
 
 def test_parallel_session_admission_is_atomic():
@@ -91,7 +94,7 @@ def test_parallel_session_admission_is_atomic():
     def create():
         barrier.wait()
         try:
-            return session.create_session({"username": "admin"}, generation=session.auth_generation())
+            return session.create_session({"username": "admin"}, generation=session.auth_generation(), principal=BUILTIN)
         except session.SessionCapacityError:
             return None
 
@@ -102,21 +105,21 @@ def test_parallel_session_admission_is_atomic():
 
 
 def test_live_capacity_changes_do_not_evict_sessions_or_counters(monkeypatch):
-    cookies = [session.create_session({"username": "admin"}, generation=session.auth_generation()) for _ in range(2)]
+    cookies = [session.create_session({"username": "admin"}, generation=session.auth_generation(), principal=BUILTIN) for _ in range(2)]
     for ip in ["192.0.2.50", "192.0.2.51"]:
         auth._record_auth_failure(ip)
     monkeypatch.setattr(settings, "session_max_entries", 1)
     monkeypatch.setattr(settings, "auth_max_failure_clients", 1)
     assert client_at("192.0.2.52").get("/api/auth/verify", headers=credentials()).status_code == 200
     with pytest.raises(session.SessionCapacityError):
-        session.create_session({"username": "admin"}, generation=session.auth_generation())
+        session.create_session({"username": "admin"}, generation=session.auth_generation(), principal=BUILTIN)
     assert all(session.get_session(cookie) for cookie in cookies)
     assert len(auth._auth_failures) == 2
     # A tracked client below its lockout threshold may still authenticate.
     assert client_at().get("/api/auth/verify", headers=credentials()).status_code == 200
     monkeypatch.setattr(settings, "session_max_entries", 3)
     monkeypatch.setattr(settings, "auth_max_failure_clients", 3)
-    assert session.create_session({"username": "admin"}, generation=session.auth_generation())
+    assert session.create_session({"username": "admin"}, generation=session.auth_generation(), principal=BUILTIN)
     assert client_at("192.0.2.52").get("/api/auth/verify", headers=credentials()).status_code == 200
 
 
@@ -192,8 +195,8 @@ def test_oauth_capacity_consumes_state_and_returns_specific_error(monkeypatch):
     monkeypatch.setattr(auth_router.oauth2_client, "exchange_code_for_token", AsyncMock(return_value={"access_token": secrets.token_hex(16)}))
     monkeypatch.setattr(auth_router.oauth2_client, "get_user_info", AsyncMock(return_value={"email": "user@example.com"}))
     for _ in range(2):
-        session.create_session({"username": "admin"}, generation=session.auth_generation())
-    state, browser_value = auth_router._new_oauth_flow("/")
+        session.create_session({"username": "admin"}, generation=session.auth_generation(), principal=BUILTIN)
+    state, browser_value = new_oauth_flow("/")
     client = client_at()
     client.cookies.set(auth_router.OAUTH_COOKIE_PREFIX + state, browser_value, domain="testserver.local", path="/")
     response = client.get("/api/auth/callback", params={"state": state, "code": secrets.token_hex(16)}, follow_redirects=False)

@@ -21,6 +21,7 @@ from app.main import app
 from app.routers import auth as auth_router
 from app.routers import settings as settings_router
 from app.services import settings_store
+from sign_in_helpers import revoke_all_sessions
 from test_session_revocation import NEW_PASSWORD, basic, signed_in, store  # noqa: F401 (store: autouse fixture)
 
 HOUR = 3600.0
@@ -247,7 +248,7 @@ def test_reasons_are_kept_for_at_most_session_max_entries(clock, monkeypatch):
 def test_signing_out_and_revocation_leave_no_reason(clock):
     one, two = signed_in(), signed_in()
     assert one.post("/api/auth/logout", follow_redirects=False).status_code == 302
-    session.revoke_all_sessions()
+    revoke_all_sessions()
     assert not session._tombstones
     _signed_out_plainly(two.get("/api/auth/status"))
 

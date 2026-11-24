@@ -52,12 +52,15 @@ def test_settings_api_reports_the_failure_instead_of_opening_the_api(db_only_aut
     from fastapi.testclient import TestClient
     from app.database import get_db
     from app.session import SESSION_COOKIE_NAME, auth_generation, create_session, _session_store
+    from app.user_access import oauth2_ref
 
     monkeypatch.setattr(settings_store, "get_config_overrides_from_db", _database_down)
     main.app.dependency_overrides[get_db] = lambda: object()
     try:
         client = TestClient(main.app, raise_server_exceptions=False)
-        client.cookies.set(SESSION_COOKIE_NAME, create_session({"username": "admin"}, generation=auth_generation()))
+        user_info = {"username": "admin"}
+        client.cookies.set(SESSION_COOKIE_NAME, create_session(user_info, generation=auth_generation(),
+                                                               principal=oauth2_ref(user_info)))
         assert client.get("/api/settings").status_code == 500
         client.cookies.clear()
         # Still enforced for everyone else after the failed reload

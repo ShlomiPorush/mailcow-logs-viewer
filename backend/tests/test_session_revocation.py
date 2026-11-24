@@ -23,6 +23,7 @@ from app.database import get_db
 from app.main import app
 from app.routers import auth as auth_router
 from app.routers import settings as settings_router
+from sign_in_helpers import revoke_all_sessions
 
 
 # New for each run
@@ -214,7 +215,7 @@ def test_a_login_let_in_before_a_password_change_gets_no_session(monkeypatch):
 
     def accept_then_change(username, password):
         accepted = check(username, password)
-        session.revoke_all_sessions()
+        revoke_all_sessions()
         return accepted
 
     monkeypatch.setattr(auth_module, "verify_credentials", accept_then_change)
@@ -230,7 +231,7 @@ def test_a_session_cannot_be_exchanged_for_a_new_one(monkeypatch):
     into a session that outlives a revocation."""
     stolen = signed_in()
     assert stolen.post("/api/auth/session").status_code == 401
-    session.revoke_all_sessions()
+    revoke_all_sessions()
     assert stolen.post("/api/auth/session").status_code == 401
     assert not session._session_store
 
@@ -246,7 +247,7 @@ def _admitted_request(generation=None):
 def test_a_login_let_in_while_sign_in_was_off_gets_no_session_once_it_is_on():
     # Let in while sign-in was off, then Basic Auth turned on (which revokes)
     request = _admitted_request(session.auth_generation())
-    session.revoke_all_sessions()
+    revoke_all_sessions()
     with pytest.raises(HTTPException) as refused:
         auth_router.create_basic_auth_session(request)
     assert refused.value.status_code == 409
@@ -267,7 +268,7 @@ def test_the_saver_is_not_signed_in_again_after_a_later_change(monkeypatch):
     stolen, operator = signed_in(), signed_in()
 
     def another_change_meanwhile(db):
-        session.revoke_all_sessions()
+        revoke_all_sessions()
 
     monkeypatch.setattr(agent_store, "check_sign_in_unchanged", another_change_meanwhile)
     response = operator.put("/api/settings", json={"auth_password": NEW_PASSWORD})

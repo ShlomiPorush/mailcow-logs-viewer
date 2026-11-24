@@ -182,13 +182,7 @@ def oauth2_ref(user_info: Dict[str, Any]) -> Dict[str, Any]:
 
 def session_ref(record: Dict[str, Any]) -> Dict[str, Any]:
     """Who a session belongs to. A session stores it from its sign-in (routers/auth.py)."""
-    ref = record.get("principal")
-    if isinstance(ref, dict):
-        return ref
-    user_info = record.get("user_info") or {}
-    if user_info.get("auth_method") == "basic":
-        return {"kind": "builtin"}
-    return oauth2_ref(user_info)
+    return record["principal"]
 
 
 def _stored_default(value: Optional[str]) -> str:

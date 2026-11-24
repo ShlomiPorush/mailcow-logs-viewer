@@ -21,6 +21,7 @@ from app import session
 from app.config import settings
 from app.main import app
 from app.routers import raw_logs
+from sign_in_helpers import revoke_all_sessions
 from test_session_revocation import NEW_PASSWORD, basic, signed_in, store  # noqa: F401 (store: autouse fixture)
 
 HOUR = 3600.0
@@ -92,7 +93,7 @@ def test_a_session_that_ends_before_the_token_gets_none(monkeypatch):
 
 
 def test_basic_credentials_let_in_before_a_sign_in_change_get_no_token(monkeypatch):
-    response = _token_with(monkeypatch, session.revoke_all_sessions, TestClient(app), basic())
+    response = _token_with(monkeypatch, revoke_all_sessions, TestClient(app), basic())
     assert response.status_code == 401
     assert not raw_logs._ws_tokens
 
@@ -103,7 +104,7 @@ def test_a_request_let_in_while_sign_in_was_off_gets_no_token_once_it_is_on(monk
 
     def sign_in_turned_on():
         settings._inner.basic_auth_enabled = True
-        session.revoke_all_sessions()
+        revoke_all_sessions()
 
     response = _token_with(monkeypatch, sign_in_turned_on, TestClient(app))
     assert response.status_code == 401
