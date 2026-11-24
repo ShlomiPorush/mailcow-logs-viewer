@@ -1150,7 +1150,7 @@ One quarantined message with its headers, Rspamd symbols, body and fuzzy hashes,
 
 Current counts:
 
-- `messages`: `24h`, `7d` and `30d` delivery-leg counts, plus `unique_24h` and `unique_7d` message counts.
+- `messages`: `24h`, `7d` and `30d` delivery-leg counts.
 - `blocked`: `24h`, `7d` and `percentage_24h` for bounced, rejected and spam.
 - `deferred` and `auth_failures`: `24h` and `7d`.
 - `direction`: `inbound_24h`, `outbound_24h`, `internal_24h`.

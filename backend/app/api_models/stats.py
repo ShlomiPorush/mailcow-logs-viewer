@@ -22,9 +22,6 @@ class DashboardMessages(_Keyed):
     h24: int = Field(alias="24h", description="Deliveries first seen in the last 24 hours")
     d7: int = Field(alias="7d")
     d30: int = Field(alias="30d")
-    unique_24h: int = Field(None, description="Messages, as the Messages page counts them (one per message). "
-                                              "Missing when the figures could not be read")
-    unique_7d: int = Field(None, description="As unique_24h, over 7 days")
 
 
 class DashboardBlocked(_Keyed):
@@ -59,11 +56,6 @@ class TimelineHour(Fixed):
     total: int = Field(description="Rspamd scans")
     spam: int
     clean: int
-    messages: int = Field(description="Deliveries first seen")
-    unique_messages: int = Field(description="Messages, one per message")
-    blocked: int
-    deferred: int
-    auth_failures: int
 
 
 class TimelineResponse(Fixed):

@@ -416,17 +416,13 @@ def test_an_alias_delivery_is_gone_from_every_message_reader_after_the_cleanup(c
     address (orig_to), stored before the address was listed. The readers that
     count or list the whole table check only a delivery's own addresses (reading
     every delivery's Postfix lines would slow every count); listing the address
-    asks for a cleanup pass, which deletes the delivery, and then the timeline's
-    message count, the recent activity, the Status page's pending list and a
-    block's link to the message leave it out."""
+    asks for a cleanup pass, which deletes the delivery, and then the recent
+    activity, the Status page's pending list and a block's link to the message
+    leave it out."""
     from app.database import get_db_context
     from app.models import MessageCorrelation, SpamSuppression, SuppressionEvent
 
-    def unique_messages():
-        hours = client.get('/api/stats/timeline', params={'hours': 24}).json()['timeline']
-        return sum(hour['unique_messages'] for hour in hours)
-    before = unique_messages()
-    now = datetime.utcnow().replace(microsecond=0) - timedelta(minutes=5)
+    now =datetime.utcnow().replace(microsecond=0) - timedelta(minutes=5)
     with get_db_context() as db:
         db.add(MessageCorrelation(correlation_key=f'alias-only-{MARK}', message_id=f'alias-only-{MSGID}', queue_id=Q_ORIG,
                                   sender=SENDER, recipient=NORMAL, subject=f'alias only {MARK}', is_complete=False,
@@ -442,7 +438,6 @@ def test_an_alias_delivery_is_gone_from_every_message_reader_after_the_cleanup(c
     try:
         from app import scheduler
         scheduler.cleanup_blacklisted_data()
-        assert unique_messages() == before
         activity = client.get('/api/stats/recent-activity', params={'limit': 500}).json()['activity']
         assert f'alias-only-{MARK}' not in {a['correlation_key'] for a in activity}
         pending = client.get('/api/settings/info').json()['recent_incomplete_correlations']
