@@ -2025,12 +2025,6 @@ function renderSettings(content, data) {
     const appVersion = data.app_version || 'Unknown';
     const versionInfo = data.version_info || {};
 
-    if (config.maxmind_status !== null && config.maxmind_status !== undefined) {
-        _cachedMaxMindStatus = config.maxmind_status;
-    } else if (_cachedMaxMindStatus) {
-        config.maxmind_status = _cachedMaxMindStatus;
-    }
-
     const kv = (label, value, cls = '') => `<div class="ui-kv"><span>${label}</span><b class="${cls}">${value}</b></div>`;
     const readOnlyFacts = [
         ['Fetch interval', `${escapeHtml(String(config.fetch_interval || 0))} seconds`],
@@ -2553,7 +2547,6 @@ function renderSettings(content, data) {
                     }
                     
                     const _maxmindChanged = ('maxmind_account_id' in payload || 'maxmind_license_key' in payload);
-                    if (_maxmindChanged) _cachedMaxMindStatus = null;
                     const _maxmindHasValues = (payload.maxmind_license_key && payload.maxmind_license_key !== '' && payload.maxmind_license_key !== '********');
                     const shellChanged = SETTINGS_READ_AT_PAGE_LOAD.some(key =>
                         key in payload && String(payload[key] ?? '') !== String(data.editable_config[key] ?? ''));
@@ -2735,10 +2728,8 @@ async function showGeoIPSetupModal(reloadPage = false) {
             const valLicData = valLicRes.ok ? await valLicRes.json() : null;
             
             if (valLicData && valLicData.valid) {
-                _cachedMaxMindStatus = valLicData;
                 setStepStatus(1, 'success', 'Credentials configured');
             } else if (valLicData && valLicData.error) {
-                _cachedMaxMindStatus = valLicData;
                 setStepStatus(1, 'error', 'Could not validate the license. Check your MaxMind credentials. Details: ' + valLicData.error);
                 setupOver();
                 return;
@@ -2816,8 +2807,6 @@ async function showGeoIPSetupModal(reloadPage = false) {
     setupOver();
 }
 
-var _cachedMaxMindStatus = null;
-
 async function validateMaxMindLicense() {
     const checkingHtml = `
         <span class="ui-tag ui-tag-info">
@@ -2837,8 +2826,6 @@ async function validateMaxMindLicense() {
         const response = await authenticatedFetch('/api/settings/maxmind/validate', { method: 'POST' });
         const result = response.ok ? await response.json()
             : { configured: true, valid: false, error: 'Request failed', failure: uiHttpErrorText(response.status, await uiReadJson(response)) };
-
-        _cachedMaxMindStatus = result;
 
         const statusHtml = renderMaxMindStatus(result);
         ['maxmind-license-status', 'maxmind-license-status-tab'].forEach(id => {
