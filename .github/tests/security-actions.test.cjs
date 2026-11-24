@@ -132,6 +132,16 @@ test('the Outgoing spam card says it stops mailboxes only with the Read-Write ke
     assert.match(card(), /Blocks sending/);
 });
 
+test('a Security event stored twice shows once', () => {
+    const context = load();
+    const box = { innerHTML: '' };
+    context.document = { getElementById: id => (id === 'netfilter-logs' ? box : null) };
+    vm.runInContext('mailcowRwConfigured = false; fail2banActiveBans = []; fail2banBlacklist = []', context);
+    const event = { time: '2026-10-16T10:00:00Z', priority: 'warn', message: '203.0.113.7 matched rule id 3', ip: '203.0.113.7', action: 'warning' };
+    context.renderNetfilterData({ data: [event, { ...event, id: 2 }, { ...event, message: '203.0.113.7 matched rule id 4' }], total: 3, page: 1, pages: 1 });
+    assert.equal((box.innerHTML.match(/class="ui-ev-detail"/g) || []).length, 2);
+});
+
 test('a rule number goes to the server as typed, so a decimal is refused instead of cut; the saved number typed again is no change', () => {
     const context = load();
     context.renderProtection = () => {};

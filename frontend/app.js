@@ -1629,6 +1629,24 @@ async function loadMoreMessages(retry = false) {
     }
 }
 
+function deduplicateNetfilterLogs(logs) {
+    if (!logs || logs.length === 0) return [];
+
+    const seen = new Set();
+    const uniqueLogs = [];
+
+    for (const log of logs) {
+        const key = `${log.message || ''}|${log.time || ''}|${log.priority || ''}`;
+
+        if (!seen.has(key)) {
+            seen.add(key);
+            uniqueLogs.push(log);
+        }
+    }
+
+    return uniqueLogs;
+}
+
 function renderNetfilterData(data) {
     const container = document.getElementById('netfilter-logs');
     if (!container) return;
@@ -1643,6 +1661,8 @@ function renderNetfilterData(data) {
         if (emptyCount) emptyCount.textContent = uiCountLabel(0, 'event', 'events');
         return;
     }
+
+    const uniqueLogs = deduplicateNetfilterLogs(data.data);
 
     const countEl = document.getElementById('security-count');
     if (countEl) {
@@ -1674,7 +1694,7 @@ function renderNetfilterData(data) {
         ${lockedNote}
         <div class="ui-ev-list">
             <div class="ui-ev-row ui-ev-head"><span>When</span><span>Address</span><span>Account</span><span>Action</span><span>Where</span><span></span></div>
-            ${data.data.map((log, index) => {
+            ${uniqueLogs.map((log, index) => {
                 const isBan = log.action === 'ban' || log.action === 'banned';
                 const isWarningOrUnban = log.action === 'warning' || log.action === 'unban';
                 const ipInBlacklist = log.ip && fail2banBlacklist.some(entry => entry === log.ip || entry === fail2banEntry(log.ip));
