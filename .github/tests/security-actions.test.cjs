@@ -132,6 +132,25 @@ test('the Outgoing spam card says it stops mailboxes only with the Read-Write ke
     assert.match(card(), /Blocks sending/);
 });
 
+test('a rule number goes to the server as typed, so a decimal is refused instead of cut; the saved number typed again is no change', () => {
+    const context = load();
+    context.renderProtection = () => {};
+    vm.runInContext(`protectionRules = { unknown_accounts: { enabled: true, mode: 'watch', threshold: 5, window_minutes: 60, ban_hours: 168, notify: true } };
+        protectionSaved = JSON.parse(JSON.stringify(protectionRules))`, context);
+    const handlers = [...context.securityRuleSentence('unknown_accounts', true).matchAll(/onchange="([^"]+)"/g)].map(m => m[1]);
+    const type = (field, value) => {
+        const handler = handlers.find(h => h.includes(`'${field}'`));
+        vm.runInContext(`(function () { ${handler} }).call({ value: ${JSON.stringify(value)} })`, context);
+        return vm.runInContext(`protectionRules.unknown_accounts.${field}`, context);
+    };
+    assert.equal(type('threshold', '3.9'), '3.9');
+    assert.equal(type('ban_hours', '24'), '24');
+    assert.equal(context.protectionChangeCount(), 2);
+    type('threshold', '5');
+    type('ban_hours', '168');
+    assert.equal(context.protectionChangeCount(), 0);
+});
+
 
 test('Disable SMTP mentions app passwords only when they are revoked', async () => {
     for (const revoke of [false, true]) {

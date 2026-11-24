@@ -116,7 +116,8 @@ function protectionChangeCount() {
     let n = 0;
     for (const [rule, values] of Object.entries(protectionRules)) {
         for (const [key, value] of Object.entries(values)) {
-            if (JSON.stringify(value) !== JSON.stringify((protectionSaved[rule] || {})[key])) n++;
+            const saved = (protectionSaved[rule] || {})[key];
+            if (String(JSON.stringify(value)).replace(/"/g, '') !== String(JSON.stringify(saved)).replace(/"/g, '')) n++;
         }
     }
     return n;

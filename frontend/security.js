@@ -1080,7 +1080,7 @@ function securityBanText(hours) {
 function securityBanSelect(rule, hours) {
     const h = Number(hours);
     const lengths = PROTECTION_BAN_LENGTHS.some(([v]) => v === h) ? PROTECTION_BAN_LENGTHS : [...PROTECTION_BAN_LENGTHS, [h, `${h} hours`]];
-    return `<select class="ui-sec-in" onchange="setProtectionRule('${rule}', 'ban_hours', Number(this.value))" aria-label="Ban length">
+    return `<select class="ui-sec-in" onchange="setProtectionRule('${rule}', 'ban_hours', this.value)" aria-label="Ban length">
         ${lengths.map(([v, text]) => `<option value="${v}" ${v === h ? 'selected' : ''}>${v === 0 ? 'until removed by hand' : `for ${escapeHtml(text)}`}</option>`).join('')}</select>`;
 }
 
@@ -1088,7 +1088,7 @@ function securityRuleSentence(key, edit) {
     const r = protectionRules[key];
     const caps = protectionCaps;
     const num = (field, min, max, label, width) => edit
-        ? securityNum(r[field], `setProtectionRule('${key}', '${field}', Number(this.value))`, min, max, label, width)
+        ? securityNum(r[field], `setProtectionRule('${key}', '${field}', this.value)`, min, max, label, width)
         : `<b>${escapeHtml(String(r[field]))}</b>`;
     const banning = r.mode === 'enforce' && caps.can_ban;
     const mail = !edit && r.notify ? ' You get a notification.' : '';
