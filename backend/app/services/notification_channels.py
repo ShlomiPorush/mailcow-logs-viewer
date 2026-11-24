@@ -1,16 +1,3 @@
-"""
-Notification channels - built-in support for common alert destinations.
-
-Each channel type declares the fields it actually needs (a Slack channel asks
-for its incoming-webhook URL, Telegram asks for a bot token and chat ID, ntfy
-asks for a server and topic). The full endpoint URL is assembled here, so the
-user never has to hand-craft one.
-
-Multiple channels can be enabled at once. Each channel subscribes to the alert
-topics it cares about (see ALERT_TYPES); a channel with no subscription list
-receives everything.
-Synchronous - call from a worker thread, never on the event loop.
-"""
 import asyncio
 import codecs
 import contextlib
@@ -29,21 +16,16 @@ from ..models import NotificationChannel
 
 logger = logging.getLogger(__name__)
 
-_TIMEOUT_SECONDS = 10      # one step: connect, TLS handshake, one read
-_TOTAL_SECONDS = 20        # the whole send, however slowly the server answers
-_MAX_ERROR_BYTES = 1024    # read of an error answer; its first 200 characters are shown
+_TIMEOUT_SECONDS = 10
+_TOTAL_SECONDS = 20
+_MAX_ERROR_BYTES = 1024
 _TOO_SLOW = "The destination took too long to respond. Try sending a test again."
 _UNREADABLE_URL = "Could not send the notification. Check the destination URL and credentials."
 _UNEXPECTED = "The send failed with an unexpected error. Check the application logs."
-# The shortest start of a secret masked where an error answer was cut off
 _MIN_CUT_SECRET = 4
-# Discord's hard limit is 2000 characters; stay comfortably below it
 _MAX_MESSAGE_CHARS = 1900
 
 
-# The alert topics a channel can subscribe to. Every notification the app
-# sends belongs to exactly one of these, so the settings UI can show what a
-# destination will actually receive.
 ALERT_TYPES: List[Dict] = [
     {
         "id": "security",
@@ -71,20 +53,13 @@ ALERT_TYPE_IDS = {t["id"] for t in ALERT_TYPES}
 
 
 def channel_wants(channel_alert_types, alert_type: Optional[str]) -> bool:
-    """Should this channel receive an alert of this type?
-
-    An empty/missing subscription list means "everything", so channels created
-    before topics existed keep receiving all alerts.
-    """
     if not channel_alert_types:
         return True
     if not alert_type:
-        return True          # untyped notification (e.g. a manual test)
+        return True
     return alert_type in channel_alert_types
 
 
-# Field specs drive the settings UI: only these fields are shown per type.
-# secret=True fields are masked once saved.
 CHANNEL_TYPES: Dict[str, Dict] = {
     "slack": {
         "label": "Slack",
@@ -110,7 +85,6 @@ CHANNEL_TYPES: Dict[str, Dict] = {
              "secret": True, "placeholder": "123456789:AAExample-Token"},
             {"key": "chat_id", "label": "Chat ID", "type": "text", "required": True,
              "placeholder": "123456789 or -100123456789 for a group"},
-            # A forum topic in a group (Bot API message_thread_id)
             {"key": "message_thread_id", "label": "Topic ID", "type": "text", "required": False,
              "integer": True, "placeholder": "42",
              "hint": "Copy the topic link in Telegram and use its last number, for example 42 in t.me/c/1234567890/42."},
@@ -163,7 +137,6 @@ def _truncate(text: str, limit: int = _MAX_MESSAGE_CHARS) -> str:
 
 
 def _readable_url(value: str) -> bool:
-    """An http(s) address with a host, that urlparse reads to the end (port too)."""
     try:
         parsed = urlparse(value)
         parsed.port
@@ -173,9 +146,6 @@ def _readable_url(value: str) -> bool:
 
 
 def validate_config(channel_type: str, config: Dict) -> Tuple[bool, str]:
-    """Check that all required fields for this type are present, and that the
-    URL fields hold an address. The message names the field, never its value:
-    a webhook URL is the channel's secret."""
     spec = CHANNEL_TYPES.get(channel_type)
     if not spec:
         return False, f"Unknown destination service: {channel_type}. Select a service from the list."
@@ -191,8 +161,6 @@ def validate_config(channel_type: str, config: Dict) -> Tuple[bool, str]:
 
 
 def _slack_text(text: str) -> str:
-    """Text Slack shows as written: &, < and > are its control characters
-    (<!channel> pings everyone, <url|label> hides where a link goes)."""
     return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
@@ -201,19 +169,11 @@ _ZERO_WIDTH_SPACE = "\u200b"
 
 
 def _discord_text(text: str) -> str:
-    """Text Discord shows as written: a zero-width space breaks @everyone,
-    @here and the [label](url) link that hides where it goes. The payload
-    also allows no mentions at all."""
     text = _DISCORD_MASS_MENTION.sub(rf"@{_ZERO_WIDTH_SPACE}\1", text)
     return text.replace("](", f"]{_ZERO_WIDTH_SPACE}(")
 
 
 def build_request(channel_type: str, config: Dict, subject: str, message: str) -> Tuple[str, Dict]:
-    """Assemble (url, httpx request kwargs) for a channel. URLs are built here so
-    the user only supplies the service-specific pieces.
-
-    Alerts quote text that whoever sends the mail chooses, such as a report
-    email's subject, so Slack and Discord get it escaped for their markup."""
     text = _truncate(message)
 
     if channel_type == "slack":
@@ -240,8 +200,6 @@ def build_request(channel_type: str, config: Dict, subject: str, message: str) -
         headers = {"Priority": "default"}
         if config.get("token"):
             headers["Authorization"] = f"Bearer {config['token']}"
-        # Title goes as a query parameter: HTTP headers can't carry the emoji
-        # some alert subjects use, ?title= takes percent-encoded UTF-8
         return url, {"content": text.encode("utf-8"), "headers": headers,
                      "params": {"title": subject}}
 
@@ -250,7 +208,6 @@ def build_request(channel_type: str, config: Dict, subject: str, message: str) -
         url = f"{server}/message?token={config['app_token']}"
         return url, {"json": {"title": subject, "message": text, "priority": 5}}
 
-    # custom webhook
     headers = {}
     if config.get("auth_header"):
         headers["Authorization"] = config["auth_header"]
@@ -266,13 +223,6 @@ def build_request(channel_type: str, config: Dict, subject: str, message: str) -
 
 
 def _sanitize_error(channel_type: str, config: Dict, error_text: str) -> str:
-    """Strip channel secrets from an error string before it is logged, stored
-    in last_error, or returned by the API. HTTP client errors can quote the
-    target URL, and for Telegram/Gotify/Slack/Discord the URL (or its path)
-    contains the token.
-
-    Never raises: a secret URL that urlparse cannot read gives a fixed text,
-    since which part of it the error quotes is not known."""
     secrets = []
     for key in SECRET_FIELDS.get(channel_type, set()):
         value = str(config.get(key, "") or "").strip()
@@ -280,8 +230,6 @@ def _sanitize_error(channel_type: str, config: Dict, error_text: str) -> str:
             continue
         secrets.append(value)
         if value.lower().startswith("http"):
-            # ConnectionError messages quote only the path part of the URL, and
-            # a server can quote the path with its query, or the query alone
             try:
                 parsed = urlparse(value)
             except ValueError:
@@ -295,11 +243,6 @@ def _sanitize_error(channel_type: str, config: Dict, error_text: str) -> str:
 
 
 def _mask(text: str, secrets: List[str]) -> str:
-    """text with every copy of each secret masked, and the start of one where
-    the text was cut off (an error answer is read only so far).
-
-    Every copy is found in the text as given, before anything is replaced:
-    masking one secret first could break up the copy of another that holds it."""
     spans = []
     for secret in filter(None, secrets):
         start = text.find(secret)
@@ -320,17 +263,12 @@ def _mask(text: str, secrets: List[str]) -> str:
             merged.append([start, end])
     out, last = [], 0
     for start, end in merged:
-        # A masked path keeps its leading slash, so the error still reads as a path
         out += [text[last:start], ("/" if text[start] == "/" else "") + MASK]
         last = end
     return "".join(out + [text[last:]])
 
 
 def _verify():
-    """Honour REQUESTS_CA_BUNDLE and CURL_CA_BUNDLE as requests, the client
-    used here before, did, so a self-hosted ntfy or Gotify behind a private CA
-    keeps working. Otherwise httpx's default, which honours SSL_CERT_FILE and
-    SSL_CERT_DIR."""
     bundle = os.environ.get("REQUESTS_CA_BUNDLE") or os.environ.get("CURL_CA_BUNDLE")
     if not bundle:
         return True
@@ -340,7 +278,6 @@ def _verify():
 
 
 def _decode(body: bytes, charset: Optional[str]) -> str:
-    """The answer's own charset when Python knows it, else UTF-8."""
     try:
         codecs.lookup(charset or "utf-8")
     except LookupError:
@@ -349,19 +286,8 @@ def _decode(body: bytes, charset: Optional[str]) -> str:
 
 
 async def _post(url: str, kwargs: Dict) -> Tuple[int, str]:
-    """POST and return (status, the start of the answer for an error status).
-
-    The channel's server decides how slowly and how much it answers, so the
-    send is bounded: one deadline for all of it, since httpx's timeout applies
-    to each step and a server sending a byte every few seconds never trips it;
-    no compressed answer, whose decoded size the server chooses; and at most
-    _MAX_ERROR_BYTES of an error answer read. A success or redirect answer is
-    not read at all.
-    """
     headers = {**kwargs.get("headers", {}), "Accept-Encoding": "identity"}
     async with asyncio.timeout(_TOTAL_SECONDS):
-        # A redirect would carry the alert, and any token in the URL or the
-        # Authorization header, to wherever the server points: never follow it
         async with httpx.AsyncClient(timeout=_TIMEOUT_SECONDS, follow_redirects=False,
                                      verify=_verify()) as client:
             async with client.stream("POST", url, **{**kwargs, "headers": headers}) as response:
@@ -380,13 +306,6 @@ async def _post(url: str, kwargs: Dict) -> Tuple[int, str]:
 
 
 def _run(coro):
-    """Run a send on its own event loop in this worker thread. asyncio.run
-    would wait at the end for a name lookup the deadline cut off (it runs on a
-    thread nothing can stop); closing the loop leaves that lookup to end on its
-    own, so the send still returns on time.
-
-    The loop is asyncio's own, not new_event_loop(): under uvicorn's default
-    policy that is uvloop, whose close() waits for a running name lookup."""
     loop = asyncio.SelectorEventLoop()
     try:
         return loop.run_until_complete(coro)
@@ -398,11 +317,6 @@ def _run(coro):
 
 
 async def _settle() -> None:
-    """Let the clean-up a send leaves behind finish before its loop closes.
-    An httpx answer that is not read to the end leaves inner generators that
-    the loop closes in tasks of their own; a closed loop would log each one
-    as destroyed while pending. All of it gets one second; whatever still runs
-    then is cancelled and left to the closing loop."""
     try:
         async with asyncio.timeout(1):
             await asyncio.get_running_loop().shutdown_asyncgens()
@@ -416,7 +330,6 @@ async def _settle() -> None:
 
 
 def send_to_config(channel_type: str, config: Dict, subject: str, message: str) -> Tuple[bool, str]:
-    """Send one notification. Returns (ok, error_message)."""
     ok, error = validate_config(channel_type, config)
     if not ok:
         return False, error
@@ -432,7 +345,6 @@ def send_to_config(channel_type: str, config: Dict, subject: str, message: str) 
     if 300 <= status < 400:
         return False, (f"HTTP {status}: the server redirected the request, "
                        f"and redirects are not followed. Enter the final URL of the service.")
-    # Masked before the cut, so the cut cannot split a secret the mask then misses
     return False, f"HTTP {status}: {_sanitize_error(channel_type, config, text)[:200]}"
 
 
@@ -450,10 +362,6 @@ def _record_result(channel_id: int, ok: bool, error: str) -> None:
 
 
 def send_to_all(subject: str, message: str, alert_type: Optional[str] = None) -> Dict[str, int]:
-    """Deliver to every enabled channel subscribed to this alert type.
-
-    Returns {'sent': n, 'failed': n, 'skipped': n}.
-    """
     try:
         with get_db_context() as db:
             all_channels = [
@@ -472,8 +380,6 @@ def send_to_all(subject: str, message: str, alert_type: Optional[str] = None) ->
 
     sent = failed = 0
     for channel in channels:
-        # One channel failing in an unforeseen way leaves the others their alert.
-        # Only the exception's type is logged: its text could quote a secret.
         try:
             ok, error = send_to_config(channel["type"], channel["config"], subject, message)
         except Exception as e:
@@ -501,7 +407,6 @@ def has_enabled_channels() -> bool:
 
 
 def mask_config(channel_type: str, config: Dict) -> Dict:
-    """Hide secret values before sending a channel to the browser."""
     secrets = SECRET_FIELDS.get(channel_type, set())
     return {
         k: (MASK if (k in secrets and str(v).strip()) else v)
@@ -510,24 +415,17 @@ def mask_config(channel_type: str, config: Dict) -> Dict:
 
 
 class SecretEndpointChanged(ValueError):
-    """A masked secret came back with a different server: it must be entered again."""
+    pass
 
 
 def _endpoint(channel_type: str, key: str, config: Dict) -> str:
-    """The server a secret goes to, spelled the same way for stored and posted configs."""
     value = str(config.get(key) or "").strip()
     if not value and channel_type == "ntfy" and key == "server_url":
-        value = "https://ntfy.sh"  # build_request's default
+        value = "https://ntfy.sh"
     return value.rstrip("/")
 
 
 def merge_config(channel_type: str, existing: Dict, incoming: Dict) -> Dict:
-    """Keep the stored secret when the UI sends back the mask placeholder.
-
-    Only while the destination stays the same: with a changed server_url / url
-    the stored secret would be sent to the new server, so SecretEndpointChanged
-    asks for it again.
-    """
     secrets = SECRET_FIELDS.get(channel_type, set())
     merged = dict(incoming or {})
     existing = existing or {}

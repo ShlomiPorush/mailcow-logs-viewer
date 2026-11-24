@@ -1,17 +1,3 @@
-"""The data a feature keeps, and its deletion while the feature is off.
-
-A feature that is off keeps nothing in the app, whichever way it was turned
-off (the Settings switch or DISABLED_FEATURES). Turned on again, it reads
-back what the server still has: Suppressions loads the blocks this app wrote
-to Rspamd (see routers/suppressions.import_managed_worker), the other
-features fetch or check again on their own. the Suppressions feature's list is kept only
-while "Sync with Rspamd" is on as well: with the sync off it goes like the
-list of a Suppressions that is off, and comes back the same way.
-
-The deletion runs at startup, after every settings save and on a sweep every
-few minutes, so a row written by a job or an API call that was already under
-way when the feature went off goes on the next pass.
-"""
 import logging
 import re
 from typing import Dict, List, Optional
@@ -23,7 +9,6 @@ from ..config import settings
 
 logger = logging.getLogger(__name__)
 
-# Feature -> its tables. The order matters only for the counts reported.
 FEATURE_TABLES: Dict[str, List[str]] = {
     'netfilter': ['netfilter_logs'],
     'domains': ['domain_dns_checks'],
@@ -31,27 +16,18 @@ FEATURE_TABLES: Dict[str, List[str]] = {
     'mailbox-stats': ['alias_statistics', 'mailbox_statistics'],
     'logs': ['raw_service_logs'],
     'blacklist': ['blacklist_checks', 'monitored_hosts'],
-    # The block details go with their blocks (the foreign key cascades too); listed first to count them
     'suppressions': ['suppression_events', 'spam_suppressions'],
     'quarantine': ['quarantine_rule_logs', 'quarantine_rules'],
     'devices': ['eas_devices'],
 }
 
-# Feature -> keys in system_settings that belong to it. A key ending in '%'
-# is a prefix.
 FEATURE_KEYS: Dict[str, List[str]] = {
     'netfilter': ['protection.%'],
     'blacklist': ['ignore.blocklists'],
     'domains': ['dns_last_full_check'],
-    # What the two-way sync with Rspamd keeps about the rows
     'suppressions': ['spam_filter.rspamd_%'],
 }
 
-# Suppressions turned on again loads the blocks this app wrote to Rspamd while
-# this key is set (routers/suppressions.import_managed_worker). RESTORE: the
-# app may have blocks there, so nothing adds to the list before they are
-# loaded, even while the Rspamd password is missing. BOOTSTRAP: nothing says
-# it has; without the password there is nothing to load.
 SPAM_IMPORT_PENDING_KEY = 'spam_filter.import_pending'
 SPAM_IMPORT_RESTORE = '1'
 SPAM_IMPORT_BOOTSTRAP = 'bootstrap'
@@ -68,11 +44,6 @@ def _set_key(db: Session, key: str, value: str) -> None:
 
 
 def security_bans_to_release(db: Session) -> int:
-    """Hits protection_rules.release_temporary_bans still has to handle: bans
-    this app wrote to Fail2ban that would have ended on their own (nothing
-    lifts them once their hits are gone), and bans still pending (an enforce
-    run may be writing one right now). Until there are none, the ban history
-    stays."""
     from ..models import ProtectionHit
     return db.query(ProtectionHit).filter(or_(
         ProtectionHit.status == 'pending',
@@ -81,17 +52,11 @@ def security_bans_to_release(db: Session) -> int:
 
 
 def spam_list_kept() -> bool:
-    """Whether Suppressions keeps its suppression list: the feature on, and
-    "Sync with Rspamd" on (services/bounce_policy.rspamd_sync_on)."""
     from .bounce_policy import rspamd_sync_on
     return rspamd_sync_on()
 
 
 def _spam_may_be_in_rspamd(db: Session) -> bool:
-    """Whether something of this app may be in Rspamd now: the list was read
-    from the map (its target is kept), a load is still owed, a row is in the
-    map (active and written, or disabled and not yet removed), or a deleted
-    row still waits to be removed there."""
     from ..models import SpamSuppression, SystemSetting
     keys = dict(db.query(SystemSetting.key, SystemSetting.value).filter(SystemSetting.key.in_(
         ['spam_filter.rspamd_target', 'spam_filter.rspamd_tombstones', SPAM_IMPORT_PENDING_KEY])).all())
@@ -105,26 +70,17 @@ def _spam_may_be_in_rspamd(db: Session) -> bool:
 
 
 def purge_feature(db: Session, feature: str, still_off=None) -> dict:
-    """Delete everything a feature that is off keeps, in one transaction.
-
-    still_off, for Suppressions, is asked again once the row lock is held: a
-    feature (or sync) turned on while this waited keeps its list, and nothing
-    is deleted. Raises on failure after rolling back; the caller decides
-    whether that stops it. Returns the rows deleted per table.
-    """
     from ..models import ProtectionHit, SystemSetting
     deleted: Dict[str, int] = {}
     restore = False
     try:
         if feature == 'suppressions':
-            # Before the tables: a detection run or the Rspamd sync holds it while it changes the rows
             from .suppression_rows_lock import lock_suppression_rows
             lock_suppression_rows(db)
             if still_off is not None and not still_off():
                 db.rollback()
                 return {}
             restore = _spam_may_be_in_rspamd(db)
-        # The feature's trend samples (in a table shared with other figures, by name)
         from .figures import purge_feature_metrics
         removed_metrics = purge_feature_metrics(db, feature)
         if removed_metrics:
@@ -133,13 +89,10 @@ def purge_feature(db: Session, feature: str, still_off=None) -> dict:
             if not _TABLE_NAME_RE.match(table_name):
                 raise ValueError(f"Invalid table name: {table_name}")
             if table_name == 'raw_service_logs':
-                # Other pages read some services from this table; only the rows
-                # nothing collects any more go
                 from ..raw_logs_worker import delete_uncollected_raw_logs
                 deleted[table_name] = delete_uncollected_raw_logs(db)
                 continue
             if table_name == 'mailbox_statistics' and settings.is_feature_enabled('rate-limits'):
-                # Rate Limits reads each mailbox's configured limit from it
                 continue
             # nosemgrep: python.sqlalchemy.security.audit.avoid-sqlalchemy-text.avoid-sqlalchemy-text
             count = db.execute(text(f"SELECT COUNT(*) FROM {table_name}")).scalar() or 0
@@ -154,7 +107,6 @@ def purge_feature(db: Session, feature: str, still_off=None) -> dict:
             if removed:
                 deleted[f'system_settings:{key}'] = removed
         if feature == 'netfilter' and not security_bans_to_release(db):
-            # The ban history goes once no temporary ban of this app is left in Fail2ban
             removed = db.query(ProtectionHit).delete(synchronize_session=False)
             if removed:
                 deleted['protection_hits'] = removed
@@ -177,10 +129,6 @@ SPAM_IMPORT_BOOTSTRAP_KEY = 'spam_filter.import_bootstrapped'
 
 
 def bootstrap_spam_import(db: Session) -> None:
-    """Once, on the first start of a version that loads the Suppressions feature's blocks
-    back: an empty list with Suppressions on loads them too. An earlier
-    version could leave the blocks in Rspamd with the list deleted (turned off
-    with "Keep blocks"), and nothing marked them to come back."""
     from ..models import SpamSuppression, SystemSetting
     if db.query(SystemSetting.key).filter(SystemSetting.key == SPAM_IMPORT_BOOTSTRAP_KEY).first() is not None:
         return
@@ -192,9 +140,6 @@ def bootstrap_spam_import(db: Session) -> None:
 
 
 def purge_disabled_features() -> Dict[str, Optional[str]]:
-    """Purge every feature that is off, each in its own session, so one that
-    fails does not keep the others; the Suppressions feature's list also while "Sync with
-    Rspamd" is off. Returns {feature: error or None}."""
     from ..database import get_db_context
     from .rspamd_map_lock import map_write_lock
     results: Dict[str, Optional[str]] = {}
@@ -212,9 +157,7 @@ def purge_disabled_features() -> Dict[str, Optional[str]]:
         try:
             with get_db_context() as db:
                 if feature == 'suppressions':
-                    # A sync or an import of the list waits, or is waited for
                     with map_write_lock():
-                        # Turned on again while this waited for a lock: its list stays
                         if not spam_off():
                             continue
                         deleted = purge_feature(db, feature, still_off=spam_off)

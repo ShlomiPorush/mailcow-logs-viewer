@@ -1,8 +1,3 @@
-"""
-Generic OAuth2/OIDC Client Service
-Supports OIDC discovery and manual endpoint configuration
-Works with any standard OAuth2/OIDC provider
-"""
 import logging
 import threading
 import httpx
@@ -15,26 +10,18 @@ logger = logging.getLogger(__name__)
 
 
 class OAuth2ClientError(Exception):
-    """Custom exception for OAuth2 client errors"""
     pass
 
 
 class OAuth2Client:
-    """Generic OAuth2/OIDC client"""
 
     def __init__(self):
-        # A settings save reloads the configuration on a worker thread while a
-        # login runs discovery on the event loop: the configuration is replaced,
-        # and a discovery answer applied, only under this lock (never held
-        # across the network request)
         self._config_lock = threading.Lock()
         self._config_version = 0
         self._update_config()
 
     def _update_config(self):
-        """Update configuration from settings (supports dynamic reload)"""
         with self._config_lock:
-            # A discovery answer for an earlier configuration is not applied
             self._config_version += 1
             self.issuer_url = settings.oauth2_issuer_url
             self.client_id = settings.oauth2_client_id
@@ -42,27 +29,17 @@ class OAuth2Client:
             self.redirect_uri = settings.oauth2_redirect_uri
             self.scopes = settings.oauth2_scopes.split()
 
-            # Endpoints (will be populated by discovery or manual config)
             self.authorization_url: Optional[str] = settings.oauth2_authorization_url
             self.token_url: Optional[str] = settings.oauth2_token_url
             self.userinfo_url: Optional[str] = settings.oauth2_userinfo_url
 
-            # OIDC discovery cache
             self._discovery_cache: Optional[Dict[str, Any]] = None
 
     def reload_config(self):
-        """Reload configuration from settings (call after settings are updated via UI)"""
         self._update_config()
         logger.info("OAuth2 client configuration reloaded")
 
     async def discover_endpoints(self) -> Dict[str, Any]:
-        """
-        Perform OIDC discovery to get endpoints
-
-        Returns:
-            Discovery document with endpoints
-        """
-        # The issuer asked and the configuration it belongs to, read together
         with self._config_lock:
             issuer_url, version, cached = self.issuer_url, self._config_version, self._discovery_cache
         if not issuer_url:
@@ -81,12 +58,9 @@ class OAuth2Client:
 
                 with self._config_lock:
                     if version != self._config_version:
-                        # The settings changed while the provider answered: its
-                        # endpoints must not replace the new provider's
                         raise OAuth2ClientError("The OAuth2 settings changed during discovery")
                     self._discovery_cache = discovery
 
-                    # Extract endpoints
                     self.authorization_url = discovery.get('authorization_endpoint')
                     self.token_url = discovery.get('token_endpoint')
                     self.userinfo_url = discovery.get('userinfo_endpoint')
@@ -108,18 +82,6 @@ class OAuth2Client:
             raise OAuth2ClientError(f"OIDC discovery error: {e}")
 
     def get_authorization_url(self, state: str, code_challenge: Optional[str] = None) -> str:
-        """
-        Get authorization URL for OAuth2 flow
-        
-        Args:
-            state: CSRF state token
-            code_challenge: PKCE S256 code_challenge (RFC 7636). Providers
-                without PKCE support ignore it, as RFC 6749 requires for
-                unknown parameters.
-            
-        Returns:
-            Authorization URL
-        """
         if not self.authorization_url:
             raise OAuth2ClientError("Authorization URL not configured. Set OAUTH2_AUTHORIZATION_URL or OAUTH2_ISSUER_URL")
         
@@ -129,7 +91,6 @@ class OAuth2Client:
         if not self.redirect_uri:
             raise OAuth2ClientError("Redirect URI not configured")
         
-        # Build authorization URL
         from urllib.parse import urlencode
         
         params = {
@@ -147,17 +108,6 @@ class OAuth2Client:
         return f"{self.authorization_url}?{query_string}"
     
     async def exchange_code_for_token(self, code: str, code_verifier: Optional[str] = None) -> Dict[str, Any]:
-        """
-        Exchange authorization code for access token
-        
-        Args:
-            code: Authorization code from callback
-            code_verifier: PKCE code_verifier matching the code_challenge
-                sent with the authorization request
-            
-        Returns:
-            Token response with access_token, etc.
-        """
         if not self.token_url:
             raise OAuth2ClientError("Token URL not configured. Set OAUTH2_TOKEN_URL or OAUTH2_ISSUER_URL")
         
@@ -167,7 +117,6 @@ class OAuth2Client:
         if not self.redirect_uri:
             raise OAuth2ClientError("Redirect URI not configured")
         
-        # Prepare token request
         data = {
             'grant_type': 'authorization_code',
             'code': code,
@@ -199,15 +148,6 @@ class OAuth2Client:
             raise OAuth2ClientError(f"Token exchange error: {e}")
     
     async def get_user_info(self, access_token: str) -> Dict[str, Any]:
-        """
-        Get user information from UserInfo endpoint
-        
-        Args:
-            access_token: OAuth2 access token
-            
-        Returns:
-            User information dictionary
-        """
         if not self.userinfo_url:
             raise OAuth2ClientError("UserInfo URL not configured. Set OAUTH2_USERINFO_URL or OAUTH2_ISSUER_URL")
         
@@ -231,14 +171,12 @@ class OAuth2Client:
             raise OAuth2ClientError(f"UserInfo request error: {e}")
     
     def is_configured(self) -> bool:
-        """Check if OAuth2 client is properly configured"""
         if not self.client_id or not self.client_secret:
             return False
         
         if not self.redirect_uri:
             return False
         
-        # Need either issuer URL (for discovery) or all endpoints manually configured
         if self.issuer_url:
             return True
         
@@ -248,18 +186,15 @@ class OAuth2Client:
         return False
     
     async def initialize(self) -> None:
-        """Initialize OAuth2 client (perform discovery if needed)"""
         if not self.is_configured():
             logger.warning("OAuth2 client not fully configured")
             return
         
-        # If issuer URL is provided and discovery is enabled, perform discovery
         if self.issuer_url and settings.oauth2_use_oidc_discovery:
             try:
                 await self.discover_endpoints()
             except Exception as e:
                 logger.warning(f"OIDC discovery failed, using manual endpoints if configured: {e}")
-                # If discovery fails, fall back to manually configured endpoints
                 if not (self.authorization_url and self.token_url and self.userinfo_url):
                     raise OAuth2ClientError(
                         "OIDC discovery failed and manual endpoints not configured. "
@@ -267,5 +202,4 @@ class OAuth2Client:
                     )
 
 
-# Global OAuth2 client instance
 oauth2_client = OAuth2Client()

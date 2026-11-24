@@ -1,11 +1,3 @@
-"""
-SQLAlchemy database models for storing mailcow logs
-
-SIMPLIFIED VERSION:
-- Correlation now relies solely on Message-ID
-- Removed old generate_correlation_key function
-- Correlation key is now SHA256 of Message-ID
-"""
 from sqlalchemy import Column, Integer, BigInteger, String, Float, DateTime, Boolean, Text, Index, JSON, UniqueConstraint, ForeignKey, CheckConstraint, func, text, Uuid
 from sqlalchemy.dialects.postgresql import JSONB
 from datetime import datetime
@@ -14,7 +6,6 @@ from .database import Base
 
 
 class PostfixLog(Base):
-    """Postfix mail server logs"""
     __tablename__ = "postfix_logs"
     
     id = Column(Integer, primary_key=True, index=True)
@@ -43,7 +34,6 @@ class PostfixLog(Base):
         Index('idx_postfix_sender_recipient', 'sender', 'recipient'),
         Index('idx_postfix_correlation', 'correlation_key'),
         Index('idx_postfix_message_id', 'message_id'),
-        # The cleanup lines without a usable Message-ID (services/no_message_id.py, alembic 0026)
         Index('idx_postfix_cleanup_no_message_id', 'time',
               postgresql_where=text("message_id IS NULL AND program LIKE '%/cleanup'")),
         UniqueConstraint('time', 'program', 'queue_id', 'message', name='uq_postfix_log'),
@@ -54,7 +44,6 @@ class PostfixLog(Base):
 
 
 class RspamdLog(Base):
-    """Rspamd spam filtering logs"""
     __tablename__ = "rspamd_logs"
     
     id = Column(Integer, primary_key=True, index=True)
@@ -109,7 +98,6 @@ class RspamdLog(Base):
 
 
 class NetfilterLog(Base):
-    """Netfilter/Authentication failure logs"""
     __tablename__ = "netfilter_logs"
     
     id = Column(Integer, primary_key=True, index=True)
@@ -124,7 +112,6 @@ class NetfilterLog(Base):
     auth_method = Column(String(50))
     action = Column(String(50), index=True)
     
-    # GeoIP data (enriched at import time when MaxMind databases are available)
     country_code = Column(String(2), index=True)
     country_name = Column(String(100))
     city = Column(String(100))
@@ -145,25 +132,11 @@ class NetfilterLog(Base):
 
 
 class MessageCorrelation(Base):
-    """
-    Correlation table to link related logs from different sources
-    
-    SIMPLIFIED APPROACH:
-    - One row per delivery leg, that is per (Message-ID, Postfix queue chain)
-    - Uses Message-ID as the primary correlation key (SHA256 hashed); an extra
-      leg of the same Message-ID hashes the Queue-ID in as well (issue #36)
-    - Links all Postfix logs of one leg via Queue-ID
-    - Links Rspamd log via Message-ID match
-    """
     __tablename__ = "message_correlations"
     
     id = Column(Integer, primary_key=True, index=True)
     correlation_key = Column(String(64), unique=True, index=True, nullable=False)
     
-    # NOT unique (issue #36): a forward or any other re-submission delivers the
-    # same Message-ID through a second Postfix queue chain, and each of those
-    # delivery legs is its own correlation. The plain index lives in
-    # __table_args__ below, so there is exactly one index on this column.
     message_id = Column(String(255))
     queue_id = Column(String(50), index=True)
     
@@ -172,23 +145,14 @@ class MessageCorrelation(Base):
     
     sender = Column(String(255), index=True)
     recipient = Column(String(255), index=True)
-    # Rspamd records some recipients in a normalized form (ALIAS_RESOLVED: no
-    # Gmail dots, no +tag); `recipient` keeps that form for matching. This maps
-    # each such Rspamd address (lowercase) to the address Postfix delivered to,
-    # as the sender wrote it, for display and search (services/written_recipients.py)
     written_recipients = Column(JSONB)
     subject = Column(Text)
     direction = Column(String(20))
     final_status = Column(String(50))
 
-    # Outcome of the last hop, from the Dovecot LMTP logs (issue #65). Postfix
-    # only reports "handed over to Dovecot", so a Sieve discard used to show up
-    # as 'delivered'. Kept separate from final_status because the Postfix-driven
-    # jobs recompute that field and would otherwise overwrite the verdict.
-    # One of: stored | discarded | rejected | forwarded | failed
     dovecot_status = Column(String(30), index=True)
-    dovecot_mailbox = Column(String(255))   # target folder, e.g. 'INBOX' or 'Junk'
-    dovecot_detail = Column(Text)           # reject reason, forward target, quota error
+    dovecot_mailbox = Column(String(255))
+    dovecot_detail = Column(Text)
 
     is_complete = Column(Boolean, default=False, index=True)
     
@@ -202,7 +166,6 @@ class MessageCorrelation(Base):
         Index('idx_correlation_message_id', 'message_id'),
         Index('idx_correlation_queue_id', 'queue_id'),
         Index('idx_correlation_sender_recipient', 'sender', 'recipient'),
-        # Functional indexes for case-insensitive mailbox stats queries
         Index('idx_correlation_sender_lower', func.lower(sender)),
         Index('idx_correlation_recipient_lower', func.lower(recipient)),
     )
@@ -212,7 +175,6 @@ class MessageCorrelation(Base):
 
 
 class DomainDNSCheck(Base):
-    """Cached DNS check results for domains"""
     __tablename__ = "domain_dns_checks"
     
     id = Column(Integer, primary_key=True, index=True)
@@ -221,10 +183,10 @@ class DomainDNSCheck(Base):
     spf_check = Column(JSONB)
     dkim_check = Column(JSONB)
     dmarc_check = Column(JSONB)
-    dnssec_check = Column(JSONB)    # DNSSEC validation of the domain
-    tlsa_check = Column(JSONB)      # DANE/TLSA records for the domain's MX hosts
-    mta_sts_check = Column(JSONB)   # MTA-STS record + policy (RFC 8461)
-    tls_rpt_check = Column(JSONB)   # TLS-RPT reporting record (RFC 8460)
+    dnssec_check = Column(JSONB)
+    tlsa_check = Column(JSONB)
+    mta_sts_check = Column(JSONB)
+    tls_rpt_check = Column(JSONB)
     
     checked_at = Column(DateTime, nullable=False)
     is_full_check = Column(Boolean, default=False)
@@ -233,14 +195,10 @@ class DomainDNSCheck(Base):
 
 
 class DMARCReport(Base):
-    """DMARC aggregate reports received from email providers"""
     __tablename__ = "dmarc_reports"
     
     id = Column(Integer, primary_key=True, index=True)
     
-    # Chosen by the sender, so not unique: a report is the same report only
-    # when its content is the same (services/report_identity.py). NULL only on
-    # rows written by an older version; the app computes them on demand.
     report_id = Column(String(255), nullable=False)
     content_hash = Column(String(64))
 
@@ -257,7 +215,6 @@ class DMARCReport(Base):
     
     domain_id = Column(String(255), index=True)
     
-    # No longer written (always NULL); kept so an older version can still run
     raw_xml = Column(Text)
     
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
@@ -274,7 +231,6 @@ class DMARCReport(Base):
 
 
 class DMARCRecord(Base):
-    """Individual records within a DMARC report (one per source IP)"""
     __tablename__ = "dmarc_records"
     
     id = Column(Integer, primary_key=True, index=True)
@@ -309,7 +265,6 @@ class DMARCRecord(Base):
 
 
 class DMARCSync(Base):
-    """History of DMARC IMAP sync operations"""
     __tablename__ = "dmarc_syncs"
     
     id = Column(Integer, primary_key=True, index=True)
@@ -339,51 +294,35 @@ class DMARCSync(Base):
 
 
 class MailboxStatistics(Base):
-    """
-    Mailbox statistics fetched from mailcow API
-    Tracks quota usage, message counts, and last access times for each mailbox
-    """
     __tablename__ = "mailbox_statistics"
     
     id = Column(Integer, primary_key=True, index=True)
     
-    # Mailbox identification
-    username = Column(String(255), unique=True, index=True, nullable=False)  # email address
+    username = Column(String(255), unique=True, index=True, nullable=False)
     domain = Column(String(255), index=True, nullable=False)
-    name = Column(String(255))  # Display name
+    name = Column(String(255))
     
-    # Quota information (in bytes)
-    quota = Column(BigInteger, default=0)  # Allocated quota
-    quota_used = Column(BigInteger, default=0)  # Used quota
-    percent_in_use = Column(Float, default=0.0)  # Percentage used
+    quota = Column(BigInteger, default=0)
+    quota_used = Column(BigInteger, default=0)
+    percent_in_use = Column(Float, default=0.0)
     
-    # Message counts
-    messages = Column(Integer, default=0)  # Total messages in mailbox
+    messages = Column(Integer, default=0)
     
-    # Status
     active = Column(Boolean, default=True, index=True)
-    # mailcow's active 2 (since 2026-11): the mailbox may not sign in, its mail is
-    # still delivered. Such a mailbox is active here.
     login_disabled = Column(Boolean, nullable=False, default=False, server_default=text('false'))
 
-    # Access times (Unix timestamps from API, stored as integers)
     last_imap_login = Column(BigInteger, nullable=True)
     last_pop3_login = Column(BigInteger, nullable=True)
     last_smtp_login = Column(BigInteger, nullable=True)
-    # Webmail, and phones that sync through SOGo; mailcow reports it since 2026-11a
     last_sogo_login = Column(BigInteger, nullable=True)
     
-    # Spam filter settings
     spam_aliases = Column(Integer, default=0)
     
-    # Rate limits
-    rl_value = Column(Integer, nullable=True)  # Rate limit value
-    rl_frame = Column(String(20), nullable=True)  # Rate limit time frame (e.g., "s", "m", "h")
+    rl_value = Column(Integer, nullable=True)
+    rl_frame = Column(String(20), nullable=True)
     
-    # Attributes from API
-    attributes = Column(JSONB)  # Store full attributes for reference
+    attributes = Column(JSONB)
     
-    # Timestamps
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
@@ -398,27 +337,19 @@ class MailboxStatistics(Base):
 
 
 class AliasStatistics(Base):
-    """
-    Alias statistics for tracking message counts per alias
-    Links aliases to their target mailboxes
-    """
     __tablename__ = "alias_statistics"
     
     id = Column(Integer, primary_key=True, index=True)
     
-    # Alias identification
-    alias_address = Column(String(255), unique=True, index=True, nullable=False)  # The alias email
-    goto = Column(Text)  # Target mailbox(es), comma-separated
+    alias_address = Column(String(255), unique=True, index=True, nullable=False)
+    goto = Column(Text)
     domain = Column(String(255), index=True, nullable=False)
     
-    # Status
     active = Column(Boolean, default=True, index=True)
-    is_catch_all = Column(Boolean, default=False)  # Is this a catch-all alias
+    is_catch_all = Column(Boolean, default=False)
     
-    # Link to primary mailbox (if applicable)
-    primary_mailbox = Column(String(255), index=True, nullable=True)  # Main target mailbox
+    primary_mailbox = Column(String(255), index=True, nullable=True)
     
-    # Timestamps
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
@@ -433,27 +364,21 @@ class AliasStatistics(Base):
 
 
 class TLSReport(Base):
-    """TLS-RPT (SMTP TLS Reporting) reports received from email providers"""
     __tablename__ = "tls_reports"
     
     id = Column(Integer, primary_key=True, index=True)
     
-    # Report identification: not unique, see DMARCReport.report_id
     report_id = Column(String(255), nullable=False)
     content_hash = Column(String(64))
     
-    # Organization that sent the report
     organization_name = Column(String(255), index=True)
     contact_info = Column(String(255))
     
-    # Domain being reported on
     policy_domain = Column(String(255), index=True, nullable=False)
     
-    # Date range of the report
     start_datetime = Column(DateTime, nullable=False)
     end_datetime = Column(DateTime, nullable=False)
     
-    # No longer written (always NULL); kept so an older version can still run
     raw_json = Column(Text)
     
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
@@ -470,23 +395,19 @@ class TLSReport(Base):
 
 
 class TLSReportPolicy(Base):
-    """Individual policy records within a TLS-RPT report"""
     __tablename__ = "tls_report_policies"
     
     id = Column(Integer, primary_key=True, index=True)
     tls_report_id = Column(Integer, index=True, nullable=False)
     
-    # Policy information
-    policy_type = Column(String(50))  # "sts", "no-policy-found", etc.
+    policy_type = Column(String(50))
     policy_domain = Column(String(255))
-    policy_string = Column(JSONB)  # The policy string array
-    mx_host = Column(JSONB)  # List of MX hosts
+    policy_string = Column(JSONB)
+    mx_host = Column(JSONB)
     
-    # Session counts
     successful_session_count = Column(Integer, default=0)
     failed_session_count = Column(Integer, default=0)
     
-    # Failure details if any
     failure_details = Column(JSONB)
     
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -501,14 +422,10 @@ class TLSReportPolicy(Base):
 
 
 class SystemSetting(Base):
-    """
-    Global system settings and state
-    Used for inter-process signaling (e.g., cache invalidation)
-    """
     __tablename__ = "system_settings"
     
     key = Column(String(255), primary_key=True, index=True)
-    value = Column(Text)  # JSON string or simple text
+    value = Column(Text)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
     def __repr__(self):
@@ -516,29 +433,21 @@ class SystemSetting(Base):
 
 
 class BlacklistCheck(Base):
-    """
-    IP Blacklist check results stored in database
-    Results are cached for 24 hours to avoid excessive DNS queries
-    """
     __tablename__ = "blacklist_checks"
     
     id = Column(Integer, primary_key=True, index=True)
     server_ip = Column(String(50), index=True, nullable=False)
     
-    # Summary counts
     total_blacklists = Column(Integer, default=0)
     listed_count = Column(Integer, default=0)
     clean_count = Column(Integer, default=0)
     error_count = Column(Integer, default=0)
     timeout_count = Column(Integer, default=0)
     
-    # Overall status: 'clean', 'listed', 'error'
     status = Column(String(20), index=True)
     
-    # Full results as JSONB
     results = Column(JSONB)
     
-    # Timestamps
     checked_at = Column(DateTime, nullable=False, index=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     
@@ -551,17 +460,10 @@ class BlacklistCheck(Base):
 
 
 class MonitoredHost(Base):
-    """
-    Hosts to be monitored for blacklisting
-    Includes the local server and any external transport/relay hosts
-    """
     __tablename__ = "monitored_hosts"
     
     id = Column(Integer, primary_key=True, index=True)
     hostname = Column(String(255), unique=True, index=True, nullable=False)
-    # 'system', 'transport', 'relayhost', or prefixed FQDN like 'relayhost:<fqdn>'
-    # TEXT because a prefixed FQDN can reach 263 chars ('relayhost:' + 253-char
-    # DNS max) and crashed the old VARCHAR(50) (issue #70)
     source = Column(Text)
     active = Column(Boolean, default=True, index=True)
     last_seen = Column(DateTime)
@@ -578,11 +480,6 @@ class MonitoredHost(Base):
 
 
 class KnownContainer(Base):
-    """
-    Known mailcow containers cache
-    Tracks all containers that have been seen, even when they're stopped
-    Used to properly count stopped containers that don't appear in API response
-    """
     __tablename__ = "known_containers"
     
     container_name = Column(String(255), primary_key=True, index=True, nullable=False)
@@ -601,11 +498,6 @@ class KnownContainer(Base):
 
 
 class RawServiceLog(Base):
-    """
-    Raw log entries from any mailcow service (postfix, dovecot, sogo, etc.)
-    Stored as-is from the mailcow API, with the full response in raw_data JSONB.
-    Used by the Live Logs Viewer page.
-    """
     __tablename__ = "raw_service_logs"
     
     id = Column(Integer, primary_key=True, index=True)
@@ -626,11 +518,6 @@ class RawServiceLog(Base):
 
 
 class EasDevice(Base):
-    """
-    One ActiveSync device of one user, built from SOGo's access log lines for
-    /Microsoft-Server-ActiveSync. Each row keeps the newest request seen for
-    the pair (user, device id) and when the pair was first and last seen.
-    """
     __tablename__ = "eas_devices"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -653,39 +540,26 @@ class EasDevice(Base):
 
 
 class SpamSuppression(Base):
-    """
-    Spam suppression list for blocking outgoing emails to recipients
-    that have previously bounced or been rejected.
-    
-    Uses progressive expiry: each subsequent bounce escalates the suppression
-    duration (base_days × bounce_count, capped at max_days).
-    
-    Synced to Rspamd's global_rcpt_blacklist.map via mailcow API.
-    """
     __tablename__ = "spam_suppressions"
     
     id = Column(Integer, primary_key=True, index=True)
     email = Column(String(255), unique=True, index=True, nullable=False)
-    type = Column(String(20), index=True, default='email')            # 'email' or 'domain'
-    reason = Column(String(50), index=True, nullable=False)           # 'hard_bounce', 'soft_bounce', 'rejected', 'manual'
-    source = Column(String(100))                                      # 'auto', 'manual', 'import'
+    type = Column(String(20), index=True, default='email')
+    reason = Column(String(50), index=True, nullable=False)
+    source = Column(String(100))
     notes = Column(Text)
     
-    # Progressive tracking
-    bounce_count = Column(Integer, default=1)                         # total escalation counter
-    hard_bounce_count = Column(Integer, default=0)                    # hard bounces specifically
-    soft_bounce_count = Column(Integer, default=0)                    # soft bounces specifically
-    last_bounce_dsn = Column(String(20))                              # e.g., '5.1.1', '4.2.2'
-    last_bounce_message = Column(Text)                                # DSN error message text
+    bounce_count = Column(Integer, default=1)
+    hard_bounce_count = Column(Integer, default=0)
+    soft_bounce_count = Column(Integer, default=0)
+    last_bounce_dsn = Column(String(20))
+    last_bounce_message = Column(Text)
     
-    # Linking to originating message
     correlation_key = Column(String(64), nullable=True)
     
-    # State
     active = Column(Boolean, default=True, index=True)
     synced_to_rspamd = Column(Boolean, default=False, index=True)
     
-    # Expiry (NULL = never expires, for manual entries)
     expires_at = Column(DateTime, nullable=True, index=True)
     
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -702,22 +576,11 @@ class SpamSuppression(Base):
 
 
 class SuppressionEvent(Base):
-    """What happened to a blocked address, kept with it for as long as it is on
-    the list (Outbound > Suppressions > Block details).
-
-    Postfix logs and messages are deleted after RETENTION_DAYS, but a block can
-    last up to months, so each event keeps its own copy of the evidence: the
-    server's answer, the message's sender, subject and ids, and the Postfix
-    lines of that message. Deleting the address deletes its events.
-    """
     __tablename__ = "suppression_events"
 
     id = Column(Integer, primary_key=True)
     suppression_id = Column(Integer, ForeignKey('spam_suppressions.id', ondelete='CASCADE'), nullable=False)
-    # hard_bounce, soft_bounce, rejected, deferred_stuck, added, imported,
-    # enabled, disabled, expiry_changed, notes_changed, before_upgrade
     kind = Column(String(30), nullable=False)
-    # What the event did to the block: created, activated, extended, counted, kept, changed
     outcome = Column(String(20))
     recorded_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     message_time = Column(DateTime)
@@ -741,21 +604,14 @@ class SuppressionEvent(Base):
 
 
 class QuarantineRule(Base):
-    """
-    Quarantine auto-processing rules.
-    
-    Each rule matches quarantined emails by sender, domain, recipient, or subject
-    and automatically releases or deletes them.
-    Delete rules always take priority over release rules.
-    """
     __tablename__ = "quarantine_rules"
     
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String(255), nullable=False)
-    match_type = Column(String(20), nullable=False)         # 'sender', 'sender_domain', 'recipient', 'subject'
-    match_value = Column(String(500), nullable=False)       # plain text or regex pattern
+    match_type = Column(String(20), nullable=False)
+    match_value = Column(String(500), nullable=False)
     is_regex = Column(Boolean, default=False)
-    action = Column(String(20), nullable=False)             # 'release' or 'delete'
+    action = Column(String(20), nullable=False)
     enabled = Column(Boolean, default=True, index=True)
     hit_count = Column(Integer, default=0)
     last_hit_at = Column(DateTime, nullable=True)
@@ -774,22 +630,18 @@ class QuarantineRule(Base):
 
 
 class QuarantineRuleLog(Base):
-    """
-    History log of automatic quarantine actions taken by rules.
-    Tracks which rule matched, the action taken, and the email details.
-    """
     __tablename__ = "quarantine_rule_logs"
     
     id = Column(Integer, primary_key=True, index=True)
     rule_id = Column(Integer, index=True, nullable=False)
-    rule_name = Column(String(255))                         # snapshot of rule name at time of action
-    action = Column(String(20), nullable=False)             # 'release' or 'delete'
-    quarantine_id = Column(String(100))                     # mailcow quarantine item ID
+    rule_name = Column(String(255))
+    action = Column(String(20), nullable=False)
+    quarantine_id = Column(String(100))
     sender = Column(String(255))
     recipient = Column(String(255))
     subject = Column(Text)
-    matched_field = Column(String(20))                      # which field matched
-    matched_value = Column(String(500))                     # the pattern that matched
+    matched_field = Column(String(20))
+    matched_value = Column(String(500))
     
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
     
@@ -799,17 +651,14 @@ class QuarantineRuleLog(Base):
     )
 
 class MetricSnapshot(Base):
-    """An hourly sample of a dashboard figure that shows a trend (services/figures.py):
-    one per figure and hour, kept 90 days; a hour whose source did not answer has
-    none (a gap). Alembic 0021."""
     __tablename__ = "metric_snapshots"
 
     id = Column(Integer, primary_key=True)
     name = Column(String(40), nullable=False)
-    slot = Column(DateTime, nullable=False)       # the hour (UTC) the sample stands for
+    slot = Column(DateTime, nullable=False)
     value = Column(Float)
-    of = Column(Float)                            # the denominator, when the figure has one
-    as_of = Column(DateTime, nullable=False)      # when it was read
+    of = Column(Float)
+    as_of = Column(DateTime, nullable=False)
 
     __table_args__ = (
         UniqueConstraint('name', 'slot', name='uq_metric_snapshot_name_slot'),
@@ -818,24 +667,17 @@ class MetricSnapshot(Base):
 
 
 class SecurityAlert(Base):
-    """
-    The alerts Needs attention lists: anomaly detection (outbound volume
-    spikes, auth-failure bursts), SMTP abuse blocks, the protection rules,
-    DNS changes and DMARC & TLS import errors (services/stored_alerts.py has
-    the types and their areas). Added in v2.6.4 (first Alembic-managed table).
-    """
     __tablename__ = "security_alerts"
 
     id = Column(Integer, primary_key=True, index=True)
-    alert_type = Column(String(40), nullable=False, index=True)  # stored_alerts.ALERT_AREAS
-    severity = Column(String(20), default='warning', index=True)  # 'info' | 'warning' | 'critical'
-    subject = Column(String(255))                # mailbox, username, address or domain the alert is about
-    title = Column(String(255), nullable=False)  # short human-readable headline
-    detail = Column(Text)                        # longer explanation
-    metric_value = Column(Float)                 # observed value (messages, failures, ...)
-    baseline_value = Column(Float)               # expected/baseline value for context
+    alert_type = Column(String(40), nullable=False, index=True)
+    severity = Column(String(20), default='warning', index=True)
+    subject = Column(String(255))
+    title = Column(String(255), nullable=False)
+    detail = Column(Text)
+    metric_value = Column(Float)
+    baseline_value = Column(Float)
     acknowledged = Column(Boolean, default=False, index=True)
-    # The receipt of the dismissal that acknowledged it (Undo re-opens by it); Alembic 0020
     ack_batch = Column(Uuid, nullable=True, index=True)
 
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
@@ -850,11 +692,6 @@ class SecurityAlert(Base):
 
 
 class SMTPAbuseWhitelist(Base):
-    """
-    Mailboxes exempt from SMTP abuse auto-blocking (newsletters, monitoring,
-    ticketing systems - anything that legitimately sends in bursts).
-
-    """
     __tablename__ = "smtp_abuse_whitelist"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -870,12 +707,6 @@ class SMTPAbuseWhitelist(Base):
 
 
 class SMTPAbuseAction(Base):
-    """
-    Audit trail of SMTP abuse actions. The most recent row per mailbox is also
-    the current state (blocked / unblocked), and drives both the UI and the
-    post-unblock grace period that stops the job re-blocking immediately.
-
-    """
     __tablename__ = "smtp_abuse_actions"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -883,7 +714,7 @@ class SMTPAbuseAction(Base):
     message_count = Column(Integer, nullable=False)
     threshold = Column(Integer, nullable=False)
     window_minutes = Column(Integer, nullable=False)
-    action = Column(String(30), nullable=False, default="blocked")   # 'blocked' | 'unblocked'
+    action = Column(String(30), nullable=False, default="blocked")
     automatic = Column(Boolean, nullable=False, default=True)
     operator = Column(String(255))
     app_passwords_revoked = Column(Integer, default=0)
@@ -899,22 +730,12 @@ class SMTPAbuseAction(Base):
 
 
 class ProtectionHit(Base):
-    """
-    An address a protection rule caught, and what happened to it.
-
-    One open hit per address and rule: later tries by the same address are
-    added to it rather than opening a new one. In watch mode a hit only records
-    what the rule would have banned (status 'watching'); the usernames tried and
-    the netfilter log ids are the evidence shown to the admin.
-    """
     __tablename__ = "protection_hits"
 
     id = Column(Integer, primary_key=True, index=True)
     ip = Column(String(50), nullable=False, index=True)
     rule = Column(String(40), nullable=False, index=True)
-    mode = Column(String(20), nullable=False, default="watch")        # 'watch' | 'enforce' | 'manual' (Ban now)
-    # Open: 'watching' (watch mode), 'pending' (to be banned), 'banned', 'alert' (breach alert, never banned)
-    # Closed: 'dismissed', 'expired', 'undone'
+    mode = Column(String(20), nullable=False, default="watch")
     status = Column(String(20), nullable=False, default="watching", index=True)
     reason = Column(Text)
     usernames = Column(JSONB, default=list)
@@ -928,9 +749,6 @@ class ProtectionHit(Base):
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     ended_at = Column(DateTime)
 
-    # Enforcement: the ban length (0 = permanent), when it was written and when
-    # it ends, and whether this app added the entry to the Fail2ban blacklist.
-    # Only entries the app added are ever removed by it.
     ban_hours = Column(Integer)
     banned_at = Column(DateTime)
     expires_at = Column(DateTime, index=True)
@@ -946,24 +764,16 @@ class ProtectionHit(Base):
 
 
 class NotificationChannel(Base):
-    """
-    A configured destination for alerts (Slack, Telegram, ntfy, ...).
-
-    Multiple channels can be active at once; every alert is delivered to all
-    enabled channels. Service-specific settings (bot token, topic, server URL)
-    live in ``config`` so each type only stores the fields it actually needs.
-    """
     __tablename__ = "notification_channels"
 
     id = Column(Integer, primary_key=True, index=True)
-    name = Column(String(100), nullable=False)          # user label, e.g. "Ops Slack"
-    channel_type = Column(String(30), nullable=False)   # slack | discord | telegram | ntfy | gotify | webhook
+    name = Column(String(100), nullable=False)
+    channel_type = Column(String(30), nullable=False)
     config = Column(JSONB, nullable=False, default=dict)
-    # Alert topics this channel receives. Empty/NULL = every alert.
     alert_types = Column(JSONB)
     enabled = Column(Boolean, default=True, nullable=False, index=True)
 
-    last_status = Column(String(20))                    # 'success' | 'failed' | None
+    last_status = Column(String(20))
     last_error = Column(Text)
     last_sent_at = Column(DateTime)
 
@@ -974,15 +784,8 @@ class NotificationChannel(Base):
         return f"<NotificationChannel(name={self.name}, type={self.channel_type}, enabled={self.enabled})>"
 
 
-# Agent access (agent_access/): AI agents a person approved in the browser.
-# Tokens and codes are stored only as SHA-256 hashes.
 
 class AgentClient(Base):
-    """A program that registered itself through Dynamic Client Registration.
-
-    Clients that identify with a metadata document URL (CIMD) are not stored:
-    their document is fetched and cached in memory.
-    """
     __tablename__ = "agent_clients"
 
     id = Column(Integer, primary_key=True)
@@ -995,17 +798,16 @@ class AgentClient(Base):
 
 
 class AgentGrant(Base):
-    """One connected agent: who approved it, what it may do and until when."""
     __tablename__ = "agent_grants"
 
     id = Column(Integer, primary_key=True)
     client_id = Column(String(512), nullable=False, index=True)
-    client_kind = Column(String(10), nullable=False)          # 'dcr' | 'cimd'
-    display_name = Column(String(100), nullable=False)        # the name the person gave it
-    declared_name = Column(String(100), nullable=False)       # the name the program gave itself
-    publisher = Column(String(255))                           # host of a CIMD client_id URL
+    client_kind = Column(String(10), nullable=False)
+    display_name = Column(String(100), nullable=False)
+    declared_name = Column(String(100), nullable=False)
+    publisher = Column(String(255))
     redirect_uri = Column(String(512), nullable=False)
-    scopes = Column(Text, nullable=False)                     # space separated
+    scopes = Column(Text, nullable=False)
     resource = Column(String(512), nullable=False)
     approved_by = Column(String(255))
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
@@ -1016,7 +818,6 @@ class AgentGrant(Base):
 
 
 class AgentCode(Base):
-    """An authorization code between the consent page and the token request."""
     __tablename__ = "agent_codes"
 
     id = Column(Integer, primary_key=True)
@@ -1025,7 +826,6 @@ class AgentCode(Base):
     redirect_uri = Column(String(512), nullable=False)
     code_challenge = Column(String(128), nullable=False)
     resource = Column(String(512), nullable=False)
-    # Everything the person chose, applied when the code is exchanged
     details = Column(JSONB, nullable=False)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     expires_at = Column(DateTime, nullable=False, index=True)
@@ -1034,86 +834,68 @@ class AgentCode(Base):
 
 
 class AgentDeviceRequest(Base):
-    """An agent that asked to connect with a code (RFC 8628), until a person answers and it collects its tokens.
-
-    state: pending -> approved | denied | expired; approved -> consumed. The
-    device code is a secret only the agent holds (stored hashed); the user code
-    is the short code the person compares on the approval page.
-    """
     __tablename__ = "agent_device_requests"
 
     id = Column(Integer, primary_key=True)
     device_code_hash = Column(String(64), nullable=False, unique=True)
     user_code = Column(String(8), nullable=False, index=True)
     client_id = Column(String(64), nullable=False)
-    label = Column(String(100), nullable=False)               # the agent's own name for itself
-    requested = Column(Text, nullable=False)                  # scopes it asked for, space separated
+    label = Column(String(100), nullable=False)
+    requested = Column(Text, nullable=False)
     resource = Column(String(512), nullable=False)
     state = Column(String(10), nullable=False, default="pending")
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     expires_at = Column(DateTime, nullable=False, index=True)
     interval = Column(Integer, nullable=False, default=5)
     last_poll_at = Column(DateTime)
-    # What the person chose, applied when the agent collects its tokens
     details = Column(JSONB)
     answered_at = Column(DateTime)
     grant_id = Column(Integer, ForeignKey("agent_grants.id", ondelete="SET NULL"))
 
 
 class AgentToken(Base):
-    """An access or refresh token of a grant."""
     __tablename__ = "agent_tokens"
 
     id = Column(Integer, primary_key=True)
     grant_id = Column(Integer, ForeignKey("agent_grants.id", ondelete="CASCADE"), nullable=False, index=True)
-    kind = Column(String(10), nullable=False)                 # 'access' | 'refresh'
+    kind = Column(String(10), nullable=False)
     token_hash = Column(String(64), nullable=False, unique=True)
     client_id = Column(String(512), nullable=False)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     expires_at = Column(DateTime, nullable=False, index=True)
-    rotated_at = Column(DateTime)                             # refresh tokens: when it was exchanged
+    rotated_at = Column(DateTime)
 
 
 class AgentAudit(Base):
-    """What a connected agent did, and when a grant was made or ended."""
     __tablename__ = "agent_audit"
 
     id = Column(Integer, primary_key=True)
     grant_id = Column(Integer, ForeignKey("agent_grants.id", ondelete="SET NULL"), index=True)
     agent_name = Column(String(100))
     at = Column(DateTime, nullable=False, default=datetime.utcnow, index=True)
-    event = Column(String(20), nullable=False)                # grant_created | grant_revoked | call | denied
+    event = Column(String(20), nullable=False)
     tool = Column(String(40))
     method = Column(String(10))
     path = Column(String(512))
     http_status = Column(Integer)
-    outcome = Column(String(10))                              # ok | error | accepted | denied
+    outcome = Column(String(10))
     detail = Column(String(300))
 
 
 class User(Base):
-    """A person who signs in with their own access (routers/users.py).
-
-    A local user signs in with a username and password on the login form. An
-    OAuth2 entry gives the person the provider signs in with that email its
-    own access, instead of the OAuth2 default. The built-in admin (AUTH_USERNAME)
-    is not stored here.
-    """
     __tablename__ = "users"
 
     id = Column(Integer, primary_key=True)
-    kind = Column(String(10), nullable=False)                 # 'local' | 'oauth2'
-    username = Column(String(64))                             # as typed, shown in the list
+    kind = Column(String(10), nullable=False)
+    username = Column(String(64))
     username_norm = Column(String(64))
     email = Column(String(320))
     email_norm = Column(String(320))
     password_hash = Column(String(255))
-    access = Column(String(10), nullable=False)               # 'admin' | 'operator' | 'viewer' | 'custom'
-    scopes = Column(Text, nullable=False, default="")         # space separated, used only for custom
+    access = Column(String(10), nullable=False)
+    scopes = Column(Text, nullable=False, default="")
     disabled = Column(Boolean, nullable=False, default=False, server_default=text("false"))
-    # Advances on every change that ends the user's sessions: password, access, disabled
     auth_version = Column(Integer, nullable=False, default=1, server_default=text("1"))
-    # Advances on every edit, so an edit made on an older copy is refused
     row_version = Column(Integer, nullable=False, default=1, server_default=text("1"))
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at = Column(DateTime, nullable=False, default=datetime.utcnow)

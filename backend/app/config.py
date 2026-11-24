@@ -1,6 +1,3 @@
-"""
-Configuration management using Pydantic Settings
-"""
 import os
 import re
 import ipaddress
@@ -15,25 +12,13 @@ import threading
 logger = logging.getLogger(__name__)
 
 _cached_active_domains: Optional[List[str]] = None
-# The mailcow (its URL) whose every domain, alias domains included, the cache
-# holds; None while it holds less (the startup load reads the primary
-# domains only)
 _cached_domains_complete: Optional[str] = None
-# Every domain mail is delivered to on this mailcow, for the automatic paths
-# that must never block or delete it: the cache above plus the domains
-# turned off in mailcow
 _cached_hosted_domains: set = set()
 
 _DEFAULT_PORTS = {"http": 80, "https": 443}
 
 
 def normalize_origin(value: str) -> Optional[str]:
-    """A browser origin as scheme://host[:port] in canonical form, or None.
-
-    Lower-cases scheme and host and drops the default port, the way browsers
-    send the Origin header. Anything with a path, credentials or a scheme
-    other than http/https is not an origin.
-    """
     value = (value or "").strip()
     if value.endswith("/"):
         value = value[:-1]
@@ -68,24 +53,15 @@ def _parse_cors_origins(raw: str) -> tuple:
             origins.append(origin)
     return tuple(origins)
 
-# Database-only keys: not editable from UI (must stay in ENV).
 _DB_ONLY_KEYS = frozenset({"postgres_host", "postgres_port", "postgres_user", "postgres_password", "postgres_db"})
-# Flag that controls UI editing; only read from ENV, not stored in DB.
-# Name avoids "settings_" prefix to prevent Pydantic protected namespace warning.
 _EDIT_VIA_UI_FLAG_KEY = "edit_settings_via_ui_enabled"
 
-# Settings that hold a password, key or other secret. Each environment
-# variable is the setting's name in capitals.
 SECRET_SETTING_KEYS = (
     "postgres_password", "mailcow_api_key", "mailcow_api_key_rw", "auth_password",
     "session_secret_key", "oauth2_client_secret", "smtp_password", "dmarc_imap_password",
     "rspamd_password", "maxmind_license_key",
 )
 _REQUIRED_SECRET_KEYS = frozenset({"postgres_password", "mailcow_api_key"})
-# The values this project ever offered for a secret setting: in env.example and
-# the documentation, as the CI and test defaults, and in the demo image. They
-# are public, so none of them may guard an installation. Values starting with
-# "replace-with-" are refused too.
 _PUBLIC_EXAMPLE_SECRETS = frozenset({
     "changeme", "a7f3c8e2-4b1d-4f9a-8c3e-7d2f1a9b5e4c", "abc123-def456-ghi789", "pass",
     "your-api-key-here", "your_api_key_here", "your-rw-api-key-here", "your-password",
@@ -104,8 +80,6 @@ _SECRET_HINTS = {
 
 
 def secret_setting_problem(key: str, value: Any) -> Optional[str]:
-    """Why a value cannot be used for a secret setting, or None when it can.
-    An empty optional setting is simply not set."""
     if value is None:
         return "is not set" if key in _REQUIRED_SECRET_KEYS else None
     text = str(value).strip()
@@ -123,11 +97,6 @@ def _secret_setting_message(key: str, problem: str) -> str:
 
 
 def sign_in_problem(source: Any) -> Optional[str]:
-    """A sign-in method that is on but lacks its secret, in the effective settings.
-
-    Checked at start and on a Settings save, not per source: a password stored
-    in Settings may complete a BASIC_AUTH_ENABLED set in .env.
-    """
     if source.is_basic_auth_enabled and not (source.auth_password or "").strip():
         return ("Basic Auth is on (BASIC_AUTH_ENABLED, or the older AUTH_ENABLED), but AUTH_PASSWORD is not "
                 "set. Set AUTH_PASSWORD, or turn Basic Auth off.")
@@ -148,7 +117,6 @@ _HOSTNAME_RE = re.compile(
 
 
 def _validate_manual_hosts_value(v: str, field_name: str) -> str:
-    """Every entry must be an IPv4/IPv6 literal or a plausible hostname."""
     if not v or not v.strip():
         return ''
     entries = [e.strip() for e in v.split(',') if e.strip()]
@@ -175,9 +143,6 @@ def _validate_manual_hosts_value(v: str, field_name: str) -> str:
 
 
 def _lenient_manual_hosts_list(value: str, setting_name: str) -> List[str]:
-    """Use-time parsing: invalid entries are skipped with a warning
-    (the field validator rejects them on save; this protects against
-    values that bypassed validation, e.g. old DB overrides)."""
     if not value:
         return []
     result = []
@@ -213,13 +178,11 @@ class Settings(BaseSettings):
         description="Verify SSL certificates when connecting to mailcow API (set to false for development with self-signed certificates)"
     )
     
-    # Blacklist Configuration
     blacklist_emails: str = Field(
         default="",
         description="Comma-separated addresses whose mail is not stored or shown in Messages"
     )
     
-    # Fetch Configuration
     fetch_interval: int = Field(default=60, description="Seconds between log fetches")
     fetch_count_postfix: int = Field(
         default=2000, 
@@ -239,7 +202,6 @@ class Settings(BaseSettings):
     )
     retention_days: int = Field(default=7, description="Days to keep logs")
     
-    # Correlation Configuration
     max_correlation_age_minutes: int = Field(
         default=10,
         description="Stop searching for correlations older than this (minutes)"
@@ -249,14 +211,12 @@ class Settings(BaseSettings):
         description="Seconds between correlation completion checks"
     )
     
-    # Database Configuration
     postgres_host: str = Field(default="db", description="PostgreSQL host")
     postgres_port: int = Field(default=5432, description="PostgreSQL port")
     postgres_user: str = Field(..., description="PostgreSQL username")
     postgres_password: str = Field(..., description="PostgreSQL password")
     postgres_db: str = Field(..., description="PostgreSQL database name")
     
-    # Application Configuration
     app_port: int = Field(default=8080, description="Application port")
     log_level: str = Field(
         default="WARNING",
@@ -281,8 +241,6 @@ class Settings(BaseSettings):
         description="Comma-separated list of features to disable (hides page and stops related jobs). Valid: netfilter, queue, quarantine, suppressions, rspamd, domains, dmarc, mailbox-stats, rate-limits, logs, blacklist, devices (spam-filter: both suppressions and rspamd)"
     )
     
-    # Settings UI: allow editing config from web UI (overrides stored in DB). ENV only; default False.
-    # Field name avoids "settings_" prefix (Pydantic protected namespace).
     edit_settings_via_ui_enabled: bool = Field(
         default=False,
         env="SETTINGS_EDIT_VIA_UI_ENABLED",
@@ -291,13 +249,11 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _apply_edit_via_ui_from_env(self) -> "Settings":
-        """Force-read SETTINGS_EDIT_VIA_UI_ENABLED from os.environ (Docker/env_file sometimes not picked by Pydantic)."""
         v = os.environ.get("SETTINGS_EDIT_VIA_UI_ENABLED", "").strip().lower()
         if v in ("true", "1", "yes"):
             object.__setattr__(self, "edit_settings_via_ui_enabled", True)
         return self
     
-    # Advanced Configuration
     debug: bool = Field(default=False, description="Debug mode")
     max_search_results: int = Field(default=1000, description="Max search results")
     csv_export_limit: int = Field(default=10000, description="CSV export row limit")
@@ -306,14 +262,12 @@ class Settings(BaseSettings):
     @field_validator('scheduler_workers', mode='after')
     @classmethod
     def clamp_scheduler_workers(cls, v: int) -> int:
-        """Clamp scheduler_workers to 1-64 for thread pool size."""
         if v < 1:
             return 1
         if v > 64:
             return 64
         return v
     
-    # Authentication Configuration
     auth_enabled: bool = Field(
         default=False,
         description="Enable authentication (deprecated, use BASIC_AUTH_ENABLED and/or OAUTH2_ENABLED)"
@@ -336,7 +290,6 @@ class Settings(BaseSettings):
         description="Maximum tracked Basic Auth failure clients per process"
     )
 
-    # OAuth2/OIDC Authentication Configuration
     oauth2_enabled: bool = Field(
         default=False,
         description="Enable OAuth2/OIDC authentication"
@@ -408,8 +361,6 @@ class Settings(BaseSettings):
         description="Maximum live authentication sessions per process"
     )
 
-    # Agent access: AI agents connect over MCP after a person approves them in
-    # the browser (agent_access/). Off by default, and live only with sign-in on.
     agent_access_enabled: bool = Field(
         default=False,
         description="Let AI agents connect over MCP once a signed-in person approves them"
@@ -426,10 +377,8 @@ class Settings(BaseSettings):
     @field_validator('agent_access_max_days', mode='after')
     @classmethod
     def clamp_agent_access_max_days(cls, v: int) -> int:
-        """A value out of range is clamped, never a reason to stop the app."""
         return max(1, min(365, v))
 
-    # DMARC configuration
     dmarc_retention_days: int = Field(
         default=60,
         env="DMARC_RETENTION_DAYS"
@@ -447,7 +396,6 @@ class Settings(BaseSettings):
         description='Allow deleting DMARC and TLS reports from the UI'
     )
 
-    # DMARC & TLS report import over IMAP (the env names keep DMARC_IMAP_)
     dmarc_imap_enabled: bool = Field(
         default=False,
         env='DMARC_IMAP_ENABLED',
@@ -534,7 +482,6 @@ class Settings(BaseSettings):
         description='Email address(es) for DMARC error notifications, separated by commas (defaults to ADMIN_EMAIL if not set)'
     )
 
-    # MaxMind Configuration
     maxmind_account_id: Optional[str] = Field(
         default=None,
         env='MAXMIND_ACCOUNT_ID',
@@ -547,7 +494,6 @@ class Settings(BaseSettings):
         description='MaxMind License Key for GeoIP database downloads'
     )
 
-    # SMTP Configuration
     smtp_enabled: bool = Field(
         default=False,
         env='SMTP_ENABLED',
@@ -610,7 +556,6 @@ class Settings(BaseSettings):
         description='Relay mode - send emails without authentication (for local relay servers)'
     )
 
-    # Webhook Notifications
     webhook_enabled: bool = Field(
         default=False,
         env='WEBHOOK_ENABLED',
@@ -632,7 +577,6 @@ class Settings(BaseSettings):
         description='Telegram chat ID (only used when webhook_type=telegram)'
     )
 
-    # Anomaly Detection (compromised mailbox / auth attack alerts)
     anomaly_detection_enabled: bool = Field(
         default=False,
         env='ANOMALY_DETECTION_ENABLED',
@@ -669,21 +613,18 @@ class Settings(BaseSettings):
         description='Suppress repeat alerts for the same mailbox/type within this many hours'
     )
 
-    # DNS change alerts
     dns_change_alerts_enabled: bool = Field(
         default=True,
         env='DNS_CHANGE_ALERTS_ENABLED',
         description='Alert when a domain SPF, DKIM, DMARC, TLSA, MTA-STS or TLS-RPT record changes, DNSSEC stops validating, or a TLSA record no longer matches the mail server certificate (sent to email and notification destinations)'
     )
 
-    # Blacklist (RBL) checks
     blacklist_dns_servers: str = Field(
         default='',
         env='BLACKLIST_DNS_SERVERS',
         description='Comma-separated DNS resolvers for blacklist (RBL) lookups. Spamhaus rejects queries from public resolvers, so this should be your own recursive resolver (in mailcow: 172.22.1.254). Leave empty to use the container resolver.'
     )
 
-    # Blacklist monitoring sources
     blacklist_source_server_ip: bool = Field(
         default=True,
         env='BLACKLIST_SOURCE_SERVER_IP',
@@ -705,7 +646,6 @@ class Settings(BaseSettings):
         description='Comma-separated IPv4/IPv6 addresses and hostnames to monitor on spam blacklists in addition to the sources above. May also be hosts unrelated to this mailcow server.'
     )
 
-    # Domain SPF check sources (which IPs must pass each domain SPF record)
     domain_spf_source_server_ip: bool = Field(
         default=True,
         env='DOMAIN_SPF_SOURCE_SERVER_IP',
@@ -737,9 +677,6 @@ class Settings(BaseSettings):
     def validate_manual_hosts(cls, v: str, info) -> str:
         return _validate_manual_hosts_value(v, info.field_name)
 
-    # SMTP Abuse Protection (automatic enforcement)
-    # Detection alerts (above) never act on their own; this is the enforcement
-    # layer: a hard outbound ceiling that disables SMTP for the mailbox.
     smtp_abuse_enabled: bool = Field(
         default=False,
         env='SMTP_ABUSE_ENABLED',
@@ -771,7 +708,6 @@ class Settings(BaseSettings):
         description='Support address included in the notification sent to a blocked mailbox'
     )
 
-    # DMARC Insights (policy recommendations)
     dmarc_insights_window_days: int = Field(
         default=28,
         env='DMARC_INSIGHTS_WINDOW_DAYS',
@@ -788,28 +724,24 @@ class Settings(BaseSettings):
         description='Minimum reported messages in the window before recommending a stricter policy'
     )
 
-    # Global Admin Email
     admin_email: Optional[str] = Field(
         default=None,
         env='ADMIN_EMAIL',
         description='Administrator email(s) for system notifications, separated by commas'
     )
 
-    # Blacklist Alert Email
     blacklist_alert_email: Optional[str] = Field(
         default=None,
         env='BLACKLIST_ALERT_EMAIL',
         description='Email address(es) for blacklist alerts, separated by commas (defaults to ADMIN_EMAIL if not set)'
     )
 
-    # Weekly Summary Report
     enable_weekly_summary: bool = Field(
         default=True,
         env='ENABLE_WEEKLY_SUMMARY',
         description='Enable weekly summary email report'
     )
 
-    # Raw Logs Viewer Configuration
     raw_logs_enabled: bool = Field(
         default=True,
         env='RAW_LOGS_ENABLED',
@@ -841,7 +773,6 @@ class Settings(BaseSettings):
         description='Comma-separated list of mailcow services to collect raw logs from'
     )
 
-    # Rspamd Integration
     rspamd_url: str = Field(
         default='',
         env='RSPAMD_URL',
@@ -853,7 +784,6 @@ class Settings(BaseSettings):
         description='Rspamd UI/API password for reading Rspamd map data'
     )
 
-    # Spam Suppression Configuration
     suppression_enabled: bool = Field(
         default=False,
         env='SUPPRESSION_ENABLED',
@@ -920,7 +850,6 @@ class Settings(BaseSettings):
         description='Maximum suppression period cap in days'
     )
 
-    # Deferred Queue Cleanup
     queue_cleanup_enabled: bool = Field(
         default=True,
         env='QUEUE_CLEANUP_ENABLED',
@@ -937,7 +866,6 @@ class Settings(BaseSettings):
         description='Minutes a deferred email must be stuck before it is deleted and recipient suppressed'
     )
 
-    # Quarantine Auto-Rules Configuration
     quarantine_rules_max_actions: int = Field(
         default=50,
         env='QUARANTINE_RULES_MAX_ACTIONS',
@@ -954,7 +882,6 @@ class Settings(BaseSettings):
         description='Days to keep quarantine auto-rule action history (older logs are automatically cleaned up)'
     )
 
-    # ActiveSync devices (Devices page)
     eas_devices_retention_days: int = Field(
         default=90, ge=0,
         env='EAS_DEVICES_RETENTION_DAYS',
@@ -964,7 +891,6 @@ class Settings(BaseSettings):
     @field_validator('smtp_port', 'dmarc_imap_port', 'dmarc_imap_interval', mode='before')
     @classmethod
     def empty_str_to_none(cls, v):
-        """Convert empty string to None so default value is used"""
         if v == '':
             return None
         return v
@@ -972,7 +898,6 @@ class Settings(BaseSettings):
     @field_validator('smtp_verify_ssl', 'dmarc_imap_verify_ssl', mode='before')
     @classmethod
     def normalize_verify_mode(cls, v):
-        """false (also empty or unset), auto or true, whatever the case"""
         from .services.mail_tls import verify_mode
         mode = verify_mode(v)
         if mode is None:
@@ -982,8 +907,6 @@ class Settings(BaseSettings):
     @field_validator(*SECRET_SETTING_KEYS, mode='after')
     @classmethod
     def refuse_public_secrets(cls, v, info):
-        """A required secret must be set, and no secret may be a published example:
-        the app does not start with one from ENV, and Settings does not save one."""
         problem = secret_setting_problem(info.field_name, v)
         if problem:
             raise ValueError(_secret_setting_message(info.field_name, problem))
@@ -991,12 +914,10 @@ class Settings(BaseSettings):
 
     @validator('mailcow_url')
     def validate_mailcow_url(cls, v):
-        """Ensure URL doesn't end with slash"""
         return v.rstrip('/')
     
     @validator('log_level')
     def validate_log_level(cls, v):
-        """Ensure valid log level"""
         valid_levels = ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL']
         v = v.upper()
         if v not in valid_levels:
@@ -1004,8 +925,6 @@ class Settings(BaseSettings):
             return 'WARNING'
         return v
 
-    # An unknown format never stops the app: it falls back to the default.
-    # Settings refuses a new unknown value when it is saved (routers/settings.py).
     @validator('date_format')
     def validate_date_format(cls, v):
         from .app_time import normalize_date_format
@@ -1018,25 +937,20 @@ class Settings(BaseSettings):
 
     @property
     def is_basic_auth_enabled(self) -> bool:
-        """Check if Basic Auth is enabled (with backward compatibility)"""
-        # For backward compatibility: if AUTH_ENABLED is set, use it
         if self.auth_enabled:
             return True
         return self.basic_auth_enabled
     
     @property
     def is_oauth2_enabled(self) -> bool:
-        """Check if OAuth2 is enabled"""
         return self.oauth2_enabled
     
     @property
     def is_authentication_enabled(self) -> bool:
-        """Check if any authentication is enabled"""
         return self.is_basic_auth_enabled or self.is_oauth2_enabled
     
     @property
     def local_domains_list(self) -> List[str]:
-        """Get active domains from mailcow API cache"""
         global _cached_active_domains
         if _cached_active_domains is None:
             logger.warning("Local domains cache not yet populated")
@@ -1045,38 +959,28 @@ class Settings(BaseSettings):
     
     @property
     def rate_limits_retention_effective(self) -> int:
-        """Days the rate limit log is kept: its own setting, but never less than
-        the other raw logs, so an install that kept them longer loses nothing"""
         return max(self.rate_limits_retention_days, self.raw_logs_retention_days)
 
     @property
     def blacklist_emails_list(self) -> List[str]:
-        """Parse blacklisted emails into a list"""
         if not self.blacklist_emails:
             return []
         return [e.strip().lower() for e in self.blacklist_emails.split(',') if e.strip()]
     
     @property
     def blacklist_source_manual_hosts_list(self) -> List[str]:
-        """Manually configured blacklist monitoring hosts (IPs and hostnames)."""
         return _lenient_manual_hosts_list(self.blacklist_source_manual_hosts, 'blacklist_source_manual_hosts')
 
     @property
     def domain_spf_source_manual_hosts_list(self) -> List[str]:
-        """Manually configured SPF check hosts (IPs and hostnames)."""
         return _lenient_manual_hosts_list(self.domain_spf_source_manual_hosts, 'domain_spf_source_manual_hosts')
 
     @property
     def cors_allowed_origins_list(self) -> List[str]:
-        """Exact origins allowed cross-origin access; never a wildcard."""
         return list(_parse_cors_origins(self.cors_allowed_origins))
 
     @property
     def raw_logs_services_list(self) -> List[str]:
-        """Parse raw_logs_services into a list of enabled service names.
-        Supports 'all' as a shortcut for all services. Names that are not a
-        known mailcow service are dropped: the list goes into mailcow API
-        paths and into the Logs page."""
         if not self.raw_logs_services:
             return []
         val = self.raw_logs_services.strip()
@@ -1087,18 +991,10 @@ class Settings(BaseSettings):
 
     @property
     def raw_logs_page_on(self) -> bool:
-        """The Logs page is on: its service selection is collected too."""
         return self.is_feature_enabled('logs') and self.raw_logs_enabled
 
     @property
     def raw_logs_required(self) -> Dict[str, List[str]]:
-        """Services other pages read from the raw logs, with those pages.
-
-        These are collected whatever the Logs page settings are, so turning
-        the Logs page off or unticking a service does not quietly empty them.
-        """
-        # Dovecot: Sieve and delivery results in message details, and the
-        # Security alert on a login after failed attempts
         required = {'dovecot': ['Message details']}
         if self.is_feature_enabled('netfilter'):
             required['dovecot'].append('Security')
@@ -1110,21 +1006,17 @@ class Settings(BaseSettings):
 
     @property
     def raw_logs_collected_list(self) -> List[str]:
-        """Every service the raw logs worker fetches: the Logs page selection
-        while that page is on, plus what other pages need."""
         page = self.raw_logs_services_list if self.raw_logs_page_on else []
         return list(dict.fromkeys(page + list(self.raw_logs_required)))
     
     @property
     def suppression_whitelist_domains_list(self) -> List[str]:
-        """Parse suppression whitelist domains into a list"""
         if not self.suppression_whitelist_domains:
             return []
         return [d.strip().lower() for d in self.suppression_whitelist_domains.split(',') if d.strip()]
     
     @property
     def is_suppression_configured(self) -> bool:
-        """Check if suppression feature is fully configured (enabled + RW key + rspamd password for sync)"""
         return (
             self.suppression_enabled and
             self.mailcow_api_key_rw is not None and
@@ -1133,26 +1025,21 @@ class Settings(BaseSettings):
     
     @property
     def is_rspamd_configured(self) -> bool:
-        """Check if Rspamd integration is configured (password set)"""
         return self.rspamd_password is not None and bool(self.rspamd_password)
     
     @property
     def notification_webhook_configured(self) -> bool:
-        """Check if webhook notifications are properly configured"""
         return bool(self.webhook_enabled and self.webhook_url)
 
     @property
     def notification_smtp_configured(self) -> bool:
-        """Check if SMTP is properly configured for notifications"""
         if self.smtp_relay_mode:
-            # Relay mode - only need host and from address
             return (
                 self.smtp_enabled and 
                 self.smtp_host is not None and
                 self.smtp_from is not None
             )
         else:
-            # Standard mode - need authentication
             return (
                 self.smtp_enabled and 
                 self.smtp_host is not None and 
@@ -1162,7 +1049,6 @@ class Settings(BaseSettings):
 
     @property
     def database_url(self) -> str:
-        """Construct PostgreSQL connection URL"""
         return (
             f"postgresql://{self.postgres_user}:{self.postgres_password}"
             f"@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"
@@ -1170,7 +1056,6 @@ class Settings(BaseSettings):
     
     @property
     def async_database_url(self) -> str:
-        """Construct async PostgreSQL connection URL"""
         return (
             f"postgresql+asyncpg://{self.postgres_user}:{self.postgres_password}"
             f"@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"
@@ -1178,13 +1063,9 @@ class Settings(BaseSettings):
 
     @property
     def disabled_features_set(self) -> set:
-        """Parse disabled_features into a set of feature IDs, the old
-        spam-filter read as the two features it became."""
         return set(normalize_disabled_features(self.disabled_features))
 
     def is_feature_enabled(self, feature: str) -> bool:
-        """Check if a feature is enabled (not in disabled_features)."""
-        # A name no switch has would read "on" for good
         if feature not in FEATURE_IDS:
             raise ValueError(f"Unknown feature: {feature}")
         return feature not in self.disabled_features_set
@@ -1195,11 +1076,6 @@ class Settings(BaseSettings):
 
 
 def _get_editable_setting_keys() -> frozenset:
-    """All Settings field names that are editable from UI (excludes DB keys, UI-edit flag, and deprecated/legacy fields)."""
-    # auth_enabled deprecated, app_port is Docker-level.
-    # cors_allowed_origins is applied once at startup, so it lives in ENV only.
-    # webhook_* are legacy single-webhook settings, superseded by the
-    # notification channels UI (they are migrated into a channel on upgrade).
     excluded = _DB_ONLY_KEYS | {
         _EDIT_VIA_UI_FLAG_KEY, "auth_enabled", "app_port", "cors_allowed_origins",
         "webhook_enabled", "webhook_type", "webhook_url", "webhook_telegram_chat_id",
@@ -1209,29 +1085,22 @@ def _get_editable_setting_keys() -> frozenset:
 
 
 def _get_field_annotations() -> Dict[str, Any]:
-    """Field name -> annotation for type coercion when loading from DB."""
     return {k: v.annotation for k, v in Settings.model_fields.items()}
 
 
 EDITABLE_SETTING_KEYS = _get_editable_setting_keys()
 
-# Every feature DISABLED_FEATURES can switch off (TOGGLEABLE_FEATURES in app.js)
 FEATURE_IDS = frozenset({
     "netfilter", "queue", "quarantine", "suppressions", "rspamd", "domains", "dmarc",
     "mailbox-stats", "rate-limits", "logs", "blacklist", "devices",
 })
 
-# Old names still accepted in DISABLED_FEATURES and in a stored or saved value.
-# spam-filter was one switch for the suppression list and the Rspamd maps, so
-# it stays off as both.
 FEATURE_ALIASES = {
     "spam-filter": ("suppressions", "rspamd"),
 }
 
 
 def normalize_disabled_features(value) -> list:
-    """A disabled_features value (comma-separated, or a list) as feature ids:
-    lower case, old names expanded, each once, in the order given."""
     if not value:
         return []
     names = value.split(',') if isinstance(value, str) else list(value)
@@ -1245,20 +1114,7 @@ def normalize_disabled_features(value) -> list:
 
 
 def _is_env_key_set(key: str) -> bool:
-    """Check if a settings key has a corresponding ENV variable actually set in os.environ.
-
-    Checks both the default name (field name uppercased, pydantic-settings default)
-    and any explicit ``env=`` name from Field().
-
-    Covers every field in Settings:
-    - Fields without explicit env= (e.g. ``mailcow_url``) → checks ``MAILCOW_URL``
-    - Fields with explicit env= (e.g. ``smtp_host``, env='SMTP_HOST') → checks ``SMTP_HOST``
-    - Fields where field name uppercased == explicit env (most cases) → deduped via set
-    """
-    # Always check the uppercased field name (pydantic-settings default behaviour)
     env_names = {key.upper()}
-    # Also check explicit env= parameter from Field() if present
-    # In pydantic-settings 2.x the env= kwarg is stored in json_schema_extra
     field_info = Settings.model_fields.get(key)
     if field_info:
         jse = getattr(field_info, 'json_schema_extra', None)
@@ -1270,21 +1126,14 @@ def _is_env_key_set(key: str) -> bool:
 
 
 def get_env_locked_keys() -> frozenset:
-    """Return the set of editable keys where an ENV variable is explicitly set.
-
-    These keys are "locked" - their effective value comes from ENV, not DB.
-    """
     return frozenset(k for k in EDITABLE_SETTING_KEYS if _is_env_key_set(k))
 
 
 class SettingsLoadError(RuntimeError):
-    """The settings stored in the database could not be read."""
+    pass
 
 
 def _validate_session_limit_overrides(allowed: Dict[str, Any]) -> None:
-    """model_copy skips validators: an invalid stored session limit is ignored
-    (the default or ENV value stays), never put in force. The longest session
-    has no upper bound, so a long one saved by an earlier version still loads."""
     bounds = {"session_idle_timeout_minutes": (5, 1440), "session_expiry_hours": (1, None)}
     for key, (low, high) in bounds.items():
         if key not in allowed:
@@ -1308,23 +1157,7 @@ def _validate_session_limit_overrides(allowed: Dict[str, Any]) -> None:
 
 
 def build_settings(db: Optional[Any] = None) -> Settings:
-    """
-    Build effective Settings: defaults -> DB -> ENV overrides.
-
-    Priority order (later wins):
-      1. Application defaults
-      2. DB overrides  (when SETTINGS_EDIT_VIA_UI_ENABLED and db given)
-      3. ENV variables (always win when explicitly set)
-
-    This prevents lockout: if a user makes a mistake in the UI (e.g. wrong
-    OIDC URL or bad auth password), they can fix it by setting the correct
-    value in ENV / docker-compose.yml and restarting.
-
-    A failed read of the stored overrides raises SettingsLoadError. It must
-    never fall back to ENV-only settings: authentication enabled from the UI
-    lives only in the database, so that fallback would turn it off.
-    """
-    base = Settings()  # loads defaults + ENV
+    base = Settings()
     if not base.edit_settings_via_ui_enabled or db is None:
         return base
     from .services.settings_store import get_config_overrides_from_db
@@ -1334,14 +1167,11 @@ def build_settings(db: Optional[Any] = None) -> Settings:
         raise SettingsLoadError(f"Could not read the settings stored in the database: {e}") from e
     if not overrides:
         return base
-    # Only apply DB overrides for editable keys where ENV is NOT explicitly set.
-    # When an ENV variable is set, it takes precedence over the DB value.
     env_locked = get_env_locked_keys()
     allowed = {k: v for k, v in overrides.items()
                if k in EDITABLE_SETTING_KEYS and k not in env_locked}
     if not allowed:
         return base
-    # model_copy bypasses validators: validate security capacity bounds first.
     for key in ("session_max_entries", "auth_max_failure_clients"):
         if key in allowed:
             try:
@@ -1353,8 +1183,6 @@ def build_settings(db: Optional[Any] = None) -> Settings:
                 logger.warning("Ignoring invalid authentication capacity override for %s", key)
                 allowed.pop(key)
     _validate_session_limit_overrides(allowed)
-    # model_copy skips the secret check too. A stored example value refuses the
-    # load, so the app does not start with it.
     for key in SECRET_SETTING_KEYS:
         problem = secret_setting_problem(key, allowed[key]) if key in allowed else None
         if problem:
@@ -1363,8 +1191,6 @@ def build_settings(db: Optional[Any] = None) -> Settings:
                 "of your own: it overrides the stored one. To manage it in Settings again, use "
                 f"Migrate Settings from ENV, then remove {key.upper()} from .env.")
     merged = base.model_copy(update=allowed)
-    # model_copy skips validators. Apply them manually on affected fields.
-    # (We can't use Settings.model_validate() because BaseSettings re-reads ENV on init)
     try:
         if 'mailcow_url' in allowed:
             object.__setattr__(merged, 'mailcow_url', merged.mailcow_url.rstrip('/'))
@@ -1389,7 +1215,6 @@ def build_settings(db: Optional[Any] = None) -> Settings:
 
 
 class SettingsWrapper:
-    """Wrapper so that settings can be reloaded (e.g. after PUT) without changing import references."""
     _inner: Settings
 
     def __getattr__(self, name: str) -> Any:
@@ -1402,20 +1227,10 @@ settings = _settings_wrapper
 
 
 def settings_snapshot() -> Settings:
-    """The settings in force now, as one object: a save replaces it as a whole,
-    so values read from it all belong to the same save (a host from one save
-    and a password from the next never meet)."""
     return _settings_wrapper._inner
 
-# One reload at a time, from reading the stored settings to putting them in
-# force. A save holds it from before it writes until it has reloaded, so a
-# reload elsewhere never reads the settings before the save and puts them in
-# force after it (that brought an old password back).
 settings_reload_lock = threading.RLock()
 
-# session.py puts new settings in force under its own lock, so a session check
-# never sees a policy change halfway (session._publish_settings). Called with
-# the new settings and a function that puts them in force.
 _settings_publisher: Optional[Callable[[Settings, Callable[[], None]], None]] = None
 
 
@@ -1435,13 +1250,6 @@ def _publish(new_inner: Settings) -> None:
 
 
 def reload_settings(db: Optional[Any] = None) -> Settings:
-    """Reload effective settings (e.g. after saving from UI). Updates the global settings wrapper.
-
-    Returns the settings it put in force. On failure the current settings stay
-    in force and the error is raised, so the caller (an API request, or
-    startup) fails instead of serving with defaults that may have
-    authentication off.
-    """
     global _settings_wrapper
     with settings_reload_lock:
         try:
@@ -1450,22 +1258,18 @@ def reload_settings(db: Optional[Any] = None) -> Settings:
             logger.error("Settings reload failed, keeping the current settings: %s", e)
             raise
         _publish(new_inner)
-        # Re-apply log level to root logger (setup_logging ran at import time with the old level)
         root = logging.getLogger()
         root.setLevel(getattr(logging, new_inner.log_level, logging.WARNING))
     return new_inner
 
 
 class AppZoneFormatter(logging.Formatter):
-    """Log lines with their time in the app's time zone and its offset, for
-    example 2026-01-15 13:30:05+01:00, whatever the container clock says. The
-    zone is read for every line, so a new zone in Settings applies at once."""
 
     def formatTime(self, record, datefmt=None):
         from datetime import datetime
         from .app_time import UTC, configured_zone_name, zone_for
         try:
-            # Not app_tz(): it may log a warning, and this runs inside a handler
+            # app_tz() may log a warning, which would re-enter this log handler
             zone = zone_for(configured_zone_name()) or UTC
         except Exception:
             zone = UTC
@@ -1473,33 +1277,27 @@ class AppZoneFormatter(logging.Formatter):
 
 
 def setup_logging():
-    """Configure application logging"""
     root = logging.getLogger()
 
-    # Remove ALL existing handlers
     for handler in root.handlers[:]:
         root.removeHandler(handler)
 
     log_format = '%(asctime)s - %(levelname)s - %(message)s'
 
-    # Console Handler
     console_handler = logging.StreamHandler()
     console_handler.setFormatter(AppZoneFormatter(log_format))
     root.addHandler(console_handler)
     
-    # File Handler (logs to /app/data/container.log)
     try:
         from logging.handlers import RotatingFileHandler
         import os
         
-        # Ensure directory exists
         log_dir = "/app/data"
         if not os.path.exists(log_dir):
             os.makedirs(log_dir, exist_ok=True)
             
         log_file = os.path.join(log_dir, "container.log")
         
-        # Rotate logs: 5MB max size, keep 3 backup files
         file_handler = RotatingFileHandler(
             log_file, 
             maxBytes=5*1024*1024, 
@@ -1514,14 +1312,11 @@ def setup_logging():
     
     root.setLevel(getattr(logging, settings.log_level))
     
-    # Who changed what (user_access.py): written whatever LOG_LEVEL says, through
-    # the same console and file handlers, so the app log page shows it too
     actions = logging.getLogger("mlv.actions")
     actions.handlers = list(root.handlers)
     actions.setLevel(logging.INFO)
     actions.propagate = False
 
-    # Set levels for third-party libraries
     logging.getLogger('httpx').setLevel(logging.ERROR)
     logging.getLogger('httpcore').setLevel(logging.ERROR)
     logging.getLogger('urllib3').setLevel(logging.ERROR)
@@ -1535,15 +1330,11 @@ def setup_logging():
     root.info("Logging initialized (Console + File)")
 
 
-# Initialize logging
 setup_logging()
 
 
 def set_cached_active_domains(domains: List[str], complete_for: Optional[str] = None,
                               hosted: Optional[List[str]] = None) -> None:
-    """Set the cached active domains list; complete_for names the mailcow it
-    was read from when it holds the alias domains too, and hosted adds the
-    domains turned off in mailcow."""
     global _cached_active_domains, _cached_domains_complete, _cached_hosted_domains
     _cached_active_domains = domains
     _cached_domains_complete = complete_for
@@ -1552,9 +1343,6 @@ def set_cached_active_domains(domains: List[str], complete_for: Optional[str] = 
 
 
 def is_hosted_domain(domain: Optional[str]) -> bool:
-    """Whether mail to the domain is delivered on this mailcow: an active
-    domain or alias domain, or a domain turned off in mailcow, whose mail
-    accepted before can still wait in the queue."""
     if not domain:
         return False
     name = domain.lower()
@@ -1562,17 +1350,13 @@ def is_hosted_domain(domain: Optional[str]) -> bool:
 
 
 def cached_domains_known() -> bool:
-    """Whether the cache holds any domain: an active one, or one only hosted
-    (turned off in mailcow, its mail can still wait in the queue)."""
     return bool(_cached_active_domains or _cached_hosted_domains)
 
 
 def local_domains_complete(mailcow_url: Optional[str]) -> bool:
-    """Whether every domain of that mailcow is known, alias domains included."""
     return _cached_domains_complete is not None and _cached_domains_complete == mailcow_url
 
 
 def get_cached_active_domains() -> Optional[List[str]]:
-    """Get the cached active domains list"""
     global _cached_active_domains
     return _cached_active_domains if _cached_active_domains else []

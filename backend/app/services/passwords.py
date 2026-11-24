@@ -1,8 +1,3 @@
-"""Password hashes for local users: scrypt from the standard library.
-
-A hash is stored as scrypt$n$r$p$salt$hash (salt and hash in base64), so a
-later change of the cost keeps every stored hash readable.
-"""
 import base64
 import binascii
 import hashlib
@@ -17,17 +12,12 @@ R = 8
 P = 1
 DKLEN = 32
 SALT_BYTES = 16
-# n=2**15, r=8 needs 32 MiB (128 * r * n), just over OpenSSL's default limit
 MAXMEM = 64 * 1024 * 1024
 MIN_LENGTH = 8
 MAX_LENGTH = 256
-# The same words in the Users dialog (frontend/users.js), which checks before it sends
 SHORT_PROBLEM = "Use at least 8 characters."
 LONG_PROBLEM = "Use at most 256 characters."
 COMMON_PROBLEM = "This password is too common. Choose another one."
-# The 100,000 passwords most seen in breaches (NCSC, from Have I Been Pwned), as SecLists publishes
-# them (MIT; source, commit and checksum in resources/vendored.json). Read from the image: a check
-# never goes to the network
 COMMON_FILE = Path(__file__).resolve().parent.parent / "resources" / "ncsc_100k_passwords.txt"
 
 _dummy: Optional[str] = None
@@ -37,7 +27,6 @@ _common_lock = threading.Lock()
 
 
 def common_passwords() -> FrozenSet[str]:
-    """The list's entries, case folded, read once from disk."""
     global _common
     if _common is None:
         with _common_lock:
@@ -48,17 +37,10 @@ def common_passwords() -> FrozenSet[str]:
 
 
 def is_common(password: str) -> bool:
-    """Whether the password is on the list, as it is; only the letter case is ignored."""
     return password.casefold() in common_passwords()
 
 
 def password_problem(password: str) -> Optional[str]:
-    """Why a local user's password cannot be set, or None. Checked before anything is hashed:
-    8 to 256 characters, and not on the list of the most common passwords (in any letter case).
-    The dialog shows how strong it is as guidance, and asks this before Save
-    (POST /api/users/password-check). The built-in admin's password (AUTH_PASSWORD) is not held
-    to this.
-    """
     if not isinstance(password, str) or len(password) < MIN_LENGTH:
         return SHORT_PROBLEM
     if len(password) > MAX_LENGTH:
@@ -91,14 +73,12 @@ def _parse(stored: str):
         expected = base64.b64decode(parts[5], validate=True)
     except (ValueError, binascii.Error):
         return None
-    # Only costs this app writes: a stored value can never ask for more memory or time
     if (n, r, p) != (N, R, P) or not salt or len(expected) != DKLEN:
         return None
     return salt, expected
 
 
 def verify_password(password: str, stored: Optional[str]) -> bool:
-    """Whether the password matches the stored hash. An unreadable hash costs a hash too."""
     parsed = _parse(stored or "")
     if parsed is None or not isinstance(password, str) or len(password) > MAX_LENGTH:
         burn(password)
@@ -108,7 +88,6 @@ def verify_password(password: str, stored: Optional[str]) -> bool:
 
 
 def burn(password) -> None:
-    """Spend the time of one check, for a name that has no password to check."""
     global _dummy
     with _dummy_lock:
         if _dummy is None:

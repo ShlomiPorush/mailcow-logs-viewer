@@ -1,8 +1,3 @@
-"""
-Message correlation: one MessageCorrelation per delivery leg, that is per
-Message-ID and Postfix queue chain. The jobs that run it are in
-services/correlation_jobs.py.
-"""
 import ipaddress
 import logging
 import re
@@ -19,17 +14,6 @@ logger = logging.getLogger(__name__)
 
 
 def origin_is_local(rspamd_log: Optional[RspamdLog]) -> bool:
-    """
-    Whether the message entered the server from the inside.
-
-    A locally hosted sender domain is not enough to call a message internal:
-    mail for a hosted domain can arrive from an outside relay (for example a
-    message sent through Microsoft 365 carries a local sender address but
-    enters from the internet). The origin counts as local when the submission
-    was authenticated (SMTP auth / MAILCOW_AUTH) or came from a private or
-    loopback address; a message that never passed Rspamd was generated on the
-    host itself.
-    """
     if rspamd_log is None:
         return True
     if getattr(rspamd_log, 'has_auth', False):
@@ -48,16 +32,6 @@ def origin_is_local(rspamd_log: Optional[RspamdLog]) -> bool:
 
 
 def submitted_with_auth():
-    """
-    Filter clause for message_correlations rows whose Rspamd scan shows an
-    authenticated submission (MAILCOW_AUTH, or a logged-in SMTP user).
-
-    Use this wherever a row is attributed to the mailbox in its sender field
-    for enforcement or alerting. The 'outbound' direction alone is not enough:
-    it also covers unauthenticated mail with a hosted envelope sender, and the
-    envelope sender of such mail is whatever the remote client claimed.
-    Rows without a linked Rspamd scan do not qualify.
-    """
     return exists().where(RspamdLog.id == MessageCorrelation.rspamd_log_id, _authenticated_scan())
 
 
@@ -69,58 +43,24 @@ def _authenticated_scan():
 
 
 def authenticated_submissions(query):
-    """
-    Limit a message_correlations query to authenticated submissions, the same
-    rows as submitted_with_auth(), with their Rspamd scan joined so that
-    submitting_mailbox() can be used in it.
-    """
     return query.select_from(MessageCorrelation).join(
         RspamdLog, RspamdLog.id == MessageCorrelation.rspamd_log_id
     ).filter(_authenticated_scan())
 
 
 def submitting_mailbox():
-    """
-    The mailbox an authenticated submission is counted for, lowercased: the
-    login Rspamd recorded, or the envelope sender when the scan has none.
-
-    mailcow lets a mailbox send from every alias that points to it and from the
-    addresses it may send as (sender ACL), so the envelope sender is not always
-    the mailbox that sent. Counting by it let one mailbox spread its mail over
-    several addresses, and pointed enforcement at an alias, which mailcow
-    cannot disable. Use inside authenticated_submissions().
-    """
-    # Literal SQL, not bound parameters, so the same expression can be grouped by
     login = func.nullif(func.nullif(func.trim(RspamdLog.user), literal_column("''")),
                         literal_column("'unknown'"))
     return func.lower(func.coalesce(login, MessageCorrelation.sender))
 
 
 def extract_domain(email: str) -> Optional[str]:
-    """
-    Extract domain from email address
-    
-    Args:
-        email: Email address (e.g., "user@example.com")
-    
-    Returns:
-        Domain name or None if invalid
-    """
     if not email or '@' not in email:
         return None
     return email.split('@', 1)[1].lower().strip()
 
 
 def is_local_domain(domain: Optional[str]) -> bool:
-    """
-    Check if domain is in local domains list
-    
-    Args:
-        domain: Domain name to check
-    
-    Returns:
-        True if domain is local, False otherwise
-    """
     if not domain:
         return False
     local_domains = settings.local_domains_list
@@ -130,38 +70,16 @@ def is_local_domain(domain: Optional[str]) -> bool:
 
 
 def detect_direction(rspamd_log: Dict[str, Any]) -> str:
-    """
-    Detect if email is inbound or outbound based on Rspamd log
-    
-    Note: Internal direction is determined later based on Postfix relay=dovecot
-    Local domains list includes primary + alias domains (from API alias-domain/all).
-    
-    Logic:
-    1. Check for MAILCOW_AUTH symbol (definitive outbound indicator)
-    2. Check user field (if authenticated = outbound, if unknown = inbound)
-    3. Fallback: if inbound by above but sender is local (incl. alias domain) and
-       any recipient is external → outbound
-    
-    Args:
-        rspamd_log: Rspamd log entry dictionary
-    
-    Returns:
-        'inbound', 'outbound', or 'unknown'
-    """
-    # Check for MAILCOW_AUTH symbol - most reliable indicator
     symbols = rspamd_log.get('symbols', {})
     if 'MAILCOW_AUTH' in symbols:
         return 'outbound'
     
-    # Check user field - if authenticated, it's outbound
     user = rspamd_log.get('user', 'unknown')
     if user != 'unknown' and user:
         return 'outbound'
     
-    # If user is unknown, default to inbound
     direction = 'inbound' if user == 'unknown' else 'unknown'
     
-    # Fallback: sender from alias domain may not have MAILCOW_AUTH/user set
     if direction == 'inbound':
         sender = rspamd_log.get('sender_smtp')
         recipients = rspamd_log.get('rcpt_smtp', [])
@@ -176,21 +94,10 @@ def detect_direction(rspamd_log: Dict[str, Any]) -> str:
     return direction
 
 
-# Postfix programs that log a delivery result (the last part of the syslog
-# program name, e.g. postfix/smtp, postfix/lmtp).
 POSTFIX_DELIVERY_AGENTS = ('smtp', 'lmtp', 'local', 'virtual', 'error', 'retry', 'discard', 'pipe')
 
-# An address as Postfix logs it between <>: a quoted local part may contain
-# '>' and ', ', anything outside quotes ends at the first '>'. The two
-# alternatives start with different characters, so matching stays linear.
 _PF_ADDR = r'(?:"(?:[^"\\]|\\.)*"|[^>"])*'
 
-# Delivery-agent result (smtp, lmtp, local, virtual, error, pipe, ...):
-#   QID: to=<rcpt>, [orig_to=<o>, ]relay=R, [conn_use=N, ]delay=D,
-#        delays=a/b/c/d, dsn=X.Y.Z, status=word (reply text)
-# Only these fixed fields carry the outcome. The addresses are chosen by
-# senders and the reply text by remote servers, so neither may supply a
-# status, a DSN or a Message-ID.
 _PF_DELIVERY_RE = re.compile(
     r'^[0-9A-F]+: to=<(?P<to>' + _PF_ADDR + r')>, '
     r'(?:orig_to=<(?P<orig_to>' + _PF_ADDR + r')>, )?'
@@ -198,39 +105,17 @@ _PF_DELIVERY_RE = re.compile(
     r'dsn=(?P<dsn>\d\.\d{1,3}\.\d{1,3}), status=(?P<status>\w+)(?P<reply>.*)$'
 )
 _PF_FIELD_RE = re.compile(r'([a-z_]+)=([^,\s<>]*), ')
-# qmgr: QID: from=<sender>, status=expired, returned to sender
 _PF_EXPIRED_RE = re.compile(r'^[0-9A-F]+: from=<' + _PF_ADDR + r'>, status=(?P<status>expired)\b')
-# cleanup: QID: message-id=<id>
 _PF_MESSAGE_ID_RE = re.compile(r'^[0-9A-F]+: message-id=<([^>]+)>', re.IGNORECASE)
 
 
 def parse_postfix_message(message: str) -> Dict[str, Any]:
-    """
-    Parse Postfix log message to extract structured data
-
-    status, dsn, relay and delay are read only from a delivery-agent result
-    line (or the qmgr "status=expired" line) of a queued message, and the
-    Message-ID only from the cleanup "message-id=" line. Text inside from=<>,
-    to=<>, helo=<> or a server reply never sets them, so an smtpd NOQUEUE
-    reject line can never look like a bounce.
-
-    Args:
-        message: Postfix log message string
-
-    Returns:
-        Dictionary with parsed fields
-    """
     result = {}
 
-    # Extract queue ID (at the start of message)
     queue_match = re.match(r'^([A-F0-9]+):', message)
     if queue_match:
         result['queue_id'] = queue_match.group(1)
 
-    # Message-ID: only the cleanup line names it. Reply text inside
-    # status=(...) is not a Message-ID: Dovecot LMTP quotes the recipient
-    # there ("250 2.0.0 <rcpt> <session> Saved") and a remote MX may quote
-    # anything.
     mid_match = _PF_MESSAGE_ID_RE.match(message)
     if mid_match:
         result['message_id'] = mid_match.group(1)
@@ -251,25 +136,19 @@ def parse_postfix_message(message: str) -> Dict[str, Any]:
         result['dsn'] = delivery.group('dsn')
         result['status'] = delivery.group('status')
 
-        # Check for rspamd-pipe-spam delivery. Only the relay or Postfix's
-        # own pipe/local result text count, never a remote server's reply.
-        # Example: relay=rspamd-pipe-spam, ... status=sent (delivered via rspamd-pipe-spam service)
         reply = delivery.group('reply').strip()
         if result['status'] == 'sent' and (
                 'rspamd-pipe-spam' in (result.get('relay') or '')
                 or (reply.startswith('(delivered ') and 'rspamd-pipe-spam' in reply)):
             result['status'] = 'spam'
-            # If we have orig_to, use it as the recipient because the actual to= is the spam alias
             if result.get('orig_to'):
                 result['recipient'] = result['orig_to']
         return result
 
-    # Extract from= (sender)
     from_match = re.search(r'from=<([^>]*)>', message)
     if from_match:
         result['sender'] = from_match.group(1) if from_match.group(1) else None
 
-    # Extract to= (recipient)
     to_match = re.search(r'to=<([^>]*)>', message)
     if to_match:
         result['recipient'] = to_match.group(1) if to_match.group(1) else None
@@ -281,39 +160,15 @@ def parse_postfix_message(message: str) -> Dict[str, Any]:
     return result
 
 
-# --- Delivery legs --------------------------------------------------------
-#
-# A correlation is one delivery leg: one (Message-ID, Postfix queue chain)
-# pair, not one Message-ID (issue #36). A SOGo/Sieve forward or any other
-# re-submission pushes the same Message-ID through a second queue chain, with
-# its own sender, recipient, direction and status. Keying on the Message-ID
-# alone let the second leg overwrite the first one, which hid the original
-# delivery completely.
-
-
 def legacy_correlation_key(message_id: str) -> str:
-    """
-    The historical Message-ID-only key.
-
-    The first leg of a message keeps it, so every correlation key handed out
-    before issue #36 (links, exports, stored references) stays valid.
-    """
     return hashlib.sha256(f"msgid:{message_id}".encode()).hexdigest()
 
 
 def leg_correlation_key(message_id: str, queue_id: str) -> str:
-    """Key of an additional delivery leg of the same Message-ID."""
     return hashlib.sha256(f"msgid:{message_id}:queue:{queue_id}".encode()).hexdigest()
 
 
 def build_correlation_key(db: Session, message_id: str, queue_id: Optional[str]) -> Optional[str]:
-    """
-    Pick the correlation key for a leg that is about to be created.
-
-    Returns None when no key can be minted: the Message-ID-only key is already
-    taken and there is no queue chain to scope a new one by. The caller must
-    then reuse the existing correlation instead of opening a second one.
-    """
     legacy = legacy_correlation_key(message_id)
     taken = {
         row[0] for row in db.query(MessageCorrelation.correlation_key).filter(
@@ -328,7 +183,6 @@ def build_correlation_key(db: Session, message_id: str, queue_id: Optional[str])
 
 
 def find_legs(db: Session, message_id: str) -> List[MessageCorrelation]:
-    """Every delivery leg recorded for a Message-ID, oldest first."""
     if not message_id:
         return []
     return db.query(MessageCorrelation).filter(
@@ -337,11 +191,6 @@ def find_legs(db: Session, message_id: str) -> List[MessageCorrelation]:
 
 
 def find_stub_leg(db: Session, message_id: str) -> Optional[MessageCorrelation]:
-    """
-    A correlation created from an Rspamd log before any Postfix line existed.
-
-    It has no queue chain yet and adopts the first one that arrives.
-    """
     if not message_id:
         return None
     return db.query(MessageCorrelation).filter(
@@ -355,13 +204,6 @@ def find_leg_by_queue(
     queue_id: str,
     message_id: Optional[str] = None
 ) -> Optional[MessageCorrelation]:
-    """
-    The leg that owns a Postfix queue chain.
-
-    Postfix reuses short queue ids, so when the log line carries a Message-ID
-    it is used to tell the legs apart; a queue whose legs all belong to other
-    messages is treated as unknown rather than guessed at.
-    """
     if not queue_id:
         return None
     rows = db.query(MessageCorrelation).filter(
@@ -388,12 +230,6 @@ def find_leg_by_queue(
 
 
 def group_postfix_logs_by_queue(postfix_logs: List[PostfixLog]) -> Dict[str, List[PostfixLog]]:
-    """
-    Split Postfix logs into queue chains, earliest chain first.
-
-    Each chain is one delivery leg. Logs without a queue id carry no chain and
-    are dropped here.
-    """
     chains: Dict[str, List[PostfixLog]] = {}
     for plog in postfix_logs:
         if plog.queue_id:
@@ -410,13 +246,6 @@ def nearest_queue_chain(
     chains: Dict[str, List[PostfixLog]],
     reference_time: Optional[datetime]
 ) -> Optional[str]:
-    """
-    The queue chain closest in time to a reference point (an Rspamd log).
-
-    Every re-submission passes Rspamd on its own, a second or two from the
-    Postfix lines of its own chain, so proximity in time is what says which
-    leg a verdict belongs to.
-    """
     if not chains:
         return None
     queue_ids = list(chains.keys())
@@ -432,39 +261,15 @@ def nearest_queue_chain(
     return min(queue_ids, key=distance)
 
 
-# --- Queue occurrences ----------------------------------------------------
-#
-# Postfix names a queued message by a short queue id made of the queue
-# file's inode and the microsecond it was created, so an id comes back once
-# the previous message has left the queue: minutes or days later, for an
-# unrelated message. All lines of one queue id are therefore not one
-# message. split_queue_occurrences() cuts them into occurrences, one per
-# message, and occurrence_for() says which one a correlation owns.
-#
-# What the cut relies on:
-# - Every line of the previous message is logged before the first line of
-#   the next one (the id is free only once the file is gone).
-# - Line order inside one second is not chronological: mailcow returns the
-#   log newest first, and PostfixLog.id is the order of storage. So lines
-#   are compared by whole second only.
-# - "removed" is not always logged, and qmgr logs it after the file is gone,
-#   possibly in the second the next message opens. Only qmgr's "removed"
-#   ends a message: qmgr logs it once every delivery is done, while
-#   postsuper -d can remove a message whose delivery is still running, and
-#   that delivery's result is logged after it.
-# - cleanup logs one message-id= line per Message-ID header, so a message
-#   with that header twice logs two lines; those never split a message.
-
-OPENER = 'opener'      # smtpd/qmqpd "client=", pickup "uid=": the queue file is created
-RECEIPT = 'receipt'    # any other smtpd, qmqpd, pickup or cleanup line
-END = 'end'            # qmgr "removed": every delivery is done and the queue file is gone
-DELIVERY = 'delivery'  # everything else: qmgr, delivery agents, bounce, postsuper
+OPENER = 'opener'
+RECEIPT = 'receipt'
+END = 'end'
+DELIVERY = 'delivery'
 
 _RECEIPT_PROGRAMS = ('smtpd', 'qmqpd', 'pickup', 'cleanup')
 
 
 def postfix_line_kind(line) -> str:
-    """Which part of a message's life a Postfix line with a queue id logs."""
     program = (getattr(line, 'program', None) or '').rsplit('/', 1)[-1]
     message = getattr(line, 'message', None) or ''
     queue_id = getattr(line, 'queue_id', None) or ''
@@ -482,7 +287,6 @@ def postfix_line_kind(line) -> str:
 
 
 def naive_utc(value: Optional[datetime]) -> Optional[datetime]:
-    """Times are stored as naive UTC; an aware value is converted to that."""
     if value is not None and value.tzinfo is not None:
         value = value.astimezone(timezone.utc).replace(tzinfo=None)
     return value
@@ -493,21 +297,12 @@ def _line_order(line):
 
 
 class QueueOccurrence:
-    """One message's lines of a queue id.
-
-    lines: the lines that are this message's.
-    boundary: delivery and "removed" lines of the second this message
-    opened in that may be the previous message's, when that one logged no
-    "removed" before. They belong to both messages for display and to
-    neither for status, times or links.
-    """
-
     def __init__(self, opened_at: datetime):
         self.opened_at = opened_at
         self.lines: List[PostfixLog] = []
         self.boundary: List[PostfixLog] = []
-        self.ended = False      # an own "removed" line
-        self.delivered = False  # an own delivery or "removed" line
+        self.ended = False
+        self.delivered = False
 
     def add(self, line) -> None:
         self.lines.append(line)
@@ -526,7 +321,6 @@ class QueueOccurrence:
         return {line.id for line in self.lines if line.id}
 
     def shown_lines(self) -> List[PostfixLog]:
-        """Own and boundary lines, in time order: what a detail view shows."""
         return sorted(self.lines + self.boundary, key=_line_order)
 
     def span(self):
@@ -535,19 +329,6 @@ class QueueOccurrence:
 
 
 def split_queue_occurrences(lines) -> List[QueueOccurrence]:
-    """Cut the lines of one queue id into messages, earliest first.
-
-    A second opens a new message when the current one already has a line in
-    an earlier second and either: the second holds an opener; or it holds a
-    receipt line and the current message already logged a delivery or
-    "removed"; or the current message already logged "removed" (anything
-    after that is someone else's). Deferred retries, hold and release, and
-    gaps of days never cut a message.
-
-    When the previous message logged no "removed" before the second the new
-    one opens in, the delivery and "removed" lines of that second cannot be
-    placed: they are boundary lines of both.
-    """
     by_second: Dict[datetime, list] = {}
     for line in lines:
         if line.time is None:
@@ -597,17 +378,6 @@ def occurrence_for(
     near: Optional[datetime] = None,
     strict: bool = True,
 ) -> Optional[QueueOccurrence]:
-    """The occurrence that is the message with this Message-ID.
-
-    An occurrence that logged another Message-ID (and not this one) is
-    someone else's. When exactly one occurrence logged this Message-ID, it is
-    that one. When none did, the only occurrence of the queue id is taken, as
-    long as it logged no other Message-ID.
-
-    Anything else cannot be decided from the lines: strict (every write)
-    returns None; otherwise (a detail view) the occurrence nearest to `near`
-    is returned.
-    """
     if not occurrences:
         return None
     if message_id:
@@ -631,7 +401,6 @@ def identified_by_message_id(occurrence: Optional[QueueOccurrence], message_id: 
 
 
 def queue_occurrences(db: Session, queue_id: Optional[str]) -> List[QueueOccurrence]:
-    """The occurrences of one queue id, from all its stored lines."""
     if not queue_id:
         return []
     return split_queue_occurrences(
@@ -640,17 +409,11 @@ def queue_occurrences(db: Session, queue_id: Optional[str]) -> List[QueueOccurre
 
 def own_occurrence(db: Session, queue_id: Optional[str], message_id: Optional[str],
                    near: Optional[datetime] = None, occurrences=None) -> Optional[QueueOccurrence]:
-    """The occurrence a write may read for this message (occurrence_for,
-    strict). None as well when it also holds the Message-ID of another
-    correlation of the queue id: the lines that tell the two messages apart
-    have not all arrived yet. occurrences: when the caller already split them."""
     if occurrences is None:
         occurrences = queue_occurrences(db, queue_id)
     occurrence = occurrence_for(occurrences, message_id, near=near)
     others = (occurrence.message_ids - {message_id}) if occurrence is not None else set()
     if others:
-        # The session does not autoflush: a correlation given this queue id
-        # earlier in the same run must be seen
         db.flush()
     if others and db.query(MessageCorrelation.id).filter(
             MessageCorrelation.queue_id == queue_id, MessageCorrelation.message_id.in_(others)).first():
@@ -659,9 +422,6 @@ def own_occurrence(db: Session, queue_id: Optional[str], message_id: Optional[st
 
 
 def shown_postfix_lines(db: Session, correlation) -> List[PostfixLog]:
-    """The Postfix lines a detail view shows for a correlation: its own
-    occurrence of its queue id with that occurrence's boundary lines, else
-    the lines linked to it by id."""
     if correlation.queue_id:
         occurrence = occurrence_for(
             queue_occurrences(db, correlation.queue_id), correlation.message_id,
@@ -674,19 +434,11 @@ def shown_postfix_lines(db: Session, correlation) -> List[PostfixLog]:
 
 
 def rspamd_marks_spam(rspamd_log) -> bool:
-    """RspamdLog.is_spam as the import sets it (scheduler, Rspamd ingest)."""
     symbols = rspamd_log.symbols if isinstance(rspamd_log.symbols, dict) else {}
     return rspamd_log.action in ('reject', 'add header', 'rewrite subject') or 'SPAM_TRAP' in symbols
 
 
 def derive_final_status(lines, rspamd_log, dovecot_status, stored_status) -> Optional[str]:
-    """A delivery's final status from its own Postfix lines alone.
-
-    Postfix outcome first (a bounce or reject wins, then a delivery to the
-    spam pipe, a delivery, an expiry, a deferral), then the Rspamd verdict
-    when Postfix logged none, then the Dovecot discard (issue #65) as
-    scheduler._apply_dovecot_verdict applies it.
-    """
     statuses = {line.status for line in lines if line.status}
     status = next((outcome for found, outcome in (
         ('bounced', 'bounced'), ('rejected', 'rejected'), ('spam', 'spam'), ('sent', 'delivered'),
@@ -704,9 +456,6 @@ def derive_final_status(lines, rspamd_log, dovecot_status, stored_status) -> Opt
 
 
 def _own_value(stored, own_values, rspamd_values, other_values):
-    """stored, unless it is evidently another message's: found in another
-    occurrence of the queue id and neither in this message's lines nor in its
-    Rspamd scan. Then this message's own value replaces it."""
     if not stored:
         return stored
     own = [v for v in own_values if v]
@@ -719,9 +468,6 @@ def _own_value(stored, own_values, rspamd_values, other_values):
 
 def ownership_differs(correlation, occurrences: List[QueueOccurrence], occurrence: QueueOccurrence,
                       queue_keys: set) -> bool:
-    """Whether a correlation holds lines of its queue id that are not its own
-    occurrence's (another message's, or boundary lines), or its own lines
-    carry the key of another correlation of this queue id."""
     own = occurrence.ids
     others = {line.id for o in occurrences for line in o.lines + o.boundary if line.id} - own
     stored = {i for i in (correlation.postfix_log_ids or []) if isinstance(i, int)}
@@ -733,9 +479,6 @@ def ownership_differs(correlation, occurrences: List[QueueOccurrence], occurrenc
 
 def repair_from_occurrence(db: Session, correlation, occurrence: QueueOccurrence,
                            occurrences: List[QueueOccurrence], now: datetime) -> None:
-    """Re-derive a correlation from its own occurrence alone, after it was
-    found holding another message's lines. Does not commit; stamps are set by
-    settle_queue()."""
     rspamd_log = db.get(RspamdLog, correlation.rspamd_log_id) if correlation.rspamd_log_id else None
     own = sorted(occurrence.lines, key=_line_order)
     other = [line for o in occurrences if o is not occurrence for line in o.lines]
@@ -765,9 +508,6 @@ def repair_from_occurrence(db: Session, correlation, occurrence: QueueOccurrence
 
 
 def owners_of_queue(correlations, occurrences: List[QueueOccurrence]) -> Dict[int, QueueOccurrence]:
-    """{correlation id: its own occurrence} for the correlations of one queue
-    id whose occurrence can be told. With several correlations on the queue
-    id, only a Message-ID tells; an occurrence two of them claim is no one's."""
     owned = {}
     for correlation in correlations:
         occurrence = occurrence_for(occurrences, correlation.message_id, near=correlation.first_seen)
@@ -781,14 +521,6 @@ def owners_of_queue(correlations, occurrences: List[QueueOccurrence]) -> Dict[in
 
 
 def settle_queue(db: Session, correlations, occurrences: List[QueueOccurrence], now: datetime) -> list:
-    """Give every message of one queue id back its own lines.
-
-    A correlation found holding lines that are not its own occurrence's is
-    re-derived from its occurrence alone (repair_from_occurrence). Then the
-    queue id's lines are stamped: the lines of an owned occurrence with its
-    owner's key; any other line that carries the key of one of these
-    correlations loses it. Returns the correlations repaired. Does not
-    commit."""
     owned = owners_of_queue(correlations, occurrences)
     keys = {c.correlation_key for c in correlations}
     repaired = [c for c in correlations if c.id in owned
@@ -820,13 +552,6 @@ def ensure_leg(
     postfix_logs: List[PostfixLog],
     rspamd_log: Optional[RspamdLog] = None
 ) -> Optional[MessageCorrelation]:
-    """
-    Return the correlation for one (Message-ID, queue chain) pair.
-
-    Creates it when this chain has not been seen before, unless a stub is
-    waiting for a chain to adopt. The Rspamd log is only attached to the leg it
-    actually belongs to, so the other legs keep their own verdict.
-    """
     leg = find_leg_by_queue(db, queue_id, message_id)
 
     if not leg:
@@ -835,16 +560,12 @@ def ensure_leg(
             logger.debug(f"Stub for {message_id[:50]} adopts queue chain {queue_id}")
             leg.queue_id = queue_id
 
-    # Linked to its Postfix lines: the addresses Rspamd recorded normalized
-    # get the ones the sender wrote. Only after the link is committed: a
-    # delivery line stored meanwhile by the ingest is seen here, or the
-    # ingest sees the link (written_recipients.record_for_queues)
     from .services.written_recipients import record as record_written
 
     if leg:
         if rspamd_log:
             update_correlation_with_rspamd(db, leg, rspamd_log)
-        update_correlation_with_postfix_logs(db, leg, postfix_logs)  # commits
+        update_correlation_with_postfix_logs(db, leg, postfix_logs)
         if record_written(db, leg, rspamd_log):
             db.commit()
         return leg
@@ -874,65 +595,40 @@ def create_correlation_with_all_data(
     message_id: str,
     queue_id: str
 ) -> MessageCorrelation:
-    """
-    Create a new correlation with all available data
-    
-    Args:
-        db: Database session
-        rspamd_log: RspamdLog object
-        postfix_logs: List of PostfixLog objects
-        message_id: Email Message-ID
-        queue_id: Postfix Queue-ID
-    
-    Returns:
-        MessageCorrelation object
-    """
-    # The first leg keeps the historical Message-ID-only key; another leg of
-    # the same message is keyed by its queue chain as well (issue #36)
     correlation_key = build_correlation_key(db, message_id, queue_id)
 
-    # Get first recipient from Rspamd
     recipients = rspamd_log.recipients_smtp if rspamd_log.recipients_smtp else []
     first_recipient = recipients[0] if recipients else None
     
-    # Get postfix log IDs
     postfix_log_ids = [log.id for log in postfix_logs if log.id]
     
-    # Determine final status from Postfix logs
     final_status = None
     for plog in postfix_logs:
         if plog.status:
             if plog.status in ['bounced', 'rejected']:
                 final_status = plog.status
-                break  # Priority status found
+                break
             elif plog.status == 'deferred' and not final_status:
                 final_status = plog.status
             elif plog.status == 'sent' and final_status in (None, 'deferred'):
-                # A delivery after deferrals, whatever order the lines come in
                 final_status = 'delivered'
             elif plog.status == 'spam':
                 final_status = 'spam'
-                # Mark Rspamd log as spam as well (so frontend shows SPAM badge)
                 if rspamd_log:
                     rspamd_log.is_spam = True
 
     
-    # If no status from Postfix, use Rspamd
     if not final_status:
         if rspamd_log.action == 'reject':
             final_status = 'rejected'
         elif rspamd_log.is_spam:
             final_status = 'spam'
     
-    # Get earliest timestamp
     all_times = [rspamd_log.time] + [log.time for log in postfix_logs]
     first_seen = min(all_times)
     
-    # Check if email was delivered locally (relay=dovecot + both sender and recipient are local domains)
-    # This is the definitive way to determine if email is internal
     direction = rspamd_log.direction
     
-    # Check if sender and recipient are both local domains
     sender_domain = extract_domain(rspamd_log.sender_smtp)
     recipients = rspamd_log.recipients_smtp if rspamd_log.recipients_smtp else []
     
@@ -947,18 +643,13 @@ def create_correlation_with_all_data(
     else:
         all_recipients_local = False
     
-    # Internal needs relay=dovecot, local sender, local recipients AND a local
-    # origin - a hosted sender domain arriving from an outside relay is inbound
     if sender_is_local and all_recipients_local and origin_is_local(rspamd_log):
         for plog in postfix_logs:
             if plog.relay and 'dovecot' in plog.relay.lower():
                 direction = 'internal'
-                # Also update Rspamd log
                 rspamd_log.direction = 'internal'
                 break
     elif direction == 'internal':
-        # The stored direction came from the earlier, laxer classification
-        # that ignored the origin - re-derive instead of inheriting it
         direction = 'outbound' if (rspamd_log.has_auth or (
             rspamd_log.user and rspamd_log.user != 'unknown')) else 'inbound'
         rspamd_log.direction = direction
@@ -976,7 +667,7 @@ def create_correlation_with_all_data(
         postfix_log_ids=postfix_log_ids,
         first_seen=first_seen,
         last_seen=datetime.utcnow(),
-        is_complete=True  # Has Queue-ID and Postfix logs
+        is_complete=True
     )
     
     db.add(correlation)
@@ -992,22 +683,6 @@ def create_correlation_from_postfix_logs(
     queue_id: str,
     postfix_logs: List[PostfixLog]
 ) -> Optional[MessageCorrelation]:
-    """
-    Open a delivery leg from Postfix data alone (issue #36)
-
-    Used for a re-submission whose Rspamd log has not been processed yet: the
-    leg has to exist before anything can be attached to it, and the sender,
-    recipient and status are all readable from the queue chain itself.
-
-    Args:
-        db: Database session
-        message_id: Email Message-ID
-        queue_id: Postfix Queue-ID of this leg
-        postfix_logs: All Postfix logs of that queue chain
-
-    Returns:
-        MessageCorrelation object, or None when no key could be minted
-    """
     correlation_key = build_correlation_key(db, message_id, queue_id)
     if not correlation_key:
         return None
@@ -1026,8 +701,6 @@ def create_correlation_from_postfix_logs(
     db.add(correlation)
     db.flush()
 
-    # Fills sender, recipient, status and the log ids from the chain, and
-    # commits
     update_correlation_with_postfix_logs(db, correlation, postfix_logs)
 
     logger.info(
@@ -1042,14 +715,6 @@ def update_correlation_with_rspamd(
     correlation: MessageCorrelation,
     rspamd_log: RspamdLog
 ):
-    """
-    Update correlation with Rspamd log information
-    
-    Args:
-        db: Database session
-        correlation: MessageCorrelation object
-        rspamd_log: RspamdLog object
-    """
     correlation.rspamd_log_id = rspamd_log.id
     
     if not correlation.sender and rspamd_log.sender_smtp:
@@ -1066,21 +731,15 @@ def update_correlation_with_rspamd(
     if not correlation.direction:
         direction = rspamd_log.direction
         if direction == 'internal' and not origin_is_local(rspamd_log):
-            # A stored 'internal' from the earlier, laxer classification that
-            # ignored the origin - re-derive instead of inheriting it
             direction = 'outbound' if (rspamd_log.has_auth or (
                 rspamd_log.user and rspamd_log.user != 'unknown')) else 'inbound'
             rspamd_log.direction = direction
         correlation.direction = direction
     elif correlation.direction == 'internal' and not origin_is_local(rspamd_log):
-        # The leg was classified before its Rspamd evidence existed (created
-        # from Postfix lines alone, where a missing scan reads as host-local).
-        # The scan that just arrived shows an outside origin - correct it.
         correlation.direction = 'outbound' if (rspamd_log.has_auth or (
             rspamd_log.user and rspamd_log.user != 'unknown')) else 'inbound'
         rspamd_log.direction = correlation.direction
 
-    # Update status if Rspamd has stronger verdict
     if rspamd_log.action == 'reject':
         correlation.final_status = 'rejected'
     elif rspamd_log.is_spam and not correlation.final_status:
@@ -1095,16 +754,6 @@ def update_correlation_with_postfix_logs(
     correlation: MessageCorrelation,
     postfix_logs: List[PostfixLog]
 ):
-    """
-    Update correlation with multiple Postfix logs
-
-    Args:
-        db: Database session
-        correlation: MessageCorrelation object
-        postfix_logs: The PostfixLog objects of this message alone (its own
-            occurrence of the queue id, see occurrence_for)
-    """
-    # Collect all IDs (use list() to ensure mutable copy)
     current_ids = list(correlation.postfix_log_ids or [])
     for plog in postfix_logs:
         if plog.id and plog.id not in current_ids:
@@ -1112,13 +761,10 @@ def update_correlation_with_postfix_logs(
 
     correlation.postfix_log_ids = current_ids
 
-    # The message was first seen at its earliest line: a line stored after the
-    # correlation was made (an smtpd "client=" line read later) moves it back
     times = [naive_utc(plog.time) for plog in postfix_logs if plog.time]
     if times and (correlation.first_seen is None or min(times) < naive_utc(correlation.first_seen)):
         correlation.first_seen = min(times)
     
-    # Update fields from logs
     for plog in postfix_logs:
         if not correlation.sender and plog.sender:
             correlation.sender = plog.sender
@@ -1132,29 +778,22 @@ def update_correlation_with_postfix_logs(
         if not correlation.message_id and plog.message_id:
             correlation.message_id = plog.message_id
         
-        # Update correlation key in Postfix log
         plog.correlation_key = correlation.correlation_key
     
-    # Check if email was delivered locally (relay=dovecot + both sender and recipient are local domains)
-    # This is the definitive way to determine if email is internal
     is_internal = False
     
-    # Check if sender and recipient are both local domains
     sender_domain = extract_domain(correlation.sender)
     recipient_domain = extract_domain(correlation.recipient)
     
     sender_is_local = sender_domain and is_local_domain(sender_domain)
     recipient_is_local = recipient_domain and is_local_domain(recipient_domain)
     
-    # Only mark as internal if: relay=dovecot AND sender is local AND recipient is local
     if sender_is_local and recipient_is_local:
         for plog in postfix_logs:
             if plog.relay and 'dovecot' in plog.relay.lower():
                 is_internal = True
                 break
     
-    # Update direction to internal if all conditions met, including a local
-    # origin - a hosted sender domain arriving from an outside relay is inbound
     if is_internal:
         rspamd_log = None
         if correlation.rspamd_log_id:
@@ -1166,7 +805,6 @@ def update_correlation_with_postfix_logs(
             if rspamd_log:
                 rspamd_log.direction = 'internal'
     
-    # Determine final status from all logs
     final_status = None
     for plog in postfix_logs:
         if plog.status:
@@ -1176,12 +814,10 @@ def update_correlation_with_postfix_logs(
             elif plog.status == 'deferred' and not final_status:
                 final_status = plog.status
             elif plog.status == 'sent' and final_status in (None, 'deferred'):
-                # A delivery after deferrals, whatever order the lines come in
                 final_status = 'delivered'
             elif plog.status == 'spam':
                  if final_status not in ['bounced', 'rejected']:
                     final_status = 'spam'
-                    # Mark Rspamd log as spam as well
                     if correlation.rspamd_log_id:
                         rspamd_log = db.query(RspamdLog).filter(
                             RspamdLog.id == correlation.rspamd_log_id
@@ -1193,7 +829,6 @@ def update_correlation_with_postfix_logs(
     if final_status:
         correlation.final_status = final_status
     
-    # Mark as complete if we have Queue-ID and Postfix logs
     if correlation.queue_id and correlation.postfix_log_ids:
         correlation.is_complete = True
     

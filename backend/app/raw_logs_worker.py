@@ -1,21 +1,3 @@
-"""
-Raw Logs Worker - Separate background scheduler for fetching raw logs from all mailcow services.
-
-This module runs independently from the main scheduler to avoid impacting
-the core log processing pipeline (Postfix/Rspamd/Netfilter correlation).
-
-Architecture:
-- Separate AsyncIOScheduler instance
-- Sequential fetching: one service at a time to avoid overwhelming the mailcow API
-- SHA-256 dedup: prevents duplicate entries via unique constraint
-- Daily cleanup: removes entries older than RAW_LOGS_RETENTION_DAYS
-- WebSocket broadcast: pushes new entries to connected clients
-
-What is collected is settings.raw_logs_collected_list: the Logs page's
-services while that page is on, plus the services other pages read from this
-table (Dovecot for message details and the breach alert, Ratelimited for Rate
-Limits, SOGo for Devices). Those keep coming in with the Logs page off.
-"""
 import logging
 import hashlib
 import json
@@ -34,8 +16,6 @@ from .services.db_values import add_rows, strip_nul
 
 logger = logging.getLogger(__name__)
 
-# Separate scheduler instance for raw logs (independent from main scheduler).
-# Constructed in UTC like the main one (scheduler.py); started in the app's zone.
 raw_logs_scheduler = AsyncIOScheduler(
     timezone=UTC,
     job_defaults={
@@ -44,37 +24,20 @@ raw_logs_scheduler = AsyncIOScheduler(
     }
 )
 
-# All supported mailcow log services
 ALL_SERVICES = [
     "acme", "api", "autodiscover", "dovecot", "netfilter",
     "postfix", "ratelimited", "rspamd-history", "sogo", "watchdog"
 ]
 
-# Services whose newest-N page is checked for a gap and, when one may exist,
-# paged deeper with the range form until the walk meets rows already stored or
-# the end of mailcow's list. These are the two services the message pipeline
-# depends on; the other services keep the plain newest-N fetch.
 CATCHUP_SERVICES = frozenset({"postfix", "rspamd-history"})
 
-# Deeper pages a single cycle may fetch for one service. A walk that needs more
-# resumes on the next cycle from where it stopped, like the message pipeline.
 CATCHUP_MAX_PAGES_PER_CYCLE = 10
 
-# A pending deep walk per service: where to resume ('offset', lines already
-# taken from the head), when the walk began ('started_at'), and the offset at
-# which an empty page was last seen ('empty_at', optional). The start time is
-# what tells rows this walk stored in an earlier cycle apart from older history:
-# positions in mailcow's list shift every time a line arrives, so a position on
-# its own cannot. Mirrored in system_settings under _STATE_KEY_PREFIX in the
-# same transaction as the rows, and loaded at startup, so a restart in the
-# middle of a long catch-up resumes instead of abandoning the rest.
 _catchup_state: Dict[str, Dict[str, Any]] = {}
 _STATE_KEY_PREFIX = 'raw_logs_catchup:'
 
 
 def _persist_state(db, service: str, state: Optional[Dict[str, Any]]) -> None:
-    """Write (or clear) the pending walk for a service in the caller's session,
-    so it commits or rolls back together with the rows of the same cycle."""
     key = _STATE_KEY_PREFIX + service
     row = db.query(SystemSetting).filter(SystemSetting.key == key).first()
     if state is None:
@@ -91,7 +54,6 @@ def _persist_state(db, service: str, state: Optional[Dict[str, Any]]) -> None:
 
 
 def load_catchup_state() -> None:
-    """Load pending walks left by a previous process. Called at startup."""
     _catchup_state.clear()
     try:
         with get_db_context() as db:
@@ -109,7 +71,6 @@ def load_catchup_state() -> None:
     except Exception as e:
         logger.warning(f"[RAW LOGS] Could not load catch-up state, starting fresh: {e}")
 
-# Service metadata for the frontend
 SERVICE_METADATA = {
     "acme":          {"name": "ACME",         "icon": "lock",     "description": "SSL certificate logs"},
     "api":           {"name": "API",          "icon": "code",     "description": "API access logs"},
@@ -123,52 +84,38 @@ SERVICE_METADATA = {
     "watchdog":      {"name": "Watchdog",     "icon": "eye",      "description": "Container monitoring logs"},
 }
 
-# Job status for monitoring
 raw_logs_job_status = {
     'fetch_raw_logs': {'last_run': None, 'status': 'idle', 'error': None, 'stats': {}},
     'cleanup_raw_logs': {'last_run': None, 'status': 'idle', 'error': None},
 }
 
-# Reference to the WebSocket broadcast functions (set by the router module)
 _ws_broadcast_fn = None
 _ws_broadcast_all_fn = None
 
 
 def set_ws_broadcast_fn(fn):
-    """Set the WebSocket broadcast function. Called by the router module on startup."""
     global _ws_broadcast_fn
     _ws_broadcast_fn = fn
 
 
 def set_ws_broadcast_all_fn(fn):
-    """Set the broadcast-to-all function. Called by the router module on startup."""
     global _ws_broadcast_all_fn
     _ws_broadcast_all_fn = fn
 
 
 def compute_message_hash(service: str, time_val: Any, raw_data: dict) -> str:
-    """
-    Compute a SHA-256 hash for deduplication.
-    Uses service + timestamp + message content (or full JSON if no message field).
-    """
     time_str = str(time_val)
-    # Use 'message' field if available, otherwise hash the full JSON
     message = raw_data.get('message', '') or json.dumps(raw_data, sort_keys=True)
     content = f"{service}:{time_str}:{message}"
     return hashlib.sha256(content.encode('utf-8')).hexdigest()
 
 
 def _prepare_candidates(service: str, logs: List[Dict[str, Any]]) -> List[tuple]:
-    """Turn raw API entries into (timestamp, message_hash, entry) tuples,
-    skipping anything without a usable time. NUL is dropped first, so the
-    hash, the stored line and the live broadcast all use the same entry:
-    PostgreSQL cannot store NUL in JSON."""
     candidates = []
     for log_entry in logs:
         try:
             log_entry = strip_nul(log_entry)
             time_val = log_entry.get('time') or log_entry.get('unix_time', 0)
-            # mailcow API often returns time as a string - cast to number
             try:
                 time_val = int(time_val)
             except (ValueError, TypeError):
@@ -190,10 +137,7 @@ def _prepare_candidates(service: str, logs: List[Dict[str, Any]]) -> List[tuple]
 
 
 def _load_stored(db, service: str, hashes: List[str]) -> Dict[str, datetime]:
-    """Which of these hashes are already committed for the service, and when
-    each was stored (created_at, naive UTC)."""
     stored: Dict[str, datetime] = {}
-    # Query in chunks of 500 to avoid overly large IN clauses
     for i in range(0, len(hashes), 500):
         chunk = hashes[i:i + 500]
         rows = db.query(RawServiceLog.message_hash, RawServiceLog.created_at).filter(
@@ -205,12 +149,6 @@ def _load_stored(db, service: str, hashes: List[str]) -> Dict[str, datetime]:
 
 
 def _store_page(db, service: str, candidates: List[tuple], known: Set[str]) -> List[Dict[str, Any]]:
-    """Add the candidates that are not yet stored. Returns their raw entries.
-    Mutates `known` so a hash repeated within one cycle is stored once.
-
-    A line the database refuses is logged and skipped, without the others on
-    the page. Its hash stays in `known`, so this cycle does not try it again,
-    but it is not reported as stored."""
     rows = []
     entries = []
     for timestamp, msg_hash, log_entry in candidates:
@@ -225,10 +163,6 @@ def _store_page(db, service: str, candidates: List[tuple], known: Set[str]) -> L
 
 def _page_is_history(candidates: List[tuple], stored: Dict[str, datetime],
                      known: Set[str], before: datetime) -> bool:
-    """True when every line on the page is already stored AND was stored before
-    `before`. Rows stored by this walk in an earlier cycle (or by this cycle's
-    head page) fail the time test: they mean the list shifted under the walk,
-    not that older history was reached."""
     if not candidates:
         return False
     for _, h, _ in candidates:
@@ -242,18 +176,6 @@ def _page_is_history(candidates: List[tuple], stored: Dict[str, datetime],
 
 async def _walk(db, service: str, page_size: int, offset: int, known: Set[str],
                 boundary_before: datetime, budget: int, fetch) -> tuple:
-    """Page deeper from `offset` until a page is entirely rows stored before
-    `boundary_before`, or the end of mailcow's list, or `budget` pages.
-
-    Returns (new_entries, pages_fetched, next_offset_or_None, empty_at).
-    next_offset None means the walk finished on a short page or on rows already
-    stored; an int means it must resume there on a later cycle. empty_at is the
-    offset at which mailcow answered with nothing - the caller decides whether
-    that is the end of the list (it is only trusted when it repeats, because
-    mailcow also answers {} when a backend such as rspamd is briefly down). A
-    range request that fails ends the walk for this cycle without discarding
-    what was already fetched; the caller resumes from the same offset next time.
-    """
     new_entries: List[Dict[str, Any]] = []
     pages = 0
     while pages < budget:
@@ -265,22 +187,21 @@ async def _walk(db, service: str, page_size: int, offset: int, known: Set[str],
             return (new_entries, pages, offset, None)
         pages += 1
         if not page:
-            return (new_entries, pages, offset, offset)   # empty: end, or a hiccup
+            return (new_entries, pages, offset, offset)
 
         candidates = _prepare_candidates(service, page)
         stored = _load_stored(db, service, [c[1] for c in candidates])
         known |= set(stored)
         if _page_is_history(candidates, stored, known, boundary_before):
-            return (new_entries, pages, None, None)     # reached what we already had
+            return (new_entries, pages, None, None)
         new_entries.extend(_store_page(db, service, candidates, known))
         if len(page) < page_size:
-            return (new_entries, pages, None, None)     # short page: end of the list
+            return (new_entries, pages, None, None)
         offset += len(page)
     return (new_entries, pages, offset, None)
 
 
 async def _collect_service(service: str, page_size: int) -> tuple:
-    """Keep the transaction on a worker and pooled HTTP on the application loop."""
     return await asyncio.to_thread(
         _collect_service_worker, service, page_size, asyncio.get_running_loop()
     )
@@ -288,8 +209,6 @@ async def _collect_service(service: str, page_size: int) -> tuple:
 
 def _collect_service_worker(service: str, page_size: int, request_loop) -> tuple:
     async def fetch(method, *args, **kwargs):
-        # Reuse the application's persistent HTTP client across polling cycles.
-        # Only database work and response preparation belong to the worker loop.
         future = asyncio.run_coroutine_threadsafe(
             getattr(mailcow_api, method)(*args, **kwargs), request_loop
         )
@@ -302,19 +221,6 @@ def _collect_service_worker(service: str, page_size: int, request_loop) -> tuple
 
 
 async def _collect_service_in_worker(service: str, page_size: int, fetch) -> tuple:
-    """Fetch and store one service for this cycle.
-
-    Returns (head_entries, deeper_entries, pages, pending_state). The head
-    page (newest N) is always
-    fetched, so the Live Logs page stays current, and only its new lines are
-    broadcast live. For CATCHUP_SERVICES the head page is then read as
-    evidence: a full page on which every row was new means lines may have been
-    missed, and the walk goes deeper.
-
-    `pending_state` is what _catchup_state[service] should become after the
-    caller's commit (None to clear). It is returned rather than written here so
-    a failed commit leaves the previous resume position in place.
-    """
     logs = await fetch('get_raw_logs', service, count=page_size)
     if not logs:
         return ([], [], 1, _catchup_state.get(service))
@@ -340,19 +246,12 @@ async def _collect_service_in_worker(service: str, page_size: int, fetch) -> tup
             budget = CATCHUP_MAX_PAGES_PER_CYCLE
 
             if pending and head_is_full and not seam:
-                # More than a page arrived since the last cycle while a deep walk
-                # is pending. The lines between this head page and the previous
-                # cycle's head were never requested: close that gap first, from
-                # just below the head, stopping at rows stored before this cycle.
                 gap, used, rest, _ = await _walk(db, service, page_size, page_size, known,
                                                  cycle_started, budget, fetch)
                 deeper.extend(gap)
                 pages += used
                 budget -= used
                 if rest is not None:
-                    # The burst was larger than a whole cycle's budget. Make the
-                    # gap the pending walk; the deeper region is re-walked later
-                    # (its rows are recognised as this walk's own and passed).
                     next_state = {'offset': rest, 'started_at': pending['started_at']}
                     budget = 0
 
@@ -374,7 +273,6 @@ async def _collect_service_in_worker(service: str, page_size: int, fetch) -> tup
                 if rest is None:
                     next_state = None
                 elif empty_at is not None and pending and pending.get('empty_at') == empty_at:
-                    # Nothing at this offset two cycles in a row: the end is real.
                     next_state = None
                 else:
                     next_state = {'offset': rest, 'started_at': started_at}
@@ -395,17 +293,11 @@ async def _collect_service_in_worker(service: str, page_size: int, fetch) -> tup
 
 
 async def fetch_raw_service_logs():
-    """
-    Main fetch job - runs every RAW_LOGS_FETCH_INTERVAL seconds.
-    Sequentially fetches logs from each enabled service and stores in DB.
-    After storing, broadcasts new entries via WebSocket.
-    """
     raw_logs_job_status['fetch_raw_logs']['status'] = 'running'
     raw_logs_job_status['fetch_raw_logs']['last_run'] = datetime.now(timezone.utc)
 
     try:
         enabled_services = settings.raw_logs_collected_list
-        # Only the Logs page streams; the other readers poll the table
         page_services = set(settings.raw_logs_services_list) if settings.raw_logs_page_on else set()
         if not enabled_services:
             logger.debug("[RAW LOGS] No services enabled, skipping fetch")
@@ -418,12 +310,9 @@ async def fetch_raw_service_logs():
 
         for service in enabled_services:
             try:
-                # Use fetch_count_rspamd for rspamd-history (each entry is a full email record, much heavier)
                 count = fetch_count_rspamd if service == 'rspamd-history' else fetch_count
                 head_entries, deeper, _pages, next_state = await _collect_service(service, count)
 
-                # The commit succeeded (or there was nothing to commit): only now
-                # is it safe to move or clear the resume position.
                 if next_state is None:
                     _catchup_state.pop(service, None)
                 else:
@@ -431,9 +320,6 @@ async def fetch_raw_service_logs():
 
                 stats[service] = len(head_entries) + len(deeper)
 
-                # Broadcast only what is genuinely new at the head. Caught-up
-                # history is older than what the page already shows and would
-                # appear at the newest end if streamed.
                 if head_entries and _ws_broadcast_fn and service in page_services:
                     try:
                         await _ws_broadcast_fn(service, head_entries)
@@ -445,13 +331,11 @@ async def fetch_raw_service_logs():
                 stats[service] = -1
                 continue
 
-        # Log summary (only if we got new data)
         total_new = sum(v for v in stats.values() if v > 0)
         if total_new > 0:
             parts = [f"{k}={v}" for k, v in stats.items() if v > 0]
             logger.info(f"[RAW LOGS] Ingested: {', '.join(parts)} (total: {total_new})")
 
-        # Broadcast updated service counts to all connected WS clients
         if _ws_broadcast_all_fn:
             try:
                 await _broadcast_service_counts()
@@ -471,7 +355,6 @@ async def fetch_raw_service_logs():
         raw_logs_job_status['fetch_raw_logs']['error'] = str(e)
 
 async def _broadcast_service_counts():
-    """Query DB for per-service log counts and broadcast to all WS clients."""
     counts = await asyncio.to_thread(_load_service_counts)
     await _ws_broadcast_all_fn({"type": "service_counts", "counts": counts})
 
@@ -489,16 +372,10 @@ def _load_service_counts():
 
 
 async def cleanup_raw_service_logs():
-    """Run raw-log retention and its session cleanup outside the event loop."""
     await asyncio.to_thread(_cleanup_raw_service_logs_worker)
 
 
 def _cleanup_raw_service_logs_worker():
-    """
-    Daily cleanup job - removes raw logs older than RAW_LOGS_RETENTION_DAYS,
-    and the rate limit log (the Rate Limits page's history) older than
-    rate_limits_retention_effective. Runs at 3:00 AM (offset from main cleanup at 2:00 AM).
-    """
     raw_logs_job_status['cleanup_raw_logs']['status'] = 'running'
     raw_logs_job_status['cleanup_raw_logs']['last_run'] = datetime.now(timezone.utc)
     
@@ -536,9 +413,6 @@ def _cleanup_raw_service_logs_worker():
 
 
 def delete_uncollected_raw_logs(db) -> int:
-    """Drop the rows of services nothing collects any more (the Logs page was
-    turned off, or a service unticked). Rows another page reads stay. The
-    caller commits."""
     collected = settings.raw_logs_collected_list
     return db.query(RawServiceLog).filter(
         ~RawServiceLog.service.in_(collected)
@@ -546,7 +420,6 @@ def delete_uncollected_raw_logs(db) -> int:
 
 
 def start_raw_logs_scheduler():
-    """Start the raw logs background scheduler (called from main.py startup)"""
     if not settings.raw_logs_collected_list:
         logger.info("[RAW LOGS] No service to collect")
         return
@@ -554,13 +427,10 @@ def start_raw_logs_scheduler():
         logger.info("[RAW LOGS] Logs page is off; collecting only what other pages read")
     
     load_catchup_state()
-    # Trigger helpers shared with the main scheduler (imported here: scheduler.py
-    # imports this module)
     from .scheduler import every, clock_trigger, clock_schedule
     raw_logs_scheduler.timezone = app_tz()
 
     try:
-        # Fetch job - every RAW_LOGS_FETCH_INTERVAL seconds
         raw_logs_scheduler.add_job(
             fetch_raw_service_logs,
             trigger=every(seconds=settings.raw_logs_fetch_interval),
@@ -570,7 +440,6 @@ def start_raw_logs_scheduler():
             max_instances=1
         )
         
-        # Cleanup job - daily at 3:00 AM
         raw_logs_scheduler.add_job(
             cleanup_raw_service_logs,
             trigger=clock_trigger('cleanup_raw_logs'),
@@ -594,7 +463,6 @@ def start_raw_logs_scheduler():
 
 
 def stop_raw_logs_scheduler():
-    """Stop the raw logs background scheduler (called from main.py shutdown)"""
     try:
         if raw_logs_scheduler.running:
             raw_logs_scheduler.shutdown(wait=False)
@@ -604,24 +472,17 @@ def stop_raw_logs_scheduler():
 
 
 def reschedule_raw_logs_jobs():
-    """
-    Reschedule raw logs jobs when settings change.
-    Called from reschedule_interval_jobs() in scheduler.py.
-    """
     if not raw_logs_scheduler.running:
         if settings.raw_logs_collected_list:
-            # Scheduler wasn't running but now it should be
             start_raw_logs_scheduler()
         return
     
     if not settings.raw_logs_collected_list:
-        # Nothing to collect: stop the scheduler
         stop_raw_logs_scheduler()
         return
 
     from .scheduler import every
     try:
-        # Update fetch interval
         raw_logs_scheduler.add_job(
             fetch_raw_service_logs,
             trigger=every(seconds=settings.raw_logs_fetch_interval),
@@ -638,5 +499,4 @@ def reschedule_raw_logs_jobs():
 
 
 def get_raw_logs_job_status() -> dict:
-    """Get raw logs job status for monitoring"""
     return raw_logs_job_status

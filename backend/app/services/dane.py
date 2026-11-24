@@ -1,13 +1,3 @@
-"""
-DANE for SMTP (RFC 7672): fetch the certificate an MX host presents over
-STARTTLS and compare it with its TLSA records.
-
-Only DANE-EE (usage 3) can be verified here: it pins the server's own
-certificate or key, which is what mailcow publishes ("3 1 1"). DANE-TA
-(usage 2) pins an issuer in the chain, and Python 3.11 does not expose the
-chain the server sent. PKIX usages 0 and 1 are not used for SMTP (RFC 7672
-section 3.1.3), so senders ignore them.
-"""
 import asyncio
 import concurrent.futures
 import functools
@@ -27,22 +17,19 @@ from cryptography.hazmat.primitives import serialization
 logger = logging.getLogger(__name__)
 
 SMTP_PORT = 25
-SMTP_TIMEOUT = 10            # seconds for one step: connect, one read, the TLS handshake
-SMTP_TOTAL_SECONDS = 20      # the whole probe, however slowly the server answers
-PROBE_GRACE_SECONDS = 5      # extra wait for name lookups, which the budget cannot cut
-MAX_REPLY_LINES = 64         # lines in one SMTP reply; smtplib alone accepts any number
-MAX_ADDRESSES = 2            # addresses tried per MX host
-MAX_PROBES = 10              # probes running at once, each on its own thread
-CERT_CACHE_SECONDS = 600     # many domains share one MX; probe it once per run
+SMTP_TIMEOUT = 10
+SMTP_TOTAL_SECONDS = 20
+PROBE_GRACE_SECONDS = 5
+MAX_REPLY_LINES = 64
+MAX_ADDRESSES = 2
+MAX_PROBES = 10
+CERT_CACHE_SECONDS = 600
 
 USAGE_DANE_TA = 2
 USAGE_DANE_EE = 3
 
 _cert_cache: Dict[str, Tuple[float, Optional[bytes], Optional[str]]] = {}
 
-# The probes block, so they run on threads, but not on the default executor:
-# ingestion, the protection rules and name lookups share that one. A probe is
-# only started when a thread is free for it, so nothing queues behind a slow MX.
 _executor = concurrent.futures.ThreadPoolExecutor(max_workers=MAX_PROBES,
                                                   thread_name_prefix='dane-probe')
 _running = 0
@@ -50,18 +37,15 @@ _running_lock = threading.Lock()
 
 
 class CertificateUnavailable(Exception):
-    """The certificate could not be fetched (port 25 blocked, no STARTTLS...)."""
+    pass
 
 
 class ProbeBusy(CertificateUnavailable):
-    """Too many probes are running in this app. Says nothing about the host,
-    so it is not cached."""
+    pass
 
 
 @functools.lru_cache(maxsize=1)
 def _ehlo_name() -> str:
-    """A fully qualified name for EHLO. Many MX hosts drop a client that
-    greets as "localhost", so use the mailcow hostname this app runs next to."""
     try:
         from app.config import settings
         name = urlparse(settings.mailcow_url).hostname or ''
@@ -73,8 +57,6 @@ def _ehlo_name() -> str:
 
 
 def _pick_addresses(infos: List[tuple]) -> List[tuple]:
-    """At most MAX_ADDRESSES distinct addresses, one per address family
-    first, so a host whose IPv6 is broken is still reached over IPv4."""
     unique = []
     for info in infos:
         if all(info[4] != seen[4] for seen in unique):
@@ -90,14 +72,6 @@ def _pick_addresses(infos: List[tuple]) -> List[tuple]:
 
 
 class _BoundedSMTP(smtplib.SMTP):
-    """smtplib.SMTP whose every network step shares one wall-clock deadline.
-
-    smtplib's own timeout applies to each socket call, its reply reader takes
-    any number of lines, and a buffered readline keeps reading while bytes
-    trickle in, so a server could hold the probe for as long as it likes.
-    Here the time left is checked before every connect, send and recv, and
-    one reply may have at most MAX_REPLY_LINES lines.
-    """
 
     def __init__(self, host: str, deadline: float):
         self._deadline = deadline
@@ -106,7 +80,6 @@ class _BoundedSMTP(smtplib.SMTP):
         super().__init__(host, SMTP_PORT, local_hostname=_ehlo_name(), timeout=SMTP_TIMEOUT)
 
     def step_timeout(self) -> float:
-        """Timeout for the next network step; raises once the budget is spent."""
         remaining = self._deadline - time.monotonic()
         if remaining <= 0:
             self.close()
@@ -114,8 +87,6 @@ class _BoundedSMTP(smtplib.SMTP):
         return min(SMTP_TIMEOUT, remaining)
 
     def _get_socket(self, host, port, timeout):
-        # socket.create_connection would try every published address with a
-        # full timeout each
         last_error: OSError = OSError(f'no address found for {host}')
         for family, socktype, proto, _, address in _pick_addresses(
                 socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)):
@@ -136,8 +107,6 @@ class _BoundedSMTP(smtplib.SMTP):
         super().send(s)
 
     def _readline(self) -> bytes:
-        """One line of at most smtplib._MAXLINE + 1 bytes, read in recv
-        calls that each get only the time left."""
         if self._buffer_sock is not self.sock:
             self._buffer, self._buffer_sock = b'', self.sock
         limit = smtplib._MAXLINE + 1
@@ -156,7 +125,6 @@ class _BoundedSMTP(smtplib.SMTP):
             self._buffer += chunk
 
     def getreply(self):
-        # smtplib.SMTP.getreply, reading through _readline and with a line cap
         resp = []
         while True:
             try:
@@ -185,9 +153,6 @@ class _BoundedSMTP(smtplib.SMTP):
 
 
 def _fetch_certificate_sync(host: str, deadline: float) -> bytes:
-    # DANE replaces PKIX validation for SMTP: the TLSA record, not a CA, says
-    # which certificate is correct. So the handshake must accept any
-    # certificate, and the comparison with the TLSA record is the check.
     context = ssl.create_default_context()
     context.minimum_version = ssl.TLSVersion.TLSv1_2
     context.check_hostname = False
@@ -201,8 +166,6 @@ def _fetch_certificate_sync(host: str, deadline: float) -> bytes:
         code, _ = smtp.docmd('STARTTLS')
         if code != 220:
             raise CertificateUnavailable(f'the server refused STARTTLS ({code})')
-        # The handshake runs under one socket timeout, so give it only the
-        # time left. Only the certificate is needed: no QUIT, just close.
         smtp.sock.settimeout(smtp.step_timeout())
         smtp.sock = context.wrap_socket(smtp.sock, server_hostname=host)
         certificate = smtp.sock.getpeercert(binary_form=True)
@@ -225,9 +188,6 @@ def _probe_finished(_future) -> None:
 
 
 async def _probe(host: str) -> bytes:
-    """Run one probe on the probe executor, or raise ProbeBusy when every
-    probe thread is taken. The slot is freed when the thread finishes, not
-    when the caller stops waiting."""
     global _running
     with _running_lock:
         if _running >= MAX_PROBES:
@@ -248,11 +208,6 @@ async def _probe(host: str) -> bytes:
 
 
 async def fetch_smtp_certificate(host: str) -> bytes:
-    """DER certificate presented by host on port 25, cached for a few minutes.
-
-    Raises CertificateUnavailable when it cannot be fetched, and its subclass
-    ProbeBusy when no probe could be started.
-    """
     key = host.lower().rstrip('.')
     cached = _cert_cache.get(key)
     if cached and time.monotonic() - cached[0] < CERT_CACHE_SECONDS:
@@ -273,8 +228,6 @@ async def fetch_smtp_certificate(host: str) -> bytes:
 
 
 def tlsa_association(certificate_der: bytes, selector: int, matching_type: int) -> Optional[bytes]:
-    """The value a TLSA record with this selector/matching type should hold
-    for the certificate, or None for combinations RFC 6698 does not define."""
     if selector == 0:
         data = certificate_der
     elif selector == 1:
@@ -293,8 +246,6 @@ def tlsa_association(certificate_der: bytes, selector: int, matching_type: int) 
 
 
 def matches_certificate(record: Dict, certificate_der: bytes) -> bool:
-    """True when a DANE-EE TLSA record (as built by check_tlsa_record) pins
-    this certificate."""
     if record.get('usage') != USAGE_DANE_EE:
         return False
     try:

@@ -1,29 +1,3 @@
-"""
-HTML layout for every email the app sends, in the v3 design language.
-
-Email clients ignore stylesheets, CSS variables and grid, so the blocks are
-tables with inline styles. The colours are the light theme of
-frontend/assets/css/ui.css, with neutral greys for the surfaces (see
-_DARK_CSS); a <style> block switches to the dark theme in the clients that
-honour prefers-color-scheme (Apple Mail, iOS, Outlook for Mac), and corrects
-it for the Outlook apps and Outlook.com. The email says it is left to right,
-so a client in a right-to-left language does not mirror it.
-
-Outlook for Windows draws email with Word, which ignores padding and margins
-outside table cells, rounded corners, max-width and font fallbacks. So every
-gap is cell padding or a spacer row, divider lines are 1px rows, and a block
-never relies on margins.
-
-Every value passed to a block is escaped. Only the output of another block
-(a Safe string) is inserted as markup, so callers never escape by hand:
-
-    html = render(
-        title='2 hosts are on a blacklist',
-        topic='Blacklist', tone='fail',
-        intro='Mail from these hosts may be rejected.',
-        blocks=[panel('Hosts', table(...))],
-    )
-"""
 import functools
 import re
 from datetime import datetime
@@ -35,20 +9,15 @@ from .. import app_time
 
 
 class Safe(str):
-    """Markup produced by this module; inserted without escaping."""
+    pass
 
 
 def _attr(value) -> str:
-    """Escape for an attribute or a place that takes no markup."""
     if isinstance(value, Safe):
         return value
     return escape('' if value is None else str(value), quote=True)
 
 
-# Runs of the characters an address is made of. The text comes from inbound
-# mail (DMARC subjects) among others, so the scan must stay linear: one
-# character class, no nested or overlapping quantifiers; whether a run is an
-# address is decided by plain string checks.
 _ADDRESS_RUN = re.compile(r'[A-Za-z0-9._%+@-]+')
 _DOMAIN_CHARS = frozenset('abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-')
 
@@ -62,16 +31,13 @@ def _is_address(text: str) -> bool:
 
 
 def _e(value, cls: str = 'm-ink') -> str:
-    """Escape visible text whose colour class is cls. Gmail and Outlook turn
-    every address into a blue link of their own, and Outlook ignores
-    color:inherit, so an address becomes a link of ours in the text colour."""
     if isinstance(value, Safe):
         return value
     color = _CLASS_COLORS.get(cls, INK)
 
     def link(match):
         run = match.group(0)
-        address = run.rstrip('.')  # the full stop of a sentence is not part of it
+        address = run.rstrip('.')
         if not _is_address(address):
             return run
         return (f'<a href="mailto:{address}" class="{cls}" style="color:{color};text-decoration:none;">'
@@ -81,15 +47,10 @@ def _e(value, cls: str = 'm-ink') -> str:
 
 
 def local_now() -> datetime:
-    """Now, in the app's time zone, like the dates in the app."""
     return app_time.local_now()
 
 
 def format_date(when: datetime, time: bool = False, zone: bool = True) -> str:
-    """The date in the app's time zone, written as Settings > Application > Time
-    says (DD/MM/YYYY when that follows the browser). With the time, the zone
-    follows it (13:00 CET) unless zone is False. A naive value is a stored
-    one, so it is UTC."""
     local = app_time.to_local(when)
     text = app_time.format_day(local.date())
     if not time:
@@ -99,15 +60,12 @@ def format_date(when: datetime, time: bool = False, zone: bool = True) -> str:
 
 
 def format_time(when: datetime, zone: bool = True) -> str:
-    """The time of day in the app's time zone, as format_date writes it
-    (13:00 CET), without the date."""
     local = app_time.to_local(when)
     text = app_time.format_clock(local.hour, local.minute)
     return f"{text} {app_time.zone_label(local)}" if zone else text
 
 
 def _lines(value, cls: str = 'm-ink') -> str:
-    """Escape, then keep line breaks."""
     if isinstance(value, Safe):
         return value
     return _e(value, cls).replace('\n', '<br>')
@@ -116,15 +74,12 @@ def _lines(value, cls: str = 'm-ink') -> str:
 FONT = "Onest, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif"
 MONO = "'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"
 
-# ui.css light theme; the surfaces are neutral greys (see _DARK_CSS)
 BG = '#FFFFFF'
 PANEL = '#EEEEEE'
 INK = '#111814'
 MUTED = '#5E6863'
 LINE = '#E0E0E0'
 
-# Tone colour and its banner tint (the colour at 13-15% over white, as
-# color-mix() gives in the app; email clients cannot mix colours)
 TONES = {
     'ok': ('#12803F', '#E0F0E6'),
     'warn': ('#9A6200', '#F2EAD9'),
@@ -135,32 +90,9 @@ TONES = {
 
 _CLASS_COLORS = {'m-ink': INK, 'm-muted': MUTED, **{f'm-{t}': c for t, (c, _) in TONES.items()}}
 
-# Bars of a chart: a neutral grey (no tint, so the Outlook apps keep it), and
-# the fail colour for the bars that hold what the email is about
 BAR = '#C4C4C4'
 BAR_HI = TONES['fail'][0]
 
-# Outlook for Android and Outlook on the web in dark mode (measured
-# 2026-10-26) recolour the email again after any dark theme of its own: the
-# tinted backgrounds, dark or light, all came out as mid greys close to each
-# other, so the email turned flat grey. Neutral greys kept their place (dark
-# ones as they are, light ones inverted, white became the client's own
-# background). So the background, panels, lines, the muted tint and chart
-# bars are neutral greys, in the light colours and in the dark theme. The
-# banners keep their tone tints (ok, warn, fail, info), which Outlook
-# remapped to a readable shade; tags are outlined instead of filled (see
-# _tag). Outlook on the web writes its colour inline on every
-# coloured element, so only the colours themselves reach it.
-#
-# Outlook marks recoloured elements with data-ogsb; under that mark the
-# Android app gets white (its own background) and neutral greys. A rule on
-# the marked element itself loses to the colour Outlook writes inline, so the
-# rules match descendants only. The bars of a chart are a neutral grey too;
-# its highlighted bars get their red there, so Outlook cannot turn them into
-# one more grey bar.
-#
-# Outlook and Gmail also turn dates into links of their own; a link in the
-# email takes the colour of its text instead (link() keeps its underline).
 _DARK_CSS = """
 :root { color-scheme: light dark; supported-color-schemes: light dark; }
 @media (prefers-color-scheme: dark) {
@@ -200,19 +132,12 @@ _DARK_CSS = """
 }
 """
 
-# Word knows only bold and normal, and takes the first font of a list even
-# when it is not installed (then it shows Times New Roman).
 _MSO_CSS = """<!--[if mso]><style>
 v\\:* { behavior: url(#default#VML); display: inline-block; }
 body, table, td, th, p, a, span, h1, div { font-family: 'Segoe UI', Arial, sans-serif !important; }
 .m-mono { font-family: Consolas, 'Courier New', monospace !important; }
 .m-b { font-weight: bold !important; }
 </style><![endif]-->"""
-
-# Outlook for Windows draws no rounded corners. Panels, banners and cards
-# stay square there: a VML shape that grows with its content does not push
-# the next block down in Outlook, so blocks overlap. Only the topic tag,
-# which has a fixed size, gets a rounded VML shape.
 
 _TABLE = 'role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"'
 
@@ -222,24 +147,15 @@ def _tone(tone: Optional[str]) -> Tuple[str, str]:
 
 
 def _rule(colspan: int = 1) -> str:
-    """A 1px divider row; Word draws cell borders unevenly."""
     return (f'<tr><td class="m-rule" colspan="{colspan}" height="1" style="height:1px;font-size:1px;line-height:1px;'
             f'mso-line-height-rule:exactly;background-color:{LINE};">&nbsp;</td></tr>')
 
 
 def tag(text, tone: str = 'muted') -> Safe:
-    """A small status label, as .ui-tag. A table cell, so Word keeps its padding."""
     return Safe(_tag(text, tone, rounded_in_outlook=False))
 
 
 def _tag(text, tone: str, rounded_in_outlook: bool) -> str:
-    """rounded_in_outlook draws a fixed-size VML shape for Outlook. Only for
-    the topic tag: VML inside a table, followed by more VML, can make Word
-    report the table as corrupt and show nothing.
-
-    A tag is outlined, not filled: Outlook on the web turned every tinted
-    fill into a muddy grey-brown in dark mode, while a border and text in
-    the tone colour stay clear there (measured 2026-10-26)."""
     color = _tone(tone)[0]
     cell = (f'<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="display:inline-table;vertical-align:middle;">'
             f'<tr><td class="m-{tone} m-{tone}-bd m-b" style="padding:1px 7px;border:1px solid {color};border-radius:6px;'
@@ -262,12 +178,6 @@ def strong(text, tone: Optional[str] = None) -> Safe:
 
 
 def mono(text, wrap: Optional[int] = None) -> Safe:
-    """Technical values (addresses, record text, keys), always whole. Long
-    keys have no spaces, so they may break anywhere instead of widening the
-    email. Word (Outlook for Windows) cannot break them at all: with wrap,
-    it gets its own copy in which every run longer than wrap characters is
-    cut into lines of that length. Every other client gets the value as it
-    is, so a copy of it is the real value."""
     text = '' if text is None else str(text)
     span = f'<span class="m-mono" style="font-family:{MONO};font-size:13px;word-break:break-all;">'
     whole = f'{span}{_e(text)}</span>'
@@ -277,7 +187,6 @@ def mono(text, wrap: Optional[int] = None) -> Safe:
     def lines(run):
         if len(run) <= wrap:
             return _e(run)
-        # Cut first, then escape, so no entity is split
         return '<br>'.join(_attr(run[i:i + wrap]) for i in range(0, len(run), wrap))
 
     word = ''.join(lines(part) if part.strip() else _attr(part) for part in re.split(r'(\s+)', text))
@@ -286,7 +195,6 @@ def mono(text, wrap: Optional[int] = None) -> Safe:
 
 
 def link(text, url) -> Safe:
-    """A link; only http(s) URLs become links, anything else stays text."""
     url = '' if url is None else str(url)
     if not url.lower().startswith(('http://', 'https://')):
         return Safe(_e(text))
@@ -303,7 +211,6 @@ def paragraph(text, muted: bool = False) -> Safe:
 
 
 def banner(tone: str, title, text=None) -> Safe:
-    """A tinted message across the full width, as .ui-banner."""
     color, tint = _tone(tone)
     body = (f'<tr><td class="m-ink" style="padding:3px 16px 0;color:{INK};font-size:14px;line-height:1.5;">'
             f'{_lines(text)}</td></tr>') if text else ''
@@ -317,12 +224,10 @@ def banner(tone: str, title, text=None) -> Safe:
     return Safe(inner)
 
 
-Stat = Tuple  # (label, value) or (label, value, tone) or (label, value, tone, note)
+Stat = Tuple
 
 
 def stats(items: Sequence[Stat], per_row: int = 3) -> Safe:
-    """Key figures in bordered cells, as .ui-kpis. One table per row, so a
-    short last row keeps the width of the others."""
     width = int(100 / per_row)
     rows = []
     for start in range(0, len(items), per_row):
@@ -350,23 +255,19 @@ def stats(items: Sequence[Stat], per_row: int = 3) -> Safe:
                 f'letter-spacing:-0.02em;">{_e(value, vcls)}</b>{note_html}</td>'
             )
         rows.append(f'<table {_TABLE}><tr>{"".join(cells)}</tr></table>')
-    # Outlook drops the bottom border of cards in the last row of a table, so
-    # an empty 1px row closes the table
+    # Without the empty last row, Outlook drops the bottom border of the last row's cards
     return Safe(f'<table {_TABLE}>' + ''.join(
         f'<tr><td style="padding:{"8px" if i else "0"} 0 0;">{row}</td></tr>' for i, row in enumerate(rows))
         + '<tr><td height="1" style="height:1px;font-size:1px;line-height:1px;">&nbsp;</td></tr></table>')
 
 
 def kv(rows: Sequence[Tuple]) -> Safe:
-    """Label on the left, value on the right, a line between rows (.ui-kv).
-    Each row is (label, value) or (label, value, tone)."""
     out = []
     for row in rows:
         label, value = row[0], row[1]
         tone = row[2] if len(row) > 2 else None
         color = _tone(tone)[0] if tone else INK
         vcls = f'm-{tone}' if tone else 'm-ink'
-        # Markup such as a tag must not sit inside <b>: Word then reports the table as corrupt
         shown = value if isinstance(value, Safe) else f'<b style="font-weight:650;">{_lines(value, vcls)}</b>'
         out.append(_rule(2))
         out.append(
@@ -379,8 +280,6 @@ def kv(rows: Sequence[Tuple]) -> Safe:
 
 def table(columns: Sequence[Union[str, Tuple[str, str]]], rows: Sequence[Sequence], empty: str = 'Nothing to show',
           head: bool = True) -> Safe:
-    """A data table inside a panel. Columns are names or (name, 'right');
-    head=False leaves out the header row."""
     cols = [(c, 'left') if isinstance(c, str) else c for c in columns]
     span = len(cols)
     out = []
@@ -407,7 +306,6 @@ def table(columns: Sequence[Union[str, Tuple[str, str]]], rows: Sequence[Sequenc
 
 
 def panel(title, *blocks, count=None, note=None) -> Safe:
-    """A grey panel with a heading, as .ui-panel."""
     count_html = (f' <span class="m-muted" style="color:{MUTED};font-weight:500;">{_e(count, "m-muted")}</span>'
                   if count is not None else '')
     note_html = (f'<br><span class="m-muted" style="color:{MUTED};font-size:12.5px;font-weight:400;">{_e(note, "m-muted")}</span>'
@@ -423,7 +321,6 @@ def panel(title, *blocks, count=None, note=None) -> Safe:
 
 
 def panel_text(text) -> Safe:
-    """Free text inside a panel, with the panel padding."""
     return Safe(f'<table {_TABLE}>{_rule()}<tr><td class="m-ink m-cell" style="padding:10px 16px 12px;color:{INK};'
                 f'font-size:14px;line-height:1.55;">{_lines(text)}</td></tr></table>')
 
@@ -432,28 +329,15 @@ BAR_MAX_HEIGHT = 80
 
 
 def _bar_heights(counts: Sequence[int], max_height: int = BAR_MAX_HEIGHT) -> list:
-    """Bar heights in px, scaled to the largest count. A count above zero
-    stays visible (2px at least); zero is a 1px line, so the axis reads."""
     top = max(counts, default=0)
     return [max(2, round(c * max_height / top)) if c > 0 else 1 for c in counts]
 
 
 def bar_chart(counts: Sequence[int], highlight: Iterable[int] = (), start=None, end=None, caption=None) -> Safe:
-    """A row of bars inside a panel, for counts over time: the bars at the
-    highlight indexes in the fail colour, the others grey (a highlighted
-    count of zero stays a grey line). start and end label the two ends of
-    the axis; the caption says in words what the bars show, so the email
-    reads without them.
-
-    Email clients draw no SVG or canvas, so every bar is a table cell of a
-    fixed height (an attribute too, for Word) under a spacer cell. The bar
-    cells are percentage widths with a 1px gap on each side, so the chart
-    fits a phone and keeps a 600px email."""
     counts = [max(int(c), 0) for c in counts]
     marked = set(highlight)
     heights = _bar_heights(counts)
     share = 100 / len(counts) if counts else 100
-    # Word reads whole percentages only; the style keeps the exact share
     width_attr, width = f"{int(share)}%", f"{share:.2f}%"
     cell = 'font-size:1px;line-height:1px;mso-line-height-rule:exactly;'
     columns = []
@@ -491,11 +375,8 @@ _APP_ICON = 'assets/icons/android-chrome-192x192.png'
 
 @functools.lru_cache(maxsize=1)
 def app_icon() -> Optional[bytes]:
-    """The app icon as PNG, sent inside the email (cid:app-icon) so every
-    client shows it without loading anything. None when the frontend files
-    are not there (tests outside the image)."""
     here = Path(__file__).resolve()
-    for root in (here.parents[2], here.parents[3]):  # /app in the image, the repository otherwise
+    for root in (here.parents[2], here.parents[3]):
         path = root / 'frontend' / _APP_ICON
         if path.is_file():
             return path.read_bytes()
@@ -503,9 +384,6 @@ def app_icon() -> Optional[bytes]:
 
 
 def _mark() -> str:
-    """The app icon. Without the file: the icon reduced to its log lines, a
-    dark tile with three bars; Word draws neither the bars nor the rounded
-    corners, so it gets a plain square instead."""
     if app_icon():
         return (f'<td width="26" height="26" valign="middle" style="width:26px;height:26px;">'
                 f'<img src="cid:{APP_ICON_CID}" width="26" height="26" alt="" '
@@ -521,16 +399,6 @@ def _mark() -> str:
 def render(*, title, topic, tone: str = 'muted', intro=None, blocks: Sequence = (),
            footer=None, preheader=None, app_title: Optional[str] = None,
            when: Optional[datetime] = None) -> str:
-    """
-    A full email.
-
-    title: the headline, a sentence that says what happened
-    topic: what kind of email this is, shown as a tag above the title
-    tone: ok / warn / fail / info / muted - the colour of the topic tag
-    intro: one or two sentences under the title
-    blocks: output of panel(), banner(), stats(), paragraph()
-    footer: why the reader gets this email and where to change it
-    """
     if app_title is None:
         try:
             from ..config import settings

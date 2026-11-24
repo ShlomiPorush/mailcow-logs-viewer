@@ -1,7 +1,3 @@
-"""
-DMARC Notification Module
-Uses the global SMTP service to send DMARC-specific notifications
-"""
 import logging
 from typing import List, Dict
 
@@ -17,25 +13,11 @@ _FOOTER = "Import errors go to the address set in Settings, Notifications."
 
 
 def send_dmarc_error_notification(failed_emails: List[Dict], sync_id: int) -> bool:
-    """
-    Send notification about failed DMARC report processing
-    Uses global SMTP service
-
-    Args:
-        failed_emails: List of failed email dicts with message_id, subject, error
-        sync_id: ID of the sync operation
-
-    Returns:
-        True if email was sent successfully, False otherwise
-    """
     if not failed_emails:
         return True
 
-    # Kept for Needs attention also when no email or channel is set up
     stored_alerts.record_dmarc_import_failed(failed_emails)
 
-    # Recipient: DMARC_ERROR_EMAIL or fallback to ADMIN_EMAIL (webhook, if
-    # configured, is notified regardless of email configuration)
     recipient = get_notification_email(settings.dmarc_error_email)
     if not recipient and not any_channel_configured():
         logger.warning("No notification channel configured (DMARC_ERROR_EMAIL/ADMIN_EMAIL or webhook)")
@@ -61,7 +43,6 @@ def _intro(sync_id: int) -> str:
 
 
 def _create_text_content(failed_emails: List[Dict], sync_id: int) -> str:
-    """Create plain text email content"""
     lines = [
         _title(failed_emails),
         _intro(sync_id),
@@ -84,9 +65,6 @@ def _create_text_content(failed_emails: List[Dict], sync_id: int) -> str:
 
 
 def _create_html_content(failed_emails: List[Dict], sync_id: int) -> str:
-    """Create HTML email content. Every value comes from inbound mail (or
-    describes it) - anyone who can mail the rua address chooses the Subject
-    and Message-ID - and email_layout escapes all of them."""
     blocks = [
         e.panel(
             email_data.get('subject') or '(no subject)',

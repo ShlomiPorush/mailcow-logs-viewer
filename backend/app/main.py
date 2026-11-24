@@ -1,7 +1,3 @@
-"""
-Main FastAPI application
-Entry point for the Mailcow Logs Viewer backend
-"""
 import logging
 root = logging.getLogger()
 root.handlers = []
@@ -72,9 +68,6 @@ from .services.geoip_downloader import (
 
 logger = logging.getLogger(__name__)
 
-# These are first-party routers - an ImportError here is a bug that should
-# crash startup, not silently ship a container missing its Settings/Status/
-# Messages APIs (which is what the old try/except ImportError did).
 from .routers import status as status_router
 from .routers import messages as messages_router
 from .routers import stats_flow as stats_flow_router
@@ -83,13 +76,6 @@ from .routers import settings as settings_router
 
 
 async def _loop_lag_watchdog():
-    """Log when the event loop is blocked.
-
-    Production runs a single uvicorn worker, so any blocking call in a
-    background job stalls every request. A 1s sleep that takes noticeably
-    longer than 1s is the cheapest proof that the stall is in-app rather
-    than in the network/reverse-proxy layer.
-    """
     while True:
         try:
             start = asyncio.get_running_loop().time()
@@ -104,7 +90,6 @@ async def _loop_lag_watchdog():
 
 
 def log_authentication_state() -> None:
-    """Log which authentication is in force; running without any is a warning."""
     if settings.is_authentication_enabled:
         auth_methods = []
         if settings.is_basic_auth_enabled:
@@ -124,11 +109,6 @@ def log_authentication_state() -> None:
 
 
 def log_agent_access_state() -> None:
-    """Say whether agents can connect, and disconnect them all if sign-in changed while the app was down.
-
-    The sign-in check runs with agent access off too: a change made while it
-    was off must not be undone by changing the setting back later.
-    """
     problem = agent_live.problem()
     if problem == agent_live.OFF or not settings.agent_access_enabled:
         pass
@@ -142,13 +122,10 @@ def log_agent_access_state() -> None:
         with get_db_context() as db:
             agent_store.check_sign_in_unchanged(db)
     except Exception as e:
-        # Checked again on every agent request, so nothing gets through meanwhile
         logger.error(f"Could not compare the sign-in settings for agent access: {e}")
 
 
 def log_user_name_conflicts() -> None:
-    """A local user named like the built-in admin (AUTH_USERNAME changed in the environment):
-    the built-in admin wins, and that user cannot sign in until renamed or removed."""
     if not settings.is_basic_auth_enabled:
         return
     try:
@@ -164,36 +141,26 @@ def log_user_name_conflicts() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Application lifecycle management"""
-    # Startup
     logger.info("Starting mailcow Logs Viewer")
     
-    # Initialize database
     try:
         init_db()
         if not check_db_connection():
             logger.error("Database connection failed!")
             raise Exception("Cannot connect to database")
         
-        # Run migrations and cleanup
         logger.info("Running database migrations and cleanup...")
         run_migrations()
 
-        # Apply Alembic revisions (the forward migration path from v2.6.4 on;
-        # run_migrations above is the frozen pre-Alembic legacy path)
         from .migrations import run_alembic_upgrade
         run_alembic_upgrade()
 
-        # Load settings overrides from DB (if UI editing is enabled and overrides exist).
-        # A failed read aborts startup: authentication enabled from the UI is
-        # stored only there, and starting without it would serve with auth off.
         if settings.edit_settings_via_ui_enabled:
             from .database import get_db_context
             with get_db_context() as db:
                 reload_settings(db)
             logger.info("Settings loaded from database overrides")
             try:
-                # Reload services that cache settings values
                 mailcow_api.reload_config()
                 from .services.oauth2_client import oauth2_client
                 oauth2_client.reload_config()
@@ -208,7 +175,6 @@ async def lifespan(app: FastAPI):
         logger.error(problem)
         raise SettingsLoadError(problem)
 
-    # Log effective configuration (after DB overrides are loaded)
     logger.info(f"Configuration: {settings.fetch_interval}s interval, {settings.retention_days}d retention")
     
     if settings.blacklist_emails_list:
@@ -218,10 +184,8 @@ async def lifespan(app: FastAPI):
     log_agent_access_state()
     log_user_name_conflicts()
 
-    # Every clock in the app follows this zone; an unknown TZ is logged here, by name, and UTC is used
     logger.info(f"Time zone: {app_tz().key}")
     
-    # GeoIP initialization
     try:
         if is_license_configured():
             status = get_geoip_status()
@@ -229,7 +193,6 @@ async def lifespan(app: FastAPI):
             asn_info = status['ASN']
             if city_info['available']:
                 logger.info(f"GeoIP databases found: City {city_info['size_mb']}MB ({city_info['age_days']}d), ASN {asn_info['size_mb']}MB ({asn_info['age_days']}d)")
-                # Eagerly load and validate readers so GeoIP works from the first fetch cycle
                 from .services import geoip_service
                 geoip_service.reload_geoip_readers()
                 if geoip_service.get_geoip_db_valid():
@@ -245,26 +208,17 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"Error initializing GeoIP: {e}")
 
-    # mailcow is not asked anything here: while it cannot be reached, startup
-    # would wait for it before serving a single page. The domain list is read
-    # by the domain sync the scheduler starts at once, and the server IP by
-    # the jobs and pages that need it.
-
-    # Start background scheduler
     try:
         start_scheduler()
     except Exception as e:
         logger.error(f"Failed to start scheduler: {e}")
         raise
     
-    # Start raw logs worker (separate scheduler)
     try:
         start_raw_logs_scheduler()
     except Exception as e:
         logger.error(f"Failed to start raw logs scheduler: {e}")
-        # Non-fatal: main app still works without raw logs
     
-    # Event loop lag watchdog (diagnostics for occasional request stalls)
     lag_watchdog_task = asyncio.create_task(_loop_lag_watchdog())
 
     logger.info("Application startup complete")
@@ -272,7 +226,6 @@ async def lifespan(app: FastAPI):
     async with auth_store_maintenance():
         yield
     
-    # Shutdown
     logger.info("Shutting down application")
     lag_watchdog_task.cancel()
     with suppress(asyncio.CancelledError):
@@ -283,7 +236,6 @@ async def lifespan(app: FastAPI):
     logger.info("Application shutdown complete")
 
 
-# Create FastAPI app
 app = FastAPI(
     title="mailcow Logs Viewer",
     description=(
@@ -300,13 +252,8 @@ app = FastAPI(
     ),
     version=__version__,
     lifespan=lifespan,
-    # FastAPI's own pages load Swagger UI and ReDoc from a CDN, which the CSP
-    # blocks; /docs below serves the reference from this server instead
     docs_url=None,
     redoc_url=None,
-    # An agent's call (agent_access/dispatch.py) may run a route only when its
-    # grant covers it, and a person's request only when their access covers it
-    # (user_access.py); each leaves the other's requests alone
     dependencies=[Depends(enforce_agent_policy), Depends(user_access.enforce_people_policy)],
 )
 
@@ -314,7 +261,6 @@ _generate_openapi = app.openapi
 
 
 def _openapi_with_agent_calls():
-    """The generated document, with errors as JSON and the two agent calls the middleware answers (api_models/)"""
     if app.openapi_schema is None:
         document = _generate_openapi()
         errors_as_json(document)
@@ -324,25 +270,14 @@ def _openapi_with_agent_calls():
 
 app.openapi = _openapi_with_agent_calls
 
-# Inside the sign-in middleware: one log line per change a person asked for
 app.add_middleware(user_access.ActionLogMiddleware)
 
-# Add Basic Auth Middleware FIRST (innermost)
-# This ensures ALL requests are authenticated when enabled
 app.add_middleware(BasicAuthMiddleware)
 
-# Writes and the live log WebSocket must come from the app's own pages,
-# with or without authentication
 app.add_middleware(SameOriginGuardMiddleware)
 
 
 def configure_cors(application: FastAPI) -> None:
-    """Allow cross-origin API access only for the exact origins in CORS_ALLOWED_ORIGINS.
-
-    The web interface is served from the same origin as the API and needs no
-    CORS at all, so by default no CORS policy is installed. Credentials are
-    never combined with a wildcard or a reflected Origin.
-    """
     origins = settings.cors_allowed_origins_list
     if not origins:
         return
@@ -358,14 +293,7 @@ def configure_cors(application: FastAPI) -> None:
 
 configure_cors(app)
 
-# Security headers on every response.
-# CSP notes: the frontend relies on inline event handlers and inline <script>
-# blocks, so script-src needs 'unsafe-inline'. Nothing the app serves compiles
-# code from strings, so 'unsafe-eval' stays out and eval() and new Function()
-# are blocked (the Scalar bundle on /docs only probes for them and falls
-# back). The CSP still blocks loading scripts from external hosts, which is the
-# main escalation path for any injected HTML. ws:/wss: are needed for the live
-# log viewer ('self' does not reliably cover WebSocket schemes).
+# Without ws: wss: in connect-src, browsers where 'self' does not cover WebSocket schemes block the live log viewer
 _CSP = (
     "default-src 'self'; "
     "script-src 'self' 'unsafe-inline'; "
@@ -380,15 +308,6 @@ _CSP = (
 
 
 class SecurityHeadersMiddleware:
-    """Add security headers to HTTP responses.
-
-    Deliberately a PURE ASGI middleware, not Starlette's BaseHTTPMiddleware
-    (``@app.middleware("http")``): BaseHTTPMiddleware is known to interfere
-    with WebSocket connections behind reverse/auth proxies (the /ws/raw-logs
-    upgrade would hang). This implementation touches only ``http`` responses
-    and passes ``websocket`` (and ``lifespan``) scopes through untouched.
-    """
-
     def __init__(self, app, csp: str):
         self.app = app
         self.csp = csp
@@ -411,14 +330,6 @@ class SecurityHeadersMiddleware:
 
 
 class SlowRequestLogMiddleware:
-    """Log requests that spend more than 3s inside the app.
-
-    Pure ASGI for the same reason as SecurityHeadersMiddleware above:
-    BaseHTTPMiddleware breaks the /ws/raw-logs upgrade. Only ``http``
-    scopes are timed; ``websocket``/``lifespan`` pass through untouched
-    (a long-lived WebSocket would always look "slow").
-    """
-
     def __init__(self, app):
         self.app = app
 
@@ -438,11 +349,8 @@ class SlowRequestLogMiddleware:
 
 app.add_middleware(SecurityHeadersMiddleware, csp=_CSP)
 
-# Registered last so it is the outermost middleware: the measured time then
-# covers auth/origin guard/security-headers as well, not just the route handler.
 app.add_middleware(SlowRequestLogMiddleware)
 
-# Include routers
 app.include_router(auth_router.router, prefix="/api", tags=["Authentication"])
 app.include_router(logs.router, prefix="/api", tags=["Logs"])
 app.include_router(stats.router, prefix="/api", tags=["Statistics"])
@@ -475,29 +383,18 @@ app.include_router(entities_router.router, prefix="/api", tags=["Entities"])
 app.include_router(users_router.router, prefix="/api")
 app.include_router(agent_consent.router, prefix="/api")
 
-# Agent access: OAuth discovery, sign-in and the MCP endpoint live outside /api
-# because the standards fix their addresses. Each answers 404 while agent
-# access is not live; the middleware lets the public ones through.
 app.include_router(agent_oauth.router)
 app.include_router(agent_mcp.router)
 app.include_router(agent_skill.router)
 
-# WebSocket endpoint needs root-level mount (not under /api prefix) so it is
-# reachable at wss://host/ws/raw-logs  # nosemgrep: javascript.lang.security.detect-insecure-websocket.detect-insecure-websocket
-# Only ws_router is mounted here: including the full raw-logs router would also
-# publish its HTTP routes outside /api, where the auth middleware does not guard
-# them (see backend/tests/test_route_exposure.py).
 app.include_router(raw_logs_router.ws_router, tags=["Raw Logs WebSocket"])
 
-# Mount static files (frontend). The slim Python image has no MIME entry for
-# web fonts, so they would go out as application/octet-stream.
 mimetypes.add_type("font/woff2", ".woff2")
 app.mount("/static", StaticFiles(directory="/app/frontend"), name="static")
 
 
 @app.get("/login", response_class=HTMLResponse, include_in_schema=False)
 def login_page(request: Request, next: Optional[str] = None):
-    """Serve the login page, or skip it when there is nothing to sign in to"""
     if not settings.is_authentication_enabled or get_session_from_request(request):
         return RedirectResponse(url=safe_return_path(next), status_code=302, headers={"Cache-Control": "no-store"})
     try:
@@ -513,7 +410,6 @@ def login_page(request: Request, next: Optional[str] = None):
 
 @app.get(agent_oauth.CONSENT_PAGE, response_class=HTMLResponse, include_in_schema=False)
 def agent_consent_page():
-    """The page where a signed-in person approves an agent (the middleware requires the session)"""
     if not agent_live.is_live():
         return HTMLResponse(content="Not Found", status_code=404)
     with open("/app/frontend/authorize.html", "r") as f:
@@ -523,7 +419,6 @@ def agent_consent_page():
 
 @app.get("/docs", response_class=HTMLResponse, include_in_schema=False)
 def api_docs_page():
-    """The interactive API reference (frontend/api-docs.js); it needs a session like any page"""
     with open("/app/frontend/api-docs.html", "r") as f:
         html = f.read()
     return HTMLResponse(content=stamp_asset_versions(html, "/app/frontend"), headers={"Cache-Control": "no-cache"})
@@ -531,19 +426,14 @@ def api_docs_page():
 
 @app.get("/redoc", include_in_schema=False)
 def redoc_moved():
-    """The old ReDoc address goes to the same reference"""
     return RedirectResponse(url="/docs", status_code=301)
 
 
 @app.get("/", response_class=HTMLResponse, include_in_schema=False)
 def root():
-    """Serve the main HTML page - requires authentication"""
-    # Authentication is handled by middleware
-    # If user reaches here, they are authenticated
     try:
         with open("/app/frontend/index.html", "r") as f:
             html = f.read()
-        # Asset links carry a content hash, and the page itself is always revalidated
         return HTMLResponse(content=stamp_asset_versions(html, "/app/frontend"), headers={"Cache-Control": "no-cache"})
     except FileNotFoundError:
         return HTMLResponse(
@@ -589,7 +479,6 @@ async def app_info(request: Request):
         "oauth2_enabled": settings.is_oauth2_enabled,
     }
 
-    # A session counts only while the person still has access (user_access.py)
     from starlette.concurrency import run_in_threadpool
     cookie = "none" if not settings.is_authentication_enabled else await run_in_threadpool(user_access.cookie_access, request)
     if cookie == "ok" or (cookie == "none" and is_request_authenticated(request)):
@@ -599,13 +488,10 @@ async def app_info(request: Request):
             "local_domains": settings.local_domains_list,
             "fetch_interval": settings.fetch_interval,
             "retention_days": settings.retention_days,
-            # The zone every time on screen follows (app_time.py)
             **tz_status(),
-            # How it writes dates and times (Settings > Application > Time)
             **display_formats(),
             "blacklist_count": len(settings.blacklist_emails_list),
             "disabled_features": sorted(settings.disabled_features_set),
-            # The search offers settings only while the edit form exists
             "settings_edit_via_ui_enabled": settings.edit_settings_via_ui_enabled,
         })
 
@@ -614,7 +500,6 @@ async def app_info(request: Request):
 
 @app.exception_handler(user_access.SessionEnded)
 async def session_ended_handler(request: Request, exc: user_access.SessionEnded):
-    """The person's account changed or no longer gives access: answered like a session a limit ended"""
     if request.url.path.startswith("/api/"):
         return session_ended_response(exc.reason)
     return _login_redirect(request, exc.reason)
@@ -622,7 +507,6 @@ async def session_ended_handler(request: Request, exc: user_access.SessionEnded)
 
 @app.exception_handler(user_access.NotPermitted)
 async def not_permitted_handler(request: Request, exc: user_access.NotPermitted):
-    """The signed-in person's access does not cover the route"""
     if request.url.path.startswith("/api/"):
         return JSONResponse(status_code=403, content={"detail": user_access.NOT_PERMITTED})
     return agent_oauth.error_page("No permission", "Only an admin can connect agents to this app.", 403)
@@ -630,7 +514,6 @@ async def not_permitted_handler(request: Request, exc: user_access.NotPermitted)
 
 @app.exception_handler(MailcowAPIError)
 async def mailcow_exception_handler(request: Request, exc: MailcowAPIError):
-    """A mailcow failure no route turned into an answer: say it was mailcow"""
     logger.error(f"mailcow request failed: {exc}")
     error = internal_error(exc)
     return JSONResponse(status_code=error.status_code, content={"detail": error.detail})
@@ -638,7 +521,6 @@ async def mailcow_exception_handler(request: Request, exc: MailcowAPIError):
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
-    """Global exception handler"""
     logger.error(f"Unhandled exception: {exc}", exc_info=True)
     return JSONResponse(
         status_code=500,
@@ -650,14 +532,6 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 
 class SpaPathConvertor(Convertor):
-    """Any path except those under /api and /ws.
-
-    Those prefixes belong to the API and the WebSocket. If the page route
-    matched them, an unknown API path such as /api/does-not-exist would get
-    index.html with 200 (and any other method a misleading 405), hiding typos
-    from scripts. Left unmatched, it gets FastAPI's JSON 404 for every method.
-    """
-
     regex = r"(?!(?:api|ws)(?:/|$)).*"
 
     def convert(self, value: str) -> str:
@@ -670,17 +544,11 @@ class SpaPathConvertor(Convertor):
 register_url_convertor("spa_path", SpaPathConvertor())
 
 
-# SPA catch-all route - must be AFTER all other routes and exception handlers
-# Returns index.html for all frontend routes (e.g., /dashboard, /messages, /dmarc)
 @app.get("/{full_path:spa_path}", response_class=HTMLResponse, include_in_schema=False)
 def spa_catch_all(full_path: str):
-    """Serve the SPA for all frontend routes - enables clean URLs"""
-    # API and static routes are handled by their respective routers/mounts
-    # This catch-all only receives unmatched routes outside /api and /ws
     try:
         with open("/app/frontend/index.html", "r") as f:
             html = f.read()
-        # Asset links carry a content hash, and the page itself is always revalidated
         return HTMLResponse(content=stamp_asset_versions(html, "/app/frontend"), headers={"Cache-Control": "no-cache"})
     except FileNotFoundError:
         return HTMLResponse(

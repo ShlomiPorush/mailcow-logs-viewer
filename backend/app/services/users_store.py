@@ -1,11 +1,3 @@
-"""Users, the OAuth2 default access, and the checks every change to them passes.
-
-Every change to users or the OAuth2 default, and every Settings save that
-touches sign-in, runs under one PostgreSQL advisory lock taken in its own
-transaction before its checks: two admins changing at once are checked one
-after the other, so neither can leave the app without an admin who can sign
-in (the last-admin guard).
-"""
 import logging
 import re
 import threading
@@ -26,11 +18,9 @@ from . import passwords
 
 logger = logging.getLogger(__name__)
 
-# pg_advisory_xact_lock key shared by every change to who can sign in ("mlvU")
 LOCK_KEY = 0x6D6C7655
 USERNAME_RE = re.compile(r"[a-z0-9._@-]{1,64}")
 EMAIL_MAX = 320
-# At most two password hashes at once for sign-ins: each takes 32 MiB and a CPU
 SIGN_IN_HASHES = threading.BoundedSemaphore(2)
 
 NO_ADMIN_LEFT = "Keep at least one admin who can sign in before making this change."
@@ -49,7 +39,7 @@ class UserError(Exception):
 
 
 class SignInBusy(Exception):
-    """Two password hashes are already running."""
+    pass
 
 
 def lock(db: Session) -> None:
@@ -73,8 +63,6 @@ def env_admin_name(source=None) -> str:
     return access.normalize_username((source or settings).auth_username or "")
 
 
-# ── The OAuth2 default ─────────────────────────────────────────────────────
-
 def read_default(db: Session) -> Dict[str, Any]:
     rows = {r.key: r.value for r in db.query(SystemSetting).filter(
         SystemSetting.key.in_((access.DEFAULT_ACCESS_KEY, access.DEFAULT_VERSION_KEY))).all()}
@@ -93,8 +81,6 @@ def _write_key(db: Session, key: str, value: str) -> None:
         row.value = value
         row.updated_at = datetime.utcnow()
 
-
-# ── Who can still sign in as an admin ──────────────────────────────────────
 
 @dataclass(frozen=True)
 class SignIn:
@@ -115,14 +101,10 @@ def sign_in_now(source=None) -> SignIn:
 
 
 def sign_in_readings(db: Session) -> Tuple[SignIn, SignIn]:
-    """Sign-in as saved and as in force, each checked on its own under the lock: a Settings save
-    releases the lock when it commits, before the shared settings are reloaded, and a failed
-    reload keeps the old ones in force."""
     return sign_in_now(build_settings(db)), sign_in_now()
 
 
 def usable_admins(db: Session, sign_in: SignIn, default: str) -> int:
-    """How many admins can sign in by a method that is on (a default of Admin counts as one)."""
     count = 0
     if sign_in.basic:
         count += 1 if sign_in.password else 0
@@ -141,16 +123,12 @@ def _admins(db: Session, readings, default: str) -> List[int]:
 
 
 def _guard(db: Session, readings, before: List[int], default: str) -> None:
-    """Refuse a change after which no admin can sign in under either reading. A
-    reading that had none before is not made worse by a change that adds none."""
     db.flush()
     for sign_in, count in zip(readings, before):
         if sign_in.enabled and count > 0 and usable_admins(db, sign_in, default) == 0:
             db.rollback()
             raise UserError(409, NO_ADMIN_LEFT)
 
-
-# ── Rows as the API shows them ─────────────────────────────────────────────
 
 def _scopes_from(access_level: str, views, acts) -> str:
     if access_level != access.CUSTOM:
@@ -179,10 +157,6 @@ def row(user: User, env_name: Optional[str] = None) -> Dict[str, Any]:
 
 
 def you(db: Session, principal) -> Dict[str, Any]:
-    """Who is asking, so the page can warn before a change to their own access: the built-in
-    admin, a local user, or an OAuth2 person with their entry or (via_default) without one. email is
-    the OAuth2 person's normalized email when it can match an entry (not one the provider left
-    unverified), so adding an entry for it can be confirmed too."""
     if principal is None or principal.kind == "builtin":
         return {"kind": "builtin", "user_id": None, "via_default": False, "email": None}
     if principal.kind == "local":
@@ -211,11 +185,7 @@ def overview(db: Session, principal=None) -> Dict[str, Any]:
     }
 
 
-# ── Changes ────────────────────────────────────────────────────────────────
-
 def _end_local_sessions(user_id: int, below: Optional[int] = None) -> None:
-    """End the user's sessions; with `below`, only those signed in before auth_version became it
-    (a sign-in that already read the new version keeps its session)."""
     sessions.end_sessions_where(
         lambda record: (record.get("principal") or {}).get("kind") == "local"
         and (record.get("principal") or {}).get("user_id") == user_id
@@ -340,9 +310,6 @@ def set_default(db: Session, value: str, version: int) -> Dict[str, Any]:
 
 
 def check_sign_in_settings(db: Session, before, allowed: Dict[str, Any]) -> None:
-    """For a Settings save that touches sign-in: refuse a built-in admin name a
-    local user has, and a change after which no admin can sign in. Takes the
-    lock in the save's own transaction, so it is held until the save commits."""
     lock(db)
     locked = get_env_locked_keys()
 
@@ -358,7 +325,6 @@ def check_sign_in_settings(db: Session, before, allowed: Dict[str, Any]) -> None
         db.rollback()
         raise UserError(400, "A local user has this username. Choose another username for the built-in admin.")
     default = read_default(db)["value"]
-    # Before, as saved and as in force: with sign-in off there, everyone was an admin
     if sign_in_after.enabled and usable_admins(db, sign_in_after, default) == 0 and any(
             not reading.enabled or usable_admins(db, reading, default) > 0
             for reading in (sign_in_before, sign_in_now())):
@@ -366,11 +332,7 @@ def check_sign_in_settings(db: Session, before, allowed: Dict[str, Any]) -> None
         raise UserError(409, NO_ADMIN_LEFT)
 
 
-# ── Sign-in of a local user ────────────────────────────────────────────────
-
 def verify_sign_in(username: str, password: str) -> Optional[Dict[str, Any]]:
-    """The local user these credentials belong to, or None. Always one password
-    hash, whether or not the name exists. Raises SignInBusy."""
     if not SIGN_IN_HASHES.acquire(blocking=False):
         raise SignInBusy()
     try:
@@ -396,7 +358,6 @@ def verify_sign_in(username: str, password: str) -> Optional[Dict[str, Any]]:
 
 
 def current_auth_version(user_id: int) -> Optional[int]:
-    """The user's auth_version now, read fresh; None when it is gone or disabled."""
     from ..database import SessionLocal
     db = SessionLocal()
     try:
@@ -418,6 +379,5 @@ def record_login(user_id: int) -> None:
 
 
 def name_conflicts(db: Session) -> List[str]:
-    """Local users whose name is the built-in admin's: the built-in admin wins and they cannot sign in."""
     name = env_admin_name()
     return [u.username for u in db.query(User).filter(User.kind == "local", User.username_norm == name).all()]

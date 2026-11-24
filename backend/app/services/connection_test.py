@@ -1,7 +1,3 @@
-"""
-Connection testing utilities for SMTP and IMAP
-Provides detailed logging for debugging
-"""
 import imaplib
 import smtplib
 import ssl
@@ -12,12 +8,10 @@ from .mail_tls import mail_tls_context, certificate_error_hint, verify_mode
 
 
 def _verify_label(verify) -> str:
-    """How a *_VERIFY_SSL setting reads in the test log."""
     return {"false": "Off", "auto": "Automatic", "true": "On"}.get(verify_mode(verify), str(verify))
 
 
 def test_smtp_connection() -> Dict:
-    """Test SMTP connection and return detailed log"""
     logs = []
     success = False
     
@@ -31,7 +25,6 @@ def test_smtp_connection() -> Dict:
         logs.append(f"Send without authentication: {settings.smtp_relay_mode}")
         logs.append(f"SMTP username: {settings.smtp_user}")
         
-        # Different validation for relay mode
         if settings.smtp_relay_mode:
             if not settings.smtp_host or not settings.smtp_from:
                 logs.append("ERROR: Set SMTP host and From address in Settings > SMTP before testing the relay.")
@@ -43,7 +36,6 @@ def test_smtp_connection() -> Dict:
         
         logs.append("Connecting to SMTP server...")
         
-        # Same connection mode as SmtpService.send_email
         if settings.smtp_use_ssl or settings.smtp_port == 465:
             context = mail_tls_context(settings.smtp_host, settings.smtp_verify_ssl, "SMTP_VERIFY_SSL")
             server = smtplib.SMTP_SSL(settings.smtp_host, settings.smtp_port, timeout=10, context=context)
@@ -58,7 +50,6 @@ def test_smtp_connection() -> Dict:
                 server.starttls(context=context)
                 logs.append("TLS established")
         
-        # Skip login in relay mode
         if not settings.smtp_relay_mode:
             logs.append("Logging in...")
             server.login(settings.smtp_user, settings.smtp_password)
@@ -116,7 +107,6 @@ def test_smtp_connection() -> Dict:
 
 
 def _open_imap(current):
-    """A logged-in IMAP connection with the given settings snapshot."""
     if current.dmarc_imap_use_ssl:
         context = mail_tls_context(current.dmarc_imap_host, current.dmarc_imap_verify_ssl, "DMARC_IMAP_VERIFY_SSL")
         connection = imaplib.IMAP4_SSL(current.dmarc_imap_host, current.dmarc_imap_port,
@@ -139,10 +129,8 @@ def _close(connection):
 
 
 def test_imap_connection() -> Dict:
-    """Test IMAP connection and return detailed log"""
     logs = []
     success = False
-    # One snapshot: a save during the test cannot mix two accounts
     current = settings_snapshot()
     connection = None
 
@@ -205,8 +193,6 @@ def test_imap_connection() -> Dict:
 
 
 def list_imap_folders() -> Dict:
-    """The stored IMAP account's folders, for choosing which ones to read.
-    Uses the stored settings, never the form; never returns the password."""
     current = settings_snapshot()
     answer = {"ok": False, "host": None, "user": None, "folders": [], "legacy": None,
               "unreadable": 0, "error": None, "message": None}
