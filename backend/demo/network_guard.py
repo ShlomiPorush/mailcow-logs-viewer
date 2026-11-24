@@ -139,7 +139,6 @@ def install() -> None:
     socket.gethostbyaddr = _guarded_gethostbyaddr
 
     _installed = True
-    # At INFO the app's default log level hides this notice.
     logger.warning("[DEMO] Outbound network disabled (allowed: loopback, localhost)")
 
 

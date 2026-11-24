@@ -73,6 +73,7 @@ def feature_switch_guard(needed: bool = True):
                 conn.commit()
             except Exception as e:
                 logger.warning(f"Trend samples' lock released by closing its connection ({e})")
+                # Returning this connection to the pool can leave the session lock held.
                 conn.invalidate()
     finally:
         conn.close()
