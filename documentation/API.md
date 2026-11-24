@@ -368,7 +368,7 @@ Times of day are in the app's time zone (`TZ`), never the container's clock.
 | **Credential Checks** | Every 6 hours, and 30 seconds after startup | Checks that mailcow accepts the Read-Write API key and Rspamd the password, as **Validate** does; changes nothing. Off when neither is set. A rejected or unreachable one fails the job. |
 | **DNS Check** | Every 6 hours, and 60 seconds after startup | Checks SPF, DKIM, DMARC, DNSSEC, TLSA, MTA-STS and TLS-RPT for all active domains. Domains feature only. |
 | **Sync Local Domains** | Every 6 hours, first run at startup | Refreshes the active domain list from mailcow |
-| **Update GeoIP** | Weekly (Sunday 3 AM), and 60 seconds after startup | Downloads the MaxMind GeoLite2 City and ASN databases when a file is missing or 7 or more days old. Runs only when the MaxMind Account ID and License Key are set; saving or removing the license in Settings adds or removes the weekly run. |
+| **Update GeoIP** | Weekly (Sunday 3 AM), and 60 seconds after startup | Downloads the MaxMind GeoLite2 City and ASN databases when a file is missing or 7 or more days old. Runs only when the MaxMind Account ID and License Key are set; saving the license in Settings adds the weekly run at once, and after the license is removed the run does nothing. |
 | **DMARC IMAP Sync** | Every `DMARC_IMAP_INTERVAL` seconds (default 3600), and 30 seconds after startup when `DMARC_IMAP_RUN_ON_STARTUP` is on | Imports DMARC and TLS reports from IMAP. Needs the DMARC feature and IMAP import on. |
 | **Mailbox Stats** | Every 5 minutes, and 45 seconds after startup | Fetches mailbox statistics. Runs while Mailbox Stats or Rate Limits is on. |
 | **Alias Stats** | Every 5 minutes, and 50 seconds after startup | Syncs alias data. Mailbox Stats feature only. |
@@ -386,7 +386,7 @@ Times of day are in the app's time zone (`TZ`), never the container's clock.
 | **Cleanup Deferred Queue** | Every 5 minutes | Deletes deferred messages stuck longer than `QUEUE_CLEANUP_THRESHOLD_MINUTES` (default 60) and suppresses their recipients. Needs suppressions, queue cleanup and a read-write key. |
 | **Sync Suppressions** | Every 10 minutes | Syncs active suppressions to the Rspamd recipient denylist. Needs the Rspamd password, Rspamd sync turned on and a read-write key. |
 | **Expire Suppressions** | Every hour | Deactivates expired suppression entries |
-| **Process Quarantine Rules** | Every `QUARANTINE_RULES_INTERVAL` minutes (default 5) | Applies the quarantine auto-rules (release or delete matching messages). Needs the Quarantine feature and a read-write key. Saving settings applies a new interval and starts or stops the job when either of these changes. |
+| **Process Quarantine Rules** | Every `QUARANTINE_RULES_INTERVAL` minutes (default 5) | Applies the quarantine auto-rules (release or delete matching messages). Needs the Quarantine feature and a read-write key. Saving settings applies a new interval and starts the job once both are present; while either is missing, the job does nothing. |
 
 ## Domains
 

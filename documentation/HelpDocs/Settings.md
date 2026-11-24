@@ -96,7 +96,7 @@ Which sending addresses must pass each domain's SPF check on [Domains](Domains.m
 
 ## MaxMind
 
-A free MaxMind account lets the app download the GeoLite2 City and ASN databases, which turn IP addresses into countries and networks. The databases update every Sunday at 03:00; saving or removing the license key adds or removes that update at once. **Repair**, shown with **Database check failed**, runs the database update and checks the databases again. It downloads only databases that are missing or out of date.
+A free MaxMind account lets the app download the GeoLite2 City and ASN databases, which turn IP addresses into countries and networks. The databases update every Sunday at 03:00; saving a license key adds that update at once, and without a license it does nothing. **Repair**, shown with **Database check failed**, runs the database update and checks the databases again. It downloads only databases that are missing or out of date.
 
 Saving a new license key opens **GeoIP database setup**, which checks the key, downloads missing databases and tests them. If a step fails, fix the account ID or key and save again. After three minutes the window stops waiting for the download; check **Database status** later.
 
