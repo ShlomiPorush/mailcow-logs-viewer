@@ -12,7 +12,7 @@ _orig_init = sf.StaticFiles.__init__
 sf.StaticFiles.__init__ = lambda s, *a, **k: _orig_init(s, *a, **{**k, 'check_dir': False})
 
 from app import correlation as corr_mod
-from app.correlation import correlate_rspamd_log
+from app.services.correlation_jobs import correlate_single_message
 
 LOCAL_A = 'origin-a.example'
 LOCAL_B = 'origin-b.example'
@@ -80,7 +80,7 @@ def _seed_and_correlate(db, tag, ip, has_auth, user='unknown'):
                      ip=ip, user=user, has_auth=has_auth)
     db.add(rlog)
     db.commit()
-    return correlate_rspamd_log(db, rlog)
+    return correlate_single_message(db, rlog)
 
 
 def test_external_origin_is_not_internal(env):
@@ -130,7 +130,7 @@ def test_tainted_stored_internal_is_rederived(env):
                          ip=OUTSIDE_IP, user='unknown', has_auth=False)
         db.add(rlog)
         db.commit()
-        c = correlate_rspamd_log(db, rlog)
+        c = correlate_single_message(db, rlog)
         assert c.direction == 'inbound'
         assert rlog.direction == 'inbound'
 
@@ -141,7 +141,6 @@ def test_leg_created_before_its_scan_is_corrected(env):
     origin, the classification must be corrected."""
     from app.database import get_db_context
     from app.models import PostfixLog, RspamdLog
-    from app.correlation import correlate_postfix_log
     with get_db_context() as db:
         now = datetime.utcnow()
         msgid = f'late-scan-{MARK}@relay.example'
@@ -159,7 +158,7 @@ def test_leg_created_before_its_scan_is_corrected(env):
                          ip=OUTSIDE_IP, user='unknown', has_auth=False)
         db.add(rlog)
         db.commit()
-        c = correlate_rspamd_log(db, rlog)
+        c = correlate_single_message(db, rlog)
         assert c is not None
         assert c.direction != 'internal', \
             'the late-arriving external-origin scan must win over the no-scan assumption'

@@ -224,19 +224,19 @@ def test_forward_keeps_both_delivery_legs(env):
 def test_late_postfix_line_updates_only_its_own_leg(env):
     """A line without a Message-ID is placed by its queue chain, not by the
     Message-ID it happens to share with the other leg."""
-    from app.correlation import correlate_postfix_log
     from app.database import get_db_context
-    from app.models import PostfixLog
+    from app.models import RspamdLog
+    from app.services import correlation_jobs
 
     msgid, queue_a, queue_b, rspamd_a, rspamd_b = _seed_forward_scenario()
     _correlate(rspamd_a)
     _correlate(rspamd_b)
 
-    late_id = _add_postfix(queue_a, datetime.utcnow(), program='postfix/lmtp',
-                           recipient=LOCAL_USER, status='bounced')
+    _add_postfix(queue_a, datetime.utcnow(), program='postfix/lmtp',
+                 recipient=LOCAL_USER, status='bounced')
     with get_db_context() as db:
-        late = db.query(PostfixLog).filter(PostfixLog.id == late_id).first()
-        correlation = correlate_postfix_log(db, late)
+        scan = db.query(RspamdLog).filter(RspamdLog.id == rspamd_a).first()
+        correlation = correlation_jobs.correlate_single_message(db, scan)
         assert correlation is not None
         assert correlation.queue_id == queue_a
 
@@ -249,10 +249,6 @@ def test_rspamd_stub_adopts_the_first_chain_then_a_second_leg_follows(env):
     """Rspamd is usually ahead of the Postfix logs. The correlation opened
     without a queue chain adopts the first one that arrives and keeps its
     Message-ID-only key; the next chain becomes a leg of its own."""
-    from app.correlation import correlate_postfix_log
-    from app.database import get_db_context
-    from app.models import PostfixLog
-
     msgid = _msgid()
     queue_a, queue_b = _queue(), _queue()
     t0 = datetime.utcnow() - timedelta(minutes=5)
@@ -267,11 +263,9 @@ def test_rspamd_stub_adopts_the_first_chain_then_a_second_leg_follows(env):
 
     # The Postfix chain shows up on a later poll
     _add_postfix(queue_a, t0, program='postfix/cleanup', msgid=msgid, sender=REMOTE)
-    arrival_id = _add_postfix(queue_a, t0 + timedelta(seconds=1), program='postfix/lmtp',
-                              recipient=LOCAL_USER, status='sent', relay='dovecot')
-    with get_db_context() as db:
-        arrival = db.query(PostfixLog).filter(PostfixLog.id == arrival_id).first()
-        correlate_postfix_log(db, arrival)
+    _add_postfix(queue_a, t0 + timedelta(seconds=1), program='postfix/lmtp',
+                 recipient=LOCAL_USER, status='sent', relay='dovecot')
+    _correlate(rspamd_a)
 
     adopted = _legs(msgid)
     assert len(adopted) == 1

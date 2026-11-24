@@ -295,9 +295,8 @@ def test_a_message_without_a_message_id_never_gets_a_correlation(api, monkeypatc
     """The paths that create correlations skip an empty Message-ID, so a listed
     message is never also a Messages row (the list does not check for one)."""
     from app.database import get_db_context
-    from app.models import MessageCorrelation, PostfixLog, RspamdLog
+    from app.models import MessageCorrelation, RspamdLog
     from app.services import correlation_jobs
-    from app.correlation import correlate_postfix_log
     _ingest(*_message(_q(17), NOW))
     picked = []
     with get_db_context() as db:
@@ -305,8 +304,8 @@ def test_a_message_without_a_message_id_never_gets_a_correlation(api, monkeypatc
             db.add(RspamdLog(time=NOW.replace(tzinfo=None), message_id=message_id, sender_smtp=SCANNER,
                              subject=f'scan {MARK}', action='no action', score=0.0, required_score=15.0, symbols={}))
         db.commit()
-        for line in db.query(PostfixLog).filter(PostfixLog.queue_id == _q(17)).all():
-            assert correlate_postfix_log(db, line) is None
+        unnamed = db.query(RspamdLog).filter(RspamdLog.message_id == '', RspamdLog.subject == f'scan {MARK}').one()
+        assert correlation_jobs.correlate_single_message(db, unnamed) is None
     monkeypatch.setattr(correlation_jobs, "is_listed", lambda _: False)
     monkeypatch.setattr(correlation_jobs, "correlate_single_message", lambda db, scan: picked.append(scan.subject))
     correlation_jobs.run_correlation()

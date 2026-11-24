@@ -699,29 +699,6 @@ def test_the_upgrade_finds_a_line_stored_after_a_removed_message(env):
     assert (row.final_status, set(row.postfix_log_ids)) == ('deferred', set(own))
 
 
-def test_the_older_line_by_line_path_does_not_give_a_line_to_another_message(env):
-    from app.correlation import correlate_postfix_log
-    from app.database import get_db_context
-    from app.models import MessageCorrelation, PostfixLog
-
-    queue = _queue()
-    msgid = _msgid('a')
-    ids = _store([_line(queue, T0, 'client'), _line(queue, T0, 'msgid', msgid=msgid),
-                  _line(queue, T0 + timedelta(seconds=1), 'deferred', rcpt=RCPT_A),
-                  _line(queue, T0 + timedelta(hours=1), 'removed')])
-    late = _store([_line(queue, T0 + timedelta(days=1), 'bounced', rcpt=RCPT_B)])
-    key = uuid.uuid4().hex
-    with get_db_context() as db:
-        db.add(MessageCorrelation(correlation_key=key, message_id=msgid, queue_id=queue,
-                                  final_status='deferred', is_complete=True, postfix_log_ids=ids,
-                                  first_seen=T0, last_seen=T0))
-        db.commit()
-        correlate_postfix_log(db, db.get(PostfixLog, late[0]))
-
-    row = _correlation(key)
-    assert (row.final_status, set(row.postfix_log_ids)) == ('deferred', set(ids))
-
-
 # ---------- review round 2 ----------
 
 def test_the_upgrade_keeps_a_delivery_logged_after_postsuper_removed(env):
@@ -772,26 +749,6 @@ def test_two_waiting_messages_do_not_both_take_lines_they_share(env, monkeypatch
     correlation_jobs.complete_incomplete_correlations()
 
     assert sum(_correlation(key).queue_id == queue for key in keys) == 1
-
-
-def test_the_older_line_by_line_path_makes_no_leg_from_shared_lines(env):
-    from app.correlation import correlate_postfix_log
-    from app.database import get_db_context
-    from app.models import MessageCorrelation, PostfixLog
-
-    queue = _queue()
-    msgid_a, msgid_b = _msgid('a'), _msgid('b')
-    a_ids = _store([_line(queue, T0, 'msgid', msgid=msgid_a)])
-    b_ids = _store([_line(queue, T0 + timedelta(seconds=10), 'msgid', msgid=msgid_b),
-                    _line(queue, T0 + timedelta(seconds=11), 'bounced', rcpt=RCPT_B)])
-    with get_db_context() as db:
-        for msgid, ids in ((msgid_a, a_ids), (msgid_b, b_ids[:1])):
-            db.add(MessageCorrelation(correlation_key=uuid.uuid4().hex, message_id=msgid, queue_id=queue,
-                                      is_complete=True, postfix_log_ids=ids, first_seen=T0, last_seen=T0))
-        db.commit()
-        correlate_postfix_log(db, db.get(PostfixLog, b_ids[0]))
-        legs = db.query(MessageCorrelation).filter(MessageCorrelation.message_id == msgid_b).all()
-        assert [leg.postfix_log_ids for leg in legs] == [b_ids[:1]]
 
 
 def test_the_postfix_list_describes_the_message_the_filter_found(env):

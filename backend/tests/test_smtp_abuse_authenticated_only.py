@@ -84,9 +84,10 @@ def env(monkeypatch):
 
 def _ingest(entry):
     """Same field mapping as the Rspamd history import in scheduler.py."""
-    from app.correlation import correlate_rspamd_log, detect_direction
+    from app.correlation import detect_direction
     from app.database import get_db_context
     from app.models import RspamdLog
+    from app.services.correlation_jobs import correlate_single_message
     with get_db_context() as db:
         row = RspamdLog(
             time=datetime.fromtimestamp(entry["unix_time"], tz=timezone.utc).replace(tzinfo=None),
@@ -98,7 +99,7 @@ def _ingest(entry):
             ip=entry["ip"], user=entry["user"], raw_data=entry)
         db.add(row)
         db.commit()
-        correlate_rspamd_log(db, row)
+        correlate_single_message(db, row)
 
 
 def _send(label, sender, rcpt, ip, count, authenticated=False, login=None):
