@@ -5,9 +5,7 @@ to an /api call is checked here. The document's models (app/api_models) are
 documentation only, so this is what keeps them true: a route that returns a
 key, a type or a status its model does not have fails the test that called it.
 
-An operation is checked once it documents a successful answer. Operations
-still waiting for their models are listed in openapi_pending.py and skipped;
-test_openapi_coverage.py keeps that list honest.
+An operation is checked once it documents a successful answer.
 """
 import ast
 import copy
@@ -29,8 +27,6 @@ class Contract:
         self.app = app
         self._document = None
         self._routes = None
-        # (method, template, status) of every checked answer, for the CONTRACT_SEEN report (conftest.py)
-        self.seen = set()
 
     @property
     def document(self) -> Dict[str, Any]:
@@ -54,9 +50,7 @@ class Contract:
         return (template, operation) if operation else None
 
     def problem(self, method: str, path: str, status: int, content_type: str, body: bytes) -> Optional[str]:
-        """What is wrong with this answer, or None when it matches (or is not checked).
-        Only an answer checked against its route's documentation and matching it counts
-        as reaching its status: not one the check passes over, nor a gateway envelope."""
+        """What is wrong with this answer, or None when it matches (or is not checked)."""
         if not path.startswith("/api/"):
             return None
         found = self.operation_for(method, path)
@@ -65,8 +59,6 @@ class Contract:
         template, operation = found
         outcome, detail = check_answer(operation, self.document.get("components", {}),
                                        status, content_type, body)
-        if outcome == "checked":
-            self.seen.add((method, template, status))
         return f"{method} {template}: {detail}" if outcome == "mismatch" else None
 
 
