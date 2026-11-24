@@ -1994,26 +1994,6 @@ async function loadMoreMessages(retry = false) {
     }
 }
 
-// Deduplicate netfilter logs based on message + time + priority
-function deduplicateNetfilterLogs(logs) {
-    if (!logs || logs.length === 0) return [];
-
-    const seen = new Set();
-    const uniqueLogs = [];
-
-    for (const log of logs) {
-        // Create unique key from message + time + priority
-        const key = `${log.message || ''}|${log.time || ''}|${log.priority || ''}`;
-
-        if (!seen.has(key)) {
-            seen.add(key);
-            uniqueLogs.push(log);
-        }
-    }
-
-    return uniqueLogs;
-}
-
 // Render netfilter without loading spinner (for smart refresh)
 function renderNetfilterData(data) {
     const container = document.getElementById('netfilter-logs');
@@ -2029,9 +2009,6 @@ function renderNetfilterData(data) {
         if (emptyCount) emptyCount.textContent = uiCountLabel(0, 'event', 'events');
         return;
     }
-
-    // Deduplicate logs
-    const uniqueLogs = deduplicateNetfilterLogs(data.data);
 
     // Update count display with total count from API (like Messages page)
     const countEl = document.getElementById('security-count');
@@ -2067,7 +2044,7 @@ function renderNetfilterData(data) {
         ${lockedNote}
         <div class="ui-ev-list">
             <div class="ui-ev-row ui-ev-head"><span>When</span><span>Address</span><span>Account</span><span>Action</span><span>Where</span><span></span></div>
-            ${uniqueLogs.map((log, index) => {
+            ${data.data.map((log, index) => {
                 const isBan = log.action === 'ban' || log.action === 'banned';
                 const isWarningOrUnban = log.action === 'warning' || log.action === 'unban';
                 // Check if IP is in the blacklist (with or without /32, or /128)
@@ -6087,28 +6064,17 @@ async function loadStatusContainers() {
     try {
         const response = await authenticatedFetch('/api/status/containers');
         if (!response.ok) throw await responseError(response);
-        let data = await response.json();
+        const data = await response.json();
 
         const container = document.getElementById('status-containers');
 
-        let containersData = data.containers || data;
-
-        if (Array.isArray(containersData) && containersData.length === 1 && typeof containersData[0] === 'object') {
-            containersData = containersData[0];
-        }
-
-        let containersList = [];
-        if (Array.isArray(containersData)) {
-            containersList = containersData;
-        } else if (containersData && typeof containersData === 'object') {
-            containersList = Object.entries(containersData).map(([key, value]) => ({
-                name: (value.name || key).replace('-mailcow', ''),
-                container: key,
-                state: value.state || 'unknown',
-                started_at: value.started_at || null,
-                ignored: !!value.ignored
-            }));
-        }
+        const containersList = Object.entries(data.containers).map(([key, value]) => ({
+            name: (value.name || key).replace('-mailcow', ''),
+            container: key,
+            state: value.state || 'unknown',
+            started_at: value.started_at || null,
+            ignored: !!value.ignored
+        }));
 
         const note = document.getElementById('status-containers-note');
         if (containersList.length > 0) {
@@ -6234,14 +6200,9 @@ async function loadStatusStorage() {
             throw await responseError(response);
         }
 
-        let rawData = await response.json();
-        console.log('Storage info data:', rawData);
+        const data = await response.json();
+        console.log('Storage info data:', data);
 
-        // Handle mailcow API format: [{ "type": "info", "disk": "/dev/sdb1", ... }]
-        let data = rawData;
-        if (Array.isArray(rawData) && rawData.length > 0) {
-            data = rawData[0]; // Take first element
-        }
         const usedPercent = parseInt(data.used_percent) || 0;
         // Amber above 75%, red above 90%
         const level = usedPercent > 90 ? 'fail' : usedPercent > 75 ? 'warn' : 'ok';

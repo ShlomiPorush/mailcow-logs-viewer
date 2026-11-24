@@ -40,19 +40,15 @@ function canonicalRoute(route, params = {}) {
         return sub === 'maps' ? { route: 'rspamd', params: {} }
             : { route: 'outbound', params: { sub: 'suppressions' } };
     }
-    if (route === 'quarantine' && sub === 'maps') return { route: 'rspamd', params: {} };
-    if (route === 'settings' && sub === 'spam_filter') return { route, params: { ...params, sub: 'outbound' } };
-    if (route === 'settings' && sub === 'correlation') return { route, params: { ...params, sub: 'fetch' } };
     return null;
 }
 
-// Pages with tabs: every tab has its own address (/security/protection), so a
+// Pages with tabs: every tab has its own address (/security/events), so a
 // tab can be reloaded, shared and reached with Back. The first tab is the
 // page's own address. select() picks the tab before the page loads; show()
 // switches it on a page already open. tabs: null takes any section name.
 const SUBPAGES = {
-    // protection, fail2ban and abuse are the old addresses of what is now the Settings tab
-    netfilter: { tabs: ['overview', 'lists', 'settings', 'events', 'protection', 'fail2ban', 'abuse'], current: () => securityTab,
+    netfilter: { tabs: ['overview', 'lists', 'settings', 'events'], current: () => securityTab,
         select: t => securityShowTab(t), show: t => securityShowTab(t) },
     quarantine: { tabs: ['messages', 'rules'], current: () => quarantineTab,
         select: t => quarantineShowTab(t), show: t => quarantineShowTab(t) },

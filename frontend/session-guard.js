@@ -421,11 +421,6 @@ function sessionGuardAsk() {
     state.dialogOpener = document.activeElement;
     state.dialogOverflow = document.body.style.overflow;
     document.body.appendChild(backdrop);
-    // A page without the app's styles still gets a dialog over the page
-    if (getComputedStyle(backdrop).position !== 'fixed') {
-        backdrop.style.cssText = 'position:fixed;inset:0;z-index:99999;display:flex;align-items:center;justify-content:center;padding:16px;background:rgb(0 0 0 / .45)';
-        backdrop.firstElementChild.style.cssText = 'max-width:460px;padding:16px;background:#fff;color:#111;border-radius:8px';
-    }
     document.body.style.overflow = 'hidden';
     sessionGuardAskText();
     state.countdown = setInterval(sessionGuardAskText, 1000);
@@ -483,9 +478,6 @@ function sessionGuardNotice(message) {
     toast.querySelector('p').textContent = message;
     toast.querySelector('button').addEventListener('click', () => toast.remove());
     document.body.appendChild(toast);
-    if (getComputedStyle(toast).position !== 'fixed') {
-        toast.style.cssText = 'position:fixed;bottom:18px;right:18px;z-index:100000;display:flex;gap:10px;max-width:420px;padding:12px;background:#fff;color:#111;border:1px solid #ccc;border-radius:6px';
-    }
 }
 
 // ---------- Start ----------

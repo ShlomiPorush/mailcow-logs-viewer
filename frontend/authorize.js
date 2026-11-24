@@ -201,11 +201,7 @@ function consentRender(data) {
 // a limit ended it (session-guard.js), and back to this request after signing in
 async function consentToLogin(response) {
     const here = window.location.pathname + window.location.search;
-    if (typeof sessionGuardLoginPath === 'function') {
-        window.location.replace(sessionGuardLoginPath(await sessionGuardReasonOf(response), here));
-    } else {
-        window.location.replace('/login?next=' + encodeURIComponent(here));
-    }
+    window.location.replace(sessionGuardLoginPath(await sessionGuardReasonOf(response), here));
 }
 
 async function consentAnswer(allow) {
