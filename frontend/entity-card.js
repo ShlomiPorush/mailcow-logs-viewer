@@ -711,7 +711,7 @@ function entityCardShowTab(tab) {
 // A source that is off or failed, in place of its content
 function entitySourceState(src, what) {
     if (src && src.state === 'disabled') {
-        const inSettings = /turned off|not set up/i.test(src.reason || '');
+        const inSettings = src.disabled === true;
         return uiLocked(inSettings ? 'Disabled in Settings' : 'Not shown', escapeHtml(src.reason || `${what} is turned off.`),
             inSettings ? '<button type="button" class="ui-btn ui-btn-sm" onclick="entityCardSettings()">Open Settings</button>' : '');
     }
@@ -734,7 +734,7 @@ function entityTile(label, { value = '', note = '', tone = '', tab = '', off = f
 function entitySourceTile(label, src, ok, tab = '', id = '') {
     if (!src || src.state === 'error') return entityTile(label, { value: 'Could not be read', note: escapeHtml(src && src.reason ? src.reason : ''), tone: 'fail', off: true, id });
     if (src.state === 'disabled') {
-        const inSettings = /turned off|not set up/i.test(src.reason || '');
+        const inSettings = src.disabled === true;
         return entityTile(label, { value: `<span class="ui-muted">${inSettings ? 'Disabled in Settings' : 'Not shown'}</span>`, note: escapeHtml(src.reason || ''), off: true, id });
     }
     return entityTile(label, { ...ok(src), tab, id });

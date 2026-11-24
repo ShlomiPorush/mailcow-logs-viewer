@@ -79,6 +79,7 @@ const params = url => new URL(url, 'http://localhost').searchParams;
 const range = { start: '2026-10-21T12:00:00Z', end: '2026-10-28T12:00:00Z' };
 const ok = extra => ({ state: 'ok', reason: null, ...extra });
 const off = reason => ({ state: 'disabled', reason });
+const turnedOff = reason => ({ state: 'disabled', disabled: true, reason });
 function ipCard(sources = {}) {
     return { kind: 'ip', value: '203.0.113.45', display: '203.0.113.45', range,
         sources: {
@@ -149,7 +150,7 @@ test('an action that does not apply, or whose source is off, is not offered', as
     // An outside address: no mailbox here; Suppressions off; its mail excluded
     await openCard(w, 'address', 'ann@example.org', addressCard('ann@example.org', {
         mailbox: ok({ local: false, mailbox: null, alias: null }),
-        suppression: off('Sync with Rspamd is off, so the app keeps no suppression list.'),
+        suppression: turnedOff('Sync with Rspamd is off, so the app keeps no suppression list.'),
         messages: off('This address is excluded, so Messages does not keep or show its mail.'),
     }));
     assert.deepEqual(acts(w), ['Show security events']);
@@ -163,8 +164,8 @@ test('an action that does not apply, or whose source is off, is not offered', as
     assert.ok(!$(w, '[data-ent-act="messages"]').classList.contains('ui-ent-fold'), 'the first stays on a phone when the main one is not offered');
     // Security off: no events, no Ban or Allow and no lock either; blocklists off: no Check now
     await openCard(w, 'ip', '203.0.113.45', ipCard({
-        security: off('The Security feature is turned off.'), lists: off('The Security feature is turned off.'),
-        protection: off('The Security feature is turned off.'), rbl: off('The IP blocklists feature is turned off.'),
+        security: turnedOff('The Security feature is turned off.'), lists: turnedOff('The Security feature is turned off.'),
+        protection: turnedOff('The Security feature is turned off.'), rbl: turnedOff('The IP blocklists feature is turned off.'),
     }));
     assert.deepEqual(acts(w), ['Show messages'], 'nothing left for More');
     assert.deepEqual(menu(w), []);

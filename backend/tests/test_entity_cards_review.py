@@ -196,7 +196,7 @@ def test_suppressions_disabled_while_rspamd_sync_is_off(review, monkeypatch):
     for kind, value in (("address", BOB), ("domain", SUPP)):
         source = _card(review, kind, value)["sources"]["suppression"]
         assert source["state"] == "disabled" and "Sync with Rspamd" in source["reason"], source
-        assert set(source) == {"state", "reason"}
+        assert set(source) == {"state", "disabled", "reason"}
 
 
 def test_suppressions_disabled_while_the_list_is_loaded_back(review):
@@ -208,3 +208,25 @@ def test_suppressions_disabled_while_the_list_is_loaded_back(review):
         db.commit()
     source = _card(review, "address", BOB)["sources"]["suppression"]
     assert source["state"] == "disabled" and "loaded" in source["reason"], source
+
+
+def test_only_a_source_a_setting_turned_off_offers_settings(review, monkeypatch):
+    from app.database import get_db_context
+    from app.models import SystemSetting
+    from app.services import entity_summary
+    from app.services.feature_data import SPAM_IMPORT_PENDING_KEY, SPAM_IMPORT_RESTORE
+    monkeypatch.setattr(settings._inner, 'disabled_features', 'dmarc')
+    monkeypatch.setattr(entity_summary.geoip_service, 'is_geoip_available', lambda: False)
+    ip = _card(review, "ip", IP)["sources"]
+    assert ip["dmarc"]["disabled"] is True
+    assert ip["geo"]["state"] == "disabled" and "disabled" not in ip["geo"]
+    hidden = _card(review, "address", HIDDEN)["sources"]["messages"]
+    assert hidden["state"] == "disabled" and "disabled" not in hidden
+    monkeypatch.setattr(settings._inner, 'suppression_rspamd_sync', False)
+    assert _card(review, "address", BOB)["sources"]["suppression"]["disabled"] is True
+    monkeypatch.setattr(settings._inner, 'suppression_rspamd_sync', True)
+    with get_db_context() as db:
+        db.add(SystemSetting(key=SPAM_IMPORT_PENDING_KEY, value=SPAM_IMPORT_RESTORE))
+        db.commit()
+    loading = _card(review, "address", BOB)["sources"]["suppression"]
+    assert loading["state"] == "disabled" and "disabled" not in loading

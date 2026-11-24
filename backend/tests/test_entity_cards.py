@@ -305,7 +305,7 @@ def test_a_feature_that_is_off_is_disabled_never_zero(client, monkeypatch):
     for name in ("security", "lists", "protection", "devices", "dmarc", "rbl"):
         source = card["sources"][name]
         assert source["state"] == "disabled" and "turned off" in source["reason"], name
-        assert set(source) == {"state", "reason"}, name
+        assert set(source) == {"state", "disabled", "reason"}, name
     assert card["sources"]["messages"]["count"] == 1
     assert card["sources"]["geo"]["state"] == "disabled"
     assert set(card["timeline"]["left_out"]) == {"security", "protection", "devices"}

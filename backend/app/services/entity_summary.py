@@ -72,6 +72,10 @@ class Off(_Answer):
     """A source that is not set up (its reason says what is missing): disabled, not failed."""
 
 
+class TurnedOff(Off):
+    """A source a setting turned off: the card offers Settings."""
+
+
 # ---------------------------------------------------------------- range
 
 def resolve_range(start: Optional[datetime], end: Optional[datetime],
@@ -111,7 +115,7 @@ def _run(db: Session, feature: Optional[str], what: str, read: Callable[[], dict
     the default isolation (the connection's level is reset when it goes back
     to the pool)."""
     if feature and not settings.is_feature_enabled(feature):
-        return {"state": "disabled", "reason": f"The {_FEATURE_NAMES[feature]} feature is turned off."}
+        return {"state": "disabled", "disabled": True, "reason": f"The {_FEATURE_NAMES[feature]} feature is turned off."}
     try:
         if snapshot:
             _rollback(db)
@@ -121,6 +125,8 @@ def _run(db: Session, feature: Optional[str], what: str, read: Callable[[], dict
         finally:
             if snapshot:
                 _rollback(db)
+    except TurnedOff as e:
+        return {"state": "disabled", "disabled": True, "reason": e.reason}
     except Off as e:
         return {"state": "disabled", "reason": e.reason}
     except Unavailable as e:
@@ -553,7 +559,7 @@ def _suppressions(db: Session, read: Callable[[], dict]) -> dict:
     from ..routers.suppressions import import_pending
     from .bounce_policy import rspamd_sync_on
     if not rspamd_sync_on():
-        raise Off("Sync with Rspamd is off, so the app keeps no suppression list.")
+        raise TurnedOff("Sync with Rspamd is off, so the app keeps no suppression list.")
     if import_pending(db):
         raise Off("The suppression list is being loaded back from Rspamd. Try again in a few minutes.")
     return read()

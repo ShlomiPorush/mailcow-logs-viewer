@@ -19,6 +19,8 @@ _STATE = ("ok; disabled when its feature is off or the value is not shown (an ex
 class Source(Fixed):
     state: str = Field(description=_STATE)
     reason: Optional[str] = Field(description="Why it is disabled or failed, in words; null when ok")
+    disabled: bool = Field(None, description="true when a setting turned it off (its feature or Sync with Rspamd); "
+                                             "absent otherwise")
 
 
 class Range(Fixed):

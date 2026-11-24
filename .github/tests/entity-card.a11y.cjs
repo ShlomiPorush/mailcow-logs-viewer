@@ -171,7 +171,7 @@ test('a source that is off or failed says so, never zero', async () => {
     const w = page('');
     w.openEntityCard('ip', '198.51.100.23');
     answer(w, 0, ipCard('198.51.100.23', {
-        dmarc: { state: 'disabled', reason: 'The DMARC & TLS feature is turned off.' },
+        dmarc: { state: 'disabled', disabled: true, reason: 'The DMARC & TLS feature is turned off.' },
         security: { state: 'error', reason: 'Could not read the security events. The details are in the container log.' },
     }));
     await settle(w);
@@ -247,7 +247,7 @@ test('U2: Open Settings from a card over a message closes both once the move is 
         w.navigateTo = route => { moves.push(route); return Promise.resolve(confirmed); };
         w.document.getElementById('msg-body').insertAdjacentHTML('beforeend', w.uiEntity('ip', '203.0.113.45'));
         w.document.querySelector('#msg-body [data-entity-kind]').click();
-        answer(w, 0, ipCard('203.0.113.45', { dmarc: { state: 'disabled', reason: 'The DMARC & TLS feature is turned off.' } }));
+        answer(w, 0, ipCard('203.0.113.45', { dmarc: { state: 'disabled', disabled: true, reason: 'The DMARC & TLS feature is turned off.' } }));
         await settle(w);
         w.entityCardTab('dmarc');
         [...w.document.querySelectorAll('#entity-card-content button')].find(b => b.textContent === 'Open Settings').click();
@@ -373,7 +373,7 @@ test('U5: the value in the card header is a copy button the keyboard reaches', a
 test('U6: with sources off and nothing found, the card says what it could not read', async () => {
     const w = page('');
     w.openEntityCard('ip', '198.51.100.23');
-    const card = ipCard('198.51.100.23', { security: { state: 'disabled', reason: 'The Security feature is turned off.' }, devices: { state: 'error', reason: 'x' } });
+    const card = ipCard('198.51.100.23', { security: { state: 'disabled', disabled: true, reason: 'The Security feature is turned off.' }, devices: { state: 'error', reason: 'x' } });
     answer(w, 0, { ...card, timeline: { items: [], truncated: false, left_out: ['security', 'devices'] } });
     await settle(w);
     const header = w.document.getElementById('entity-card-header').textContent;
