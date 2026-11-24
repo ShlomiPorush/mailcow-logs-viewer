@@ -44,7 +44,7 @@ def test_every_read_the_app_makes_is_answered(api, no_unhandled_routes):
 
     async def reads():
         assert await client.test_connection() is True  # an empty log list is still an answer
-        assert await client.get_active_domains() == ["example.com", "example.org", "shop.test"]
+        assert [d["domain_name"] for d in await client.get_domains() if d["active"] == 1] == ["example.com", "example.org", "shop.test"]
         assert await client.get_alias_domain_map() == {"example.net": "example.com"}
         assert len(await client.get_mailboxes()) == len(world.MAILBOXES)
         assert any(a["is_catch_all"] for a in await client.get_aliases())
@@ -92,7 +92,7 @@ def test_logs_are_newest_first_with_mailcow_range_semantics(api):
                                       for i in range(5)])
 
     async def reads():
-        head = await client.get_postfix_logs(2)
+        head = await client.get_raw_logs("postfix", 2)
         assert [e["message"] for e in head] == ["line 4", "line 3"]
         # 1-based on the Redis lists: 2-3 is the second and third newest
         page = await client.get_postfix_logs_page(page_size=2, offset=1)

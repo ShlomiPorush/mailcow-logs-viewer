@@ -3662,7 +3662,7 @@ async def _spam_blocks_loaded(job: str) -> bool:
     place of the permanent one. While loading fails the job does not run,
     and Status says why.
     """
-    from .routers.suppressions import import_pending, import_managed_worker, rspamd_sync_on
+    from .routers.suppressions import import_pending, import_managed_worker
 
     if not rspamd_sync_on():
         # Nothing is read from Rspamd while the sync is off: nothing to wait for

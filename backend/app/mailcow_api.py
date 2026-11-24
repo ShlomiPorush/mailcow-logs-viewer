@@ -610,56 +610,6 @@ class MailcowAPI:
         logger.warning(f"Rspamd password check failed: HTTP {status}")
         return {"configured": True, "valid": False, "error": error, "http_status": status}
 
-    async def get_postfix_logs(self, count: int = 500) -> List[Dict[str, Any]]:
-        """
-        Fetch Postfix logs from mailcow
-        
-        Args:
-            count: Number of logs to fetch
-        
-        Returns:
-            List of log entries
-        """
-        logger.info(f"Fetching {count} Postfix logs")
-        try:
-            data = await self._make_request(f"/api/v1/get/logs/postfix/{count}")
-            
-            if not isinstance(data, list):
-                logger.warning(f"Unexpected Postfix response format: {type(data)}")
-                return []
-            
-            logger.info(f"Retrieved {len(data)} Postfix logs")
-            return data
-            
-        except MailcowAPIError as e:
-            logger.error(f"Failed to fetch Postfix logs: {e}")
-            raise
-    
-    async def get_rspamd_logs(self, count: int = 500) -> List[Dict[str, Any]]:
-        """
-        Fetch Rspamd history from mailcow
-        
-        Args:
-            count: Number of logs to fetch
-        
-        Returns:
-            List of log entries
-        """
-        logger.info(f"Fetching {count} Rspamd logs")
-        try:
-            data = await self._make_request(f"/api/v1/get/logs/rspamd-history/{count}")
-            
-            if not isinstance(data, list):
-                logger.warning(f"Unexpected Rspamd response format: {type(data)}")
-                return []
-            
-            logger.info(f"Retrieved {len(data)} Rspamd logs")
-            return data
-            
-        except MailcowAPIError as e:
-            logger.error(f"Failed to fetch Rspamd logs: {e}")
-            raise
-    
     async def get_postfix_logs_page(self, page_size: int, offset: int) -> List[Dict[str, Any]]:
         """
         Fetch a specific page of Postfix logs using mailcow's range syntax.
@@ -1078,69 +1028,12 @@ class MailcowAPI:
             logger.error(f"Failed to fetch domains: {e}")
             raise
     
-    async def get_active_domains(self) -> List[str]:
-        """
-        Fetch active domains from mailcow and return domain names only
-        
-        Returns:
-            List of active domain names (where active=1)
-        """
-        logger.info("Fetching active domains")
-        domains = await self.get_domains()
-
-        # Filter active domains and extract domain_name
-        active_domains = [
-            domain.get('domain_name', '')
-            for domain in domains
-            if domain.get('active') == 1 and domain.get('domain_name')
-        ]
-
-        logger.info(f"Found {len(active_domains)} active domains: {', '.join(active_domains)}")
-        return active_domains
-    
-    async def get_alias_domains(self) -> List[str]:
-        """
-        Fetch active alias domains from mailcow (alias_domain -> target_domain).
-        Returns list of alias domain names that are
-        configured as alias of a primary domain. Used so mail from these is
-        treated as outbound/local.
-        
-        Returns:
-            List of active alias domain names
-        """
-        logger.info("Fetching alias domains")
-        try:
-            data = await self._make_request("/api/v1/get/alias-domain/all")
-            if isinstance(data, dict):
-                if not data:
-                    logger.info("No alias domains found (empty dict)")
-                    return []
-                logger.warning(f"Unexpected alias-domain dict response: {data}")
-                return []
-            if not isinstance(data, list):
-                logger.warning(f"Unexpected alias-domain response format: {type(data)}")
-                return []
-            active = [
-                item.get('alias_domain', '')
-                for item in data
-                if item.get('active', 0) == 1 and item.get('alias_domain')
-            ]
-            if active:
-                logger.info(f"Found {len(active)} active alias domains: {', '.join(active)}")
-            return active
-
-        except MailcowAPIError as e:
-            logger.error(f"Failed to fetch alias domains: {e}")
-            raise
-
     async def get_alias_domain_map(self, strict: bool = False) -> Dict[str, str]:
         """
-        Fetch active alias domains WITH their targets: {alias_domain: target_domain}.
+        Fetch active alias domains with their targets: {alias_domain: target_domain}.
 
-        get_alias_domains() above returns only the names (enough for direction
-        classification); mailbox attribution and the Domains page need to know
-        which primary domain each alias points at. strict: an answer that is
-        neither a list nor {} (null, a string, a number) raises too.
+        strict: an answer that is neither a list nor {} (null, a string, a
+        number) raises too.
         """
         logger.info("Fetching alias domain map")
         data = await self._make_request("/api/v1/get/alias-domain/all")
@@ -1549,28 +1442,14 @@ class MailcowAPI:
         logger.info("Fetching transports")
         try:
             data = await self._make_request("/api/v1/get/transport/all")
-            
-            # Handle different response formats
+
             if isinstance(data, list):
                 logger.info(f"Retrieved {len(data)} transports")
                 return data
-            elif isinstance(data, dict):
-                # API may return empty dict {} when no transports exist
-                if not data:
-                    logger.info("No transports found (empty dict)")
-                    return []
-                # If dict has a key containing list, extract it
-                # Check common patterns
-                for key in ['transports', 'data', 'items']:
-                    if key in data and isinstance(data[key], list):
-                        logger.info(f"Retrieved {len(data[key])} transports from dict")
-                        return data[key]
-                # If dict is not empty but doesn't contain expected list, log warning
-                logger.warning(f"Transports API returned dict but no list found: {data}")
-                return []
-            else:
+            # mailcow answers {} when there are no transports
+            if data != {}:
                 logger.warning(f"Unexpected transports response format: {type(data)}")
-                return []
+            return []
             
         except MailcowAPIError as e:
             logger.error(f"Failed to fetch transports: {e}")
@@ -1586,28 +1465,14 @@ class MailcowAPI:
         logger.info("Fetching relayhosts")
         try:
             data = await self._make_request("/api/v1/get/relayhost/all")
-            
-            # Handle different response formats
+
             if isinstance(data, list):
                 logger.info(f"Retrieved {len(data)} relayhosts")
                 return data
-            elif isinstance(data, dict):
-                # API may return empty dict {} when no relayhosts exist
-                if not data:
-                    logger.info("No relayhosts found (empty dict)")
-                    return []
-                # If dict has a key containing list, extract it
-                # Check common patterns
-                for key in ['relayhosts', 'data', 'items']:
-                    if key in data and isinstance(data[key], list):
-                        logger.info(f"Retrieved {len(data[key])} relayhosts from dict")
-                        return data[key]
-                # If dict is not empty but doesn't contain expected list, log warning
-                logger.warning(f"Relayhosts API returned dict but no list found: {data}")
-                return []
-            else:
+            # mailcow answers {} when there are no relayhosts
+            if data != {}:
                 logger.warning(f"Unexpected relayhosts response format: {type(data)}")
-                return []
+            return []
             
         except MailcowAPIError as e:
             logger.error(f"Failed to fetch relayhosts: {e}")
@@ -1978,11 +1843,6 @@ class MailcowAPI:
             refused = next((entry.get("msg") for entry in entries if entry.get("type") != "success"), None)
             raise MailcowAPIError(f"mailcow did not save the map {map_filename}: {refused or 'no confirmation in its reply'}")
         return result
-
-    @property
-    def has_rw_key(self) -> bool:
-        """Check if a Read-Write API key is configured."""
-        return self.headers_rw is not None
 
 
 mailcow_api = MailcowAPI()

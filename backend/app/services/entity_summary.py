@@ -550,7 +550,8 @@ def _suppressions(db: Session, read: Callable[[], dict]) -> dict:
     """The suppression list's answer, while the app keeps the list: with "Sync
     with Rspamd" off it keeps none, and while its blocks are loaded back from
     Rspamd it is not complete. Either way the card says so, never "no entry"."""
-    from ..routers.suppressions import import_pending, rspamd_sync_on
+    from ..routers.suppressions import import_pending
+    from .bounce_policy import rspamd_sync_on
     if not rspamd_sync_on():
         raise Off("Sync with Rspamd is off, so the app keeps no suppression list.")
     if import_pending(db):

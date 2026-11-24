@@ -131,7 +131,12 @@ def codes_in_text(text: str) -> List[str]:
 
 def rspamd_sync_on() -> bool:
     """Whether the list is kept in step with the app's section of the Rspamd
-    map ("Sync with Rspamd"), both ways and by itself."""
+    map ("Sync with Rspamd"), both ways and by itself. Off, the app keeps no
+    list (services/feature_data deletes it; turned on, it loads back from the
+    app's section) and neither reads nor writes the map, apart from what the
+    user asks for in Settings (removing its blocks, starting fresh).
+    Automatic blocks are made only with "Handle failed mail
+    automatically" on as well."""
     return settings.is_feature_enabled('suppressions') and bool(settings.suppression_rspamd_sync)
 
 

@@ -28,7 +28,6 @@ READS = [
     ("get_status_vmail", (), {}),
     ("get_status_version", (), {}),
     ("get_domains", (), {}),
-    ("get_active_domains", (), {}),
     ("get_alias_domain_map", (), {}),
     ("get_mailboxes", (), {}),
     ("get_aliases", (), {}),
