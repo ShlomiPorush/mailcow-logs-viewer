@@ -289,7 +289,7 @@ def test_message_id_equal_to_a_mailbox_does_not_hijack_its_deliveries(db_env, mo
                            action='no action', is_spam=False, direction='inbound', user='unknown')
         db.add(rspamd)
         db.commit()
-        scheduler.correlate_single_message(db, rspamd)
+        scheduler.correlation_jobs.correlate_single_message(db, rspamd)
         db.commit()
 
         legs = db.query(MessageCorrelation).filter(MessageCorrelation.message_id == victim).all()

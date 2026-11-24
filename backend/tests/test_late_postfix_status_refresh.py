@@ -203,20 +203,20 @@ def test_a_correlation_older_than_the_retry_horizon_is_not_touched(env, monkeypa
 def test_refresh_is_driven_by_arrivals_not_by_scanning(env, monkeypatch):
     """The whole point of the design: work follows arriving log lines. A page
     with no new status lines must not trigger any correlation refresh."""
-    from app import scheduler
+    from app.services import correlation_jobs
     from app.database import get_db_context
 
     with get_db_context() as db:
         _seed(db, QUEUE, 'deferred', 'deferred', age_minutes=45)
 
     calls = []
-    original = scheduler.refresh_correlations_for_queue_ids
+    original = correlation_jobs.refresh_correlations_for_queue_ids
 
     def spy(db, queue_ids):
         calls.append(set(queue_ids))
         return original(db, queue_ids)
 
-    monkeypatch.setattr(scheduler, 'refresh_correlations_for_queue_ids', spy)
+    monkeypatch.setattr(correlation_jobs, 'refresh_correlations_for_queue_ids', spy)
 
     page = [_entry(_sent_line())]
     _ingest(monkeypatch, page)

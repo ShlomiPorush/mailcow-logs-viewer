@@ -318,11 +318,11 @@ def _rspamd(msgid, when, sender, rcpt, action='no action', is_spam=False):
 
 
 def _correlate(rspamd_id):
-    from app import scheduler as sched
+    from app.services import correlation_jobs
     from app.database import get_db_context
     from app.models import RspamdLog
     with get_db_context() as db:
-        correlation = sched.correlate_single_message(db, db.get(RspamdLog, rspamd_id))
+        correlation = correlation_jobs.correlate_single_message(db, db.get(RspamdLog, rspamd_id))
         return correlation.correlation_key if correlation else None
 
 
@@ -389,7 +389,7 @@ def test_the_details_show_only_the_messages_own_lines(env):
 def test_a_status_is_never_taken_from_another_message(env):
     """A deferred message whose stored lines include a later message's bounce
     (stored by an earlier version) keeps its own status and drops the line."""
-    from app import scheduler as sched
+    from app.services import correlation_jobs
     from app.database import get_db_context
     from app.models import MessageCorrelation
 
@@ -401,7 +401,7 @@ def test_a_status_is_never_taken_from_another_message(env):
                                first_seen=T0, last_seen=T0, created_at=datetime.utcnow())
         db.add(a)
         db.commit()
-        sched._recompute_correlation_from_postfix(db, a)
+        correlation_jobs.recompute_correlation_from_postfix(db, a)
         db.commit()
         db.refresh(a)
         assert a.final_status == 'deferred'
@@ -747,7 +747,7 @@ def test_the_upgrade_keeps_a_delivery_logged_after_postsuper_removed(env):
     assert (row.final_status, row.postfix_log_ids) == ('delivered', ids)
 
 
-def test_two_waiting_messages_do_not_both_take_lines_they_share(env):
+def test_two_waiting_messages_do_not_both_take_lines_they_share(env, monkeypatch):
     """Two correlations wait for their queue id; the stored lines hold both
     Message-IDs and nothing yet between them. One completion run must not
     give the same lines to both."""
@@ -767,8 +767,9 @@ def test_two_waiting_messages_do_not_both_take_lines_they_share(env):
                                       first_seen=T0, last_seen=T0, created_at=datetime.utcnow()))
         db.commit()
 
-    correlation_jobs.complete_incomplete_correlations(
-        get_db_context=get_db_context, update_job_status=lambda *a: None, max_age_minutes=60, clock=datetime)
+    monkeypatch.setattr(correlation_jobs, "update_job_status", lambda *a: None)
+    monkeypatch.setattr(correlation_jobs.settings._inner, "max_correlation_age_minutes", 60)
+    correlation_jobs.complete_incomplete_correlations()
 
     assert sum(_correlation(key).queue_id == queue for key in keys) == 1
 

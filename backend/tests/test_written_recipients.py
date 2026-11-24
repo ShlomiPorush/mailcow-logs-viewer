@@ -201,11 +201,11 @@ def _rspamd(msgid, when, recipients, resolved=True):
 
 
 def _correlate(rspamd_id):
-    from app import scheduler as sched
+    from app.services import correlation_jobs
     from app.database import get_db_context
     from app.models import RspamdLog
     with get_db_context() as db:
-        correlation = sched.correlate_single_message(db, db.get(RspamdLog, rspamd_id))
+        correlation = correlation_jobs.correlate_single_message(db, db.get(RspamdLog, rspamd_id))
         return correlation.correlation_key if correlation else None
 
 
@@ -600,8 +600,10 @@ def test_a_delivery_line_stored_while_the_link_is_made_is_not_lost(env, monkeypa
             db.commit = commit_after_the_ingest
             yield db
 
-    correlation_jobs.complete_incomplete_correlations(
-        get_db_context=racing_session, update_job_status=lambda *a: None, max_age_minutes=60, clock=datetime)
+    monkeypatch.setattr(correlation_jobs, "get_db_context", racing_session)
+    monkeypatch.setattr(correlation_jobs, "update_job_status", lambda *a: None)
+    monkeypatch.setattr(correlation_jobs.settings._inner, "max_correlation_age_minutes", 60)
+    correlation_jobs.complete_incomplete_correlations()
     row = _row(key)
     assert row.queue_id == queue
     assert row.written_recipients == {'danalee@gmail.test': 'dana.lee@gmail.test'}

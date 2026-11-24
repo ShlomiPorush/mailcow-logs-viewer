@@ -21,7 +21,7 @@ def test_service_import_does_not_initialize_scheduling_or_request_handlers():
     assert result.returncode == 0, result.stderr
 
 
-def test_batch_uses_injected_blacklist_and_record_processor():
+def test_batch_marks_excluded_senders_and_rolls_back_a_failed_record(monkeypatch):
     db = Mock()
     rows = [
         SimpleNamespace(id=1, sender_smtp="blocked@example.test", recipients_smtp=[]),
@@ -47,17 +47,16 @@ def test_batch_uses_injected_blacklist_and_record_processor():
         return True
 
     db.rollback.side_effect = lambda: events.append("rollback")
-    correlation_jobs.run_correlation(
-        get_db_context=database,
-        is_blacklisted=lambda address: address == "blocked@example.test",
-        correlate=correlate,
-    )
+    monkeypatch.setattr(correlation_jobs, "get_db_context", database)
+    monkeypatch.setattr(correlation_jobs, "is_listed", lambda address: address == "blocked@example.test")
+    monkeypatch.setattr(correlation_jobs, "correlate_single_message", correlate)
+    correlation_jobs.run_correlation()
     assert rows[0].correlation_key == "BLACKLISTED"
     assert events == ["open", 2, "rollback", 3, "close"]
     db.commit.assert_called_once()
 
 
-def test_arrival_reconciliation_uses_clock_and_leaves_commit_to_caller():
+def test_arrival_reconciliation_uses_clock_and_leaves_commit_to_caller(monkeypatch):
     from app.models import MessageCorrelation, PostfixLog
     now = datetime(2026, 1, 15)
 
@@ -83,17 +82,16 @@ def test_arrival_reconciliation_uses_clock_and_leaves_commit_to_caller():
     db.query.side_effect = lambda model: Mock(**{"filter.return_value.all.return_value": {
         MessageCorrelation: rows, PostfixLog: lines}[model]})
     recompute = Mock(return_value=True)
-    result = correlation_jobs.refresh_correlations_for_queue_ids(
-        db, [row.queue_id for row in rows], recompute=recompute,
-        clock=SimpleNamespace(utcnow=lambda: now, now=lambda tz: now),
-    )
+    monkeypatch.setattr(correlation_jobs, "recompute_correlation_from_postfix", recompute)
+    monkeypatch.setattr(correlation_jobs, "datetime", SimpleNamespace(utcnow=lambda: now, now=lambda tz: now))
+    result = correlation_jobs.refresh_correlations_for_queue_ids(db, [row.queue_id for row in rows])
     assert result == (1, 3)
     recompute.assert_called_once()
     assert recompute.call_args.args == (db, rows[0])
     db.commit.assert_not_called()
 
 
-def test_failed_expiry_reports_through_injected_status_callback():
+def test_failed_expiry_reports_its_status(monkeypatch):
     events = []
 
     @contextmanager
@@ -101,10 +99,9 @@ def test_failed_expiry_reports_through_injected_status_callback():
         raise RuntimeError("fixture database failure")
         yield
 
-    correlation_jobs.expire_old_correlations(
-        get_db_context=database, update_job_status=lambda *event: events.append(event),
-        max_age_minutes=7, clock=datetime,
-    )
+    monkeypatch.setattr(correlation_jobs, "get_db_context", database)
+    monkeypatch.setattr(correlation_jobs, "update_job_status", lambda *event: events.append(event))
+    correlation_jobs.expire_old_correlations()
     assert events == [
         ("expire_correlations", "running"),
         ("expire_correlations", "failed", "fixture database failure"),

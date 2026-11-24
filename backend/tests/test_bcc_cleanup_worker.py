@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from app import scheduler
 from app.config import settings
+from app.services import correlation_jobs
 from app.database import Base, engine
 from app.models import MessageCorrelation, PostfixLog, RspamdLog
 
@@ -81,7 +82,7 @@ def test_correlation_waits_for_cleanup(monkeypatch):
         events.append("correlation session")
         yield db
     monkeypatch.setattr(scheduler, "cleanup_blacklisted_queues", cleanup)
-    monkeypatch.setattr(scheduler, "get_db_context", session)
+    monkeypatch.setattr(correlation_jobs, "get_db_context", session)
     asyncio.run(scheduler.run_correlation())
     assert events == ["cleanup started", "cleanup finished", "correlation session"]
 

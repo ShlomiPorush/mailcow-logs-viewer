@@ -291,7 +291,7 @@ def test_keys_that_are_not_such_a_message_are_not_found(api):
         assert api.get(f'/api/message/{key}/details').status_code == 404, key
 
 
-def test_a_message_without_a_message_id_never_gets_a_correlation(api):
+def test_a_message_without_a_message_id_never_gets_a_correlation(api, monkeypatch):
     """The paths that create correlations skip an empty Message-ID, so a listed
     message is never also a Messages row (the list does not check for one)."""
     from app.database import get_db_context
@@ -307,8 +307,9 @@ def test_a_message_without_a_message_id_never_gets_a_correlation(api):
         db.commit()
         for line in db.query(PostfixLog).filter(PostfixLog.queue_id == _q(17)).all():
             assert correlate_postfix_log(db, line) is None
-    correlation_jobs.run_correlation(get_db_context=get_db_context, is_blacklisted=lambda _: False,
-                                     correlate=lambda db, scan: picked.append(scan.subject))
+    monkeypatch.setattr(correlation_jobs, "is_listed", lambda _: False)
+    monkeypatch.setattr(correlation_jobs, "correlate_single_message", lambda db, scan: picked.append(scan.subject))
+    correlation_jobs.run_correlation()
     assert not any(MARK in subject for subject in picked)
     with get_db_context() as db:
         assert db.query(MessageCorrelation).filter(MessageCorrelation.sender == SCANNER).count() == 0

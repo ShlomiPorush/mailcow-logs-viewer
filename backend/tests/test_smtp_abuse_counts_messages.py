@@ -115,7 +115,7 @@ def _ingest_rspamd_and_correlate(queue_id, message_id):
     from app.correlation import detect_direction
     from app.database import get_db_context
     from app.models import RspamdLog
-    from app.scheduler import correlate_single_message
+    from app.services.correlation_jobs import correlate_single_message
     entry = {
         "unix_time": int(datetime.utcnow().replace(tzinfo=timezone.utc).timestamp()),
         "message-id": message_id, "sender_smtp": SENDER, "rcpt_smtp": RECIPIENTS,

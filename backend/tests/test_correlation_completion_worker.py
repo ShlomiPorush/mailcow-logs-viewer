@@ -6,6 +6,7 @@ from unittest.mock import Mock
 
 
 from app import scheduler
+from app.services import correlation_jobs
 
 
 def test_completion_leaves_event_loop_responsive(monkeypatch):
@@ -26,8 +27,8 @@ def test_completion_leaves_event_loop_responsive(monkeypatch):
         finally:
             threads.append(threading.get_ident())
             finished.set()
-    monkeypatch.setattr(scheduler, "get_db_context", session)
-    monkeypatch.setattr(scheduler, "job_status", {})
+    monkeypatch.setattr(correlation_jobs, "get_db_context", session)
+    monkeypatch.setitem(scheduler.job_status, "complete_correlations", {})
     async def run():
         loop_thread = threading.get_ident()
         task = asyncio.create_task(scheduler.complete_incomplete_correlations())
@@ -48,8 +49,8 @@ def test_completion_reports_database_failure(monkeypatch):
     def session():
         raise RuntimeError("fixture database failure")
         yield
-    monkeypatch.setattr(scheduler, "get_db_context", session)
-    monkeypatch.setattr(scheduler, "job_status", {})
+    monkeypatch.setattr(correlation_jobs, "get_db_context", session)
+    monkeypatch.setitem(scheduler.job_status, "complete_correlations", {})
     asyncio.run(scheduler.complete_incomplete_correlations())
     assert scheduler.job_status["complete_correlations"]["status"] == "failed"
     assert scheduler.job_status["complete_correlations"]["error"] == "fixture database failure"

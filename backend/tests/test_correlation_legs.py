@@ -118,12 +118,12 @@ def _add_rspamd(msgid, when, sender, recipients, action='no action', is_spam=Fal
 
 def _correlate(rspamd_id):
     """Run the correlation the way the scheduler job runs it, per Rspamd log."""
-    from app import scheduler as sched
+    from app.services import correlation_jobs
     from app.database import get_db_context
     from app.models import RspamdLog
     with get_db_context() as db:
         rspamd_log = db.query(RspamdLog).filter(RspamdLog.id == rspamd_id).first()
-        correlation = sched.correlate_single_message(db, rspamd_log)
+        correlation = correlation_jobs.correlate_single_message(db, rspamd_log)
         return correlation.correlation_key if correlation else None
 
 

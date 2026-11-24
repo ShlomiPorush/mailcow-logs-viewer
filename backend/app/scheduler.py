@@ -48,6 +48,7 @@ from .routers.suppressions import auto_suppression_address, AUTOMATIC_SOURCES, R
 from .services.dmarc_imap_service import sync_dmarc_reports_from_imap
 from .services.dmarc_notifications import send_dmarc_error_notification
 from .services import geoip_service, correlation_jobs, excluded_addresses, written_recipients
+from .services.job_status import job_status, update_job_status
 from .services.correlation_jobs import (
     TERMINAL_FINAL_STATUSES,
     PUSH_SKIP_FINAL_STATUSES,
@@ -115,41 +116,6 @@ def reschedule_interval_jobs():
         logger.warning("Failed to reschedule interval jobs: %s", e)
 
 
-# Job execution tracking
-job_status = {
-    'fetch_logs': {'last_run': None, 'status': 'idle', 'error': None},
-    'complete_correlations': {'last_run': None, 'status': 'idle', 'error': None},
-    'update_final_status': {'last_run': None, 'status': 'idle', 'error': None},
-    'expire_correlations': {'last_run': None, 'status': 'idle', 'error': None},
-    'feature_data_sweep': {'last_run': None, 'status': 'idle', 'error': None},
-    'trend_samples': {'last_run': None, 'status': 'idle', 'error': None},
-    'correlate_dovecot': {'last_run': None, 'status': 'idle', 'error': None},
-    'cleanup_logs': {'last_run': None, 'status': 'idle', 'error': None},
-    'cleanup_dmarc_reports': {'last_run': None, 'status': 'idle', 'error': None},
-    'check_app_version': {'last_run': None, 'status': 'idle', 'error': None},
-    'dns_check': {'last_run': None, 'status': 'idle', 'error': None},
-    'update_geoip': {'last_run': None, 'status': 'idle', 'error': None},
-    'check_credentials': {'last_run': None, 'status': 'idle', 'error': None},
-    'dmarc_imap_sync': {'last_run': None, 'status': 'idle', 'error': None},
-    'mailbox_stats': {'last_run': None, 'status': 'idle', 'error': None},
-    'alias_stats': {'last_run': None, 'status': 'idle', 'error': None},
-    'blacklist_check': {'last_run': None, 'status': 'idle', 'error': None},
-    'send_weekly_summary': {'last_run': None, 'status': 'idle', 'error': None},
-    'sync_transports': {'last_run': None, 'status': 'idle', 'error': None},
-    'fetch_raw_logs': {'last_run': None, 'status': 'idle', 'error': None},
-    'cleanup_raw_logs': {'last_run': None, 'status': 'idle', 'error': None},
-    'detect_suppressions': {'last_run': None, 'status': 'idle', 'error': None},
-    'sync_suppressions': {'last_run': None, 'status': 'idle', 'error': None},
-    'expire_suppressions': {'last_run': None, 'status': 'idle', 'error': None},
-    'process_quarantine_rules': {'last_run': None, 'status': 'idle', 'error': None},
-    'cleanup_deferred_queue': {'last_run': None, 'status': 'idle', 'error': None},
-    'anomaly_detection': {'last_run': None, 'status': 'idle', 'error': None},
-    'smtp_abuse': {'last_run': None, 'status': 'idle', 'error': None},
-    'protection_rules': {'last_run': None, 'status': 'idle', 'error': None},
-    'eas_devices': {'last_run': None, 'status': 'idle', 'error': None},
-    'cleanup_eas_devices': {'last_run': None, 'status': 'idle', 'error': None},
-}
-
 # Number of hosts that were listed on actionable blacklists in the previous blacklist check run (for "cleared" notification)
 _blacklist_last_listed_actionable_count = 0
 _blacklist_check_lock = asyncio.Lock()
@@ -181,25 +147,6 @@ JOB_SKIPPED = "skipped"
 # Returned by a job that sets its own final status, failures included: a
 # manual run must not overwrite it
 JOB_STATUS_SET = "status_set"
-
-def update_job_status(job_name: str, status: str, error: str = None, retryable: bool = False) -> dict:
-    """Update job execution status. Returns the entry it wrote: a caller that
-    must later tell its own write from another run's keeps it (the manual
-    runner), never reading the shared dict back, where another run may have
-    written in between.
-
-    retryable: the failure may pass by itself (mailcow could not be reached,
-    timed out or failed itself), so retry_failed_jobs runs the job again
-    soon. Kept here only, never in an API answer.
-    """
-    entry = {
-        'last_run': datetime.now(timezone.utc),
-        'status': status,
-        'error': error,
-        'retryable': retryable,
-    }
-    job_status[job_name] = entry
-    return entry
 
 
 def _transient(error: BaseException) -> bool:
@@ -802,7 +749,7 @@ def _store_postfix_page(logs):
             # Failing here must never lose the logs that were just stored.
             if page_queue_ids:
                 try:
-                    refreshed, skipped_refresh = refresh_correlations_for_queue_ids(
+                    refreshed, skipped_refresh = correlation_jobs.refresh_correlations_for_queue_ids(
                         db, page_queue_ids)
                     if refreshed or skipped_refresh:
                         db.commit()
@@ -1557,14 +1504,7 @@ async def run_correlation():
 
 def _run_correlation_sync():
     with _correlation_link_lock:
-        return correlation_jobs.run_correlation(
-            get_db_context=get_db_context, is_blacklisted=is_blacklisted,
-            correlate=correlate_single_message,
-        )
-
-
-def correlate_single_message(db: Session, rspamd_log: RspamdLog) -> Optional[MessageCorrelation]:
-    return correlation_jobs.correlate_single_message(db, rspamd_log, clock=datetime)
+        return correlation_jobs.run_correlation()
 
 
 async def complete_incomplete_correlations():
@@ -1576,49 +1516,20 @@ async def complete_incomplete_correlations():
 
 def _complete_incomplete_correlations_sync():
     with _correlation_link_lock:
-        return correlation_jobs.complete_incomplete_correlations(
-            get_db_context=get_db_context, update_job_status=update_job_status,
-            max_age_minutes=settings.max_correlation_age_minutes, clock=datetime,
-        )
+        return correlation_jobs.complete_incomplete_correlations()
 
 
 async def expire_old_correlations():
     """Expire old correlations in the configured scheduler worker pool."""
     await asyncio.get_running_loop().run_in_executor(
-        get_thread_pool_executor(), _expire_old_correlations_sync
-    )
-
-
-def _expire_old_correlations_sync():
-    return correlation_jobs.expire_old_correlations(
-        get_db_context=get_db_context, update_job_status=update_job_status,
-        max_age_minutes=settings.max_correlation_age_minutes, clock=datetime,
-    )
-
-
-def _recompute_correlation_from_postfix(db: Session, correlation: MessageCorrelation, occurrences=None) -> bool:
-    return correlation_jobs.recompute_correlation_from_postfix(
-        db, correlation, clock=datetime, occurrences=occurrences)
-
-
-def refresh_correlations_for_queue_ids(db: Session, queue_ids) -> tuple:
-    return correlation_jobs.refresh_correlations_for_queue_ids(
-        db, queue_ids, recompute=_recompute_correlation_from_postfix, clock=datetime,
+        get_thread_pool_executor(), correlation_jobs.expire_old_correlations
     )
 
 
 async def update_final_status_for_correlations():
     """Refresh late message outcomes in the configured scheduler worker pool."""
     await asyncio.get_running_loop().run_in_executor(
-        get_thread_pool_executor(), _update_final_status_for_correlations_sync
-    )
-
-
-def _update_final_status_for_correlations_sync():
-    return correlation_jobs.update_final_status_for_correlations(
-        get_db_context=get_db_context, update_job_status=update_job_status,
-        max_age_minutes=settings.max_correlation_age_minutes,
-        recompute=_recompute_correlation_from_postfix, clock=datetime,
+        get_thread_pool_executor(), correlation_jobs.update_final_status_for_correlations
     )
 
 
@@ -1849,7 +1760,7 @@ def _correlate_dovecot_logs_sync():
                             # A later delivery attempt actually stored the message -
                             # re-derive from Postfix instead of leaving the stale
                             # override behind.
-                            _recompute_correlation_from_postfix(db, correlation)
+                            correlation_jobs.recompute_correlation_from_postfix(db, correlation)
                         else:
                             _apply_dovecot_verdict(correlation)
 

@@ -5,6 +5,7 @@ from contextlib import contextmanager
 from unittest.mock import Mock, AsyncMock
 
 from app import scheduler
+from app.services import correlation_jobs
 
 
 def test_correlation_keeps_loop_responsive(monkeypatch):
@@ -29,10 +30,10 @@ def test_correlation_keeps_loop_responsive(monkeypatch):
         finally:
             threads.append(threading.get_ident())
             finished.set()
-    monkeypatch.setattr(scheduler, "get_db_context", session)
+    monkeypatch.setattr(correlation_jobs, "get_db_context", session)
     monkeypatch.setattr(scheduler, "cleanup_blacklisted_queues", AsyncMock())
-    monkeypatch.setattr(scheduler, "is_blacklisted", lambda email: False)
-    monkeypatch.setattr(scheduler, "correlate_single_message", correlate)
+    monkeypatch.setattr(correlation_jobs, "is_listed", lambda email: False)
+    monkeypatch.setattr(correlation_jobs, "correlate_single_message", correlate)
     async def run():
         loop_thread = threading.get_ident()
         task = asyncio.create_task(scheduler.run_correlation())
@@ -65,9 +66,9 @@ def test_failed_record_rolls_back_before_next_record(monkeypatch):
     def session():
         yield db
         events.append("closed")
-    monkeypatch.setattr(scheduler, "get_db_context", session)
+    monkeypatch.setattr(correlation_jobs, "get_db_context", session)
     monkeypatch.setattr(scheduler, "cleanup_blacklisted_queues", AsyncMock())
-    monkeypatch.setattr(scheduler, "is_blacklisted", lambda email: False)
-    monkeypatch.setattr(scheduler, "correlate_single_message", correlate)
+    monkeypatch.setattr(correlation_jobs, "is_listed", lambda email: False)
+    monkeypatch.setattr(correlation_jobs, "correlate_single_message", correlate)
     asyncio.run(scheduler.run_correlation())
     assert events == [1, "rollback", 2, "closed"]

@@ -5,6 +5,7 @@ from contextlib import contextmanager
 from unittest.mock import Mock
 import pytest
 from app import scheduler
+from app.services import job_status as job_status_store
 from app.config import settings
 
 
@@ -15,7 +16,8 @@ JOBS = [("cleanup_old_logs", "cleanup_logs"),
 @pytest.mark.parametrize("name,status_key", JOBS)
 def test_retention_does_not_block_event_loop(monkeypatch, name, status_key):
     monkeypatch.setattr(settings._inner, "disabled_features", "")
-    monkeypatch.setattr(scheduler, "job_status", {})
+    monkeypatch.setattr(job_status_store, "job_status", {})
+    monkeypatch.setattr(scheduler, "job_status", job_status_store.job_status)
     started, release, finished = threading.Event(), threading.Event(), threading.Event()
     threads = []
     db = Mock()
@@ -55,7 +57,8 @@ def test_retention_does_not_block_event_loop(monkeypatch, name, status_key):
 @pytest.mark.parametrize("name,status_key", JOBS)
 def test_worker_database_failure_is_reported(monkeypatch, name, status_key):
     monkeypatch.setattr(settings._inner, "disabled_features", "")
-    monkeypatch.setattr(scheduler, "job_status", {})
+    monkeypatch.setattr(job_status_store, "job_status", {})
+    monkeypatch.setattr(scheduler, "job_status", job_status_store.job_status)
     @contextmanager
     def broken_session():
         raise RuntimeError("fixture database failure")
@@ -105,7 +108,8 @@ def test_retention_boundaries_on_isolated_postgres_schema(monkeypatch):
                 return now if tz else now.replace(tzinfo=None)
         monkeypatch.setattr(scheduler, "datetime", Clock)
         monkeypatch.setattr(scheduler, "get_db_context", session_context)
-        monkeypatch.setattr(scheduler, "job_status", {})
+        monkeypatch.setattr(job_status_store, "job_status", {})
+        monkeypatch.setattr(scheduler, "job_status", job_status_store.job_status)
         monkeypatch.setattr(settings._inner, "disabled_features", "")
         monkeypatch.setattr(settings._inner, "retention_days", 7)
         monkeypatch.setattr(settings._inner, "dmarc_retention_days", 7)

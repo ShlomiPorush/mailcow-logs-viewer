@@ -391,7 +391,7 @@ def test_recompute_keeps_discarded_over_a_late_sent_line(env):
     derives 'delivered' from status=sent and must not resurrect the message."""
     from app.database import get_db_context
     from app.models import MessageCorrelation
-    from app import scheduler as sched
+    from app.services import correlation_jobs
 
     msgid = _msgid()
     queue = uuid.uuid4().hex[:10].upper()
@@ -402,7 +402,7 @@ def test_recompute_keeps_discarded_over_a_late_sent_line(env):
     with get_db_context() as db:
         corr = db.query(MessageCorrelation).filter(
             MessageCorrelation.correlation_key == key).first()
-        sched._recompute_correlation_from_postfix(db, corr)
+        correlation_jobs.recompute_correlation_from_postfix(db, corr)
         db.commit()
 
     assert _get_correlation(key).final_status == 'discarded'
@@ -411,7 +411,7 @@ def test_recompute_keeps_discarded_over_a_late_sent_line(env):
 def test_recompute_lets_a_real_bounce_win_over_discarded(env):
     from app.database import get_db_context
     from app.models import MessageCorrelation
-    from app import scheduler as sched
+    from app.services import correlation_jobs
 
     msgid = _msgid()
     queue = uuid.uuid4().hex[:10].upper()
@@ -422,7 +422,7 @@ def test_recompute_lets_a_real_bounce_win_over_discarded(env):
     with get_db_context() as db:
         corr = db.query(MessageCorrelation).filter(
             MessageCorrelation.correlation_key == key).first()
-        sched._recompute_correlation_from_postfix(db, corr)
+        correlation_jobs.recompute_correlation_from_postfix(db, corr)
         db.commit()
 
     assert _get_correlation(key).final_status == 'bounced'
@@ -447,7 +447,7 @@ def test_arrival_driven_push_path_skips_discarded(env):
     """PR #115 refreshes correlations when a status-bearing Postfix line
     arrives; PUSH_SKIP_FINAL_STATUSES must keep it away from a discard."""
     from app.database import get_db_context
-    from app import scheduler as sched
+    from app.services import correlation_jobs
 
     msgid = _msgid()
     queue = uuid.uuid4().hex[:10].upper()
@@ -456,7 +456,7 @@ def test_arrival_driven_push_path_skips_discarded(env):
     _add_postfix_log(queue, 'sent', msgid=msgid)
 
     with get_db_context() as db:
-        updated, skipped = sched.refresh_correlations_for_queue_ids(db, [queue])
+        updated, skipped = correlation_jobs.refresh_correlations_for_queue_ids(db, [queue])
         db.commit()
 
     assert updated == 0
