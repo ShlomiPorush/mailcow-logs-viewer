@@ -44,6 +44,11 @@ const STUBS = `
         window.navs.push(args);
         currentTab = args[0];
         document.querySelectorAll('.tab-content').forEach(el => el.classList.toggle('hidden', el.id !== 'content-' + args[0]));
+        // Messages opened with filters loads with them (switchTab)
+        if (args[0] === 'messages' && messagesOpening) {
+            messagesOpening();
+            loadMessages();
+        }
         return true;
     };
     checkAuthentication = async () => false;

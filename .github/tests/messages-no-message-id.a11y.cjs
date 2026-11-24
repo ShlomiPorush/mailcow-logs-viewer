@@ -189,6 +189,56 @@ test('opening Messages with filters from elsewhere shows the whole list again', 
     assert.ok(!p.$('#content-messages').classList.contains('is-noid'));
 });
 
+test('Stay over unsaved changes leaves the Messages filters as they were; Leave loads the list once, with the new ones', async () => {
+    const p = page();
+    p.$('#messages-filter-search').value = 'invoice';
+    p.w.applyMessagesFilters();
+    await p.settle(); await p.settle();
+    const shown = () => JSON.stringify([
+        ...['search', 'sender', 'recipient', 'user', 'ip', 'direction', 'status'].map(key => p.$(`#messages-filter-${key}`).value),
+        p.$('#messages-start-date').value, p.$('#messages-end-date').value, p.$('#messages-date-range-label').textContent,
+        p.$('#messages-exact').innerHTML, p.w.eval('currentFilters.messages')]);
+    const before = shown();
+    p.w.uiUnsavedRegister('form', { count: () => 1, drop() {} });
+    const lists = () => p.asked().filter(url => url.startsWith('/api/messages?'));
+    const wait = () => new Promise(resolve => p.w.setTimeout(resolve, 150));
+    const opens = [
+        () => p.w.navigateToMessagesWithFilter({ address: 'boss@example.com', datePreset: '7days' }),
+        () => p.w.openMessagesRange({ start: '2026-10-24T10:00:00Z', endInclusive: '2026-10-24T10:59:59.999Z', label: 'Hour picked' }),
+    ];
+    for (const open of opens) {
+        p.asked().length = 0;
+        const moved = open();
+        await p.settle();
+        p.$('#app-confirm-cancel').click();
+        assert.equal(await moved, false);
+        await wait();
+        assert.equal(shown(), before, 'Stay: fields, period, chip and filters as they were');
+        assert.equal(lists().length, 0, 'Stay: nothing loaded');
+    }
+    // Leave: one load, with the address the card asked for
+    p.asked().length = 0;
+    let moved = opens[0]();
+    await p.settle();
+    p.$('#app-confirm-ok').click();
+    assert.equal(await moved, true);
+    await wait(); await p.settle();
+    assert.equal(lists().length, 1);
+    assert.equal(params(lists()[0]).get('address'), 'boss@example.com');
+    assert.equal(params(lists()[0]).get('search'), null);
+    // The chart's exact range and its label
+    p.asked().length = 0;
+    moved = opens[1]();
+    await p.settle();
+    p.$('#app-confirm-ok').click();
+    assert.equal(await moved, true);
+    await wait(); await p.settle();
+    assert.equal(lists().length, 1);
+    assert.equal(params(lists()[0]).get('start_date'), '2026-10-24T10:00:00Z');
+    assert.equal(params(lists()[0]).get('end_date'), '2026-10-24T10:59:59.999Z');
+    assert.equal(p.$('#messages-date-range-label').textContent, 'Hour picked');
+});
+
 test('a redraw of the list by the auto refresh does not drop the count', async () => {
     const p = page();
     p.run('noidTotal = 0');

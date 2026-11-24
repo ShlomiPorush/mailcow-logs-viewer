@@ -55,7 +55,12 @@ function harness(filters, appTimezone = 'Europe/Berlin') {
         setMessagesDatePresetActive() {},
         toggleMessagesTimePanel() {},
         applyMessagesFilters: () => { calls.applied++; },
-        navigateTo: (...args) => calls.navigated.push(args),
+        // The move made: the page opens with the filters it was given (switchTab)
+        navigateTo: (...args) => {
+            calls.navigated.push(args);
+            if (context.messagesOpening) context.messagesOpening();
+            return Promise.resolve(true);
+        },
         console: { log() {} },
         messagesOrder: 'desc',   // the list's order as it opens: newest first
         messagesGen: 0,   // the list's load generation (an older answer is dropped)
@@ -84,6 +89,7 @@ function harness(filters, appTimezone = 'Europe/Berlin') {
         extract('messagesShowRange'),
         extract('mailFlowHour'),
         extract('mailFlowSpan'),
+        extract('openMessagesWith'),
         extract('openMessagesRange'),
         extract('openMailFlowHourMessages'),
     ].join('\n'), context);

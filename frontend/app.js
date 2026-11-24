@@ -26,68 +26,62 @@
  * @returns {Promise<boolean>} whether the Messages page opened
  */
 function navigateToMessagesWithFilter(options) {
-    // The filters asked for apply to the whole list
-    leaveMessagesWithoutId();
-    // Clear existing filters first
-    const filterSearch = document.getElementById('messages-filter-search');
-    const filterSender = document.getElementById('messages-filter-sender');
-    const filterRecipient = document.getElementById('messages-filter-recipient');
-    const filterDirection = document.getElementById('messages-filter-direction');
-    const filterStatus = document.getElementById('messages-filter-status');
-    const filterUser = document.getElementById('messages-filter-user');
-    const filterIp = document.getElementById('messages-filter-ip');
+    return openMessagesWith(() => {
+        const filterSearch = document.getElementById('messages-filter-search');
+        const filterSender = document.getElementById('messages-filter-sender');
+        const filterRecipient = document.getElementById('messages-filter-recipient');
+        const filterDirection = document.getElementById('messages-filter-direction');
+        const filterStatus = document.getElementById('messages-filter-status');
+        const filterUser = document.getElementById('messages-filter-user');
+        const filterIp = document.getElementById('messages-filter-ip');
 
-    // Reset all filters
-    if (filterSearch) filterSearch.value = '';
-    if (filterSender) filterSender.value = '';
-    if (filterRecipient) filterRecipient.value = '';
-    if (filterDirection) filterDirection.value = '';
-    if (filterStatus) filterStatus.value = '';
-    if (filterUser) filterUser.value = '';
-    if (filterIp) filterIp.value = '';
+        if (filterSearch) filterSearch.value = '';
+        if (filterSender) filterSender.value = '';
+        if (filterRecipient) filterRecipient.value = '';
+        if (filterDirection) filterDirection.value = '';
+        if (filterStatus) filterStatus.value = '';
+        if (filterUser) filterUser.value = '';
+        if (filterIp) filterIp.value = '';
 
-    // Set email filter based on type
-    if (options.email) {
-        if (options.filterType === 'sender') {
-            if (filterSender) filterSender.value = options.email;
-        } else if (options.filterType === 'recipient') {
-            if (filterRecipient) filterRecipient.value = options.email;
-        } else if (options.filterType === 'user') {
-            // The mailbox that logged in, whichever address or alias it sent from
-            if (filterUser) filterUser.value = options.email;
-        } else {
-            // Default: use search field
-            if (filterSearch) filterSearch.value = options.email;
+        if (options.email) {
+            if (options.filterType === 'sender') {
+                if (filterSender) filterSender.value = options.email;
+            } else if (options.filterType === 'recipient') {
+                if (filterRecipient) filterRecipient.value = options.email;
+            } else if (options.filterType === 'user') {
+                // The mailbox that logged in, whichever address or alias it sent from
+                if (filterUser) filterUser.value = options.email;
+            } else if (filterSearch) {
+                filterSearch.value = options.email;
+            }
         }
-    }
+        if (options.direction && filterDirection) filterDirection.value = options.direction;
+        if (options.status && filterStatus) filterStatus.value = options.status;
+        if (options.ip && filterIp) filterIp.value = options.ip;
 
-    // Set direction filter
-    if (options.direction && filterDirection) {
-        filterDirection.value = options.direction;
-    }
+        // Whole values (the entity card): the fields set here, and an address or a
+        // domain, which have no field. A filter changed later drops them (applyMessagesFilters)
+        const field = el => (el ? el.value : '');
+        messagesExact = (options.exact && field(filterIp)) || options.address || options.domain ? {
+            ip: options.exact ? field(filterIp) : '', address: options.address || '', domain: options.domain || '',
+        } : null;
 
-    // Set status filter
-    if (options.status && filterStatus) {
-        filterStatus.value = options.status;
-    }
+        // The period, when one is given: a preset up to now, or an exact range
+        if (options.datePreset && MESSAGES_ROLLING_PRESETS.includes(options.datePreset)) messagesShowDatePreset(options.datePreset);
+        else if (options.start && options.end) messagesShowRange(options.start, options.end);
+        readMessagesFilters();
+    });
+}
 
-    if (options.ip && filterIp) filterIp.value = options.ip;
-
-    // Whole values (the entity card): the fields set here, and an address or a
-    // domain, which have no field. A filter changed later drops them (applyMessagesFilters)
-    const field = el => (el ? el.value : '');
-    messagesExact = (options.exact && field(filterIp)) || options.address || options.domain ? {
-        ip: options.exact ? field(filterIp) : '', address: options.address || '', domain: options.domain || '',
-    } : null;
-
-    // The period, when one is given: a preset up to now, or an exact range
-    if (options.datePreset && MESSAGES_ROLLING_PRESETS.includes(options.datePreset)) messagesShowDatePreset(options.datePreset);
-    else if (options.start && options.end) messagesShowRange(options.start, options.end);
-
-    // Navigate to Messages tab
+// Messages opened from elsewhere with filters of its own: prepare sets the fields
+// and currentFilters.messages when the page opens (switchTab), so the page loads
+// once, with them. Stay over unsaved changes, or a page the person may not open,
+// leaves the filters as they were
+let messagesOpening = null;
+function openMessagesWith(prepare) {
+    messagesOpening = prepare;
     return navigateTo('messages').then(moved => {
-        // Apply filters after navigation
-        if (moved) setTimeout(() => { if (typeof applyMessagesFilters === 'function') applyMessagesFilters(); }, 100);
+        messagesOpening = null;
         return moved;
     });
 }
@@ -2582,6 +2576,7 @@ function switchTab(tab, params = {}) {
         case 'messages':
             // Coming back to the page shows the whole list again
             leaveMessagesWithoutId();
+            if (messagesOpening) messagesOpening();
             loadMessages();
             break;
         case 'netfilter':
@@ -3744,20 +3739,20 @@ function messagesShowRange(start, endInclusive, label = '') {
 // keeps them until another range is applied). endInclusive: the last moment
 // in it, as the Messages page's end is inclusive.
 function openMessagesRange({ start, endInclusive, user = '', label = '' }) {
-    leaveMessagesWithoutId();
-    ['search', 'sender', 'recipient', 'user', 'ip', 'direction', 'status'].forEach(key => {
-        const el = document.getElementById(`messages-filter-${key}`);
-        if (el) el.value = '';
+    return openMessagesWith(() => {
+        ['search', 'sender', 'recipient', 'user', 'ip', 'direction', 'status'].forEach(key => {
+            const el = document.getElementById(`messages-filter-${key}`);
+            if (el) el.value = '';
+        });
+        if (user) {
+            const field = document.getElementById('messages-filter-user');
+            if (field) field.value = user;
+        }
+        messagesExact = null;
+        messagesShowRange(start, endInclusive, label);
+        currentFilters.messages = { start_date: start, end_date: endInclusive, ...(user ? { user } : {}) };
+        currentPage.messages = 1;
     });
-    if (user) {
-        const field = document.getElementById('messages-filter-user');
-        if (field) field.value = user;
-    }
-    messagesExact = null;
-    messagesShowRange(start, endInclusive, label);
-    currentFilters.messages = { start_date: start, end_date: endInclusive, ...(user ? { user } : {}) };
-    currentPage.messages = 1;
-    navigateTo('messages');
 }
 
 // The picked bar's messages, else those of all the bars shown, on the Messages page.
@@ -5489,6 +5484,12 @@ async function loadQuarantineRuleHistory({ quiet = false } = {}) {
 // =============================================================================
 
 function applyMessagesFilters() {
+    readMessagesFilters();
+    loadMessages();
+}
+
+// The filters the fields say, for the next load of the list
+function readMessagesFilters() {
     currentFilters.messages = messagesWithExact({
         search: document.getElementById('messages-filter-search').value,
         sender: document.getElementById('messages-filter-sender').value,
@@ -5507,7 +5508,6 @@ function applyMessagesFilters() {
             .filter(key => kept[key]).map(key => [key, kept[key]]));
     }
     currentPage.messages = 1;
-    loadMessages();
 }
 
 // The filters panel next to the search (sender, recipient, user, IP)
