@@ -2745,19 +2745,14 @@ function attentionLoad(state, force, read) {
 
 // One read of a source's answer. A read that has not answered in 20 seconds has
 // failed, so a request that hangs never holds the refresh that comes after it
-function attentionRead(url) {
-    return Promise.race([
-        (async () => {
-            try {
-                const res = await authenticatedFetch(url);
-                return res.ok ? await res.json() : READ_FAILED;
-            } catch (e) {
-                console.warn(`Needs attention could not read ${url}:`, e);
-                return READ_FAILED;
-            }
-        })(),
-        new Promise(resolve => setTimeout(() => resolve(READ_FAILED), attention.timeout)),
-    ]);
+async function attentionRead(url) {
+    try {
+        const res = await authenticatedFetch(url, { timeout: attention.timeout });
+        return res.ok ? await res.json() : READ_FAILED;
+    } catch (e) {
+        console.warn(`Needs attention could not read ${url}:`, e);
+        return READ_FAILED;
+    }
 }
 
 // The open alerts (Security, Domains, DMARC & TLS); true when the list was read

@@ -86,11 +86,15 @@ function page(over, { scripts = [], realSwitch = false } = {}) {
         if (h1) { h1.dataset.page = tab; bar.appendChild(h1); } }`);
     w.asked = [];
     w.answers = answers(over);
-    w.authenticatedFetch = async url => {
+    w.appAuthenticatedFetch = w.authenticatedFetch;
+    // A late answer past the time limit fails, as app.js's own authenticatedFetch aborts it
+    w.authenticatedFetch = async (url, { timeout } = {}) => {
         const key = url.split('?')[0];
         w.asked.push(key);
         let body = w.answers[key];
-        if (typeof body === 'function') body = await body();
+        if (typeof body === 'function') {
+            body = await (timeout ? Promise.race([body(), new Promise((resolve, reject) => setTimeout(() => reject(new Error('aborted')), timeout))]) : body());
+        }
         if (body === 'fail') return { ok: false, status: 500, json: async () => ({}) };
         return { ok: true, status: 200, json: async () => body };
     };
@@ -342,6 +346,22 @@ test('an alerts read that never answers has failed by the time limit, and the ne
     w.answers['/api/security-alerts'] = { alerts: [alert(2)], unacknowledged_count: 1, unacknowledged_critical: 0, unacknowledged_ids: [2] };
     assert.equal(await w.loadDashboardSecurityAlerts({ force: false }), true);
     assert.deepEqual(state(w).alerts.list.map(a => a.id), [2]);
+});
+
+test('a read past the time limit is aborted, not left running', async () => {
+    const w = page();
+    state(w).timeout = 50;
+    // The alerts request never answers; the page's other requests are not answered either
+    let signal = null;
+    w.fetch = (url, { signal: own } = {}) => {
+        if (!url.startsWith('/api/security-alerts')) return Promise.reject(new Error('offline'));
+        signal = own;
+        return new Promise((resolve, reject) => own.addEventListener('abort', () => reject(own.reason)));
+    };
+    w.authenticatedFetch = w.appAuthenticatedFetch;
+    assert.equal(await w.loadDashboardSecurityAlerts(), false);
+    assert.ok(signal && signal.aborted, 'the request was aborted');
+    assert.equal(state(w).alerts.ok, false);
 });
 
 // ---------- alerts of three areas: Security, Domains, DMARC & TLS ----------
