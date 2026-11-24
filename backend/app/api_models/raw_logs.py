@@ -1,4 +1,3 @@
-"""What the Live Logs calls return (routers/raw_logs.py; the WebSocket is not an API call)."""
 from typing import Dict, List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field

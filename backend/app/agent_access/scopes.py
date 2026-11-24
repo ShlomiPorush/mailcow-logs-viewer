@@ -1,14 +1,3 @@
-"""What an agent may call, by area of the app.
-
-Every /api route is either in POLICY (an area, and whether it only reads or
-changes something) or in EXCLUDED with the reason no agent may call it. A test
-fails when a route is in neither, so a new route cannot become reachable, or
-silently unreachable, without a decision.
-
-The areas follow the app's menu, and the consent page offers View and Act for
-each. A route's kind follows its effect, not its HTTP method: a POST that only
-checks a value is View, a GET that starts probes is Act.
-"""
 from dataclasses import dataclass
 from typing import Dict, FrozenSet, Iterable, Optional, Tuple
 
@@ -21,7 +10,7 @@ class Area:
     id: str
     label: str
     view: str
-    act: str  # empty: the area has no actions
+    act: str
 
 
 AREAS: Tuple[Area, ...] = (
@@ -66,13 +55,8 @@ AREAS: Tuple[Area, ...] = (
 
 AREA_IDS: FrozenSet[str] = frozenset(a.id for a in AREAS)
 
-# Calls every grant may make, whatever its areas: help text and public facts
 ANY = "any"
 
-# Calls shared by several areas, whose items each belong to one of them: the
-# Needs attention alerts are Security's, DNS changes Domains' and report import
-# errors DMARC's. Such a call needs its kind (View or Act) in at least one of the
-# areas, and the route then acts only on the items of the areas the caller has
 ALERTS = "alerts"
 ALTERNATIVES: Dict[str, Tuple[str, ...]] = {ALERTS: ("security", "domains", "dmarc")}
 
@@ -81,10 +65,7 @@ ALTERNATIVES: Dict[str, Tuple[str, ...]] = {ALERTS: ("security", "domains", "dma
 class Rule:
     area: str
     kind: str
-    # Checked against the path parameters before the call; returns an error
-    # text the agent sees, or None to allow
     guard: Optional[str] = None
-    # The body for routes that read the JSON themselves (no OpenAPI schema)
     body: Optional[str] = None
 
 
@@ -102,15 +83,11 @@ _ITEMS = '{"items": ["<id>", ...]}'
 POLICY: Dict[Tuple[str, str], Rule] = {
     **_r("GET /api/docs/{doc_name}", "GET /api/info", "GET /api/health", area=ANY, kind=READ),
 
-    # Needs attention: the list answers with the alerts of the areas the caller
-    # may view (none for some), and a dismissal changes only those of the areas
-    # it may act in (routers/security_alerts.py)
     **_r("GET /api/security-alerts", area=ANY, kind=READ),
     **_r("POST /api/security-alerts/{alert_id}/acknowledge", "POST /api/security-alerts/acknowledge-all",
          "POST /api/security-alerts/acknowledgements/{receipt}/undo",
          area=ALERTS, kind=WRITE),
 
-    # Dashboard & Status
     **_r("GET /api/stats/dashboard", "GET /api/stats/timeline", "GET /api/stats/top-spam-triggers",
          "GET /api/stats/top-blocked-ips", "GET /api/stats/flow",
          "GET /api/stats/trends", "GET /api/system/summary",
@@ -125,8 +102,6 @@ POLICY: Dict[Tuple[str, str], Rule] = {
          "POST /api/blacklist/check", "POST /api/system/summary/email",
          area="status", kind=WRITE),
 
-    # Messages: every route that returns a message's sender, recipient or
-    # subject, whatever page it serves
     **_r("GET /api/messages", "GET /api/messages/facets", "GET /api/messages/new", "GET /api/messages/without-message-id",
          "GET /api/message/{correlation_key}/details",
          "GET /api/message/{correlation_key}", "GET /api/logs/postfix", "GET /api/logs/postfix/by-queue/{queue_id}",
@@ -134,7 +109,6 @@ POLICY: Dict[Tuple[str, str], Rule] = {
          "GET /api/export/messages/csv", "GET /api/stats/recent-activity",
          area="messages", kind=READ),
 
-    # Outbound
     **_r("GET /api/queue", "GET /api/suppressions", "GET /api/suppressions/stats", "GET /api/suppressions/config",
          "GET /api/suppressions/bounce-codes", "GET /api/suppressions/{suppression_id}/events", "GET /api/suppressions/export",
          "GET /api/suppressions/rspamd/state",
@@ -147,7 +121,6 @@ POLICY: Dict[Tuple[str, str], Rule] = {
          "POST /api/suppressions/start-fresh",
          area="outbound", kind=WRITE),
 
-    # Quarantine
     **_r("GET /api/quarantine", "GET /api/quarantine/{item_id}/details", "GET /api/quarantine/rules",
          "GET /api/quarantine/rules/logs", "POST /api/quarantine/rules/test",
          area="quarantine", kind=READ),
@@ -158,7 +131,6 @@ POLICY: Dict[Tuple[str, str], Rule] = {
          "POST /api/quarantine/rules/{rule_id}/toggle",
          area="quarantine", kind=WRITE),
 
-    # Security
     **_r("GET /api/logs/netfilter", "GET /api/logs/netfilter/countries", "GET /api/logs/netfilter/stats/by-country",
          "GET /api/logs/netfilter/stats/by-network", "GET /api/logs/netfilter/overview",
          "GET /api/export/netfilter/csv", "GET /api/security/addresses", "GET /api/fail2ban", "GET /api/rw-status",
@@ -187,7 +159,6 @@ POLICY: Dict[Tuple[str, str], Rule] = {
          "POST /api/smtp-abuse/mailboxes/{email}/unblock",
          area="security", kind=WRITE),
 
-    # Rspamd
     **_r("GET /api/rspamd/config", "GET /api/rspamd/maps", "GET /api/rspamd/maps/{filename}",
          "POST /api/rspamd/validate",
          area="rspamd", kind=READ),
@@ -195,7 +166,6 @@ POLICY: Dict[Tuple[str, str], Rule] = {
          body='{"content": "<the whole map>", "base_hash": "<content_hash from GET>"} - 409 when the map '
               'changed since it was read; the answer has the saved map and its new content_hash'),
 
-    # DMARC & TLS
     **_r("GET /api/dmarc/insights", "GET /api/dmarc/reports/config", "GET /api/dmarc/reports/all",
          "GET /api/dmarc/reports/domains", "GET /api/dmarc/domains", "GET /api/dmarc/domains/{domain}/overview",
          "GET /api/dmarc/domains/{domain}/tls-rpt-record", "GET /api/dmarc/domains/{domain}/calendar",
@@ -209,13 +179,10 @@ POLICY: Dict[Tuple[str, str], Rule] = {
          "DELETE /api/dmarc/reports/{report_type}/{report_id}", "POST /api/dmarc/imap/sync",
          area="dmarc", kind=WRITE),
 
-    # Domains: a check runs DNS, HTTPS (MTA-STS) and SMTP (DANE) probes, so it
-    # is an action, and only for the app's own domains
     **_r("GET /api/domains/all", area="domains", kind=READ),
     **_r("POST /api/domains/{domain}/check-dns", area="domains", kind=WRITE, guard="own_domain"),
     **_r("POST /api/domains/check-all-dns", area="domains", kind=WRITE),
 
-    # Mailboxes
     **_r("GET /api/mailbox-stats/summary", "GET /api/mailbox-stats/all", "GET /api/mailbox-stats/domains",
          "GET /api/mailbox-stats/refresh", "GET /api/devices", "GET /api/rate-limits/events",
          "GET /api/rate-limits/sender-events", "GET /api/rate-limits/limits",
@@ -224,12 +191,10 @@ POLICY: Dict[Tuple[str, str], Rule] = {
          "POST /api/rate-limits/reset",
          area="mailboxes", kind=WRITE),
 
-    # Logs
     **_r("GET /api/raw-logs/services", "GET /api/raw-logs/worker-status", "GET /api/raw-logs/{service}",
          "GET /api/raw-logs/{service}/smart-filters",
          area="logs", kind=READ),
 
-    # Settings: secrets are masked by these routes
     **_r("GET /api/settings", "GET /api/settings/geoip/status", "GET /api/notifications/types",
          "GET /api/notifications/channels",
          area="settings", kind=READ),
@@ -237,8 +202,6 @@ POLICY: Dict[Tuple[str, str], Rule] = {
 
 _SIGN_IN = "sign-in and sessions are for people only"
 _SETTINGS = "only people change settings, because a change could turn off sign-in or agent limits, or send alerts elsewhere"
-# The card gathers several areas (messages, security, DMARC, mailboxes) in one
-# answer, so no single scope covers it; agents read those areas one by one
 _ENTITY = "the entity card gathers several areas in one answer and is for people in the app"
 
 EXCLUDED: Dict[Tuple[str, str], str] = {
@@ -269,7 +232,6 @@ EXCLUDED: Dict[Tuple[str, str], str] = {
     **{("GET", p): _ENTITY for p in ("/api/entities/ip", "/api/entities/address", "/api/entities/domain")},
 }
 
-# Managing agents is for people, whatever the method (consent.py registers these)
 AGENTS_API_PREFIX = "/api/agents"
 _MANAGE = "managing agents is for people"
 USERS_API_PREFIX = "/api/users"
@@ -293,7 +255,6 @@ def write_scope(area: str) -> str:
 
 
 def all_scopes() -> Tuple[str, ...]:
-    """Every scope, in menu order: View, then Act where the area has actions."""
     out = []
     for a in AREAS:
         out.append(read_scope(a.id))
@@ -307,13 +268,11 @@ def read_scopes() -> Tuple[str, ...]:
 
 
 def parse_scopes(value: Optional[str]) -> FrozenSet[str]:
-    """The known scopes in a space separated string; anything else is ignored."""
     known = set(all_scopes())
     return frozenset(s for s in (value or "").split() if s in known)
 
 
 def grant_scopes(views: Iterable[str], acts: Iterable[str]) -> str:
-    """The scope string for the areas a person ticked. Act includes View."""
     areas = {a.id: a for a in AREAS}
     chosen = set()
     for area in views:
@@ -327,17 +286,11 @@ def grant_scopes(views: Iterable[str], acts: Iterable[str]) -> str:
 
 
 def requested_views(requested: FrozenSet[str]) -> Tuple[str, ...]:
-    """The areas whose View box starts ticked on the consent page.
-
-    Act never starts ticked, whatever the client asked for. Without a known
-    scope in the request, every area starts with View.
-    """
     areas = tuple(a.id for a in AREAS if read_scope(a.id) in requested or write_scope(a.id) in requested)
     return areas or tuple(a.id for a in AREAS)
 
 
 def rule_areas(area: str) -> Tuple[str, ...]:
-    """The areas a rule's area stands for: itself, or the ones it shares a call between."""
     return ALTERNATIVES.get(area, (area,))
 
 
@@ -354,7 +307,6 @@ def allows(scopes: FrozenSet[str], rule: Rule) -> bool:
 
 
 def areas_of(scopes: FrozenSet[str]) -> Dict[str, str]:
-    """area id -> 'act' or 'view' for the areas a grant covers, in menu order."""
     out = {}
     for a in AREAS:
         if write_scope(a.id) in scopes:

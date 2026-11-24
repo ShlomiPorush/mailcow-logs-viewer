@@ -1,12 +1,3 @@
-# mailcow-logs for agents on Windows: runs the Node version when Node 20+ is installed, and otherwise does the same
-# itself with Windows PowerShell 5.1 (built into Windows 10 and 11) or PowerShell 7.
-#
-# One of three versions with one contract (see mailcow-logs.mjs): same commands, same JSON output and error codes,
-# same files and the same lock, so they can run side by side. Tokens never appear in the output.
-#
-# Run it as: powershell -NoProfile -ExecutionPolicy Bypass -File mailcow-logs.ps1 <command> ...
-# (the policy is bypassed for this one process only; nothing on the computer changes).
-
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2
 
@@ -102,7 +93,6 @@ mailcow-logs: use mailcow Logs Viewer after a person approves it.
   --url <address>       The mailcow Logs Viewer address (or MAILCOW_LOGS_URL).
 "@
 
-# Context: the app's address, this agent's identity (the folder it is installed in) and where its connection is kept.
 
 function Get-Context([string]$urlOption) {
   $raw = $urlOption
@@ -130,8 +120,6 @@ function Get-Context([string]$urlOption) {
   }
 }
 
-# This install's id, kept in the skill's folder (.install-id), so every version agrees on it however each one spells
-# the folder's path. Published in one step: written aside, then moved into place, which fails if one is there.
 function Get-InstallId([string]$install) {
   $file = Join-Path $install '.install-id'
   $read = {
@@ -149,7 +137,6 @@ function Get-InstallId([string]$install) {
   Fail 'cannot_save' "Cannot write in $install. The agent's id is kept there; allow writing it."
 }
 
-# icacls over the folder and its files; tried again while other commands add or replace files in it.
 function Invoke-Icacls([string[]]$arguments) {
   for ($i = 0; ; $i++) {
     $ErrorActionPreference = 'Continue'
@@ -162,11 +149,9 @@ function Invoke-Icacls([string[]]$arguments) {
   }
 }
 
-# What in saved ACLs (icacls /save: one SDDL line per object) lets anyone but this user, SYSTEM and Administrators
-# in. Anything but plain allow and deny entries (conditional or callback ones) counts too: refused, not guessed.
 function Find-OtherAllowed([string]$saved, [string]$userSid) {
   $allowed = @($userSid, 'SY', 'BA', 'S-1-5-18', 'S-1-5-32-544')
-  # SDDL writes the built-in Administrator account (RID 500) as LA, so a user who is that account shows as LA.
+  # Without LA, the built-in Administrator (RID 500) is refused its own folder: SDDL writes that account as LA.
   if ($userSid -match '^S-1-5-21-[0-9-]+-500$') { $allowed += 'LA' }
   foreach ($line in ($saved -split "`r?`n")) {
     $at = $line.IndexOf('D:')
@@ -226,18 +211,15 @@ function Protect-Dir([string]$dir) {
   if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -or -not $item.PSIsContainer) {
     Fail 'insecure_credentials' "$dir must be a plain folder, not a link."
   }
-  # Limited to this user, SYSTEM and Administrators (well-known SIDs, so no localized names).
   try {
     $who = (& $Whoami /user /fo csv /nh) -join ''
     if ($who -notmatch '"(S-1-[0-9-]+)"\s*$') { throw 'no SID' }
     $sid = $Matches[1]
     & $Icacls $dir /inheritance:r /grant:r "*${sid}:(OI)(CI)F" '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' /Q *> $null
     if ($LASTEXITCODE -ne 0) { throw 'icacls' }
-    # The owner may always change an ACL, so the folder and its files must be this user's. (Only now: taking
-    # ownership needs the full control just granted. No /C, which would hide a failure behind exit code 0.)
+    # Before the grant above /setowner is refused, and /C would hide that failure behind exit code 0.
     Invoke-Icacls @($dir, '/setowner', "*$sid", '/T', '/Q')
-    # Granting does not remove other entries: read the folder's and its files' ACLs back and allow no one else.
-    # (icacls, not Get-Acl: started from PowerShell 7, Windows PowerShell may fail to load the module Get-Acl is in.)
+    # Get-Acl can fail to load in Windows PowerShell started from PowerShell 7.
     $saved = Join-Path $dir ".acl-$(Hex 4)"
     try {
       Invoke-Icacls @($dir, '/save', $saved, '/T', '/Q')
@@ -257,7 +239,6 @@ function Test-PlainFile([string]$file) {
   }
 }
 
-# The connection's file: flat JSON with plain values, written in one step.
 
 function New-Record($ctx) {
   $rec = @{}
@@ -294,7 +275,6 @@ function Format-Record($rec) {
   '{' + ($parts -join ',') + "}`n"
 }
 
-# Writes a file of the connection in one step: a new private file, flushed, moved over the old one.
 function Write-Private($ctx, [string]$file, [string]$text) {
   Protect-Dir $ctx.dir
   $tmp = "$file.$(Hex 6).tmp"
@@ -308,7 +288,7 @@ function Write-Private($ctx, [string]$file, [string]$text) {
 function Write-Record($ctx, $rec) { Write-Private $ctx $ctx.file (Format-Record $rec) }
 
 function Move-Over([string]$from, [string]$to) {
-  # An open handle (an antivirus scan) can refuse the replace for a moment.
+  # Without retrying, an open handle (an antivirus scan) makes the replace fail.
   $until = [DateTime]::UtcNow.AddSeconds(5)
   while ($true) {
     try {
@@ -327,7 +307,6 @@ function Move-Over([string]$from, [string]$to) {
 function Remove-Kinds($ctx) { if ([IO.File]::Exists($ctx.kinds)) { [IO.File]::Delete($ctx.kinds) } }
 function Remove-Record($ctx) { if ([IO.File]::Exists($ctx.file)) { [IO.File]::Delete($ctx.file) }; Remove-Kinds $ctx }
 
-# The lock: a file created exclusively, naming its holder. Never taken from a live holder, however old.
 
 function Read-Lock([string]$file) {
   if (-not [IO.File]::Exists($file)) { return $null }
@@ -350,7 +329,6 @@ function Invoke-Hook([string]$point) {
 
 function Test-LockEmpty($held) { $held.PSObject.Properties['empty'] -and $held.empty }
 
-# Takes the lock; $own is a lock this process held before, which counts as taken if it is back in place.
 function Enter-Lock($ctx, [string]$own) {
   Protect-Dir $ctx.dir
   $token = Hex 16
@@ -365,18 +343,16 @@ function Enter-Lock($ctx, [string]$own) {
     } catch [IO.IOException] {
       if (-not [IO.File]::Exists($ctx.lock) -and -not [IO.Directory]::Exists($ctx.dir)) { Fail 'cannot_save' "Cannot create a lock in $($ctx.dir)." }
     } catch [UnauthorizedAccessException] {
-      # Windows refuses for a moment to create a file whose name is still being deleted (a lock just released).
+      # Without retrying, creating a lock right after one was released fails.
       if ([DateTime]::UtcNow -gt $deadline) { Fail 'cannot_save' "Cannot create a lock in $($ctx.dir)." }
       Start-Sleep -Milliseconds (50 + (Get-Random -Maximum 100))
       continue
     } catch { Fail 'cannot_save' "Cannot create a lock in $($ctx.dir)." }
     if ($created) { Invoke-Hook 'locked'; return $token }
     $held = Read-Lock $ctx.lock
-    # Another process moved this one's lock away by mistake and has put it back.
     if ($own -and $held -and -not (Test-LockEmpty $held) -and $held.token -eq $own) { return $own }
     $dead = $false
     if ($held) {
-      # A holder that died between creating the lock and writing its name leaves it empty; that takes a moment.
       if (Test-LockEmpty $held) { $dead = ([DateTime]::UtcNow - $held.mtime).TotalSeconds -gt 60 }
       else { $dead = ([string]$held.host).ToLowerInvariant() -eq (HostName).ToLowerInvariant() -and -not (Test-Alive ([int]$held.pid)) }
     }
@@ -394,8 +370,6 @@ function Enter-Lock($ctx, [string]$own) {
   }
 }
 
-# Moving the dead lock away is atomic, so of two that try only one moves it; if what was moved is not the dead lock
-# (another process had just taken a fresh one), it goes back unless a newer one is there (Move never overwrites).
 function Remove-DeadLock($ctx, $held) {
   $moved = "$($ctx.lock).$(Hex 6).dead"
   try { [IO.File]::Move($ctx.lock, $moved) } catch { return $true }
@@ -422,11 +396,7 @@ function Assert-Mine($ctx, [string]$token) {
   if (-not (Test-Mine $ctx $token)) { Fail 'busy' 'Another mailcow-logs command took over this connection. Run it again.' }
 }
 
-# Requests
-
-# Plain HTTP/1.1 over one new connection per request, never HttpClient: .NET's HttpClient sends a request again by
-# itself when its connection breaks before the answer (tried: PowerShell 7 sent a dropped request four times), and
-# neither an action nor a one-time refresh token may ever be sent twice. No redirects are followed.
+# HttpClient resends a request whose connection broke (PowerShell 7 sent one four times), so an action could run twice.
 
 function Find-Bytes([byte[]]$hay, [byte[]]$needle, [int]$from) {
   for ($i = $from; $i -le $hay.Length - $needle.Length; $i++) {
@@ -437,7 +407,6 @@ function Find-Bytes([byte[]]$hay, [byte[]]$needle, [int]$from) {
   -1
 }
 
-# The body of a chunked answer, or $null when it is cut short.
 function Get-Unchunked([byte[]]$raw) {
   $out = New-Object System.IO.MemoryStream
   $crlf = [byte[]](13, 10)
@@ -482,8 +451,6 @@ function Invoke-Ops($ctx, [string]$method, [string]$url, $form, [string]$bearer,
       $stream = $tcp.GetStream()
       if ($u.Scheme -eq 'https') {
         $ssl = New-Object System.Net.Security.SslStream($stream, $false)
-        # The system's TLS versions; the certificate is checked as usual. The handshake gets
-        # what is left of the request's time: a server that stops in it cannot hold the lock.
         $left = $timeoutMs - [int]$clock.ElapsedMilliseconds
         if ($left -le 0) { throw 'the connection timed out' }
         $tcp.ReceiveTimeout = $left; $tcp.SendTimeout = $left
@@ -492,7 +459,6 @@ function Invoke-Ops($ctx, [string]$method, [string]$url, $form, [string]$bearer,
         $stream = $ssl
       }
     } catch {
-      # The name, the connection or TLS failed first: nothing reached the app.
       $f = [OpsFail]::new('unreachable', "Cannot reach $($ctx.issuer) ($($_.Exception.GetBaseException().Message)).")
       $f.Sent = $false
       throw $f
@@ -530,7 +496,6 @@ function Invoke-Ops($ctx, [string]$method, [string]$url, $form, [string]$bearer,
     $lines = [Text.Encoding]::ASCII.GetString($all, 0, $split) -split "`r`n"
     if ($lines[0] -match '^HTTP/1\.[01] (\d{3})') { $status = [int]$Matches[1] }
   }
-  # The answer started and broke off (or never came): the app got the request and may have acted on it.
   if ($status -eq 0) { throw [OpsFail]::new('unreachable', "The answer from $($ctx.issuer) broke off.") }
   $headers = @{}
   foreach ($line in ($lines | Select-Object -Skip 1)) {
@@ -551,7 +516,7 @@ function Invoke-Ops($ctx, [string]$method, [string]$url, $form, [string]$bearer,
   $text = $Utf8.GetString($bytes)
   $parsed = $null
   $isJson = $false
-  # Only text that looks like JSON is parsed: PowerShell 7 would also accept some text that is not.
+  # Without this check PowerShell 7 parses some text that is not JSON.
   if ($text -match '^\s*([\{\["\-0-9]|true\s*$|false\s*$|null\s*$)') {
     try { $parsed = $text | ConvertFrom-Json; $isJson = $true } catch {}
   }
@@ -606,8 +571,6 @@ function Invoke-RevokePending($ctx, $rec) {
   $next
 }
 
-# Commands
-
 function Show-Status($ctx) {
   $rec = Read-Record $ctx
   $state = 'not_connected'
@@ -629,7 +592,6 @@ function Get-Pending($rec) {
 function Clear-Pending($rec) { Merge $rec @{ deviceCode = ''; userCode = ''; link = ''; deviceExpiresAt = [long]0; interval = [long]0; nextPollAt = [long]0 } }
 
 function Invoke-Connect($ctx, [bool]$replace) {
-  # Before any code exists: can it keep a connection here, and is the app there?
   Protect-Dir $ctx.dir
   $probe = Join-Path $ctx.dir ".probe-$(Hex 4)"
   try { [IO.File]::Open($probe, [IO.FileMode]::CreateNew).Dispose(); [IO.File]::Delete($probe) } catch {
@@ -645,7 +607,6 @@ function Invoke-Connect($ctx, [bool]$replace) {
     if (-not $rec) { $rec = New-Record $ctx }
     $rec = Invoke-RevokePending $ctx $rec
     if ($rec.refreshToken -and -not $replace) { return Write-Json ([ordered]@{ status = 'already_connected'; label = $rec.label; scope = $rec.scope }) }
-    # The open code again, unless asked for a new one (--replace: the link did not work for the person).
     if ($rec.deviceCode -and ($rec.deviceExpiresAt - (Now)) -gt 30 -and -not $replace) { return Write-Json (Get-Pending $rec) }
     Assert-Mine $ctx $lock
     $r = Invoke-OAuth $ctx '/oauth/device' ([ordered]@{ scope = $Scope; resource = "$($ctx.issuer)/api"; client_label = $ctx.label })
@@ -694,7 +655,6 @@ function Invoke-Wait($ctx) {
           $oauthError = Get-Field $r 'error'
           if ($r.status -eq 200) {
             $tokens = Get-Tokens $r
-            # Connecting again (--replace): the old connection is ended once the new one is stored.
             $old = ''
             if ($rec.refreshToken -and $rec.refreshToken -ne $tokens.refreshToken) { $old = $rec.refreshToken }
             $rec = Merge (Clear-Pending $rec) $tokens
@@ -728,7 +688,6 @@ function Invoke-Wait($ctx) {
 
 function Test-Usable($rec) { $rec.accessToken -and ($rec.accessExpiresAt - (Now)) -gt 60 -and -not $rec.refreshStartedAt }
 
-# A live access token: the stored one while it lasts, else one refresh under the lock.
 function Get-AccessToken($ctx, [string]$stale) {
   $first = Read-Record $ctx
   if (-not $first -or -not $first.refreshToken) { Fail 'not_connected' 'Not connected. Run: mailcow-logs connect' }
@@ -738,15 +697,12 @@ function Get-AccessToken($ctx, [string]$stale) {
     $rec = Read-Record $ctx
     if (-not $rec -or -not $rec.refreshToken) { Fail 'not_connected' 'Not connected. Run: mailcow-logs connect' }
     $rec = Invoke-RevokePending $ctx $rec
-    # Another command refreshed while this one waited for the lock.
     if ((Test-Usable $rec) -and $rec.accessToken -ne $stale) { return $rec.accessToken }
     $before = @{ refreshStartedAt = $rec.refreshStartedAt; refreshRetried = $rec.refreshRetried }
-    # A refresh that started moments ago may still be on its way (its holder lost the lock): never send it twice.
     if ($rec.refreshStartedAt -and ((Now) - $rec.refreshStartedAt) -lt $RefreshGrace) {
       Fail 'busy' 'Another mailcow-logs command is refreshing this connection. Nothing was sent; run it again.'
     }
     if ($rec.refreshStartedAt) {
-      # The last refresh got no answer; trying once more either continues the connection or ends it there.
       if ($rec.refreshRetried) { Fail 'connection_ended' 'Two refreshes got no answer, so this connection cannot be trusted. Run: mailcow-logs connect --replace' }
       $rec.refreshRetried = [long]1
     }
@@ -757,7 +713,6 @@ function Get-AccessToken($ctx, [string]$stale) {
     try {
       $r = Invoke-OAuth $ctx '/oauth/token' ([ordered]@{ grant_type = 'refresh_token'; refresh_token = $rec.refreshToken; resource = "$($ctx.issuer)/api" })
     } catch [OpsFail] {
-      # Nothing left the computer: the token is as good as before.
       if ($_.Exception.Code -eq 'unreachable' -and -not $_.Exception.Sent) { Write-Record $ctx (Merge $rec $before) }
       throw
     }
@@ -765,30 +720,26 @@ function Get-AccessToken($ctx, [string]$stale) {
       $next = Merge (Merge $rec (Get-Tokens $r)) @{ refreshStartedAt = [long]0; refreshRetried = [long]0 }
       Invoke-Hook 'before-write'
       if (-not (Test-Mine $ctx $lock)) {
-        # The lock was taken while this one waited for the app: keep the new tokens anyway, under a fresh lock.
         $again = Enter-Lock $ctx $lock
         try { Write-Record $ctx $next } finally { Exit-Lock $ctx $again }
       } else { Write-Record $ctx $next }
       return $next.accessToken
     }
     if ((Get-Field $r 'error') -eq 'invalid_grant') {
-      # An old connection still to be ended (after --replace) keeps its place until the app confirms it.
       if ($rec.toRevoke) { Write-Record $ctx (Merge (New-Record $ctx) @{ label = $rec.label; toRevoke = $rec.toRevoke }) }
       else { Remove-Record $ctx }
       Fail 'connection_ended' 'This connection has ended (disconnected in Settings, its time ran out, sign-in settings changed, or its token was used twice). Run: mailcow-logs connect'
     }
-    # The app answered with an error before spending the token (a 4xx); a 5xx may have come after.
     if ($r.status -lt 500) { Write-Record $ctx (Merge $rec $before) }
     throw (New-HttpFail $r 'Refreshing the connection')
   } finally { Exit-Lock $ctx $lock }
 }
 
-# The full path of an API call (with its query) and the URL to send it to.
 function Get-ApiTarget($ctx, [string]$p) {
   $bad = 'Give a path of the API, for example: messages?limit=20 (percent-encode anything else)'
   if (-not $p) { Fail 'bad_path' $bad }
   if ($p.StartsWith('/api/')) { $p = $p.Substring(4) }
-  # Encoded dots too: a server or proxy that decodes them would take the token out of the API.
+  # Allowing %2e lets a server or proxy that decodes it send the token outside the API.
   if ($p -notmatch $PathChars -or $p.Contains('://') -or $p.StartsWith('//') -or $p -match '%2e') { Fail 'bad_path' $bad }
   $pathOnly = ($p -split '\?', 2)[0]
   foreach ($s in ($pathOnly -split '/')) { if ($s -eq '.' -or $s -eq '..') { Fail 'bad_path' $bad } }
@@ -798,8 +749,6 @@ function Get-ApiTarget($ctx, [string]$p) {
   if ("$($u.Scheme)://$($u.Authority)" -ne $ctx.issuer -or -not $u.AbsolutePath.StartsWith('/api/') -or $u.AbsolutePath.Length -le 5) { Fail 'bad_path' $bad }
   @{ url = $u.AbsoluteUri; path = $u.AbsolutePath; hasQuery = [bool]$u.Query }
 }
-
-# Kinds: whether a call is a read or an action, from the server's own list of this connection's calls.
 
 function Read-Kinds($ctx, $rec) {
   if (-not [IO.File]::Exists($ctx.kinds)) { return $null }
@@ -830,7 +779,7 @@ function Write-Kinds($ctx, $rec, $data) {
     if ($e.PSObject.Properties['kind'] -and [string]$e.kind -eq 'read') { $kind = 'read' }
     if ($method -cmatch '^[A-Z]{3,7}$' -and $template -match $Template) { $lines.Add("$method $template $kind") }
   }
-  # Only a cache: without it every call counts as an action.
+  # Throwing here fails a call that ran, only because its cache could not be saved.
   try { Write-Private $ctx $ctx.kinds (($lines -join "`n") + "`n") } catch {}
 }
 
@@ -848,7 +797,6 @@ function Test-TemplateMatch([string]$template, [string]$path) {
   $t.Count -eq $s.Count
 }
 
-# "read" or "act". An endpoint the list does not hold, or no list, counts as an action.
 function Get-Kind($ctx, [string]$method, [string]$path) {
   if ($method -eq 'GET' -and ($path -eq '/api/agent/access' -or $path -eq '/api/agent/endpoints')) { return 'read' }
   $rec = Read-Record $ctx
@@ -869,9 +817,6 @@ function Get-Kind($ctx, [string]$method, [string]$path) {
   'read'
 }
 
-# One API call with its retries: a refresh and one retry after a 401 (the server checks the token before the route
-# runs), one retry after a 429 busy (nothing started), and for a read one retry after a network failure. An action
-# is never sent again once it may have reached the app.
 function Send-Api($ctx, [string]$method, [string]$url, $json, [string]$kind) {
   $token = Get-AccessToken $ctx ''
   $refreshed = $false; $busyRetried = $false; $netRetried = $false
@@ -900,7 +845,6 @@ function Send-Api($ctx, [string]$method, [string]$url, $json, [string]$kind) {
   }
 }
 
-# The answer as JSON text on one line: a JSON answer as it is (its line breaks are only spacing), text as a string.
 function Get-DataText($r) {
   if ($r.isJson) { return ($r.text -replace "[`r`n]", '').Trim() }
   ConvertTo-JsonString $r.text
@@ -929,7 +873,6 @@ function Invoke-Api($ctx, [string]$method, [string]$p, $json) {
     Write-Line ('{"status":' + $r.status + ',"data":' + $data + '}')
     return
   }
-  # The app's own refusals for agents carry a code and a message: passed on as they are.
   $code = Get-Field $r 'error'; $message = Get-Field $r 'message'
   if ($code -cmatch '^[a-z_]{1,40}$' -and (Test-Object $r.json) -and $r.json.PSObject.Properties['message'] -and $r.json.message -is [string]) {
     $f = [OpsFail]::new($code, $message); $f.Status = $r.status; throw $f

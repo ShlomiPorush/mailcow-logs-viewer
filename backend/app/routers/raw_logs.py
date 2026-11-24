@@ -1,13 +1,3 @@
-"""
-Raw Logs Router - REST API endpoints and WebSocket for the Live Log Viewer.
-
-Endpoints:
-- GET  /api/raw-logs/services         - List available services
-- GET  /api/raw-logs/worker-status    - Worker health info
-- GET  /api/raw-logs/{service}        - Query stored logs (paginated)
-- GET  /api/raw-logs/{service}/smart-filters - Postfix smart filter definitions
-- WS   /ws/raw-logs                   - WebSocket for real-time log streaming
-"""
 import logging
 import asyncio
 import json
@@ -44,31 +34,14 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-# The WebSocket route is mounted at the application root (no /api prefix), so it
-# lives on its own router. Mounting the whole router twice would also publish
-# every HTTP route here under /raw-logs/..., which the auth middleware lets
-# through unauthenticated because it only guards paths under /api/.
 ws_router = APIRouter()
 
-# ── WebSocket Auth Tokens (in-memory, short-lived) ─────────────────────────
-# A stream lasts longer than the request that allowed it, so it carries the
-# authority it came from: the session that asked for its token (None without
-# one) and the session generation at that time. It ends when that session is
-# deleted or expires (sign-out) or when every session is revoked (sign-in
-# settings changed), the same moments the HTTP API stops accepting the session.
-# It also carries the person (user_access.Principal.ref(), None for the
-# built-in admin), whose View for Logs is checked again while it runs.
 Authority = Tuple[Optional[str], int, Optional[dict]]
 
-_ws_tokens: Dict[str, Tuple[float, Authority]] = {}  # token -> (expiry timestamp, authority)
-_WS_TOKEN_TTL = 30  # seconds
-# Close code for a stream whose session ended or whose person lost View for
-# Logs. The page reconnects on it: with a valid session and access it gets a
-# new token, otherwise the token request is refused.
+_ws_tokens: Dict[str, Tuple[float, Authority]] = {}
+_WS_TOKEN_TTL = 30
 WS_SESSION_ENDED = 4001
-# A valid token whose person no longer has View for Logs
 WS_NOT_PERMITTED = 4403
-# How often an open stream checks the person's access again, at most
 WS_ACCESS_CHECK_SECONDS = 5
 
 
@@ -91,25 +64,17 @@ async def _may_read_logs(authority: Authority) -> bool:
 
 
 def _cleanup_expired_tokens():
-    """Remove expired tokens. Iterate over a snapshot so a concurrent
-    mutation of _ws_tokens can never raise 'dictionary changed size'."""
     now = time.time()
     expired = [t for t, (exp, _authority) in list(_ws_tokens.items()) if exp < now]
     for t in expired:
         _ws_tokens.pop(t, None)
 
 
-# =============================================================================
-# WEBSOCKET MANAGER
-# =============================================================================
-
 WS_SEND_TIMEOUT_SECONDS = 10
 WS_CLOSE_TIMEOUT_SECONDS = 1
 
 
 class LogStreamManager:
-    """Broadcast independently to viewers while serializing each socket's writes."""
-
     def __init__(self):
         self.connections: Dict[str, List[WebSocket]] = {}
         self._send_locks: Dict[WebSocket, asyncio.Lock] = {}
@@ -145,7 +110,6 @@ class LogStreamManager:
         return True
 
     async def _drop(self, websocket: WebSocket, code: int = 1013, reason: str = ""):
-        # A client may have switched service while its write was pending.
         if self._send_locks.pop(websocket, None) is None:
             return
         self._authority.pop(websocket, None)
@@ -156,10 +120,9 @@ class LogStreamManager:
         try:
             await asyncio.wait_for(websocket.close(code=code, reason=reason), WS_CLOSE_TIMEOUT_SECONDS)
         except Exception:
-            pass  # The peer may already be gone or unable to receive a close frame.
+            pass
 
     async def _access_lost(self, websocket: WebSocket) -> bool:
-        """Whether the stream's person lost View for Logs, checked at most every few seconds."""
         authority = self._authority.get(websocket)
         if authority is None or _person(authority) is None:
             return False
@@ -170,7 +133,6 @@ class LogStreamManager:
         return not await _may_read_logs(authority)
 
     async def end_if_revoked(self, websocket: WebSocket) -> bool:
-        """Close the stream if its session ended or its person lost View for Logs. True when it was closed."""
         if self.is_current(websocket):
             if not await self._access_lost(websocket):
                 return False
@@ -187,7 +149,6 @@ class LogStreamManager:
         if await self.end_if_revoked(websocket):
             return False
         try:
-            # Include waiting for an earlier write in this client's time budget.
             async with asyncio.timeout(WS_SEND_TIMEOUT_SECONDS):
                 async with lock:
                     if self._send_locks.get(websocket) is not lock:
@@ -224,19 +185,13 @@ class LogStreamManager:
         await self._broadcast_text(clients, json.dumps(message))
 
 
-# Module-level instance
 log_stream_manager = LogStreamManager()
 
-# Register the broadcast functions with the worker
 set_ws_broadcast_fn(log_stream_manager.broadcast)
 set_ws_broadcast_all_fn(log_stream_manager.broadcast_to_all)
 
 
 def _admitted_authority(request: Request) -> Optional[Authority]:
-    """The authority the middleware let this request in with (auth.py), or
-    None when it is no longer current: the admitted session and the admitted
-    generation, never the state at the time the handler runs. A session that
-    ended, or a sign-in change, after the admission gets no stream."""
     admission = getattr(request.state, "auth_admission", None)
     generation = getattr(request.state, "auth_generation", None)
     principal = getattr(request.state, "principal", None)
@@ -273,10 +228,6 @@ async def get_ws_token(request: Request):
     return {"token": token, "ttl": _WS_TOKEN_TTL}
 
 
-# =============================================================================
-# WEBSOCKET ENDPOINT
-# =============================================================================
-
 @ws_router.websocket("/ws/raw-logs")
 async def websocket_raw_logs(
     websocket: WebSocket,
@@ -292,14 +243,10 @@ async def websocket_raw_logs(
     Client can send messages to switch service:
       {"action": "subscribe", "service": "dovecot"}
     """
-    # ── WebSocket Authentication ────────────────────────────────────────
-    # Without authentication the stream is still tied to the session
-    # generation, so turning authentication on ends it
     authority: Authority = (None, auth_generation())
     if settings.is_authentication_enabled:
         authenticated = False
 
-        # Validate one-time token; always consume it (one-time use)
         entry = _ws_tokens.pop(token, None) if token else None
         if entry:
             expiry, authority = entry
@@ -317,16 +264,13 @@ async def websocket_raw_logs(
             await websocket.close(code=4401, reason="Authentication required")
             return
 
-        # The person may have lost View for Logs since the token was issued
         if not await _may_read_logs(authority):
             logger.info("[WS Auth] Live log stream refused: no View for Logs")
             await websocket.accept()
             await websocket.send_json({"type": "error", "message": user_access.NOT_PERMITTED})
             await websocket.close(code=WS_NOT_PERMITTED, reason="No permission")
             return
-    # ────────────────────────────────────────────────────────────────────
     
-    # Validate service
     enabled = settings.raw_logs_services_list
     if service not in enabled:
         service = enabled[0] if enabled else "postfix"
@@ -335,14 +279,12 @@ async def websocket_raw_logs(
     await log_stream_manager.connect(websocket, current_service, authority)
     
     try:
-        # Send initial connection confirmation
         await log_stream_manager.send_json(websocket, {
             "type": "connected",
             "service": current_service,
             "message": f"Connected to {current_service} log stream"
         })
         
-        # Listen for client messages (service switches, etc.)
         while True:
             try:
                 data = await websocket.receive_text()
@@ -370,16 +312,12 @@ async def websocket_raw_logs(
             except WebSocketDisconnect:
                 break
             except json.JSONDecodeError:
-                pass  # Ignore malformed messages
+                pass
             except Exception:
                 break
     finally:
         await log_stream_manager.disconnect(websocket, current_service)
 
-
-# =============================================================================
-# REST API ENDPOINTS
-# =============================================================================
 
 @router.get("/raw-logs/services", responses=documented(m.RawLogServices))
 def get_services():
@@ -389,7 +327,6 @@ def get_services():
     """
     enabled = settings.raw_logs_services_list
     
-    # Get log counts per service
     service_counts = {}
     try:
         with get_db_context() as db:
@@ -413,7 +350,6 @@ def get_services():
             "log_count": service_counts.get(service_id, 0),
         })
     
-    # WebSocket connection info
     ws_connections = log_stream_manager.get_connection_count()
     
     return {
@@ -426,7 +362,6 @@ def get_services():
 @router.get("/raw-logs/worker-status", responses=documented(m.RawLogsWorkerStatus))
 def get_worker_status(request: Request = None):
     """Worker health check - last fetch time, stats, errors"""
-    # A copy with the run times as UTC with Z; the worker's own record stays as it is
     status = {
         name: {**job, "last_run": format_datetime_for_api(job.get("last_run")),
                **({"error": user_access.job_error(request, job["error"])} if "error" in job else {})}
@@ -444,8 +379,6 @@ def get_worker_status(request: Request = None):
 
 
 def _range_bound(value: Optional[str], end: bool) -> Optional[datetime]:
-    """A range bound as stored times are kept (naive UTC): see app_time.range_bound.
-    None when empty or unreadable."""
     if not value:
         return None
     try:
@@ -478,8 +411,6 @@ def get_raw_logs(
         with get_db_context() as db:
             query = db.query(RawServiceLog).filter(RawServiceLog.service == service)
 
-            # Date range filter: instants (UTC unless they say otherwise), or
-            # whole days (YYYY-MM-DD) in the app's time zone
             start_bound = _range_bound(start_date, end=False)
             if start_bound is not None:
                 query = query.filter(RawServiceLog.time >= start_bound)
@@ -488,11 +419,9 @@ def get_raw_logs(
             if end_bound is not None:
                 query = query.filter(RawServiceLog.time <= end_bound)
             
-            # Text search in raw_data JSONB
             if search:
                 search_term = f"%{search}%"
                 if service == "rspamd-history":
-                    # Rspamd history has subject, sender_smtp, sender_mime, ip - no 'message' field
                     query = query.filter(
                         or_(
                             cast(RawServiceLog.raw_data['subject'], String).ilike(search_term),
@@ -507,33 +436,27 @@ def get_raw_logs(
                         cast(RawServiceLog.raw_data['message'], String).ilike(search_term)
                     )
             
-            # Program filter
             if program:
                 query = query.filter(
                     cast(RawServiceLog.raw_data['program'], String).ilike(f"%{program}%")
                 )
             
-            # Smart filters (Postfix-specific patterns)
             if smart_filter and service == "postfix":
                 filters = smart_filter.split(',')
                 smart_conditions = _build_smart_filter_conditions(filters)
                 if smart_conditions:
                     query = query.filter(or_(*smart_conditions))
             
-            # Get total count
             total = query.count()
             
-            # Sort
             if order == "asc":
                 query = query.order_by(asc(RawServiceLog.time))
             else:
                 query = query.order_by(desc(RawServiceLog.time))
             
-            # Paginate
             offset = (page - 1) * limit
             logs = query.offset(offset).limit(limit).all()
             
-            # Build response
             data = []
             for log in logs:
                 entry = log.raw_data.copy() if log.raw_data else {}
@@ -641,8 +564,6 @@ def get_smart_filters(
 
 
 def _build_smart_filter_conditions(filter_ids: List[str]):
-    """Build SQLAlchemy filter conditions from smart filter IDs"""
-    # Smart filter definitions
     filter_map = {
         "postscreen":        ("program", "postfix/postscreen"),
         "noqueue_reject":    ("message", "NOQUEUE: reject"),

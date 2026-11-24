@@ -1,10 +1,3 @@
-"""What the Settings calls return (routers/settings.py): the settings, the Status
-page's information, the checks of credentials and connections, GeoIP, and the
-manual job runs.
-
-GET /api/settings/info and GET /api/settings/health answer 200 when the
-database read fails: then `error` says so, as the Failed models show.
-"""
 from typing import Any, Dict, List, Optional, Union
 
 from pydantic import Field
@@ -16,11 +9,6 @@ TIME = "UTC, ISO 8601 with Z"
 SETTINGS = ("One key per editable setting, named like its environment variable in lower case. "
             "A secret is ******** when set and empty when not")
 
-# 403: UI editing is off ({detail}). An AI agent refused a route only people may use gets the agent
-# gateway's {error, message} instead, which the API description covers for every call
-
-
-# ---------------------------------------------------------------- shared parts
 
 class CheckResult(Fixed):
     """The last check of a credential: MaxMind's license key, mailcow's Read-Write key or the Rspamd password."""
@@ -60,8 +48,6 @@ class GeoipNotSet(Fixed):
     City: GeoipFileNotSet
     ASN: GeoipFileNotSet
 
-
-# ---------------------------------------------------------------- GET /settings/info
 
 class InfoConfiguration(Fixed):
     """The settings in force, without secrets."""
@@ -264,8 +250,6 @@ class SettingsInfoFailed(Fixed):
 SettingsInfoResponse = Union[SettingsInfo, SettingsInfoFailed]
 
 
-# ---------------------------------------------------------------- editing the settings
-
 class EditableSettings(Fixed):
     """The editable settings, for the Settings page."""
     settings_edit_via_ui_enabled: bool
@@ -321,11 +305,8 @@ class FeatureDataPurged(Fixed):
     total_rows_deleted: int
 
 
-# The same map error as the suppression calls give
 PurgeMapError = RspamdMapError
 
-
-# ---------------------------------------------------------------- checks
 
 class ConnectionTest(Fixed):
     success: bool
@@ -405,8 +386,6 @@ class CredentialCheck(Fixed):
     stale: bool = Field(None, description="true: the credential changed while it was checked, so this result "
                                           "was not stored")
 
-
-# ---------------------------------------------------------------- GeoIP and jobs
 
 class GeoipStatus(Fixed):
     configured: bool = Field(description="The MaxMind Account ID and License Key are set")

@@ -1,12 +1,3 @@
-"""
-API endpoints for managing Rspamd map files
-
-Provides read/write access to all 13 Rspamd maps in mailcow,
-including regex validation before saving.
-
-Read: Rspamd API (GET /rspamd/maps, GET /rspamd/getmap) via Password header
-Write: mailcow API (POST /api/v1/edit/rspamd-map) via X-API-Key RW header
-"""
 import hashlib
 import re
 import logging
@@ -25,7 +16,6 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-# All known mailcow Rspamd maps with metadata
 RSPAMD_MAPS = [
     {
         "filename": "global_mime_from_blacklist.map",
@@ -121,14 +111,11 @@ RSPAMD_MAPS = [
     },
 ]
 
-# Build a quick lookup by filename
 _MAP_METADATA = {m["filename"]: m for m in RSPAMD_MAPS}
 
 
 class MapContentRequest(BaseModel):
     content: str
-    # content_hash of the map as the editor read it: the save is refused when
-    # the map changed since (the suppression sync writes the recipient denylist)
     base_hash: Optional[str] = None
 
 
@@ -140,7 +127,6 @@ def content_hash(content: str) -> str:
 
 
 async def _read_map(filename: str) -> str:
-    """The map as Rspamd has it now ("" when Rspamd has not loaded it)."""
     map_id = await mailcow_api.find_rspamd_map_id(filename)
     return "" if map_id is None else await mailcow_api.get_rspamd_map_content(map_id)
 
@@ -151,27 +137,15 @@ class MapValidationRequest(BaseModel):
 
 
 def validate_map_content(content: str) -> List[Dict[str, Any]]:
-    """
-    Validate map content line by line.
-    Returns a list of errors (empty if all valid).
-    
-    Each line can be:
-    - Empty / whitespace only -> valid
-    - Comment (starts with #) -> valid
-    - Regex (starts with / and ends with / or /i) -> validate regex syntax
-    - Plain text (email, domain, header, word) -> accept
-    """
     errors = []
     lines = content.replace('\r\n', '\n').replace('\r', '\n').split('\n')
     
     for i, line in enumerate(lines, 1):
         stripped = line.strip()
         
-        # Empty or comment lines are always valid
         if not stripped or stripped.startswith('#'):
             continue
         
-        # Check if it looks like a regex: /pattern/ or /pattern/i
         regex_match = re.match(r'^/(.+)/([a-zA-Z]*)$', stripped)
         if regex_match:
             pattern = regex_match.group(1)
@@ -189,8 +163,6 @@ def validate_map_content(content: str) -> List[Dict[str, Any]]:
                     "error": f"Invalid regex: {str(e)}"
                 })
             except (OverflowError, RecursionError) as e:
-                # Too large a repeat count or too deep a nesting for the check;
-                # Rspamd's own regex engine may differ, but the line is not saved unchecked
                 errors.append({
                     "line": i,
                     "content": stripped,
@@ -199,11 +171,6 @@ def validate_map_content(content: str) -> List[Dict[str, Any]]:
                 })
             continue
 
-        # A bare address in a regexp map is compiled unanchored and matches
-        # every recipient that merely CONTAINS it - e@example.com also hits
-        # alice@example.com. Accepted for compatibility, but flagged. The
-        # linear pattern and the length cap keep crafted lines from stalling
-        # the worker (dot excluded from the repeated classes).
         if len(stripped) <= 320 and re.match(r'^[^\s/@]+@[^\s/@.]+(?:\.[^\s/@.]+)+$', stripped):
             errors.append({
                 "line": i,
@@ -213,8 +180,6 @@ def validate_map_content(content: str) -> List[Dict[str, Any]]:
             })
             continue
 
-        # All other lines are accepted (emails, domains, headers, words, TLDs, etc.)
-        # We don't strictly validate format since maps can contain various entry types
 
     return errors
 
@@ -242,7 +207,6 @@ async def list_rspamd_maps():
     from the Rspamd API for live status.
     """
     if not settings.is_rspamd_configured:
-        # Return metadata only, without live data
         return {
             "configured": False,
             "message": "Rspamd password not configured. Set RSPAMD_PASSWORD in Settings.",
@@ -250,10 +214,8 @@ async def list_rspamd_maps():
         }
     
     try:
-        # Fetch live map data from Rspamd
         live_maps = await mailcow_api.get_rspamd_maps()
         
-        # Build lookup by filename from uri
         live_lookup = {}
         for lm in live_maps:
             uri = lm.get("uri", "")
@@ -263,11 +225,10 @@ async def list_rspamd_maps():
                         "map_id": lm.get("map"),
                         "loaded": lm.get("loaded", False),
                         "editable": lm.get("editable", False),
-                        "rspamd_description": lm.get("description", ""),  # renamed to avoid overwriting our metadata description
+                        "rspamd_description": lm.get("description", ""),
                     }
                     break
         
-        # Merge live data with our metadata
         result_maps = []
         for m in RSPAMD_MAPS:
             entry = {**m}
@@ -320,7 +281,6 @@ async def get_map_content(filename: str):
 
         content = await mailcow_api.get_rspamd_map_content(map_id)
 
-        # Count non-empty, non-comment lines
         lines = [l.strip() for l in content.split('\n') if l.strip() and not l.strip().startswith('#')]
 
         return {
@@ -353,16 +313,12 @@ async def update_map_content(filename: str, body: MapContentRequest):
             detail="Read-Write API key (MAILCOW_API_KEY_RW) is not configured. Cannot save map changes."
         )
     
-    # Bare addresses are anchored automatically - in a regexp map they match
-    # as substrings, and operators are not expected to fix that by hand
     from .suppressions import migrate_manual_map_line
     raw_lines = body.content.split('\n')
     normalized_lines = [migrate_manual_map_line(l) for l in raw_lines]
     normalized_count = sum(1 for a, b in zip(raw_lines, normalized_lines) if a != b)
     content_to_save = '\n'.join(normalized_lines)
 
-    # Validate the content that will actually be saved - only real errors
-    # block the save
     findings = validate_map_content(content_to_save)
     errors = [f for f in findings if f.get('severity', 'error') == 'error']
     warnings = [f for f in findings if f.get('severity') == 'warning']
@@ -376,9 +332,6 @@ async def update_map_content(filename: str, body: MapContentRequest):
         )
 
     try:
-        # The suppression sync writes the recipient denylist too; one writer at
-        # a time, from the check that the map is still the one the editor read
-        # to the read of what was saved
         saved, saved_hash = content_to_save, None
         async with map_write_lock_async():
             readable = settings.is_rspamd_configured
@@ -387,8 +340,6 @@ async def update_map_content(filename: str, body: MapContentRequest):
                 raise HTTPException(status_code=409, detail={"code": "map_changed", "message": MAP_CHANGED_TEXT})
             result = await mailcow_api.edit_rspamd_map(filename, content_to_save)
             if readable:
-                # What the next save is checked against: the map as saved
-                # (mailcow trims it and ends it with a new line)
                 try:
                     saved = await _read_map(filename)
                     saved_hash = content_hash(saved)
@@ -396,7 +347,6 @@ async def update_map_content(filename: str, body: MapContentRequest):
                     logger.warning(f"Saved map {filename} could not be read back: {e}")
                     saved = content_to_save
 
-        # Count entries for response
         lines = [l.strip() for l in saved.split('\n') if l.strip() and not l.strip().startswith('#')]
 
         return {
@@ -405,7 +355,6 @@ async def update_map_content(filename: str, body: MapContentRequest):
             "entry_count": len(lines),
             "normalized_entries": normalized_count,
             "content": saved,
-            # None when the saved map could not be read back: open it again before the next save
             "content_hash": saved_hash,
             "warnings": warnings,
             "api_response": result,
@@ -430,7 +379,6 @@ def validate_map(body: MapValidationRequest):
     errors = [f for f in findings if f.get('severity', 'error') == 'error']
     warnings = [f for f in findings if f.get('severity') == 'warning']
 
-    # Count entries
     lines = [l.strip() for l in body.content.split('\n') if l.strip() and not l.strip().startswith('#')]
 
     return {

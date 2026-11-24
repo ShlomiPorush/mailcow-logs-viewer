@@ -1,14 +1,3 @@
-"""Client ID Metadata Documents: a client whose client_id is an https URL.
-
-The document at that URL names the client and lists its redirect addresses
-(draft-ietf-oauth-client-id-metadata-document-00). Fetching a URL a stranger
-chose is a server-side request, so it is fenced in: only after a person signed
-in, https on port 443 only, every resolved address must be public, the
-connection goes to the vetted address (no second DNS lookup) with the
-certificate checked against the host name, no redirects, no proxy from the
-environment, no compression, at most 64 KB and 5 seconds. Failures are not
-cached; good documents are cached in memory.
-"""
 import asyncio
 import ipaddress
 import json
@@ -33,7 +22,6 @@ CACHE_MAX_SECONDS = 86400
 MAX_CONCURRENT_FETCHES = 4
 
 
-# Why a client's metadata document cannot be used, as shown to the person
 REASONS: Dict[str, str] = {
     "address_too_long": "The client's address is too long.",
     "address_invalid": "The client's address is not valid.",
@@ -58,15 +46,13 @@ REASONS: Dict[str, str] = {
 
 
 class ClientDocumentError(Exception):
-    """The client's metadata document cannot be used; reason is a key of REASONS."""
-
     def __init__(self, reason: str):
         super().__init__(REASONS[reason])
         self.reason = reason
 
 
 def reason_text(error: ClientDocumentError) -> str:
-    """The text for the person, taken from REASONS rather than from the exception."""
+    # Looking the text up by error.reason directly brings back CodeQL's alert on the error page (#508)
     return next((text for reason, text in REASONS.items() if reason == error.reason),
                 "The client's details cannot be used.")
 
@@ -88,7 +74,6 @@ def is_document_client_id(client_id: str) -> bool:
 
 
 def _check_url(url: str) -> Tuple[str, str]:
-    """(host, path with query) of an acceptable document URL."""
     if len(url) > MAX_URL_LENGTH:
         raise ClientDocumentError("address_too_long")
     try:
@@ -122,7 +107,6 @@ def _public_one(ip) -> bool:
 
 
 def _public(address: str) -> bool:
-    """Whether an address is a public unicast one, IPv4 carried inside IPv6 included."""
     try:
         ip = ipaddress.ip_address(address.split("%", 1)[0])
     except ValueError:
@@ -163,8 +147,7 @@ def _cache_seconds(cache_control: str) -> int:
 
 
 def parse_document(url: str, body: bytes, publisher: str) -> ClientDocument:
-    """Validate the document's content (also used by tests)."""
-    from .oauth import valid_redirect_uri  # local import: oauth imports this module
+    from .oauth import valid_redirect_uri
 
     try:
         doc = json.loads(body.decode("utf-8"))
@@ -188,22 +171,10 @@ def parse_document(url: str, body: bytes, publisher: str) -> ClientDocument:
 
 
 def _also_offers_none(methods) -> bool:
-    """Whether a client that prefers another method lists "none" among the ones it supports.
-
-    Not in the CIMD draft: ChatGPT's document asks for private_key_jwt and lists
-    ["none", "private_key_jwt"] next to it. Such a client is a public client here
-    like any other (PKCE S256, the exact redirect, no client authentication).
-    """
     return isinstance(methods, list) and all(isinstance(m, str) for m in methods) and "none" in methods
 
 
 async def fetch(url: str) -> ClientDocument:
-    """The client's document, from the cache or the web, within TIMEOUT_SECONDS in all.
-
-    The deadline covers waiting for a free fetch, the DNS lookup and the whole
-    download: httpx's own timeout only limits each read, so a server sending a
-    byte every few seconds would otherwise hold a fetch for as long as it likes.
-    """
     cached = _cache.get(url)
     if cached and cached[0] > time.monotonic():
         return cached[1]

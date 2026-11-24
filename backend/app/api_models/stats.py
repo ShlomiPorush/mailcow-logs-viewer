@@ -1,8 +1,3 @@
-"""What the dashboard statistics return (routers/stats.py, stats_flow.py, stats_trends.py).
-
-Most of these calls answer 200 even when the database read fails: the
-figures are then zero (or the list empty) and `error` says so.
-"""
 from typing import Dict, List, Optional
 
 from pydantic import ConfigDict, Field

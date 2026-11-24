@@ -1,16 +1,3 @@
-"""The OAuth 2.1 authorization server agents sign in through.
-
-Public clients only. Two ways in: authorization code with PKCE (S256) for MCP
-apps, where the browser runs on the agent's computer, and the device
-authorization grant (RFC 8628) for agents that run the skill's script, where a
-person approves with a short code on any device. Refresh tokens rotate.
-Discovery follows RFC 9728 (protected resource) and RFC 8414 (authorization
-server). Clients identify with a metadata document URL (CIMD, cimd.py) or
-register themselves (RFC 7591, deprecated in MCP but still used). Every answer
-to the client carries `iss` (RFC 9207) and returns `state` unchanged.
-
-Every route here answers 404 while agent access is not live.
-"""
 import html
 import json
 import logging
@@ -41,13 +28,12 @@ _FORBIDDEN_SCHEMES = frozenset({"javascript", "data", "file", "vbscript", "about
 
 registrations = Window(limit=10, seconds=3600)
 token_requests = Window(limit=30, seconds=60)
-device_requests = Window(limit=10, seconds=3600)      # codes asked for, per address
-code_lookups = Window(limit=10, seconds=600)          # codes typed or opened, per address and per session
-unknown_device_codes = Window(limit=20, seconds=60)   # polls with a code that cannot succeed, per address
+device_requests = Window(limit=10, seconds=3600)
+code_lookups = Window(limit=10, seconds=600)
+unknown_device_codes = Window(limit=20, seconds=60)
 
 _NO_STORE = {"Cache-Control": "no-store", "Pragma": "no-cache"}
 
-# Consents waiting in the browser end too when every agent is disconnected
 store.on_disconnect_all.append(pending.clear)
 
 
@@ -57,7 +43,6 @@ def require_live() -> None:
 
 
 def db_call(fn, *args, **kwargs):
-    """Run fn(db, ...) on a fresh session in the thread pool."""
     def run():
         db = SessionLocal()
         try:
@@ -67,10 +52,7 @@ def db_call(fn, *args, **kwargs):
     return run_in_threadpool(run)
 
 
-# ── Redirect addresses ─────────────────────────────────────────────────────
-
 def valid_redirect_uri(uri: str) -> bool:
-    """https anywhere, http only on a loopback host, or a private-use scheme of a native app."""
     if not isinstance(uri, str) or not uri or len(uri) > MAX_URI_LENGTH:
         return False
     if any(ord(c) < 33 or ord(c) == 127 for c in uri):
@@ -87,16 +69,10 @@ def valid_redirect_uri(uri: str) -> bool:
         return bool(parts.hostname)
     if scheme == "http":
         return bool(parts.hostname) and live.is_loopback_host(parts.hostname)
-    # A private-use scheme (RFC 8252 7.1) is a reverse domain name, such as com.example.app
     return "." in scheme and scheme not in _FORBIDDEN_SCHEMES and scheme.replace(".", "").replace("-", "").replace("+", "").isalnum()
 
 
 def redirect_matches(registered: List[str], given: str) -> bool:
-    """Exact match, except that a loopback http address may use any port (RFC 8252 7.3).
-
-    Only the port may differ: the host as written, the path and the query must
-    be the same.
-    """
     if not given or not valid_redirect_uri(given):
         return False
     if given in registered:
@@ -115,7 +91,6 @@ def redirect_matches(registered: List[str], given: str) -> bool:
 
 
 def with_params(uri: str, params: Dict[str, Optional[str]]) -> str:
-    """The redirect address with the answer added to its query (its own query kept)."""
     parts = urlsplit(uri)
     query = parse_qsl(parts.query, keep_blank_values=True)
     query += [(k, v) for k, v in params.items() if v is not None]
@@ -129,7 +104,6 @@ def client_redirect(uri: str, state: Optional[str], **params) -> RedirectRespons
 
 
 def error_page(title: str, message: str, status_code: int = 400) -> HTMLResponse:
-    """Shown in the browser when the request cannot be answered to the client."""
     page = f"""<!DOCTYPE html>
 <html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{html.escape(title)} - mailcow Logs Viewer</title>
@@ -141,8 +115,6 @@ def error_page(title: str, message: str, status_code: int = 400) -> HTMLResponse
 </main></body></html>"""
     return HTMLResponse(page, status_code=status_code, headers=_NO_STORE)
 
-
-# ── Discovery ──────────────────────────────────────────────────────────────
 
 def _protected_resource() -> Dict:
     return {
@@ -183,8 +155,6 @@ def authorization_server_metadata():
         "client_id_metadata_document_supported": True,
     })
 
-
-# ── Authorization ──────────────────────────────────────────────────────────
 
 @router.get("/oauth/authorize")
 async def authorize(request: Request):
@@ -234,15 +204,11 @@ async def authorize(request: Request):
     return RedirectResponse(f"{CONSENT_PAGE}?request={entry.id}", status_code=302, headers=_NO_STORE)
 
 
-# ── Agents that connect with a code (RFC 8628) ─────────────────────────────
-
 DEVICE_GRANT = "urn:ietf:params:oauth:grant-type:device_code"
 _LABEL_PUNCTUATION = frozenset(" ._-()@:/")
 
 
 def clean_label(raw: Optional[str]) -> Optional[str]:
-    """The script's name for itself when it is plain text (letters, marks, digits, spaces and . _ - ( ) @ : /,
-    1 to 60 characters); anything else, such as control or direction marks, quotes or markup, drops it."""
     if not isinstance(raw, str):
         return None
     label = unicodedata.normalize("NFC", raw).strip()
@@ -291,7 +257,6 @@ async def device_authorization(request: Request):
 
 
 def code_page(message: Optional[str] = None, status_code: int = 200, value: str = "") -> HTMLResponse:
-    """Where a person types the code their agent shows, when they did not open the agent's link."""
     note = f'<p class="ui-banner ui-banner-fail" role="alert">{html.escape(message)}</p>' if message else ""
     page = f"""<!DOCTYPE html>
 <html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
@@ -345,8 +310,6 @@ async def device_page(request: Request):
     return RedirectResponse(f"{CONSENT_PAGE}?request={entry.id}", status_code=302, headers=_NO_STORE)
 
 
-# ── Token, registration and revocation ─────────────────────────────────────
-
 def _oauth_error(error: str, description: str, status_code: int = 400) -> JSONResponse:
     return JSONResponse({"error": error, "error_description": description}, status_code=status_code, headers=_NO_STORE)
 
@@ -377,8 +340,6 @@ async def token(request: Request):
     except HTTPException as e:
         return _oauth_error("invalid_request", str(e.detail), e.status_code if e.status_code == 413 else 400)
     grant_type = form.get("grant_type")
-    # Polls of a known code are paced by the code itself (slow_down); several
-    # agents behind one address must not use up the budget of the others
     if grant_type != DEVICE_GRANT and not token_requests.hit(ip):
         return _oauth_error("slow_down", "Too many requests. Try again in a minute.", 429)
     if grant_type == DEVICE_GRANT and unknown_device_codes.full(ip):
@@ -392,8 +353,6 @@ async def token(request: Request):
                 result = await db_call(store.redeem_device_code, device_code=form.get("device_code", ""),
                                        client_id=client_id)
             except store.TokenError as e:
-                # Only a code still waiting is paced by the code itself; one that
-                # can never succeed (unknown, used, denied, expired) counts here
                 if e.error not in ("authorization_pending", "slow_down"):
                     unknown_device_codes.hit(ip)
                 raise

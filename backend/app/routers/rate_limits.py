@@ -1,18 +1,3 @@
-"""
-Rate Limits API - who is hitting mailcow's sender rate limits, and control
-over the limits themselves.
-
-mailcow enforces sender rate limits in rspamd, which counts every send against
-a Redis key and writes a line to the `ratelimited` log when a sender runs out.
-This app already collects that log into raw_service_logs, so /events reads the
-local table only: the page stays fast and still answers when mailcow is down.
-/limits and all three write endpoints do talk to mailcow.
-
-Two different things can be changed here, and they are easy to confuse:
-  - the LIMIT is configuration (rl_value messages per rl_frame)
-  - the COUNTER is the Redis hash a blocked sender is currently stuck behind;
-    releasing it lets that sender through again without touching the limit
-"""
 import asyncio
 import logging
 import re
@@ -40,54 +25,35 @@ logger = logging.getLogger(__name__)
 
 
 def _write_failed(e: MailcowAPIError, detail: str) -> HTTPException:
-    """A refused Read-Write key or a write mailcow did not confirm says what to do; any other failure points to the logs."""
     return HTTPException(status_code=502, detail=str(e) if isinstance(e, MailcowShownError) else detail)
 
 router = APIRouter(prefix="/rate-limits")
 
-# A limit sent to mailcow: no Read-Write key (503), a bad value or name (400), mailcow refusing (502)
 RL_WRITE = {400: None, 422: Invalid, 500: None, 502: None, 503: None}
 
-# rspamd's time frames: second, minute, hour, day
 VALID_FRAMES = ('s', 'm', 'h', 'd')
 
-# Shape of the Redis key rspamd counts against, as it appears in the log
 _RL_HASH_RE = re.compile(r'^RL[A-Za-z0-9]+$')
 
-# Detail rows kept per sender, and the length of the flat feed
 _RECENT_PER_SENDER = 5
 _FLAT_EVENT_LIMIT = 50
 
-# One sender's detail view reads its whole history separately. This is far
-# above any realistic sender's collected hits and only guards against a single
-# request rendering a runaway table; `total` still reports the real number.
 _SENDER_EVENTS_MAX = 2000
 
-# The windows the activity chart offers, in hours. Only those within the
-# rate limit history the app keeps are offered (settings.rate_limits_retention_effective)
 _WINDOW_HOURS = (24, 168, 720, 2160, 8760)
 
-# Reading the domain limits is one mailcow round trip per domain and the page
-# refreshes often, so the answers are reused in-process for a few minutes.
 _DOMAIN_LIMIT_TTL = 300
 _domain_limit_cache: Dict[str, Any] = {'at': 0.0, 'limits': None}
 
-# One bulk apply is a single mailcow call per kind, so the only real cost is
-# the size of the payload. This is far above the largest realistic selection
-# (every mailbox of a big server) and keeps a runaway client out.
 _BULK_MAX_ITEMS = 1000
 
 
-# ---- helpers ----
-
 def _bust_domain_limit_cache() -> None:
-    """Drop the cached domain limits after a write."""
     _domain_limit_cache['at'] = 0.0
     _domain_limit_cache['limits'] = None
 
 
 def _require_rw_key() -> None:
-    """Every write here goes through mailcow and needs the Read-Write key."""
     if not mailcow_api.has_rw_key:
         raise HTTPException(
             status_code=503,
@@ -96,7 +62,6 @@ def _require_rw_key() -> None:
 
 
 def _validate_value(value: Any) -> int:
-    """Rate limit values are whole messages per frame; 0 means no limit."""
     try:
         parsed = int(value)
     except (TypeError, ValueError):
@@ -117,11 +82,6 @@ def _validate_frame(frame: str) -> str:
 
 
 def _normalised_names(raw: Optional[List[str]]) -> List[str]:
-    """Lower-cased names in the order they were sent, without blanks or repeats.
-
-    The browser sends whatever the filter currently shows, so the same name can
-    arrive twice; sending it to mailcow twice would be pointless work.
-    """
     names: List[str] = []
     seen = set()
     for name in raw or []:
@@ -133,7 +93,6 @@ def _normalised_names(raw: Optional[List[str]]) -> List[str]:
 
 
 def _limit_value(raw: Any) -> Optional[int]:
-    """mailcow returns the limit as a string; 0 and junk both mean no limit."""
     try:
         parsed = int(str(raw).strip())
     except (TypeError, ValueError):
@@ -142,9 +101,6 @@ def _limit_value(raw: Any) -> Optional[int]:
 
 
 def _bucket_key(when: datetime, kind: str) -> str:
-    """The key one event (a stored naive UTC time) is counted under. An hour
-    is the UTC instant it starts at, with Z, which the frontend shows in the
-    app time zone; a day is a day in the app time zone, shown as it is."""
     if kind == 'hour':
         return format_datetime_for_api(when.replace(minute=0, second=0, microsecond=0))
     return day_key(when)
@@ -152,11 +108,6 @@ def _bucket_key(when: datetime, kind: str) -> str:
 
 def _bucket_series(since: datetime, until: datetime, kind: str,
                    counts: Dict[str, int]) -> List[Dict[str, Any]]:
-    """Every bucket of the window, oldest first, zero-filled.
-
-    A quiet stretch has to show as a gap in the chart, not disappear from it,
-    so buckets with no events are returned with a count of 0.
-    """
     if kind == 'hour':
         cursor = since.replace(minute=0, second=0, microsecond=0)
         keys = []
@@ -164,7 +115,6 @@ def _bucket_series(since: datetime, until: datetime, kind: str,
             keys.append(_bucket_key(cursor, kind))
             cursor += timedelta(hours=1)
     else:
-        # Calendar days of the app time zone, so a 23 or 25 hour day is one bucket
         day, last = to_local(since).date(), to_local(until).date()
         keys = []
         while day <= last:
@@ -177,20 +127,15 @@ def _bucket_series(since: datetime, until: datetime, kind: str,
         covered.add(key)
         series.append({'bucket': key, 'count': counts.get(key, 0)})
 
-    # A row can sit just outside the generated range (a log written while the
-    # request was running). Keep its count rather than losing it.
     for key, count in counts.items():
         if key not in covered:
             series.append({'bucket': key, 'count': count})
 
-    # Both key shapes sort correctly as plain strings
     series.sort(key=lambda entry: entry['bucket'])
     return series
 
 
 def _known_domains(db: Session) -> set:
-    """Local domain names: the mailcow domain cache, plus the domains we have
-    mailboxes for (so the page keeps working before the cache is populated)."""
     names = {(d or '').strip().lower() for d in (get_cached_active_domains() or [])}
     for (domain,) in db.query(MailboxStatistics.domain).distinct().all():
         names.add((domain or '').strip().lower())
@@ -204,7 +149,6 @@ def _load_known_domains_worker() -> set:
 
 
 async def _fetch_domain_limits() -> Tuple[List[Dict[str, Any]], Optional[str]]:
-    """Per-domain limits from mailcow, cached in-process for _DOMAIN_LIMIT_TTL."""
     now = time.monotonic()
     cached = _domain_limit_cache.get('limits')
     if cached is not None and (now - _domain_limit_cache['at']) < _DOMAIN_LIMIT_TTL:
@@ -225,14 +169,11 @@ async def _fetch_domain_limits() -> Tuple[List[Dict[str, Any]], Optional[str]]:
             'rl_frame': data.get('frame') or None,
         })
 
-    # Never cache a partial answer - the next refresh should retry mailcow
     if error is None:
         _domain_limit_cache['limits'] = limits
         _domain_limit_cache['at'] = now
     return limits, error
 
-
-# ---- request models ----
 
 class MailboxLimitRequest(BaseModel):
     mailbox: str
@@ -258,8 +199,6 @@ class ReleaseRequest(BaseModel):
     user: Optional[str] = None
 
 
-# Audit of counter resets, kept in system_settings as JSON: user -> last reset.
-# Feeds the "counter reset" marker on the events rows.
 _RESETS_KEY = 'rate_limit_resets'
 _RESETS_MAX = 100
 
@@ -295,19 +234,12 @@ def _record_reset(db: Session, user: str, rl_hash: str) -> None:
     db.commit()
 
 
-# ---- endpoints ----
-
 def _sender_column():
-    """The sender of a rate limit row, as the page groups it: the logged-in
-    user, or the envelope sender when there is none, trimmed and lowercased.
-    Every query here uses this one expression, so the list, the counts and a
-    sender's own history always agree."""
     user = func.nullif(func.trim(RawServiceLog.raw_data['user'].astext), '')
     return func.lower(func.trim(func.coalesce(user, RawServiceLog.raw_data['from'].astext, '')))
 
 
 def _offered_windows() -> List[int]:
-    """The chart windows within the kept history; a day is always offered."""
     kept = settings.rate_limits_retention_effective * 24
     return [hours for hours in _WINDOW_HOURS if hours <= kept] or [_WINDOW_HOURS[0]]
 
@@ -337,26 +269,22 @@ def get_rate_limit_events(
         hours = offered[-1]
     now = datetime.utcnow()
     since = now - timedelta(hours=hours)
-    # A day of hits reads per hour; anything longer reads per day
     bucket_kind = 'hour' if hours <= 24 else 'day'
     sender = _sender_column().label('sender')
     is_rl = and_(RawServiceLog.service == 'ratelimited', _sender_column() != '')
     if bucket_kind == 'hour':
         bucket = func.date_trunc('hour', RawServiceLog.time)
     else:
-        # The day in the app time zone: the stored time is naive UTC
         zone = getattr(app_tz(), 'key', 'UTC')
         bucket = func.to_char(func.timezone(zone, func.timezone('UTC', RawServiceLog.time)), 'YYYY-MM-DD')
     try:
         totals = db.query(sender, func.count(RawServiceLog.id), func.max(RawServiceLog.time)) \
             .filter(is_rl).group_by(sender).all()
-        # The newest few rows of each sender, for the detail view
         ranked = db.query(RawServiceLog.id.label('id'), func.row_number().over(
             partition_by=_sender_column(), order_by=(RawServiceLog.time.desc(), RawServiceLog.id.desc())).label('n')
         ).filter(is_rl).subquery()
         recent_rows = db.query(RawServiceLog).join(ranked, ranked.c.id == RawServiceLog.id) \
             .filter(ranked.c.n <= _RECENT_PER_SENDER).order_by(RawServiceLog.time.desc(), RawServiceLog.id.desc()).all()
-        # The newest limit hash of each sender, however far back it is
         rl_hash = func.trim(RawServiceLog.raw_data['rl_hash'].astext)
         hashes = db.query(sender, rl_hash).filter(is_rl, rl_hash != '') \
             .distinct(_sender_column()).order_by(_sender_column(), RawServiceLog.time.desc(), RawServiceLog.id.desc()).all()
@@ -408,8 +336,6 @@ def get_rate_limit_events(
         data, detail = detail_of(row)
         events.append({'user': sender_of(data), **detail})
 
-    # The configured limit comes from the synced mailbox row, never from a
-    # mailcow call - this endpoint has to stay fast and work offline.
     if groups:
         try:
             configured = db.query(
@@ -425,8 +351,6 @@ def get_rate_limit_events(
             if group is not None and rl_value:
                 group['current_limit'] = {'value': rl_value, 'frame': rl_frame}
 
-    # Mark senders whose counter was reset from here (the audit in
-    # system_settings), so the row can show it
     resets = _load_resets(db)
     for user_key, group in groups.items():
         reset = resets.get(user_key)
@@ -466,11 +390,9 @@ def get_sender_events(
     if not address:
         raise HTTPException(status_code=400, detail="A sender address is required")
 
-    # The same sender as the events list: `user`, else `from`
     matches_sender = _sender_column() == address
 
     try:
-        # The real number, counted in the database - the list below is capped
         total = db.query(func.count(RawServiceLog.id)).filter(
             RawServiceLog.service == 'ratelimited',
             matches_sender
@@ -501,7 +423,7 @@ def _load_configured_mailboxes_worker() -> List[Dict[str, Any]]:
     with SessionLocal() as db:
         try:
             rows = db.query(MailboxStatistics).filter(
-                MailboxStatistics.active == True  # noqa: E712 - SQLAlchemy filter
+                MailboxStatistics.active == True  # noqa: E712
             ).order_by(MailboxStatistics.username).all()
         except Exception as e:
             logger.error(f"Error reading mailbox rate limits: {e}")
@@ -584,8 +506,6 @@ async def set_mailbox_limit(request: MailboxLimitRequest):
         logger.error(f"Failed to set the rate limit of {mailbox}: {e}")
         raise _write_failed(e, "mailcow did not apply the change. Check the application logs.")
 
-    # Mirror the change locally so the page shows it without waiting for the
-    # next mailbox sync. A failure here is cosmetic, not a failed write.
     new_value = value or None
     try:
         await asyncio.to_thread(
@@ -657,8 +577,6 @@ async def set_limits_in_bulk(request: BulkLimitRequest):
 
     skipped: List[str] = []
 
-    # Mailboxes are matched against the synced rows, exactly like the
-    # single-mailbox endpoint, and written with their stored spelling
     names_by_key: Dict[str, str] = {}
     if wanted_mailboxes:
         try:
@@ -686,8 +604,6 @@ async def set_limits_in_bulk(request: BulkLimitRequest):
             raise _write_failed(e, "mailcow did not apply the change. Check the application logs.")
         mailboxes_updated = len(targets)
 
-        # Mirror the change locally so the page shows it without waiting for
-        # the next mailbox sync. A failure here is cosmetic, not a failed write.
         try:
             await asyncio.to_thread(_store_mailbox_limits_worker, targets, new_value, new_frame)
         except Exception as e:
@@ -729,8 +645,6 @@ async def reset_rate_limit_counter(request: ReleaseRequest):
         logger.error(f"Failed to reset the rate limit counter {rl_hash}: {e}")
         raise _write_failed(e, "mailcow did not reset the counter. Check the application logs.")
 
-    # mailcow answers this delete with an empty 200 - reaching here means it
-    # accepted the request. Record who was reset for the row marker.
     if request.user:
         try:
             await asyncio.to_thread(_record_reset_worker, request.user, rl_hash)

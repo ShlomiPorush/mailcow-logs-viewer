@@ -1,10 +1,3 @@
-"""Settings > Users: local users, OAuth2 entries and the OAuth2 default access.
-
-Admins only (user_access.py), and never agents (agent_access/scopes.py). A
-change to a user applies to that user's next request: a new password, new
-access, or disabling ends their sessions. Kind, username and email cannot be
-changed; delete the user and add them again.
-"""
 import logging
 from typing import List, Literal, Optional
 

@@ -1,10 +1,3 @@
-"""Whether agent access is live, and the address it lives at.
-
-Agents are served only when the switch is on, sign-in is on (a person must be
-able to approve them) and AGENT_ACCESS_URL holds a valid address. The address
-is the OAuth issuer and the base of the MCP resource; nothing is taken from
-request headers, which a proxy or a client could change.
-"""
 import ipaddress
 from typing import Optional
 from urllib.parse import urlsplit
@@ -13,7 +6,6 @@ from ..config import settings
 
 LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
 
-# Why agent access is not live, as stable codes (the Agents tab words them)
 OFF = "off"
 NO_SIGN_IN = "no_sign_in"
 NO_URL = "no_url"
@@ -31,12 +23,6 @@ def is_loopback_host(host: str) -> bool:
 
 
 def normalize_base_url(value: str) -> Optional[str]:
-    """The canonical form of an app address, or None when it is not one.
-
-    https with any host, or http on a loopback host (for a local test); no
-    path, query, fragment or user info. Scheme and host are lower case, the
-    default port is left out, and there is no trailing slash.
-    """
     value = (value or "").strip()
     if not value or len(value) > 255:
         return None
@@ -63,10 +49,6 @@ def normalize_base_url(value: str) -> Optional[str]:
 
 
 def problem() -> Optional[str]:
-    """None when agents are served, else the first reason they are not.
-
-    Missing sign-in comes first: without it the switch cannot be turned on.
-    """
     if not settings.is_authentication_enabled:
         return NO_SIGN_IN
     if not settings.agent_access_enabled:
@@ -83,7 +65,6 @@ def is_live() -> bool:
 
 
 def issuer() -> str:
-    """The OAuth issuer: the canonical app address. Only call when live."""
     base = normalize_base_url(settings.agent_access_url)
     if base is None:
         raise RuntimeError("agent access has no valid address")
@@ -91,12 +72,10 @@ def issuer() -> str:
 
 
 def resource() -> str:
-    """The MCP server's canonical URI: tokens of agents that connected over MCP are bound to it."""
     return issuer() + "/mcp"
 
 
 def api_resource() -> str:
-    """The REST API's canonical URI: tokens of agents that connected with a code (the skill) are bound to it."""
     return issuer() + "/api"
 
 
@@ -105,11 +84,6 @@ def resources() -> tuple:
 
 
 def same_resource(given: str, expected: str) -> bool:
-    """Whether a client's resource parameter names our MCP server.
-
-    Scheme and host compare without case and a trailing slash is ignored;
-    the path compares exactly.
-    """
     if not given:
         return False
     try:

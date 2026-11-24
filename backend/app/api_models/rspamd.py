@@ -1,4 +1,3 @@
-"""What the Rspamd map calls return (routers/rspamd_maps.py)."""
 from typing import Any, List, Optional
 
 from pydantic import Field

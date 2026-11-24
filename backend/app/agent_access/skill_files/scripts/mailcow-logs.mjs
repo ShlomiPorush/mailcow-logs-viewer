@@ -1,20 +1,4 @@
 #!/usr/bin/env node
-/*
- * mailcow-logs for agents: connect with a code a person approves (OAuth device flow, RFC 8628), then read and act on
- * mailcow Logs Viewer through its REST API, within what the person allowed.
- *
- * One of three versions with one contract: mailcow-logs.mjs (Node 20+), mailcow-logs.ps1 (Windows PowerShell 5.1+)
- * and mailcow-logs.sh (POSIX sh and curl). Same commands, same JSON output and error codes, same files and the same
- * lock, so they can run side by side on one computer. Tokens never appear in the output.
- *
- * The refresh token rotates on every use, and the server ends the connection when one is used twice. So every
- * change to the connection's file and every request that spends a one-time secret runs under one lock, the
- * access token is reused until a minute before it runs out, and a refresh whose answer was lost is retried once.
- *
- * An action (an endpoint whose kind is act, whatever its HTTP method) is never sent twice: when its answer is lost
- * or the server failed after it may have started, the answer is outcome_unknown. Kinds come from the server's own
- * list (agent/endpoints), kept per connection; an endpoint not on the list counts as an action.
- */
 import { execFileSync } from "node:child_process"
 import { createHash, randomBytes } from "node:crypto"
 import fs from "node:fs"
@@ -88,7 +72,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 const print = (value) => process.stdout.write(`${JSON.stringify(value)}\n`)
 const host = () => (win ? process.env.COMPUTERNAME || os.hostname() : os.hostname())
 const sameHost = (h) => String(h).toLowerCase() === host().toLowerCase()
-// Windows tools by their full path: in Git Bash, for one, whoami is a different program.
+// A bare whoami.exe or icacls.exe can start Git Bash's own program instead of Windows'.
 const system32 = (exe) => path.join(process.env.SystemRoot || "C:\\Windows", "System32", exe)
 
 const HELP = `mailcow-logs: use mailcow Logs Viewer after a person approves it.
@@ -150,7 +134,6 @@ function body(opts, fallback) {
   return opts.json ?? fallback
 }
 
-/** The app's address, this agent's identity (the folder it is installed in) and where its connection is kept. */
 function context(urlOption) {
   const raw = urlOption || process.env.MAILCOW_LOGS_URL || (DEFAULT_URL.startsWith("__") ? "" : DEFAULT_URL)
   if (!raw)
@@ -184,16 +167,10 @@ function context(urlOption) {
   }
 }
 
-/** The skill's folder: one connection per place the skill is installed (one agent). */
 function installDir() {
   return path.resolve(path.dirname(path.dirname(fileURLToPath(import.meta.url))))
 }
 
-/**
- * This install's id, kept in the skill's folder (`.install-id`), so every version agrees on it however each one
- * spells the folder's path (short 8.3 names, links, letter case). Published in one step: written aside, then
- * linked into place, which fails if another process got there first.
- */
 function installId(install) {
   const file = path.join(install, ".install-id")
   const read = () => {
@@ -211,7 +188,7 @@ function installId(install) {
     fs.writeFileSync(tmp, `${hex(16)}\n`, { flag: "wx" })
     fs.linkSync(tmp, file)
   } catch {
-    // Another process published one first, or the folder cannot be written.
+    // Throwing here fails a command whenever another process published its id first.
   } finally {
     fs.rmSync(tmp, { force: true })
   }
@@ -220,7 +197,6 @@ function installId(install) {
   return id
 }
 
-/** What the agent is called on the approval page and in Settings: which agent, on which computer. */
 function label(install) {
   if (process.env.MAILCOW_LOGS_AGENT_NAME) return process.env.MAILCOW_LOGS_AGENT_NAME.slice(0, 60)
   let agent = "Agent"
@@ -261,7 +237,6 @@ function credentialsDir() {
 }
 
 let secured = false
-/** Creates the folder if needed and checks that only this user can read it; never loosens or fixes it silently. */
 function secureDir(dir) {
   if (secured) return
   try {
@@ -273,7 +248,6 @@ function secureDir(dir) {
   if (st.isSymbolicLink() || !st.isDirectory())
     throw new Fail("insecure_credentials", `${dir} must be a plain folder, not a link.`)
   if (win) {
-    // Mode bits are no ACL on Windows: the folder is limited to this user, SYSTEM and Administrators.
     try {
       const sid = /"(S-1-[0-9-]+)"\s*$/.exec(
         execFileSync(system32("whoami.exe"), ["/user", "/fo", "csv", "/nh"]).toString().trim(),
@@ -292,10 +266,8 @@ function secureDir(dir) {
         ],
         { stdio: "ignore" },
       )
-      // The owner may always change an ACL, so the folder and its files must be this user's. (Only now: taking
-      // ownership needs the full control just granted. No /C, which would hide a failure behind exit code 0.)
+      // Before the grant above /setowner is refused, and /C would hide that failure behind exit code 0.
       icacls([dir, "/setowner", `*${sid[1]}`, "/T", "/Q"])
-      // Granting does not remove other entries: read the folder's and its files' ACLs back and allow no one else.
       const saved = path.join(dir, `.acl-${hex(4)}`)
       try {
         icacls([dir, "/save", saved, "/T", "/Q"])
@@ -316,7 +288,6 @@ function secureDir(dir) {
   secured = true
 }
 
-/** icacls over the folder and its files; tried again while other commands add or replace files in it. */
 function icacls(args) {
   for (let i = 0; ; i++) {
     try {
@@ -329,13 +300,9 @@ function icacls(args) {
   }
 }
 
-/**
- * What in saved ACLs (icacls /save: one SDDL line per object) lets anyone but this user, SYSTEM and Administrators
- * in. Anything but plain allow and deny entries (conditional or callback ones) counts too: refused, not guessed.
- */
 function othersAllowed(saved, userSid) {
   const allowed = new Set([userSid, "SY", "BA", "S-1-5-18", "S-1-5-32-544"])
-  // SDDL writes the built-in Administrator account (RID 500) as LA, so a user who is that account shows as LA.
+  // Without LA, the built-in Administrator (RID 500) is refused its own folder: SDDL writes that account as LA.
   if (/^S-1-5-21-[0-9-]+-500$/.test(userSid)) allowed.add("LA")
   for (const line of saved.split(/\r?\n/)) {
     const at = line.indexOf("D:")
@@ -405,7 +372,6 @@ function serialize(rec) {
   return `{${parts.join(",")}}\n`
 }
 
-/** Writes a file of the connection in one step: a private temp file, synced, renamed over the old one. */
 function writePrivate(ctx, file, text) {
   secureDir(ctx.dir)
   const tmp = `${file}.${hex(6)}.tmp`
@@ -426,7 +392,7 @@ function writePrivate(ctx, file, text) {
 const writeRecord = (ctx, rec) => writePrivate(ctx, ctx.file, serialize(rec))
 
 function renameOver(from, to) {
-  // On Windows an open handle (an antivirus scan) can refuse the rename for a moment.
+  // Without retrying, an open handle (an antivirus scan) makes the rename fail on Windows.
   const until = Date.now() + 5_000
   for (;;) {
     try {
@@ -446,8 +412,6 @@ function removeRecord(ctx) {
   fs.rmSync(ctx.file, { force: true })
   fs.rmSync(ctx.kinds, { force: true })
 }
-
-/* The lock: a file created exclusively, naming its holder. Never taken from a live holder, however old. */
 
 function readLock(file) {
   try {
@@ -469,7 +433,7 @@ function alive(pid) {
     process.kill(pid, 0)
     return true
   } catch (e) {
-    // The holder runs as this user, so a process of another user with that number means the holder is gone.
+    // Taking EPERM as alive keeps a dead holder's lock forever on Windows, where that number is another user's.
     return win && e.code === "EPERM"
   }
 }
@@ -481,7 +445,6 @@ async function hook(point) {
   for (let i = 0; i < 1200 && !fs.existsSync(`${at}.go`); i++) await sleep(50)
 }
 
-/** Takes the lock; `own` is a lock this process held before, which counts as taken if it is back in place. */
 async function acquire(ctx, own) {
   secureDir(ctx.dir)
   const token = hex(16)
@@ -497,7 +460,7 @@ async function acquire(ctx, own) {
       return token
     } catch (e) {
       if (fd !== undefined) fs.closeSync(fd)
-      // Windows refuses for a moment to create a file whose name is still being deleted (a lock just released).
+      // Without retrying, creating a lock right after one was released fails on Windows.
       const deleting = win && (e.code === "EPERM" || e.code === "EACCES") && Date.now() < deadline
       if (deleting) {
         await sleep(50 + Math.random() * 100)
@@ -506,9 +469,7 @@ async function acquire(ctx, own) {
       if (e.code !== "EEXIST") throw new Fail("cannot_save", `Cannot create a lock in ${ctx.dir}.`)
     }
     const held = readLock(ctx.lock)
-    // Another process moved this one's lock away by mistake and has put it back.
     if (own && held && !held.empty && held.token === own) return own
-    // A holder that died between creating the lock and writing its name leaves it empty; that takes a moment.
     const dead = held?.empty
       ? Date.now() - held.mtime > 60_000
       : held && sameHost(held.host) && !alive(Number(held.pid))
@@ -529,10 +490,6 @@ async function acquire(ctx, own) {
   }
 }
 
-/**
- * Removes a dead holder's lock. Moving it away is atomic, so of two that try only one moves it; if what was moved
- * is not the dead lock (another process had just taken a fresh one), it goes back unless a newer one is there.
- */
 async function breakLock(ctx, held) {
   const moved = `${ctx.lock}.${hex(6)}.dead`
   try {
@@ -549,7 +506,7 @@ async function breakLock(ctx, held) {
   try {
     fs.linkSync(moved, ctx.lock)
   } catch {
-    // A newer lock is there already.
+    // Throwing here fails a command whenever a newer lock already took the place.
   }
   fs.rmSync(moved, { force: true })
   return false
@@ -570,13 +527,10 @@ async function withLock(ctx, fn, own) {
   }
 }
 
-/** Before spending a one-time secret: the lock must still be ours, or nothing is sent. */
 function assertMine(ctx, token) {
   if (!mine(ctx, token))
     throw new Fail("busy", "Another mailcow-logs command took over this connection. Run it again.")
 }
-
-/* Requests */
 
 const NOT_SENT = new Set([
   "ENOTFOUND",
@@ -609,7 +563,6 @@ async function request(ctx, method, url, { form, bearer, json, timeout = OAUTH_T
   }
   let res
   try {
-    // No redirects: a secret never follows one to another address.
     res = await fetch(url, {
       method,
       headers,
@@ -627,7 +580,6 @@ async function request(ctx, method, url, { form, bearer, json, timeout = OAUTH_T
   try {
     text = await res.text()
   } catch {
-    // The answer started and broke off: the app got the request and may have acted on it.
     throw new Fail("unreachable", `The answer from ${ctx.issuer} broke off.`, { sent: true })
   }
   let parsed = null
@@ -673,8 +625,6 @@ async function revokePending(ctx, rec) {
   return next
 }
 
-/* Commands */
-
 function status(ctx) {
   const rec = readRecord(ctx)
   print({
@@ -686,7 +636,6 @@ function status(ctx) {
 }
 
 async function connect(ctx, replace) {
-  // Before any code exists: can it keep a connection here, and is the app there?
   secureDir(ctx.dir)
   const probe = path.join(ctx.dir, `.probe-${hex(4)}`)
   try {
@@ -706,7 +655,6 @@ async function connect(ctx, replace) {
     let rec = readRecord(ctx) ?? emptyRecord(ctx)
     rec = await revokePending(ctx, rec)
     if (rec.refreshToken && !replace) return { status: "already_connected", label: rec.label, scope: rec.scope }
-    // The open code again, unless asked for a new one (--replace: the link did not work for the person).
     if (rec.deviceCode && rec.deviceExpiresAt - now() > 30 && !replace) return pending(rec)
     assertMine(ctx, lock)
     const r = await oauth(ctx, "/oauth/device", {
@@ -762,8 +710,6 @@ async function waitForApproval(ctx) {
         throw new Fail("not_connected", "No connection is being made. Run: mailcow-logs connect")
       }
       const t = now()
-      // The server decides when a code has ended: one approved at the last minute can
-      // still be collected for a while after. Only a code long past that is dropped here.
       if (rec.deviceExpiresAt + STALE_CODE_SECONDS <= t) {
         writeRecord(ctx, clearPending(rec))
         throw new Fail("expired", "The code expired before it was approved. Run: mailcow-logs connect")
@@ -785,7 +731,6 @@ async function waitForApproval(ctx) {
       }
       if (r.status === 200) {
         const tokens = tokensFrom(r)
-        // Connecting again (--replace): the old connection is ended once the new one is stored.
         const old = rec.refreshToken && rec.refreshToken !== tokens.refreshToken ? rec.refreshToken : ""
         rec = {
           ...clearPending(rec),
@@ -826,7 +771,6 @@ async function waitForApproval(ctx) {
 
 const usable = (rec) => rec.accessToken && rec.accessExpiresAt - now() > 60 && !rec.refreshStartedAt
 
-/** A live access token: the stored one while it lasts, else one refresh under the lock. */
 async function accessToken(ctx, stale) {
   const first = readRecord(ctx)
   if (!first?.refreshToken) throw new Fail("not_connected", "Not connected. Run: mailcow-logs connect")
@@ -835,18 +779,14 @@ async function accessToken(ctx, stale) {
     let rec = readRecord(ctx)
     if (!rec?.refreshToken) throw new Fail("not_connected", "Not connected. Run: mailcow-logs connect")
     rec = await revokePending(ctx, rec)
-    // Another command refreshed while this one waited for the lock.
     if (usable(rec) && rec.accessToken !== stale) return rec.accessToken
     const before = { refreshStartedAt: rec.refreshStartedAt, refreshRetried: rec.refreshRetried }
-    // A refresh that started moments ago may still be on its way (its holder lost the lock): never send it twice.
     if (rec.refreshStartedAt && now() - rec.refreshStartedAt < REFRESH_GRACE)
       throw new Fail(
         "busy",
         "Another mailcow-logs command is refreshing this connection. Nothing was sent; run it again.",
       )
     if (rec.refreshStartedAt) {
-      // The last refresh got no answer; it may or may not have reached the app. Trying once more either continues
-      // the connection or ends it there, which also ends the new token nobody received.
       if (rec.refreshRetried)
         throw new Fail(
           "connection_ended",
@@ -866,7 +806,6 @@ async function accessToken(ctx, stale) {
         resource: `${ctx.issuer}/api`,
       })
     } catch (e) {
-      // Nothing left the computer: the token is as good as before.
       if (e.code === "unreachable" && e.extra.sent === false) writeRecord(ctx, { ...rec, ...before })
       throw e
     }
@@ -874,13 +813,11 @@ async function accessToken(ctx, stale) {
       const next = { ...rec, ...tokensFrom(r), refreshStartedAt: 0, refreshRetried: 0 }
       await hook("before-write")
       if (!mine(ctx, lock)) {
-        // The lock was taken while this one waited for the app: keep the new tokens anyway, under a fresh lock.
         await withLock(ctx, async () => writeRecord(ctx, next), lock)
       } else writeRecord(ctx, next)
       return next.accessToken
     }
     if (r.json?.error === "invalid_grant") {
-      // An old connection still to be ended (after --replace) keeps its place until the app confirms it.
       if (rec.toRevoke) writeRecord(ctx, { ...emptyRecord(ctx), label: rec.label, toRevoke: rec.toRevoke })
       else removeRecord(ctx)
       throw new Fail(
@@ -888,19 +825,16 @@ async function accessToken(ctx, stale) {
         "This connection has ended (disconnected in Settings, its time ran out, sign-in settings changed, or its token was used twice). Run: mailcow-logs connect",
       )
     }
-    // The app answered with an error before spending the token (a 4xx); a 5xx may have come after.
     if (r.status < 500) writeRecord(ctx, { ...rec, ...before })
     throw httpFail(r, "Refreshing the connection")
   })
 }
 
-/** The full path of an API call (with its query) and the URL to send it to. */
 function apiTarget(ctx, p) {
   let value = String(p ?? "")
   const bad = "Give a path of the API, for example: messages?limit=20 (percent-encode anything else)"
   if (value.startsWith("/api/")) value = value.slice(4)
-  // The same characters in every version (the shell version passes the path to curl as it is).
-  // Encoded dots too: a server or proxy that decodes them would take the token out of the API.
+  // Allowing %2e lets a server or proxy that decodes it send the token outside the API.
   if (!PATH_CHARS.test(value) || value.includes("://") || value.startsWith("//") || /%2e/i.test(value))
     throw new Fail("bad_path", bad)
   const pathOnly = value.split("?")[0]
@@ -910,8 +844,6 @@ function apiTarget(ctx, p) {
     throw new Fail("bad_path", bad)
   return { url: url.toString(), path: url.pathname }
 }
-
-/* Kinds: whether a call is a read or an action, from the server's own list of this connection's calls. */
 
 function readKinds(ctx, rec) {
   let text
@@ -946,7 +878,7 @@ function writeKinds(ctx, rec, data) {
   try {
     writePrivate(ctx, ctx.kinds, `${lines.join("\n")}\n`)
   } catch {
-    // Only a cache: without it every call counts as an action.
+    // Throwing here fails a call that ran, only because its cache could not be saved.
   }
 }
 
@@ -963,7 +895,6 @@ function templateMatches(template, p) {
   return t.length === s.length
 }
 
-/** "read" or "act". An endpoint the list does not hold, or no list, counts as an action. */
 async function kindOf(ctx, method, p) {
   if (method === "GET" && (p === "/api/agent/access" || p === "/api/agent/endpoints")) return "read"
   const rec = readRecord(ctx)
@@ -977,7 +908,7 @@ async function kindOf(ctx, method, p) {
         list = readKinds(ctx, rec)
       }
     } catch {
-      // Without the list every call counts as an action.
+      // Throwing here stops every call while the list cannot be fetched.
     }
   }
   if (!list) return "act"
@@ -986,11 +917,6 @@ async function kindOf(ctx, method, p) {
   return hits.some((e) => e.kind === "act") ? "act" : "read"
 }
 
-/**
- * One API call with its retries: a refresh and one retry after a 401 (the server checks the token before the
- * route runs), one retry after a 429 busy (nothing started), and for a read one retry after a network failure.
- * An action is never sent again once it may have reached the app.
- */
 async function send(ctx, method, url, json, kind) {
   let token = await accessToken(ctx)
   let refreshed = false
@@ -1025,7 +951,6 @@ async function send(ctx, method, url, json, kind) {
   }
 }
 
-/** The answer as JSON text on one line: a JSON answer as it is (its line breaks are only spacing), text as a string. */
 function dataText(r) {
   if (r.json !== null) return r.text.replace(/[\r\n]/g, "").trim()
   return JSON.stringify(r.text)
@@ -1060,7 +985,6 @@ async function api(ctx, method, p, json) {
     return
   }
   const body = r.json !== null && typeof r.json === "object" && !Array.isArray(r.json) ? r.json : null
-  // The app's own refusals for agents carry a code and a message: passed on as they are.
   if (body && typeof body.error === "string" && /^[a-z_]{1,40}$/.test(body.error) && typeof body.message === "string")
     throw new Fail(body.error, body.message, { status: r.status })
   throw httpFail(r, `${method} ${p}`)

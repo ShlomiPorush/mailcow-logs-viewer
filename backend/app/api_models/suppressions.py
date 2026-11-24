@@ -1,6 +1,3 @@
-"""What the Suppressions calls return (routers/suppressions.py): the list, its
-block details, import, and keeping it in step with the app's section of
-Rspamd's global_rcpt_blacklist.map."""
 from typing import Any, List, Optional
 
 from pydantic import Field
@@ -9,8 +6,6 @@ from . import Fixed
 
 TIME = "UTC, ISO 8601 with Z"
 
-
-# ---------------------------------------------------------------- the list
 
 class SuppressionExpiresIn(Fixed):
     """The time left until the entry expires."""
@@ -125,8 +120,6 @@ class SuppressionImport(Fixed):
                                           "Row 5: empty email")
 
 
-# ---------------------------------------------------------------- block details
-
 class SuppressionEventLine(Fixed):
     """A Postfix line of the message, copied when the event was recorded."""
     time: str = Field(description=TIME)
@@ -176,8 +169,6 @@ class SuppressionEvents(Fixed):
     events: List[SuppressionEventItem]
 
 
-# ---------------------------------------------------------------- errors
-
 class SuppressionErrorDetail(Fixed):
     code: str = Field(description="What went wrong, for a program")
     message: str = Field(description="What went wrong, in words")
@@ -207,8 +198,6 @@ class RspamdMapError(Fixed):
     (mailcow did not confirm the save; check Rspamd before trying again)."""
     detail: RspamdMapErrorDetail
 
-
-# ---------------------------------------------------------------- Rspamd sync
 
 class SuppressionSyncDone(Fixed):
     """The list and the app's section are in step: read in, then the list's changes written."""

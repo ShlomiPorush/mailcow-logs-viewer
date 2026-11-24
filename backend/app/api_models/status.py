@@ -1,9 +1,3 @@
-"""What the Status calls return (routers/status.py): mailcow's containers,
-version and counts, this app's version and its own log.
-
-The mailcow counts and storage (MailcowInfo, StorageStatus) are in
-mailboxes.py, because the weekly summary carries them too.
-"""
 from typing import Dict, List, Optional
 
 from pydantic import Field

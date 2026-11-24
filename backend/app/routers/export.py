@@ -1,6 +1,3 @@
-"""
-API endpoints for exporting logs to CSV
-"""
 import logging
 from fastapi import APIRouter, Depends, Query, HTTPException, Request
 from sqlalchemy.orm import Session, aliased, load_only
@@ -20,7 +17,6 @@ from ..services import excluded_addresses, written_recipients
 from ..services.csv_export import csv_download, csv_query_rows, get_csv_db
 from ..api_models import CsvFile, Invalid, documented
 
-# No rows to export (404), a bad filter (422), a database failure (500)
 CSV_ERRORS = {404: None, 422: Invalid, 500: None}
 
 logger = logging.getLogger(__name__)
@@ -29,8 +25,6 @@ router = APIRouter()
 
 
 def _csv_time(value: Optional[datetime]) -> str:
-    """A stored (naive UTC) time in the app's time zone with its offset, for
-    example 2026-01-15 13:00:00+01:00, so a spreadsheet cannot misread it."""
     return to_local(value).isoformat(sep=' ', timespec='seconds') if value else ""
 
 
@@ -57,7 +51,6 @@ def export_postfix_csv(
             PostfixLog.relay, PostfixLog.delay, PostfixLog.dsn, PostfixLog.message,
         )).filter(excluded_addresses.postfix_line_visible())
         
-        # Apply same filters as the main API
         if search:
             search_term = f"%{search}%"
             query = query.filter(
@@ -84,10 +77,8 @@ def export_postfix_csv(
         if end_date:
             query = query.filter(PostfixLog.time <= end_date)
         
-        # Limit to prevent massive exports
         logs = csv_query_rows(query.order_by(desc(PostfixLog.time)).limit(settings.csv_export_limit))
         
-        # Format one row at a time while the response is consumed.
         data = (
             {
                 "Time": _csv_time(log.time),
@@ -143,7 +134,6 @@ def export_rspamd_csv(
             RspamdLog.user, RspamdLog.ip, RspamdLog.size, RspamdLog.symbols,
         )).filter(excluded_addresses.rspamd_visible())
         
-        # Apply filters
         if search:
             search_term = f"%{search}%"
             query = query.filter(
@@ -177,7 +167,6 @@ def export_rspamd_csv(
         
         logs = csv_query_rows(query.order_by(desc(RspamdLog.time)).limit(settings.csv_export_limit))
         
-        # Format one row at a time while the response is consumed.
         data = (
             {
                 "Time": _csv_time(log.time),
@@ -237,7 +226,6 @@ def export_netfilter_csv(
             NetfilterLog.priority, NetfilterLog.message,
         ))
         
-        # Apply filters
         if search:
             search_term = f"%{search}%"
             query = query.filter(
@@ -262,7 +250,6 @@ def export_netfilter_csv(
             query = query.filter(NetfilterLog.username.isnot(None), on_domain(NetfilterLog.username, username_domain))
 
         if action:
-            # As in the list: 'ban' also matches the older 'banned' lines
             if action == 'ban':
                 query = query.filter(or_(NetfilterLog.action == 'ban', NetfilterLog.action == 'banned'))
             else:
@@ -279,7 +266,6 @@ def export_netfilter_csv(
         
         logs = csv_query_rows(query.order_by(desc(NetfilterLog.time)).limit(settings.csv_export_limit))
         
-        # Format one row at a time while the response is consumed.
         data = (
             {
                 "Time": _csv_time(log.time),
@@ -331,14 +317,10 @@ def export_messages_csv(
     Export Messages (correlations) to CSV
     """
     try:
-        # The Rspamd columns of each row come through a join of their own: the
-        # filters may join RspamdLog themselves (inner, to filter on it)
         scan = aliased(RspamdLog)
         query = db.query(MessageCorrelation, scan).outerjoin(
             scan, MessageCorrelation.rspamd_log_id == scan.id,
         )
-        # The very filters of the Messages list (messages.py), excluded
-        # addresses and the exact mode included, so the file holds what the list shows
         query = _filtered_messages_query(db, search, sender, recipient, direction, status, user, ip,
                                          start_date, end_date, exact=exact, base=query,
                                          address=address, domain=domain, exact_ip=exact_ip)
@@ -350,13 +332,10 @@ def export_messages_csv(
             MessageCorrelation.rspamd_log_id, MessageCorrelation.is_complete,
         ), load_only(scan.id, scan.score, scan.is_spam, scan.user, scan.ip))
 
-        # In the list's order (newest first, or oldest first), so the row limit keeps the same messages
-        # By the same time the list sorts by (a delivery with no first-seen time by when it was stored)
         by = (message_sort_time().asc(), MessageCorrelation.id.asc()) if order == "asc" \
             else (desc(message_sort_time()), desc(MessageCorrelation.id))
         messages = csv_query_rows(query.order_by(*by).limit(settings.csv_export_limit))
         
-        # Format one row at a time while the response is consumed.
         def rows():
             for msg, rspamd in messages:
                 yield {

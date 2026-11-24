@@ -1,9 +1,3 @@
-"""What the entity card calls return (routers/entities.py, services/entity_summary.py).
-
-Every source has a state. Only an "ok" source carries its figures; a
-"disabled" or "error" one carries only the reason, so a missing figure is
-never read as zero.
-"""
 from typing import Any, Dict, List, Optional
 
 from pydantic import Field
@@ -29,8 +23,6 @@ class Range(Fixed):
     end: str = Field(description=TIME)
 
 
-# ---------------------------------------------------------------- messages
-
 class MessageItem(Fixed):
     """One message (its earliest matching delivery), as the Messages list shows it."""
     correlation_key: str = Field(description="Opens the message: GET /api/message/{correlation_key}/details")
@@ -48,8 +40,6 @@ class MessagesSource(Source):
     received: int = Field(None, description="Of them, sent to the address or domain (address and domain cards)")
     items: List[MessageItem] = Field(None, description="The newest, at most 50")
 
-
-# ---------------------------------------------------------------- security
 
 class SecurityItem(Fixed):
     """One Netfilter line."""
@@ -92,8 +82,6 @@ class ProtectionSource(Source):
     items: List[ProtectionCatch] = Field(None, description="The newest, at most 50")
 
 
-# ---------------------------------------------------------------- devices
-
 class DeviceItem(Fixed):
     id: int
     username: str
@@ -109,8 +97,6 @@ class DevicesSource(Source):
     count: int = Field(None, description="ActiveSync devices seen in the range (an IP card: last seen from it)")
     items: List[DeviceItem] = Field(None, description="The most recently seen, at most 50")
 
-
-# ---------------------------------------------------------------- DMARC
 
 class DmarcDomainFigures(Fixed):
     domain: str
@@ -158,8 +144,6 @@ class DmarcDomainSource(Source):
     last_received: Optional[str] = Field(None, description=TIME)
 
 
-# ---------------------------------------------------------------- blocklists and place
-
 class RblSource(Source):
     """The last stored blocklist check, never a new lookup (Check now is POST /api/blacklist/check)."""
     checked: bool = Field(None, description="false: not checked yet")
@@ -178,8 +162,6 @@ class GeoSource(Source):
     asn: Optional[str] = None
     asn_org: Optional[str] = None
 
-
-# ---------------------------------------------------------------- address and domain facts
 
 class SuppressionEntry(Fixed):
     email: str = Field(description="The address or domain on the list")
@@ -233,8 +215,6 @@ class DnsSource(Source):
                                                                  "dnssec, tlsa, mta_sts, tls_rpt)")
 
 
-# ---------------------------------------------------------------- timeline
-
 class TimelineItem(Fixed):
     """One stored event. Each kind sets the keys that belong to it."""
     time: str = Field(description=TIME)
@@ -261,8 +241,6 @@ class Timeline(Fixed):
     truncated: bool = Field(description="More happened in the range than the list holds")
     left_out: List[str] = Field(description="Sources that are off or failed, so they are not in it")
 
-
-# ---------------------------------------------------------------- the cards
 
 class IpSources(Fixed):
     messages: MessagesSource

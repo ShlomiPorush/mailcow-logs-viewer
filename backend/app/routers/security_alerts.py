@@ -1,13 +1,3 @@
-"""
-Security Alerts API - the alerts Needs attention and the bell list: anomaly
-detection (compromised mailbox / auth attack), SMTP abuse blocks, the protection
-rules' possible stolen passwords and failed bans, DNS changes and DMARC & TLS
-report import errors.
-
-Each alert type belongs to one area (services/stored_alerts.py). The list shows
-a caller the alerts of the areas it may view, and a dismissal or its undo
-changes only those of the areas it may act in.
-"""
 import logging
 import re
 import uuid
@@ -36,18 +26,14 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-# Dismiss all takes at most this many ids (the list hands out as many)
 MAX_ACK_IDS = 10000
 
 
 def _types(request: Request, kind: str) -> List[str]:
-    """The alert types whose area the caller may view (READ) or act in (WRITE)."""
     return sorted(t for t, area in ALERT_AREAS.items() if caller_may(request, area, kind))
 
 
 def _allowed(request: Request, kind: str):
-    """The alerts the caller may view or change, as a condition. An admin also has
-    those of a type that belongs to no area; anyone else only the types of its areas."""
     if caller_is_admin(request):
         return true()
     types = _types(request, kind)
@@ -88,8 +74,6 @@ def list_security_alerts(
         readable = _allowed(request, READ)
         writable = _allowed(request, WRITE)
         is_open = SecurityAlert.acknowledged == False  # noqa: E712
-        # One snapshot for the rows and the ids: an alert committed between the two
-        # queries is in neither, so Dismiss all never takes one the list did not show
         db.connection(execution_options={"isolation_level": "REPEATABLE READ"})
         q = db.query(SecurityAlert).filter(readable)
         if acknowledged is not None:
@@ -100,15 +84,10 @@ def list_security_alerts(
             return [row[0] for row in db.query(SecurityAlert.id).filter(condition, is_open).order_by(
                 SecurityAlert.created_at.desc(), SecurityAlert.id.desc()).limit(MAX_ACK_IDS + 1).all()]
 
-        # Every alert still open as this answer sees it (newest first)
         open_ids = newest_ids(readable)
         unacked = len(open_ids) if len(open_ids) <= MAX_ACK_IDS else db.query(SecurityAlert).filter(
             readable, is_open).count()
-        # The open critical ones, also those past the rows asked for: Needs attention
-        # is marked critical for one even when its list shows only the newest
         critical = db.query(SecurityAlert).filter(readable, is_open, SecurityAlert.severity == 'critical').count()
-        # The open ones the caller may dismiss: Dismiss all sends these back, so one
-        # committed after this answer, or of an area the caller may only view, is not touched
         writable_ids = newest_ids(and_(readable, writable))
 
         return {
@@ -125,9 +104,6 @@ def list_security_alerts(
 
 
 def _acknowledge(db: Session, condition) -> dict:
-    """Acknowledge the open alerts matching condition in one statement, all under
-    one new receipt; an alert already acknowledged is left as it is (its own
-    receipt stays), so the receipt names only what this call changed."""
     receipt = uuid.uuid4()
     ids = [row[0] for row in db.execute(
         update(SecurityAlert)
@@ -201,19 +177,11 @@ def undo_acknowledgement(receipt: uuid.UUID, request: Request, db: Session = Dep
         raise internal_error(e)
 
 
-# What an alert is about, over time: the mailbox's sent mail for a volume spike
-# or an SMTP block by abuse protection, the username's failed logins for an
-# auth failure burst. Counted per 15 minutes from the baseline period before
-# the alert to two hours after it.
 BUCKET_MINUTES = 15
 AFTER_HOURS = 2
 SENT_MAIL_ALERTS = ('volume_spike', 'smtp_abuse_block')
-# An SMTP block is recorded twice at once: its abuse action, then its alert
 BLOCK_ACTION_MATCH = timedelta(minutes=5)
-# How far before an alert "Around the alert" starts when its window is not known
 UNKNOWN_WINDOW_MINUTES = 60
-# An anomaly alert names the window it counted in, and a spike its baseline
-# period, in its detail (anomaly_service): the settings may have changed since
 DETAIL_WINDOW_RE = re.compile(r"in the last (\d+) minutes")
 DETAIL_BASELINE_RE = re.compile(r"over the past (\d+) days")
 
@@ -221,7 +189,6 @@ DETAIL_BASELINE_RE = re.compile(r"over the past (\d+) days")
 def _events(db: Session, alert: SecurityAlert, start, end):
     subject = (alert.subject or '').lower()
     if alert.alert_type in SENT_MAIL_ALERTS:
-        # The same messages the volume-spike alert counted
         return authenticated_submissions(
             db.query(MessageCorrelation.first_seen, MessageCorrelation.recipient,
                      MessageCorrelation.final_status, MessageCorrelation.subject)).filter(
@@ -237,7 +204,6 @@ def _events(db: Session, alert: SecurityAlert, start, end):
 
 
 def _block_window(db: Session, alert: SecurityAlert) -> Optional[int]:
-    """The window an SMTP block counted in, from its own abuse action; None when that action is gone."""
     at = alert.created_at
     actions = db.query(SMTPAbuseAction.created_at, SMTPAbuseAction.window_minutes).filter(
         SMTPAbuseAction.email == (alert.subject or '').lower(),
@@ -273,14 +239,9 @@ def alert_activity(alert_id: int, request: Request = None, db: Session = Depends
     with_messages = caller_may(request, "messages", READ)
     try:
         alert = db.query(SecurityAlert).filter(SecurityAlert.id == alert_id).first()
-        # Only the anomaly and SMTP abuse alerts have activity; the others (another
-        # area's among them) are not shown here at all
         if not alert or alert.alert_type not in ACTIVITY_TYPES:
             raise HTTPException(status_code=404, detail="Alert not found")
         at = alert.created_at
-        # The window the alert counted in, even after the setting changed:
-        # an SMTP block keeps the one it was blocked with, an anomaly alert
-        # the one its detail names; None when not known
         if alert.alert_type == 'smtp_abuse_block':
             window = _block_window(db, alert)
         else:
@@ -292,14 +253,11 @@ def alert_activity(alert_id: int, request: Request = None, db: Session = Depends
 
         step = timedelta(minutes=BUCKET_MINUTES)
         counts = Counter(int((row[0] - start) / step) for row in rows if row[0])
-        # Data only up to now: for a recent alert the hours after it have not
-        # happened yet, and are no quiet hours
         seen_to = min(end, datetime.utcnow())
         buckets = []
         t, i = start, 0
         while t < seen_to:
             buckets.append({'start': format_datetime_utc(t), 'count': counts.get(i, 0),
-                            # The last one ends at now, part of its 15 minutes
                             'partial': t + step > seen_to})
             t += step
             i += 1
@@ -317,7 +275,6 @@ def alert_activity(alert_id: int, request: Request = None, db: Session = Depends
         else:
             around = {
                 'addresses': _top(Counter(r[1] or '?' for r in near)),
-                # Every address, not only the top ones listed
                 'address_count': len({r[1] or '?' for r in near}),
                 'countries': _top(Counter(r[2] or 'Unknown' for r in near)),
                 'networks': _top(Counter(r[3] or 'Unknown' for r in near)),
@@ -328,9 +285,7 @@ def alert_activity(alert_id: int, request: Request = None, db: Session = Depends
             'window_minutes': window,
             'baseline_days': baseline_days,
             'buckets': buckets,
-            # The exact end of the data (now, for a recent alert)
             'data_end': seen_to.isoformat(timespec='microseconds') + 'Z',
-            # To the microsecond, as the database keeps them: Open in Messages asks for exactly this span
             'around': {'from': around_from.isoformat(timespec='microseconds') + 'Z', 'to': around_to.isoformat(timespec='microseconds') + 'Z',
                        'total': len(near), **around},
         }

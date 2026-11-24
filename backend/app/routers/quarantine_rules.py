@@ -1,8 +1,3 @@
-"""
-Quarantine Auto-Rules API
-CRUD endpoints for quarantine rules and action history.
-Requires Read-Write API key (MAILCOW_API_KEY_RW) for all operations.
-"""
 import asyncio
 import logging
 from datetime import datetime, timedelta
@@ -27,8 +22,6 @@ VALID_MATCH_TYPES = {'sender', 'sender_domain', 'recipient', 'subject'}
 VALID_ACTIONS = {'release', 'delete'}
 
 
-# ---- Pydantic schemas ----
-
 class RuleCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
     match_type: str = Field(..., description="sender, sender_domain, recipient, or subject")
@@ -48,7 +41,6 @@ class RuleUpdate(BaseModel):
 
 
 def _require_rw_key():
-    """Raise 403 if no RW key is configured."""
     if not mailcow_api.has_rw_key:
         raise HTTPException(
             status_code=403,
@@ -56,18 +48,12 @@ def _require_rw_key():
         )
 
 
-try:  # Python 3.11+
+try:
     from re import _parser as _sre_parse
-except ImportError:  # pragma: no cover - older Python
+except ImportError:  # pragma: no cover
     import sre_parse as _sre_parse
 
-# Sender, recipient and subject come from whoever sent the mail. A regex rule
-# only looks at this many leading characters, which bounds the work per item.
 REGEX_TARGET_MAX_CHARS = 1000
-# The nested-repetition check below catches the common slow patterns, not all
-# of them (overlapping alternatives such as (a|a)* pass it). Every match runs
-# in the regex module with this time limit, so no pattern can stall the job;
-# a match that runs out of time counts as no match.
 REGEX_MATCH_TIMEOUT_SECONDS = 0.1
 
 _REPEATS = (_sre_parse.MAX_REPEAT, _sre_parse.MIN_REPEAT)
@@ -76,11 +62,6 @@ _warned_patterns = set()
 
 
 def _only_variable_items(items) -> tuple:
-    r"""(every item has a variable length, at least one repeats without limit).
-
-    A body like `a+`, `\w+\s?` or `(a*)*` can split the same text in many
-    ways; a fixed item such as the `\.` in `([a-z]+\.)+` cannot.
-    """
     unbounded = False
     seen = False
     for op, av in items:
@@ -103,9 +84,6 @@ def _only_variable_items(items) -> tuple:
 
 
 def _has_nested_repetition(items) -> bool:
-    r"""True when a repeated group itself repeats without limit, such as
-    (a+)+ or (\w+\s?)*. Such a pattern can take exponential time on text
-    that almost matches."""
     for op, av in items:
         if op in _REPEATS:
             _low, high, sub = av
@@ -135,7 +113,6 @@ def _is_nested_repetition(pattern: str) -> bool:
 
 
 def _validate_regex(pattern: str):
-    """Validate a regex pattern."""
     try:
         regex.compile(pattern)
     except regex.error as e:
@@ -166,11 +143,6 @@ def _rule_to_dict(rule: QuarantineRule) -> dict:
 
 
 def _find_matching_rule(rules, sender: str, sender_domain: str, rcpt: str, subject: str):
-    """
-    Find the first matching rule for a quarantine item.
-    Delete rules are checked first (deny wins over allow).
-    """
-    # Sort: delete rules first, then release
     sorted_rules = sorted(rules, key=lambda r: (0 if r.action == 'delete' else 1))
     
     for rule in sorted_rules:
@@ -189,8 +161,6 @@ def _find_matching_rule(rules, sender: str, sender_domain: str, rcpt: str, subje
         
         if rule.is_regex:
             if _is_nested_repetition(value):
-                # Saved before such patterns were refused: skip it, leaving the
-                # item in quarantine, instead of risking a stalled process
                 if value not in _warned_patterns:
                     _warned_patterns.add(value)
                     logger.warning(f"[QUARANTINE RULES] Skipping rule '{rule.name}': its pattern "
@@ -209,16 +179,11 @@ def _find_matching_rule(rules, sender: str, sender_domain: str, rcpt: str, subje
             except regex.error:
                 continue
         else:
-            # Case-insensitive exact match
             if (target or '').lower() == value.lower():
                 return rule
     
     return None
 
-
-# ---- CRUD Endpoints ----
-# IMPORTANT: Static routes (/logs, /test) MUST be defined before
-# parameterized routes (/{rule_id}) to avoid FastAPI matching "logs" as a rule_id.
 
 @router.get("", responses=documented(m.QuarantineRuleList, errors={403: None, 500: None}))
 def list_rules():
@@ -227,7 +192,7 @@ def list_rules():
     
     with get_db_context() as db:
         rules = db.query(QuarantineRule).order_by(
-            QuarantineRule.action.desc(),  # delete rules first
+            QuarantineRule.action.desc(),
             QuarantineRule.created_at.desc()
         ).all()
         return {
@@ -264,8 +229,6 @@ def create_rule(body: RuleCreate):
         logger.info(f"[QUARANTINE RULES] Created rule '{rule.name}': {rule.match_type}={rule.match_value} → {rule.action}")
         return _rule_to_dict(rule)
 
-
-# ---- Action History (must be before /{rule_id}) ----
 
 @router.get("/logs", responses=documented(m.QuarantineRuleLogs, errors={403: None, 422: Invalid, 500: None}))
 def get_rule_logs(
@@ -305,11 +268,7 @@ def get_rule_logs(
         }
 
 
-# ---- Dry-Run Test (must be before /{rule_id}) ----
-
 def _load_preview_rules_worker():
-    """Load detached rule fields with a worker-owned database session."""
-    # Load ALL rules (enabled + disabled) and convert to plain objects
     with get_db_context() as db:
         db_rules = db.query(QuarantineRule).all()
         rules = []
@@ -373,8 +332,6 @@ async def test_rules():
         "matches": matches,
     }
 
-
-# ---- Parameterized routes (/{rule_id}) ----
 
 @router.put("/{rule_id}", responses=documented(m.QuarantineRule, errors={400: None, 403: None, 404: None, 422: Invalid, 500: None}))
 def update_rule(rule_id: int, body: RuleUpdate):

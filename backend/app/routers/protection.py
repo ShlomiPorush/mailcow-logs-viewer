@@ -1,8 +1,3 @@
-"""
-Protection rules API: the rules the admin manages on the Security page, and the
-addresses they caught. Ban now and Undo write to the Fail2ban blacklist; both
-wait for a rules run in progress so the two never write at once.
-"""
 import logging
 from datetime import datetime, timedelta
 
@@ -30,7 +25,6 @@ _hit = rules_service.hit_dict
 
 
 def _capabilities() -> dict:
-    """What the rules can do on this install; the page locks what is missing."""
     return {
         "can_ban": bool(mailcow_api.has_rw_key),
         "geoip": bool(geoip_service.is_geoip_available()),
@@ -39,7 +33,6 @@ def _capabilities() -> dict:
 
 
 def _country_suggestions(db: Session) -> list:
-    """The countries failed logins came from in the last week, most first."""
     since = datetime.utcnow() - timedelta(days=7)
     rows = db.query(NetfilterLog.country_code, func.max(NetfilterLog.country_name), func.count(NetfilterLog.id)).filter(
         NetfilterLog.time >= since, NetfilterLog.country_code.isnot(None)
@@ -48,7 +41,6 @@ def _country_suggestions(db: Session) -> list:
 
 
 def _trap_suggestions(db: Session) -> list:
-    """Account names tried in the last week that do not exist: good trap candidates."""
     known, catch_all = rules_service._known_accounts(db)
     since = datetime.utcnow() - timedelta(days=7)
     rows = db.query(NetfilterLog.username, func.count(NetfilterLog.id), func.count(func.distinct(NetfilterLog.ip))).filter(
@@ -60,7 +52,6 @@ def _trap_suggestions(db: Session) -> list:
         name = (username or "").strip().lower()
         if not name or not rules_service._is_unknown(name, known, catch_all):
             continue
-        # A bare name that is a real local part would ban real users; never suggest it
         if "@" not in name and name in local_parts:
             continue
         out.append({"name": name, "tries": tries, "addresses": addresses})

@@ -1,16 +1,3 @@
-"""REST for agents that connected with a code (the skill): /api with a bearer token.
-
-The auth middleware hands every /api request that carries an Authorization
-Bearer header here before any other check, so such a request is an agent's
-whatever cookie it also carries, and a bad token never falls back to a session.
-The call runs through the same path as an MCP call (dispatch.call_api): the
-route the router picks is checked against the policy before it runs, with the
-same body and answer limits, slots and timeout. Every call and refusal is
-written to the agent's activity.
-
-Errors are JSON {"error": <code>, "message": <text>}; the codes are the
-skill's contract (skill_files/SKILL.md).
-"""
 import logging
 from typing import Optional
 
@@ -55,7 +42,7 @@ def _path_problem(path: str) -> Optional[str]:
 
 
 def _client_ip(request: Request) -> str:
-    from ..auth import _client_ip as client_ip   # auth imports this module lazily
+    from ..auth import _client_ip as client_ip
     return client_ip(request)
 
 
@@ -83,8 +70,6 @@ async def handle(request: Request) -> Response:
             return _error(405, "not_found", "Use GET.", {"Allow": "GET"})
         if path == ACCESS_PATH:
             info = access_info(grant)
-            # The skill's script says which version it is; an older copy (or one that says
-            # nothing) is told to install the skill again. Its connection is kept.
             if request.headers.get("x-mailcow-logs-skill") != skill_version():
                 info["update_skill"] = (f"A newer mailcow-logs skill is available. Install it again as described at "
                                         f"{live.issuer()}/agents/skill/ and then go on; the connection is kept.")

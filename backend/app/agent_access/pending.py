@@ -1,9 +1,3 @@
-"""Authorization requests waiting on the consent page, in memory.
-
-Each belongs to the browser session that opened it and is used once. They
-live ten minutes; at most MAX_PENDING wait at a time (the oldest makes room),
-and all are dropped when sign-in settings change.
-"""
 import secrets
 import threading
 import time
@@ -19,7 +13,7 @@ class PendingRequest:
     id: str
     session_key: str
     client_id: str
-    client_kind: str                  # 'dcr' | 'cimd' | 'device'
+    client_kind: str
     declared_name: str
     publisher: Optional[str]
     redirect_uri: str
@@ -27,10 +21,10 @@ class PendingRequest:
     code_challenge: str
     resource: str
     requested: FrozenSet[str]
-    sign_in: str                      # the sign-in fingerprint when the request was opened
+    sign_in: str
     created: float
-    device_id: Optional[int] = None   # an agent that connects with a code: its request (store.py)
-    user_code: Optional[str] = None   # the code the person compares, as XXXX-XXXX
+    device_id: Optional[int] = None
+    user_code: Optional[str] = None
 
 
 _pending: Dict[str, PendingRequest] = {}
@@ -54,7 +48,6 @@ def add(**fields) -> PendingRequest:
 
 
 def get(request_id: str, session_key: Optional[str]) -> Optional[PendingRequest]:
-    """The request, if it exists and belongs to this session."""
     with _lock:
         _expire(time.monotonic())
         request = _pending.get(request_id or "")
@@ -64,7 +57,6 @@ def get(request_id: str, session_key: Optional[str]) -> Optional[PendingRequest]
 
 
 def take(request_id: str, session_key: Optional[str]) -> Optional[PendingRequest]:
-    """Like get, and removes it: a request is answered once."""
     with _lock:
         request = get(request_id, session_key)
         if request is not None:

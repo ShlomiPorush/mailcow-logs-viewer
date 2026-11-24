@@ -1,4 +1,3 @@
-"""What the notification destination calls return (routers/notifications.py)."""
 from typing import Any, Dict, List, Optional
 
 from pydantic import Field

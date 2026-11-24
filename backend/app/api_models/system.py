@@ -1,4 +1,3 @@
-"""What /api/health and /api/info return (main.py)."""
 from typing import List, Optional
 
 from pydantic import Field

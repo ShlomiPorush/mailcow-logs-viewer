@@ -1,14 +1,3 @@
-"""Run one /api call for an agent inside the app, under its grant.
-
-The call goes through the whole app (middleware, router, the route's own
-validation) exactly like a request from the browser. Which route runs is
-decided by the app's router; enforce_agent_policy, an app-wide dependency,
-then checks that route against the policy (scopes.py) before its code runs.
-A call whose route never reached the check is treated as refused.
-
-Each call holds a slot until the app has finished with it, including work a
-route started after answering (BackgroundTasks): two per agent, four in all.
-"""
 import asyncio
 import dataclasses
 import json
@@ -37,14 +26,9 @@ SLOTS_TOTAL = 4
 SLOT_WAIT_SECONDS = 10
 
 
-# ── The policy check inside the app ────────────────────────────────────────
-
 def _route_index(app) -> Dict[Tuple[Any, str], List[str]]:
-    """(endpoint function, method) -> the full path templates it serves (built once per app)."""
     index = getattr(app.state, "agent_route_index", None)
     if index is None:
-        # FastAPI 0.141 resolves included routers lazily; this is the same walk
-        # the route exposure test uses (conftest.registered_routes)
         from fastapi.routing import _iter_routes_with_context
 
         index = {}
@@ -75,7 +59,6 @@ def _guard_problem(guard: Optional[str], path_params: Dict[str, Any]) -> Optiona
 
 
 def decide(app, call: AgentCall, endpoint, method: str, path_params: Dict[str, Any]) -> Optional[str]:
-    """None when the call may run, else why not (in words for the agent)."""
     paths = _route_index(app).get((endpoint, method)) or []
     if not paths:
         return "This address is not part of the app's API."
@@ -94,7 +77,6 @@ def decide(app, call: AgentCall, endpoint, method: str, path_params: Dict[str, A
     rule = rules.pop()
     call.path_template = paths[0]
     call.area = rule.area
-    # MCP says read or act by the tool it used; a REST call (mode None) takes the route's own kind
     if call.mode is not None and rule.kind != call.mode:
         if rule.kind == policy.WRITE:
             return "This call changes something: use perform_action."
@@ -118,15 +100,9 @@ def _scopes_now(grant):
 
 
 async def enforce_agent_policy(connection: HTTPConnection) -> None:
-    """App-wide dependency: let an agent's call run only when its grant covers the route.
-
-    Typed HTTPConnection so it also applies to WebSocket routes, where it does nothing.
-    """
     call = agent_call(connection.scope)
     if call is None:
         return
-    # The call may have waited for its body or a slot since its token was checked:
-    # the grant is read again here, and the policy runs on what it allows now
     scopes = await run_in_threadpool(_scopes_now, call.grant)
     if scopes is None:
         reason = "This connection has ended. The person who connected you can connect you again."
@@ -140,15 +116,13 @@ async def enforce_agent_policy(connection: HTTPConnection) -> None:
         raise HTTPException(status_code=403, detail=reason)
 
 
-# ── Running a call ─────────────────────────────────────────────────────────
-
 @dataclass
 class CallResult:
     status: int
     content_type: str
     text: str
     truncated: bool
-    outcome: str           # ok | error | denied | accepted
+    outcome: str
     denied: Optional[str] = None
     path_template: Optional[str] = None
 
@@ -201,7 +175,6 @@ async def _take_slot(grant_id: int) -> None:
 
 
 def check_path(path: str) -> Optional[str]:
-    """Why an address cannot be called, or None. Only plain /api paths."""
     if not isinstance(path, str) or not path.startswith("/api/") or len(path) > 1000:
         return "The path must start with /api/."
     if any(c in path for c in "?#%\\") or any(ord(c) < 33 or ord(c) == 127 for c in path):
@@ -238,7 +211,6 @@ def _summarize(content_type: str, raw: bytes) -> Tuple[str, Optional[Any]]:
 
 
 def _reports_error(data: Any) -> bool:
-    """A 2xx answer that says it failed: {"status": "error"} or {"success": false}."""
     return isinstance(data, dict) and (data.get("status") == "error" or data.get("success") is False)
 
 
@@ -246,9 +218,6 @@ async def call_api(app, grant, mode: Optional[str], method: str, path: str, quer
                    body: Any, client: Optional[Tuple[str, int]], *, raw_body: Optional[bytes] = None,
                    content_type: Optional[str] = None, query_string: Optional[bytes] = None,
                    raw_path: Optional[bytes] = None, max_chars: int = MAX_RESULT_CHARS) -> CallResult:
-    """Run one /api call for an agent. MCP passes `query` and `body` as JSON
-    values; a REST call (rest.py, mode None) passes the request's own raw body,
-    content type, query string and raw path."""
     method = method.upper()
     body_bytes = b""
     headers: List[Tuple[bytes, bytes]] = [(b"accept", b"application/json, text/csv;q=0.9, */*;q=0.1"),
@@ -298,7 +267,6 @@ async def call_api(app, grant, mode: Optional[str], method: str, path: str, quer
                 room = MAX_RESPONSE_BYTES - len(response["body"])
                 response["body"].extend(chunk[:room])
                 if len(chunk) > room:
-                    # Enough: tell a streaming answer the reader has gone
                     response["truncated"] = True
                     disconnect.set()
                     finished.set()
@@ -332,7 +300,6 @@ async def call_api(app, grant, mode: Optional[str], method: str, path: str, quer
         if status in (404, 405):
             return CallResult(status, "text/plain", "No such address in the app's API (or not for this method).",
                               False, "error")
-        # The route ran without the policy check: never hand its answer to the agent
         logger.error(f"Agent call {method} {path} reached a route without the agent policy check")
         return CallResult(403, "text/plain", "Not available to agents.", False, "denied")
     if call.denied:

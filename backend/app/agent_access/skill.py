@@ -1,12 +1,3 @@
-"""The skill for agents that run commands, served by the app with its address filled in.
-
-The person pastes one sentence to the agent (Settings > Agents). It points to
-/agents/skill/, a short install note; the agent downloads the files listed
-there, reads SKILL.md and connects with a code (oauth.py, RFC 8628). Public
-(the files hold no secret), never cached, and only while agent access is live
-on an https address (or this computer): an agent runs what it downloads here.
-Only the files in FILES are served, from this version of the app.
-"""
 import hashlib
 import re
 from pathlib import Path
@@ -30,8 +21,6 @@ FILES: Dict[str, str] = {
 }
 PLACEHOLDER = "__MAILCOW_LOGS_URL__"
 VERSION_PLACEHOLDER = "__MAILCOW_LOGS_SKILL_VERSION__"
-# The canonical address (live.normalize_base_url) is only ever this shape; it
-# goes into JavaScript, PowerShell and sh source, so nothing else is accepted
 _SAFE_URL = re.compile(r"^https?://(\[[0-9a-f:.]+\]|[a-z0-9.-]+)(:[0-9]{1,5})?$")
 _HEADERS = {"Cache-Control": "no-cache", "X-Content-Type-Options": "nosniff"}
 _cache: Dict[str, str] = {}
@@ -56,8 +45,6 @@ def _read(name: str) -> Optional[str]:
 
 
 def skill_version() -> str:
-    """A short hash of the skill's files as shipped: the scripts send it, and the app
-    tells an agent with another one to install the skill again (rest.py, access)."""
     version = _cache.get("__version__")
     if version is None:
         digest = hashlib.sha256()
@@ -69,7 +56,6 @@ def skill_version() -> str:
 
 
 def sentence(base: str) -> str:
-    """The sentence the person pastes to the agent (shown in Settings > Agents)."""
     return (f"Install the {SKILL_NAME} skill into your personal skills folder as described at "
             f"{base}/agents/skill/, then connect to mailcow Logs Viewer.")
 
@@ -96,13 +82,11 @@ Show the person the link and the code that `{SKILL_NAME} connect` prints in the 
 
 
 def mcp_sentence(base: str) -> str:
-    """The sentence a person pastes to an agent that should connect over MCP (Settings > Agents > MCP)."""
     return (f"Connect yourself to mailcow Logs Viewer over MCP as described at {base}/agents/mcp/, "
             "then tell me what to approve.")
 
 
 def mcp_note(base: str) -> str:
-    """How to add this app as an MCP server, for an agent or a person, in the common clients."""
     url = f"{base}/mcp"
     return f"""# Connect to mailcow Logs Viewer over MCP
 
@@ -160,7 +144,7 @@ def skill_file(name: str):
             return JSONResponse({"error": "not_found", "message": "This build has no agent skill."},
                                 status_code=404, headers=_HEADERS)
         return Response(install_note(base), media_type="text/markdown; charset=utf-8", headers=_HEADERS)
-    # Read by the allowlist's own name, never by the one in the request
+    # Reading by the requested name instead brings back CodeQL's path alert (#508)
     known = next((n for n in FILES if n == name), None)
     text = _read(known) if known else None
     if text is None:

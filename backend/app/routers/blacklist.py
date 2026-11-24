@@ -1,6 +1,3 @@
-"""
-API endpoints for IP blacklist checking
-"""
 import logging
 from fastapi import APIRouter, Query, HTTPException
 from pydantic import BaseModel
@@ -29,11 +26,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-# The routes say `-> Dict[str, Any]`, from which FastAPI would infer a model that
-# describes nothing; response_model=None leaves the description to responses=
-
 def format_datetime(dt: datetime) -> str:
-    """Format datetime as UTC ISO string with Z"""
     return format_datetime_for_api(dt) if dt else None
 
 @router.get("/monitored", response_model=None, responses=documented(m.MonitoredHostsResponse))
@@ -45,16 +38,12 @@ def get_monitored_hosts() -> Dict[str, Any]:
     """
     try:
         with get_db_context() as db:
-            # Align with current settings first, so a just-saved blacklist
-            # source toggle or manual-hosts change is reflected immediately
-            # instead of waiting for the next scheduled scan
             from app.services.blacklist_service import reconcile_monitored_hosts
             reconcile_monitored_hosts(db)
             hosts = db.query(MonitoredHost).filter(MonitoredHost.active == True).all()
             ignored = load_ignored(db, IGNORED_BLOCKLISTS_KEY)
             results = []
             for host in hosts:
-                # Get latest check for this host
                 check = db.query(BlacklistCheck).filter(
                     BlacklistCheck.server_ip == host.hostname
                 ).order_by(desc(BlacklistCheck.checked_at)).first()
@@ -103,23 +92,15 @@ async def check_blacklists(
     target_ip = host
     from ..scheduler import blacklist_check_admits, blacklist_check_lock
 
-    # One check at a time, whoever starts it (the schedule, Status, an entity
-    # card): checks share the progress and the batch state, so another one
-    # started now would corrupt both. A full check waiting for the lock goes
-    # first. Nothing is started; the caller says so
     if not blacklist_check_admits():
         return {"status": "busy", "message": BUSY_TEXT}
 
-    # If no host specified, check ALL monitored hosts (background job)
     if not target_ip:
         from ..scheduler import check_monitored_hosts_job
         import asyncio
-        # Trigger background job without awaiting it
         asyncio.create_task(check_monitored_hosts_job(force=force))
         return {"status": "started", "message": "Background check started for all hosts"}
         
-    # If host specified, check single host.
-    # IP literals (IPv4 or IPv6) are used as-is; hostnames are resolved.
     import ipaddress
     try:
         ipaddress.ip_address(target_ip)
@@ -130,10 +111,10 @@ async def check_blacklists(
             if answers:
                 target_ip = str(answers[0])
          except Exception:
-              pass # use hostname as is if resolution fails
+              pass
              
     try:
-        if not blacklist_check_admits():   # taken while the host name resolved
+        if not blacklist_check_admits():
             return {"status": "busy", "message": BUSY_TEXT}
         async with blacklist_check_lock():
             results = await get_blacklist_check_results(force=force, ip=target_ip)
@@ -198,15 +179,6 @@ def get_blacklist_summary() -> Dict[str, Any]:
 
 
 def blacklist_summary_data() -> Dict[str, Any]:
-    """
-    Get compact blacklist status summary for dashboard.
-
-    Aggregates the latest check of every ACTIVE monitored host (WAN IP,
-    manual hosts, transports/relayhosts) instead of only the auto-detected
-    WAN IP, so the card still has data when the server IP source is
-    disabled. Sync def on purpose: DB work runs in the threadpool,
-    off the event loop.
-    """
     from sqlalchemy import func
     from app.services.blacklist_service import aggregate_blacklist_summary
 
@@ -221,9 +193,6 @@ def blacklist_summary_data() -> Dict[str, Any]:
             hostnames = [h.hostname for h in hosts]
             ignored = load_ignored(db, IGNORED_BLOCKLISTS_KEY)
             if hostnames:
-                # Latest check per host in ONE query (window function) and
-                # only the summary columns. The full results JSONB is loaded
-                # only when some lists are ignored, to recount without them.
                 rn = func.row_number().over(
                     partition_by=BlacklistCheck.server_ip,
                     order_by=desc(BlacklistCheck.checked_at)

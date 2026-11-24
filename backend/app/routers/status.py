@@ -1,6 +1,3 @@
-"""
-API endpoints for system status and health monitoring
-"""
 import asyncio
 import logging
 import httpx
@@ -25,8 +22,6 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-# Cache for the mailcow version check. An hour keeps the "update available"
-# notice from outliving a mailcow update for long, at one check per hour.
 VERSION_CHECK_INTERVAL = timedelta(hours=1)
 version_cache = {
     "checked_at": None,
@@ -37,8 +32,6 @@ version_cache = {
 }
 
 def _started_at(value):
-    """A container start time as UTC with Z. Docker gives RFC 3339 in UTC with
-    nanoseconds; anything unreadable is passed on as it came."""
     if not value or not isinstance(value, str):
         return value
     try:
@@ -49,49 +42,37 @@ def _started_at(value):
 
 
 async def _get_containers_status_internal():
-    """Fetch mailcow asynchronously, then persist and build status in a worker."""
     containers_data = await mailcow_api.get_status_containers()
     return await asyncio.to_thread(_store_container_status_worker, containers_data)
 
 
 def _store_container_status_worker(containers_data):
-    """Keep cache queries, writes and rollback in one worker-owned session."""
     with SessionLocal() as db:
         try:
-            # Extract the containers dict from the list
             containers_dict = {}
             if containers_data and len(containers_data) > 0:
                 containers_dict = containers_data[0] if isinstance(containers_data, list) else containers_data
 
-            # Load known containers from database
             known_containers = {kc.container_name: kc for kc in db.query(KnownContainer).all()}
-            # Containers stopped on purpose (e.g. ipv6nat without IPv6) are
-            # listed but never counted, so they raise no alert
             ignored = load_ignored(db, IGNORED_CONTAINERS_KEY)
             ignored_count = 0
 
-            # Track which containers are active (appear in API response)
             active_container_names = set(containers_dict.keys())
             current_time = datetime.utcnow()
 
-            # Build simplified response
             simplified_containers = {}
             running_count = 0
             stopped_count = 0
 
-            # Process containers from API (active containers)
             for container_key, info in containers_dict.items():
-                # Get state and normalize (handle None, empty string, etc.)
                 state = info.get('state', 'unknown')
                 if state is None or state == '':
                     state = 'unknown'
                 else:
                     state = str(state).lower().strip()
 
-                # Simplify container name (remove -mailcow suffix)
                 display_name = container_key.replace('-mailcow', '')
 
-                # Update or create known container
                 if container_key in known_containers:
                     known_container = known_containers[container_key]
                     known_container.last_seen = current_time
@@ -99,7 +80,6 @@ def _store_container_status_worker(containers_data):
                     if known_container.display_name != display_name:
                         known_container.display_name = display_name
                 else:
-                    # New container - add to database
                     known_container = KnownContainer(
                         container_name=container_key,
                         display_name=display_name,
@@ -108,7 +88,6 @@ def _store_container_status_worker(containers_data):
                     db.add(known_container)
                     known_containers[container_key] = known_container
 
-                # Count containers: only 'running' is considered running, everything else is stopped
                 if container_key in ignored:
                     ignored_count += 1
                 elif state == 'running':
@@ -116,7 +95,6 @@ def _store_container_status_worker(containers_data):
                 else:
                     stopped_count += 1
 
-                # Build simplified entry
                 simplified_containers[container_key] = {
                     "name": display_name,
                     "state": state,
@@ -124,10 +102,8 @@ def _store_container_status_worker(containers_data):
                     "ignored": container_key in ignored
                 }
 
-            # Process known containers that are not in API response (stopped containers)
             for container_key, known_container in known_containers.items():
                 if container_key not in active_container_names:
-                    # Container is known but not in API response - it's stopped
                     display_name = known_container.display_name
 
                     simplified_containers[container_key] = {
@@ -141,13 +117,11 @@ def _store_container_status_worker(containers_data):
                     else:
                         stopped_count += 1
 
-            # Commit database changes
             try:
                 db.commit()
             except Exception as db_error:
                 logger.error(f"Error committing container cache changes: {db_error}")
                 db.rollback()
-                # Continue without cache update - still return the results
 
             return {
                 "containers": simplified_containers,
@@ -161,12 +135,10 @@ def _store_container_status_worker(containers_data):
 
         except Exception as e:
             logger.error(f"Error fetching container status: {e}", exc_info=True)
-            # Try to rollback if there's a DB error
             try:
                 db.rollback()
             except Exception:
                 pass
-            # Re-raise the exception - let the caller handle HTTPException
             raise
 
 
@@ -234,7 +206,6 @@ async def get_version_status(force: bool = Query(False, description="Force a fre
     try:
         global version_cache
         
-        # Refresh the cache when it is older than VERSION_CHECK_INTERVAL or forced
         now = datetime.now(timezone.utc)
         if (force or 
             version_cache["checked_at"] is None or 
@@ -242,11 +213,9 @@ async def get_version_status(force: bool = Query(False, description="Force a fre
             
             logger.info("Checking mailcow version and updates...")
             
-            # Get current version
             current_version = await mailcow_api.get_status_version()
             version_cache["current_version"] = current_version
             
-            # Check GitHub for latest version
             try:
                 async with httpx.AsyncClient(timeout=10) as client:
                     response = await client.get(
@@ -263,7 +232,6 @@ async def get_version_status(force: bool = Query(False, description="Force a fre
                         version_cache["name"] = name
                         version_cache["changelog"] = changelog
                         
-                        # Compare versions (normalize by removing 'v' prefix)
                         curr_norm = current_version.lower().lstrip('v')
                         latest_norm = latest_version.lower().lstrip('v')
                         
@@ -282,7 +250,6 @@ async def get_version_status(force: bool = Query(False, description="Force a fre
             
             version_cache["checked_at"] = now
         
-        # Format last_checked with UTC timezone indicator ('Z' suffix)
         last_checked = format_datetime_for_api(version_cache["checked_at"])
         
         return {
@@ -308,19 +275,15 @@ async def get_app_version_status(force: bool = Query(False, description="Force a
         force: If True, force a fresh check regardless of cache age
     """
     try:
-        # Get cache from scheduler
         app_version_cache = get_app_version_cache()
         
-        # Force check or check if cache is stale (more than 1 day old) and refresh if needed
-        # This is a fallback in case the scheduler hasn't run yet
         now = datetime.now(timezone.utc)
         if (force or 
             app_version_cache["checked_at"] is None or 
             now - app_version_cache["checked_at"] > timedelta(days=1)):
             await check_app_version_update()
-            app_version_cache = get_app_version_cache()  # Get updated cache
+            app_version_cache = get_app_version_cache()
         
-        # Format last_checked with UTC timezone indicator ('Z' suffix)
         last_checked = format_datetime_for_api(app_version_cache["checked_at"])
         
         return {
@@ -348,7 +311,6 @@ async def get_mailcow_info():
     Get mailcow system information (domains, mailboxes, aliases)
     """
     try:
-        # Fetch all info in parallel
         import asyncio
         domains, mailboxes, aliases = await asyncio.gather(
             mailcow_api.get_domains(),
@@ -356,7 +318,6 @@ async def get_mailcow_info():
             mailcow_api.get_aliases()
         )
         
-        # Count active items
         active_domains = sum(1 for d in domains if d.get('active', 0) == 1)
         active_mailboxes = sum(1 for m in mailboxes if mailbox_state(m)[0])
         active_aliases = sum(1 for a in aliases if a.get('active', 0) == 1)
@@ -406,11 +367,9 @@ async def get_app_version_changelog(version: str):
     Get changelog for a specific app version from GitHub
     """
     try:
-        # Remove 'v' prefix if present for API call
         version_tag = version if version.startswith('v') else f'v{version}'
         
         async with httpx.AsyncClient(timeout=10) as client:
-            # Try to get the specific release by tag
             response = await client.get(
                 f"https://api.github.com/repos/ShlomiPorush/mailcow-logs-viewer/releases/tags/{quote(version_tag, safe='')}"
             )
@@ -445,7 +404,6 @@ async def get_status_summary():
     try:
         import asyncio
         
-        # Fetch all status info in parallel
         from ..services.figures import storage_figure
         containers_data, storage_data, mailcow_info = await asyncio.gather(
             _get_containers_status_internal(),
@@ -454,10 +412,6 @@ async def get_status_summary():
             return_exceptions=True
         )
         
-        # Handle exceptions. Without an answer from mailcow the counts are zeros, which
-        # are not "nothing stopped": containers_known says whether they were read. Its
-        # API runs in a container, so an answer has one running; none running means the
-        # counts came from the containers known before, not from mailcow
         containers_known = not isinstance(containers_data, Exception)
         if not containers_known:
             containers_data = {"summary": {"running": 0, "stopped": 0, "total": 0}}
@@ -475,14 +429,12 @@ async def get_status_summary():
                 "used_percent": storage_data.get("used_percent", "0%"),
                 "used": storage_data.get("used", "0"),
                 "total": storage_data.get("total", "0"),
-                # False when mailcow did not tell it: the card says Unknown, not 0%
                 "known": bool(storage_data.get("valid")),
             },
             "system": {
                 "domains": mailcow_info.get("domains", {}).get("total", 0),
                 "mailboxes": mailcow_info.get("mailboxes", {}).get("total", 0),
                 "aliases": mailcow_info.get("aliases", {}).get("total", 0),
-                # False when mailcow did not answer: the dashboard says so, not 0
                 "known": system_known,
             }
         }
@@ -503,7 +455,6 @@ def get_container_logs(lines: int = Query(100, ge=10, le=1000, description="Numb
         if not os.path.exists(log_file):
             return {"logs": ["Log file not found or hasn't been created yet."]}
             
-        # Read file efficiently using deque for last N lines
         from collections import deque
         
         with open(log_file, 'r', encoding='utf-8', errors='replace') as f:

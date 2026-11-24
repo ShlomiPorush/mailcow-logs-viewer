@@ -1,6 +1,3 @@
-"""
-API endpoints for statistics and dashboard data
-"""
 import logging
 from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.orm import Session
@@ -34,7 +31,6 @@ def get_dashboard_stats(db: Session = Depends(get_db)):
         week_ago = now - timedelta(days=7)
         month_ago = now - timedelta(days=30)
         
-        # Messages processed
         messages_24h = db.query(MessageCorrelation).filter(
             MessageCorrelation.first_seen >= day_ago
         ).count()
@@ -47,7 +43,6 @@ def get_dashboard_stats(db: Session = Depends(get_db)):
             MessageCorrelation.first_seen >= month_ago
         ).count()
 
-        # Blocked messages (bounced, rejected, spam) - from MessageCorrelation
         blocked_24h = db.query(MessageCorrelation).filter(
             and_(
                 MessageCorrelation.first_seen >= day_ago,
@@ -62,7 +57,6 @@ def get_dashboard_stats(db: Session = Depends(get_db)):
             )
         ).count()
         
-        # Deferred messages - from MessageCorrelation
         deferred_24h = db.query(MessageCorrelation).filter(
             and_(
                 MessageCorrelation.first_seen >= day_ago,
@@ -77,7 +71,6 @@ def get_dashboard_stats(db: Session = Depends(get_db)):
             )
         ).count()
         
-        # Auth failures - rule_id=3: failed mail logins (SMTP only before mailcow 2026-11)
         auth_failures_24h = db.query(NetfilterLog).filter(
             and_(
                 NetfilterLog.time >= day_ago,
@@ -92,7 +85,6 @@ def get_dashboard_stats(db: Session = Depends(get_db)):
             )
         ).count()
         
-        # Direction statistics (last 24h)
         inbound_24h = db.query(RspamdLog).filter(
             and_(
                 RspamdLog.time >= day_ago,
@@ -163,7 +155,6 @@ def get_timeline_stats(
     try:
         cutoff = datetime.utcnow() - timedelta(hours=hours)
 
-        # Query for hourly counts
         timeline = db.query(
             func.date_trunc('hour', RspamdLog.time).label('hour'),
             func.count(RspamdLog.id).label('count'),
@@ -203,7 +194,6 @@ def get_top_spam_triggers(
     try:
         cutoff = datetime.utcnow() - timedelta(days=7)
         
-        # Get all spam logs
         spam_logs = db.query(RspamdLog.symbols).filter(
             and_(
                 RspamdLog.time >= cutoff,
@@ -211,14 +201,12 @@ def get_top_spam_triggers(
             )
         ).all()
         
-        # Count symbols
         symbol_counts = {}
         for log in spam_logs:
             if log.symbols:
                 for symbol_name in log.symbols.keys():
                     symbol_counts[symbol_name] = symbol_counts.get(symbol_name, 0) + 1
         
-        # Sort and limit
         top_symbols = sorted(
             symbol_counts.items(),
             key=lambda x: x[1],
