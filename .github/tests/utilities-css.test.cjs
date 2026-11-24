@@ -11,7 +11,7 @@ const ROOT = path.join(__dirname, '..', '..');
 const FRONTEND = path.join(ROOT, 'frontend');
 const config = require(path.join(ROOT, '.github', 'tailwind', 'tailwind.config.cjs'));
 const safelist = new Set(config.safelist);
-// The colours the scripts pass into those templates (see app.js)
+// The status colours a script would pass into such a template
 const RUNTIME_COLOURS = ['gray', 'green', 'red', 'yellow', 'orange'];
 
 function scripts() {
