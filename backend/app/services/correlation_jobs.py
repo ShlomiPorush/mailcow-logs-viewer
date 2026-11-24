@@ -195,52 +195,27 @@ def correlate_single_message(db: Session, rspamd_log: RspamdLog) -> Optional[Mes
     if not first_seen:
         first_seen = now
 
-    try:
-        # Create correlation
-        correlation = MessageCorrelation(
-            correlation_key=correlation_key,
-            message_id=message_id,
-            queue_id=None,
-            sender=rspamd_log.sender_smtp,
-            recipient=first_recipient,
-            subject=rspamd_log.subject,
-            direction=rspamd_log.direction,
-            final_status=final_status,
-            rspamd_log_id=rspamd_log.id,
-            postfix_log_ids=[],
-            first_seen=first_seen,
-            last_seen=now,
-            is_complete=False
-        )
+    correlation = MessageCorrelation(
+        correlation_key=correlation_key,
+        message_id=message_id,
+        queue_id=None,
+        sender=rspamd_log.sender_smtp,
+        recipient=first_recipient,
+        subject=rspamd_log.subject,
+        direction=rspamd_log.direction,
+        final_status=final_status,
+        rspamd_log_id=rspamd_log.id,
+        postfix_log_ids=[],
+        first_seen=first_seen,
+        last_seen=now,
+        is_complete=False
+    )
+    db.add(correlation)
+    rspamd_log.correlation_key = correlation_key
+    db.commit()
 
-        db.add(correlation)
-        db.flush()  # Try to insert - will fail if the key was just taken
-
-        # Update rspamd log with correlation key
-        rspamd_log.correlation_key = correlation_key
-
-        db.commit()
-
-        logger.debug(f"Created correlation for {message_id[:40]}... (no Postfix logs yet)")
-        return correlation
-
-    except Exception as e:
-        # Handle race condition - another process created the correlation
-        db.rollback()
-
-        # Try to find and return the existing one
-        existing = find_stub_leg(db, message_id)
-        if not existing:
-            legs = find_legs(db, message_id)
-            existing = legs[0] if legs else None
-
-        if existing:
-            rspamd_log.correlation_key = existing.correlation_key
-            db.commit()
-            return existing
-
-        # Re-raise if it's a different error
-        raise
+    logger.debug(f"Created correlation for {message_id[:40]}... (no Postfix logs yet)")
+    return correlation
 
 
 def complete_incomplete_correlations():
