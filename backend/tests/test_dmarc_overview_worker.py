@@ -1,4 +1,3 @@
-"""Domain overview database waits must not block concurrent requests."""
 import asyncio
 import threading
 from contextlib import contextmanager

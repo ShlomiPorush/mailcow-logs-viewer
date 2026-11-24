@@ -1,4 +1,3 @@
-"""Postfix network I/O stays async while database work runs in a worker."""
 import asyncio
 import threading
 from contextlib import contextmanager

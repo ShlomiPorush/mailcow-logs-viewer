@@ -1,12 +1,3 @@
-"""Every answer the app gives in a test must match what /openapi.json says it returns.
-
-conftest.py wraps TestClient so each response of the real app (app.main.app)
-to an /api call is checked here. The document's models (app/api_models) are
-documentation only, so this is what keeps them true: a route that returns a
-key, a type or a status its model does not have fails the test that called it.
-
-An operation is checked once it documents a successful answer.
-"""
 import ast
 import copy
 import inspect
@@ -18,7 +9,6 @@ from typing import Any, Dict, Optional, Tuple
 from conftest import registered_routes
 from contract_rules import check_answer
 
-# Answered by the auth middleware for an agent's bearer token, not by a route
 MIDDLEWARE_OPERATIONS = {("GET", "/api/agent/access"), ("GET", "/api/agent/endpoints")}
 
 
@@ -35,7 +25,6 @@ class Contract:
         return self._document
 
     def operation_for(self, method: str, path: str) -> Optional[Tuple[str, Dict[str, Any]]]:
-        """The route template a request reached and its operation in the document."""
         if (method, path) in MIDDLEWARE_OPERATIONS:
             template = path
         else:
@@ -50,7 +39,6 @@ class Contract:
         return (template, operation) if operation else None
 
     def problem(self, method: str, path: str, status: int, content_type: str, body: bytes) -> Optional[str]:
-        """What is wrong with this answer, or None when it matches (or is not checked)."""
         if not path.startswith("/api/"):
             return None
         found = self.operation_for(method, path)
@@ -63,11 +51,6 @@ class Contract:
 
 
 def agent_envelope(contract: "Contract", request, response) -> bool:
-    """An answer agent_access/rest.py gives an agent's bearer call itself (a refusal,
-    a body or answer too large, an outcome it cannot know): {error, message} with two
-    strings, which the document's description lists for every call. The gateway can
-    answer so at any status, also one the route documents for its own answer, so a
-    bearer call's error is held to the route's answer or to this envelope."""
     if not request.headers.get("authorization", "").lower().startswith("bearer ") or response.status_code < 400:
         return False
     try:
@@ -79,7 +62,6 @@ def agent_envelope(contract: "Contract", request, response) -> bool:
 
 
 def check_response(contract: Contract, response) -> None:
-    """Fail the calling test when a response does not match the document."""
     request = response.request
     problem = contract.problem(request.method.upper(), request.url.path, response.status_code,
                                response.headers.get("content-type", ""), response.content)
@@ -88,7 +70,6 @@ def check_response(contract: Contract, response) -> None:
 
 
 def _literal_statuses(node) -> set:
-    """Status codes a status argument can take: a number, or either side of `a if c else b`."""
     if isinstance(node, ast.Constant) and isinstance(node.value, int):
         return {node.value}
     if isinstance(node, ast.IfExp):
@@ -97,12 +78,6 @@ def _literal_statuses(node) -> set:
 
 
 def statuses_in_source(function) -> set:
-    """The statuses a handler gives in its own code: HTTPException(...) and
-    JSONResponse(...) with a literal status (keyword or, for HTTPException, the
-    first argument; both sides of a conditional), and internal_error() (500).
-    Comments and strings are not code, so they are not read. A status given in
-    a helper the handler calls is not seen; the contract check still catches it
-    when a test reaches it."""
     tree = ast.parse(textwrap.dedent(inspect.getsource(function)))
     found = set()
     for node in ast.walk(tree):
@@ -126,7 +101,6 @@ def schema_names(document: Dict[str, Any]) -> set:
 
 
 def unresolved_refs(document: Dict[str, Any]) -> list:
-    """Every $ref in the document that names no component."""
     names = schema_names(document)
     refs = re.findall(r'"\$ref": "#/components/schemas/([^"]+)"', json.dumps(document))
     return sorted({r for r in refs if r not in names})

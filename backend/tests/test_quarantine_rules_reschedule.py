@@ -1,4 +1,3 @@
-"""Saving settings reschedules the quarantine rules job, like the other interval jobs."""
 import asyncio
 import secrets
 from datetime import timedelta
@@ -64,7 +63,6 @@ def test_read_write_key_added_later_starts_the_job(monkeypatch, fake_scheduler):
 
 
 def test_feature_switched_off_leaves_the_job_doing_nothing(monkeypatch, fake_scheduler):
-    """The job stays registered, so two saves at once cannot drop it, and does nothing while the feature is off."""
     monkeypatch.setattr(scheduler.mailcow_api, "headers_rw", {"X-API-Key": secrets.token_hex(16)})
     scheduler.reschedule_interval_jobs()
     assert _quarantine_job(fake_scheduler) is not None

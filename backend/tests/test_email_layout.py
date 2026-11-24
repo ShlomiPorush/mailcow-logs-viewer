@@ -1,8 +1,3 @@
-"""Every email the app sends uses the shared v3 layout (email_layout).
-
-The layout escapes every value it is given, so an email builder never has
-to escape by hand; only the output of another layout block is markup.
-"""
 import asyncio
 from datetime import datetime
 
@@ -14,7 +9,6 @@ LAYOUT_MARK = 'class="m-bg"'
 
 
 def _texts(html):
-    """The text between tags, one entry per text node."""
     import re
     return [t.strip() for t in re.findall(r'>([^<]+)<', html) if t.strip()]
 
@@ -60,17 +54,12 @@ def test_dark_mode_and_header():
 
 
 def test_outlook_dark_mode_gets_neutral_greys():
-    # Outlook for Android turned the tinted backgrounds into similar mid
-    # greys, but kept white (as its own background) and neutral dark greys.
-    # Measured 2026-10-26.
     html = e.render(title='T', topic='Weekly')
     assert '[data-ogsb] .m-bg { background-color: #FFFFFF !important; }' in html
     assert '[data-ogsb] .m-panel { background-color: #202020 !important; }' in html
     assert '[data-ogsb] .m-line { border-color: #333333 !important; }' in html
     assert '[data-ogsb] .m-rule { background-color: #333333 !important; }' in html
     assert '[data-ogsb] .m-muted-bg { background-color: #333333 !important; }' in html
-    # A rule on the marked element itself loses to Outlook's inline colour,
-    # and Outlook drops an attribute joined to a class
     assert '[data-ogsb].' not in html and '[data-ogsc].' not in html
 
 
@@ -80,9 +69,6 @@ def _neutral(hex_colour):
 
 
 def test_every_surface_is_a_neutral_grey():
-    # Outlook for Android and Outlook on the web turn any tinted surface, light
-    # or dark, into the same mid grey, and keep neutral greys. Measured
-    # 2026-10-26: the old tinted panels and dark theme came out flat grey.
     import re
     light = {'BG': e.BG, 'PANEL': e.PANEL, 'LINE': e.LINE, 'muted tint': e.TONES['muted'][1], 'BAR': e.BAR}
     assert {name: c for name, c in light.items() if not _neutral(c)} == {}
@@ -93,8 +79,6 @@ def test_every_surface_is_a_neutral_grey():
 
 
 def test_tags_are_outlined_not_filled():
-    # Outlook on the web turned every tinted tag fill into a muddy grey-brown
-    # in dark mode; a border and text in the tone colour stayed clear
     for tone, (color, tint) in e.TONES.items():
         html = e.tag('Label', tone)
         assert f'border:1px solid {color};' in html and f'color:{color};' in html
@@ -107,18 +91,14 @@ def test_tags_are_outlined_not_filled():
 
 
 def test_the_email_is_left_to_right():
-    # A client in a right-to-left language (Outlook on the web in Hebrew)
-    # otherwise mirrors the email
     html = e.render(title='T', topic='Weekly')
     assert '<html lang="en" dir="ltr"' in html
     assert '<body class="m-bg" dir="ltr"' in html
     assert '<table role="presentation" class="m-bg" dir="ltr"' in html
-    # Outlook on the web drops the html and body attributes; the tables keep theirs
     assert 'dir="ltr" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;' in html
 
 
 def test_links_the_client_adds_look_like_text_but_ours_stay_links():
-    # Outlook and Gmail turn dates such as 26.10.2026 into links of their own
     html = e.render(title='T', topic='Weekly', blocks=[e.panel('P', e.panel_text(e.link('Open', 'https://example.com')))])
     assert '.m-bg a { color: inherit !important; text-decoration: none !important; }' in html
     assert 'text-decoration:underline !important;">Open</a>' in html
@@ -131,8 +111,6 @@ def test_the_date_is_in_the_app_timezone(monkeypatch):
 
 
 def test_an_email_time_is_in_the_app_timezone_and_names_it(monkeypatch):
-    """Emails printed the time without a zone, so a reader could not tell
-    UTC from local time."""
     from datetime import timezone
     from app.config import settings
     monkeypatch.setattr(settings._inner, 'tz', 'Europe/Berlin')
@@ -140,7 +118,6 @@ def test_an_email_time_is_in_the_app_timezone_and_names_it(monkeypatch):
     assert e.format_date(winter, time=True) == '15/01/2026 13:00 CET'
     assert e.format_date(datetime(2026, 7, 15, 12, 0), time=True) == '15/07/2026 14:00 CEST'
     assert e.format_date(winter) == '15/01/2026'
-    # Late in the UTC evening it is already the next day in Tokyo
     monkeypatch.setattr(settings._inner, 'tz', 'Asia/Tokyo')
     assert e.format_date(datetime(2026, 1, 15, 20, 0, tzinfo=timezone.utc)) == '16/01/2026'
     html = e.render(title='T', topic='Weekly', app_title='My Logs', when=winter)
@@ -154,8 +131,6 @@ def test_an_email_time_in_utc_says_utc(monkeypatch):
 
 
 def test_addresses_keep_the_text_colour():
-    """Gmail and Outlook made the address in a title a blue underlined link of
-    their own; Outlook ignores color:inherit, so the link has the text colour."""
     html = e.render(title='Sending is off for anna@example.com', topic='Security')
     assert ('Sending is off for <a href="mailto:anna@example.com" class="m-ink" '
             'style="color:#111814;text-decoration:none;">anna@example.com</a></h1>') in html
@@ -172,9 +147,6 @@ def test_address_links_take_whole_addresses_only():
 
 
 def test_address_scan_stays_fast_on_hostile_text():
-    """The text includes subjects of inbound mail. The address pattern used to
-    backtrack polynomially on a long run without a valid address (CodeQL
-    py/polynomial-redos); the scan is linear now."""
     import time
     hostile = ('a.' * 40000) + '@' + ('b-' * 40000) + '!'
     started = time.perf_counter()
@@ -184,7 +156,6 @@ def test_address_scan_stays_fast_on_hostile_text():
 
 
 def _mso_parts(html):
-    """(the copy for Outlook for Windows, the copy for every other client)"""
     import re
     word = re.search(r'<!--\[if mso\]>(.*?)<!\[endif\]-->', html, re.S)
     other = re.search(r'<!--\[if !mso\]><!-->(.*?)<!--<!\[endif\]-->', html, re.S)
@@ -192,17 +163,12 @@ def _mso_parts(html):
 
 
 def test_long_values_are_never_shortened():
-    """A DNS alert must show the whole record: a change in the middle of an
-    SPF record was hidden behind an ellipsis."""
     key = 'MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA' + 'Ab1+/' * 60 + 'IDAQAB'
     value = f'v=DKIM1;k=rsa;t=s;s=email;p={key}'
     shown = e.mono(value, wrap=56)
     assert '…' not in shown
     word, other = _mso_parts(shown)
-    # Every other client gets the value whole, so a copy is the real record
     assert other is not None and ''.join(_texts(other)) == value
-    # Outlook for Windows cannot break a run without spaces; it gets lines
-    # of at most 56 characters that together are the whole value
     lines = word.split('<span', 1)[1].split('>', 1)[1].rsplit('</span>', 1)[0].split('<br>')
     assert ''.join(lines) == value and all(len(line) <= 56 for line in lines) and len(lines) > 1
 
@@ -212,7 +178,6 @@ def test_long_spf_record_keeps_its_middle():
              'include:spf.mail-relay.example.com ~all')
     shown = e.mono(value, wrap=56)
     assert ''.join(_texts(shown)) == value
-    # Words short enough to wrap at spaces need no copy for Outlook
     assert '[if mso]' not in shown
 
 
@@ -233,8 +198,6 @@ def test_dns_change_alert_shows_whole_records(monkeypatch):
 def test_long_runs_are_split_before_escaping():
     import html
     import re
-    # The line ends inside "&<>": an escaped entity cut there would show
-    # as "&am" and "p;" in Outlook
     value = 'p=' + 'A' * 53 + '&<>' + 'B' * 60
     word, other = _mso_parts(e.mono(value, wrap=56))
     for part in (word, other):
@@ -260,8 +223,6 @@ def _summary_data():
 
 
 def test_weekly_summary_title_is_the_exact_window_it_counts(monkeypatch):
-    """The counts are a rolling 7 days up to now; the title used to start at
-    now - 6 days and named no time or zone."""
     from datetime import timezone
     from app.config import settings
     from app.routers.reporting import build_summary_email
@@ -269,11 +230,9 @@ def test_weekly_summary_title_is_the_exact_window_it_counts(monkeypatch):
     data = _summary_data()
     data['traffic'].update(start_date='2026-10-19T07:00:00Z', end_date='2026-10-26T08:00:00Z')
     subject, text, html = build_summary_email(data, now=datetime(2026, 10, 26, 8, 0, 3, tzinfo=timezone.utc))
-    # The window crosses the end of summer time, so each end carries its own zone
     assert subject == 'Weekly summary: 19/10/2026 09:00 CEST to 26/10/2026 09:00 CET'
     assert '19/10/2026 09:00 CEST to 26/10/2026 09:00 CET.' in text
 
-    # Without the window in the data, it is the 7 days up to now
     data['traffic'].pop('start_date')
     data['traffic'].pop('end_date')
     subject, _, _ = build_summary_email(data, now=datetime(2026, 1, 12, 8, 0, tzinfo=timezone.utc))
@@ -290,7 +249,6 @@ def test_weekly_summary_uses_the_layout_and_names_what_needs_a_look(monkeypatch)
     assert 'Failure rate' in html and 'Rating' not in html
     assert '12,480' in html
     assert 'Needs a look: 1 host on a blacklist, DNS issues on 1 domain, a failure rate of 7.5%.' in html
-    # The plain-text part carries the content, not a "view in HTML" placeholder
     assert 'mx1.example.com: listed (Spamhaus ZEN)' in text
     assert 'HTML-compatible' not in text
 
@@ -328,7 +286,6 @@ def test_dns_change_email(monkeypatch):
     sent = {}
     monkeypatch.setattr(notification_service, 'notify',
                         lambda subject, text, html_content=None, **kw: sent.update(html=html_content, kw=kw))
-    # The email is what this checks; the alert it also stores is test_attention_alert_writers.py's
     monkeypatch.setattr(stored_alerts, 'record_dns_change', lambda domain, changes: True)
     domains.notify_dns_changes('example.com', [{'type': 'SPF', 'old': 'v=spf1 -all', 'new': f'v=spf1 {PAYLOAD}'}])
     assert LAYOUT_MARK in sent['html']
@@ -346,12 +303,10 @@ def test_anomaly_alert_email():
     _inert(html)
     assert 'Unusual sending from a@example.com' in html
     assert 'Review the mailbox.' in html
-    # Without its counts the email has no chart
     assert 'Last 24 hours' not in html and 'm-bar' not in html.split('</style>', 1)[1]
 
 
 def _bar_columns(html):
-    """Per bar column: the heights of its cells (spacer, bar) and the bar's class and colour."""
     import re
     columns = re.findall(r'<td width="\d+%" valign="bottom".*?</table></td>', html)
     return [([int(h) for h in re.findall(r'height="(\d+)"', column)],
@@ -361,9 +316,7 @@ def _bar_columns(html):
 
 def test_bar_chart_scales_the_bars_to_the_largest_count():
     columns = _bar_columns(e.bar_chart([0, 1, 20, 40, 3]))
-    # The bar is the last cell: zero is a 1px line, a small count stays visible
     assert [heights[-1] for heights, _ in columns] == [1, 2, 40, 80, 6]
-    # Every column is as tall as the tallest bar, so the bars stand on one line
     assert {sum(heights) for heights, _ in columns} == {e.BAR_MAX_HEIGHT}
 
 
@@ -378,7 +331,6 @@ def test_bar_chart_highlights_the_marked_bars():
     columns = _bar_columns(e.bar_chart([3, 5, 39, 12], highlight=[2, 3]))
     assert [style for _, style in columns] == [
         ('m-bar', '#C4C4C4'), ('m-bar', '#C4C4C4'), ('m-bar-hi', '#C42B1C'), ('m-bar-hi', '#C42B1C')]
-    # A neutral grey (no tint), which the Outlook apps keep as it is
     assert e.BAR[1:3] == e.BAR[3:5] == e.BAR[5:7]
 
 
@@ -388,7 +340,6 @@ def test_bar_chart_escapes_its_text():
     _inert(html)
     for prefix in ('S', 'E', 'C'):
         assert f'{prefix}{ESCAPED}' in html, prefix
-    # The counts become heights: anything but a number is refused
     import pytest
     with pytest.raises(ValueError):
         e.bar_chart([f'1{PAYLOAD}'])
@@ -399,8 +350,6 @@ def test_bar_chart_in_dark_mode():
     dark = html.split('@media (prefers-color-scheme: dark)', 1)[1].split('\n}\n', 1)[0]
     assert '.m-bar { background-color: #4A4A4A !important; }' in dark
     assert '.m-bar-hi { background-color: #FF6B61 !important; }' in dark
-    # Outlook for Android turns tinted colours into a flat grey: the bars get
-    # a neutral grey, and the highlighted ones their red back
     assert '[data-ogsb] .m-bar { background-color: #555555 !important; }' in html
     assert '[data-ogsb] .m-bar-hi { background-color: #FF6B61 !important; }' in html
 
@@ -417,9 +366,7 @@ def test_anomaly_alert_email_shows_the_last_24_hours(monkeypatch):
         'Mailbox a@example.com sent 39 messages.\n\nReview the mailbox.',
         'critical', 'volume_spike', 'a@example.com', chart)
     assert 'Messages sent per hour. 39 in the last hour, usually 0.6 an hour.' in html
-    # After the details, before what to do
     assert html.index('>Details<') < html.index('>Last 24 hours<') < html.index('What to do')
-    # The axis: the start a day earlier, with its date; the end with its zone
     assert '>14/01/2026 13:00<' in html and '>13:00 CET<' in html
     assert [style[0] for _, style in _bar_columns(html)].count('m-bar-hi') == 1
 
@@ -428,7 +375,6 @@ def test_the_chart_axis_names_both_zones_across_a_clock_change(monkeypatch):
     from app.config import settings
     from app.services.anomaly_service import AlertChart, _alert_email_html
     monkeypatch.setattr(settings._inner, 'tz', 'Europe/Berlin')
-    # Summer time ended at 01:00 UTC on 25/10/2026
     chart = AlertChart([1] * 24, [23], datetime(2026, 10, 25, 12, 0))
     html = _alert_email_html('T', 'What.\n\nDo.', 'warning', 'auth_failure_burst', 'a@example.com', chart)
     assert '>24/10/2026 14:00 CEST<' in html and '>13:00 CET<' in html
@@ -476,7 +422,6 @@ def test_smtp_abuse_operator_email(monkeypatch):
 
 
 def _run_blacklist_job(monkeypatch, listed_count, prev_listed):
-    """Run the blacklist check with one host and a cached result; return what was sent."""
     from app import scheduler
     from app.services import blacklist_service, notification_service
     monkeypatch.setattr(scheduler, '_load_blacklist_hosts_worker',
@@ -503,7 +448,7 @@ def test_blacklist_job_sends_the_alert(monkeypatch):
     assert len(sent) == 1
     subject, text, html, alert_type = sent[0]
     assert subject == 'Blacklist: 1 host is on a blacklist' and alert_type == 'blacklist'
-    # Exact comparisons: CodeQL reads "host in ..." as URL sanitizing
+    # A `host in ...` check here fails the CodeQL URL-sanitizing rule in CI.
     shown = _texts(html)
     assert LAYOUT_MARK in html
     assert any(t == 'mx1.example.com' for t in shown) and any(t == 'Spamhaus ZEN' for t in shown)
@@ -523,10 +468,6 @@ def test_blacklist_job_sends_improved(monkeypatch):
 
 
 def test_sent_mail_keeps_lines_short(monkeypatch):
-    """SMTP allows at most 998 characters per line. The layout writes long
-    lines, and a 7bit part sent as it is was broken by the mail server in the
-    middle of a tag, so Gmail showed '< /table>' as text. The parts must be
-    encoded so that no line is too long and the HTML arrives unchanged."""
     import email
     from app.services import smtp_service
 
@@ -562,8 +503,6 @@ def test_sent_mail_keeps_lines_short(monkeypatch):
 
 
 def test_the_app_icon_travels_with_the_email():
-    """The header shows the app icon; it is sent inside the email so Outlook
-    and Gmail show it without loading anything from the internet."""
     import email
     from app.services.smtp_service import build_message
 
@@ -579,9 +518,6 @@ def test_the_app_icon_travels_with_the_email():
 
 
 def test_outlook_gets_only_the_fixed_size_rounded_tag():
-    """A VML shape that grows with its content does not push the next block
-    down in Outlook, so panels, cards and banners overlapped there. Only the
-    topic tag, which has a fixed size, is a VML shape."""
     html = e.render(title='T', topic='Topic', blocks=[
         e.panel('P', e.kv([('Severity', e.tag('Critical', 'fail'))])),
         e.banner('warn', 'What to do', 'Text'),

@@ -1,16 +1,3 @@
-"""One report email must not cost an IMAP import its failure records.
-
-Anyone can mail the report address. The import keeps, for each email it could
-not import, the email's Message-ID, Subject and error (which names the
-attachment) and announces them at the end. A Subject with raw 8-bit bytes
-comes back from the email parser as a Header object, and an attachment name
-can decode to NUL: either one made the final commit fail, so the run lost
-every failure entry, stayed 'running' and sent no notification, while the
-emails were already marked as read and never tried again.
-
-Each failure entry is now plain bounded text, it is stored before its email
-is marked, and an import that fails still records and reports what failed.
-"""
 import base64
 from types import SimpleNamespace
 
@@ -43,20 +30,14 @@ def _mail(subject: bytes, disposition: bytes, content_type: bytes, body: bytes, 
     )
 
 
-# An ordinary reporter's email whose report is broken
 ORDINARY = _mail(b"Report Domain: example.com Submitter: reporter.example.com Report-ID: r1",
                  b'filename="report.xml.gz"', b"application/gzip", b"not gzip", b"r1")
-# The attachment name decodes to NUL (RFC 2231)
 NUL_NAME = _mail(b"TLS Report Domain: example.com", b"filename*=utf-8''r%00.json",
                  b"application/json", b"{not json", b"nul")
-# A Subject with a raw 8-bit byte
 EIGHT_BIT = _mail(b"DMARC \xff report", b'filename="a.xml"', b"application/xml", b"not xml", b"8bit")
 
 
 class ServerImap(FakeImap):
-    """Also marks an email as read when its body is fetched without PEEK,
-    as an IMAP server does (RFC 3501, 6.4.5)."""
-
     def uid(self, command, *args):
         if command == 'FETCH' and 'PEEK' not in args[1] and 'SIZE' not in args[1]:
             self.seen.add(args[0].encode())
@@ -112,8 +93,6 @@ def run(monkeypatch):
 
 
 def _failing_once(db, when):
-    """The session, with one commit failing like a lost connection when
-    `when(db)` first holds."""
     from sqlalchemy.exc import OperationalError
     real_commit = db.commit
     failed = []
@@ -151,7 +130,6 @@ def test_the_entry_keeps_readable_text(run):
 
 def test_an_entry_the_database_still_refuses_keeps_the_email_and_the_counts(run, monkeypatch):
     import app.services.dmarc_imap_service as imap_module
-    # As before the fix: the raw header goes into the entry as it is
     monkeypatch.setattr(imap_module, "_plain_text", lambda value, limit=1000: value)
     monkeypatch.setattr(imap_module, "_header_text", lambda msg, name: msg.get(name))
 
@@ -160,7 +138,6 @@ def test_an_entry_the_database_still_refuses_keeps_the_email_and_the_counts(run,
     assert done.row.status == 'success'
     assert done.row.reports_failed == 2 and done.row.emails_processed == 2
     assert done.row.failed_emails[0]['email_id'] == '1'
-    # The fallback entry still says which folder the email is in
     assert done.row.failed_emails[1] == {'email_id': '2', 'folder': done.row.failed_emails[0]['folder'],
                                          'message_id': None, 'subject': None,
                                          'error': imap_module._DETAILS_NOT_STORED}
@@ -187,7 +164,6 @@ def test_a_lost_connection_keeps_the_stored_failures_and_the_email_unread(run):
     def second_email_saved(db):
         return any(isinstance(o, DMARCSync) and o.emails_processed == 2 for o in db.dirty)
 
-    # Email 1 fails and is stored; saving after email 2 (a bounce) fails once
     done = run({1: ORDINARY, 2: DSN}, commit_fails_once_when=second_email_saved)
 
     assert done.result['status'] == 'error'
@@ -196,7 +172,6 @@ def test_a_lost_connection_keeps_the_stored_failures_and_the_email_unread(run):
     assert first[0]['message_id'] == '<r1@reporter.example.com>'
     assert first[0]['error'] != 'The details of this email could not be stored'
     assert [failed for failed, _ in run.notified] == [first]
-    # Email 2 was not stored as processed, so it stays unread for the next run
     assert done.seen == [b'1']
 
 
@@ -206,7 +181,6 @@ def test_failures_reported_before_a_late_error_are_reported_once(run, monkeypatc
     calls = []
 
     def build(self, sync_record):
-        # The success path fails at its very end, after its notification
         calls.append(1)
         if len(calls) == 1:
             raise RuntimeError("late failure")

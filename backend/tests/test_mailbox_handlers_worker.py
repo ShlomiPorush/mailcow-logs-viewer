@@ -1,4 +1,3 @@
-"""Mailbox HTTP handlers must not run blocking queries on the request loop."""
 import asyncio
 import threading
 from unittest.mock import Mock

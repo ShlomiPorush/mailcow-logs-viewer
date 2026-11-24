@@ -1,12 +1,3 @@
-"""A write to mailcow is sent again only when it cannot have reached mailcow.
-
-mailcow releases a quarantined message by sending it and then deleting it, and
-keeps working after the app stops waiting. A write retried after a timeout, a
-dropped answer or a 5xx can therefore run twice: a released message reached
-its recipient twice. Now a write is retried only when the connection was never
-made; any other failure is either a definite refusal (4xx) or an outcome
-mailcow did not confirm, which the page is told to check before trying again.
-"""
 import asyncio
 import secrets
 import time
@@ -22,8 +13,6 @@ CHECK_FIRST = "mailcow did not confirm the change. It may still be running. Chec
 
 @pytest.fixture()
 def mailcow(monkeypatch):
-    """A fake mailcow. `answer` decides each attempt: a response, or an exception.
-    `attempts` counts every try, `reached` the ones mailcow received."""
     state = {"answer": lambda request: httpx.Response(200, json=[{"type": "success", "msg": ["ok"]}]),
              "attempts": 0, "reached": []}
 
@@ -44,7 +33,6 @@ def mailcow(monkeypatch):
 
 
 def _reached(state, then):
-    """mailcow gets the request and does the work; then `then` happens."""
     def answer(request):
         state["reached"].append(request)
         return then(request)
@@ -88,8 +76,6 @@ def test_a_free_connection_is_waited_for_again(mailcow):
     (httpx.PoolTimeout, 3),
 ], ids=["connect-error", "connect-timeout", "pool-timeout"])
 def test_a_connection_never_made_fails_as_mailcow_not_answering(mailcow, error, attempts):
-    """A connection that could not be made is not tried again seconds later:
-    the page is told at once and can try again itself."""
     def answer(request):
         raise error("no connection", request=request)
     mailcow["answer"] = answer
@@ -114,8 +100,6 @@ def test_a_connection_never_made_fails_as_mailcow_not_answering(mailcow, error, 
 ], ids=["read-timeout", "write-timeout", "write-error", "dropped-after-sending", "read-error", "500", "504",
         "not-json", "nested-too-deep"])
 def test_a_write_mailcow_received_is_sent_once(mailcow, then):
-    """A batch release slower than the timeout, or an answer that is lost or
-    unreadable: mailcow may have sent the messages, so they are not sent again."""
     mailcow["answer"] = _reached(mailcow, then)
     with pytest.raises(MailcowWriteUnknownError) as raised:
         _release()
@@ -139,15 +123,12 @@ def test_a_missing_read_write_key_fails_at_once(monkeypatch):
     assert time.monotonic() - start < 1
 
 
-# ---------- what the page is told ----------
-
 def test_the_page_is_told_to_check_first():
     from app.routers import rate_limits
     from app.utils import internal_error
     unknown = MailcowWriteUnknownError("read timeout")
     assert (internal_error(unknown).status_code, internal_error(unknown).detail) == (502, CHECK_FIRST)
     assert rate_limits._write_failed(unknown, "mailcow did not apply the limit").detail == CHECK_FIRST
-    # A definite failure keeps its own text
     assert rate_limits._write_failed(MailcowAPIError("400"), "mailcow did not apply the limit").detail \
         == "mailcow did not apply the limit"
 
@@ -174,11 +155,7 @@ def test_an_unban_mailcow_did_not_confirm_says_so(monkeypatch):
     assert r.status_code == 502 and r.json()["detail"] == CHECK_FIRST
 
 
-# ---------- NaN and Infinity are not JSON ----------
-
 def test_an_answer_with_nan_is_not_taken_as_json(mailcow, monkeypatch):
-    """Python's parser takes NaN and Infinity, mailcow cannot send them, and an
-    answer that passed them on failed when sent to the browser."""
     monkeypatch.setattr(mod.MailcowAPI._make_request.retry, "wait", lambda *a, **k: 0)
     body = b'[{"queue_id": "A", "message_size": Infinity}]'
     mailcow["answer"] = lambda request: httpx.Response(200, content=body, headers={"content-type": "application/json"})
@@ -202,7 +179,6 @@ def test_an_answer_with_nan_is_not_taken_as_json(mailcow, monkeypatch):
     ("/api/quarantine", b'[{"id": 1, "created": 5, "size": 1e400}]'),
 ], ids=["queue", "quarantine"])
 def test_a_number_too_large_for_a_float_is_mailcow_not_answering(mailcow, monkeypatch, path, body):
-    """1e400 reads as infinity, which the answer to the browser cannot carry."""
     import starlette.staticfiles as sf
     real_init = sf.StaticFiles.__init__
     monkeypatch.setattr(sf.StaticFiles, "__init__", lambda s, *a, **k: real_init(s, *a, **{**k, "check_dir": False}))

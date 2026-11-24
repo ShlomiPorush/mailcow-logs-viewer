@@ -1,12 +1,3 @@
-"""When mailcow keeps failing, callers get MailcowAPIError, never tenacity's RetryError.
-
-The retry decorators used to raise RetryError after the third try, so every
-`except MailcowAPIError` around a call was skipped and the request ended in
-a 500. A read that fails must also not pass for an empty answer: an empty
-transport list turns off blacklist monitoring, an empty container list shows
-every container as stopped. Only three reads have a deliberate answer for
-"mailcow did not answer": test_connection, get_fail2ban and get_status_host_ip.
-"""
 import asyncio
 import secrets
 
@@ -15,7 +6,7 @@ import pytest
 
 from app import mailcow_api as mod
 from app.mailcow_api import MailcowAPIError, MailcowWriteUnknownError
-from tests.test_mailcow_api_recovery import server  # noqa: F401  (the fake mailcow)
+from tests.test_mailcow_api_recovery import server  # noqa: F401
 
 READS = [
     ("get_postfix_logs_page", (), {"page_size": 10, "offset": 0}),
@@ -79,8 +70,6 @@ def test_a_read_raises_mailcow_api_error_after_the_tries(failing, name, args, kw
 
 @pytest.mark.parametrize("name,args,kwargs", WRITES, ids=[r[0] for r in WRITES])
 def test_a_write_mailcow_answered_500_is_sent_once(failing, name, args, kwargs):
-    """mailcow received it and may have made the change: it is not sent again
-    (tests/test_mailcow_write_retry.py)."""
     with pytest.raises(MailcowWriteUnknownError):
         _call(name, args, kwargs)
     assert len(failing["requests"]) == 1
@@ -106,8 +95,6 @@ def test_a_missing_read_write_key_is_named(failing):
     with pytest.raises(MailcowAPIError, match="MAILCOW_API_KEY_RW"):
         asyncio.run(go())
 
-
-# ---------- what the browser is told ----------
 
 def _no_mailcow(*args, **kwargs):
     raise MailcowAPIError("API returned status 500")
@@ -157,7 +144,6 @@ def test_a_mailcow_error_no_route_caught_is_still_a_mailcow_answer(no_debug):
 
 
 def test_local_domains_stay_as_they_were_when_mailcow_fails(monkeypatch):
-    """A failed domain read must not leave only the alias domains as local."""
     from app import scheduler
 
     async def aliases(**kwargs):

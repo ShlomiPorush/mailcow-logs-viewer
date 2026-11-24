@@ -1,8 +1,3 @@
-"""
-Credential checks: one harmless request tells whether mailcow accepts the
-Read-Write API key and whether Rspamd accepts its password, and the last
-result is kept only for the address and secret it ran against.
-"""
 import asyncio
 import secrets
 import uuid
@@ -19,7 +14,6 @@ from app.models import Base, SystemSetting
 from app.routers import settings as settings_router
 from app.services import settings_store
 
-# New for each run
 RW_KEY = secrets.token_hex(16)
 RSPAMD_PASSWORD = secrets.token_hex(16)
 
@@ -39,8 +33,6 @@ def _client(handler):
     return api, requests
 
 
-# ── mailcow Read-Write API key ────────────────────────────────────────────
-
 @pytest.mark.parametrize("status, valid, error", [
     (404, True, None),
     (403, False, "read_only"),
@@ -53,7 +45,6 @@ def test_rw_key_check_reads_the_mailcow_answer(status, valid, error):
     assert result["configured"] is True
     assert result["valid"] is valid
     assert result["error"] == error
-    # One request, no retry: every rejection counts as a failed login for Fail2ban
     assert len(requests) == 1
     request = requests[0]
     assert request.method == "POST"
@@ -76,8 +67,6 @@ def test_rw_key_check_without_a_key_sends_nothing():
     assert asyncio.run(api.check_rw_key()) == {"configured": False, "valid": False, "error": None}
     assert requests == []
 
-
-# ── Rspamd password ───────────────────────────────────────────────────────
 
 @pytest.fixture
 def rspamd(monkeypatch):
@@ -127,8 +116,6 @@ def test_rspamd_check_without_a_password_sends_nothing(rspamd, monkeypatch):
     assert requests == []
 
 
-# ── Endpoints and stored status ───────────────────────────────────────────
-
 @pytest.mark.parametrize("name, method, endpoint", [
     ("mailcow_rw_key", "check_rw_key", "validate_mailcow_rw_key_endpoint"),
     ("rspamd_password", "check_rspamd_password", "validate_rspamd_password_endpoint"),
@@ -177,9 +164,7 @@ def test_status_is_forgotten_when_the_address_or_secret_changes():
             status = settings_store.get_credential_check_status(db, "mailcow_rw_key", current)
             assert status["error"] == "rejected" and status["checked_at"]
             assert "fingerprint" not in status
-            # The secret itself is never stored with the status
             assert RW_KEY not in db.query(SystemSetting).one().value
-            # Each credential keeps its own result
             assert settings_store.get_credential_check_status(db, "rspamd_password", current) is None
             for url, key in [("https://mail.example.com", secrets.token_hex(16)), ("https://other.example.com", RW_KEY)]:
                 changed = settings_store.credential_fingerprint(url, key)

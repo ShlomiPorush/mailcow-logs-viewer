@@ -1,7 +1,3 @@
-"""
-The demo's fake mailcow server, driven through the real MailcowAPI client so
-the application's own request, retry and parsing code is what is tested.
-"""
 import asyncio
 import logging
 import secrets
@@ -43,7 +39,7 @@ def test_every_read_the_app_makes_is_answered(api, no_unhandled_routes):
     client, _ = api
 
     async def reads():
-        assert await client.test_connection() is True  # an empty log list is still an answer
+        assert await client.test_connection() is True
         assert [d["domain_name"] for d in await client.get_domains() if d["active"] == 1] == ["example.com", "example.org", "shop.test"]
         assert await client.get_alias_domain_map() == {"example.net": "example.com"}
         assert len(await client.get_mailboxes()) == len(world.MAILBOXES)
@@ -94,10 +90,8 @@ def test_logs_are_newest_first_with_mailcow_range_semantics(api):
     async def reads():
         head = await client.get_raw_logs("postfix", 2)
         assert [e["message"] for e in head] == ["line 4", "line 3"]
-        # 1-based on the Redis lists: 2-3 is the second and third newest
         page = await client.get_postfix_logs_page(page_size=2, offset=1)
         assert [e["message"] for e in page] == ["line 3", "line 2"]
-        # 0-based on rspamd-history
         page = await client.get_raw_logs_range("rspamd-history", offset=1, page_size=2)
         assert [e["message-id"] for e in page] == ["m3@example.com", "m2@example.com"]
         assert await client.probe_log_position("postfix", 5) is True
@@ -160,7 +154,6 @@ def test_fail2ban_ban_allow_and_unban(api):
         result = await client.unban_fail2ban(["203.0.113.5/32"])
         assert result[0]["type"] == "success"
         assert "203.0.113.5" not in {b["ip"] for b in (await client.get_fail2ban())["active_bans"]}
-        # Like mailcow, an unban of an address that is not banned is still accepted
         result = await client.unban_fail2ban(["203.0.113.5/32"])
         assert result[0]["type"] == "success"
 

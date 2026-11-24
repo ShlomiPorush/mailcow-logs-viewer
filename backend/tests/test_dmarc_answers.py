@@ -1,10 +1,3 @@
-"""Every answer the DMARC & TLS calls can give, so the contract check (conftest.py,
-contract.py) holds each one to /openapi.json: the answers with data and without, the
-shapes that change with a parameter (insights with and without a domain, the report
-list with and without a page, an upload stored or a duplicate), a database that fails
-(500), deletion or upload switched off (403), an upload too large (413) and the requests
-the calls refuse (400, 404, 422). DNS and the IMAP server are faked and no notification
-is sent; nothing leaves the test."""
 import json
 import secrets
 import uuid
@@ -35,7 +28,6 @@ TLS_ONLY = f'tls-{MARK}.example'
 UPLOADED = f'up-{MARK}.example'
 OUR_DOMAINS = (DOMAIN, TLS_ONLY, UPLOADED)
 PASSING_IP, FAILING_IP = '203.0.113.5', '198.51.100.7'
-# One time for the whole run, so an upload sent twice has the same content
 NOW = int(datetime.now(timezone.utc).timestamp())
 
 
@@ -67,7 +59,6 @@ class _Txt:
 
 
 async def _fake_dns(query, record_type='TXT', timeout=5):
-    """A DMARC record for every domain and no TLS-RPT record anywhere."""
     if query.startswith('_dmarc.'):
         return [_Txt('v=DMARC1; p=reject; rua=mailto:dmarc@example.net')]
     raise dns.resolver.NXDOMAIN()
@@ -78,7 +69,6 @@ def client(monkeypatch):
     for key in ('auth_enabled', 'basic_auth_enabled', 'oauth2_enabled'):
         monkeypatch.setattr(settings._inner, key, False)
     monkeypatch.setattr(domains_router, 'resolve_dns_with_fallback', _fake_dns)
-    # The domains list is cached in memory for 5 minutes; start each test without it
     monkeypatch.setattr(dmarc_cache, '_dmarc_cache', {})
     yield TestClient(app, raise_server_exceptions=False)
     app.dependency_overrides.pop(get_db, None)
@@ -86,8 +76,6 @@ def client(monkeypatch):
 
 @pytest.fixture
 def rows(client):
-    """Two DMARC reports and a TLS report of one domain, a TLS report of another, and the
-    stored DNS check of the first; removed after the test with what the calls added."""
     if not _postgres_available():
         pytest.skip('PostgreSQL not available')
     from app.models import (DMARCRecord, DMARCReport, DMARCSync, DomainDNSCheck, SystemSetting, TLSReport,
@@ -97,14 +85,12 @@ def rows(client):
     stamp = int(now.timestamp())
     naive = now.replace(tzinfo=None)
     with database.get_db_context() as db:
-        # Shared rows these calls change: the cache signal and the import runs
         signal = db.query(SystemSetting).filter(SystemSetting.key == 'dmarc_last_update').first()
         signal_before = (signal.value, signal.updated_at) if signal else None
         syncs_before = {row.id: (row.status, row.error_message) for row in db.query(DMARCSync)}
         policy = {'p': 'none', 'pct': '100', 'adkim': 'r', 'aspf': 'r'}
         first = DMARCReport(domain=DOMAIN, org_name='reporter.example', report_id=f'{MARK}-1', email='r@x.example',
                             begin_date=stamp - 3600, end_date=stamp, policy_published=policy, content_hash=MARK)
-        # Another reporter's report with the same report ID and other content
         second = DMARCReport(domain=DOMAIN, org_name='other.example', report_id=f'{MARK}-1', email='o@x.example',
                              begin_date=stamp - 3600, end_date=stamp - 60, policy_published={'p': 'none'},
                              content_hash=MARK + 'x')
@@ -134,7 +120,6 @@ def rows(client):
             TLSReportPolicy(tls_report_id=tls_only.id, policy_type='no-policy-found', policy_domain=TLS_ONLY,
                             mx_host=None, successful_session_count=0, failed_session_count=0, failure_details=None),
         ])
-        # A DMARC check stored by an older version: no settings yet
         db.add(DomainDNSCheck(
             domain_name=DOMAIN, checked_at=naive,
             dmarc_check={'status': 'warning', 'message': 'DMARC policy is too weak (none)', 'record': 'v=DMARC1; p=none',
@@ -174,14 +159,11 @@ def rows(client):
         db.commit()
 
 
-# ---------------------------------------------------------------- reading
-
 def test_domains_overview_and_records(client, rows):
     body = client.get('/api/dmarc/domains').json()
     ours = {d['domain']: d for d in body['domains'] if d['domain'] in OUR_DOMAINS}
     assert ours[DOMAIN]['has_dmarc'] and ours[DOMAIN]['dmarc_record']['policy'] == 'none'
     assert not ours[TLS_ONLY]['has_dmarc'] and ours[TLS_ONLY]['tls_rpt_record']['found'] is False
-    # The second call is answered from the cache
     assert client.get('/api/dmarc/domains').status_code == 200
 
     overview = client.get(f'/api/dmarc/domains/{DOMAIN}/overview').json()
@@ -205,7 +187,6 @@ def test_insights_with_and_without_a_domain(client, rows, monkeypatch):
 
 
 def test_reports_config_says_whether_upload_is_on(client, monkeypatch):
-    # The DMARC page offers Upload Report from this answer, which needs View on DMARC & TLS only
     for on in (True, False):
         monkeypatch.setattr(settings._inner, 'dmarc_manual_upload_enabled', on)
         assert client.get('/api/dmarc/reports/config').json()['manual_upload_enabled'] is on
@@ -266,8 +247,6 @@ def test_tls_reports(client, rows):
     assert client.get(f'/api/dmarc/domains/{DOMAIN}/tls-reports/2000-01-01/details').status_code == 404
     assert client.get(f'/api/dmarc/domains/{DOMAIN}/tls-reports/31-12-2000/details').status_code == 400
 
-
-# ---------------------------------------------------------------- upload and deletion
 
 def _dmarc_xml(report_id: str, count: int) -> bytes:
     return f"""<?xml version="1.0" encoding="UTF-8"?>
@@ -339,11 +318,7 @@ def test_deleting_reports(client, rows, monkeypatch):
     assert client.post('/api/dmarc/cache/clear').json()['status'] == 'success'
 
 
-# ---------------------------------------------------------------- IMAP import
-
 class _Imap:
-    """An IMAP server holding the given mails, answering as imaplib returns it."""
-
     def __init__(self, mails):
         self.mails = {str(uid): raw for uid, raw in mails.items()}
         self.seen = set()
@@ -411,7 +386,6 @@ def test_imap_import(client, rows, monkeypatch):
     monkeypatch.setattr(dmarc_imap_service, 'send_dmarc_error_notification',
                         lambda failed, sync_id: sent.append(sync_id) or True)
 
-    # TestClient runs the queued import before it returns
     assert client.post('/api/dmarc/imap/sync').json()['status'] == 'started'
     assert len(sent) == 1
     history = client.get('/api/dmarc/imap/history?limit=500').json()
@@ -424,8 +398,6 @@ def test_imap_import(client, rows, monkeypatch):
     with dmarc_imap_service._sync_lock:
         assert client.post('/api/dmarc/imap/sync').json()['status'] == 'already_running'
 
-
-# ---------------------------------------------------------------- failures
 
 DB_GETS = ['/api/dmarc/insights', f'/api/dmarc/insights?domain={DOMAIN}', '/api/dmarc/reports/all',
            '/api/dmarc/reports/all?page=1', '/api/dmarc/reports/domains', f'/api/dmarc/domains/{DOMAIN}/calendar',
@@ -445,7 +417,6 @@ def test_when_the_database_fails(client, monkeypatch):
     assert client.delete('/api/dmarc/reports/dmarc/1').status_code == 500
     assert client.delete(f'/api/dmarc/reports/domains/{DOMAIN}').status_code == 500
 
-    # The calls that open their own session
     monkeypatch.setattr(dmarc_router, 'SessionLocal', _broken_context)
     assert client.get('/api/dmarc/domains').status_code == 500
     assert client.get(f'/api/dmarc/domains/{DOMAIN}/overview').status_code == 500
@@ -455,8 +426,6 @@ def test_when_the_database_fails(client, monkeypatch):
 
 
 def test_tls_rpt_record_when_the_session_cannot_close(client, monkeypatch):
-    """The cached check is read in a session the route opens and closes itself; a
-    database that drops while the session ends is a 500."""
     class Session:
         def __enter__(self):
             return self

@@ -1,17 +1,3 @@
-"""
-Process-wide outbound network guard for the demo image.
-
-The demo must never reach a real server, whatever a code path tries: the
-mailcow API, SMTP, IMAP, DNS, blocklists, MaxMind or a webhook. Instead of
-trusting every service to honour a flag, the demo patches the socket module
-once at startup so that the only reachable destinations are the loopback
-interface and Unix sockets. Anything else fails the same way an unreachable
-network does, so the application's normal error handling takes over.
-
-The guard only sees connections made through Python's socket module. That is
-why the demo image runs uvicorn on the asyncio loop (uvloop connects in C).
-PostgreSQL is reached through libpq, which is C as well and unaffected.
-"""
 import errno
 import ipaddress
 import logging
@@ -48,14 +34,9 @@ def _host_allowed(host) -> bool:
 
 
 def _lookup_allowed(host) -> bool:
-    # A literal IP needs no DNS lookup; connect() decides whether it is reachable.
     return _host_allowed(host) or _ip(host) is not None
 
 
-# DNS and DNS over TLS stay blocked even on loopback: Docker's embedded
-# resolver listens on 127.0.0.11 and forwards unknown names to the host's
-# upstream servers. Name resolution for the database host goes through libc
-# in C and is not affected.
 _DNS_PORTS = frozenset({53, 853})
 
 
@@ -89,7 +70,6 @@ def _guarded_connect_ex(self, address):
 
 
 def _guarded_sendto(self, data, *args):
-    # sendto(data, address) or sendto(data, flags, address)
     address = args[-1] if args else None
     if address is not None and not _address_allowed(self, address):
         raise _blocked(address)
@@ -126,7 +106,6 @@ def _guarded_gethostbyname_ex(host):
 
 
 def _guarded_gethostbyaddr(ip):
-    # Reverse lookups go to a DNS server even for a literal address.
     if not _host_allowed(ip):
         _blocked(ip)
         raise socket.herror(errno.ENETUNREACH, BLOCKED_MESSAGE)
@@ -134,7 +113,6 @@ def _guarded_gethostbyaddr(ip):
 
 
 def install() -> None:
-    """Patch the socket module. Idempotent."""
     global _installed
     if _installed:
         return
@@ -161,12 +139,11 @@ def install() -> None:
     socket.gethostbyaddr = _guarded_gethostbyaddr
 
     _installed = True
-    # WARNING: the app's default log level hides INFO, and this must be visible
+    # At INFO the app's default log level hides this notice.
     logger.warning("[DEMO] Outbound network disabled (allowed: loopback, localhost)")
 
 
 def uninstall() -> None:
-    """Restore the socket module (tests only)."""
     global _installed
     if not _installed:
         return

@@ -1,12 +1,3 @@
-"""The Messages list and the message dialog count recipients the same way.
-
-The dialog counts in the browser (messageRecipients() in
-frontend/message-details.js); the list shows the server's count
-(app/services/message_recipients.py). The shared cases in
-fixtures/recipient_count_cases.json run through the dialog's count in
-.github/tests/recipient-count-parity.test.cjs and through the server's here:
-the helper on its own, then the real list and details answers.
-"""
 import hashlib
 import json
 import pathlib
@@ -43,8 +34,6 @@ def test_the_shared_cases_are_there():
 
 
 def _shown(case, leg):
-    """The server leaves out a delivery to or from an excluded address: its own
-    recipient, or an address a line of its queue names (such as orig_to)."""
     excluded = [address.lower() for address in case.get('excluded', [])]
     named = [leg['recipient']] + [a for entry in leg['postfix'] for a in (entry['to'], entry.get('orig_to')) if a]
     return not any(address.lower() in excluded for address in named)
@@ -67,8 +56,6 @@ def test_the_server_counts_as_the_dialog(case, monkeypatch):
         assert sorted(resolve(leg)) == sorted(leg['resolved'])
     assert len(union_recipients([resolve(case)] + [resolve(leg) for leg in others])) == case['expected']
 
-
-# ---------- the real answers ----------
 
 def _postgres_available() -> bool:
     try:
@@ -98,7 +85,7 @@ def client(monkeypatch):
     from app.config import settings
     from app.database import init_db
     from app.main import app
-    import app.models as _tables  # noqa: F401 - the tables init_db creates on an empty database
+    import app.models as _tables  # noqa: F401
     init_db()
     monkeypatch.setattr(settings._inner, 'blacklist_emails', '')
     _cleanup()
@@ -137,19 +124,15 @@ def test_the_list_and_the_details_give_the_shared_count(case, client, monkeypatc
         for n, leg in enumerate(case.get('other_legs', []), start=1):
             _seed_leg(db, msgid, leg, t0 + timedelta(seconds=30 * n))
         db.commit()
-    # An address is excluded after the mail was stored
     _exclude(monkeypatch, case)
 
     rows = {row['correlation_key']: row for row in
             client.get('/api/messages', params={'search': MARKER, 'limit': 50}).json()['data']}
     details = client.get(f'/api/message/{key}/details').json()
-    # Lines of the same second come in either order: the list is compared as a set
     assert sorted(details['recipients']) == sorted(case['recipients'])
-    # Each other delivery with its own recipients; one to an excluded address is left out
     others = [leg for leg in case.get('other_legs', []) if _shown(case, leg)]
     assert (sorted(sorted(d['recipients']) for d in details['related_deliveries'])
             == sorted(sorted(leg['resolved']) for leg in others))
     assert details['recipient_count'] == case['expected']
     assert rows[key]['recipient_count'] == case['expected']
-    # The row's deliveries are the ones the details list: this one and the others shown
     assert rows[key]['deliveries'] == 1 + len(others)

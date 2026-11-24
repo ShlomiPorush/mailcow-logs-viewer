@@ -1,13 +1,3 @@
-"""SMTP abuse protection and the outbound volume-spike alert count only mail
-the mailbox actually submitted with authentication.
-
-The 'outbound' direction also covers unauthenticated mail whose envelope
-sender is a hosted address and whose recipient looks external. Anyone on the
-internet controls those envelope fields, so counting such rows let a remote
-sender push a hosted mailbox over the abuse threshold and get its SMTP access
-disabled and its app passwords revoked. Rows are ingested the same way the
-Rspamd history import does it, then correlated by the real code.
-"""
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -25,8 +15,6 @@ DOMAIN = f"hosted-{MARK}.test"
 FORGED_A = f"victim-a@{DOMAIN}"
 FORGED_B = f"victim-b@{DOMAIN}"
 SENDER = f"sender@{DOMAIN}"
-# Aliases of SENDER: mailcow lets a mailbox send from every alias that points
-# to it, and from addresses its sender ACL allows
 ALIAS_A = f"sales@{DOMAIN}"
 ALIAS_B = f"info@{DOMAIN}"
 ADDRESSES = (FORGED_A, FORGED_B, SENDER, ALIAS_A, ALIAS_B)
@@ -83,7 +71,6 @@ def env(monkeypatch):
 
 
 def _ingest(entry):
-    """Same field mapping as the Rspamd history import in scheduler.py."""
     from app.correlation import detect_direction
     from app.database import get_db_context
     from app.models import RspamdLog
@@ -124,11 +111,8 @@ def _directions():
 
 def test_unauthenticated_forged_sender_is_not_a_block_candidate(env):
     from app.services import smtp_abuse_service as svc
-    # Public-IP client, hosted recipient written with a trailing dot
     _send("a", FORGED_A, f"mbox@{DOMAIN}.", "203.0.113.10", 6)
-    # Shape of a redirected copy: container IP, no login, external recipient
     _send("b", FORGED_B, "dest@external.invalid", "172.22.1.250", 6)
-    # The rows are still shown as outbound; only the attribution changes
     assert {(FORGED_A, "outbound"), (FORGED_B, "outbound")} <= _directions()
 
     counts = svc.fetch_outbound_counts(60)
@@ -166,9 +150,6 @@ def test_volume_spike_still_alerts_on_authenticated_burst(env):
 
 
 def test_mail_sent_from_aliases_counts_for_the_mailbox_that_logged_in(env):
-    """Counted per envelope sender, three messages from each of two aliases
-    stayed under the limit of 5, and an alias over it was the block target,
-    which mailcow cannot disable, so the mailbox that sent was never blocked."""
     from app.services import smtp_abuse_service as svc
     _send("alias-a", ALIAS_A, "dest@external.invalid", "198.51.100.20", 3, authenticated=True, login=SENDER)
     _send("alias-b", ALIAS_B, "dest@external.invalid", "198.51.100.20", 3, authenticated=True, login=SENDER)

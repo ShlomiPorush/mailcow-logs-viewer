@@ -1,4 +1,3 @@
-"""CSV projections preserve output without fetching unused payloads or lazy columns."""
 import csv
 import io
 import uuid

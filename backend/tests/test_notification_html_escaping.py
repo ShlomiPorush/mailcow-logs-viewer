@@ -1,11 +1,3 @@
-"""HTML notification emails show data as text, never as markup.
-
-The DMARC error notification put the Subject and Message-ID of inbound rua
-mail into its HTML body unescaped, so anyone able to mail the published rua
-address could add links and tracking images to an operator alert sent from
-the app's own address. The other HTML emails had the same pattern with less
-exposed data (host names, mailbox names, DNS issue text).
-"""
 import asyncio
 
 import pytest

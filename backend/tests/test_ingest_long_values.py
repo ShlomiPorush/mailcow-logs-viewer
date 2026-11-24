@@ -1,13 +1,3 @@
-"""One over-long value must not drop a whole page of mail logs.
-
-Sender, recipient, Message-ID, From header and SASL user name are chosen by
-whoever sends the mail or tries to log in, and they were written into
-VARCHAR(255) columns as-is. PostgreSQL rejected the one long row, the single
-page commit rolled back every entry of the page, and because the entries had
-already been added to the in-memory duplicate cache the page was never
-retried. Values are now cut to their column length, and the cache only
-learns entries after the commit succeeded.
-"""
 import uuid
 from contextlib import contextmanager
 from datetime import datetime
@@ -96,8 +86,6 @@ def test_rspamd_page_with_one_300_char_value_stores_every_entry(env):
 
     assert new == 3
     assert _count(RspamdLog, RspamdLog.message_id) == 3
-    # A second pass over the same page (cache cleared, as after a restart)
-    # must recognise every entry as already stored, the long Message-ID too.
     scheduler.seen_rspamd.clear()
     new, skipped, _ = scheduler._store_rspamd_page(logs)
     assert (new, skipped) == (0, 3)
@@ -115,8 +103,6 @@ def test_netfilter_batch_with_one_300_char_value_stores_every_entry(env):
 
     assert _count(NetfilterLog, NetfilterLog.message) == 3
 
-
-# ---- the duplicate cache only learns committed entries ----
 
 def _failing_session():
     db = MagicMock()

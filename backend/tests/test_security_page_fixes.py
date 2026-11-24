@@ -1,12 +1,3 @@
-"""Security page answers that must match what mailcow and the app really do.
-
-- A single IPv6 address on a Fail2ban list is /128. mailcow's netfilter reads
-  2001:db8::1/32 as the network 2001:db8::/32, so it is not the same entry as
-  the address 2001:db8::1, and removing the address must leave it alone.
-- The Events CSV export applies the same Action and Country filters as the list.
-- The Outgoing spam status says whether app passwords are revoked on a block,
-  so the page does not promise it when the setting is off.
-"""
 import asyncio
 import csv
 import io
@@ -73,8 +64,6 @@ def test_a_slash_32_ipv6_network_is_not_read_as_an_address():
     assert _bare('198.51.100.7/32') == '198.51.100.7'
 
 
-# ------------------------------------------------------------- Events CSV export
-
 def _postgres_available() -> bool:
     try:
         from app.database import engine
@@ -112,13 +101,10 @@ def _exported_ips(**params):
 
 def test_the_events_export_keeps_the_action_and_country_filters(netfilter_rows):
     assert _exported_ips() == ['192.0.2.1', '192.0.2.2', '192.0.2.3', '192.0.2.4', '192.0.2.5']
-    # Ban also matches the older "banned" lines, as the list does
     assert _exported_ips(action='ban') == ['192.0.2.1', '192.0.2.2', '192.0.2.4']
     assert _exported_ips(country_code='tl') == ['192.0.2.1', '192.0.2.2', '192.0.2.3']
     assert _exported_ips(action='ban', country_code='OL') == ['192.0.2.4']
 
-
-# ------------------------------------------------------------- Outgoing spam
 
 @pytest.mark.parametrize('revoke', [False, True])
 def test_the_outgoing_spam_status_says_whether_app_passwords_are_revoked(monkeypatch, revoke):

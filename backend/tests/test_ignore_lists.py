@@ -1,4 +1,3 @@
-"""Ignoring a stopped container or a blocklist silences it without hiding it."""
 import asyncio
 from contextlib import contextmanager
 from types import SimpleNamespace
@@ -29,7 +28,6 @@ def test_listing_only_on_an_ignored_list_reads_clean():
     assert out["listed_count"] == 0
     assert out["ignored_listed_count"] == 1
     assert [r["ignored"] for r in out["results"]] == [True, False, False]
-    # The stored check is untouched, so un-ignoring brings the listing back
     assert stored["listed_count"] == 1 and "ignored" not in stored["results"][0]
 
 

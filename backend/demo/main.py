@@ -1,30 +1,13 @@
-"""
-Entry point of the demo image (APP_MODULE=demo.main:app).
-
-Wraps the regular application: importing app.main makes no connection, and
-the network guard, the fake mailcow server and the fake internet are
-installed before the lifespan starts any job, so the first request already
-goes to a fake.
-
-Two startup steps are wrapped: before the database is initialised it is
-emptied and the fake server receives a week of logs; before the scheduler
-starts, the application's own jobs ingest that history. Once the scheduler
-runs, live traffic starts flowing and the nightly reset is scheduled.
-"""
 import logging
 import os
 import secrets
 
-# The fictional mailcow and Rspamd accept any credentials, but the app needs
-# them set to turn on the read-write actions and the Rspamd maps. They are
-# read from the environment like any other deployment, before app.config
-# loads, and stay locked in Settings. The nightly reset re-executes this
-# process with the same environment, so they last until the container stops.
+# Set before app.config loads, or the demo's read-write actions and Rspamd maps stay off.
 for _name in ("MAILCOW_API_KEY", "MAILCOW_API_KEY_RW", "RSPAMD_PASSWORD"):
     os.environ.setdefault(_name, secrets.token_hex(32))
 
 import app.main as app_main
-from app.main import app  # noqa: F401  (served by uvicorn)
+from app.main import app  # noqa: F401
 
 from . import fake_internet, fake_mailcow, network_guard, seed
 from .banner import DemoBannerMiddleware
@@ -58,7 +41,6 @@ def _demo_start_scheduler():
 
 
 app.add_middleware(DemoBannerMiddleware)
-# Outermost, so a refused write costs nothing downstream
 app.add_middleware(WriteRateLimitMiddleware)
 
 app_main.init_db = _demo_init_db

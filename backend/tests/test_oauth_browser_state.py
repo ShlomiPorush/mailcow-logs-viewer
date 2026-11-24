@@ -1,4 +1,3 @@
-"""OAuth callbacks must belong to the browser that initiated authorization."""
 import secrets
 from urllib.parse import parse_qs, urlencode, urlsplit
 from unittest.mock import AsyncMock
@@ -201,7 +200,6 @@ def test_start_failure_does_not_leave_pending_state(monkeypatch):
 @pytest.mark.parametrize("forwarded", ["https", "https, http"])
 def test_https_browser_behind_tls_terminating_proxy(forwarded):
     async def http_backend(scope, receive, send):
-        # The browser uses HTTPS, while the proxy talks HTTP to the application.
         scope = dict(scope, scheme="http")
         await app(scope, receive, send)
 
@@ -215,7 +213,6 @@ def test_https_browser_behind_tls_terminating_proxy(forwarded):
 
 
 def test_unauthenticated_starts_cannot_block_a_new_login():
-    """Starting a login keeps no server-side state, so no number of starts fills anything."""
     flooder = TestClient(app)
     for _ in range(1100):
         flooder.cookies.clear()

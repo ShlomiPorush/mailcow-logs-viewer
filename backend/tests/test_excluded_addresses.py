@@ -1,11 +1,3 @@
-"""Excluded addresses (BLACKLIST_EMAILS): mail to or from them is not stored or shown in Messages.
-
-The data here was stored before the address was listed. Every reader of the
-message tables leaves it out at once, the cleanup then deletes it (and only
-it), and the Postfix ingest does not store a listed message's lines, even
-when they come in another page. The raw service logs keep every line.
-Dummy data only, against the test PostgreSQL.
-"""
 import uuid
 from datetime import datetime, timedelta
 
@@ -16,14 +8,13 @@ _orig_init = sf.StaticFiles.__init__
 sf.StaticFiles.__init__ = lambda s, *a, **k: _orig_init(s, *a, **{**k, 'check_dir': False})
 
 MARK = uuid.uuid4().hex[:8]
-# "_" is a LIKE wildcard: the neighbour must never be taken for the listed address
 LISTED = f'arch_{MARK}@example.test'
 NEIGHBOUR = f'archx{MARK}@example.test'
 NORMAL = f'user-{MARK}@example.test'
 SENDER = f'boss-{MARK}@example.test'
 MSGID = f'{MARK}@example.test'
-Q_LISTED = f'A{MARK.upper()}1'     # the BCC copy's queue, also used 10 days earlier for another message
-Q_ORIG = f'A{MARK.upper()}2'       # delivered to NORMAL as an alias of LISTED
+Q_LISTED = f'A{MARK.upper()}1'
+Q_ORIG = f'A{MARK.upper()}2'
 Q_NORMAL = f'A{MARK.upper()}3'
 Q_NEIGHBOUR = f'A{MARK.upper()}4'
 
@@ -79,19 +70,15 @@ def _seed():
                                       sender=SENDER, recipient=recipient, subject=f'{name} {MARK}',
                                       rspamd_log_id=rspamd_id, is_complete=False, direction='outbound',
                                       final_status='delivered', first_seen=now, last_seen=now, created_at=now))
-        # The BCC copy's queue: only one of its lines names the address
         _line(db, now, Q_LISTED, f'{Q_LISTED}: from=<{SENDER}>, size=100, nrcpt=1', sender=SENDER)
         _line(db, now + timedelta(seconds=1), Q_LISTED, f'{Q_LISTED}: to=<{LISTED}>, relay=local, status=sent',
               recipient=LISTED)
         _line(db, now + timedelta(seconds=2), Q_LISTED, f'{Q_LISTED}: removed')
-        # The same queue id, ten days earlier, for someone else's message
         _line(db, old, Q_LISTED, f'{Q_LISTED}: to=<{NORMAL}>, relay=local, status=sent old-message', recipient=NORMAL)
-        # Mail to LISTED, an alias, delivered to NORMAL
         _line(db, now, Q_ORIG, f'{Q_ORIG}: to=<{NORMAL}>, orig_to=<{LISTED}>, relay=local, status=sent',
               recipient=NORMAL)
         _line(db, now, Q_NORMAL, f'{Q_NORMAL}: to=<{NORMAL}>, relay=local, status=sent', recipient=NORMAL)
         _line(db, now, Q_NEIGHBOUR, f'{Q_NEIGHBOUR}: to=<{NEIGHBOUR}>, relay=local, status=sent', recipient=NEIGHBOUR)
-        # Rejected before it had a queue
         _line(db, now, None, f'NOQUEUE: reject: RCPT from x[192.0.2.1]: 554 5.7.1 denied; from=<{SENDER}> to=<{LISTED}>',
               sender=SENDER, recipient=LISTED)
         for i, text in enumerate((f'lmtp({LISTED})<1><s{MARK}>: msgid=<{MSGID}>: unknown action',
@@ -114,7 +101,6 @@ def stored(monkeypatch):
     _wipe()
     monkeypatch.setattr(settings._inner, 'blacklist_emails', '')
     keys = _seed()
-    # The operator lists the address after the mail was stored
     monkeypatch.setattr(settings._inner, 'blacklist_emails', f'other@example.test, {LISTED.upper()}')
     yield keys
     _wipe()
@@ -133,11 +119,8 @@ def _no_listed(response):
     return response
 
 
-# ── Readers, before any cleanup ────────────────────────────────────────────
-
 def test_message_readers_leave_out_listed_mail(client):
     listing = _no_listed(client.get('/api/messages', params={'search': MARK, 'limit': 50})).json()
-    # One row per message (Message-ID): a visible leg stands for it
     assert {m['recipient'] for m in listing['data']} & {NORMAL, NEIGHBOUR}
 
     activity = _no_listed(client.get('/api/stats/recent-activity', params={'limit': 500})).json()['activity']
@@ -164,7 +147,6 @@ def test_postfix_and_rspamd_readers_leave_out_listed_queues(client):
     by_queue = {r['queue_id']: r for r in rows}
     assert Q_ORIG not in by_queue
     assert {Q_NORMAL, Q_NEIGHBOUR} <= set(by_queue)
-    # Only the earlier message under the reused queue id is shown for it
     assert by_queue[Q_LISTED]['recipient'] == NORMAL and 'old-message' in by_queue[Q_LISTED]['message']
 
     assert client.get(f'/api/logs/postfix/by-queue/{Q_ORIG}').status_code == 404
@@ -179,8 +161,6 @@ def test_raw_service_logs_keep_every_line(client):
     body = client.get('/api/raw-logs/dovecot', params={'search': MARK}).json()
     assert body['total'] == 2
 
-
-# ── Cleanup ────────────────────────────────────────────────────────────────
 
 def _state():
     from app.database import get_db_context
@@ -200,7 +180,6 @@ def test_cleanup_deletes_only_listed_mail(stored):
     from app import scheduler
     scheduler.cleanup_blacklisted_data()
     state = _state()
-    # The other recipient's delivery stays, without the deleted scan
     assert state['deliveries'] == {'normal': None, 'neighbour': None}
     assert state['postfix'] == sorted([
         f'{Q_LISTED}: to=<{NORMAL}>, relay=local, status=sent old-message',
@@ -209,14 +188,11 @@ def test_cleanup_deletes_only_listed_mail(stored):
     ])
     assert state['rspamd'] == sorted([f'object value {MARK}', f'no value {MARK}'])
     assert state['raw'] == 2
-    # A second run finds nothing more
     scheduler.cleanup_blacklisted_data()
     assert _state() == state
 
 
 def test_adding_an_address_starts_a_pass(stored, monkeypatch):
-    """The correlation job cleans up only when a pass is due: adding an
-    address, as a settings save does, makes the next run one."""
     from app import scheduler
     from app.config import settings
     from app.services import excluded_addresses
@@ -230,8 +206,6 @@ def test_adding_an_address_starts_a_pass(stored, monkeypatch):
     assert 'listed' not in _state()['deliveries']
     assert excluded_addresses.full_pass_due() is None
 
-
-# ── Ingest ─────────────────────────────────────────────────────────────────
 
 def test_postfix_ingest_stores_no_line_of_a_listed_message(stored, monkeypatch):
     from app import scheduler
@@ -250,7 +224,6 @@ def test_postfix_ingest_stores_no_line_of_a_listed_message(stored, monkeypatch):
         entry(3, f'{alias}: to=<{NORMAL}>, orig_to=<{LISTED}>, relay=local, delay=1, delays=0/0/0/1, dsn=2.0.0, '
                  f'status=sent (250 ok)'),
     ])
-    # The rest of the queue comes in a later page
     scheduler._store_postfix_page([entry(4, f'{queue}: removed')])
 
     from app.database import get_db_context
@@ -260,8 +233,6 @@ def test_postfix_ingest_stores_no_line_of_a_listed_message(stored, monkeypatch):
             PostfixLog.message.like(f'%{MARK}%'), PostfixLog.time >= datetime.utcfromtimestamp(now))]
     assert stored_lines == []
 
-
-# ── Edges of the queue rule ────────────────────────────────────────────────
 
 def _ingest(scheduler, monkeypatch, *pages):
     monkeypatch.setattr(scheduler, 'seen_postfix', set())
@@ -291,8 +262,6 @@ def test_a_reply_that_quotes_orig_to_does_not_make_a_message_listed(stored, monk
 
 
 def test_the_rspamd_path_deletes_around_the_listed_line_only(stored):
-    """A delivery at t, the line naming the address at t+23h, and another
-    message under the same queue id at t-12h: 35 hours from the evidence."""
     from app import scheduler
     from app.database import get_db_context
     from app.models import MessageCorrelation
@@ -314,8 +283,6 @@ def test_the_rspamd_path_deletes_around_the_listed_line_only(stored):
 
 
 def test_lines_of_an_old_listed_message_in_a_later_page_are_dropped(stored, monkeypatch):
-    """A catch-up of lines two days old: the queue is remembered from when it
-    was seen, not from the log time."""
     from app import scheduler
     queue = f'E{MARK.upper()}1'
     old = datetime.utcnow().replace(microsecond=0) - timedelta(days=2)
@@ -335,8 +302,6 @@ def test_lines_after_the_cleanup_removed_the_evidence_are_dropped(stored, monkey
 
 
 def test_the_cleanup_waits_for_a_page_being_stored(stored):
-    """A page checked against the list from before a change, and committed
-    while the cleanup is due, is in the database before the cleanup reads."""
     import threading
     from app import scheduler
     from app.database import get_db_context
@@ -363,7 +328,6 @@ def test_the_cleanup_waits_for_a_page_being_stored(stored):
 
 
 def test_an_alias_delivery_of_a_listed_address_has_no_details(client):
-    """Mail to the listed address delivered to NORMAL as an alias (orig_to)."""
     from app.database import get_db_context
     from app.models import MessageCorrelation
     now = datetime.utcnow().replace(microsecond=0) - timedelta(minutes=5)
@@ -386,7 +350,6 @@ def test_block_details_do_not_show_an_excluded_address_message(client):
         block = SpamSuppression(email=f'bounced-{MARK}@example.test', reason='hard_bounce', source='auto')
         db.add(block)
         db.flush()
-        # Sent by the listed address, and (an alias bounce) sent to it as orig_to
         db.add(SuppressionEvent(suppression_id=block.id, kind='hard_bounce', outcome='blocked', dsn='5.1.1',
                                 sender=LISTED, recipient=block.email, subject=f'secret {MARK}', queue_id=Q_LISTED,
                                 message_id=MSGID, correlation_key=f'normal-{MARK}',
@@ -412,13 +375,6 @@ def test_block_details_do_not_show_an_excluded_address_message(client):
 
 
 def test_an_alias_delivery_is_gone_from_every_message_reader_after_the_cleanup(client):
-    """A message whose only delivery reached NORMAL as an alias of the listed
-    address (orig_to), stored before the address was listed. The readers that
-    count or list the whole table check only a delivery's own addresses (reading
-    every delivery's Postfix lines would slow every count); listing the address
-    asks for a cleanup pass, which deletes the delivery, and then the recent
-    activity, the Status page's pending list and a block's link to the message
-    leave it out."""
     from app.database import get_db_context
     from app.models import MessageCorrelation, SpamSuppression, SuppressionEvent
 

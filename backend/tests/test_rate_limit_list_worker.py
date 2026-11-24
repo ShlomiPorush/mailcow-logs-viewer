@@ -1,4 +1,3 @@
-"""Rate limit list database reads must leave the request loop responsive."""
 import asyncio
 import threading
 from contextlib import contextmanager

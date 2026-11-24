@@ -1,16 +1,3 @@
-"""Only a real sign-in starts a session's clocks, and access derived from a
-request is tied to how that request was let in.
-
-- A signed-in browser could post to /api/auth/session without the password
-  and get a new session with a fresh length, again and again: the session
-  never ended. A new session now needs the password every time.
-- The Live Logs token was issued for whatever the session state was when the
-  handler ran, not when the request was let in. A session that ended in
-  between, or a sign-in change in between, still got a token, and the stream
-  it opened outlived the session.
-- Re-issuing the operator's session after a sign-in settings change gave it a
-  fresh full length, so saving the settings extended the session.
-"""
 import base64
 
 import pytest
@@ -22,7 +9,7 @@ from app.config import settings
 from app.main import app
 from app.routers import raw_logs
 from sign_in_helpers import revoke_all_sessions
-from test_session_revocation import NEW_PASSWORD, basic, signed_in, store  # noqa: F401 (store: autouse fixture)
+from test_session_revocation import NEW_PASSWORD, basic, signed_in, store  # noqa: F401
 
 HOUR = 3600.0
 
@@ -42,8 +29,6 @@ def clock(monkeypatch):
     monkeypatch.setattr(session, "_now", lambda: now["t"], raising=False)
     return now
 
-
-# ── A new session needs the password ───────────────────────────────────────
 
 def test_a_session_cookie_alone_gets_no_new_session():
     client = signed_in()
@@ -69,11 +54,7 @@ def test_the_password_gets_a_new_session():
     assert len(session._session_store) == 2
 
 
-# ── The Live Logs token follows the request's admission ───────────────────
-
 def _token_with(monkeypatch, between, client, headers=None):
-    """Ask for a Live Logs token; `between` runs after the request was let in
-    and before the token is issued."""
     real = raw_logs._cleanup_expired_tokens
 
     def cleanup_then_change():
@@ -115,8 +96,6 @@ def test_a_current_session_and_current_credentials_get_a_token():
     assert signed_in().get("/api/raw-logs/ws-token").status_code == 200
     assert TestClient(app).get("/api/raw-logs/ws-token", headers=basic()).status_code == 200
 
-
-# ── Re-issuing the operator's session keeps its clocks ────────────────────
 
 def _max_age(response) -> int:
     cookie = response.headers["set-cookie"]

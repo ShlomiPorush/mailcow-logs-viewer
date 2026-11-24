@@ -1,7 +1,3 @@
-"""What mailcow 2026-11 added that the app shows: a mailbox whose login is
-disabled (active 2, its mail still delivered), a shared mailbox, and Unban all
-for Fail2ban's bans. Older mailcow versions send active 0 or 1 and no shared
-attribute, and know only the "unban" action, which Unban all uses."""
 import importlib.util
 import uuid
 from pathlib import Path
@@ -24,8 +20,6 @@ def _client():
     return TestClient(app)
 
 
-# ---------- the mailbox state mailcow reports ----------
-
 @pytest.mark.parametrize('value, state', [
     (1, (True, False)), ('1', (True, False)),
     (2, (True, True)), ('2', (True, True)), (' 2 ', (True, True)),
@@ -46,8 +40,6 @@ def test_a_mailbox_without_the_field_is_active():
 def test_a_shared_mailbox_is_the_attribute_mailcow_sets(attributes, shared):
     assert mailbox_shared(attributes) is shared
 
-
-# ---------- the mailbox sync ----------
 
 def _postgres_available() -> bool:
     try:
@@ -71,7 +63,7 @@ def db():
     if not _postgres_available():
         pytest.skip('PostgreSQL not available')
     from app.database import get_db_context, init_db
-    import app.models  # noqa: F401  (the tables init_db creates)
+    import app.models  # noqa: F401
     init_db()
     _cleanup()
     with get_db_context() as session:
@@ -98,7 +90,6 @@ def test_the_sync_keeps_the_login_disabled_state(db):
     assert _stored(db) == {'on': (True, False), 'off': (False, False), 'nologin': (True, True),
                            'nologin-text': (True, True), 'shared': (True, False)}
 
-    # mailcow turns the login back on, or turns the mailbox off
     _store_mailbox_statistics([_mailbox('on', 2), _mailbox('off', 0), _mailbox('nologin', 1),
                                _mailbox('nologin-text', 0), _mailbox('shared', 1, shared='1')])
     assert _stored(db) == {'on': (True, True), 'off': (False, False), 'nologin': (True, False),
@@ -140,8 +131,6 @@ def test_status_counts_a_mailbox_with_its_login_disabled_as_active(monkeypatch):
     assert res.json()['mailboxes'] == {'total': 4, 'active': 3}
 
 
-# ---------- the upgrade ----------
-
 def _migration():
     path = next((Path(__file__).resolve().parents[1] / 'alembic' / 'versions').glob('*_mailbox_login_disabled.py'))
     spec = importlib.util.spec_from_file_location('mailbox_login_disabled', path)
@@ -170,14 +159,11 @@ def test_the_upgrade_adds_the_column_false_for_stored_mailboxes(db):
         assert 'login_disabled' not in {c['name'] for c in inspect(engine).get_columns('mailbox_statistics')}
     finally:
         run(_migration().upgrade)
-        # A second run (the fresh-install start made the column already) changes nothing
         run(_migration().upgrade)
     with engine.connect() as connection:
         assert connection.execute(text('SELECT login_disabled FROM mailbox_statistics WHERE username = :u'),
                                   {'u': f'before@{DOMAIN}'}).scalar() is False
 
-
-# ---------- Unban all ----------
 
 def _ban(network, queued=0):
     return {'network': network, 'ip': network.split('/')[0], 'banned_until': '00h 20m 00s', 'queued_for_unban': queued}
@@ -189,7 +175,6 @@ def _done(network):
 
 @pytest.fixture()
 def mailcow(monkeypatch):
-    """A mailcow with the given Fail2ban answer and unban reply; records every Read-Write call."""
     state = {'f2b': {'netban_ipv4': 32, 'netban_ipv6': 128, 'blacklist': '', 'whitelist': '',
                      'active_bans': [], 'perm_bans': []},
              'reply': None, 'calls': []}
@@ -212,7 +197,6 @@ def test_unban_all_lifts_fail2bans_bans_in_one_unban(mailcow):
         active_bans=[_ban('198.51.100.7/32'), _ban('2001:db8::/64'), _ban('198.51.100.7/32'),
                      _ban('203.0.113.9/32', queued=1), _ban('203.0.113.10/32', queued='1'),
                      _ban('192.0.2.66/32'), _ban('not a network'), 'junk', {'ip': '192.0.2.1'}],
-        # A permanent ban is the denylist's: it stays
         perm_bans=[{'network': '192.0.2.66/32', 'ip': '192.0.2.66'}])
     res = _client().post('/api/fail2ban/unban-all')
     assert res.status_code == 200
@@ -290,7 +274,6 @@ def test_unban_all_is_a_security_write():
 
 
 @pytest.mark.parametrize('reply', [
-    # Every entry a success, but none names the network: not an unban mailcow confirmed
     [{'type': 'success', 'msg': 'f2b_modified'}],
     [{'type': 'success', 'msg': ['object_modified', '203.0.113.200/32']}],
 ])
@@ -302,7 +285,6 @@ def test_unban_all_counts_only_the_networks_mailcow_names(mailcow, reply):
 
 
 def test_unban_all_leaves_out_a_network_mailcow_would_refuse(mailcow):
-    # mailcow's valid_network() refuses an IPv6 scope and still answers success for it
     mailcow['f2b']['active_bans'] = [_ban('2001:db8::1%eth0/128'), _ban('2001:db8::1%eth&0/128'),
                                      _ban('198.51.100.1'), _ban('198.51.100.2/32')]
     res = _client().post('/api/fail2ban/unban-all').json()

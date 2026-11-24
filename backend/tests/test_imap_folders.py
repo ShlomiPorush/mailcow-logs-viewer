@@ -1,6 +1,3 @@
-"""Several IMAP folders for the DMARC & TLS report import (issue #564): the
-stored setting, the folder list, which folders a run reads, and a run across
-folders against a fake IMAP server. Nothing leaves the test."""
 import imaplib
 import secrets
 from types import SimpleNamespace
@@ -14,8 +11,6 @@ from app.services.dmarc_imap_service import DMARCImapService
 from app.services.imap_folders import (Entry, Folder, decode_mutf7, describe_setting, folder_targets,
                                        legacy_match, parse_list, parse_setting, resolve)
 
-
-# ---------------------------------------------------------------- the setting
 
 @pytest.mark.parametrize('value', ['INBOX', 'inbox', 'Reports', '[Gmail]/Spam', 'Reports,Archive', '[]',
                                    'Reports/&ZeVnLIqe-', 'x/*', '{"name": "a"}', '[1]', '[""]',
@@ -38,10 +33,7 @@ def test_folder_list():
     assert describe_setting('Reports') == 'Reports'
 
 
-# ---------------------------------------------------------------- the folder list
-
 def test_modified_utf7():
-    # RFC 3501, 5.1.3
     assert decode_mutf7('~peter/mail/&U,BTFw-/&ZeVnLIqe-') == '~peter/mail/\u53f0\u5317/\u65e5\u672c\u8a9e'
     assert decode_mutf7('Tom &- Jerry') == 'Tom & Jerry'
     assert decode_mutf7('&BdMF1QXXBdUF6g-') == '\u05d3\u05d5\u05d7\u05d5\u05ea'
@@ -91,7 +83,6 @@ def test_folders_added_later_are_read_once():
     folders = _folders('INBOX', 'INBOX/dmarc', 'INBOX/dmarc/google.com', 'INBOX/dmarc/new-tag', 'INBOX/tls-rpt')
     targets, missing, empty = resolve(folders, [Entry('inbox/dmarc', True), Entry('INBOX/dmarc', True),
                                                 Entry('INBOX/dmarc/new-tag'), Entry('gone')])
-    # Names other than INBOX itself are exact: inbox/dmarc is not INBOX/dmarc
     assert missing == ['inbox/dmarc', 'gone']
     assert [t.label for t in targets] == ['INBOX/dmarc', 'INBOX/dmarc/google.com', 'INBOX/dmarc/new-tag']
     assert targets[0].select == '"INBOX/dmarc"'
@@ -102,7 +93,6 @@ def test_inbox_is_case_insensitive_and_noselect_parents():
     targets, missing, empty = resolve(folders, [Entry('inbox'), Entry('Archive', True), Entry('Empty', True),
                                                 Entry('Empty')])
     assert [t.label for t in targets] == ['INBOX', 'Archive/2026']
-    # A parent with subfolders and nothing to read yet is not missing; a \Noselect folder named itself is
     assert empty == ['Empty'] and missing == ['Empty']
 
 
@@ -113,12 +103,7 @@ def test_a_stored_single_name_matches_the_raw_listed_name():
     assert legacy_match(folders, 'Reports/\u65e5\u672c\u8a9e') is None
 
 
-# ---------------------------------------------------------------- a fake server
-
 class Server:
-    """An IMAP server with folders of mails, answering as imaplib returns it.
-    keep_seen=False: STORE answers OK but the flag does not stay."""
-
     def __init__(self, folders, uidplus=True, keep_seen=True, list_extra=(), noselect=()):
         self.folders = {name: {str(uid): dict(mail) for uid, mail in mails.items()} for name, mails in folders.items()}
         self.uidplus, self.keep_seen = uidplus, keep_seen
@@ -181,8 +166,6 @@ class _SyncRecord(SimpleNamespace):
 
 
 def _run(monkeypatch, server, setting, delete_after=False, scan_all_unseen=False):
-    """One import run against the server; process_email answers from each mail's
-    'result' (default: a stored report), so no database is involved."""
     service = DMARCImapService()
     service.folder = setting
     service.delete_after = delete_after
@@ -227,14 +210,12 @@ def test_a_run_reads_every_chosen_folder_and_subfolders_added_later(monkeypatch)
                      'INBOX/dmarc/added-later': {7: REPORT}, 'Other': {1: REPORT}})
     result, processed, cleared, notified = _run(monkeypatch, server, '[{"name":"INBOX/dmarc","subfolders":true}]')
     assert result['status'] == 'success'
-    # The same UID in different folders is a different email
     assert processed == [('INBOX/dmarc', '1'), ('INBOX/dmarc/google.com', '1'), ('INBOX/dmarc/google.com', '2'),
                          ('INBOX/dmarc/added-later', '7')]
     assert result['emails_found'] == 4 and result['reports_created'] == 3
     assert result['failed_emails'] == [{'email_id': '2', 'folder': 'INBOX/dmarc/google.com',
                                         'message_id': '<2@x>', 'subject': 'Report Domain: x', 'error': 'broken'}]
     assert notified and cleared
-    # One LIST of every folder; no stored name is sent as a pattern
     assert [c for c in server.calls if c[0] == 'LIST'] == [('LIST', '""', '*')]
 
 
@@ -243,7 +224,6 @@ def test_delete_removes_only_the_imported_email(monkeypatch):
     server = Server({'INBOX/dmarc': {1: REPORT, 2: foreign, 3: {'report': True, 'result': {'keep': True}}}})
     result, *_ = _run(monkeypatch, server, '["INBOX/dmarc"]', delete_after=True)
     assert result['status'] == 'success'
-    # The report is gone; a mail client's deleted email and a kept report stay
     assert sorted(server.folders['INBOX/dmarc']) == ['2', '3']
     assert ('EXPUNGE', 'INBOX/dmarc', '1') in server.calls
 
@@ -261,8 +241,6 @@ def test_scan_all_unseen_also_in_subfolders(monkeypatch):
     server = Server({'INBOX': {1: other}, 'INBOX/sub': {1: other, 2: REPORT}})
     result, processed, *_ = _run(monkeypatch, server, '[{"name":"INBOX","subfolders":true}]', scan_all_unseen=True)
     assert result['status'] == 'success'
-    # A subfolder read through With subfolders is checked like a folder chosen itself
-    # (subject matches first, then the other unread emails)
     assert processed == [('INBOX', '1'), ('INBOX/sub', '2'), ('INBOX/sub', '1')]
 
 
@@ -291,7 +269,6 @@ def test_flags_the_server_does_not_keep_stop_the_folder(monkeypatch):
     result, processed, *_ = _run(monkeypatch, server, 'INBOX')
     assert result['status'] == 'error'
     assert 'already handled as unread' in result['error_message']
-    # Each email once, no endless loop
     assert processed == [('INBOX', '1'), ('INBOX', '2'), ('INBOX', '3')]
     assert result['emails_processed'] == 3
 
@@ -311,7 +288,6 @@ def test_a_refused_search_or_store_is_an_error_not_an_empty_folder(monkeypatch):
     result, processed, cleared, _ = _run(monkeypatch, server, 'INBOX')
     assert result['status'] == 'error' and 'refused to set' in result['error_message']
     assert processed == [('INBOX', '1')]
-    # The report was stored before the error: the DMARC pages must show it
     assert cleared
 
 
@@ -375,20 +351,15 @@ def test_history_hides_the_folder_from_callers_without_settings(monkeypatch):
     assert dmarc._failure_for('viewer', item, False) == {
         'email_id': '2', 'message_id': None, 'subject': None, 'error': 'hidden'}
     assert dmarc._failure_for('admin', item, True) == item
-    # Entries from runs before folder lists have no folder
     assert dmarc._failure_for('admin', {'email_id': '1', 'error': 'x'}, True) == {'email_id': '1', 'error': 'x'}
 
 
 def test_hostile_list_answers_are_not_offered_or_read():
     data = [
         b'(\\HasNoChildren) "/" "Reports"',
-        # A line break in a name would start another command when the name is sent back
         (b'(\\HasNoChildren) "/" {27}', b'Reports/x\r\na LOGOUT\r\nb NOOP'), b'',
-        # An empty separator would make "Reports" cover "ReportsPrivate"
         b'(\\HasNoChildren) "" "ReportsPrivate"',
-        # NUL through modified UTF-7
         b'(\\HasNoChildren) "/" "Reports/&AAA-"',
-        # Two spellings of one name (one shift or two): neither can be told apart
         b'(\\HasNoChildren) "/" "&ZeVnLIqe-"', b'(\\HasNoChildren) "/" "&ZeU-&ZyyKng-"',
     ]
     folders, unreadable = parse_list(data)
@@ -413,8 +384,6 @@ def test_a_read_only_folder_does_not_stop_the_others(monkeypatch):
 
 
 def test_a_shifted_separator_does_not_make_a_subfolder():
-    # "&AC8-" spells "/": printable ASCII is never shifted (RFC 3501, 5.1.3), so
-    # the folder is not read as Reports/private and not covered by Reports
     for bad in ('Reports&AC8-private', '&AFIAZQBwAG8AcgB0AHM-', 'x&ACY-'):
         with pytest.raises(ValueError):
             decode_mutf7(bad)

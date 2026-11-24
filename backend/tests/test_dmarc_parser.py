@@ -1,4 +1,3 @@
-"""Tests for the DMARC aggregate report parser."""
 import gzip
 import io
 import zipfile
@@ -51,7 +50,6 @@ def test_parse_valid_xml():
 
 
 def test_entity_expansion_blocked():
-    """defusedxml must reject XML with internal entity definitions (billion laughs)."""
     evil = (
         '<?xml version="1.0"?><!DOCTYPE lolz [<!ENTITY lol "lol">'
         '<!ENTITY lol2 "&lol;&lol;&lol;">]><feedback>&lol2;</feedback>'
@@ -82,7 +80,7 @@ def test_gzip_bomb_is_rejected_as_over_the_limit():
 
 
 def test_oversized_compressed_input_is_rejected_as_over_the_limit():
-    big = b"\x00" * (11 * 1024 * 1024)  # over the 10 MB compressed cap
+    big = b"\x00" * (11 * 1024 * 1024)
     with pytest.raises(ReportLimitError):
         parse_dmarc_file(big, "big.xml.gz")
 
@@ -97,7 +95,6 @@ def test_missing_metadata_raises():
 
 
 def test_parse_plain_xml_file():
-    # The upload picker and the IMAP import both offer a plain .xml report
     result = parse_dmarc_file(VALID_REPORT.encode(), "example.net!example.com!1700000000!1700086400.xml")
     assert result is not None
     assert result["report_id"] == "1234567890"

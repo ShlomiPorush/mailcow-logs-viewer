@@ -1,4 +1,3 @@
-"""Mail to whitelisted domains stays in the queue: neither queue cleanup nor a hard bounce deletes it."""
 import asyncio
 import secrets
 from datetime import datetime, timezone

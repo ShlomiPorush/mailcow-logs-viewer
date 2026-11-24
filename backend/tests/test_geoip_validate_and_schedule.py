@@ -1,6 +1,3 @@
-"""GeoIP: the validate endpoint reports each database on its own, and the
-weekly update job exists once a license is entered in Settings.
-"""
 import asyncio
 
 import pytest
@@ -17,8 +14,7 @@ from app.services import geoip_service  # noqa: E402
 
 
 def test_validate_reports_a_missing_asn_database(monkeypatch):
-    # City answers the test lookups, the ASN database cannot be read
-    monkeypatch.setattr(geoip_service, '_geoip_db_valid', None)  # restored afterwards
+    monkeypatch.setattr(geoip_service, '_geoip_db_valid', None)
     monkeypatch.setattr(settings_router, 'get_geoip_status', lambda: {'City': {'available': True}})
     state = {}
 
@@ -80,7 +76,6 @@ def test_removing_the_license_leaves_the_weekly_update_doing_nothing(monkeypatch
 
     scheduler.reschedule_interval_jobs()
 
-    # Registered still, so two saves at once cannot drop it; without a license it downloads nothing
     assert 'update_geoip' in fake.jobs
     monkeypatch.setattr(geoip_downloader, 'is_license_configured', lambda: False)
     monkeypatch.setattr(geoip_downloader, 'update_geoip_database_if_needed',

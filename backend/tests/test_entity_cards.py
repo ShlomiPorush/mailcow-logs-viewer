@@ -1,11 +1,3 @@
-"""The entity card (GET /api/entities/ip, /address, /domain) against a real
-PostgreSQL: every source matches the value exactly, never a similar one, an
-excluded address stays hidden, a source that is off or failed says so instead
-of counting zero, and the timeline holds only what is stored.
-
-The rows live in March 2020 and the calls ask for that range, so nothing else
-in the database is counted with them.
-"""
 import uuid
 from datetime import datetime, timedelta
 
@@ -21,11 +13,11 @@ from app.mailcow_api import mailcow_api
 
 MARK = uuid.uuid4().hex[:8]
 DOMAIN = f"c{MARK}.example"
-UNDERSCORE_DOMAIN = f"u_{MARK}.example"       # '_' is a LIKE wildcard: uX<mark>.example must not match
+UNDERSCORE_DOMAIN = f"u_{MARK}.example"
 LOOKALIKE_DOMAIN = f"ux{MARK}.example"
 ANN = f"ann@{DOMAIN}"
 JOANN = f"joann@{DOMAIN}"
-WILD = f"ann_1%@{DOMAIN}"                      # '_' and '%' in an address are plain characters
+WILD = f"ann_1%@{DOMAIN}"
 WILD_LOOKALIKE = f"annx1zz@{DOMAIN}"
 HIDDEN = f"hidden@{DOMAIN}"
 IP, SIMILAR_IP = "203.0.113.4", "203.0.113.45"
@@ -89,25 +81,20 @@ def _seed():
                 final_status="delivered", first_seen=AT + timedelta(minutes=minutes),
                 last_seen=AT + timedelta(minutes=minutes), created_at=AT, rspamd_log_id=rspamd))
 
-        # From IP: one message delivered twice (two legs), and one to an excluded address
         from_ip = scan("ip", IP, 0)
         message("ip-leg1", "Sender@Example.NET", ANN, 0, from_ip, message_id=f"<two-legs.{MARK}@example.com>")
         message("ip-leg2", "Sender@Example.NET", JOANN, 1, from_ip, message_id=f"<two-legs.{MARK}@example.com>")
         message("ip-hidden", "sender@example.net", HIDDEN, 2, scan("hidden", IP, 2))
-        # From the similar IP
         message("similar", "sender@example.net", JOANN, 3, scan("similar", SIMILAR_IP, 3))
-        # Mail of the address, in another case; and of addresses that only contain it
         message("ann-out", ANN.upper(), "friend@example.org", 10, direction="outbound")
         message("joann", JOANN, "friend@example.org", 11, direction="outbound")
         message("wild", WILD, "friend@example.org", 12, direction="outbound")
         message("wild-lookalike", WILD_LOOKALIKE, "friend@example.org", 13, direction="outbound")
-        # Domain: an exact domain, a subdomain, a domain that merely ends the same, and '_' as a wildcard
         message("dom-sub", f"x@sub.{DOMAIN}", "friend@example.org", 14)
         message("dom-suffix", f"x@{DOMAIN}.evil.example", "friend@example.org", 15)
         message("under", f"x@{UNDERSCORE_DOMAIN}", "friend@example.org", 16)
         message("under-lookalike", f"x@{LOOKALIKE_DOMAIN}", "friend@example.org", 17)
 
-        # Netfilter: two failed attempts, the warning after one, a ban, and a line of the similar IP
         for i, (ip, message_text, rule, action, user) in enumerate((
             (IP, f"{IP} matched rule id 3 (warning: unknown[{IP}]: SASL LOGIN authentication failed) {MARK}", 3, None, ANN),
             (IP, f"4 more attempts in the next 600 seconds until {IP}/32 is banned {MARK}", None, "warning", None),
@@ -130,7 +117,6 @@ def _seed():
         db.add(EasDevice(username=JOANN, device_id=f"{MARK}tablet", device_type="iPad", last_ip=SIMILAR_IP,
                          first_seen=AT, last_seen=AT + timedelta(minutes=5)))
 
-        # DMARC: the IP sends for two domains; the similar IP for one of them
         for domain, n, ip, spf in ((DMARC_A, 7, IP, "pass"), (DMARC_B, 3, IP, "fail"), (DMARC_A, 100, SIMILAR_IP, "pass")):
             report = DMARCReport(report_id=f"{MARK}-{domain}-{ip}", domain=domain, org_name="Reporter Example",
                                  begin_date=_epoch(AT - timedelta(days=1)), end_date=_epoch(AT),
@@ -139,7 +125,6 @@ def _seed():
             db.flush()
             db.add(DMARCRecord(dmarc_report_id=report.id, source_ip=ip, count=n, disposition="none",
                                spf_result=spf, dkim_result="fail", header_from=domain))
-        # Own domain DMARC
         report = DMARCReport(report_id=f"{MARK}-own", domain=DOMAIN, org_name="Reporter Example",
                              begin_date=_epoch(AT - timedelta(days=1)), end_date=_epoch(AT), created_at=AT)
         db.add(report)
@@ -172,7 +157,7 @@ def client(monkeypatch):
                 'active_bans': [{'network': f'{IP}/32', 'ip': IP, 'banned_until': '00h 20m 00s', 'queued_for_unban': 0}]}
     monkeypatch.setattr(mailcow_api, 'get_fail2ban', fake_fail2ban)
 
-    from app import models  # noqa: F401  (create_all only knows the tables of imported models)
+    from app import models  # noqa: F401
     from app.database import init_db
     init_db()
     _cleanup()
@@ -193,14 +178,10 @@ def _subjects(source):
     return sorted(i["subject"].split()[0] for i in source["items"])
 
 
-# ---------------------------------------------------------------- IP
-
 def test_ip_card_matches_the_address_exactly(client):
     card = _card(client, "ip", IP)
     assert card["kind"] == "ip" and card["value"] == IP
     s = card["sources"]
-    # Two deliveries of one message count once; the excluded recipient's message is left out; the
-    # similar IP 203.0.113.45 is not 203.0.113.4
     assert s["messages"]["state"] == "ok" and s["messages"]["count"] == 1
     assert _subjects(s["messages"]) == ["ip-leg1"]
     sec = s["security"]
@@ -220,7 +201,6 @@ def test_ip_card_dmarc_covers_every_domain(client):
     assert by_domain[DMARC_A]["messages"] == 7 and by_domain[DMARC_A]["spf_pass"] == 7
     assert by_domain[DMARC_B]["messages"] == 3 and by_domain[DMARC_B]["dmarc_pass"] == 0
     assert by_domain[DOMAIN]["dkim_pass"] == 5
-    # The report period and when it came in are separate
     record = next(r for r in dmarc["records"] if r["domain"] == DMARC_A)
     assert record["period_end"] == "2020-03-10T12:00:00Z" and record["received"] == "2020-03-10T18:00:00Z"
     assert record["period_begin"] == "2020-03-09T12:00:00Z"
@@ -244,17 +224,13 @@ def test_lists_unknown_when_mailcow_does_not_answer(client, monkeypatch):
     assert "allowlisted_as" not in lists and "ban" not in lists
 
 
-# ---------------------------------------------------------------- address
-
 def test_address_card_matches_the_address_exactly(client):
     card = _card(client, "address", "Ann@" + DOMAIN.upper())
     assert card["value"] == ANN and card["display"] == "Ann@" + DOMAIN.upper()
     assert card["domain"] == DOMAIN and card["hosted_domain"] is True and card["excluded"] is False
     s = card["sources"]
-    # ann@ never finds joann@; the stored address in upper case is the same address
     assert _subjects(s["messages"]) == ["ann-out", "ip-leg1"]
     assert (s["messages"]["count"], s["messages"]["sent"], s["messages"]["received"]) == (2, 1, 1)
-    # The account was tried from both addresses
     assert s["security"]["rule_matches"] == 2 and s["security"]["ips"] == 2
     assert s["protection"]["count"] == 1
     assert [d["username"] for d in s["devices"]["items"]] == [ANN]
@@ -276,13 +252,10 @@ def test_an_excluded_address_shows_no_messages(client):
     assert "messages" in card["timeline"]["left_out"]
 
 
-# ---------------------------------------------------------------- domain
-
 def test_domain_card_matches_the_part_after_the_last_at(client):
     card = _card(client, "domain", DOMAIN.upper() + ".")
     assert card["value"] == DOMAIN and card["hosted"] is True
     s = card["sources"]
-    # Not sub.<domain>, not <domain>.evil.example; the excluded address stays out
     assert _subjects(s["messages"]) == ["ann-out", "ip-leg1", "joann", "similar", "wild", "wild-lookalike"]
     assert (s["messages"]["count"], s["messages"]["sent"], s["messages"]["received"]) == (6, 4, 2)
     assert s["dmarc"]["messages"] == 5 and s["dmarc"]["reports"] == 1 and s["dmarc"]["sources"] == 1
@@ -296,8 +269,6 @@ def test_underscore_in_a_domain_is_a_plain_character(client):
     card = _card(client, "domain", UNDERSCORE_DOMAIN)
     assert _subjects(card["sources"]["messages"]) == ["under"]
 
-
-# ---------------------------------------------------------------- states
 
 def test_a_feature_that_is_off_is_disabled_never_zero(client, monkeypatch):
     monkeypatch.setattr(settings._inner, 'disabled_features', 'netfilter,devices,dmarc,blacklist')
@@ -322,12 +293,9 @@ def test_a_source_that_fails_is_an_error_and_the_others_still_answer(client, mon
     card = _card(client, "ip", IP)
     assert card["sources"]["security"]["state"] == "error"
     assert "events" not in card["sources"]["security"]
-    # The failed statement did not take the next sources with it
     assert card["sources"]["protection"]["state"] == "ok" and card["sources"]["devices"]["count"] == 1
     assert "security" in card["timeline"]["left_out"]
 
-
-# ---------------------------------------------------------------- timeline
 
 def test_ip_timeline_is_newest_first_with_its_labels(client):
     timeline = _card(client, "ip", IP)["timeline"]
@@ -355,8 +323,6 @@ def test_no_label_calls_anything_a_login(client):
         for item in _card(client, kind, value)["timeline"]["items"]:
             assert "login" not in item["label"].lower()
 
-
-# ---------------------------------------------------------------- the request
 
 @pytest.mark.parametrize("kind,value,says", [
     ("ip", "203.0.113.0/24", "not a network"),
@@ -388,7 +354,6 @@ def test_default_range_is_the_last_seven_days(client):
     start = datetime.fromisoformat(card["range"]["start"].replace("Z", ""))
     end = datetime.fromisoformat(card["range"]["end"].replace("Z", ""))
     assert end - start == timedelta(days=7)
-    # March 2020 is outside it
     assert card["sources"]["messages"]["count"] == 0
 
 

@@ -1,9 +1,3 @@
-"""Every answer the Status calls can give, so the contract check (conftest.py,
-contract.py) holds each one to /openapi.json: mailcow answering, not answering
-(502) or answering with something the call cannot read (500), the database
-failing (500), the answers that stay 200 when GitHub or mailcow fail, and the
-requests they refuse (404, 422). mailcow and GitHub are faked; nothing leaves
-the test. The containers recorded and the ignored list are put back."""
 import types
 import uuid
 from contextlib import contextmanager
@@ -61,7 +55,6 @@ def _postgres_available() -> bool:
 
 
 class _GitHub:
-    """GitHub's releases API, answering with a fixed status and release."""
     status = 200
     release = {'tag_name': 'v9.9.9', 'name': 'Release 9.9.9', 'body': '## Notes'}
 
@@ -96,7 +89,6 @@ def client(monkeypatch):
     fake_httpx = types.SimpleNamespace(AsyncClient=github)
     monkeypatch.setattr(status, 'httpx', fake_httpx)
     monkeypatch.setattr(scheduler, 'httpx', fake_httpx)
-    # The version checks keep their results in the process
     version_before, app_before = dict(status.version_cache), dict(scheduler.app_version_cache)
     job_before = dict(scheduler.job_status['check_app_version'])
     yield TestClient(app, raise_server_exceptions=False), answers, github
@@ -108,7 +100,6 @@ def client(monkeypatch):
 
 @pytest.fixture
 def rows(client):
-    """The containers this test records and the ignored list, put back after it."""
     if not _postgres_available():
         pytest.skip('PostgreSQL not available')
     from app.models import KnownContainer, SystemSetting
@@ -131,13 +122,10 @@ def rows(client):
         db.commit()
 
 
-# ---------------------------------------------------------------- containers
-
 def test_containers(client, rows):
     c, answers, _ = client
     assert c.get('/api/status/containers').json()['containers'][RUNNING]['name'] == f'a{MARK}'
     assert c.put(f'/api/status/containers/{EXITED}/ignore', json={'ignored': True}).json()['ignored'] is True
-    # Gone from mailcow's answer: still listed, as stopped
     answers['/api/v1/get/status/containers'] = [{RUNNING: {'state': 'running'}}]
     body = c.get('/api/status/containers').json()
     assert body['containers'][EXITED]['state'] == 'stopped' and body['summary']['ignored'] >= 1
@@ -155,14 +143,11 @@ def test_containers_when_the_database_fails(client, monkeypatch):
     assert c.put(f'/api/status/containers/{EXITED}/ignore', json={'ignored': True}).status_code == 500
 
 
-# ---------------------------------------------------------------- storage and counts
-
 def test_storage(client):
     c, answers, _ = client
     assert c.get('/api/status/storage').json()['used_percent'] == '45%'
     answers['/api/v1/get/status/vmail'] = []
     assert c.get('/api/status/storage').json()['disk'] == 'unknown'
-    # An answer that is not an object cannot be read
     answers['/api/v1/get/status/vmail'] = ['45%']
     assert c.get('/api/status/storage').status_code == 500
     answers['/api/v1/get/status/vmail'] = DOWN
@@ -194,8 +179,6 @@ def test_mailcow_connection(client):
     assert c.get('/api/status/mailcow-connection').json()['connected'] is False
 
 
-# ---------------------------------------------------------------- versions
-
 def test_mailcow_version(client):
     c, answers, github = client
     body = c.get('/api/status/version?force=true').json()
@@ -208,8 +191,6 @@ def test_mailcow_version(client):
 
 
 def test_mailcow_version_after_a_mailcow_update(client):
-    """The update notice goes away within an hour of updating mailcow,
-    and a dashboard refresh inside that hour asks mailcow nothing."""
     c, answers, _ = client
     assert c.get('/api/status/version?force=true').json()['update_available'] is True
     answers['/api/v1/get/status/version'] = [{'version': '9.9.9'}]
@@ -242,8 +223,6 @@ def test_changelog(client):
     github.status = None
     assert 'Failed' in c.get('/api/status/app-version/changelog/0.0.1').json()['changelog']
 
-
-# ---------------------------------------------------------------- the app's log
 
 def test_container_logs(client):
     c, _, _ = client

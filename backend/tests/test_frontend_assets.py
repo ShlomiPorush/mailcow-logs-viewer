@@ -1,4 +1,3 @@
-"""A changed frontend file must get a new URL so browsers do not keep the old one."""
 import hashlib
 
 from app.frontend_assets import stamp_asset_versions

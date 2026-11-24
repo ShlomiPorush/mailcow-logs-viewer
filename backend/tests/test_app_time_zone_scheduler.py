@@ -1,14 +1,3 @@
-"""Scheduled jobs run by the app's time zone, never by the container's.
-
-Both schedulers used to take the container's zone (APScheduler asks tzlocal),
-so the 02:00 cleanup and the Monday 09:00 summary ran at 02:00 and 09:00 of
-whatever TZ the container had. An unknown TZ such as Europe/Berlinn was worse:
-tzlocal raised while APScheduler was being constructed, at import time, and the
-app did not start at all.
-
-Each case runs in its own Python process: the old failure happens at import
-time, and tzlocal remembers the first zone it found for the whole process.
-"""
 import json
 import os
 import subprocess
@@ -21,7 +10,6 @@ import pytest
 
 BACKEND = Path(__file__).resolve().parents[1]
 
-# Every job that runs at a clock time: (hour, minute, weekday or None)
 CLOCK_JOBS = {
     "cleanup_logs": (2, 0, None),
     "cleanup_dmarc_reports": (2, 15, None),
@@ -31,7 +19,6 @@ CLOCK_JOBS = {
     "send_weekly_summary": (9, 0, 0),
     "cleanup_raw_logs": (3, 0, None),
 }
-# Registered whatever the features and credentials are
 ALWAYS_REGISTERED = {"cleanup_logs", "cleanup_eas_devices", "send_weekly_summary", "cleanup_raw_logs"}
 
 SCRIPT = r'''
@@ -135,7 +122,6 @@ def test_unknown_tz_in_the_environment_starts_the_app_on_utc():
     assert_clock_jobs_in(out["started"], "UTC")
     assert out["info"] == {"timezone": "UTC", "timezone_valid": False,
                            "timezone_configured": "Europe/Berlinn"}
-    # The log names the bad value, once
     assert sum("Europe/Berlinn" in w for w in out["warnings"]) == 1, out["warnings"]
 
 
@@ -150,7 +136,6 @@ def test_unknown_tz_saved_in_settings_starts_the_app_on_utc():
 
 
 def test_clock_jobs_run_in_the_app_zone_not_the_container_zone():
-    # The container runs on New York time; the app zone is Berlin
     out = run_app("America/New_York", stored="Europe/Berlin")
 
     assert out["scheduler_zone"] == "Europe/Berlin"

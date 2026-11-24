@@ -1,9 +1,3 @@
-"""A manual run of a job that cannot run is refused instead of reported as started.
-
-The Status page hides Run for such a job, but the API accepted it: the job
-returned at once and was marked success (or, for Protection Rules with the
-Security feature off, ran anyway).
-"""
 import secrets
 
 import pytest
@@ -23,7 +17,6 @@ from app.routers import settings as settings_router  # noqa: E402
 
 @pytest.fixture()
 def started(monkeypatch):
-    """The jobs the runner started; nothing is executed."""
     tasks = []
     monkeypatch.setattr(BackgroundTasks, "add_task", lambda self, *a, **k: tasks.append(a))
     saved = {k: dict(v) for k, v in scheduler.job_status.items()}
@@ -62,7 +55,6 @@ def test_a_job_whose_setting_is_off_says_why(started, monkeypatch):
 
 
 def test_suppression_sync_without_the_rw_key_still_reads(started, monkeypatch):
-    # It reads the app's Rspamd blocks into the list; it writes only with the key
     _rw(monkeypatch, False)
     monkeypatch.setattr(settings._inner, 'suppression_enabled', True)
     monkeypatch.setattr(settings._inner, 'suppression_rspamd_sync', True)
@@ -81,7 +73,6 @@ def test_suppression_sync_without_the_rspamd_password_is_refused(started, monkey
 
 
 def test_mailbox_sync_still_runs_for_rate_limits(started, monkeypatch):
-    # Mailbox Stats off, Rate Limits on: the sync still feeds Rate Limits
     monkeypatch.setattr(settings._inner, 'disabled_features', 'mailbox-stats')
     resp = TestClient(app).post("/api/settings/jobs/mailbox_stats/run")
     assert resp.status_code == 200, resp.text

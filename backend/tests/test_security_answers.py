@@ -1,9 +1,3 @@
-"""Every answer the Security alerts, Protection rules, SMTP abuse, Rate limits and
-Blacklist calls can give, so the contract check (conftest.py, contract.py) holds each
-one to /openapi.json: the answers with data, a database that fails (500), mailcow
-refusing or not answering (502, 500 where the call turns a refusal into one), the
-Read-Write key or the feature missing (403, 503) and the requests the calls refuse
-(400, 404, 409, 422). mailcow and DNS are faked; nothing leaves the test."""
 import uuid
 from contextlib import contextmanager
 from datetime import datetime, timedelta
@@ -28,7 +22,6 @@ MARK = uuid.uuid4().hex[:8]
 DOMAIN = f'{MARK}.example'
 MAILBOX = f'u@{DOMAIN}'
 OK = [{'type': 'success', 'msg': ['object_modified', 'x']}]
-# The protection rules, the rate limit reset audit and the ignored blocklists
 SHARED_KEYS = (protection_rules.RULES_KEY, 'rate_limit_resets', 'ignore.blocklists')
 
 
@@ -82,10 +75,8 @@ def client(monkeypatch):
 
     async def not_sent(*args, **kwargs):
         return None
-    # A block notifies the operator and the user; nothing is sent from a test
     monkeypatch.setattr(smtp_abuse_service, '_notify_operator_blocked', not_sent)
     monkeypatch.setattr(smtp_abuse_service, '_notify_user_blocked', not_sent)
-    # Reading the monitored hosts would also align them with the settings
     monkeypatch.setattr(blacklist_service, 'reconcile_monitored_hosts', lambda db: False)
     rate_limits._bust_domain_limit_cache()
     yield TestClient(app, raise_server_exceptions=False), state
@@ -95,7 +86,6 @@ def client(monkeypatch):
 
 @pytest.fixture
 def rows(client):
-    """A mailbox, an alert and three catches of this test, removed after it."""
     if not _postgres_available():
         pytest.skip('PostgreSQL not available')
     from app.models import (MailboxStatistics, ProtectionHit, SecurityAlert, SMTPAbuseAction, SMTPAbuseWhitelist,
@@ -103,11 +93,9 @@ def rows(client):
     database.init_db()
     now = datetime.utcnow()
     with database.get_db_context() as db:
-        # What these calls change that other tests and the app share, put back after
         settings_before = {row.key: (row.value, row.updated_at)
                            for row in db.query(SystemSetting).filter(SystemSetting.key.in_(SHARED_KEYS))}
         whitelist_before = {row.email: (row.notes, row.active, row.updated_at) for row in db.query(SMTPAbuseWhitelist)}
-        # Saving the rules can move other catches back to watching
         catches_before = {row.id: (row.status, row.mode) for row in db.query(ProtectionHit)}
         db.add(MailboxStatistics(username=MAILBOX, domain=DOMAIN, active=True))
         alert = SecurityAlert(alert_type='auth_failure_burst', severity='warning', subject=MAILBOX,
@@ -119,7 +107,6 @@ def rows(client):
         db.add(alert)
         db.add_all(hits.values())
         db.commit()
-        # The catch with status alert keeps its key; the security alert has its own
         ids = {**{status: hit.id for status, hit in hits.items()}, 'security_alert': alert.id}
     yield ids
     with database.get_db_context() as db:
@@ -146,8 +133,6 @@ def rows(client):
         db.commit()
 
 
-# ---------------------------------------------------------------- security alerts
-
 def test_security_alerts(client, rows):
     c, _ = client
     assert c.get('/api/security-alerts?limit=500').status_code == 200
@@ -171,8 +156,6 @@ def test_security_alerts_when_the_database_fails(client):
         assert c.post(path).status_code == 500
 
 
-# ---------------------------------------------------------------- protection rules
-
 def test_protection_rules_and_catches(client, rows, monkeypatch):
     c, state = client
     rules = c.get('/api/protection/rules').json()['rules']
@@ -185,15 +168,12 @@ def test_protection_rules_and_catches(client, rows, monkeypatch):
     for action in ('dismiss', 'ban', 'undo'):
         assert c.post(f'/api/protection/hits/0/{action}').status_code == 404
         assert c.post(f'/api/protection/hits/x/{action}').status_code == 422
-    # Ban: only a watched catch of a banning rule, with the Read-Write key
     assert c.post(f"/api/protection/hits/{rows['banned']}/ban").status_code == 409
     state['rw'] = False
     assert c.post(f"/api/protection/hits/{rows['watching']}/ban").status_code == 400
     assert c.post(f"/api/protection/hits/{rows['banned']}/undo").status_code == 400
     state['rw'] = True
 
-    # A ban and its undo that succeed run for real against a fake mailcow in the
-    # protection rules' own API tests; here, the ones mailcow does not take
     async def nothing_written(api, now=None):
         return {}
     monkeypatch.setattr(protection_rules, 'enforce', nothing_written)
@@ -215,8 +195,6 @@ def test_protection_when_the_database_fails(client):
         assert c.post(f'/api/protection/hits/1/{action}').status_code == 500
 
 
-# ---------------------------------------------------------------- SMTP abuse
-
 def test_smtp_abuse(client, rows, monkeypatch):
     c, state = client
     monkeypatch.setattr(smtp_abuse_service, 'fetch_outbound_counts', lambda window, limit=None: {MAILBOX: 7})
@@ -234,7 +212,6 @@ def test_smtp_abuse(client, rows, monkeypatch):
     assert c.post(f'/api/smtp-abuse/mailboxes/{MAILBOX}/unblock').json()['smtp_access'] is True
     assert c.get('/api/smtp-abuse/history?limit=500').status_code == 200
     assert c.get('/api/smtp-abuse/history?limit=0').status_code == 422
-    # mailcow not answering (502), or refusing the change, which the call turns into a 500
     for answer, status in ((MailcowAPIError('down'), 502), ([{'type': 'danger', 'msg': 'alias'}], 500)):
         state['mailcow'] = answer
         assert c.post(f'/api/smtp-abuse/mailboxes/{MAILBOX}/block').status_code == status
@@ -271,13 +248,10 @@ def test_smtp_abuse_when_the_database_fails(client, monkeypatch):
     assert c.get('/api/smtp-abuse/status').status_code == 500
     assert c.get('/api/smtp-abuse/whitelist').status_code == 500
     assert c.get('/api/smtp-abuse/history').status_code == 500
-    # Unblock reads nothing first; its 500 is mailcow refusing (test_smtp_abuse)
     for method, path, body in WRITES[:4]:
         kwargs = {'json': body} if body is not None else {}
         assert getattr(c, method)(path, **kwargs).status_code == 500
 
-
-# ---------------------------------------------------------------- rate limits
 
 def test_rate_limit_reads(client, rows):
     c, _ = client
@@ -331,8 +305,6 @@ def test_rate_limits_when_the_database_fails(client, monkeypatch):
     monkeypatch.setattr(mailcow_api, 'delete_rl_hash', broken)
     assert c.post('/api/rate-limits/reset', json={'rl_hash': 'RLabc123'}).status_code == 500
 
-
-# ---------------------------------------------------------------- blacklist
 
 def test_blacklist(client, rows, monkeypatch):
     c, _ = client

@@ -1,8 +1,3 @@
-"""Every answer the Live Logs calls can give, so the contract check (conftest.py,
-contract.py) holds each one to /openapi.json: the stream token, the services (also
-when they cannot be counted), the worker's state before and after a run, stored
-lines of a service, a database that fails (500), and the requests the calls refuse
-(404, 422). The lines this test stores are removed after it."""
 import uuid
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
@@ -50,7 +45,6 @@ def client(monkeypatch):
 
 @pytest.fixture
 def lines():
-    """Two Postfix lines and an Rspamd history entry of this test, removed after it."""
     if not _postgres_available():
         pytest.skip('PostgreSQL not available')
     from app.models import RawServiceLog

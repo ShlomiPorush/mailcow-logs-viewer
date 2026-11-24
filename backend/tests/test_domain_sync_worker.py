@@ -1,4 +1,3 @@
-"""Local-domain synchronization must not block the event loop on persistence."""
 import asyncio
 import threading
 from contextlib import contextmanager
@@ -94,6 +93,5 @@ def test_no_domains_does_not_replace_persisted_mapping(monkeypatch, state):
     assert asyncio.run(scheduler.sync_local_domains()) == scheduler.JOB_STATUS_SET
     scheduler.update_job_status.assert_called_with('sync_local_domains', 'failed', 'No domains')
     session.assert_not_called()
-    # mailcow answered that it has none: the list is read, empty
     state[0].assert_called_once_with([], complete_for=scheduler.mailcow_api.base_url, hosted=[])
     state[1].assert_not_called()

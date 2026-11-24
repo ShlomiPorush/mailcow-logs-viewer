@@ -1,12 +1,3 @@
-"""The Messages list says how many recipients a message has.
-
-A row used to show only the delivery's primary recipient, so a message sent
-to three people looked like a message sent to one. Each list item now carries
-recipient_count, counted exactly as the message dialog counts its recipients:
-Rspamd's SMTP recipients without excluded addresses, else the distinct
-recipients of the visible Postfix lines. The list counts a whole page with one
-grouped Postfix query, never one per row.
-"""
 import hashlib
 import uuid
 from datetime import datetime, timedelta
@@ -51,7 +42,7 @@ def env(monkeypatch):
         pytest.skip('PostgreSQL not available')
     from app.config import settings
     from app.database import init_db
-    import app.models  # noqa: F401 - the tables init_db creates on an empty database
+    import app.models  # noqa: F401
     init_db()
     monkeypatch.setattr(settings._inner, 'blacklist_emails', '')
     _cleanup()
@@ -60,10 +51,6 @@ def env(monkeypatch):
 
 
 def _seed(recipient, rspamd=None, postfix=(), queue=True, minutes=5):
-    """One delivery leg. rspamd: Rspamd's recipients (None: no Rspamd log).
-    postfix: the recipients of its Postfix delivery lines, in order.
-    queue=False links the lines by id only, as a leg without a queue id does.
-    Returns the correlation key."""
     from app.database import get_db_context
     from app.models import MessageCorrelation, PostfixLog, RspamdLog
     msgid = f'{uuid.uuid4().hex}@{MARKER}'
@@ -125,11 +112,8 @@ def test_recipients_from_rspamd_are_counted(client):
 
 
 def test_without_rspamd_the_postfix_recipients_are_counted(client):
-    # No Rspamd log at all; a retried delivery to Bob logs him twice
     key = _seed(ALICE, rspamd=None, postfix=[ALICE, BOB, BOB, CAROL])
-    # An Rspamd log that names no recipient falls back the same way
     empty = _seed(ALICE, rspamd=[], postfix=[ALICE, BOB], minutes=6)
-    # A leg without a queue id counts the lines it is linked to
     loose = _seed(ALICE, rspamd=None, postfix=[ALICE, CAROL], queue=False, minutes=7)
     rows = _rows(client)
     assert rows[key]['recipient_count'] == 3
@@ -140,15 +124,12 @@ def test_without_rspamd_the_postfix_recipients_are_counted(client):
 def test_an_excluded_recipient_is_not_counted(client, env):
     from app.config import settings
     key = _seed(ALICE, rspamd=[ALICE, LISTED, BOB], postfix=[ALICE])
-    # The operator lists the address after the mail was stored
     env.setattr(settings._inner, 'blacklist_emails', LISTED.upper())
     assert _rows(client)[key]['recipient_count'] == 2
     assert LISTED not in _details(client, key)['recipients']
 
 
 def test_a_leg_with_no_recipient_left_still_counts_its_own(client):
-    """Retention removed its Postfix lines and Rspamd never scanned it: the
-    row still names a recipient, so it counts at least that one."""
     key = _seed(ALICE, rspamd=None, postfix=[])
     assert _rows(client)[key]['recipient_count'] == 1
     assert _details(client, key)['recipient_count'] == 1
@@ -168,9 +149,6 @@ def test_list_and_details_agree(client):
 
 
 def test_lines_linked_by_id_are_shown_and_counted_alike(client, env):
-    """A leg without a queue id reads the lines linked to it. A line whose queue
-    occurrence names an excluded address in another, unlinked line is left out
-    of the rows the details show, as it is left out of the list's count."""
     from app.config import settings
     from app.database import get_db_context
     from app.models import MessageCorrelation, PostfixLog
@@ -200,9 +178,6 @@ def test_lines_linked_by_id_are_shown_and_counted_alike(client, env):
 
 
 def test_two_lines_that_differ_after_their_first_100_characters_are_two(client):
-    """Two long aliases delivered to one mailbox in the same second: the lines
-    match for well over 100 characters and differ only in orig_to. They are two
-    recipients in the details and in the list alike."""
     from app.database import get_db_context
     from app.models import MessageCorrelation, PostfixLog
     msgid = f'{uuid.uuid4().hex}@{MARKER}'
@@ -231,7 +206,6 @@ def test_two_lines_that_differ_after_their_first_100_characters_are_two(client):
 
 
 def test_the_details_count_from_the_lines_they_loaded(client):
-    """The details read the message's Postfix lines once, and count from them."""
     from sqlalchemy import event
     from app.database import engine
     key = _seed(ALICE, rspamd=None, postfix=[ALICE, BOB])
@@ -249,10 +223,6 @@ def test_the_details_count_from_the_lines_they_loaded(client):
 
 
 def test_a_page_of_messages_delivered_twice_takes_the_same_queries_as_a_short_one(client):
-    """Every message passed through the server twice (two legs, one recipient
-    each): each row counts both legs' recipients, and the page reads the legs,
-    their Rspamd logs and their Postfix lines in grouped queries, so 8 rows
-    take as many statements as 2."""
     from sqlalchemy import event
     from app.database import engine, get_db_context
     from app.models import MessageCorrelation, PostfixLog, RspamdLog
@@ -299,8 +269,6 @@ def test_a_page_of_messages_delivered_twice_takes_the_same_queries_as_a_short_on
 
 
 def test_the_postfix_fallback_is_one_query_per_page(client):
-    """No query per row: a page of messages Rspamd has no recipients for reads
-    the Postfix recipients of all of them at once."""
     from sqlalchemy import event
     from app.database import engine
 

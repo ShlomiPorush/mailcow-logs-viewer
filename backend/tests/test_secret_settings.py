@@ -1,10 +1,3 @@
-"""The app does not start with a missing required secret or a published example value.
-
-The examples in this project's documentation, old env.example, CI and demo are
-public, so a setting that holds one guards nothing. Settings refuses them from
-ENV (at start), from the database (when the stored settings load) and from a
-Settings save.
-"""
 import secrets
 
 import pytest
@@ -54,13 +47,11 @@ def test_values_of_your_own_start(monkeypatch):
     own = secrets.token_hex(16)
     loaded = _settings(monkeypatch, POSTGRES_PASSWORD=own, AUTH_PASSWORD=f" {own} ")
     assert loaded.postgres_password == own
-    # The value itself is kept as given; only the check ignores the spaces
     assert loaded.auth_password == f" {own} "
 
 
 @pytest.fixture
 def stored(monkeypatch):
-    """Settings stored in the database, as the Settings page saves them."""
     monkeypatch.setenv("SETTINGS_EDIT_VIA_UI_ENABLED", "true")
     for name in ("AUTH_PASSWORD", "SMTP_PASSWORD"):
         monkeypatch.delenv(name, raising=False)
@@ -139,7 +130,6 @@ _SIGN_IN_ENV = ("SETTINGS_EDIT_VIA_UI_ENABLED", "AUTH_ENABLED", "BASIC_AUTH_ENAB
 
 
 def _start(monkeypatch):
-    """Run the app start up to the sign-in check, with no database or mailcow."""
     import asyncio
     from contextlib import contextmanager
     from unittest.mock import AsyncMock
@@ -154,7 +144,6 @@ def _start(monkeypatch):
     def fake_db():
         yield object()
     monkeypatch.setattr(database, "get_db_context", fake_db)
-    # Nothing past the check may run for real if startup wrongly continues
     monkeypatch.setattr(main, "is_license_configured", lambda: False)
     monkeypatch.setattr(main.mailcow_api, "test_connection", AsyncMock(return_value=False))
     monkeypatch.setattr(main, "start_scheduler", lambda: None)
@@ -191,7 +180,6 @@ def test_the_app_does_not_start_with_oauth2_stored_without_a_client_secret(store
 
 
 def _save(monkeypatch, stored_values, body):
-    """PUT /api/settings against stored settings, with sign-in off for the request itself."""
     from fastapi.testclient import TestClient
     from app.database import get_db
     from app.routers import settings as settings_router
@@ -226,7 +214,6 @@ def test_settings_does_not_save_oauth2_without_a_client_secret(no_sign_in_env, m
 
 
 def test_turning_off_a_flag_that_env_sets_does_not_let_the_secret_go(no_sign_in_env, monkeypatch):
-    # OAUTH2_ENABLED from .env stays in force, whatever the save sends for it
     monkeypatch.setenv("OAUTH2_ENABLED", "true")
     answer, saved = _save(monkeypatch, {"oauth2_client_secret": secrets.token_hex(16)},
                           {"oauth2_enabled": False, "oauth2_client_secret": ""})
@@ -236,7 +223,6 @@ def test_turning_off_a_flag_that_env_sets_does_not_let_the_secret_go(no_sign_in_
 
 
 def test_the_save_checks_the_settings_as_stored_now(no_sign_in_env, monkeypatch):
-    # Another save turned OAuth2 on after this app last loaded its settings
     answer, saved = _save(monkeypatch, {"oauth2_enabled": True, "oauth2_client_secret": secrets.token_hex(16)},
                           {"oauth2_client_secret": ""})
     assert answer.status_code == 400, answer.text

@@ -1,8 +1,3 @@
-"""Every shape the Messages calls can answer with, so the contract check (conftest.py,
-contract.py) sees each one: a message with all its logs (Rspamd with symbols,
-Postfix lines, a Dovecot line, a Netfilter event, another delivery leg), an
-unknown message (404), a bad cursor (422 with a string) and a bad parameter
-(422 with FastAPI's list), and a failure (500)."""
 import uuid
 from datetime import datetime, timedelta
 
@@ -16,7 +11,6 @@ from app.config import settings  # noqa: E402
 
 MARK = uuid.uuid4().hex[:8]
 MSGID = f'answers-{MARK}@example.com'
-# A documentation address of its own per run, so no other row shares it
 IP = f'198.51.100.{int(MARK, 16) % 254 + 1}'
 
 

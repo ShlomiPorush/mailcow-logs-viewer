@@ -1,16 +1,3 @@
-"""Postfix reuses short queue ids; two messages on one id stay two messages.
-
-A short queue id is the queue file's inode and the microsecond it was made,
-so the id comes back once the message has left the queue, minutes or days
-later, for an unrelated message. The app used to read every line of a queue
-id as one message: the later message took the earlier one's first-seen time
-(days early in the Messages list), its lines in the details, and its status,
-and its key was stamped on all of them.
-
-The pure tests pin how the lines of one queue id are cut into messages
-(app/correlation.py split_queue_occurrences). The database tests drive the
-real correlation, refresh, details and upgrade paths.
-"""
 import asyncio
 import importlib.util
 import itertools
@@ -44,8 +31,6 @@ RCPT_B = 'two@example.test'
 T0 = datetime(2026, 10, 20, 9, 13, 0)
 
 
-# ---------- line builders (Postfix's own wording) ----------
-
 def _text(queue, kind, msgid=None, sender=None, rcpt=None):
     return {
         'client': ('postfix/smtpd', f'{queue}: client=mail.example.test[192.0.2.10]'),
@@ -71,7 +56,6 @@ _ids = itertools.count(1)
 
 
 def _line(queue, when, kind, **fields):
-    """A PostfixLog-like line for the pure tests, parsed as the ingest parses it."""
     from app.correlation import parse_postfix_message
     program, message = _text(queue, kind, **fields)
     parsed = parse_postfix_message(message)
@@ -82,7 +66,6 @@ def _line(queue, when, kind, **fields):
 
 
 def _message(queue, start, msgid, sender, rcpt, outcome='sent', removed=True, opener='client'):
-    """One whole message: received, delivered, removed, a second per step."""
     lines = [_line(queue, start, opener, sender=sender),
              _line(queue, start, 'msgid', msgid=msgid),
              _line(queue, start + timedelta(seconds=1), 'from', sender=sender),
@@ -95,8 +78,6 @@ def _message(queue, start, msgid, sender, rcpt, outcome='sent', removed=True, op
 def _ids_of(lines):
     return {line.id for line in lines}
 
-
-# ---------- cutting lines into messages ----------
 
 def test_two_messages_days_apart_are_two_occurrences():
     a = _message('AAA1', T0, 'a@example.test', SENDER_A, RCPT_A)
@@ -114,7 +95,6 @@ def test_a_message_without_removed_still_ends_at_the_next_opener():
 
 
 def test_line_order_inside_a_second_is_not_used():
-    """mailcow returns the log newest first; ids inside a second say nothing."""
     a = _message('AAA3', T0, 'a@example.test', SENDER_A, RCPT_A)
     b = _message('AAA3', T0 + timedelta(seconds=10), 'b@example.test', SENDER_B, RCPT_B)
     for line, new_id in zip(b + a, range(1000, 2000)):
@@ -124,9 +104,6 @@ def test_line_order_inside_a_second_is_not_used():
 
 
 def test_the_previous_message_removed_in_the_next_ones_first_second_is_a_boundary_line():
-    """A delivered in S-1, A's "removed" and B's client= both in S: the
-    "removed" may be A's (qmgr logs it after the file is gone), so it is
-    neither message's own."""
     a = _message('AAA4', T0, 'a@example.test', SENDER_A, RCPT_A, removed=False)
     s = T0 + timedelta(seconds=3)
     a_removed = _line('AAA4', s, 'removed')
@@ -150,8 +127,6 @@ def test_a_bounce_in_the_opening_second_without_a_previous_removed_is_a_boundary
 
 
 def test_a_fast_message_after_a_removed_predecessor_keeps_all_its_lines():
-    """Opened, delivered and removed within one second, days after the
-    previous message logged "removed": every line is its own."""
     a = _message('AAA6', T0, 'a@example.test', SENDER_A, RCPT_A)
     s = T0 + timedelta(days=3)
     b = [_line('AAA6', s, 'client'), _line('AAA6', s, 'msgid', msgid='b@example.test'),
@@ -161,9 +136,6 @@ def test_a_fast_message_after_a_removed_predecessor_keeps_all_its_lines():
 
 
 def test_a_line_after_qmgr_removed_is_another_messages():
-    """qmgr logs "removed" once every delivery is done: a line after it is
-    someone else's, even a status line that arrived before the next
-    message's receipt lines."""
     a = [_line('AAA7', T0, 'client'), _line('AAA7', T0, 'msgid', msgid='a@example.test'),
          _line('AAA7', T0 + timedelta(seconds=1), 'deferred', rcpt=RCPT_A),
          _line('AAA7', T0 + timedelta(hours=1), 'removed')]
@@ -174,8 +146,6 @@ def test_a_line_after_qmgr_removed_is_another_messages():
 
 
 def test_a_delivery_after_postsuper_removed_is_still_the_messages():
-    """postsuper -d can remove a message whose delivery is still running;
-    that delivery's result is logged after the "removed"."""
     a = [_line('AAA0', T0, 'client'), _line('AAA0', T0, 'msgid', msgid='a@example.test'),
          _line('AAA0', T0 + timedelta(seconds=1), 'deferred', rcpt=RCPT_A),
          _line('AAA0', T0 + timedelta(seconds=60), 'postsuper'),
@@ -184,8 +154,6 @@ def test_a_delivery_after_postsuper_removed_is_still_the_messages():
 
 
 def test_what_one_message_logs_never_cuts_it():
-    """Two Message-ID headers (cleanup logs both), a slow upload, deferred
-    retries over five days and a hold and release are one message."""
     q = 'AAA8'
     lines = [_line(q, T0, 'client'),
              _line(q, T0 + timedelta(seconds=30), 'msgid', msgid='a@example.test'),
@@ -198,7 +166,6 @@ def test_what_one_message_logs_never_cuts_it():
 
 
 def test_a_server_bounce_without_an_opener_is_its_own_message():
-    """Postfix's own bounce notice gets a queue file through cleanup alone."""
     a = _message('AAA9', T0, 'a@example.test', SENDER_A, RCPT_A, outcome='bounced', removed=False)
     later = T0 + timedelta(minutes=5)
     notice = [_line('AAA9', later, 'msgid', msgid='notice@example.test'),
@@ -213,15 +180,12 @@ def test_a_local_submission_opens_with_pickup():
     assert [_ids_of(o.lines) for o in split_queue_occurrences(a + b)] == [_ids_of(a), _ids_of(b)]
 
 
-# ---------- which occurrence is a message's ----------
-
 def test_the_message_id_says_which_occurrence_is_whose():
     a = _message('AAB2', T0, 'a@example.test', SENDER_A, RCPT_A)
     b = _message('AAB2', T0 + timedelta(days=1), 'b@example.test', SENDER_B, RCPT_B)
     occurrences = split_queue_occurrences(a + b)
     assert occurrence_for(occurrences, 'b@example.test') is occurrences[1]
     assert occurrence_for(occurrences, 'a@example.test', near=T0 + timedelta(days=1)) is occurrences[0]
-    # Another message's occurrence is never a guess, for a write or a view
     assert occurrence_for(occurrences, 'c@example.test') is None
     assert occurrence_for([occurrences[1]], 'c@example.test') is None
     assert occurrence_for([occurrences[1]], 'c@example.test', strict=False) is occurrences[1]
@@ -244,8 +208,6 @@ def test_one_occurrence_without_a_message_id_line_is_the_messages():
                                            _line('AAB4', T0 + timedelta(days=1), 'sent', rcpt=RCPT_B)])
     assert occurrence_for(two, 'a@example.test') is None
 
-
-# ---------- database ----------
 
 def _postgres_available() -> bool:
     try:
@@ -293,7 +255,6 @@ def _msgid(tag):
 
 
 def _store(lines):
-    """Store pure-test lines as PostfixLog rows; returns their new ids in order."""
     from app.database import get_db_context
     from app.models import PostfixLog
     with get_db_context() as db:
@@ -351,8 +312,6 @@ def _two_messages(queue, gap=timedelta(days=2), b_outcome='sent', a_outcome='sen
 
 
 def test_the_second_message_on_a_queue_id_gets_its_own_time_and_lines(env):
-    """The bug as seen on a live server: the second message's first-seen time
-    was the first message's, days early, and it held both messages' lines."""
     queue = _queue()
     m = _two_messages(queue)
     key_a = _correlate(_rspamd(m.msgid_a, T0, SENDER_A, RCPT_A))
@@ -387,8 +346,6 @@ def test_the_details_show_only_the_messages_own_lines(env):
 
 
 def test_a_status_is_never_taken_from_another_message(env):
-    """A deferred message whose stored lines include a later message's bounce
-    (stored by an earlier version) keeps its own status and drops the line."""
     from app.services import correlation_jobs
     from app.database import get_db_context
     from app.models import MessageCorrelation
@@ -409,7 +366,6 @@ def test_a_status_is_never_taken_from_another_message(env):
 
 
 def _page(lines):
-    """Ingest Postfix lines as one page from mailcow, as the scheduler does."""
     from app import scheduler as sched
     sched.seen_postfix.clear()
     entries = [{'time': str(int(l.time.replace(tzinfo=timezone.utc).timestamp())), 'program': l.program,
@@ -418,7 +374,6 @@ def _page(lines):
 
 
 def test_a_late_delivery_of_the_second_message_reaches_it(env):
-    """Two correlations on one queue id used to block every late status."""
     queue = _queue()
     m = _two_messages(queue, gap=timedelta(hours=3), b_outcome='deferred', b_removed=False)
     key_a = _correlate(_rspamd(m.msgid_a, T0, SENDER_A, RCPT_A))
@@ -433,8 +388,6 @@ def test_a_late_delivery_of_the_second_message_reaches_it(env):
 
 
 def test_a_line_after_a_removed_message_is_not_that_messages(env):
-    """A left the queue (qmgr logged "removed"). The id's next message's
-    bounce arrives before its receipt lines: it is not A's."""
     from app.database import get_db_context
     from app.models import MessageCorrelation
 
@@ -457,9 +410,6 @@ def test_a_line_after_a_removed_message_is_not_that_messages(env):
 
 
 def test_a_message_given_another_ones_bounce_gets_its_own_status_back(env):
-    """B's lines arrive before A's delivery attempt: nothing yet shows two
-    messages, and A takes B's bounce. When A's deferral arrives, the lines
-    show two messages, and A is re-derived from its own lines."""
     from app.database import get_db_context
     from app.models import MessageCorrelation
 
@@ -475,7 +425,7 @@ def test_a_message_given_another_ones_bounce_gets_its_own_status_back(env):
 
     _page([_line(queue, T0 + timedelta(seconds=10), 'msgid', msgid=msgid_b),
            _line(queue, T0 + timedelta(seconds=11), 'bounced', rcpt=RCPT_B)])
-    assert _correlation(key).final_status == 'bounced'  # nothing tells the messages apart yet
+    assert _correlation(key).final_status == 'bounced'
 
     _page([_line(queue, T0 + timedelta(seconds=5), 'deferred', rcpt=RCPT_A)])
 
@@ -502,8 +452,6 @@ def test_the_messages_list_counts_each_messages_own_recipients(env):
     assert {to for to, _ in found[key_b]} == {RCPT_B}
 
 
-# ---------- the upgrade repairs what earlier versions stored ----------
-
 def _migration():
     path = next((Path(__file__).resolve().parents[1] / 'alembic' / 'versions').glob('*_queue_id_reuse_repair.py'))
     spec = importlib.util.spec_from_file_location('queue_id_reuse_repair', path)
@@ -519,9 +467,6 @@ def _repair():
 
 
 def _as_stored_before(queue, m, *, b_status, b_sender, b_is_spam=False, dovecot=None):
-    """Both correlations as earlier versions stored them: the second message
-    holds every line of the queue id, its key on all of them, and the first
-    message's first-seen time."""
     from app.database import get_db_context
     from app.models import MessageCorrelation, PostfixLog
     rspamd_a = _rspamd(m.msgid_a, T0, SENDER_A, RCPT_A)
@@ -548,7 +493,6 @@ def test_the_upgrade_gives_each_message_back_its_own_lines_time_and_status(env):
 
     queue = _queue()
     m = _two_messages(queue, a_outcome='spam')
-    # B took A's spam-pipe delivery: its status, its Rspamd spam mark, and A's sender
     key_a, key_b, rspamd_b = _as_stored_before(queue, m, b_status='spam', b_sender=SENDER_A, b_is_spam=True)
 
     assert _repair() >= 2
@@ -566,16 +510,12 @@ def test_the_upgrade_gives_each_message_back_its_own_lines_time_and_status(env):
     a = _correlation(key_a)
     assert (a.first_seen, a.final_status, set(a.postfix_log_ids)) == (T0, 'spam', set(m.a))
 
-    # Nothing is left to repair: a second run writes nothing
     _repair()
     assert _correlation(key_b).last_seen == b.last_seen
     assert _stamps(m.a + m.b) == stamps
 
 
 def test_the_upgrade_keeps_a_dovecot_discard(env):
-    """Issue #65: Dovecot dropped the message by Sieve after Postfix logged
-    sent. The repair re-derives the status from the message's own lines and
-    keeps the discard, as the ingest does."""
     queue = _queue()
     m = _two_messages(queue, a_outcome='bounced')
     _, key_b, _ = _as_stored_before(queue, m, b_status='bounced', b_sender=SENDER_B, dovecot='discarded')
@@ -611,11 +551,7 @@ def test_the_upgrade_leaves_one_message_queue_ids_alone(env):
     assert (row.first_seen, row.final_status, row.postfix_log_ids) == (T0 - timedelta(seconds=1), 'delivered', ids)
 
 
-# ---------- review round 1 ----------
-
 def test_a_delivery_after_deferrals_is_delivered_whatever_order_the_lines_are_stored_in(env):
-    """mailcow returns the log newest first, so the sent line is often stored
-    before the deferral it followed."""
     queue = _queue()
     msgid = _msgid('a')
     _store([_line(queue, T0 + timedelta(hours=1), 'sent', rcpt=RCPT_A),
@@ -627,8 +563,6 @@ def test_a_delivery_after_deferrals_is_delivered_whatever_order_the_lines_are_st
 
 
 def test_lines_that_do_not_yet_tell_two_messages_apart_are_given_to_neither(env):
-    """Both Message-IDs are in one stretch of lines until a line between them
-    arrives: a bounce then is not given to either message."""
     from app.database import get_db_context
     from app.models import MessageCorrelation
 
@@ -652,9 +586,6 @@ def test_lines_that_do_not_yet_tell_two_messages_apart_are_given_to_neither(env)
 
 
 def test_the_recipient_count_reads_the_messages_own_current_lines(env):
-    """A later message on the queue id without a correlation of its own (a
-    server notice) is not counted; a delivery line of this message stored
-    after its status was final is."""
     from app.database import get_db_context
     from app.models import MessageCorrelation
     from app.services.message_recipients import page_deliveries
@@ -675,8 +606,6 @@ def test_the_recipient_count_reads_the_messages_own_current_lines(env):
 
 
 def test_the_upgrade_finds_a_line_stored_after_a_removed_message(env):
-    """The only sign of the next message is its bounce after qmgr's "removed":
-    one opener, one Message-ID, one correlation."""
     from app.database import get_db_context
     from app.models import MessageCorrelation
 
@@ -698,8 +627,6 @@ def test_the_upgrade_finds_a_line_stored_after_a_removed_message(env):
     row = _correlation(key)
     assert (row.final_status, set(row.postfix_log_ids)) == ('deferred', set(own))
 
-
-# ---------- review round 2 ----------
 
 def test_the_upgrade_keeps_a_delivery_logged_after_postsuper_removed(env):
     from app.database import get_db_context
@@ -725,9 +652,6 @@ def test_the_upgrade_keeps_a_delivery_logged_after_postsuper_removed(env):
 
 
 def test_two_waiting_messages_do_not_both_take_lines_they_share(env, monkeypatch):
-    """Two correlations wait for their queue id; the stored lines hold both
-    Message-IDs and nothing yet between them. One completion run must not
-    give the same lines to both."""
     from app.database import get_db_context
     from app.models import MessageCorrelation
     from app.services import correlation_jobs
@@ -764,11 +688,7 @@ def test_the_postfix_list_describes_the_message_the_filter_found(env):
     assert [row['sender'] for row in latest] == [SENDER_B]
 
 
-# ---------- review round 3 ----------
-
 def test_creation_and_completion_never_link_lines_at_the_same_time(monkeypatch):
-    """Each job checks the other correlations of a queue id before it links
-    lines; two jobs doing it at once could both link the same lines."""
     from app import scheduler
     from app.services import correlation_jobs
 

@@ -1,8 +1,3 @@
-"""The DANE port 25 probe against a loopback SMTP server, and the limits that
-keep a domain's MX hosts from holding it: one deadline for the whole probe,
-however the server paces its replies; a cap on lines per reply; its own
-threads, never the default executor that ingestion and name lookups share;
-and a cap on how many MX hosts one check probes. Nothing leaves 127.0.0.1."""
 import asyncio
 import datetime
 import socket
@@ -27,17 +22,12 @@ from app.routers import domains
 from app.services import dane
 from app.services.dns_resolver import DnssecAnswer
 
-STEP = 1.0      # per-step timeout in these tests
-BUDGET = 1.5    # whole-probe budget in these tests
-SLACK = 1.0     # scheduling allowance on a busy CI runner
+STEP = 1.0
+BUDGET = 1.5
+SLACK = 1.0
 
-
-# --- a loopback SMTP server ---------------------------------------------------
 
 class FakeMX:
-    """Threaded SMTP server on 127.0.0.1. `script(conn, stop)` handles each
-    connection; `stop` is set when the test ends so no script runs on."""
-
     def __init__(self, script):
         self.script = script
         self.stop = threading.Event()
@@ -130,14 +120,12 @@ def _certificate(tmp_path):
 
 def smtp_server(tls_context, greeting=b'220 mail.example.test ready\r\n', starttls_delay=0.0,
                 stall_handshake=False):
-    """A server that greets, answers EHLO with a multi-line reply offering
-    STARTTLS, and then completes (or stalls) the TLS handshake."""
     def script(conn, stop):
         conn.sendall(greeting)
-        read_line(conn)                                   # EHLO
+        read_line(conn)
         conn.sendall(b'250-mail.example.test\r\n250-PIPELINING\r\n'
                      b'250-SIZE 10240000\r\n250-8BITMIME\r\n250 STARTTLS\r\n')
-        read_line(conn)                                   # STARTTLS
+        read_line(conn)
         stop.wait(starttls_delay)
         conn.sendall(b'220 2.0.0 Ready to start TLS\r\n')
         if stall_handshake:
@@ -150,7 +138,6 @@ def smtp_server(tls_context, greeting=b'220 mail.example.test ready\r\n', startt
 
 
 def run_probe_in_thread(host='127.0.0.1'):
-    """Run the blocking probe on a plain thread; (thread, outcome, elapsed)."""
     outcome = {}
 
     def target():
@@ -166,8 +153,6 @@ def run_probe_in_thread(host='127.0.0.1'):
     thread.join(BUDGET + SLACK)
     return thread, outcome
 
-
-# --- the probe ----------------------------------------------------------------
 
 def test_normal_server_gives_its_certificate(fake_mx, tmp_path):
     context, der = _certificate(tmp_path)
@@ -190,7 +175,6 @@ def test_greeting_dripped_forever_ends_at_the_budget(fake_mx):
 
 
 def test_bytes_dripped_without_a_line_end_end_at_the_budget(fake_mx):
-    # One readline would keep reading as long as bytes keep coming
     def drip_bytes(conn, stop):
         conn.sendall(b'220 ')
         while not stop.wait(0.05):
@@ -203,7 +187,6 @@ def test_bytes_dripped_without_a_line_end_end_at_the_budget(fake_mx):
 
 
 def test_reply_with_too_many_lines_is_refused(fake_mx, tmp_path):
-    # Otherwise a normal server: without the cap the probe would succeed
     context, _ = _certificate(tmp_path)
     greeting = b'220-hello\r\n' * 100 + b'220 ready\r\n'
     fake_mx(smtp_server(context, greeting=greeting))
@@ -214,8 +197,6 @@ def test_reply_with_too_many_lines_is_refused(fake_mx, tmp_path):
 
 
 def test_handshake_gets_only_the_time_left(fake_mx, monkeypatch, tmp_path):
-    # Each step stays under the per-step timeout; the handshake then stalls.
-    # The probe must end at the budget, not one more full step later.
     monkeypatch.setattr(dane, 'SMTP_TIMEOUT', 2.0)
     budget = 2.5
     monkeypatch.setattr(dane, 'SMTP_TOTAL_SECONDS', budget)
@@ -241,8 +222,6 @@ def test_async_probe_returns_and_frees_its_thread(fake_mx):
         except Exception as e:
             outcome['error'] = e
 
-    # On its own thread, so a probe that never ends fails the test instead of
-    # hanging it; the server stops when the test ends
     caller = threading.Thread(target=check, daemon=True)
     caller.start()
     caller.join(BUDGET + SLACK)
@@ -291,7 +270,6 @@ def test_probes_beyond_the_thread_limit_are_refused_and_not_cached(monkeypatch):
             await dane.fetch_smtp_certificate('late.example.test')
         release.set()
         assert await asyncio.gather(*held) == [b'cert'] * dane.MAX_PROBES
-        # the refusal said nothing about the host, so it was not cached
         return await dane.fetch_smtp_certificate('late.example.test')
 
     try:
@@ -311,8 +289,6 @@ def test_addresses_tried_are_capped_one_per_family_first():
     assert dane._pick_addresses([v6a, v6a, v6b, v4]) == [v6a, v4]
     assert dane._pick_addresses([v4, v4]) == [v4]
 
-
-# --- how many MX hosts one check probes -------------------------------------------
 
 def _mx_zone(count, tlsa_hosts=None):
     hosts = [f'mx{i:02d}.example.test' for i in range(1, count + 1)]
@@ -343,7 +319,6 @@ def _check(monkeypatch, records):
 
 def test_only_the_most_preferred_mx_hosts_are_probed(monkeypatch):
     hosts, records = _mx_zone(domains.MAX_DANE_MX_HOSTS + 2)
-    # the last host by name is the most preferred, so it must be checked
     records[('example.test', 'MX')].records[-1].preference = 1
     result, probes = _check(monkeypatch, records)
     assert len(probes) == domains.MAX_DANE_MX_HOSTS

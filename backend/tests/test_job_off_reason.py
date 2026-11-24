@@ -1,5 +1,3 @@
-"""A background job that cannot run says why, and which Settings section changes it,
-so the Status page shows the reason instead of a Run button that is simply missing."""
 import starlette.staticfiles as sf
 _orig_init = sf.StaticFiles.__init__
 sf.StaticFiles.__init__ = lambda s, *a, **k: _orig_init(s, *a, **{**k, 'check_dir': False})
@@ -40,7 +38,6 @@ def test_a_job_that_can_run_has_no_reason(monkeypatch):
 
 
 def test_an_outbound_job_names_the_switch_as_settings_shows_it(monkeypatch):
-    # The reason names the switch to turn on, so it must be the name on the screen
     import re
     from pathlib import Path
     source = (Path(__file__).resolve().parents[2] / 'frontend' / 'settings.js').read_text(encoding='utf-8')

@@ -1,4 +1,3 @@
-"""Expiry uses a worker and a bulk update without changing status semantics."""
 import asyncio
 import threading
 import uuid
@@ -128,11 +127,9 @@ def test_expiry_boundaries_and_bulk_query(monkeypatch, extra_rows):
                 active, synced, stamp = expected[row.email]
                 assert (row.active, row.synced_to_rspamd, row.expires_at) == (active, synced, stamp)
                 assert row.notes == "Preserve this text"
-        # The row lock first (services/suppression_rows_lock), then one bulk update
         assert len(statements) == 2
         assert "pg_advisory_xact_lock" in statements[0]
         assert statements[1].lstrip().upper().startswith("UPDATE ")
-        # Repeated expiry is harmless and still succeeds.
         asyncio.run(scheduler.expire_suppressions_job())
         assert scheduler.job_status["expire_suppressions"]["status"] == "success"
     finally:

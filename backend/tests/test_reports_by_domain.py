@@ -1,8 +1,3 @@
-"""Manage Reports counts the reports of each domain and deletes all of one domain's reports.
-
-A domain removed from mailcow keeps its stored DMARC and TLS reports, so it stays
-on the DMARC & TLS page (#412). Deleting them one report at a time is not practical.
-"""
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -58,7 +53,6 @@ def db_client():
 
 
 def seed(isolated):
-    """example.com: 2 DMARC (one stored with different case) + 1 TLS; example.net: 1 DMARC; example.org: 2 TLS."""
     with Session(isolated) as db:
         def dmarc(domain, index, end_date, records):
             report = DMARCReport(report_id=f"dmarc-{index}", domain=domain, org_name="Test",
@@ -105,7 +99,6 @@ def test_summary_counts_each_domain_once(db_client, deletion):
     assert (rows["example.com"]["dmarc_reports"], rows["example.com"]["tls_reports"]) == (2, 1)
     assert (rows["example.net"]["dmarc_reports"], rows["example.net"]["tls_reports"]) == (1, 0)
     assert (rows["example.org"]["dmarc_reports"], rows["example.org"]["tls_reports"]) == (0, 2)
-    # The latest report period end, whichever report type it came from
     assert rows["example.net"]["last_report"] == 1_767_398_400
     assert rows["example.org"]["last_report"] == int(datetime(2026, 1, 5, tzinfo=timezone.utc).timestamp())
     assert rows["example.com"]["last_report"] == int(datetime(2026, 1, 3, tzinfo=timezone.utc).timestamp())
@@ -125,17 +118,14 @@ def test_delete_all_removes_only_that_domain(db_client, deletion, caplog):
     assert response.status_code == 200
     assert response.json() == {"status": "success", "domain": "example.com", "dmarc_reports": 2,
                                "dmarc_records": 3, "tls_reports": 1, "tls_policies": 2}
-    # The deletion is on record in the log
     assert ("Deleted all reports of example.com: 2 DMARC reports (3 records), 1 TLS reports (2 policies)"
             in [r.message for r in caplog.records if r.name == "app.routers.dmarc"])
     assert counts(isolated) == {"dmarc": ["example.net"], "records": 3,
                                 "tls": ["example.org", "example.org"], "policies": 2}
-    # Other processes are told their cached DMARC figures are stale
     with Session(isolated) as db:
         assert db.query(SystemSetting).filter(SystemSetting.key == "dmarc_last_update").count() == 1
     assert [row["domain"] for row in client.get("/dmarc/reports/domains").json()["domains"]] == [
         "example.net", "example.org"]
-    # A TLS-only domain goes too
     assert client.delete("/dmarc/reports/domains/example.org").json()["tls_reports"] == 2
     assert counts(isolated)["tls"] == []
 
@@ -158,9 +148,6 @@ def test_unknown_domain_is_not_found(db_client, deletion):
     assert counts(isolated) == before
 
 
-# The checks below go through the full app and need no database: each is
-# answered before the handler opens a query.
-
 @pytest.fixture
 def no_auth(monkeypatch):
     monkeypatch.setattr(settings._inner, "auth_enabled", False)
@@ -171,7 +158,6 @@ def no_auth(monkeypatch):
 def test_route_is_not_taken_by_the_single_report_delete(deletion, no_auth):
     from app.main import app
     response = TestClient(app, base_url=APP).delete("/api/dmarc/reports/domains/example.com")
-    # The single-report route would answer 422 (the domain is not a report id)
     assert response.status_code == 403
     assert "Report deletion is disabled" in response.json()["detail"]
 
@@ -191,8 +177,6 @@ def test_cross_site_delete_is_rejected(deletion, no_auth):
     assert response.status_code == 403
     assert "another site" in response.json()["detail"]
 
-
-# Search on the All reports list: the domain or the reporter, literally and in any case
 
 def seed_search(isolated):
     with Session(isolated) as db:
@@ -258,7 +242,6 @@ def test_an_empty_or_absent_search_lists_everything(db_client):
     seed_search(isolated)
     assert found(client, "   ")[0]["total"] == 4
     assert client.get("/dmarc/reports/all?page=1").json()["total"] == 4
-    # The legacy unpaginated response is unchanged without a search and filtered with one
     assert client.get("/dmarc/reports/all").json()["total"] == 4
     assert client.get("/dmarc/reports/all", params={"search": "microsoft"}).json()["total"] == 1
 
@@ -270,17 +253,14 @@ def test_a_very_long_search_is_capped_not_refused(db_client):
     assert (payload["total"], rows) == (0, [])
 
 
-# Sorting All reports on the server: across both report types, before paging
-
 def seed_sort(isolated):
-    """Mixed DMARC and TLS rows with ties on every key, and a TLS report without a reporter."""
     t1, t2, t3 = datetime(2026, 1, 1, 1), datetime(2026, 1, 1, 2), datetime(2026, 1, 1, 3)
-    dmarc = [  # domain, reporter, period start, imported, records
+    dmarc = [
         ("b.example.com", "Zeta", 300, t1, 2),
         ("A.example.net", "alpha", 100, t2, 0),
         ("c.example.org", "Mid", 200, t1, 5),
     ]
-    tls = [  # domain, reporter, period start, imported, policies
+    tls = [
         ("a.example.com", "beta", 150, t3, 1),
         ("b.example.com", "Zeta", 300, t1, 2),
         ("d.example.com", None, 50, t2, 0),
@@ -310,7 +290,6 @@ def seed_sort(isolated):
 
 
 def python_order(rows, sort_by, sort_dir):
-    """The documented order: the key (empty values last), then newest import, type, highest id."""
     rows = sorted(rows, key=lambda r: -r["id"])
     rows = sorted(rows, key=lambda r: r["type"])
     rows = sorted(rows, key=lambda r: r["created_at"], reverse=True)
@@ -339,7 +318,6 @@ def test_every_column_sorts_across_pages_and_types(db_client, sort_by, sort_dir)
     first, rows = all_pages(client, sort_by=sort_by, sort_dir=sort_dir)
     assert (first["sort_by"], first["sort_dir"], first["total"]) == (sort_by, sort_dir, 6)
     assert rows == [(r["type"], r["id"]) for r in python_order(expected, sort_by, sort_dir)]
-    # The same order on every request, at any page size
     assert all_pages(client, limit=4, sort_by=sort_by, sort_dir=sort_dir)[1] == rows
     assert all_pages(client, limit=6, sort_by=sort_by, sort_dir=sort_dir)[1] == rows
 
@@ -354,7 +332,6 @@ def test_sort_works_with_the_search(db_client):
     client, isolated = db_client
     expected = seed_sort(isolated)
     first, rows = all_pages(client, search="example.com", sort_by="records", sort_dir="asc")
-    # The seeded domains that contain the search
     matching = [r for r in expected if r["domain"] in ("a.example.com", "b.example.com", "d.example.com")]
     assert first["total"] == 4
     assert rows == [(r["type"], r["id"]) for r in python_order(matching, "records", "asc")]

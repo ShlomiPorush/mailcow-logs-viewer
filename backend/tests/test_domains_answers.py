@@ -1,10 +1,3 @@
-"""Every answer the Domains calls can give, so the contract check (conftest.py,
-contract.py) holds each one to /openapi.json: a DNS check of a domain in every
-branch of every check (record found, missing, invalid, lookup failed, timed
-out), the domain list with stored checks, checking every domain, mailcow
-failing (502), the database failing (500) and a domain name the call refuses
-(400). DNS, the MTA-STS policy fetch, the port 25 probe and mailcow are faked;
-nothing leaves the test."""
 import datetime
 import hashlib
 import time
@@ -41,8 +34,6 @@ ZONE = f'{MARK}.example'
 SERVER_IP = '192.0.2.10'
 KEY = 'MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAx'
 
-
-# ---------------------------------------------------------------- fake DNS records
 
 class TXT:
     def __init__(self, text):
@@ -93,10 +84,6 @@ def tlsa(cert_der=CERT, usage=3, selector=1, mtype=1):
     return SimpleNamespace(usage=usage, selector=selector, mtype=mtype, cert=hashlib.sha256(data).digest())
 
 
-# ---------------------------------------------------------------- every branch of every check
-# Each variant is (records, the start of the message it gives). Domain i takes
-# variant i of each check (cycled), so one call reaches one branch of each.
-
 def spf_variants(d):
     return [
         ({(d, 'TXT'): [TXT(f'v=spf1 a mx:mx-spf.{d} include:_spf.{d} -all'), TXT('site-verification=x')],
@@ -125,7 +112,6 @@ MAILCOW_DKIM = {'dkim_selector': 'dkim', 'dkim_txt': f'v=DKIM1;k=rsa;t=s;s=email
 
 
 def dkim_variants(d):
-    """(mailcow's answer, records, message)"""
     at = f'dkim._domainkey.{d}'
     return [
         (MAILCOW_DKIM, {(at, 'TXT'): [TXT(f'v=DKIM1; k=rsa; t=s; s=email; p={KEY}')]}, 'DKIM configured correctly'),
@@ -170,7 +156,6 @@ def dnssec_variants(d):
 
 
 def tlsa_variants(d):
-    """(DNSSEC records, certificates by host, message)"""
     mx1, mx2, mx3 = f'mx1.{d}', f'mx2.{d}', f'mx3.{d}'
 
     def at(host):
@@ -201,7 +186,6 @@ def tlsa_variants(d):
 
 
 def mta_sts_variants(d):
-    """(records, the policy file or why it cannot be fetched, message)"""
     at = f'_mta-sts.{d}'
     policy = f'version: STSv1\nmode: enforce\nmx: *.{d}\nmax_age: 604800\n'
     elsewhere = [mx('mx.elsewhere.example')]
@@ -243,7 +227,6 @@ def scenario_domain(n):
 
 
 def build_world(world, n):
-    """Put domain n's records in the fake DNS, mailcow and probes; return the messages each check gives."""
     d = scenario_domain(n)
 
     def pick(variants):
@@ -268,8 +251,6 @@ def build_world(world, n):
             'tlsa': tlsa_message, 'mta_sts': mta_sts_message, 'tls_rpt': tls_rpt_message}
 
 
-# ---------------------------------------------------------------- fixtures
-
 class _Broken:
     def __getattr__(self, name):
         raise RuntimeError('database gone')
@@ -290,11 +271,8 @@ def _postgres_available() -> bool:
 
 @pytest.fixture
 def world(monkeypatch):
-    """Fake DNS, MTA-STS policies, port 25 certificates and mailcow. A name the world
-    does not have answers NXDOMAIN; nothing is looked up or fetched for real."""
     for key in ('auth_enabled', 'basic_auth_enabled', 'oauth2_enabled'):
         monkeypatch.setattr(settings._inner, key, False)
-    # No change alert is sent; the SPF sources are the server's IP and the DMARC history
     monkeypatch.setattr(settings._inner, 'dns_change_alerts_enabled', False)
     monkeypatch.setattr(settings._inner, 'domain_spf_source_server_ip', True)
     monkeypatch.setattr(settings._inner, 'domain_spf_source_transports', False)
@@ -346,7 +324,6 @@ def world(monkeypatch):
     monkeypatch.setattr(domains, '_fetch_mta_sts_policy', fetch_policy)
     monkeypatch.setattr(domains, '_fetch_mx_certificate', fetch_certificate)
     monkeypatch.setattr(mailcow_api, '_make_request', mailcow)
-    # The alias domains come from memory, not the map stored for the app
     monkeypatch.setattr(alias_domains, '_cache', {})
     monkeypatch.setattr(alias_domains, '_cache_loaded_at', time.monotonic())
     return state
@@ -359,7 +336,6 @@ def client(world):
 
 @pytest.fixture
 def stored(world):
-    """The checks these tests store, and the time of the last full check, put back after."""
     if not _postgres_available():
         pytest.skip('PostgreSQL not available')
     from app.models import DomainDNSCheck, SystemSetting
@@ -392,8 +368,6 @@ def mailcow_domain(name, active=1, **values):
     return domain
 
 
-# ---------------------------------------------------------------- POST /api/domains/{domain}/check-dns
-
 @pytest.mark.parametrize('n', range(SCENARIOS))
 def test_check_one_domain_in_every_branch(client, world, stored, n):
     expected = build_world(world, n)
@@ -409,7 +383,6 @@ def test_check_one_domain_in_every_branch(client, world, stored, n):
 
 
 def test_check_one_domain_when_a_check_breaks(client, world, stored, monkeypatch):
-    # Each check handles its own failures; one that breaks anyway fails the set
     async def broken(domain, *args):
         raise RuntimeError('a check broke')
     monkeypatch.setattr(domains, 'check_spf_record', broken)
@@ -430,21 +403,17 @@ def test_check_one_domain_when_the_database_fails(client, monkeypatch):
     assert response.status_code == 500
 
 
-# ---------------------------------------------------------------- GET /api/domains/all
-
 def test_domain_list_with_stored_checks(client, world, stored, monkeypatch):
     from app.models import DomainDNSCheck
     checked, alias, alias_unchecked = scenario_domain(0), f'alias.{ZONE}', f'alias2.{ZONE}'
     build_world(world, 0)
     assert client.post(f'/api/domains/{checked}/check-dns').status_code == 200
     assert client.post(f'/api/domains/{alias}/check-dns').status_code == 200
-    # A row stored by an older version: checks added since are null, an old error text is cut
     with database.get_db_context() as db:
         db.add(DomainDNSCheck(
             domain_name=f'old.{ZONE}', checked_at=datetime.datetime.utcnow(),
             spf_check={'status': 'error', 'message': 'Failed to check SPF: timed out', 'record': None,
                        'has_strict_all': False, 'includes_mx': False, 'includes': []},
-            # Stored before 2.3.0: no settings
             dmarc_check={'status': 'success', 'message': 'DMARC configured with strong policy',
                          'record': 'v=DMARC1; p=reject', 'policy': 'reject', 'is_strong': True, 'warnings': []}))
         db.commit()
@@ -452,7 +421,7 @@ def test_domain_list_with_stored_checks(client, world, stored, monkeypatch):
     world['domains'] = [
         mailcow_domain(checked),
         mailcow_domain(f'old.{ZONE}', active=0, created='not a date', backupmx=1),
-        {'domain_name': f'new.{ZONE}', 'active': 1},  # what mailcow leaves out reads as 0
+        {'domain_name': f'new.{ZONE}', 'active': 1},
         {'domain_name': ''},
     ]
     response = client.get('/api/domains/all')
@@ -488,8 +457,6 @@ def test_domain_list_when_the_database_fails(client, world, monkeypatch):
     assert client.get('/api/domains/all').status_code == 500
 
 
-# ---------------------------------------------------------------- POST /api/domains/check-all-dns
-
 def test_check_every_domain(client, world, stored, monkeypatch):
     first, inactive, alias = scenario_domain(0), scenario_domain(1), f'alias.{ZONE}'
     build_world(world, 0)
@@ -511,8 +478,6 @@ def test_check_every_domain_without_domains(client, world):
 
 
 def test_check_every_domain_when_results_cannot_be_stored(client, world, monkeypatch):
-    """With the database gone each result fails to store, and the answer lists them.
-    The alias domains are read from memory, so that read does not fail."""
     world['domains'] = [mailcow_domain(scenario_domain(0)), mailcow_domain(scenario_domain(1))]
     monkeypatch.setattr(domains, 'get_db_context', _broken_context)
     response = client.post('/api/domains/check-all-dns')
@@ -527,6 +492,5 @@ def test_check_every_domain_when_mailcow_fails(client, world):
 
 
 def test_check_every_domain_when_mailcow_sends_a_domain_that_is_not_an_object(client, world):
-    """A database that fails cannot stop this call (see above); a domain list it cannot read can."""
     world['domains'] = [mailcow_domain(scenario_domain(0)), 'not a domain']
     assert client.post('/api/domains/check-all-dns').status_code == 500

@@ -1,10 +1,3 @@
-"""
-Some reporters send aggregate reports whose rows are empty placeholders: no
-source IP, a count of 0 and no results. Storing such a row violated the NOT
-NULL constraint on dmarc_records.source_ip and the whole report failed on
-every sync (issue #324). Rows without a usable source IP are now skipped and
-the report itself is kept.
-"""
 import gzip
 
 import pytest

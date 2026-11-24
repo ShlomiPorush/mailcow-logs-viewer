@@ -1,4 +1,3 @@
-"""Retention work must keep its session inside a worker and leave the loop free."""
 import asyncio
 import threading
 from contextlib import contextmanager

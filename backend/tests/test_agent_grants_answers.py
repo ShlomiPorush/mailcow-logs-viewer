@@ -1,13 +1,3 @@
-"""Every answer the consent page and Settings > Agents calls can give, so the contract
-check (conftest.py, contract.py) holds each one to /openapi.json: an open request and
-its answers (a redirect back to the agent, or done for an agent that connects with a
-code), the agents with their activity, changing and disconnecting them, a database
-that fails (500), and the requests the calls refuse (400, 404, 409, 422).
-
-The routes use the database only through get_db. Here it is a session inside a
-transaction that is rolled back after each test, so disconnecting every agent or
-saving a code changes nothing anyone else sees. The browser sessions and open
-requests of this test live in stores of their own."""
 import secrets
 import uuid
 from datetime import timedelta
@@ -52,7 +42,6 @@ def _postgres_available() -> bool:
 
 @pytest.fixture
 def db(monkeypatch):
-    """Agent access live with Basic Auth, and get_db as a session whose work is rolled back."""
     if not _postgres_available():
         pytest.skip('PostgreSQL not available')
     from app.models import SystemSetting
@@ -72,7 +61,6 @@ def db(monkeypatch):
     connection = database.engine.connect()
     outer = connection.begin()
     db = Session(bind=connection, join_transaction_mode='create_savepoint')
-    # The sign-in settings as stored: nothing is disconnected for a change of them
     fingerprint = store.sign_in_fingerprint()
     monkeypatch.setattr(store, '_known_fingerprint', fingerprint)
     row = db.query(SystemSetting).filter(SystemSetting.key == store._FINGERPRINT_KEY).first()
@@ -97,7 +85,6 @@ def db(monkeypatch):
 
 @pytest.fixture
 def browser(db):
-    """A signed-in browser: its session cookie, and its session's key."""
     signed = session_module.create_session({'username': 'admin', 'auth_method': 'basic'},
                                            generation=session_module.auth_generation(), principal={'kind': 'builtin'})
     client = TestClient(app, raise_server_exceptions=False)
@@ -143,8 +130,6 @@ def _device_request(db, user_code):
     db.commit()
     return row
 
-
-# ---------------------------------------------------------------- consent
 
 def test_open_request(browser):
     client, key = browser
@@ -195,8 +180,6 @@ def test_consent_errors(browser):
     app.dependency_overrides[get_db] = _broken_session
     assert client.post(f'/api/agents/consent/{entry.id}', json={'allow': True, 'views': ['security']}).status_code == 500
 
-
-# ---------------------------------------------------------------- Settings > Agents
 
 def test_agents(browser, db):
     client, _key = browser

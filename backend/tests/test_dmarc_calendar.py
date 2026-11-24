@@ -1,7 +1,3 @@
-"""The DMARC calendar of a domain: days of the app's zone (the clocks changing
-too), whole days at its ends, each day the same as that day's own view, a day
-without reports absent and a day where all failed present, one query whatever
-the number of reports, and a year of reports answered quickly."""
 import time
 import uuid
 from datetime import datetime, timezone
@@ -18,7 +14,6 @@ from app.config import settings
 MARK = uuid.uuid4().hex[:8]
 DOMAIN = f'cal-{MARK}.example'
 BERLIN = ZoneInfo('Europe/Berlin')
-# Today, for the calendar: Wednesday 28 October 2026 in Berlin (the clocks went back on the 25th)
 NOW = datetime(2026, 10, 28, 12, 0, tzinfo=BERLIN)
 
 
@@ -62,7 +57,6 @@ def _client():
 
 
 def _report(at_utc, records, domain=DOMAIN):
-    """A report that began at at_utc with records [(count, spf, dkim)]."""
     from app.database import get_db_context
     from app.models import DMARCRecord, DMARCReport
     begin = int(at_utc.replace(tzinfo=timezone.utc).timestamp())
@@ -80,10 +74,9 @@ def _days(answer):
 
 
 def test_days_are_the_app_zones_whole_days_and_each_equals_its_own_view(db_ready):
-    # 22:30 UTC on 24 October is 00:30 on the 25th in Berlin (summer time), 23:30 UTC on the 25th is 00:30 on the 26th (winter time)
     _report(datetime(2026, 10, 24, 22, 30), [(10, 'pass', 'fail'), (5, 'fail', 'fail')])
     _report(datetime(2026, 10, 25, 23, 30), [(4, 'fail', 'pass')])
-    _report(datetime(2026, 10, 24, 21, 30), [(3, 'fail', 'fail')])   # 23:30 on the 24th in Berlin: all failed
+    _report(datetime(2026, 10, 24, 21, 30), [(3, 'fail', 'fail')])
     c = _client()
     answer = c.get(f'/api/dmarc/domains/{DOMAIN}/calendar').json()
     days = _days(answer)
@@ -97,9 +90,8 @@ def test_days_are_the_app_zones_whole_days_and_each_equals_its_own_view(db_ready
 
 def test_the_first_day_is_whole_and_the_day_before_it_is_out(db_ready):
     c = _client()
-    # The first day of a 3-day calendar is Monday 26 October: from 00:00 Berlin (23:00 UTC on the 25th)
-    _report(datetime(2026, 10, 25, 23, 5), [(7, 'pass', 'pass')])    # 00:05 on the 26th: in
-    _report(datetime(2026, 10, 25, 22, 55), [(9, 'pass', 'pass')])   # 23:55 on the 25th: out
+    _report(datetime(2026, 10, 25, 23, 5), [(7, 'pass', 'pass')])
+    _report(datetime(2026, 10, 25, 22, 55), [(9, 'pass', 'pass')])
     answer = c.get(f'/api/dmarc/domains/{DOMAIN}/calendar', params={'days': 3}).json()
     assert answer['from'] == '2026-10-26' and _days(answer) == {'2026-10-26': (7, 7, 0)}
 
@@ -128,7 +120,6 @@ def test_bad_ranges_are_refused(db_ready):
 
 
 def test_a_year_of_reports_is_answered_within_a_second(db_ready):
-    """20,000 reports with 10 records each, over a year."""
     from sqlalchemy import text
     from app.database import engine
     start = int(datetime(2025, 10, 29, tzinfo=timezone.utc).timestamp())
@@ -143,7 +134,7 @@ def test_a_year_of_reports_is_answered_within_a_second(db_ready):
             FROM dmarc_reports r, generate_series(1, 10) AS k WHERE r.domain = :domain"""), {'domain': DOMAIN})
         conn.execute(text('ANALYZE dmarc_reports; ANALYZE dmarc_records'))
     c = _client()
-    c.get(f'/api/dmarc/domains/{DOMAIN}/calendar', params={'days': 365})   # a warm cache, as on a page in use
+    c.get(f'/api/dmarc/domains/{DOMAIN}/calendar', params={'days': 365})
     began = time.monotonic()
     answer = c.get(f'/api/dmarc/domains/{DOMAIN}/calendar', params={'days': 365}).json()
     took = time.monotonic() - began

@@ -1,6 +1,3 @@
-"""An alert opens on its history: the mailbox's sent mail per 15 minutes
-around a volume spike (or the username's failed logins around a burst), and
-what happened around it."""
 import uuid
 from datetime import datetime, timedelta
 
@@ -49,14 +46,11 @@ def env(monkeypatch):
             db.commit()
     cleanup()
     with get_db_context() as db:
-        # Sent after logging in (counted), and mail from outside that only
-        # claims the mailbox as its sender (not counted, as in the alert)
         own = RspamdLog(time=now, sender_smtp=SENDER, has_auth=True, user=SENDER, direction='outbound')
         forged = RspamdLog(time=now, sender_smtp=SENDER, has_auth=False, user='unknown', ip='203.0.113.9',
                            direction='outbound')
         db.add_all([own, forged])
         db.flush()
-        # Two messages three days before, then 30 in the alert's 15 minutes to two domains
         for i in range(2):
             when = now - timedelta(days=3, minutes=i)
             db.add(MessageCorrelation(correlation_key=uuid.uuid4().hex, sender=SENDER, recipient='friend@known.example', direction='outbound',
@@ -75,17 +69,14 @@ def env(monkeypatch):
         for i in range(12):
             db.add(NetfilterLog(time=now - timedelta(minutes=5, seconds=i), priority=MARKER, ip=f'192.0.2.{i % 3 + 1}', username=USER,
                                 rule_id=3, country_name='Testland', asn_org='Test Net', message='failed'))
-        # Failed logins for another username from nine addresses
         for i in range(18):
             db.add(NetfilterLog(time=now - timedelta(minutes=5, seconds=i), priority=MARKER, ip=f'198.51.100.{i % 9 + 1}', username=WIDE,
                                 rule_id=3, country_name='Testland', asn_org='Test Net', message='failed'))
         spike = SecurityAlert(alert_type='volume_spike', severity='critical', subject=SENDER, title='spike', metric_value=30, baseline_value=0.01, created_at=now)
         burst = SecurityAlert(alert_type='auth_failure_burst', severity='warning', subject=USER, title='burst', metric_value=12, baseline_value=10, created_at=now)
-        # Abuse protection disabled SMTP for the same mailbox, counting in 60 minutes
         db.add(SMTPAbuseAction(email=SENDER, message_count=30, threshold=25, window_minutes=60, action='blocked',
                                automatic=True, operator='system', created_at=now - timedelta(seconds=1)))
         block = SecurityAlert(alert_type='smtp_abuse_block', severity='critical', subject=SENDER, title='block', metric_value=30, baseline_value=25, created_at=now)
-        # An older block whose action is no longer kept
         orphan = SecurityAlert(alert_type='smtp_abuse_block', severity='critical', subject=SENDER, title='old block', metric_value=30, baseline_value=25,
                                created_at=now - timedelta(days=2))
         wide = SecurityAlert(alert_type='auth_failure_burst', severity='warning', subject=WIDE, title='wide', metric_value=18, baseline_value=10, created_at=now)
@@ -107,7 +98,6 @@ def test_a_spike_opens_on_the_mailboxs_sent_mail(env):
     assert data['bucket_minutes'] == 15 and data['baseline_days'] == 7
     counts = [b['count'] for b in data['buckets']]
     assert sum(counts) == 32
-    # Seven days before, two hours after, in quarters of an hour
     assert 7 * 24 * 4 <= len(counts) <= 7 * 24 * 4 + 2 * 4 + 4
     around = data['around']
     assert around['total'] == 30
@@ -132,7 +122,6 @@ def test_a_burst_counts_every_address_not_only_the_top_ones(env):
 
 
 def test_an_smtp_block_opens_on_the_mailboxs_sent_mail(env):
-    # The block counted the mailbox's sent mail in the abuse window, not failed logins
     data = _client().get(f'/api/security-alerts/{env[2]}/activity').json()
     assert data['window_minutes'] == 60
     assert sum(b['count'] for b in data['buckets']) == 32
@@ -140,7 +129,6 @@ def test_an_smtp_block_opens_on_the_mailboxs_sent_mail(env):
     assert around['total'] == 30
     assert around['recipient_domains'][0] == {'name': 'a.example', 'count': 20}
     assert around['subjects'] == [{'name': 'Win a prize', 'count': 30}]
-    # To the microsecond, so Open in Messages asks for exactly this span
     assert all(len(around[key].rstrip('Z').split('.')[-1]) == 6 for key in ('from', 'to'))
 
 
@@ -153,19 +141,15 @@ def test_an_smtp_block_keeps_its_own_window_after_the_setting_changes(env, monke
     from app.database import get_db_context
     from app.models import SecurityAlert
     from app.services import smtp_abuse_service
-    # Abuse protection blocks the mailbox while it counts in 60 minutes
     monkeypatch.setattr(settings._inner, 'smtp_abuse_threshold', 25)
     smtp_abuse_service.record_action(SENDER, 30, 'blocked', True, 'system')
     smtp_abuse_service.record_security_alert(SENDER, 30, 0, True)
     with get_db_context() as db:
         alert_id = db.query(SecurityAlert.id).filter(SecurityAlert.subject == SENDER, SecurityAlert.alert_type == 'smtp_abuse_block') \
             .order_by(SecurityAlert.id.desc()).first()[0]
-    # Later the window is set to 15 minutes, and the alert is opened again
     monkeypatch.setattr(settings._inner, 'smtp_abuse_window_minutes', 15)
     data = _client().get(f'/api/security-alerts/{alert_id}/activity').json()
-    # The block counted in 60 minutes; today's 15 does not relabel it
     assert data['window_minutes'] == 60
-    # Its 60 minutes before it, to an hour after
     assert _minutes_around(data['around']) == 120
     assert data['around']['total'] == 30
 
@@ -173,9 +157,7 @@ def test_an_smtp_block_keeps_its_own_window_after_the_setting_changes(env, monke
 def test_an_smtp_block_without_its_action_has_an_unknown_window(env, monkeypatch):
     monkeypatch.setattr(settings._inner, 'smtp_abuse_window_minutes', 15)
     data = _client().get(f'/api/security-alerts/{env[4]}/activity').json()
-    # Not today's setting, and not the window of the block two days later
     assert data['window_minutes'] is None
-    # An hour before it, to an hour after
     assert _minutes_around(data['around']) == 120
 
 
@@ -184,7 +166,6 @@ def test_an_unknown_alert_is_not_found(env):
 
 
 def _raise_anomaly_alert(monkeypatch, alert_type, subject):
-    """Raise the alert through its real detector, as the scheduler does."""
     from app.database import get_db_context
     from app.models import MailboxStatistics, SecurityAlert
     from app.services import anomaly_service
@@ -194,7 +175,6 @@ def _raise_anomaly_alert(monkeypatch, alert_type, subject):
     monkeypatch.setattr(settings._inner, 'anomaly_alert_cooldown_hours', 24)
     monkeypatch.setattr(anomaly_service, '_is_recurring_daily_pattern', lambda *a, **k: False)
     with get_db_context() as db:
-        # The fixture's own alert would hold the detector back (cooldown)
         db.query(SecurityAlert).filter(SecurityAlert.alert_type == alert_type,
                                        SecurityAlert.subject == subject).delete(synchronize_session=False)
         if alert_type == 'volume_spike' and not db.query(MailboxStatistics).filter(MailboxStatistics.username == SENDER).first():
@@ -219,17 +199,13 @@ def no_mailbox():
 
 
 def test_a_spike_keeps_its_own_window_and_baseline_after_the_settings_change(env, monkeypatch, no_mailbox):
-    # Raised while the check counts 15 minutes against a 7 day baseline
     alert_id = _raise_anomaly_alert(monkeypatch, 'volume_spike', SENDER)
-    # Later the settings change, and the alert is opened again
     monkeypatch.setattr(settings._inner, 'anomaly_check_interval', 60)
     monkeypatch.setattr(settings._inner, 'anomaly_baseline_days', 3)
     data = _client().get(f'/api/security-alerts/{alert_id}/activity').json()
     assert data['window_minutes'] == 15
-    # Its usual rate was measured over 7 days
     assert data['baseline_days'] == 7
     assert 7 * 24 * 4 <= len(data['buckets'])
-    # Its 15 minutes before it, to an hour after
     assert _minutes_around(data['around']) == 75
     assert data['around']['total'] == 30
 
@@ -244,7 +220,6 @@ def test_a_burst_keeps_its_own_window_after_the_setting_changes(env, monkeypatch
 
 
 def test_an_anomaly_alert_that_does_not_name_its_window_has_an_unknown_window(env, monkeypatch):
-    # The fixture's spike has no detail: not today's setting either
     monkeypatch.setattr(settings._inner, 'anomaly_check_interval', 60)
     data = _client().get(f'/api/security-alerts/{env[0]}/activity').json()
     assert data['window_minutes'] is None

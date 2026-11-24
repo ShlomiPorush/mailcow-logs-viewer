@@ -1,7 +1,3 @@
-"""New mail for the Messages list: the list comes with a watermark (the newest
-delivery stored), and GET /api/messages/new counts the messages matching the
-filters that came after it. A message that was there already, whose status
-changed or which got another delivery, is not new."""
 import uuid
 from datetime import datetime, timedelta
 
@@ -135,14 +131,12 @@ def test_the_list_holds_nothing_after_its_watermark(client):
     from app.models import MessageCorrelation
     mark = _watermark(client)
     _add(_leg(MessageCorrelation, f'<late-{MARK}@example.com>'))
-    # The next pages of that list: only what its first page's watermark held
     response = client.get(f'/api/messages?search={MARK}&upto_id={mark}&limit=50')
     assert response.status_code == 200, response.text
     page = response.json()
     assert page['watermark'] == mark
     assert all('late-' not in (m['message_id'] or '') for m in page['data'])
     assert _new(client, mark)['count'] == 1
-    # A new list has it
     fresh = client.get(f'/api/messages?search={MARK}&limit=50').json()
     assert any('late-' in (m['message_id'] or '') for m in fresh['data'])
 

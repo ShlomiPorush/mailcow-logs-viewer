@@ -1,4 +1,3 @@
-"""Authentication capacity limits preserve live sessions and failure budgets."""
 import secrets
 from concurrent.futures import ThreadPoolExecutor
 from threading import Barrier
@@ -54,8 +53,6 @@ def test_full_sessions_reject_new_login_and_preserve_cookies():
     ("192.0.2.50", "127.0.0.1"), ("192.0.2.10", "192.0.2.10"),
 ])
 def test_failure_capacity_accepts_correct_password_and_counts_wrong_ones(peer, trusted):
-    # A full table used to answer 429 before checking the password, which let
-    # anyone who filled it lock the operator out of new logins.
     for ip in ["198.51.100.1", "198.51.100.2"]:
         for _ in range(auth._AUTH_MAX_FAILURES):
             auth._record_auth_failure(ip)
@@ -64,10 +61,8 @@ def test_failure_capacity_accepts_correct_password_and_counts_wrong_ones(peer, t
     assert "version" in client.get("/api/info", headers=headers).json()
     assert client.get("/api/auth/verify", headers=headers).status_code == 200
     assert client.post("/api/auth/session", headers=headers).status_code == 200
-    # Correct passwords are not recorded, so the tracked clients are untouched
     assert len(auth._auth_failures) == 2
     assert auth._is_rate_limited("198.51.100.1")
-    # A wrong guess from a new client is counted; the least recent client makes room
     wrong = {**credentials("wrong"), "X-Forwarded-For": "192.0.2.51"}
     assert client_at(peer, trusted).get("/api/auth/verify", headers=wrong).status_code == 401
     assert len(auth._auth_failures) == 2
@@ -115,7 +110,6 @@ def test_live_capacity_changes_do_not_evict_sessions_or_counters(monkeypatch):
         session.create_session({"username": "admin"}, generation=session.auth_generation(), principal=BUILTIN)
     assert all(session.get_session(cookie) for cookie in cookies)
     assert len(auth._auth_failures) == 2
-    # A tracked client below its lockout threshold may still authenticate.
     assert client_at().get("/api/auth/verify", headers=credentials()).status_code == 200
     monkeypatch.setattr(settings, "session_max_entries", 3)
     monkeypatch.setattr(settings, "auth_max_failure_clients", 3)

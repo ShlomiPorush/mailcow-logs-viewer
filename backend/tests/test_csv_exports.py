@@ -1,4 +1,3 @@
-"""Exercise the actual CSV downloads with untrusted text and typed values."""
 import csv
 import io
 import asyncio
@@ -290,7 +289,6 @@ TIME_COLUMNS = [
 
 @pytest.mark.parametrize("path,column", TIME_COLUMNS)
 def test_csv_times_are_in_the_app_time_zone_with_their_offset(export_client, monkeypatch, path, column):
-    """Time columns were naive UTC with no marker; a spreadsheet read them as local time."""
     client, row, _, _ = export_client
     monkeypatch.setattr(settings._inner, "tz", "Europe/Berlin")
     row.time = row.first_seen = row.created_at = datetime(2026, 1, 15, 12, 0)
@@ -301,8 +299,6 @@ def test_csv_times_are_in_the_app_time_zone_with_their_offset(export_client, mon
 
 @pytest.mark.parametrize("path", [route[0] for route in ROUTES[:4]])
 def test_csv_file_names_use_the_date_in_the_app_time_zone(export_client, monkeypatch, path):
-    """Two zones 26 hours apart are never on the same date, so at least one of
-    them differs from the container's date at any moment."""
     from zoneinfo import ZoneInfo
     client, _, _, _ = export_client
     for zone in ("Etc/GMT-14", "Etc/GMT+12"):

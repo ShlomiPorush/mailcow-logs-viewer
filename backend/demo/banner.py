@@ -1,16 +1,3 @@
-"""
-The demo notice on every page.
-
-The regular frontend knows nothing about the demo. This middleware adds a
-slim notice at the top of the main column of every HTML page the app
-serves, styled with the interface's own theme variables so it follows the
-light and dark themes. Its style also hides the app's "Authentication is
-off" warning, since the demo has no sign-in on purpose.
-
-DEMO_NOTICE replaces the notice text, for example to say that the demo
-runs an unreleased version. When it is empty the default text is shown.
-The "Demo" tag and the link to the installation guide always stay.
-"""
 import html
 import os
 
@@ -70,15 +57,12 @@ BANNER = banner_html(os.environ.get("DEMO_NOTICE", ""))
 
 
 def inject(body: bytes) -> bytes:
-    """Put the notice at the top of the main column, once."""
     if MARKER not in body or b'class="demo-banner"' in body:
         return body
     return body.replace(MARKER, MARKER + BANNER, 1)
 
 
 class DemoBannerMiddleware:
-    """Pure ASGI: buffers only HTML responses, passes everything else through."""
-
     def __init__(self, app):
         self.app = app
 

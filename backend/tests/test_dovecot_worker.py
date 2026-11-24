@@ -1,4 +1,3 @@
-"""Dovecot correlation owns its database session in a worker."""
 import asyncio
 import threading
 from contextlib import contextmanager

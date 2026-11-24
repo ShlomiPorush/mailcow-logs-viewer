@@ -1,4 +1,3 @@
-"""Report processing owns its session off the request event loop."""
 import asyncio
 import threading
 from contextlib import contextmanager

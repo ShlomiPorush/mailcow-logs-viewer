@@ -1,7 +1,3 @@
-"""The Rate Limits page keeps its own, longer history (Rate Limits Retention
-Days, never less than the other raw logs) and counts it in the database: no
-5000 row cap, a window only as long as the kept history, days in the app
-time zone, and the same sender everywhere."""
 import uuid
 from datetime import datetime, timedelta
 
@@ -152,7 +148,6 @@ def test_cleanup_keeps_the_rate_limit_log_for_its_own_retention(env, monkeypatch
 
     _cleanup_raw_service_logs_worker()
     assert kept() == [('ratelimited', 'Q2')]
-    # Raw logs kept longer than the rate limit setting: the rate limit log follows them
     _insert([_row('ratelimited', HEAVY, 4, now - timedelta(days=100))])
     monkeypatch.setattr(settings._inner, 'raw_logs_retention_days', 120)
     _cleanup_raw_service_logs_worker()

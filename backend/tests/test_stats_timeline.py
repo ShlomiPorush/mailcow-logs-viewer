@@ -1,7 +1,3 @@
-"""The /stats/timeline endpoint built its spam_count with
-func.cast(RspamdLog.is_spam, func.Integer), which SQLAlchemy rejects at query
-construction time - the endpoint's catch-all then returned an empty timeline
-with an error, so the dashboard chart was silently broken."""
 import uuid
 from datetime import datetime, timedelta
 

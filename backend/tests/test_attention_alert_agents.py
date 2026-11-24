@@ -1,15 +1,10 @@
-"""Agents and the Needs attention alerts of three areas (Security, Domains,
-DMARC & TLS): an agent lists the alerts of the areas its connection may view,
-and dismisses or undoes only with Take action in the alert's own area. The
-three changes stay actions: read_api refuses them, perform_action runs them.
-"""
 import json
 import uuid
 from datetime import datetime
 
 import pytest
 
-from test_agent_access import _connect, _tool, live_agents  # noqa: F401  (live_agents is a fixture)
+from test_agent_access import _connect, _tool, live_agents  # noqa: F401
 from test_agent_device_rest import _api, _connect_with_code
 
 MARK = uuid.uuid4().hex[:8]
@@ -46,7 +41,6 @@ def test_an_agent_lists_the_alerts_of_the_areas_it_may_view(alerts):
     assert {a['alert_type'] for a in body['alerts']} <= {'dns_change'}
     assert alerts['dns_change'] in {a['id'] for a in body['alerts']}
     assert body['writable_ids'] == []
-    # An area outside the three: an empty list, not a refusal
     client, _, tokens = _connect(views=('messages',))
     head, body = _answer(_tool(client, tokens['access_token'], 'read_api', {'path': '/api/security-alerts'}))
     assert head.startswith('HTTP 200') and body['alerts'] == [] and body['unacknowledged_count'] == 0
@@ -148,7 +142,6 @@ def test_an_agent_with_every_area_never_gets_an_alert_type_of_no_area(live_agent
             'method': 'POST', 'path': '/api/security-alerts/acknowledge-all'}))
         assert unknown['future_kind'] not in body['ids']
         assert _open(unknown) == {unknown['future_kind']}
-        # A dismissal made by an admin is not the agent's to undo
         receipt = client.post(f"/api/security-alerts/{unknown['future_kind']}/acknowledge").json()['receipt']
         head, body = _answer(_tool(client, token, 'perform_action', {
             'method': 'POST', 'path': f'/api/security-alerts/acknowledgements/{receipt}/undo'}))

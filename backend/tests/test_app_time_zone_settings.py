@@ -1,10 +1,3 @@
-"""The app time zone is a setting like the others: Settings > Application.
-
-TZ used to be a legacy, ENV-only value nobody could see or change from the
-page. It is now editable there; an ENV value wins and locks the field, an
-unknown name is refused on save, and the jobs list says in which zone the
-clock-time jobs run.
-"""
 import types
 
 import pytest
@@ -19,7 +12,6 @@ from app.config import EDITABLE_SETTING_KEYS, Settings, get_env_locked_keys
 
 @pytest.fixture
 def store(monkeypatch):
-    """Real update_settings and build_settings; only the system_settings table is a dict."""
     data = {}
     monkeypatch.delenv("TZ", raising=False)
     monkeypatch.setenv("SETTINGS_EDIT_VIA_UI_ENABLED", "true")
@@ -65,7 +57,6 @@ def test_saving_a_zone_stores_it_and_moves_the_jobs(store):
     assert result["configuration"]["tz"] == "Europe/Berlin"
     assert store.data["tz"] == "Europe/Berlin"
     assert tz_status()["timezone"] == "Europe/Berlin"
-    # Clock-time jobs are rescheduled after the new zone is in effect
     assert store.rescheduled == ["Europe/Berlin"]
 
 
@@ -98,7 +89,6 @@ def test_env_wins_and_locks_the_field(store, monkeypatch):
 
 
 def test_an_unknown_zone_from_env_does_not_block_saving_other_settings(store, monkeypatch):
-    # The page posts every key, the locked one included
     monkeypatch.setenv("TZ", "Europe/Berlinn")
     cfg.reload_settings(object())
 
@@ -117,7 +107,6 @@ def test_an_unknown_stored_zone_does_not_block_saving_other_settings(store):
 
 
 def test_a_new_unknown_zone_is_refused_while_env_locks_the_field(store, monkeypatch):
-    # Stored, it would become the zone the day TZ leaves the environment
     monkeypatch.setenv("TZ", "Europe/Berlin")
     cfg.reload_settings(object())
 
@@ -140,7 +129,6 @@ def test_the_stored_zone_sent_back_unchanged_does_not_block_a_save_while_locked(
 
 
 def test_an_unknown_zone_from_env_sent_back_is_not_stored(store, monkeypatch):
-    # The locked field echoes the environment; it is not a choice to keep
     monkeypatch.setenv("TZ", "Europe/Berlinn")
     cfg.reload_settings(object())
 
@@ -148,8 +136,6 @@ def test_an_unknown_zone_from_env_sent_back_is_not_stored(store, monkeypatch):
 
     assert store.data == {"app_title": "Mail logs"}
 
-
-# --- The jobs list names the zone -------------------------------------------
 
 def _postgres_available() -> bool:
     try:

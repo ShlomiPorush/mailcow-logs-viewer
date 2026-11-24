@@ -1,6 +1,4 @@
-"""The suppression list search is literal, and finds a domain or pattern
-block by its value without the backslashes it is stored with."""
-from test_rspamd_two_way import MARK, _add, db  # noqa: F401  db is a fixture
+from test_rspamd_two_way import MARK, _add, db  # noqa: F401
 
 
 def _found(db, text):

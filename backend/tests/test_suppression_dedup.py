@@ -1,7 +1,3 @@
-"""Regression for issue seen in the Detect Suppressions job: a recipient
-bouncing several times within one scan batch caused duplicate INSERTs for
-the same email (unique index violation) because the session has
-autoflush=False and pending entries are invisible to queries."""
 import asyncio
 from datetime import datetime
 

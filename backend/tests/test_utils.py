@@ -1,4 +1,3 @@
-"""Tests for shared utility helpers."""
 import secrets
 from datetime import datetime, timezone, timedelta
 

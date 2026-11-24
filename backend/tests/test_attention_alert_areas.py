@@ -1,14 +1,9 @@
-"""Needs attention lists alerts of three areas: Security (sign-in and sending
-alerts, the protection rules), Domains (DNS changes) and DMARC & TLS (report
-import errors). Each person sees the alerts of the areas they may view, and a
-dismissal, Dismiss all and Undo change only those of the areas they may act in.
-"""
 import uuid
 from datetime import datetime
 
 import pytest
 
-from test_users import _add, _admin, _person, _sign_in, people, stored  # noqa: F401  (fixtures)
+from test_users import _add, _admin, _person, _sign_in, people, stored  # noqa: F401
 
 MARK = uuid.uuid4().hex[:8]
 TYPES = ('volume_spike', 'protection_breach', 'dns_change', 'dmarc_import_failed')
@@ -26,7 +21,6 @@ def _alert(stored, alert_type, severity='warning'):
 
 @pytest.fixture
 def alerts(people, stored):
-    """One open alert of each kind, the protection one critical, by type."""
     return {t: _alert(stored, t, 'critical' if t == 'protection_breach' else 'warning') for t in TYPES}
 
 
@@ -39,7 +33,6 @@ def _open(ids):
 
 
 def _counts(types):
-    """What the database holds open for these types: (count, critical)."""
     from app.database import get_db_context
     from app.models import SecurityAlert
     with get_db_context() as db:
@@ -62,17 +55,14 @@ def _list(client):
     (('messages',), set()),
 ])
 def test_each_person_sees_the_alerts_of_the_areas_they_may_view(alerts, views, readable):
-    """Before this, the list was Security's: a person with only Domains got a refusal."""
     body = _list(_person(_admin(), 'viewer-' + '-'.join(views), views=views))
     types = set().union(*(AREA_TYPES[a] for a in readable)) if readable else set()
     mine = {i for t, i in alerts.items() if t in types}
     listed = {a['id'] for a in body['alerts']}
     assert mine <= listed and not (set(alerts.values()) - mine) & listed
     assert {a['alert_type'] for a in body['alerts']} <= types
-    # The counts and ids follow the same areas, also the critical one they cannot see
     assert set(body['unacknowledged_ids']) & set(alerts.values()) == mine
     assert (body['unacknowledged_count'], body['unacknowledged_critical']) == _counts(types)
-    # View only: nothing to dismiss
     assert body['writable_ids'] == []
 
 
@@ -105,10 +95,8 @@ def test_new_alerts_are_listed_with_anomaly_detection_off(alerts, monkeypatch):
 def test_one_alert_is_dismissed_only_in_an_area_the_person_may_act_in(alerts):
     admin = _admin()
     person = _person(admin, 'domains-act', views=('security',), acts=('domains',))
-    # Another area's, seen but not to be changed: refused
     r = person.post(f"{LIST}/{alerts['volume_spike']}/acknowledge")
     assert r.status_code == 403 and r.json() == {'detail': 'You do not have permission for this.'}
-    # An area not even seen: as if it were not there
     assert person.post(f"{LIST}/{alerts['dmarc_import_failed']}/acknowledge").status_code == 404
     assert _open(alerts.values()) == sorted(alerts.values())
     done = person.post(f"{LIST}/{alerts['dns_change']}/acknowledge").json()
@@ -127,11 +115,9 @@ def test_a_person_who_may_only_view_cannot_dismiss_at_all(alerts):
 
 def test_dismiss_all_leaves_the_alerts_of_other_areas_open_with_ids_or_without(alerts):
     person = _person(_admin(), 'dmarc-act', views=('security', 'domains'), acts=('dmarc',))
-    # Ids it was never given, of areas it may only view, are left as they are
     done = person.post(f'{LIST}/acknowledge-all', json={'ids': list(alerts.values())}).json()
     assert done['ids'] == [alerts['dmarc_import_failed']] and done['acknowledged'] == 1
     person.post(f"/api/security-alerts/acknowledgements/{done['receipt']}/undo")
-    # No body: every open alert, of its areas only
     done = person.post(f'{LIST}/acknowledge-all').json()
     assert alerts['dmarc_import_failed'] in done['ids']
     assert not set(done['ids']) & {alerts['volume_spike'], alerts['protection_breach'], alerts['dns_change']}
@@ -149,7 +135,6 @@ def test_undo_reopens_only_what_the_person_may_act_in_and_keeps_the_rest_for_som
     with get_db_context() as db:
         kept = db.query(SecurityAlert).filter(SecurityAlert.id.in_(list(alerts.values()))).all()
         assert {a.id for a in kept if a.acknowledged and str(a.ack_batch) == receipt} == set(alerts.values()) - {alerts['dns_change']}
-    # The same receipt still undoes the rest for an admin
     assert admin.post(f'/api/security-alerts/acknowledgements/{receipt}/undo').json()['restored'] == 3
     assert _open(alerts.values()) == sorted(alerts.values())
 
@@ -169,7 +154,6 @@ def test_undo_after_the_persons_access_changed_reopens_nothing(alerts):
 def test_only_sign_in_and_sending_alerts_have_activity(alerts, alert_type):
     admin = _admin()
     assert admin.get(f'{LIST}/{alerts[alert_type]}/activity').status_code == 404
-    # A Security viewer cannot read another area's alert through it
     security = _person(admin, 'security-view-' + alert_type.replace('_', '-'), views=('security',))
     assert security.get(f'{LIST}/{alerts[alert_type]}/activity').status_code == 404
 
@@ -188,11 +172,8 @@ def test_the_policy_needs_one_of_the_three_areas_to_dismiss():
             assert scopes.allows(frozenset({f'{area}:write'}), rule)
         assert not scopes.allows(frozenset({'security:read', 'domains:read', 'dmarc:read', 'messages:write'}), rule)
     assert user_access.need_for('GET', '/api/security-alerts').kind == user_access.SIGNED_IN
-    # Nothing else became a write anyone may make
     assert not scopes.allows(frozenset(), scopes.Rule(scopes.ANY, scopes.WRITE))
 
-
-# ---------- past 10,000 open alerts ----------
 
 MANY = 10001
 MANY_SUBJECT = f'many-{MARK}.example.com'
@@ -200,7 +181,6 @@ MANY_SUBJECT = f'many-{MARK}.example.com'
 
 @pytest.fixture
 def many(people):
-    """10,001 open alerts of Security, the newest of all, and 10,001 of Domains just before them."""
     from sqlalchemy import text
     from app.database import get_db_context
 
@@ -223,17 +203,13 @@ def test_past_10000_open_alerts_each_list_of_ids_has_its_own_cap(many):
     from app.routers.security_alerts import MAX_ACK_IDS
     person = _person(_admin(), 'many-mixed', views=('security',), acts=('domains',))
     body = person.get(LIST, params={'acknowledged': 'false', 'limit': 1}).json()
-    # The count goes past the cap: it is counted, not taken from the ids
     assert (body['unacknowledged_count'], body['unacknowledged_critical']) == _counts(AREA_TYPES['security'] | AREA_TYPES['domains'])
     assert body['unacknowledged_count'] > 2 * MAX_ACK_IDS
-    # The newest open alerts the person sees are the Security ones, which they may only view
     assert len(body['unacknowledged_ids']) == MAX_ACK_IDS and set(body['unacknowledged_ids']) <= many['volume_spike']
-    # What they may dismiss lies past those, under a cap of its own
     assert len(body['writable_ids']) == MAX_ACK_IDS and set(body['writable_ids']) <= many['dns_change']
     assert not set(body['writable_ids']) & set(body['unacknowledged_ids'])
     newest = sorted(many['dns_change'], reverse=True)[:MAX_ACK_IDS]
     assert sorted(body['writable_ids'], reverse=True) == newest
-    # Dismiss all with them changes exactly those
     done = person.post(f'{LIST}/acknowledge-all', json={'ids': body['writable_ids']}).json()
     assert done['acknowledged'] == MAX_ACK_IDS
     assert len(_open(many['dns_change'])) == 1 and len(_open(many['volume_spike'])) == MANY
@@ -247,12 +223,9 @@ def test_past_10000_open_alerts_an_admin_gets_both_lists_capped(many):
     assert body['unacknowledged_count'] >= 2 * MANY
 
 
-# ---------- a type that belongs to no area ----------
-
 def test_an_alert_type_of_no_area_is_an_admins_only(people, stored):
     unknown = _alert(stored, 'future_kind', 'critical')
     admin = _admin()
-    # Every area, View and Take action, but not an admin
     person = _person(admin, 'everything', views=('security', 'domains', 'dmarc', 'messages'),
                      acts=('security', 'domains', 'dmarc'))
     body = _list(person)
@@ -264,7 +237,6 @@ def test_an_alert_type_of_no_area_is_an_admins_only(people, stored):
     assert person.post(f'{LIST}/acknowledge-all', json={'ids': [unknown]}).json()['acknowledged'] == 0
     assert unknown not in person.post(f'{LIST}/acknowledge-all').json()['ids']
     assert _open([unknown]) == [unknown]
-    # An admin sees it, and dismisses it; the person cannot undo that
     body = _list(admin)
     assert unknown in {a['id'] for a in body['alerts']} and unknown in body['writable_ids']
     receipt = admin.post(f'{LIST}/{unknown}/acknowledge').json()['receipt']

@@ -1,5 +1,3 @@
-"""MailcowAPI.get_raw_logs_range: endpoint shape, argument checks, and the
-{} answer mailcow gives past the end of a list. No database, no network."""
 import asyncio
 
 import pytest

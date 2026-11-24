@@ -1,10 +1,3 @@
-"""DMARC pass = aligned SPF OR aligned DKIM passed (RFC 7489).
-
-Regression for the domains table / overview / sources computing pass with
-AND (both must pass), which wildly understated the rate for mail that
-passes only one mechanism (e.g. forwarded mail breaks SPF, DKIM survives)
-and contradicted the Insights panel.
-"""
 import time
 
 import pytest
@@ -42,7 +35,6 @@ def seeded_domain():
                          begin_date=now - 3600, end_date=now)
     db.add(report)
     db.flush()
-    # 10 both-pass, 30 dkim-only, 40 spf-only, 20 both-fail -> 80% DMARC pass
     for spf, dkim, count in [("pass", "pass", 10), ("fail", "pass", 30),
                              ("pass", "fail", 40), ("fail", "fail", 20)]:
         db.add(DMARCRecord(dmarc_report_id=report.id, source_ip="192.0.2.1",

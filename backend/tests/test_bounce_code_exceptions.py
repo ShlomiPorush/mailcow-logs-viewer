@@ -1,10 +1,3 @@
-"""Codes left alone (Settings > Outbound): a delivery failure with a status
-code the admin listed for its kind is not blocked, counted or deleted, in the
-log detection and in the queue cleanup alike.
-
-Deleting queued mail cannot be undone, so the queue paths are pinned for both
-kinds and for every choice that deletes. Fictional addresses only.
-"""
 import asyncio
 import secrets
 import uuid
@@ -13,7 +6,7 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
-import app.models  # noqa: F401  init_db creates the tables of the models imported so far
+import app.models  # noqa: F401
 from app import scheduler
 from app.config import settings
 from app.services import bounce_policy
@@ -43,7 +36,6 @@ def base(monkeypatch):
          suppression_hard_bounce_action='suppress', suppression_soft_bounce_action='count',
          suppression_soft_bounce_threshold=1,
          suppression_hard_bounce_excluded_codes='5.2.2', suppression_soft_bounce_excluded_codes='4.2.2',
-         # The tests of the list read it alone; the standard codes have their own below
          suppression_hard_bounce_standard_codes=False, suppression_soft_bounce_standard_codes=False,
          queue_cleanup_enabled=True, queue_cleanup_block=True, queue_cleanup_threshold_minutes=30,
          suppression_whitelist_domains='', rspamd_password='')
@@ -55,8 +47,6 @@ def base(monkeypatch):
     monkeypatch.setattr(scheduler.mailcow_api, 'delete_queue', AsyncMock(return_value=[{'type': 'success'}]))
     return monkeypatch
 
-
-# ---- Reading the lists ----
 
 def test_a_list_is_stored_in_one_form():
     assert bounce_policy.normalize_codes(' 5.2.2, 5.1.1 5.02.2,,5.10.1 ', '5') == '5.1.1,5.2.2,5.10.1'
@@ -88,27 +78,21 @@ def test_the_code_is_read_from_a_reply_and_never_from_an_address():
     assert bounce_policy.codes_in_text('connect to mx.example.org[5.4.3.2]:25: Connection timed out') == []
     assert bounce_policy.codes_in_text('connect to mx.example.org[45.4.3.2]:25: timed out') == []
     assert bounce_policy.codes_in_text(None) == []
-    # Review R4: a number in a host name or an address is not a code, only one after its reply code
     assert bounce_policy.codes_in_text('connect to 4.2.2-mx.example.test[192.0.2.1]:25: Connection timed out') == []
     assert bounce_policy.codes_in_text('host 452-4.2.2-mx.example.test[192.0.2.1] refused to talk to me') == []
     assert bounce_policy.codes_in_text('host mx said: 550 4.2.2 odd') == [], 'a code of another class than its reply'
     assert bounce_policy.codes_in_text('host mx[192.0.2.1] said: 451 4.7.1 Greylisted, try again') == ['4.7.1']
-    # Round 3: only the code that opens the reply, however many spaces follow its reply code
     assert bounce_policy.codes_in_text('host mx said: 451 4.7.1 <452-4.2.2@example.test>: Recipient address rejected') == ['4.7.1']
     assert bounce_policy.codes_in_text('host mx.example.test said: 452  4.2.2 Mailbox full') == ['4.2.2']
     assert bounce_policy.codes_in_text('host mx[192.0.2.1] refused to talk to me: 421 4.7.0 Try again later') == ['4.7.0']
-    # Round 4: other Postfix wordings, and a code only on the last line of a joined reply
     assert bounce_policy.codes_in_text('TLS is required, but host mx.example.test[192.0.2.1] refused to start TLS: '
                                        '454 4.7.0 TLS not available due to temporary reason') == ['4.7.0']
     assert bounce_policy.codes_in_text('host mx.example.test[192.0.2.1] said: 452-Temporary delivery failure '
                                        '452 4.2.2 Mailbox full (in reply to RCPT TO command)') == ['4.2.2']
-    # Round 5: an address is taken out whole, whatever characters it holds
     assert bounce_policy.codes_in_text('host mx.example.test[192.0.2.1] said: 450 4.1.8 <sender+452-4.2.2+tag@example.invalid>: '
                                        'Sender address rejected: Domain not found (in reply to RCPT TO command)') == ['4.1.8']
     assert bounce_policy.codes_in_text('host mx said: 550 5.1.1 user 552 5.2.2+x@example.invalid unknown') == ['5.1.1']
 
-
-# ---- The queue cleanup ----
 
 def _queue(monkeypatch, items):
     monkeypatch.setattr(scheduler.mailcow_api, 'get_queue', AsyncMock(return_value=items))
@@ -142,8 +126,6 @@ def test_without_a_list_the_cleanup_deletes_as_before(base):
     scheduler.mailcow_api.delete_queue.assert_awaited_once_with(['FULL'])
 
 
-# ---- The log detection ----
-
 @pytest.fixture
 def db(base):
     if not _postgres_available():
@@ -161,7 +143,6 @@ def db(base):
 
     wipe()
     with get_db_context() as s:
-        # Only this test's lines are new to the detection
         top = s.query(PostfixLog.id).order_by(PostfixLog.id.desc()).first()
         s.query(SystemSetting).filter(SystemSetting.key == scheduler.BOUNCE_WATERMARK_KEY).delete()
         s.add(SystemSetting(key=scheduler.BOUNCE_WATERMARK_KEY, value=str(top[0] if top else 0), updated_at=datetime.utcnow()))
@@ -198,8 +179,6 @@ def test_a_permanent_failure_with_a_code_left_alone_is_not_blocked_or_deleted(db
 
 
 def test_mail_waiting_with_a_code_left_alone_stays_when_its_address_also_failed_permanently(db, base):
-    """Review R1: another, permanent failure of the same address deletes its
-    queued mail, but not a message deferred with a code left alone."""
     gone = f'gone-{MARK}@example.org'
     _line(db, gone, '5.1.1')
     _queue(base, [{'queue_id': 'WAITING', 'recipients': [f'{gone} (host mx.example.org[192.0.2.1] said: 452 4.2.2 Mailbox full)']},
@@ -210,7 +189,6 @@ def test_mail_waiting_with_a_code_left_alone_stays_when_its_address_also_failed_
 
 @pytest.mark.parametrize('block', [True, False])
 def test_a_list_saved_while_the_cleanup_runs_keeps_the_mail(base, block):
-    """Review R2: the codes are asked again right before the deletion, under the map lock."""
     _set(base, suppression_soft_bounce_excluded_codes='', queue_cleanup_block=block)
     base.setattr(scheduler, '_store_deferred_suppressions_worker', lambda r, uncovered=None: len(r))
     real = scheduler._cleanup_deletable
@@ -226,7 +204,6 @@ def test_a_list_saved_while_the_cleanup_runs_keeps_the_mail(base, block):
 
 
 def test_a_list_saved_before_the_block_is_stored_blocks_nobody(db, base):
-    """Review R2: the block is stored under the row lock, with the codes asked again there."""
     arrived = datetime.utcnow() - timedelta(hours=2)
     full, slow = f'full-{MARK}@example.org', f'slow-{MARK}@example.org'
     counted = scheduler._store_deferred_suppressions_worker([
@@ -248,8 +225,6 @@ def test_a_temporary_failure_with_a_code_left_alone_is_not_counted(db, base):
     assert _rows(db) == {slow: True}
 
 
-# ---- Saving the lists ----
-
 def test_saving_a_list_stores_it_in_one_form_and_refuses_a_wrong_code(base):
     from fastapi import HTTPException
     from app.routers.settings import _normalize_bounce_codes
@@ -260,25 +235,21 @@ def test_saving_a_list_stores_it_in_one_form_and_refuses_a_wrong_code(base):
         _normalize_bounce_codes({'suppression_hard_bounce_excluded_codes': '4.2.2'})
     assert error.value.status_code == 400
     assert '"4.2.2" is not a 5.x.x code' in error.value.detail
-    # The value in effect sent back as it is never blocks saving the rest
     _set(base, suppression_soft_bounce_excluded_codes='4.2.2,typo')
     echoed = {'suppression_soft_bounce_excluded_codes': '4.2.2,typo'}
     _normalize_bounce_codes(echoed)
     assert echoed == {}
 
 
-# ---- The codes Settings offers ----
-
 def test_the_codes_offered_are_the_failures_the_detection_reads(db, base):
     from app.routers.suppressions import get_bounce_codes
-    # Codes no other test writes, so lines left by others do not count here
     perm, temp = '5.9.871', '4.9.872'
     for _ in range(2):
         _line(db, f'a-{MARK}@example.org', perm)
     _line(db, f'b-{MARK}@example.org', temp, status='deferred')
-    _line(db, f'c-{MARK}@example.org', perm, program='postfix/smtpd')     # a client's line, not a delivery
-    _line(db, f'd-{MARK}@example.org', perm, program='postfix/lmtp')      # inbound delivery to a mailbox here
-    _line(db, f'e-{MARK}@example.org', perm, age=timedelta(days=8))       # older than the window
+    _line(db, f'c-{MARK}@example.org', perm, program='postfix/smtpd')
+    _line(db, f'd-{MARK}@example.org', perm, program='postfix/lmtp')
+    _line(db, f'e-{MARK}@example.org', perm, age=timedelta(days=8))
     _line(db, f'f-{MARK}@example.org', temp, status='sent')
     with db() as s:
         answer = get_bounce_codes(db=s)
@@ -288,8 +259,6 @@ def test_the_codes_offered_are_the_failures_the_detection_reads(db, base):
     assert all(c['code'].startswith('5.') for c in answer['permanent'])
     assert all(c['code'].startswith('4.') for c in answer['temporary'])
 
-
-# ---- The standard codes (on by default) ----
 
 @pytest.mark.parametrize('code', ['5.7.0', '5.7.1', '5.7.509', '5.6.11', '5.2.2', '5.2.121', '5.1.8', '5.4.6', '5.5.2',
                                   '4.2.2', '4.2.1', '4.4.1', '4.4.7', '4.7.1', '4.7.28', '4.0.0', '4.5.3'])
@@ -330,7 +299,6 @@ def test_settings_shows_the_same_standard_codes_the_jobs_use():
 
 
 def test_the_reported_gmail_content_block_blocks_nobody_by_default(db, base):
-    """Issue #562: Gmail refused an attachment with 552 5.7.0; the address is fine."""
     _set(base, suppression_hard_bounce_standard_codes=True, suppression_hard_bounce_excluded_codes='')
     flagged, gone = f'flagged-{MARK}@example.org', f'gone-{MARK}@example.org'
     _line(db, flagged, '5.7.0')
@@ -350,7 +318,6 @@ def _deferral(db, queue_id, recipient, dsn, age):
 
 @pytest.mark.parametrize('standard', [True, False])
 def test_the_cleanup_reads_the_code_a_queue_reason_leaves_out_from_the_log(db, base, standard, real_queue_log):
-    """A timeout reads "connect to ...: Connection timed out" in the queue; Postfix logs it as 4.4.1."""
     _set(base, suppression_soft_bounce_excluded_codes='', suppression_soft_bounce_standard_codes=standard)
     stored = []
     base.setattr(scheduler, '_store_deferred_suppressions_worker',
@@ -370,10 +337,9 @@ def test_the_cleanup_reads_the_code_a_queue_reason_leaves_out_from_the_log(db, b
 
 
 def test_a_logged_code_of_an_earlier_message_with_the_same_queue_id_is_not_read(db, base, real_queue_log):
-    """Postfix can give a queue ID again: only lines from the message's arrival on count."""
     _set(base, suppression_soft_bounce_excluded_codes='', suppression_soft_bounce_standard_codes=True, queue_cleanup_block=False)
     qid = f'R{MARK.upper()}'
-    _deferral(db, qid, f'old-{MARK}@example.org', '4.4.1', timedelta(hours=5))   # before OLD (2 hours ago)
+    _deferral(db, qid, f'old-{MARK}@example.org', '4.4.1', timedelta(hours=5))
     _queue(base, [_stuck(qid, f'new-{MARK}@example.org (lost connection with mx.example.org[192.0.2.1])')])
     asyncio.run(scheduler.cleanup_deferred_queue_job())
     scheduler.mailcow_api.delete_queue.assert_awaited_once_with([qid])
@@ -392,7 +358,6 @@ def test_a_log_that_cannot_be_read_deletes_nothing(base):
 
 
 def test_the_block_store_reads_the_codes_the_cleanup_passes(db, base):
-    """The codes of the message (the log's included) are asked again under the row lock."""
     _set(base, suppression_soft_bounce_standard_codes=True)
     arrived = datetime.utcnow() - timedelta(hours=2)
     slow, gone = f'slow-{MARK}@example.org', f'gone-{MARK}@example.org'
@@ -405,14 +370,13 @@ def test_the_block_store_reads_the_codes_the_cleanup_passes(db, base):
 
 
 def test_a_code_of_a_recipient_already_delivered_does_not_keep_the_rest(db, base, real_queue_log):
-    """Review R1: the log's code of a recipient no longer in the queue says nothing about the one still waiting."""
     _set(base, suppression_soft_bounce_excluded_codes='', suppression_soft_bounce_standard_codes=True)
     stored = []
     base.setattr(scheduler, '_store_deferred_suppressions_worker',
                  lambda r, uncovered=None: stored.extend(r) or len({i['email'] for i in r}))
     done, remaining = f'done-{MARK}@example.org', f'remaining-{MARK}@example.org'
     qid = f'P{MARK.upper()}'
-    _deferral(db, qid, done, '4.4.1', timedelta(minutes=50))       # later delivered: gone from the queue
+    _deferral(db, qid, done, '4.4.1', timedelta(minutes=50))
     _deferral(db, qid, remaining, '4.1.1', timedelta(minutes=40))
     _queue(base, [_stuck(qid, f'{remaining.upper()} (host mx.example.org[192.0.2.1] said: 450 user unknown here)')])
     asyncio.run(scheduler.cleanup_deferred_queue_job())
@@ -421,7 +385,6 @@ def test_a_code_of_a_recipient_already_delivered_does_not_keep_the_rest(db, base
 
 
 def test_the_permanent_failure_deletion_reads_the_log_of_the_recipient_waiting(db, base, real_queue_log):
-    """The deletion after a permanent failure asks the log too, per recipient still waiting."""
     _set(base, suppression_soft_bounce_standard_codes=True, suppression_hard_bounce_excluded_codes='',
          suppression_soft_bounce_excluded_codes='')
     gone = f'gone-{MARK}@example.org'
@@ -433,13 +396,10 @@ def test_the_permanent_failure_deletion_reads_the_log_of_the_recipient_waiting(d
                   {'queue_id': f'O{MARK.upper()}', 'queue_name': 'deferred', 'arrival_time': OLD, 'recipients': [gone]}])
     asyncio.run(scheduler.detect_suppressions_job())
     assert _rows(db) == {gone: True}
-    # The message deferred with a timeout stays; the other one's logged code belongs to another recipient
     scheduler.mailcow_api.delete_queue.assert_awaited_once_with([f'O{MARK.upper()}'])
 
 
 def test_a_later_code_of_the_same_recipient_does_not_hide_a_code_left_alone(db, base, real_queue_log):
-    """Review R3: a line of an earlier message with the same queue ID can fall inside
-    the window (a clock set back); every line counts, so it can only keep the mail."""
     _set(base, suppression_soft_bounce_excluded_codes='', suppression_soft_bounce_standard_codes=True)
     rcpt, qid = f'rcpt-{MARK}@example.org', f'C{MARK.upper()}'
     _deferral(db, qid, rcpt, '4.4.1', timedelta(minutes=40))

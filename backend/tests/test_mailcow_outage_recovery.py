@@ -1,13 +1,3 @@
-"""After mailcow comes back, the app recovers by itself.
-
-The domain sync, the transport sync, the DNS check and the credential checks
-run every few hours. One that failed because mailcow could not answer stayed
-failed until its next run, up to six hours later, and an unknown server IP
-until a restart. retry_failed_jobs runs them again every five minutes while
-their last failure was transient, and never after a refusal: a rejected key is
-a failed login for mailcow's Fail2ban. A manual Run of a failing job was marked
-a success; it keeps its failure now.
-"""
 import asyncio
 import secrets
 import json
@@ -31,7 +21,6 @@ from app.mailcow_api import MailcowAPIError, MailcowUnreachableError  # noqa: E4
 from app.routers import domains  # noqa: E402
 from app.routers import settings as settings_router  # noqa: E402
 
-# status key -> the scheduler job that runs it every few hours
 TARGETS = {'sync_local_domains': 'sync_local_domains', 'sync_transports': 'sync_transports',
            'dns_check': 'dns_check_background', 'check_credentials': 'check_credentials'}
 UNREACHABLE = "mailcow cannot be reached. It is tried again within 30 seconds."
@@ -51,7 +40,6 @@ def _restore_job_status():
 
 @pytest.fixture
 def features(monkeypatch):
-    """Every feature on; add a name to turn it off."""
     off = set()
     monkeypatch.setattr(type(settings._inner), "is_feature_enabled", lambda self, name: name not in off)
     return off
@@ -59,7 +47,6 @@ def features(monkeypatch):
 
 @pytest.fixture
 def jobs(monkeypatch, features):
-    """The scheduler with every periodic target registered, and the server IP known."""
     fake = Mock()
     fake.registered = set(TARGETS.values())
     fake.get_job.side_effect = lambda job_id: Mock(id=job_id) if job_id in fake.registered else None
@@ -77,8 +64,6 @@ def _failed(key, retryable=True, error=UNREACHABLE):
 def _retried(fake):
     return sorted(c.args[0] for c in fake.modify_job.call_args_list)
 
-
-# ---------- which jobs run again ----------
 
 def test_a_job_that_failed_on_a_transient_error_runs_again_now(jobs):
     for key in TARGETS:
@@ -113,7 +98,6 @@ def test_a_job_of_a_feature_turned_off_does_not_run_again(jobs, features, key, f
     features.add(feature)
     run(scheduler.retry_failed_jobs())
     jobs.modify_job.assert_not_called()
-    # Read at each run, not at startup: turned on again, it runs
     features.discard(feature)
     run(scheduler.retry_failed_jobs())
     assert _retried(jobs) == [TARGETS[key]]
@@ -135,11 +119,8 @@ def test_one_target_that_breaks_does_not_stop_the_others(jobs):
     jobs.modify_job.side_effect = modify
     jobs.get_job.side_effect = get_job
     run(scheduler.retry_failed_jobs())
-    # The two after them still ran
     assert _retried(jobs) == ['check_credentials', 'dns_check_background', 'sync_local_domains']
 
-
-# ---------- the server IP ----------
 
 def test_an_unknown_server_ip_is_read_again(jobs, monkeypatch):
     monkeypatch.setattr(domains, "_server_ip_cache", None)
@@ -160,8 +141,6 @@ def test_the_server_ip_failing_does_not_stop_the_jobs(jobs, monkeypatch):
     assert _retried(jobs) == ['check_credentials']
 
 
-# ---------- registration ----------
-
 def test_the_retry_runs_every_five_minutes_and_is_not_a_job_on_status(monkeypatch):
     fake = Mock()
     monkeypatch.setattr(scheduler, "scheduler", fake)
@@ -172,14 +151,11 @@ def test_the_retry_runs_every_five_minutes_and_is_not_a_job_on_status(monkeypatc
     assert retry[0].args[0] is scheduler.retry_failed_jobs
     assert retry[0].kwargs['max_instances'] == 1
     assert retry[0].kwargs['trigger'].interval == timedelta(minutes=5)
-    # Not on Status, and no Run button for it
     assert 'retry_failed_jobs' not in scheduler.job_status
     with pytest.raises(HTTPException) as refused:
         run(settings_router.trigger_job('retry_failed_jobs', BackgroundTasks()))
     assert refused.value.status_code == 404
 
-
-# ---------- each job says whether its failure can pass ----------
 
 TRANSIENT_ERRORS = [
     (MailcowUnreachableError(), True),
@@ -240,8 +216,6 @@ def test_the_dns_check_says_whether_its_failure_can_pass(features, monkeypatch, 
 
 
 def _credentials(monkeypatch, answers):
-    """answers: name -> a list of check answers, one per run (None: not set);
-    an exception in the list is raised by that run."""
     def check(name):
         async def answer():
             result = answers[name].pop(0)
@@ -288,9 +262,6 @@ def test_the_credential_check_runs_again_only_when_the_server_could_not_answer(m
 
 
 def test_a_check_that_broke_off_is_never_retried_early(monkeypatch):
-    """The Read-Write key check may have been answered with a refusal before it
-    broke off (saving its result failed, say): retried every five minutes it
-    would be one more failed login each time."""
     _credentials(monkeypatch, {'mailcow_rw_key': [RuntimeError("could not save the result")],
                                'rspamd_password': [_refused('connection')]})
     run(scheduler.check_credentials_job())
@@ -318,8 +289,6 @@ def test_a_rejected_key_is_not_checked_more_often(jobs, monkeypatch):
     jobs.modify_job.assert_not_called()
     jobs.add_job.assert_not_called()
 
-
-# ---------- a manual Run keeps a failure ----------
 
 def _manual_run(job):
     scheduler.job_status[job] = {'last_run': None, 'status': 'idle', 'error': None}
@@ -362,8 +331,6 @@ def test_a_manual_domain_sync_that_works_is_a_success(features, monkeypatch):
 
 @pytest.mark.parametrize("error, retryable", TRANSIENT_ERRORS, ids=TRANSIENT_IDS)
 def test_a_dns_check_without_the_alias_domains_says_whether_that_can_pass(features, monkeypatch, error, retryable):
-    """The primary domains are checked; alias domains that could not be read
-    for a passing reason leave the run failed, so it runs again soon."""
     monkeypatch.setattr(scheduler.mailcow_api, "get_domains", AsyncMock(return_value=[{"domain_name": "example.com", "active": 1}]))
     monkeypatch.setattr(scheduler.mailcow_api, "get_alias_domain_map", AsyncMock(side_effect=error))
     monkeypatch.setattr(domains, "get_spf_source_ips", AsyncMock(return_value=[]))
@@ -377,13 +344,10 @@ def test_a_dns_check_without_the_alias_domains_says_whether_that_can_pass(featur
 
 
 def test_a_dns_check_with_no_domains_does_not_stay_running(features, monkeypatch):
-    """A status left on running refused every later manual Run with 409."""
     monkeypatch.setattr(scheduler.mailcow_api, "get_domains", AsyncMock(return_value=[]))
     assert run(scheduler.check_all_domains_dns_background()) == scheduler.JOB_STATUS_SET
     assert scheduler.job_status['dns_check']['status'] == 'success'
 
-
-# ---------- the flag stays inside ----------
 
 def _postgres_available() -> bool:
     try:

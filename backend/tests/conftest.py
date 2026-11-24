@@ -1,9 +1,3 @@
-"""
-Test configuration.
-
-Sets required environment variables BEFORE any app module import so that
-app.config.Settings() can construct without a real deployment environment.
-"""
 import os
 import pathlib
 import secrets
@@ -12,24 +6,16 @@ import time as _real_time
 
 import pytest
 
-# Secrets are new for each run; a run against a real database passes its
-# POSTGRES_* settings in the environment
 os.environ.setdefault("MAILCOW_URL", "https://mail.example.com")
 os.environ.setdefault("MAILCOW_API_KEY", secrets.token_hex(16))
 os.environ.setdefault("POSTGRES_USER", "test")
 os.environ.setdefault("POSTGRES_PASSWORD", secrets.token_hex(16))
 os.environ.setdefault("POSTGRES_DB", "test")
 
-# Make `app` importable when running pytest from the repo root or backend/
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
 
 def registered_routes(application):
-    """Inspect resolved routes, including hidden HTTP and WebSocket routes.
-
-    FastAPI 0.141 resolves included routers lazily. Keep this version-specific
-    introspection in one place; OpenAPI alone omits security-relevant routes.
-    """
     from fastapi.routing import _iter_routes_with_context
 
     for original, context in _iter_routes_with_context(application.routes):
@@ -39,12 +25,6 @@ def registered_routes(application):
 
 
 class _ModuleClock:
-    """Stands in for the ``time`` module inside one module under test.
-
-    Patching ``some_module.time.time`` would replace ``time.time`` for the
-    whole process, including background threads started by other tests.
-    """
-
     def __init__(self):
         self._overrides = {}
 
@@ -57,7 +37,6 @@ class _ModuleClock:
 
 @pytest.fixture
 def module_clock(monkeypatch):
-    """Override time functions as seen by one module only: module_clock(auth, time=lambda: 1000.0)."""
     clocks = {}
 
     def apply(module, **overrides):
@@ -72,11 +51,6 @@ def module_clock(monkeypatch):
 
 @pytest.fixture
 def app_schema():
-    """The app's tables in the test database, as the app's start creates them.
-
-    For a test whose request resolves a person's access (an OAuth2 sign-in or
-    session, a local user): that reads the users and system_settings tables.
-    """
     from sqlalchemy import text
     from app.database import engine, init_db
     try:
@@ -89,8 +63,6 @@ def app_schema():
 
 @pytest.fixture(autouse=True)
 def local_domains_loaded(monkeypatch):
-    """The automatic suppression jobs wait until every domain of this mailcow is
-    known; a test runs with that list loaded unless it says otherwise."""
     from app import config
     from app.mailcow_api import mailcow_api
     monkeypatch.setattr(config, "_cached_domains_complete", mailcow_api.base_url)
@@ -98,8 +70,6 @@ def local_domains_loaded(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def queue_log_unread(monkeypatch, request):
-    """The queue jobs also read the codes the Postfix log has for queued mail; a
-    test with a made-up queue reads none, unless it asks for the log (real_queue_log)."""
     scheduler = sys.modules.get("app.scheduler")
     if scheduler is not None and "real_queue_log" not in request.fixturenames:
         monkeypatch.setattr(scheduler, "_logged_deferral_codes", lambda arrived, waiting: {})
@@ -107,29 +77,20 @@ def queue_log_unread(monkeypatch, request):
 
 @pytest.fixture
 def real_queue_log():
-    """The queue jobs read the logged codes of queued mail from the test database."""
+    pass
 
 
 @pytest.fixture(autouse=True)
 def mailcow_reachable(monkeypatch):
-    """No test starts with mailcow refused because an earlier test could not connect to it."""
     from app import mailcow_api as client
     monkeypatch.setattr(client.mailcow_api, "_reachability", client._Reachability())
 
 
-# One Contract per app, shared by the whole run: building it copies the document
 _contracts = {}
 
 
 @pytest.fixture(autouse=True)
 def api_contract(monkeypatch, request):
-    """Check every answer the real app gives a test against /openapi.json (contract.py).
-
-    Only TestClient calls to app.main.app are checked; tests that build an app
-    of their own are left alone. A mismatch fails the test that made the call.
-    A test marked no_contract (it stubs the code that builds an answer) is not
-    checked.
-    """
     marker = request.node.get_closest_marker("no_contract")
     if marker is not None:
         if not marker.kwargs.get("reason"):
@@ -147,7 +108,6 @@ def api_contract(monkeypatch, request):
             contract = _contracts.get(id(main.app))
             if contract is None or contract.app is not main.app:
                 contract = _contracts[id(main.app)] = Contract(main.app)
-            # A followed redirect is an answer too
             for answer in (*response.history, response):
                 check_response(contract, answer)
         return response

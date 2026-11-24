@@ -1,14 +1,3 @@
-"""What the entity card's actions rely on, from the review of the card actions:
-
-- One blocklist check at a time, whoever starts it: the scheduled and manual
-  job and POST /api/blacklist/check (with or without a host) share one lock,
-  and the POST answers status busy, starting nothing, while a check runs.
-- An alias offers Open mailbox only when it delivers to a mailbox here: the
-  card's mailbox source names that mailbox (alias.local_mailbox), never an
-  outside first target.
-- GET /api/mailbox-stats/all?username= finds one mailbox by its whole
-  address (either form of an IDN domain), wherever the pages would put it.
-"""
 import uuid
 
 import idna
@@ -24,8 +13,8 @@ from app.config import settings
 MARK = uuid.uuid4().hex[:8]
 DOMAIN = f"r{MARK}.example"
 IDN_UNICODE = f"bücher{MARK}.example"
-IDN_ASCII = idna.encode(IDN_UNICODE).decode()   # as mailcow stores it: xn--...
-OWNER = f"zz.owner@{DOMAIN}"   # sorts after user00..user59
+IDN_ASCII = idna.encode(IDN_UNICODE).decode()
+OWNER = f"zz.owner@{DOMAIN}"
 TO_LOCAL = f"team@{DOMAIN}"
 TO_OUTSIDE = f"fwd@{DOMAIN}"
 
@@ -48,8 +37,6 @@ def client(monkeypatch):
     from app.main import app
     return TestClient(app)
 
-
-# ---------------------------------------------------------------- one blocklist check at a time
 
 def test_the_job_and_a_single_address_share_one_lock():
     from app import scheduler
@@ -108,8 +95,6 @@ def test_busy_is_documented():
     assert "CheckBusy" in schema["components"]["schemas"]
 
 
-# ---------------------------------------------------------------- alias and Mailbox Stats
-
 @pytest.fixture()
 def boxes(client):
     if not _postgres_available():
@@ -125,7 +110,6 @@ def boxes(client):
             db.commit()
     cleanup()
     with get_db_context() as db:
-        # 60 mailboxes: the one asked for sorts last, past the first page of 50
         for i in range(60):
             db.add(MailboxStatistics(username=f"user{i:02d}@{DOMAIN}", domain=DOMAIN, name=f"User {i}", active=True))
         db.add(MailboxStatistics(username=OWNER, domain=DOMAIN, name="Zz Owner", active=False))
@@ -154,7 +138,6 @@ def test_an_alias_names_its_mailbox_only_when_it_is_one_here(boxes):
     outside = _mailbox_source(boxes, TO_OUTSIDE)
     assert outside["alias"]["primary_mailbox"] == "ann@outside.test"
     assert outside["alias"]["local_mailbox"] is None
-    # A mailbox's own card has no alias part
     assert _mailbox_source(boxes, OWNER)["alias"] is None
 
 
@@ -166,11 +149,9 @@ def _all(client, **params):
 
 
 def test_mailbox_stats_finds_one_mailbox_by_its_whole_address(boxes):
-    # Past the first page of a search, it is not there
     assert OWNER not in _all(boxes, search=DOMAIN)
     assert _all(boxes, username=OWNER) == [OWNER]
     assert _all(boxes, username=OWNER.upper()) == [OWNER], "in any case"
     assert _all(boxes, username=f"user1@{DOMAIN}") == [], "whole, not a part of user10"
-    # An IDN domain, written either way
     assert _all(boxes, username=f"ann@{IDN_UNICODE}") == [f"ann@{IDN_ASCII}"]
     assert _all(boxes, username=f"ann@{IDN_ASCII}") == [f"ann@{IDN_ASCII}"]

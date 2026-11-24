@@ -1,7 +1,3 @@
-"""Block details: every block keeps why it happened, with its own copy of the
-evidence, for as long as the address is on the list.
-
-Fictional addresses and messages only."""
 import importlib.util
 import io
 import pathlib
@@ -12,7 +8,6 @@ from types import SimpleNamespace
 import pytest
 
 from app.config import settings
-# init_db creates the tables of the models imported so far
 import app.models  # noqa: F401
 
 MARK = uuid.uuid4().hex[:8]
@@ -63,7 +58,6 @@ def _events(email):
         row = db.query(SpamSuppression).filter(SpamSuppression.email == email).one()
         events = db.query(SuppressionEvent).filter(SuppressionEvent.suppression_id == row.id) \
             .order_by(SuppressionEvent.id).all()
-        # Plain copies: the session closes on return
         return row.id, [SimpleNamespace(**{c.name: getattr(e, c.name) for c in SuppressionEvent.__table__.columns})
                         for e in events]
 
@@ -128,14 +122,11 @@ def test_a_stuck_message_keeps_the_queue_details(db_ready):
 
 
 def test_a_stuck_message_counts_once_when_its_deletion_is_retried(db_ready):
-    """The block is stored before the message is deleted; when the deletion
-    fails, the next run stores the same message again and must not count it."""
     from app import scheduler
     from app.database import get_db_context
     from app.models import SpamSuppression
     arrived = datetime.utcnow().replace(microsecond=0) - timedelta(hours=2)
     stuck = {'email': RCPT, 'queue_id': f'R{MARK.upper()}', 'sender': SENDER, 'arrived': arrived, 'reason': None}
-    # The same recipient twice in one message is one event
     assert scheduler._store_deferred_suppressions_worker([stuck, dict(stuck)]) == 1
     assert scheduler._store_deferred_suppressions_worker([dict(stuck)]) == 0
     block_id, events = _events(RCPT)
@@ -143,14 +134,12 @@ def test_a_stuck_message_counts_once_when_its_deletion_is_retried(db_ready):
     with get_db_context() as db:
         row = db.get(SpamSuppression, block_id)
         assert (row.bounce_count, row.soft_bounce_count) == (1, 1)
-        # Turned off by hand meanwhile: a retry of the same message leaves it off
         row.active = False
         db.commit()
     assert scheduler._store_deferred_suppressions_worker([dict(stuck)]) == 0
     with get_db_context() as db:
         assert db.get(SpamSuppression, block_id).active is False
 
-    # Postfix may reuse a queue id: another arrival is another message, and so is another id
     again = {**stuck, 'arrived': arrived + timedelta(hours=1)}
     other = {**stuck, 'queue_id': f'S{MARK.upper()}'}
     assert scheduler._store_deferred_suppressions_worker([again, other, dict(stuck)]) == 1
@@ -163,7 +152,6 @@ def test_a_stuck_message_counts_once_when_its_deletion_is_retried(db_ready):
 
 
 def test_stuck_messages_say_only_that_they_were_stuck(db_ready):
-    """The deletion is not known yet when the block is stored."""
     from app import scheduler
     scheduler._store_deferred_suppressions_worker([{'email': RCPT, 'queue_id': f'T{MARK.upper()}', 'sender': SENDER,
                                                     'arrived': datetime.utcnow() - timedelta(hours=2), 'reason': None}])
@@ -176,7 +164,6 @@ def test_stuck_messages_say_only_that_they_were_stuck(db_ready):
 
 
 def test_two_runs_at_once_count_a_message_once(db_ready, monkeypatch):
-    """Without the lock both runs would read 'not kept yet' before either commits."""
     import threading
     import time
     from app import scheduler
@@ -184,11 +171,11 @@ def test_two_runs_at_once_count_a_message_once(db_ready, monkeypatch):
     from app.models import SpamSuppression
     arrived = datetime.utcnow().replace(microsecond=0) - timedelta(hours=2)
     first = {'email': RCPT, 'queue_id': f'U{MARK.upper()}', 'sender': SENDER, 'arrived': arrived, 'reason': None}
-    scheduler._store_deferred_suppressions_worker([first])  # the block exists, as on a retry
+    scheduler._store_deferred_suppressions_worker([first])
     record = scheduler.record_stuck
 
     def slow_record(db, captured):
-        time.sleep(0.5)  # hold the transaction open after the reads
+        time.sleep(0.5)
         record(db, captured)
 
     monkeypatch.setattr(scheduler, 'record_stuck', slow_record)
@@ -290,8 +277,6 @@ def test_the_upgrade_keeps_what_an_existing_block_knows(db_ready):
 
 
 def test_each_event_keeps_the_expiry_it_set_and_its_own_message(db_ready):
-    """Two bounces of one address in one run: a queue id Postfix reused four
-    days later is another message, and each event keeps the expiry it set."""
     from app import scheduler
     from app.database import get_db_context
     queue_id, now = f'R{MARK.upper()}', datetime.utcnow()

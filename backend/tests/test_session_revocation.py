@@ -1,9 +1,3 @@
-"""Changing how people sign in revokes the sessions issued before the change.
-
-Rotating the Basic Auth password from the Settings page used to reject the old
-password at once but leave every session cookie issued with it valid until it
-expired, so rotating a password did not evict whoever held a stolen cookie.
-"""
 import base64
 import secrets
 import threading
@@ -26,7 +20,6 @@ from app.routers import settings as settings_router
 from sign_in_helpers import revoke_all_sessions
 
 
-# New for each run
 OLD_PASSWORD = secrets.token_hex(16)
 NEW_PASSWORD = secrets.token_hex(16)
 
@@ -37,18 +30,14 @@ def basic(password=OLD_PASSWORD):
 
 @pytest.fixture(autouse=True)
 def store(monkeypatch):
-    """Real update_settings, build_settings and reload_settings; only the
-    system_settings table is a dict."""
     data = {}
     for key in list(cfg.os.environ):
         if key.startswith(("AUTH_", "BASIC_AUTH", "OAUTH2_", "SESSION_")):
             monkeypatch.delenv(key)
     monkeypatch.setenv("SETTINGS_EDIT_VIA_UI_ENABLED", "true")
-    # Values go through the same string round trip as the system_settings table
     monkeypatch.setattr(ss, "get_config_overrides_from_db", lambda db, types_: {
         k: ss._deserialize_value(ss._serialize_value(v), k, types_[k]) for k, v in data.items()})
     monkeypatch.setattr(settings_router, "save_config_overrides_to_db", lambda db, values: data.update(values))
-    # The last-admin and username checks read the users table (test_users.py covers them)
     monkeypatch.setattr(settings_router.users_store, "check_sign_in_settings", lambda db, before, allowed: None)
     monkeypatch.setattr(settings_router, "has_config_overrides_in_db", lambda db: bool(data))
     monkeypatch.setattr(settings_router, "cleanup_disabled_feature_data", lambda db: None)
@@ -85,7 +74,6 @@ def test_auth_change_revokes_other_sessions_and_keeps_the_operator_signed_in(cha
     assert response.status_code == 200
     assert stolen.get("/api/auth/verify").status_code == 401
     assert stolen.put("/api/settings", json={"auth_password": secrets.token_hex(16)}).status_code == 401
-    # The operator who saved got a fresh session and is not signed out mid-save
     assert "session_id=" in response.headers.get("set-cookie", "")
     assert operator.get("/api/auth/verify").status_code == 200
     assert len(session._session_store) == 1
@@ -112,12 +100,7 @@ def test_resaving_the_same_credentials_keeps_sessions():
     assert other.get("/api/auth/verify").status_code == 200
 
 
-# ── A reload elsewhere during the save ─────────────────────────────────────
-
 def test_revocation_is_decided_from_the_saved_settings(monkeypatch):
-    """The shared settings may hold older values than the database: here they
-    are set back to the pre-save ones right after the save's reload. The
-    password change still ends the stolen session."""
     stolen, operator = signed_in(), signed_in()
     old = cfg.build_settings(object())
     real = settings_router._record_list_transition
@@ -132,12 +115,7 @@ def test_revocation_is_decided_from_the_saved_settings(monkeypatch):
 
 
 def test_a_reload_elsewhere_cannot_bring_the_old_password_back(store, monkeypatch):
-    """GET /api/settings reloads the shared settings too. One that read the
-    stored settings before a password change and put them in force after the
-    change's own reload brought the old password back, and the change ended no
-    session. Reloads are serialized with the save, so the GET reads after it."""
     stolen, operator = signed_in(), signed_in()
-    # get_arrived: the GET read the stored settings, or waits for the reload lock
     get_arrived, get_read, put_reloaded = threading.Event(), threading.Event(), threading.Event()
     get_thread, errors = {}, []
     read = ss.get_config_overrides_from_db
@@ -150,7 +128,6 @@ def test_a_reload_elsewhere_cannot_bring_the_old_password_back(store, monkeypatc
         if is_get():
             get_read.set()
             get_arrived.set()
-            # Puts what it read in force only after the save's reload
             put_reloaded.wait(timeout=5)
         return values
 
@@ -169,13 +146,12 @@ def test_a_reload_elsewhere_cannot_bring_the_old_password_back(store, monkeypatc
     def get_settings():
         try:
             settings_router.get_editable_settings(db=object())
-        except Exception as e:  # reported by the test below
+        except Exception as e:
             errors.append(e)
 
     def save(db, values):
         thread = get_thread["thread"] = threading.Thread(target=get_settings, daemon=True)
         thread.start()
-        # The GET reads the settings as they are before this save, or waits
         assert get_arrived.wait(timeout=5)
         store.update(values)
 
@@ -184,11 +160,9 @@ def test_a_reload_elsewhere_cannot_bring_the_old_password_back(store, monkeypatc
     def after_reload(*args, **kwargs):
         put_reloaded.set()
         if get_read.is_set():
-            # It read before the save: it puts the old settings in force now
             get_thread["thread"].join(timeout=5)
         return real_transition(*args, **kwargs)
 
-    # The GET's reload, not the save's (which holds the lock already)
     monkeypatch.setattr(cfg, "settings_reload_lock", WatchedLock(getattr(cfg, "settings_reload_lock", None)),
                         raising=False)
     monkeypatch.setattr(ss, "get_config_overrides_from_db", read_stored)
@@ -206,11 +180,7 @@ def test_a_reload_elsewhere_cannot_bring_the_old_password_back(store, monkeypatc
     assert TestClient(app).post("/api/auth/session", headers=basic(NEW_PASSWORD)).status_code == 200
 
 
-# ── A login that ends after a sign-in change ───────────────────────────────
-
 def test_a_login_let_in_before_a_password_change_gets_no_session(monkeypatch):
-    """The old password is accepted, then the change lands while the login
-    waits for a worker. Its session would outlive the change."""
     check = auth_module.verify_credentials
 
     def accept_then_change(username, password):
@@ -227,8 +197,6 @@ def test_a_login_let_in_before_a_password_change_gets_no_session(monkeypatch):
 
 
 def test_a_session_cannot_be_exchanged_for_a_new_one(monkeypatch):
-    """A new session needs the password, so a stolen cookie cannot be turned
-    into a session that outlives a revocation."""
     stolen = signed_in()
     assert stolen.post("/api/auth/session").status_code == 401
     revoke_all_sessions()
@@ -245,7 +213,6 @@ def _admitted_request(generation=None):
 
 
 def test_a_login_let_in_while_sign_in_was_off_gets_no_session_once_it_is_on():
-    # Let in while sign-in was off, then Basic Auth turned on (which revokes)
     request = _admitted_request(session.auth_generation())
     revoke_all_sessions()
     with pytest.raises(HTTPException) as refused:
@@ -262,9 +229,6 @@ def test_a_login_the_middleware_did_not_see_gets_no_session():
 
 
 def test_the_saver_is_not_signed_in_again_after_a_later_change(monkeypatch):
-    """Another save changed sign-in again between this save's revocation and
-    its new session for the operator: that change ends the operator's session
-    as well, so none is issued."""
     stolen, operator = signed_in(), signed_in()
 
     def another_change_meanwhile(db):
@@ -280,8 +244,6 @@ def test_the_saver_is_not_signed_in_again_after_a_later_change(monkeypatch):
 
 
 def test_the_oauth2_client_takes_the_new_provider_before_new_sessions_begin(monkeypatch):
-    """A login let in after the revocation gets a session; it must finish
-    with the new provider, not with the client still set up for the old one."""
     client = settings_router.oauth2_client
     for name in ("issuer_url", "client_id", "client_secret", "redirect_uri", "scopes",
                  "authorization_url", "token_url", "userinfo_url", "_discovery_cache"):

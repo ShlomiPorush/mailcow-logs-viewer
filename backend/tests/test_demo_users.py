@@ -1,7 +1,3 @@
-"""
-The demo's example users: Settings > Users shows one per access level, while
-nobody can sign in as them, since the demo has no sign-in.
-"""
 import pytest
 
 import starlette.staticfiles as sf
@@ -37,7 +33,6 @@ def _wipe():
 
 @pytest.fixture
 def demo_users(monkeypatch):
-    """Sign-in off, as in the demo image, with the example users seeded."""
     if not _postgres_available():
         pytest.skip('PostgreSQL not available')
     from app.database import init_db
@@ -60,10 +55,8 @@ def test_the_examples_show_in_settings(demo_users):
     assert users["dana@example.com"]["areas"] == {"messages": "view", "outbound": "view", "security": "act"}
     assert [n for n, u in users.items() if u["disabled"]] == ["contractor"]
     assert not any(u["name_conflict"] for u in users.values())
-    # Local users read as people who used the app; OAuth2 entries show no sign-in time
     assert all(users[n]["last_login_at"] for n in ("maria", "helpdesk", "contractor"))
     assert users["it-lead@example.org"]["last_login_at"] is None
-    # No sign-in is on, so the page says so instead of showing the built-in admin
     assert body["builtin"]["basic_auth_enabled"] is False and body["oauth2"]["enabled"] is False
 
 
@@ -72,7 +65,6 @@ def test_nobody_knows_a_local_users_password(demo_users):
     from app.models import User
     with get_db_context() as db:
         hashes = [h for (h,) in db.query(User.password_hash).filter(User.kind == "local")]
-    # Each gets its own random password at seeding: none is written down anywhere
     assert len(hashes) == 3 and len(set(hashes)) == 3
     assert not any("password" in spec for spec in seed.DEMO_USERS)
     assert users_store.verify_sign_in("maria", "maria") is None

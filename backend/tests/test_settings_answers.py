@@ -1,11 +1,3 @@
-"""Every answer the Settings calls can give, so the contract check (conftest.py,
-contract.py) holds each one to /openapi.json: the information and settings, the
-saves and the requests they refuse (400, 403, 422), a busy save (503), the
-database failing (the 200 answers that say so, and 500), the purge of a feature's
-data with Rspamd refusing (409, 502), the checks of credentials and connections,
-GeoIP and the manual job runs (404, 409). mailcow, Rspamd, MaxMind, SMTP and IMAP
-are faked or left unconfigured; nothing leaves the test. Every setting and stored
-row a call changes is put back."""
 import pathlib
 import secrets
 import types
@@ -34,7 +26,6 @@ from app.services import figures  # noqa: E402
 from app.services.oauth2_client import oauth2_client  # noqa: E402
 
 MARK = uuid.uuid4().hex[:8]
-# Stored rows these calls write: settings, check results, the Suppressions switch token
 SHARED_PREFIXES = ('config.', 'maxmind.', 'credential_check.')
 SHARED_KEYS = (OFF_TRANSITION_KEY,)
 
@@ -54,8 +45,6 @@ def _broken_context():
 
 
 def _set(monkeypatch, key, value):
-    """A setting for this test. A value an earlier test left on the settings wrapper itself
-    would hide it, so that one is taken off for the test and put back after."""
     if key in vars(settings):
         monkeypatch.delattr(settings, key)
     monkeypatch.setattr(settings._inner, key, value)
@@ -80,7 +69,6 @@ def client(monkeypatch):
     for key in ('auth_enabled', 'basic_auth_enabled', 'oauth2_enabled'):
         _set(monkeypatch, key, False)
     _set(monkeypatch, 'edit_settings_via_ui_enabled', False)
-    # Nothing is sent: no SMTP, IMAP, MaxMind, mailcow key or Rspamd password
     for key in ('smtp_host', 'smtp_user', 'smtp_password', 'smtp_from', 'dmarc_imap_host', 'dmarc_imap_user',
                 'dmarc_imap_password', 'maxmind_license_key', 'maxmind_account_id', 'rspamd_password'):
         _set(monkeypatch, key, None)
@@ -95,7 +83,6 @@ def client(monkeypatch):
 
 @pytest.fixture
 def rows(client):
-    """The stored settings and check results as they were, put back after the test."""
     if not _postgres_available():
         pytest.skip('PostgreSQL not available')
     from app.models import SpamSuppression, SystemSetting
@@ -121,15 +108,11 @@ def rows(client):
 
 @pytest.fixture
 def editing(client, rows, monkeypatch):
-    """UI editing on, also for the settings a save reloads from the environment; the
-    settings, the mailcow client and the jobs as they were after the test."""
     monkeypatch.setenv('SETTINGS_EDIT_VIA_UI_ENABLED', 'true')
     _set(monkeypatch, 'edit_settings_via_ui_enabled', True)
-    # A save's side effects that build no part of its answer
     monkeypatch.setattr(settings_router, 'cleanup_disabled_feature_data', lambda db: {})
     monkeypatch.setattr(settings_router, 'run_feature_data_sweep_soon', lambda: None)
     monkeypatch.setattr(settings_router, 'reschedule_interval_jobs', lambda: None)
-    # A save puts new settings in force and reloads the OAuth2 client from them
     inner = settings._inner
     oauth2_state = dict(vars(oauth2_client))
     yield client
@@ -139,8 +122,6 @@ def editing(client, rows, monkeypatch):
     vars(oauth2_client).update(oauth2_state)
     mailcow_api.reload_config()
 
-
-# ---------------------------------------------------------------- information and health
 
 def test_settings_info(client, rows, monkeypatch):
     from app.models import MessageCorrelation
@@ -153,7 +134,6 @@ def test_settings_info(client, rows, monkeypatch):
         body = client.get('/api/settings/info').json()
         assert 'editable_config' not in body
         assert any(c['queue_id'] == f'Q{MARK}' for c in body['recent_incomplete_correlations'])
-        # Editing on, MaxMind set, a stored license check and a job at its clock time
         _set(monkeypatch, 'edit_settings_via_ui_enabled', True)
         _set(monkeypatch, 'maxmind_license_key', secrets.token_hex(16))
         _set(monkeypatch, 'maxmind_account_id', '1')
@@ -165,7 +145,6 @@ def test_settings_info(client, rows, monkeypatch):
         body = client.get('/api/settings/info').json()
         assert body['configuration']['maxmind_status']['error'] == 'Invalid'
         assert 'editable_config' in body and body['geoip_configuration']['enabled'] is True
-        # The form locks the Basic Auth password's Remove under AUTH_ENABLED from /info alone
         assert body['legacy_auth_enabled'] is False
         password = secrets.token_hex(16)
         _set(monkeypatch, 'auth_password', password)
@@ -190,8 +169,6 @@ def test_health(client, rows):
     app.dependency_overrides[get_db] = _broken_session
     assert client.get('/api/settings/health').json()['status'] == 'unhealthy'
 
-
-# ---------------------------------------------------------------- the settings
 
 def test_editable_settings(client, rows, editing):
     assert client.get('/api/settings').status_code == 200
@@ -222,7 +199,6 @@ def test_saving_settings_while_editing_is_off(client):
 
 
 def test_saving_settings_while_the_feature_list_is_busy(editing, monkeypatch):
-    # Another save holds the samples' lock: this one waits, then changes nothing
     monkeypatch.setattr(figures, 'SWITCH_WAIT', '200ms')
     with database.engine.connect() as other:
         other.execute(text('SELECT pg_advisory_lock(:key)'), {'key': figures._LOCK_KEY})
@@ -245,16 +221,12 @@ def test_import_from_env(editing):
     assert body['settings_migrated'] is True and 'mailcow_url' in body['configuration']
 
 
-# ---------------------------------------------------------------- purging a feature's data
-
 class _Result:
     def scalar(self):
         return 2
 
 
 class _RecordingDb:
-    """Takes the statements of a purge, so no table of the shared database is emptied."""
-
     def execute(self, statement, *args, **kwargs):
         return _Result()
 
@@ -270,11 +242,9 @@ def test_purge_feature_data(editing, monkeypatch):
     assert c.post('/api/settings/purge-feature-data', json={'feature': 'nope'}).status_code == 400
     assert c.post('/api/settings/purge-feature-data', json={'feature': 'dmarc'}).status_code == 400
     assert c.post('/api/settings/purge-feature-data', json=['dmarc']).status_code == 422
-    # A feature name that is not text fails in the handler (main.py's handler)
     assert c.post('/api/settings/purge-feature-data', json={'feature': 5}).status_code == 500
     _set(monkeypatch, 'disabled_features', 'mailbox-stats,devices,suppressions')
     assert c.post('/api/settings/purge-feature-data', json={'feature': 'suppressions'}).status_code == 400
-    # Without the Read-Write key and the Rspamd password the blocks cannot be removed
     assert c.post('/api/settings/purge-feature-data',
                   json={'feature': 'suppressions', 'rspamd': 'remove'}).json()['detail']['code'] == \
         'no_rw_key_and_password'
@@ -306,10 +276,7 @@ def test_purge_when_mailcow_does_not_confirm_the_removal(editing, monkeypatch):
     assert answer.status_code == 502 and answer.json()['detail']['code'] == 'not_confirmed'
 
 
-# ---------------------------------------------------------------- checks
-
 def test_connection_tests_without_a_server(client):
-    # Not configured: the tests stop before connecting
     for path in ('/api/settings/test/smtp', '/api/settings/test/imap'):
         assert client.post(path).json()['success'] is False
     folders = client.post('/api/settings/imap/folders').json()
@@ -345,7 +312,6 @@ def test_imap_folder_list(client, monkeypatch):
 
 
 class _MaxMind:
-    """MaxMind's license check, answering with a fixed status."""
     status = 401
 
     def __init__(self, *args, **kwargs):
@@ -371,7 +337,6 @@ def test_maxmind_license(client, rows, monkeypatch):
 
 
 def _answering(monkeypatch, status):
-    """mailcow and Rspamd answer every request with this status."""
     transport = httpx.MockTransport(lambda request: httpx.Response(status, json={}))
     monkeypatch.setattr(mailcow_api, '_get_client', lambda: httpx.AsyncClient(transport=transport))
 
@@ -385,13 +350,11 @@ def test_credential_checks(client, rows, monkeypatch):
     assert client.post('/api/settings/mailcow/rw-key/validate').json()['error'] == 'rejected'
     _answering(monkeypatch, 302)
     assert client.post('/api/settings/rspamd/password/validate').json()['error'] == 'redirected'
-    # JSON that is not an object is not Rspamd's answer to a login
     for body in (b'[]', b'null', b'"ok"'):
         transport = httpx.MockTransport(lambda request, body=body: httpx.Response(200, content=body))
         monkeypatch.setattr(mailcow_api, '_get_client', lambda: httpx.AsyncClient(transport=transport))
         odd = client.post('/api/settings/rspamd/password/validate').json()
         assert (odd['valid'], odd['error']) == (False, 'unexpected'), body
-    # The stored results, as the Status page reads them
     configuration = client.get('/api/settings/info').json()['configuration']
     assert configuration['mailcow_rw_key_status']['http_status'] == 401
     assert configuration['rspamd_password_status']['checked_at']
@@ -399,8 +362,6 @@ def test_credential_checks(client, rows, monkeypatch):
     assert client.post('/api/settings/mailcow/rw-key/validate').status_code == 500
     assert client.post('/api/settings/rspamd/password/validate').status_code == 500
 
-
-# ---------------------------------------------------------------- GeoIP
 
 def test_geoip(client, monkeypatch):
     assert client.get('/api/settings/geoip/status').json()['configured'] is False
@@ -418,23 +379,18 @@ def test_geoip(client, monkeypatch):
 def test_geoip_validation(client, monkeypatch):
     from app.services import geoip_service
     from app.services.geoip_downloader import get_geoip_status
-    # Validating closes the readers and sets the GeoIP state: the test works on its own,
-    # and the readers and state as they were come back untouched after it
     for name in ('_city_reader', '_asn_reader', '_geoip_available', '_geoip_db_valid'):
         monkeypatch.setattr(geoip_service, name, None)
     files = get_geoip_status()
     missing = {**files, 'City': {**files['City'], 'available': False}}
     monkeypatch.setattr(settings_router, 'get_geoip_status', lambda: missing)
     assert client.post('/api/settings/geoip/validate').json()['error'] == 'The City database is missing. Download the GeoIP databases again.'
-    # The file is there: the readers are reloaded and the lookups tried
     there = {**files, 'City': {**files['City'], 'available': True}}
     monkeypatch.setattr(settings_router, 'get_geoip_status', lambda: there)
     assert 'db_valid' in client.post('/api/settings/geoip/validate').json()
 
 
 def test_geoip_files_that_cannot_be_read(client, monkeypatch):
-    """A database file that goes away between the check that it is there and the
-    reading of its size and date (500)."""
     from app.services import geoip_downloader
 
     class Vanishing(type(pathlib.Path())):
@@ -452,11 +408,8 @@ def test_geoip_files_that_cannot_be_read(client, monkeypatch):
     assert client.post('/api/settings/geoip/validate').status_code == 500
 
 
-# ---------------------------------------------------------------- manual job runs
-
 def test_job_runs(client, monkeypatch):
     assert client.post('/api/settings/jobs/nope/run').status_code == 404
-    # Without MaxMind credentials Update GeoIP would do nothing
     assert 'MaxMind' in client.post('/api/settings/jobs/update_geoip/run').json()['detail']
 
     async def checked():

@@ -1,8 +1,3 @@
-"""Rate Limits: the mailcow calls behind the page, the grouping of the
-collected `ratelimited` log, and the guards on every write.
-
-Nothing here talks to a real mailcow - the API client is exercised through a
-monkeypatched `_make_request`, and the router through a fake client object."""
 from conftest import registered_routes
 
 import asyncio
@@ -27,10 +22,7 @@ NEWEST_HASH = f'RLnewest{MARKER}'
 OLDER_HASH = f'RLolder{MARKER}'
 
 
-# ---------- wiring ----------
-
 def test_every_endpoint_is_registered_under_the_api_prefix():
-    """Anything outside /api/ is unauthenticated (see test_route_exposure)."""
     from app.main import app
     paths = {getattr(route, 'path', '') for route in registered_routes(app)}
     for path in ('/api/rate-limits/events', '/api/rate-limits/sender-events',
@@ -39,8 +31,6 @@ def test_every_endpoint_is_registered_under_the_api_prefix():
                  '/api/rate-limits/bulk', '/api/rate-limits/reset'):
         assert path in paths, f'{path} is not registered'
 
-
-# ---------- API client: endpoint paths and payloads (no network) ----------
 
 def _client():
     return MailcowAPI()
@@ -75,7 +65,6 @@ def test_get_rl_domain_asks_mailcow_for_the_domain_limit(monkeypatch):
 
 
 def test_no_limit_is_an_empty_answer(monkeypatch):
-    """mailcow answers {} for a mailbox that has no limit - not an error."""
     api = _client()
 
     async def fake(endpoint, method='GET', **kw):
@@ -125,8 +114,6 @@ def test_edit_rl_domain_posts_the_items_and_attr_payload(monkeypatch):
 
 
 def test_edit_rl_mboxes_sends_every_mailbox_in_one_call(monkeypatch):
-    """A bulk apply must be one request, not one per mailbox - mailcow's edit
-    endpoint takes the whole list."""
     api = _client()
     seen = {}
 
@@ -185,8 +172,6 @@ def test_removing_a_limit_sends_a_zero_value(monkeypatch):
 
 
 def test_delete_rl_hash_posts_a_bare_list(monkeypatch):
-    """mailcow's rlhash delete takes the hash as a bare JSON list, not an
-    items/attr object."""
     api = _client()
     seen = {}
 
@@ -200,8 +185,6 @@ def test_delete_rl_hash_posts_a_bare_list(monkeypatch):
     assert seen['endpoint'] == '/api/v1/delete/rlhash'
     assert seen['json'] == ['RLabc123']
 
-
-# ---------- database-backed tests ----------
 
 def _postgres_available() -> bool:
     try:
@@ -228,7 +211,6 @@ def _cleanup():
 
 
 def _log_row(user, index, when, rl_hash):
-    """One collected `ratelimited` entry, in the shape mailcow really returns."""
     from app.models import RawServiceLog
     return RawServiceLog(
         service='ratelimited',
@@ -264,11 +246,9 @@ def env():
 
     now = datetime.utcnow()
     with get_db_context() as db:
-        # The loud sender: six hits, the newest one carrying NEWEST_HASH
         for index in range(6):
             rl_hash = NEWEST_HASH if index == 0 else OLDER_HASH
             db.add(_log_row(SENDER, index, now - timedelta(minutes=index + 1), rl_hash))
-        # A second sender: one hit, older than an hour, and no configured limit
         db.add(_log_row(QUIET, 0, now - timedelta(minutes=90), OLDER_HASH))
 
         db.add(MailboxStatistics(username=SENDER, domain=DOMAIN, active=True,
@@ -288,7 +268,6 @@ def _events(hours=168):
 
 
 def test_events_are_grouped_by_sender_with_hit_counts(env):
-    """The question the page answers: who is hitting a limit, and how often."""
     data = _events()
     groups = {g['user']: g for g in data['by_sender']}
     assert groups[SENDER]['events'] == 6
@@ -300,7 +279,6 @@ def test_events_are_grouped_by_sender_with_hit_counts(env):
 
 
 def test_the_latest_hash_is_the_one_offered_for_reset(env):
-    """Releasing the counter must use the newest hash, not an expired one."""
     groups = {g['user']: g for g in _events()['by_sender']}
     assert groups[SENDER]['last_rl_hash'] == NEWEST_HASH
 
@@ -327,26 +305,18 @@ def test_the_flat_feed_names_the_sender(env):
 
 
 def test_the_window_scopes_the_chart_but_never_the_sender_list(env):
-    """QUIET's only hit is 90 minutes old. A one hour window drops it from the
-    chart's numbers, but the Blocked senders list mirrors reality - every
-    collected sender stays visible regardless of the window."""
     data = _events(hours=1)
     groups = {g['user']: g for g in data['by_sender']}
     assert SENDER in groups
     assert QUIET in groups, 'the sender list must ignore the window'
     assert groups[QUIET]['events'] == 1
 
-    # The chart's numbers stay window-scoped and consistent with each other
     chart_total = sum(b['count'] for b in data['by_bucket'])
     assert chart_total == data['total_events']
     wide = _events(hours=168)
     assert wide['total_events'] >= data['total_events'] + 1, \
         "QUIET's 90 minute old hit counts in the wide window but not in one hour"
 
-
-# ---------- one sender's full history ----------
-# Opening a sender must show everything collected about them, not the handful
-# of rows /events carries for the instant first paint.
 
 def _sender_events(user):
     from app.database import get_db_context
@@ -356,8 +326,6 @@ def _sender_events(user):
 
 
 def _seed_extra_hits(count, user=SENDER):
-    """More hits for one sender, older than the ones the fixture seeded, so
-    there is more history than the five rows /events keeps."""
     from app.database import get_db_context
     now = datetime.utcnow()
     with get_db_context() as db:
@@ -384,7 +352,6 @@ def test_a_senders_whole_history_is_returned_newest_first(env):
 
 
 def test_the_history_holds_more_than_the_five_rows_events_carries(env):
-    """The whole point of the endpoint: the detail view is not capped at five."""
     _seed_extra_hits(4)
     groups = {g['user']: g for g in _events()['by_sender']}
     assert len(groups[SENDER]['recent']) == 5
@@ -405,7 +372,6 @@ def test_an_unknown_sender_is_an_empty_history_not_an_error(env):
 
 
 def test_the_sender_is_matched_regardless_of_case(env):
-    """Addresses arrive from the log in whatever case the client sent."""
     data = _sender_events(f'  {SENDER.upper()}  ')
     assert data['user'] == SENDER
     assert data['total'] == 6
@@ -413,8 +379,6 @@ def test_the_sender_is_matched_regardless_of_case(env):
 
 
 def test_a_very_long_history_is_capped_but_still_counted(env, monkeypatch):
-    """One sender must not render a runaway table, and the count still has to
-    tell the truth so the page can say "showing 3 of 10"."""
     from app.routers import rate_limits
     _seed_extra_hits(4)
     monkeypatch.setattr(rate_limits, '_SENDER_EVENTS_MAX', 3)
@@ -424,11 +388,6 @@ def test_a_very_long_history_is_capped_but_still_counted(env, monkeypatch):
     assert len(data['events']) == 3, 'the newest rows only'
     assert data['total'] == 10, 'the real total, not the capped length'
 
-
-# ---------- the activity chart's buckets ----------
-# An hour bucket is the UTC instant it starts at, with Z, so the page can show
-# it in the app time zone and the two repeated hours at the end of daylight
-# saving stay apart. A day bucket is a day in the app time zone, shown as is.
 
 @pytest.fixture()
 def app_zone(monkeypatch):
@@ -440,7 +399,6 @@ def app_zone(monkeypatch):
 
 
 def test_a_day_or_less_is_bucketed_per_hour_and_anything_longer_per_day(app_zone):
-    """The chart's resolution follows the window, not the other way round."""
     from app.routers.rate_limits import _bucket_key
     when = datetime(2025, 9, 14, 17, 43, 12)
     assert _bucket_key(when, 'hour') == '2025-09-14T17:00:00Z'
@@ -450,14 +408,12 @@ def test_a_day_or_less_is_bucketed_per_hour_and_anything_longer_per_day(app_zone
 def test_a_day_bucket_is_a_day_in_the_app_time_zone(app_zone):
     from app.routers.rate_limits import _bucket_key
     app_zone('Asia/Tokyo')
-    # 17:43 UTC is 02:43 the next morning in Tokyo; the hour stays a UTC instant
     when = datetime(2025, 9, 14, 17, 43, 12)
     assert _bucket_key(when, 'day') == '2025-09-15'
     assert _bucket_key(when, 'hour') == '2025-09-14T17:00:00Z'
 
 
 def test_the_bucket_series_is_zero_filled_across_the_whole_window(app_zone):
-    """A quiet stretch has to show as a gap in the chart, not vanish from it."""
     from app.routers.rate_limits import _bucket_series
     since = datetime(2025, 9, 14, 9, 30)
     until = datetime(2025, 9, 14, 12, 5)
@@ -485,14 +441,12 @@ def test_the_bucket_series_covers_every_day_of_a_long_window(app_zone):
 def test_the_day_series_uses_the_days_of_the_app_time_zone(app_zone):
     from app.routers.rate_limits import _bucket_series
     app_zone('Asia/Tokyo')
-    # 2025-09-09 08:50 to 2025-09-14 09:10 in Tokyo
     series = _bucket_series(datetime(2025, 9, 8, 23, 50), datetime(2025, 9, 14, 0, 10), 'day', {})
     assert [b['bucket'] for b in series] == [
         '2025-09-09', '2025-09-10', '2025-09-11', '2025-09-12', '2025-09-13', '2025-09-14']
 
 
 def test_the_hour_series_keeps_the_repeated_hour_apart(app_zone):
-    """Europe/Berlin repeats 02:00-03:00 on 2026-10-25: two buckets, not one."""
     from app.routers.rate_limits import _bucket_key, _bucket_series
     app_zone('Europe/Berlin')
     first, second = datetime(2026, 10, 25, 0, 30), datetime(2026, 10, 25, 1, 30)
@@ -505,7 +459,6 @@ def test_the_hour_series_keeps_the_repeated_hour_apart(app_zone):
 
 
 def test_a_count_outside_the_generated_range_is_still_returned(app_zone):
-    """A log written while the request ran must not be silently dropped."""
     from app.routers.rate_limits import _bucket_series
     since = datetime(2025, 9, 14, 10, 0)
     until = datetime(2025, 9, 14, 11, 0)
@@ -538,24 +491,16 @@ def test_a_long_window_reports_daily_buckets(env, app_zone):
 
 @pytest.mark.parametrize('hours', [1, 24, 168, 720, 2160, 8760])
 def test_every_counted_hit_lands_in_exactly_one_bucket(env, hours):
-    """The chart and the headline count must never disagree."""
     data = _events(hours=hours)
     assert sum(b['count'] for b in data['by_bucket']) == data['total_events']
 
 
 def test_the_buckets_count_the_seeded_hits(env):
-    """SENDER's six hits are all within the last ten minutes, so they sit in
-    the newest hourly bucket, or split over it and the one before."""
     counts = [b['count'] for b in _events(hours=24)['by_bucket']]
     assert counts[-1] + counts[-2] >= 6, 'recent hits belong in the newest buckets'
 
 
-# ---------- write endpoints ----------
-
 class FakeMailcow:
-    """Stands in for the mailcow client inside the router. Records calls so a
-    test can assert what would have been sent, and never touches the network."""
-
     def __init__(self, has_rw_key=True):
         self.has_rw_key = has_rw_key
         self.calls = []
@@ -605,7 +550,6 @@ def _set_domain(value, frame, domain=DOMAIN):
 
 
 def test_setting_a_mailbox_limit_reaches_mailcow_and_updates_the_local_row(env, monkeypatch):
-    """The page must show the new limit at once, not after the next sync."""
     from app.database import get_db_context
     from app.models import MailboxStatistics
     fake = _fake_client(monkeypatch)
@@ -677,11 +621,6 @@ def test_an_unknown_domain_is_refused(env, monkeypatch):
     assert fake.calls == []
 
 
-# ---------- applying one limit to a whole filtered selection ----------
-# "Apply to filtered" sends everything the page currently shows. The contract
-# that matters: one mailcow call per kind, the local mirror kept in step, and a
-# name the server does not know reported back instead of failing the batch.
-
 def _bulk(value, frame, mailboxes=None, domains=None):
     from app.routers import rate_limits
     return asyncio.run(rate_limits.set_limits_in_bulk(
@@ -701,7 +640,6 @@ def _limit_of(mailbox):
 
 
 def test_a_bulk_apply_is_one_mailcow_call_per_kind(env, monkeypatch):
-    """160 mailboxes must not become 160 HTTP round trips."""
     fake = _fake_client(monkeypatch)
 
     result = _bulk(250, 'H', mailboxes=[SENDER.upper(), QUIET], domains=[DOMAIN])
@@ -730,7 +668,6 @@ def test_a_bulk_value_of_zero_clears_every_limit(env, monkeypatch):
 
 
 def test_an_unknown_name_is_skipped_without_failing_the_others(env, monkeypatch):
-    """A stale row in an open tab must not block the rest of the batch."""
     fake = _fake_client(monkeypatch)
     ghost = f'nobody-{MARKER}@{DOMAIN}'
     stranger = f'not-ours-{MARKER}.example'
@@ -764,7 +701,6 @@ def test_a_bulk_apply_needs_a_read_write_key(env, monkeypatch):
 
 
 def test_an_oversized_bulk_request_is_refused(env, monkeypatch):
-    """One apply is one payload; a runaway client does not get to send 5000."""
     from app.routers import rate_limits
     fake = _fake_client(monkeypatch)
     too_many = [f'user{index}-{MARKER}@{DOMAIN}'
@@ -778,8 +714,6 @@ def test_an_oversized_bulk_request_is_refused(env, monkeypatch):
 
 
 def test_a_bulk_mailcow_failure_leaves_the_local_rows_alone(env, monkeypatch):
-    """Nothing is mirrored for a kind mailcow refused - the page must not show
-    a limit that was never applied."""
     fake = _fake_client(monkeypatch)
 
     async def boom(mailboxes, value, frame):
@@ -811,8 +745,6 @@ def test_releasing_a_counter_passes_the_hash_to_mailcow(env, monkeypatch):
 
 @pytest.mark.parametrize('bad', ['', 'notahash', 'RL', 'RL abc', 'RLabc; DROP', '../RLabc'])
 def test_a_malformed_rl_hash_is_refused(env, monkeypatch, bad):
-    """The hash goes straight into a mailcow delete call, so only the real
-    shape is accepted."""
     fake = _fake_client(monkeypatch)
     with pytest.raises(HTTPException) as exc:
         _reset(bad, fake)
@@ -843,8 +775,6 @@ def test_a_mailcow_failure_is_reported_not_swallowed(env, monkeypatch):
     assert 'mailcow did not apply the change' in str(exc.value.detail)
 
 
-# ---------- configured limits ----------
-
 def test_limits_lists_mailbox_and_domain_limits(env, monkeypatch):
     from app.routers import rate_limits
     fake = _fake_client(monkeypatch)
@@ -854,7 +784,6 @@ def test_limits_lists_mailbox_and_domain_limits(env, monkeypatch):
     mailboxes = {m['username']: m for m in data['mailboxes']}
     assert mailboxes[SENDER]['rl_value'] == 100
     assert mailboxes[SENDER]['rl_frame'] == 'm'
-    # Unlimited mailboxes are listed too - a limit has to start somewhere
     assert QUIET in mailboxes
     assert mailboxes[QUIET]['rl_value'] is None
 
@@ -865,8 +794,6 @@ def test_limits_lists_mailbox_and_domain_limits(env, monkeypatch):
 
 
 def test_domain_limits_are_cached_between_requests(env, monkeypatch):
-    """One mailcow round trip per domain is expensive; the page refreshes a
-    lot, so a second read must not hit mailcow again."""
     from app.routers import rate_limits
     fake = _fake_client(monkeypatch)
 
@@ -880,27 +807,16 @@ def test_domain_limits_are_cached_between_requests(env, monkeypatch):
     assert len(fake.calls) > first, 'busting the cache refetches'
 
 
-# ---------- feature toggle ----------
-# Rate Limits is toggleable like every other feature: the id goes into
-# `disabled_features`, /api/info hands the list to the frontend, and the
-# frontend hides the view. No router in this app gates its own endpoints on a
-# feature flag (dmarc, blacklist and mailbox-stats all keep answering while
-# disabled), so these tests pin the wiring that actually exists.
-
 FEATURE_ID = 'rate-limits'
 
 
 def _disable(monkeypatch, value):
-    """`settings` is a SettingsWrapper that delegates to a swappable inner
-    Settings model, so the field has to be patched on the inner model."""
     from app.config import settings
     monkeypatch.setattr(settings._inner, 'disabled_features', value)
     return settings
 
 
 def test_rate_limits_is_offered_as_a_toggleable_feature():
-    """The valid-id list in the setting's own description is the backend's
-    only feature registry - the Settings UI reads it from documentation."""
     from app.config import Settings
     description = Settings.model_fields['disabled_features'].description
     assert FEATURE_ID in description, description
@@ -924,7 +840,6 @@ def test_the_feature_id_survives_spacing_and_case(monkeypatch):
 
 
 def test_api_info_hands_the_disabled_feature_to_the_frontend(monkeypatch):
-    """This payload is what the frontend gates the view switcher on."""
     from fastapi.testclient import TestClient
     from app.main import app
 
@@ -947,8 +862,6 @@ def test_api_info_omits_the_feature_while_it_is_enabled(monkeypatch):
 
 
 def test_disabling_the_feature_leaves_the_endpoints_registered(monkeypatch):
-    """Deliberate: gating is UI-side here, exactly as for every other feature.
-    If a router-level guard is ever added it must be added for all of them."""
     _disable(monkeypatch, 'rate-limits')
 
     from app.main import app
@@ -957,7 +870,6 @@ def test_disabling_the_feature_leaves_the_endpoints_registered(monkeypatch):
     assert '/api/rate-limits/limits' in paths
 
 def test_a_reset_is_recorded_and_marked_on_the_events_row(env, monkeypatch):
-    """After a counter reset, the sender's events row carries the marker."""
     from app.database import get_db_context
     from app.routers import rate_limits
     fake = _fake_client(monkeypatch)
@@ -970,12 +882,6 @@ def test_a_reset_is_recorded_and_marked_on_the_events_row(env, monkeypatch):
     assert group.get('last_reset'), 'the reset must be marked on the row'
 
 
-# ---------- Rate Limits does not depend on Mailbox Stats ----------
-# The page reads each mailbox's configured limit out of `mailbox_statistics`,
-# which only the Mailbox Stats sync job ever fills. Gating that job on Mailbox
-# Stats alone meant switching that feature off quietly froze the Rate Limits
-# page on stale data, so the job is shared by the two features now.
-
 def _sync_needed():
     from app.scheduler import _mailbox_sync_needed
     return _mailbox_sync_needed()
@@ -987,7 +893,6 @@ def test_the_mailbox_sync_runs_when_both_features_are_enabled(monkeypatch):
 
 
 def test_the_mailbox_sync_keeps_running_for_rate_limits_alone(monkeypatch):
-    """The point of the decoupling: Rate Limits still gets fresh limits."""
     _disable(monkeypatch, 'mailbox-stats')
     assert _sync_needed() is True
 
@@ -1003,7 +908,6 @@ def test_the_mailbox_sync_stops_only_when_both_features_are_off(monkeypatch):
 
 
 def test_the_mailbox_job_itself_still_runs_with_mailbox_stats_off(monkeypatch):
-    """The job has its own guard, so the registration fix is not enough."""
     from app import scheduler
     _disable(monkeypatch, 'mailbox-stats')
     reached = []
@@ -1029,7 +933,6 @@ def test_the_mailbox_job_stops_when_both_features_are_off(monkeypatch):
 
 
 def test_the_alias_job_stays_tied_to_mailbox_stats_alone(monkeypatch):
-    """Rate Limits has no use for aliases, so that job must not be revived."""
     from app import scheduler
     _disable(monkeypatch, 'mailbox-stats')
 
@@ -1039,11 +942,6 @@ def test_the_alias_job_stays_tied_to_mailbox_stats_alone(monkeypatch):
 
     asyncio.run(scheduler.update_alias_statistics())
 
-
-# ---------- a disabled feature leaves nothing behind ----------
-# Switching a feature off takes its data with it. The rules read the *current*
-# disabled set rather than a transition, so the cleanup is idempotent and safe
-# to run on every startup and after every settings save.
 
 ALIAS = f'alias-{MARKER}@{DOMAIN}'
 TARGET = f'target-{MARKER}@{DOMAIN}'
@@ -1064,7 +962,6 @@ def _wipe_leftovers():
 
 @pytest.fixture()
 def leftovers():
-    """One mailbox row, one alias row and one reset-audit entry to clean up."""
     if not _postgres_available():
         pytest.skip('PostgreSQL not available')
     from app.database import init_db, get_db_context
@@ -1117,7 +1014,6 @@ def test_disabling_mailbox_stats_drops_the_alias_rows(leftovers, monkeypatch):
 
 
 def test_the_mailbox_rows_survive_while_rate_limits_still_reads_them(leftovers, monkeypatch):
-    """The table is shared infrastructure, not Mailbox Stats' private data."""
     _disable(monkeypatch, 'mailbox-stats')
     _run_cleanup()
     assert _counts()['mailboxes'] >= 1
@@ -1152,7 +1048,6 @@ def test_running_the_cleanup_twice_changes_nothing(leftovers, monkeypatch):
 
 
 def test_a_cleanup_failure_never_reaches_the_caller(monkeypatch):
-    """Startup and a settings save must survive a cleanup that blows up."""
     from app import scheduler
 
     def boom(db):

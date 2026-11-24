@@ -1,4 +1,3 @@
-"""Tests for auth rate limiting and session signing (no DB required)."""
 import pytest
 
 from app.auth import (
@@ -33,8 +32,6 @@ def test_rate_limiter_isolated_per_ip():
 
 
 def test_session_fallback_key_is_stable():
-    # Without SESSION_SECRET_KEY configured the fallback key must be generated
-    # once per process — a per-call key would silently break all OAuth2 logins.
     assert session.get_session_secret_key() == session.get_session_secret_key()
 
 

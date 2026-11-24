@@ -1,14 +1,3 @@
-"""What the automatic bounce and stuck-queue handling may change.
-
-- A block a person set (an administrator's entry, or an automatic one made
-  permanent by hand) keeps its reason and expiry: a bounce only counts.
-- A block a person turned off stays off, and its queued mail stays.
-- Mail to a domain hosted on this mailcow is inbound: its delivery failures
-  never block the address or delete its mail, and the jobs wait until every
-  domain of this mailcow is known.
-
-Fictional domains only.
-"""
 import asyncio
 import secrets
 import uuid
@@ -51,7 +40,7 @@ def env(monkeypatch):
         'queue_cleanup_enabled': False, 'queue_cleanup_threshold_minutes': 60, 'rspamd_password': '',
     }.items():
         monkeypatch.setattr(settings._inner, key, value)
-    monkeypatch.setattr(sch.mailcow_api, 'headers_rw', None)   # no queue calls
+    monkeypatch.setattr(sch.mailcow_api, 'headers_rw', None)
     monkeypatch.setattr(sch, '_spam_blocks_loaded', AsyncMock(return_value=True))
     monkeypatch.setattr(sch, 'update_job_status', Mock())
     monkeypatch.setattr(config, '_cached_active_domains', [HOSTED])
@@ -73,7 +62,6 @@ def env(monkeypatch):
                 db.commit()
 
         def change(self, email, **fields):
-            """A change on the Suppressions page."""
             from app.routers.suppressions import SuppressionUpdateRequest, update_suppression
             with get_db_context() as db:
                 row = db.query(SpamSuppression).filter(SpamSuppression.email == email).one()
@@ -91,7 +79,6 @@ def env(monkeypatch):
             asyncio.run(sch.detect_suppressions_job())
 
         def fail(self, email, path):
-            """A permanent bounce read by the detection, or a stuck message stored by the cleanup."""
             if path == 'bounce':
                 self.bounce(email)
                 self.detect()
@@ -99,7 +86,6 @@ def env(monkeypatch):
                 self.stuck(email)
 
         def stuck(self, email):
-            """The stuck-queue cleanup storing the block for one stuck message."""
             return sch._store_deferred_suppressions_worker([{
                 'email': email, 'queue_id': f'Q{uuid.uuid4().hex[:8]}', 'sender': f'a@{REMOTE}',
                 'arrived': datetime.utcnow() - timedelta(hours=2), 'reason': 'connect timed out'}])
@@ -123,8 +109,6 @@ def env(monkeypatch):
     yield Env()
     wipe()
 
-
-# ---------- a block a person set keeps its reason and expiry ----------
 
 @pytest.mark.parametrize('path', ['bounce', 'stuck'])
 def test_an_administrators_permanent_block_stays_permanent(env, path):
@@ -174,7 +158,6 @@ def test_a_block_turned_off_by_hand_stays_off_and_its_mail_stays(env, path):
 
 
 def test_a_block_that_ran_out_is_blocked_again(env):
-    """Automatic handling of a block nobody touched works as before."""
     email = f'ran-out@{REMOTE}'
     env.block(email, source='manual', expires_at=datetime.utcnow() - timedelta(days=1), active=False)
     env.bounce(email)
@@ -183,8 +166,6 @@ def test_a_block_that_ran_out_is_blocked_again(env):
     assert row.active and row.reason == 'hard_bounce' and row.expires_at > datetime.utcnow()
     assert env.outcomes(email) == ['activated']
 
-
-# ---------- mail to a domain hosted here ----------
 
 @pytest.mark.parametrize('program', ['postfix/lmtp', 'postfix/smtp'])
 def test_a_failed_delivery_to_a_hosted_mailbox_blocks_nothing(env, program):
@@ -205,13 +186,11 @@ def test_a_local_delivery_line_blocks_nothing_whatever_its_address(env):
 
 
 def test_the_stuck_queue_block_asks_again_for_hosted_domains(env):
-    """The domain list can change between picking the message and storing its block."""
     env.stuck(f'inbound@{HOSTED}')
     assert env.row(f'inbound@{HOSTED}') is None
 
 
 def _no_alias_side_effects(monkeypatch):
-    """A domain sync here changes nothing other tests read."""
     from app import config, scheduler
     monkeypatch.setattr(config, '_cached_hosted_domains', set())
     monkeypatch.setattr(scheduler, '_persist_local_domain_aliases', lambda alias_map: None)
@@ -223,7 +202,7 @@ def test_detection_waits_until_every_domain_is_known(env, monkeypatch):
     email = f'later@{REMOTE}'
     env.bounce(email)
     monkeypatch.setattr(config, '_cached_domains_complete', None)
-    monkeypatch.setattr(env.sch_, 'sync_local_domains', AsyncMock(return_value=False))   # mailcow does not answer
+    monkeypatch.setattr(env.sch_, 'sync_local_domains', AsyncMock(return_value=False))
     env.detect()
     assert env.row(email) is None
     env.sch_.sync_local_domains.assert_awaited()
@@ -239,7 +218,7 @@ def test_only_a_full_domain_sync_counts_as_every_domain_known(monkeypatch):
     _no_alias_side_effects(monkeypatch)
     url = scheduler.mailcow_api.base_url
     monkeypatch.setattr(config, '_cached_active_domains', None)
-    config.set_cached_active_domains([HOSTED])   # the startup load: primary domains only
+    config.set_cached_active_domains([HOSTED])
     assert not config.local_domains_complete(url)
 
     monkeypatch.setattr(scheduler.mailcow_api, 'get_domains', AsyncMock(return_value=[{'domain_name': HOSTED, 'active': 1}]))
@@ -284,8 +263,6 @@ def test_an_alias_domain_answer_that_is_not_a_list_of_them_is_an_error(monkeypat
     else:
         assert asyncio.run(mailcow_api.get_alias_domain_map()) == expected
 
-
-# ---------- the stuck-queue cleanup ----------
 
 OLD = datetime.now(timezone.utc).timestamp() - 7200
 
@@ -341,7 +318,6 @@ def test_the_cleanup_waits_until_every_domain_is_known(queue, monkeypatch):
 
 
 def test_mail_to_a_domain_turned_off_in_mailcow_stays_in_the_queue(queue, monkeypatch):
-    """Mail it accepted while it was on can still wait in the queue."""
     from app import config
     sch, stored = queue
     _no_alias_side_effects(monkeypatch)

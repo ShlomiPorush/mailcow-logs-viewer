@@ -1,8 +1,3 @@
-"""Every answer the Mailbox stats, Devices, weekly summary and CSV export calls can give,
-so the contract check (conftest.py, contract.py) holds each one to /openapi.json: the
-answers with data, the failures that still answer 200 (mailbox statistics), a database
-that fails (500), mailcow failing (502), nothing to export (404) and bad parameters (422).
-mailcow, DNS and email are faked; nothing leaves the test."""
 import uuid
 from datetime import datetime, timedelta
 
@@ -57,7 +52,6 @@ def client(monkeypatch):
 
 @pytest.fixture
 def rows(client):
-    """A mailbox with an alias, a device, and one log line and message of each kind, removed after."""
     if not _postgres_available():
         pytest.skip('PostgreSQL not available')
     from app.models import (AliasStatistics, EasDevice, MailboxStatistics, MessageCorrelation, NetfilterLog,
@@ -92,8 +86,6 @@ def rows(client):
         db.commit()
 
 
-# ---------------------------------------------------------------- mailbox statistics
-
 def test_mailbox_statistics(client, rows):
     page = client.get(f'/api/mailbox-stats/all?search={MARK}&active_only=false&date_range=7days').json()
     assert page['mailboxes'][0]['aliases'][0]['alias_address'] == f'a@{DOMAIN}'
@@ -112,8 +104,6 @@ def test_mailbox_statistics_that_cannot_be_read_still_answer(client):
         assert response.status_code == 200 and 'error' in response.json()
 
 
-# ---------------------------------------------------------------- devices
-
 def test_devices(client, rows):
     listed = client.get(f'/api/devices?search={MARK}').json()
     assert listed['items'][0]['device_id'] == f'androidc{MARK}'
@@ -125,12 +115,8 @@ def test_devices_when_the_database_fails(client):
     assert client.get('/api/devices').status_code == 500
 
 
-# ---------------------------------------------------------------- weekly summary
-
 @pytest.fixture
 def summary_sources(monkeypatch, rows):
-    """mailcow as the summary reads it (domains, mailboxes, aliases, storage, queue,
-    quarantine), and a stored DNS check with an SPF problem; the summary's own code runs."""
     from app.models import DomainDNSCheck
     state = {'domains': [{'domain_name': DOMAIN, 'active': 1}], 'vmail': {'disk': '/dev/sda1', 'used': '1.2G',
                                                                           'total': '20G', 'used_percent': '6%'}}
@@ -147,7 +133,6 @@ def summary_sources(monkeypatch, rows):
 
     monkeypatch.setattr(mailcow_api, 'get_domains', answer('domains'))
     monkeypatch.setattr(mailcow_api, 'get_status_vmail', answer('vmail'))
-    # Reading the monitored hosts would also align them with the settings
     from app.services import blacklist_service
     monkeypatch.setattr(blacklist_service, 'reconcile_monitored_hosts', lambda db: False)
     for name in ('get_mailboxes', 'get_aliases', 'get_queue', 'get_quarantine'):
@@ -167,10 +152,8 @@ def test_the_weekly_summary(client, summary_sources):
     summary = client.get('/api/system/summary').json()
     assert summary['dns_issues'] == [{'domain': DOMAIN, 'issues': ['SPF: No SPF record']}]
     assert summary['system']['domains'] == {'total': 1, 'active': 1}
-    # mailcow failing while the summary is read (502)
     summary_sources['domains'] = MailcowAPIError('down')
     assert client.get('/api/system/summary').status_code == 502
-    # mailcow answering storage in a shape the summary cannot read (500)
     summary_sources['domains'] = [{'domain_name': DOMAIN, 'active': 1}]
     summary_sources['vmail'] = ['not', 'an', 'object']
     assert client.get('/api/system/summary').status_code == 500
@@ -185,8 +168,6 @@ def test_the_weekly_summary_email(client, monkeypatch):
     assert client.post('/api/system/summary/email?force=true').json()['status'] == 'queued'
     assert client.post('/api/system/summary/email?force=maybe').status_code == 422
 
-
-# ---------------------------------------------------------------- CSV exports
 
 @pytest.mark.parametrize('kind', EXPORTS)
 def test_csv_exports(client, rows, kind):

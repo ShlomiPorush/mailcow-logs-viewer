@@ -1,8 +1,3 @@
-"""
-The demo's live trickle: minute-sized windows get a minute's worth of
-traffic, never a line from the future, and the lines a scenario writes later
-(a retry, an unban) arrive once their time comes.
-"""
 import threading
 import time
 
@@ -31,7 +26,6 @@ def test_minute_windows_never_contain_future_lines():
 def test_lines_written_later_arrive_in_a_later_window():
     traffic = Traffic(seed=7)
     batch = Batch()
-    # 26 attempts 17 seconds apart, starting 30 seconds before the window ends
     traffic.credential_attack(batch, NOW + 30)
     first = traffic._release(batch, NOW + 60)["netfilter"]
     later = traffic.generate(NOW + 60, NOW + 600)["netfilter"]
@@ -44,10 +38,9 @@ def test_lines_written_later_arrive_in_a_later_window():
 def test_the_trickle_rate_is_steady_at_any_hour():
     traffic = Traffic(seed=3)
     busy = [sum(len(v) for v in batch.values()) for _, _, batch in _windows(traffic, NOW, 120)]
-    # Connection noise alone arrives in most minutes
     assert sum(1 for n in busy if n) > 0.7 * len(busy)
     messages = sum(len(batch["rspamd-history"]) for _, _, batch in _windows(Traffic(seed=3), NOW, 120))
-    assert 10 <= messages <= 60  # about twelve an hour
+    assert 10 <= messages <= 60
 
 
 def test_queue_ids_stay_unique_across_history_and_live():
@@ -68,8 +61,6 @@ def test_the_live_loop_feeds_the_fake_server():
             time.sleep(0.05)
         assert any(fake.logs.values())
     finally:
-        # A thread left running would keep generating traffic for the rest of
-        # the test session and react to other tests' clock changes.
         stop.set()
         thread.join(timeout=5)
     assert not thread.is_alive()

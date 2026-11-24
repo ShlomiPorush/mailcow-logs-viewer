@@ -1,11 +1,3 @@
-"""Which delivery leg a Dovecot LMTP line belongs to when several legs share
-the recipient (issue #36).
-
-A message Rspamd rejects into quarantine and that is released later is two
-legs with the same Message-ID, sender and recipient: the rejected one, which
-never reached Dovecot, and the release, which Dovecot stored. The stored
-verdict used to land on the first leg with that recipient, the rejected one.
-"""
 from datetime import datetime, timedelta
 
 from app.models import MessageCorrelation
@@ -24,7 +16,6 @@ def test_the_released_leg_gets_the_store_not_the_rejected_one():
     released = _leg('released', 'delivered', T0 + timedelta(seconds=28))
     event = {'recipient': RCPT, 'time': T0 + timedelta(seconds=28)}
     assert _leg_for_dovecot_event([rejected, released], event) is released
-    # The order the legs come in does not matter
     assert _leg_for_dovecot_event([released, rejected], event) is released
 
 

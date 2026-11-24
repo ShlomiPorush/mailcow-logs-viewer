@@ -1,7 +1,3 @@
-"""A feature that is off keeps no data; turned on, it reads back what the
-server still has (decision 57).
-
-Fictional addresses only."""
 import asyncio
 import secrets
 import uuid
@@ -11,7 +7,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-import app.models  # noqa: F401  init_db creates the tables of the models imported so far
+import app.models  # noqa: F401
 from app.config import settings
 
 MARK = uuid.uuid4().hex[:8]
@@ -85,8 +81,6 @@ def _map(manual_above, managed, manual_below=()):
                      + [MANAGED_MARKER_END] + ([''] + list(manual_below) if manual_below else []))
 
 
-# ---- Reading the app's map lines back ----
-
 @pytest.mark.parametrize('stored, kind, source', [
     ('user+tag@example.test', 'email', 'auto'),
     ('o.brien@sub.example.test', 'email', 'manual'),
@@ -105,7 +99,6 @@ def test_a_line_the_app_wrote_reads_back_to_its_row(stored, kind, source):
 
 
 def test_an_exact_address_in_capitals_is_read_as_the_address():
-    # With the i flag and nothing a pattern reads differently, it blocks just that address
     from app.routers.suppressions import parse_managed_line
     assert parse_managed_line('/^UPPER@example\\.test$/i') == ('upper@example.test', 'email')
 
@@ -117,7 +110,6 @@ def test_a_line_the_app_did_not_write_is_kept_as_a_pattern_that_stays_the_same(l
     assert (value, kind) == (line, 'email')
     written = suppression_map_line(SimpleNamespace(email=value, source='rspamd'))
     assert written.startswith('/^(?:') and written.endswith(')$/i'), 'anchored like every pattern the app writes'
-    # Loaded back and written again: the same line, it does not grow
     again = parse_managed_line(written)[0]
     assert suppression_map_line(SimpleNamespace(email=again, source='rspamd')) == written
 
@@ -127,8 +119,6 @@ def test_a_line_no_row_can_hold_stops_the_import():
     with pytest.raises(ValueError):
         parse_managed_line('/^(?:' + 'a' * 300 + ')$/x')
 
-
-# ---- Lines typed into the map by hand ----
 
 def test_the_sync_keeps_lines_typed_below_the_section(db_ready, monkeypatch):
     from app.routers.suppressions import sync_suppressions_worker
@@ -153,8 +143,6 @@ def test_a_bare_address_below_the_section_is_anchored_like_one_above(db_ready, m
 
 
 def test_an_end_marker_without_its_start_stops_the_sync(db_ready, monkeypatch):
-    """Which lines are the app's cannot be told: nothing is read in or
-    written, and the page says to fix the markers (test_rspamd_two_way.py)."""
     from app.routers.suppressions import MapUnavailable, sync_suppressions_worker, MANAGED_MARKER_END
     content = '\n'.join(['/^a@example\\.test$/i', MANAGED_MARKER_END, '/^b@example\\.test$/i'])
     state = _fake_map(monkeypatch, content)
@@ -163,8 +151,6 @@ def test_an_end_marker_without_its_start_stops_the_sync(db_ready, monkeypatch):
     assert error.value.code == 'section_unclear'
     assert state['content'] == content
 
-
-# ---- Turned off: everything goes ----
 
 def test_a_feature_that_is_off_keeps_nothing(db_ready, monkeypatch):
     from app.models import QuarantineRule, SpamSuppression, SystemSetting
@@ -180,7 +166,6 @@ def test_a_feature_that_is_off_keeps_nothing(db_ready, monkeypatch):
     with db_ready() as db:
         assert db.query(QuarantineRule).filter(QuarantineRule.name == f'rule-{MARK}').count() == 0
         assert db.query(SystemSetting).filter(SystemSetting.key.like('protection.%')).count() == 0
-        # Spam Filter is on: its list stays
         assert db.query(SpamSuppression).filter(SpamSuppression.email == f'kept-{MARK}@example.test').count() == 1
 
 
@@ -219,8 +204,6 @@ def test_one_feature_that_fails_does_not_keep_the_others(db_ready, monkeypatch):
         assert db.query(QuarantineRule).filter(QuarantineRule.name == f'rule-{MARK}').count() == 0
 
 
-# ---- Turned on: Spam Filter loads its blocks back ----
-
 def _pending(db_ready):
     from app.services.feature_data import _set_key, SPAM_IMPORT_PENDING_KEY
     with db_ready() as db:
@@ -234,7 +217,7 @@ def test_the_blocks_the_app_wrote_come_back_as_permanent_rows(db_ready, monkeypa
     managed = [format_suppression_map_entry('back@example.test'),
                format_suppression_map_entry('/^.+@blocked\\.test$/i', allow_regex=True),
                '/^weird\\d+@example\\.test$/i',
-               format_suppression_map_entry('back@example.test')]  # twice in the map, once in the list
+               format_suppression_map_entry('back@example.test')]
     state = _fake_map(monkeypatch, _map(['/^typed-by-hand@example\\.test$/i'], managed))
     _pending(db_ready)
     assert import_managed_worker() == {'imported': 3, 'pending': False, 'loaded': True}
@@ -273,7 +256,6 @@ def test_until_the_blocks_load_no_sync_writes_the_section(db_ready, monkeypatch)
     assert state['writes'] == 0 and state['content'] == content
     with db_ready() as db:
         assert import_pending(db)
-    # Readable again: the block comes back and the section is left as it is
     state['fail_read'] = False
     result = sync_suppressions_worker()
     assert result.get('skipped') and state['writes'] == 0
@@ -330,8 +312,6 @@ def test_a_job_that_adds_to_the_list_waits_for_the_blocks(db_ready, monkeypatch)
     assert status[:2] == ('detect_suppressions', 'failed')
 
 
-# ---- Security turned off: the app's temporary bans leave Fail2ban ----
-
 def _hit(ip, owned, hours, rule='trap'):
     now = datetime.utcnow()
     return app.models.ProtectionHit(ip=ip, rule=rule, mode='enforce', status='banned', reason=f'fixture {MARK}',
@@ -359,10 +339,10 @@ def test_security_off_takes_out_only_the_apps_temporary_bans(db_ready, monkeypat
     from app.services import protection_rules
     from app.services.feature_data import purge_disabled_features
     with db_ready() as db:
-        db.add(_hit('198.51.100.1', owned=True, hours=24))      # temporary, ours: goes
-        db.add(_hit('198.51.100.2', owned=True, hours=24))      # temporary, ours, but also
-        db.add(_hit('198.51.100.2', owned=False, hours=0, rule='subnet'))  # banned for good: stays
-        db.add(_hit('198.51.100.3', owned=True, hours=0))       # permanent: stays
+        db.add(_hit('198.51.100.1', owned=True, hours=24))
+        db.add(_hit('198.51.100.2', owned=True, hours=24))
+        db.add(_hit('198.51.100.2', owned=False, hours=0, rule='subnet'))
+        db.add(_hit('198.51.100.3', owned=True, hours=0))
         db.commit()
     api = _fake_fail2ban(monkeypatch, ['198.51.100.1', '198.51.100.2', '198.51.100.3', '203.0.113.9'])
     _off(monkeypatch, 'netfilter')
@@ -403,8 +383,6 @@ def test_nothing_is_taken_out_or_written_while_security_is_on_or_after_it_went_o
 
 
 def test_a_ban_still_pending_when_security_went_off_is_closed_not_written(db_ready, monkeypatch):
-    """An enforce run may be writing a pending ban: the history waits for the
-    sweep, which closes it holding the Fail2ban lock."""
     from app.models import ProtectionHit
     from app.services import protection_rules
     from app.services.feature_data import purge_disabled_features
@@ -426,9 +404,7 @@ def test_a_ban_still_pending_when_security_went_off_is_closed_not_written(db_rea
 
 
 @pytest.mark.parametrize('line, value, written', [
-    # a bare pattern stays a pattern
     ('.*@blocked\\.test', '/.*@blocked\\.test/', '/^(?:.*@blocked\\.test)$/'),
-    # a bare address is blocked exactly
     ('bare@example.test', 'bare@example.test', '/^bare@example\\.test$/i'),
 ])
 def test_a_bare_line_in_the_section_keeps_its_meaning(line, value, written):
@@ -452,7 +428,7 @@ def test_a_pattern_with_flags_the_app_cannot_keep_stops_the_import():
 
 def test_a_long_pattern_that_fits_is_loaded_without_extra_anchors():
     from app.routers.suppressions import format_suppression_map_entry, parse_managed_line, suppression_map_line
-    stored = '/' + 'a' * 253 + '/'                  # 255 characters, as a row can hold
+    stored = '/' + 'a' * 253 + '/'
     line = format_suppression_map_entry(stored, allow_regex=True)
     value, _ = parse_managed_line(line)
     assert len(value) <= 255
@@ -518,7 +494,6 @@ def test_the_queue_cleanup_keeps_messages_no_block_covers(monkeypatch):
 
     monkeypatch.setattr(scheduler, '_store_deferred_suppressions_worker', store)
     monkeypatch.setattr(scheduler, '_blocked_now', lambda emails: set(emails))
-    # A block From Rspamd disabled by hand keeps its mail
     monkeypatch.setattr(scheduler, '_protected_now', lambda emails: set(emails) & {'off@example.test'})
     asyncio.run(scheduler.cleanup_deferred_queue_job())
     scheduler.mailcow_api.delete_queue.assert_awaited_once_with(['GO'])
@@ -539,7 +514,6 @@ def test_detection_leaves_a_block_from_rspamd_alone(db_ready, monkeypatch):
         db.commit()
     try:
         _, _, cleanup, _ = scheduler._detect_suppressions_worker()
-        # No block covers it: its queued mail stays (checked right before a deletion)
         monkeypatch.setattr(settings._inner, 'suppression_enabled', True)
         monkeypatch.setattr(scheduler.mailcow_api, 'headers_rw', {'X-API-Key': secrets.token_hex(16)})
         address = f'off-{MARK}@example.test'
@@ -566,10 +540,6 @@ def test_the_sweep_reports_a_feature_it_could_not_clean(monkeypatch):
 
 
 def test_without_the_rspamd_password_there_is_nothing_to_load(db_ready, monkeypatch):
-    """A new install (no Rspamd password) never wrote to Rspamd: the marker of
-    the first start must not hold the jobs back. A marker that says the app
-    may have blocks there waits for the password instead
-    (test_rspamd_sync_off_keeps_no_list.py)."""
     from app.routers.suppressions import import_managed_worker, import_pending
     from app.services.feature_data import _set_key, SPAM_IMPORT_PENDING_KEY
     monkeypatch.setattr(type(settings._inner), 'is_rspamd_configured', property(lambda self: False))
@@ -616,7 +586,7 @@ def test_a_purge_that_waited_for_spam_filter_to_come_back_on_deletes_nothing(db_
         if name != 'suppressions':
             return True
         asked['suppressions'] += 1
-        return asked['suppressions'] > 2    # off at the first start check and the sweep, on again once it holds the lock
+        return asked['suppressions'] > 2
 
     monkeypatch.setattr(type(settings._inner), 'is_feature_enabled', enabled)
     purge_disabled_features()

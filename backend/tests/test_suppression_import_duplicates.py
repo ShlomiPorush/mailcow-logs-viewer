@@ -1,4 +1,3 @@
-"""Import duplicates must be skipped even before the final commit."""
 import csv
 import io
 import uuid

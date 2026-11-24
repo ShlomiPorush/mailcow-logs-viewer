@@ -1,7 +1,3 @@
-"""GET /api/agent/access and /api/agent/endpoints: every answer the auth middleware
-gives them (agent_access/rest.py), so the contract check (conftest.py) holds each
-one to /openapi.json: the answers, an unknown area (400), no valid token (401)
-and too many bad tokens (429). The token check is faked; no database is needed."""
 import secrets
 from datetime import datetime, timedelta
 from types import SimpleNamespace
@@ -33,7 +29,6 @@ def agent(monkeypatch):
     monkeypatch.setattr(live, 'issuer', lambda: 'https://logs.example.com')
     monkeypatch.setattr(live, 'api_resource', lambda: 'https://logs.example.com/api')
     monkeypatch.setattr(rest, 'db_call', check_token)
-    # A bad token here counts against no other test
     monkeypatch.setattr(rest.failed_tokens, '_events', type(rest.failed_tokens._events)())
     return state
 

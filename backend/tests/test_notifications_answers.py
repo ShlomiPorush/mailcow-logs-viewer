@@ -1,8 +1,3 @@
-"""Every answer the notification destination calls can give, so the contract check
-(conftest.py, contract.py) holds each one to /openapi.json: the types, destinations
-saved, changed and removed, test notifications that are delivered and that fail, a
-database that fails (500), and the requests the calls refuse (404, 422). The send
-itself is faked (notification_channels._post); nothing leaves the test."""
 import secrets
 import uuid
 from contextlib import contextmanager
@@ -24,13 +19,10 @@ from app.services import notification_channels as nc  # noqa: E402
 MARK = uuid.uuid4().hex[:8]
 TELEGRAM = {'name': f'{MARK} Ops Telegram', 'channel_type': 'telegram',
             'config': {'bot_token': f'123:{secrets.token_hex(16)}', 'chat_id': '456'}, 'alert_types': ['security', 'blacklist']}
-# A webhook URL urlparse cannot read; its path is the channel's secret
 BAD_HOOK = 'http://[hooks.example/T000/B000/SECRET'
 
 
 class _Broken:
-    """A database session whose every query fails."""
-
     def rollback(self):
         pass
 
@@ -65,7 +57,6 @@ def client(monkeypatch):
     sent = {'status': 200, 'calls': []}
 
     async def post(url, kwargs):
-        # Where the request would go; no request is made
         sent['calls'].append(url)
         return sent['status'], 'the service is down'
 
@@ -76,7 +67,6 @@ def client(monkeypatch):
 
 @pytest.fixture
 def channels(client):
-    """The destinations this test saves, removed after it."""
     if not _postgres_available():
         pytest.skip('PostgreSQL not available')
     from app.models import NotificationChannel
@@ -98,18 +88,15 @@ def test_destinations(client, channels):
     created = c.post('/api/notifications/channels', json=TELEGRAM)
     assert created.status_code == 200 and created.json()['config']['bot_token'] == nc.MASK
     channel_id = created.json()['id']
-    # Every alert type is the same as none: stored as every alert
     everything = c.post('/api/notifications/channels', json={**TELEGRAM, 'name': f'{MARK} all',
                                                              'alert_types': sorted(nc.ALERT_TYPE_IDS)})
     assert everything.json()['alert_types'] == []
     assert c.get('/api/notifications/channels').status_code == 200
 
-    # The masked secret keeps the stored one
     changed = c.put(f'/api/notifications/channels/{channel_id}',
                     json={**TELEGRAM, 'config': {'bot_token': nc.MASK, 'chat_id': '789'}, 'enabled': False})
     assert changed.status_code == 200 and changed.json()['enabled'] is False
 
-    # Refused: an unknown type or alert type, a missing field, a masked secret sent to a new server
     for body in ({**TELEGRAM, 'channel_type': 'pager'}, {**TELEGRAM, 'alert_types': ['nope']},
                  {**TELEGRAM, 'config': {'chat_id': '456'}}, {**TELEGRAM, 'name': ''}):
         assert c.post('/api/notifications/channels', json=body).status_code == 422
@@ -124,7 +111,6 @@ def test_destinations(client, channels):
     assert c.put('/api/notifications/channels/0', json=TELEGRAM).status_code == 404
     assert c.put('/api/notifications/channels/x', json=TELEGRAM).status_code == 422
 
-    # A test to a saved destination: delivered, then refused by the service
     delivered = c.post(f'/api/notifications/channels/{channel_id}/test')
     assert delivered.status_code == 200 and delivered.json()['success'] is True
     sent['status'] = 500
@@ -144,13 +130,11 @@ def test_unsaved_destination(client):
     c, sent = client
     tried = c.post('/api/notifications/test', json={'channel_type': 'telegram', 'config': TELEGRAM['config']})
     assert tried.status_code == 200 and tried.json()['success'] is True
-    # A missing field is not sent at all
     missing = c.post('/api/notifications/test', json={'channel_type': 'telegram', 'config': {}})
     assert missing.status_code == 200 and missing.json()['success'] is False
     assert len(sent['calls']) == 1
     assert c.post('/api/notifications/test', json={'channel_type': 'pager'}).status_code == 422
     assert c.post('/api/notifications/test', json={}).status_code == 422
-    # A URL urlparse cannot read is not sent to, and the answer does not quote it
     broken = c.post('/api/notifications/test', json={'channel_type': 'slack', 'config': {'webhook_url': BAD_HOOK}})
     assert broken.status_code == 200 and broken.json()['success'] is False
     assert 'SECRET' not in broken.text
@@ -167,7 +151,6 @@ def test_a_destination_with_a_url_that_cannot_be_read(client, channels):
     changed = c.put(f'/api/notifications/channels/{channel_id}', json=slack)
     assert changed.status_code == 422 and 'SECRET' not in changed.text
 
-    # One saved before the check existed fails its test without quoting it, here or in its last error
     from app.models import NotificationChannel
     with database.get_db_context() as db:
         db.query(NotificationChannel).filter(NotificationChannel.id == channel_id).update(
@@ -189,6 +172,5 @@ def test_destinations_when_the_database_fails(client, monkeypatch):
     assert c.post('/api/notifications/channels', json=TELEGRAM).status_code == 500
     assert c.put('/api/notifications/channels/1', json=TELEGRAM).status_code == 500
     assert c.delete('/api/notifications/channels/1').status_code == 500
-    # The saved-destination test opens its own session
     monkeypatch.setattr(database, 'get_db_context', _broken_context)
     assert c.post('/api/notifications/channels/1/test').status_code == 500

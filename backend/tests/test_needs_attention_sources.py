@@ -1,6 +1,3 @@
-"""What Needs attention (the Dashboard panel and the header bell) reads besides
-the rows: the open critical alerts past the rows asked for, and whether the
-container counts were read at all."""
 import uuid
 from datetime import datetime, timedelta
 from unittest.mock import AsyncMock
@@ -63,14 +60,12 @@ def _add(severity, n, age_minutes):
 def test_open_critical_alerts_are_counted_past_the_rows_asked_for(db_ready):
     c = _client()
     before = c.get('/api/security-alerts?acknowledged=false&limit=20').json()['unacknowledged_critical']
-    # One critical alert older than 25 newer warnings: not among the 20 rows
     [critical] = _add('critical', 1, age_minutes=60)
     _add('warning', 25, age_minutes=1)
     answer = c.get('/api/security-alerts?acknowledged=false&limit=20').json()
     assert len(answer['alerts']) == 20
     assert critical not in [a['id'] for a in answer['alerts']]
     assert answer['unacknowledged_critical'] == before + 1
-    # Dismissed, it is no longer counted
     c.post(f'/api/security-alerts/{critical}/acknowledge')
     assert c.get('/api/security-alerts?acknowledged=false&limit=20').json()['unacknowledged_critical'] == before
 
@@ -91,15 +86,11 @@ def test_container_counts_say_whether_mailcow_answered(monkeypatch):
     read = _summary(monkeypatch, AsyncMock(return_value={'summary': {'running': 17, 'stopped': 1, 'total': 18}}))
     assert read['containers'] == {'running': 17, 'stopped': 1, 'total': 18}
     assert read['containers_known'] is True
-    # No answer: zeros, which must not read as "nothing is stopped"
     failed = _summary(monkeypatch, AsyncMock(side_effect=RuntimeError('mailcow did not answer')))
     assert failed['containers'] == {'running': 0, 'stopped': 0, 'total': 0}
     assert failed['containers_known'] is False
-    # An answer with no containers at all is not a reading either
     empty = _summary(monkeypatch, AsyncMock(return_value={'summary': {'running': 0, 'stopped': 0, 'total': 0}}))
     assert empty['containers_known'] is False
-    # Nor are counts with nothing running: mailcow's API runs in a container, so these
-    # are the containers known before, all counted as stopped, not mailcow's answer
     cached = _summary(monkeypatch, AsyncMock(return_value={'summary': {'running': 0, 'stopped': 18, 'total': 18}}))
     assert cached['containers_known'] is False
 
@@ -109,6 +100,5 @@ def test_mailcow_counts_say_whether_mailcow_answered(monkeypatch):
     info = {'domains': {'total': 4}, 'mailboxes': {'total': 13}, 'aliases': {'total': 10}}
     read = _summary(monkeypatch, running, AsyncMock(return_value=info))
     assert read['system'] == {'domains': 4, 'mailboxes': 13, 'aliases': 10, 'known': True}
-    # No answer: zeros, which the dashboard must not show as a mailcow with nothing on it
     failed = _summary(monkeypatch, running, AsyncMock(side_effect=RuntimeError('mailcow did not answer')))
     assert failed['system'] == {'domains': 0, 'mailboxes': 0, 'aliases': 0, 'known': False}

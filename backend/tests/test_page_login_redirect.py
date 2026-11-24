@@ -1,11 +1,3 @@
-"""A signed-out page request goes straight to the login page, and back after.
-
-The pages used to be served to anyone, and the page's own script sent the
-browser to /login only after it had drawn the app. The server now answers a
-page request without a session with a redirect that keeps the page asked for,
-and signing in returns there. The login page itself is skipped when there is
-a session already, so neither page flashes before the other.
-"""
 import base64
 import builtins
 import re
@@ -53,9 +45,6 @@ def auth_mode(monkeypatch):
 
 @pytest.fixture
 def client():
-    # No context manager: the app lifespan needs a database, and none of these
-    # requests reach it. CI has no /app/frontend, so a page that gets through
-    # answers with an error; these tests only care whether it was redirected.
     return TestClient(app, follow_redirects=False, raise_server_exceptions=False)
 
 
@@ -166,7 +155,6 @@ def test_only_local_pages_are_return_paths(value, expected):
 
 @pytest.mark.parametrize("path", ["/loginx", "/login-help", "/api/infox", "/api/health-x", "/api/auth/login2"])
 def test_public_paths_match_exactly(auth_mode, client, path):
-    """Only the listed public paths skip authentication, not everything that starts with them."""
     auth_mode(basic=True, oauth2=False)
     response = client.get(path)
     if path.startswith("/api/"):

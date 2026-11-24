@@ -1,20 +1,10 @@
-"""POST /api/fail2ban changes the Fail2ban settings and never the lists.
-
-mailcow's Fail2ban edit replaces the whole object. A caller that read it with
-GET /api/fail2ban and saved it back later used to write its old denylist over
-a ban a protection rule wrote in between, while the app kept showing the
-address as banned. The lists are now read fresh under the lock; lists sent
-with the settings must be the current ones. Every write goes to a fake mailcow.
-"""
 import pytest
 
 from test_protection_enforce import FakeMailcow, _enforce, _trap_hit
-from test_protection_rules import TRAP_IP, db  # noqa: F401  (db is a fixture)
+from test_protection_rules import TRAP_IP, db  # noqa: F401
 
 
 class WholeObjectMailcow(FakeMailcow):
-    """Saves every attribute it is sent, the way mailcow's edit does."""
-
     async def edit_fail2ban(self, attrs):
         self.edits.append(attrs)
         self.settings.update(attrs)

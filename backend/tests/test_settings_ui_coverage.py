@@ -1,11 +1,3 @@
-"""Every setting that can be edited from the UI must have a place on the Settings page.
-
-The backend decides which settings are editable (EDITABLE_SETTING_KEYS); the
-Settings page only renders the keys listed in its tab definitions in
-frontend/settings.js (groups: [{ label, keys: [...] }]). A key missing from
-those tabs is editable in theory but unreachable in practice, which is how an
-option silently disappears when the page is reorganised or redesigned.
-"""
 import re
 from pathlib import Path
 

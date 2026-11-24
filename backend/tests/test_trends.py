@@ -1,7 +1,3 @@
-"""The dashboard figures' trends: one function per figure for the card and the
-hourly samples, a gap (no sample, and Unknown on the card) when a source did not
-answer, the samples of a feature that is off neither written nor served nor
-kept, and a switch-off that races a sample never leaves one behind."""
 import asyncio
 import importlib.util
 import pathlib
@@ -114,7 +110,6 @@ def test_a_run_samples_what_answered_and_leaves_a_gap_for_what_did_not(db_ready,
     written = asyncio.run(figures.run_trend_samples())
     names = {r.name for r in _rows()}
     assert names == {'security_review', 'security_banned'} and written == 2, names
-    # Everything answers: one sample each in this hour; a second run in the same hour replaces it
     _fake_sources(monkeypatch)
     asyncio.run(figures.run_trend_samples())
     asyncio.run(figures.run_trend_samples())
@@ -142,7 +137,6 @@ def test_a_feature_that_is_off_is_neither_sampled_nor_served_and_its_samples_go(
 
 
 def test_a_switch_off_during_a_run_leaves_no_sample_behind(db_ready, monkeypatch):
-    """The run has read its figures; the switch and the delete come; then it writes."""
     figures = _fake_sources(monkeypatch)
     epochs = {f: figures.feature_epoch(f) for f in set(figures.METRICS.values()) if f}
     points = asyncio.run(figures.collect_figures())
@@ -153,20 +147,18 @@ def test_a_switch_off_during_a_run_leaves_no_sample_behind(db_ready, monkeypatch
         purge_feature(db, 'netfilter')
     figures.write_points(points, epochs, figures.slot_of(datetime.utcnow()))
     assert not _rows('security_review') and _rows('storage_used')
-    # Off and on again before the write: that run's samples of it are dropped too
     monkeypatch.setattr(settings._inner, 'disabled_features', '')
     figures.write_points(points, epochs, figures.slot_of(datetime.utcnow()))
     assert not _rows('security_review')
 
 
 def test_a_write_waits_for_a_purge_in_progress_and_then_writes_nothing_of_it(db_ready, monkeypatch):
-    """The purge holds the lock; the write waits, then sees the feature off."""
     figures = _fake_sources(monkeypatch)
     epochs = {f: figures.feature_epoch(f) for f in set(figures.METRICS.values()) if f}
     points = asyncio.run(figures.collect_figures())
     from app.database import get_db_context
     with get_db_context() as db:
-        figures.purge_feature_metrics(db, 'netfilter')   # the lock is held until commit
+        figures.purge_feature_metrics(db, 'netfilter')
         done = threading.Event()
         worker = threading.Thread(target=lambda: (figures.write_points(points, epochs, figures.slot_of(datetime.utcnow())), done.set()))
         worker.start()
@@ -247,7 +239,6 @@ def test_an_error_answer_from_fail2ban_is_no_answer(db_ready, monkeypatch):
 
 
 def test_a_quick_off_and_on_through_settings_drops_a_running_sample(db_ready, monkeypatch):
-    """Off and on again before any purge: the switch itself moves the epoch."""
     figures = _fake_sources(monkeypatch)
     epochs = {f: figures.feature_epoch(f) for f in set(figures.METRICS.values()) if f}
     points = asyncio.run(figures.collect_figures())
@@ -258,8 +249,6 @@ def test_a_quick_off_and_on_through_settings_drops_a_running_sample(db_ready, mo
 
 
 def test_a_sources_queries_stop_together_at_its_time_budget(db_ready):
-    """The budget is the source's, not each query's: two queries that each fit
-    but together do not are stopped in the second."""
     from sqlalchemy import text
     from app.services import figures
     done = []
@@ -273,13 +262,11 @@ def test_a_sources_queries_stop_together_at_its_time_budget(db_ready):
     with pytest.raises(Exception, match='statement timeout|canceling statement|took more than'):
         figures._in_session(two, budget=1.2)
     assert done == ['first'] and time.monotonic() - started < 1.8
-    # Each query is told what is left
     seen = figures._in_session(lambda db: db.execute(text('SHOW statement_timeout')).scalar(), budget=20)
     assert seen.endswith('ms') and 19000 <= int(seen[:-2]) <= 20000
 
 
 def test_only_storage_and_the_security_counts_have_a_trend(db_ready, monkeypatch):
-    """Message linking and Blocklists have no trend: not sampled and not served."""
     figures = _fake_sources(monkeypatch)
     assert set(figures.METRICS) == {'storage_used', 'security_review', 'security_banned'}
     asyncio.run(figures.run_trend_samples())
@@ -290,7 +277,6 @@ def test_only_storage_and_the_security_counts_have_a_trend(db_ready, monkeypatch
 
 
 def test_a_save_of_the_feature_list_that_cannot_have_the_samples_lock_changes_nothing(db_ready, monkeypatch):
-    """The lock is had before anything is saved: busy, the save is refused and nothing changed."""
     from fastapi import HTTPException
     from sqlalchemy import text
     from app.database import engine
@@ -314,7 +300,6 @@ def test_a_save_of_the_feature_list_that_cannot_have_the_samples_lock_changes_no
         holder.execute(text('SELECT pg_advisory_unlock(:key)'), {'key': figures._LOCK_KEY})
         holder.commit()
         holder.close()
-    # Free again: the guard leaves no lock and no timeout behind on the pool
     with figures.feature_switch_guard() as note:
         note()
     with engine.connect() as conn:

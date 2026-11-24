@@ -1,7 +1,3 @@
-"""exact=true on the Messages calls: sender, recipient, user and ip match whole
-values (the entity card's "Show messages"), in the list, the new-mail count,
-the facet counts and the CSV export alike. Without it they still match a part,
-as they always have."""
 import csv
 import io
 import uuid
@@ -79,7 +75,7 @@ CASES = [
     ({"recipient": ANN}, ["to-ann"], ["to-ann", "to-joann"]),
     ({"user": ANN}, ["ann"], ["ann", "joann"]),
     ({"ip": IP}, ["ann", "to-ann"], ["ann", "joann", "to-ann", "to-joann"]),
-    ({"ip": "192.0.2.04"}, [], []),     # not an address: matched as written, so nothing
+    ({"ip": "192.0.2.04"}, [], []),
 ]
 
 
@@ -123,7 +119,7 @@ def test_new_messages(client, filters, exact, partial):
 def test_export(client, filters, exact, partial):
     def subjects(**extra):
         res = client.get("/api/export/messages/csv", params={**RANGE, **filters, **extra})
-        if res.status_code == 404:          # nothing to export
+        if res.status_code == 404:
             return []
         assert res.status_code == 200, res.text
         rows = csv.DictReader(io.StringIO(res.content.decode("utf-8-sig")))
@@ -133,7 +129,6 @@ def test_export(client, filters, exact, partial):
 
 
 def test_export_keeps_the_rspamd_columns_with_an_ip_filter(client):
-    """The filter joins Rspamd itself; the export's own columns still come with each row."""
     res = client.get("/api/export/messages/csv", params={**RANGE, "ip": IP, "exact": "true"})
     rows = [r for r in csv.DictReader(io.StringIO(res.content.decode("utf-8-sig"))) if MARK in r["Subject"]]
     assert sorted((r["Subject"].split()[0], r["IP"], r["User"]) for r in rows) == [

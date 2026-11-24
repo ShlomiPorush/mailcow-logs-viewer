@@ -1,4 +1,3 @@
-"""SPF syntax check: ptr and exp= are legal SPF (RFC 7208), not errors."""
 import pytest
 
 from app.config import settings
@@ -32,7 +31,6 @@ async def test_ptr_is_a_warning_not_an_error(monkeypatch, term):
     assert result['status'] == 'warning', result['message']
     assert 'Invalid' not in result['message']
     assert any('ptr' in w for w in result['warnings'])
-    # ptr is a DNS lookup (RFC 7208 4.6.4): mx and ptr
     assert result['dns_lookups'] == 2
 
 
@@ -45,19 +43,15 @@ async def test_unknown_mechanism_is_still_an_error(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_unknown_modifiers_are_ignored(monkeypatch):
-    """RFC 7208 section 6: unknown modifiers (name=value) must be ignored.
-    ra=, rp= and rr= are the SPF failure reporting modifiers of RFC 6652."""
     result = await _check(monkeypatch, 'v=spf1 mx ra=postmaster rp=10 rr=all -all')
     assert result['status'] == 'success', result['message']
     assert 'Invalid' not in result['message']
-    # Only mx is a lookup; a modifier is never resolved
     assert result['dns_lookups'] == 1
 
 
 @pytest.mark.parametrize('term', ['-foo=bar', '=bar', 'foo'])
 @pytest.mark.asyncio
 async def test_terms_that_are_no_modifier_are_still_errors(monkeypatch, term):
-    """Modifiers take no qualifier and need a name: these are invalid terms."""
     result = await _check(monkeypatch, f'v=spf1 mx {term} -all')
     assert result['status'] == 'error'
     assert f'Invalid SPF mechanisms: {term}' in result['message']
@@ -65,8 +59,6 @@ async def test_terms_that_are_no_modifier_are_still_errors(monkeypatch, term):
 
 @pytest.mark.asyncio
 async def test_mechanism_written_as_a_modifier_is_a_warning(monkeypatch):
-    """include=example.net is an unknown modifier, so SPF ignores it, but it
-    is almost always a typo for include:example.net."""
     result = await _check(monkeypatch, 'v=spf1 mx include=example.net -all')
     assert result['status'] == 'warning', result['message']
     assert any('include=example.net' in w for w in result['warnings'])
@@ -76,8 +68,6 @@ async def test_mechanism_written_as_a_modifier_is_a_warning(monkeypatch):
 @pytest.mark.parametrize('term', ['abc', 'mxfoo', 'allx', 'ptrx', 'a:', 'include', 'ip4', '--all', '-redirect=example.net'])
 @pytest.mark.asyncio
 async def test_a_term_that_only_starts_like_a_mechanism_is_an_error(monkeypatch, term):
-    """RFC 7208 sections 4.6.1 and 5: the mechanism name is matched whole, then
-    only what that mechanism allows may follow (nothing, ':' or '/')."""
     result = await _check(monkeypatch, f'v=spf1 mx {term} -all')
     assert result['status'] == 'error', result['message']
     assert f'Invalid SPF mechanisms: {term}' in result['message']
@@ -96,15 +86,12 @@ async def test_well_formed_mechanisms_stay_valid(monkeypatch, term):
 @pytest.mark.parametrize('term', ['MX', 'Include:example.com', 'IP4:192.0.2.0/24', 'A/24', 'Ptr', 'Redirect=example.net'])
 @pytest.mark.asyncio
 async def test_mechanism_names_are_case_insensitive(monkeypatch, term):
-    """RFC 7208 section 4.6.1: mechanism and modifier names are case-insensitive."""
     result = await _check(monkeypatch, f'v=spf1 {term} -all')
     assert 'Invalid' not in result['message'], result['message']
 
 
 @pytest.mark.asyncio
 async def test_a_record_written_in_upper_case_is_checked_like_lower_case(monkeypatch):
-    """V=SPF1 and -ALL too: the version and every name are case-insensitive
-    (RFC 7208 section 12, ABNF strings per RFC 5234)."""
     result = await _check(monkeypatch, 'V=SPF1 MX -ALL')
     assert result['status'] == 'success', result['message']
     assert result['record'] == 'V=SPF1 MX -ALL'
@@ -127,7 +114,6 @@ class FakeMX:
 
 
 def _fake_dns(monkeypatch, records):
-    """records: {(name, type): [rdata, ...]}; anything else resolves to nothing."""
     async def fake_resolve(query, record_type='TXT', timeout=5):
         return records.get((query.lower(), record_type), [])
     monkeypatch.setattr(domains, 'resolve_dns_with_fallback', fake_resolve)
@@ -142,7 +128,6 @@ def _fake_dns(monkeypatch, records):
 ])
 @pytest.mark.asyncio
 async def test_a_and_mx_with_a_cidr_length_are_dns_lookups(monkeypatch, record, lookups):
-    """RFC 7208 section 4.6.4: every a and mx term is a DNS lookup, whatever its CIDR length."""
     _fake_dns(monkeypatch, {})
     assert await domains.count_spf_dns_lookups('example.com', record) == lookups
 
@@ -151,7 +136,6 @@ async def test_a_and_mx_with_a_cidr_length_are_dns_lookups(monkeypatch, record, 
 async def test_upper_case_terms_are_counted_as_dns_lookups(monkeypatch):
     _fake_dns(monkeypatch, {('example.net', 'TXT'): [FakeTXT('V=SPF1 MX A -ALL')]})
     record = 'v=spf1 A MX/24 Include:example.net EXISTS:%{i}.example.org PTR Redirect=example.org'
-    # A, MX/24, Include (+ its MX and A), EXISTS, PTR, Redirect
     assert await domains.count_spf_dns_lookups('example.com', record) == 8
 
 
@@ -210,7 +194,6 @@ _CIDR_DNS = {
 ])
 @pytest.mark.asyncio
 async def test_a_and_mx_apply_their_cidr_length(monkeypatch, term, ip, method):
-    """RFC 7208 section 5.6: a/24 authorizes the /24 around each address the name resolves to."""
     _fake_dns(monkeypatch, _CIDR_DNS)
     assert await domains.check_ip_in_spf('example.com', ip, f'v=spf1 {term} -all') == (True, method)
 
@@ -221,7 +204,6 @@ async def test_a_and_mx_apply_their_cidr_length(monkeypatch, term, ip, method):
     ('a:mail.example.com', '2001:db8:1::99'),
     ('mx', '192.0.2.99'),
     ('mx:example.net', '2001:db8:2::99'),
-    # Each length applies to its own address family only
     ('a:mail.example.com//64', '192.0.2.99'),
     ('a:mail.example.com/24', '2001:db8:1::99'),
     ('a/24', '198.51.100.20'),
@@ -243,9 +225,6 @@ async def test_mx_with_a_cidr_length_counts_as_mx(monkeypatch):
                                   'ip4:192.0.2.0/33', 'ip4:192.0.2.0/024', 'ip6:2001:db8::/129', 'ip6:2001:db8::/064'])
 @pytest.mark.asyncio
 async def test_an_invalid_cidr_length_is_an_error(monkeypatch, term):
-    """RFC 7208 sections 5.6 and 4.6.1: a length is decimal digits without a
-    leading zero, 0 to 32 for IPv4 and 0 to 128 for IPv6, whichever family the
-    server uses."""
     result = await _check(monkeypatch, f'v=spf1 {term} -all')
     assert result['status'] == 'error', result['message']
     assert f'Invalid SPF mechanisms: {term}' in result['message']
@@ -290,8 +269,6 @@ async def test_cidr_lengths_within_range_stay_valid(monkeypatch, term):
                                   'a:%{ir.}.example.net', 'a:%{d2,=_}', 'A:%{D/}', 'a:%%.%_.%-.example.com'])
 @pytest.mark.asyncio
 async def test_a_slash_or_other_delimiter_in_a_macro_is_valid(monkeypatch, term):
-    """RFC 7208 section 7.1: '/' and . - + , _ = are macro delimiters, so only a
-    '/' outside %{...} starts the CIDR length."""
     result = await _check(monkeypatch, f'v=spf1 {term} -all')
     assert 'Invalid' not in result['message'], result['message']
 
@@ -305,7 +282,6 @@ async def test_an_unclosed_macro_is_an_error(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_a_term_with_a_macro_is_skipped_when_checking_an_ip(monkeypatch):
-    """The dashboard cannot expand macros: the term is neither looked up nor an error."""
     queries = []
 
     async def fake_resolve(query, record_type='TXT', timeout=5):
@@ -328,7 +304,6 @@ async def test_a_macro_term_does_not_block_an_authorized_server(monkeypatch):
                                   'ip6:192.0.2.0/24', 'ip6:192.0.2.1', 'IP6:192.0.2.0/24'])
 @pytest.mark.asyncio
 async def test_an_address_of_the_other_family_is_an_error(monkeypatch, term):
-    """RFC 7208 section 5.6: ip4 takes an IPv4 network and ip6 an IPv6 network."""
     result = await _check(monkeypatch, f'v=spf1 {term} -all')
     assert result['status'] == 'error', result['message']
     assert f'Invalid SPF mechanisms: {term}' in result['message']
@@ -358,7 +333,6 @@ async def test_an_address_of_its_own_family_stays_valid(monkeypatch, term):
     assert 'Invalid' not in result['message'], result['message']
 
 
-# A wildcard TXT record that would answer the macro target if it were looked up as written
 _MACRO_TARGET_DNS = {
     ('%{d}._spf.example.net', 'TXT'): [FakeTXT('v=spf1 ip4:192.0.2.99 -all')],
     ('example.com', 'A'): [FakeAddr('192.0.2.20')],
@@ -369,7 +343,6 @@ _MACRO_TARGET_DNS = {
                                     'v=spf1 Include:%{d}._spf.example.net -all', 'v=spf1 REDIRECT=%{d}._spf.example.net'])
 @pytest.mark.asyncio
 async def test_an_include_or_redirect_with_a_macro_is_skipped_when_checking_an_ip(monkeypatch, record):
-    """The dashboard cannot expand macros: the target is neither looked up nor an error."""
     queries = []
 
     async def fake_resolve(query, record_type='TXT', timeout=5):
@@ -422,7 +395,6 @@ async def test_ip4_and_ip6_addresses_stay_valid(monkeypatch, term):
 
 @pytest.mark.asyncio
 async def test_a_redirect_counts_the_lookups_of_its_target(monkeypatch):
-    # RFC 7208 4.6.4: the record a redirect points to counts toward the limit
     records = {'example.com': 'v=spf1 mx redirect=_spf.example.net',
                '_spf.example.net': 'v=spf1 a mx include:_inc.example.org -all',
                '_inc.example.org': 'v=spf1 a -all'}
@@ -430,7 +402,6 @@ async def test_a_redirect_counts_the_lookups_of_its_target(monkeypatch):
     async def fake_resolve(query, record_type='TXT', timeout=5):
         return [FakeTXT(records[query])] if record_type == 'TXT' and query in records else []
     monkeypatch.setattr(domains, 'resolve_dns_with_fallback', fake_resolve)
-    # mx, redirect, then a, mx, include and the included a
     assert await domains.count_spf_dns_lookups('example.com', records['example.com']) == 6
 
 
@@ -442,15 +413,12 @@ async def _qualifier(monkeypatch, spf_text):
 
 
 @pytest.mark.parametrize('record, strict, status', [
-    # "-all" inside an include's name is not the all term
     ('v=spf1 include:spf-all.example.net ?all', False, 'warning'),
     ('v=spf1 include:mail-all.example.net ~all', False, 'success'),
-    # The first all term decides (RFC 7208 section 5.1)
     ('v=spf1 mx ?all -all', False, 'warning'),
     ('v=spf1 mx -all +all', True, 'success'),
     ('v=spf1 mx -ALL', True, 'success'),
     ('v=spf1 mx all', False, 'error'),
-    # With an all term, redirect= is ignored wherever it stands
     ('v=spf1 redirect=_spf.example.net -all', True, 'success'),
 ])
 @pytest.mark.asyncio

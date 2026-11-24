@@ -1,9 +1,3 @@
-"""Report emails that could not be imported are announced on the notification
-channels (Slack, Telegram, ntfy...) even when no SMTP server is set up.
-
-send_dmarc_error_notification already sends to the channels without email;
-both of its callers used to skip it unless SMTP was configured.
-"""
 import asyncio
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -15,7 +9,6 @@ from tests.test_dmarc_imap_bounces import BROKEN_REPORT, FakeImap, _SyncRecord
 
 
 def _channels_only(monkeypatch):
-    """A notification channel is on, SMTP is not set up."""
     monkeypatch.setattr(notification_service, "has_enabled_channels", lambda: True)
     assert not scheduler.settings.notification_smtp_configured
 
@@ -46,7 +39,6 @@ def test_imap_import_errors_reach_the_channels_without_smtp(monkeypatch):
 def test_the_notification_itself_goes_to_the_channels_without_smtp(monkeypatch):
     from app.services import dmarc_notifications, stored_alerts
     _channels_only(monkeypatch)
-    # The channels are what this checks; the alert it also stores is test_attention_alert_writers.py's
     monkeypatch.setattr(stored_alerts, 'record_dmarc_import_failed', lambda failed: True)
     sent = []
     monkeypatch.setattr(dmarc_notifications, "notify",

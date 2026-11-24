@@ -1,6 +1,3 @@
-"""ActiveSync devices read from SOGo's access log: the line parser, the
-idempotent upsert, retention, the job's feature gate and the /api/devices list.
-Fake addresses only."""
 import asyncio
 from datetime import datetime, timedelta
 
@@ -19,8 +16,6 @@ EAS = '/SOGo/Microsoft-Server-ActiveSync'
 def line(query, remote='203.0.113.7', status=200, pid='[61]: ', method='POST'):
     return f'{pid}{remote} "{method} {EAS}?{query} HTTP/1.1" {status} 13/0 0.012 - - 0 - 15'
 
-
-# --- parser -----------------------------------------------------------------
 
 def test_a_plain_ping_gives_user_device_type_command_ip_and_status():
     parsed = parse_eas_line(line('User=jane%40example.com&DeviceId=ABC123&DeviceType=iPhone&Cmd=Ping'))
@@ -50,7 +45,6 @@ def test_a_forwarded_list_gives_the_client_address():
 
 
 def test_a_line_in_the_shape_a_real_mailcow_logs_it():
-    # Seen on a live mailcow: nginx's X-Forwarded-For repeats the client
     message = ('[126]: 203.0.113.7, 203.0.113.7 "POST /SOGo/Microsoft-Server-ActiveSync?Cmd=Sync'
                '&User=jane%40example.com&DeviceId=androidc1234567890&DeviceType=Android HTTP/1.1" '
                '200 0/69 0.234 - - 288K - 13')
@@ -75,7 +69,6 @@ def test_a_missing_device_type_and_command_stay_empty():
 
 
 @pytest.mark.parametrize('message', [
-    # The base64 query form names no user
     f'[61]: 203.0.113.7 "POST {EAS}?jAAJBAp2MTQwRGV2aWNlAApTbWFydFBob25l HTTP/1.1" 200 13/0 0.012 - - 0 - 15',
     line('DeviceId=A&Cmd=Ping'),
     line('User=jane@example.com&Cmd=Ping'),
@@ -98,7 +91,6 @@ def test_lines_that_name_no_device_are_skipped(message):
     'User=jane@example.com&DeviceId=a%C2%85b',
 ])
 def test_a_control_character_in_a_decoded_value_skips_the_line(query):
-    # The client chooses the query, and PostgreSQL text cannot hold NUL
     assert parse_eas_line(line(query)) is None
 
 
@@ -137,8 +129,6 @@ def test_the_batch_keeps_the_newest_request_and_the_oldest_time():
 def test_the_app_and_model_are_named_only_when_recognised(device_id, device_type, client, model):
     assert describe_device(device_id, device_type) == {'client': client, 'model': model}
 
-
-# --- database ---------------------------------------------------------------
 
 USER = 'eas-test@example.test'
 
@@ -189,7 +179,7 @@ def test_overlapping_cycles_leave_one_row_with_the_right_times(db):
     second = first[1:] + [_entry(t0 + timedelta(minutes=9), q + '&Cmd=Ping', remote='203.0.113.9')]
     store_devices(db, collect_devices(first))
     store_devices(db, collect_devices(second))
-    store_devices(db, collect_devices(second))   # the same page read again
+    store_devices(db, collect_devices(second))
     [row] = _rows(db)
     assert row.first_seen == t0
     assert row.last_seen == t0 + timedelta(minutes=9)
@@ -252,10 +242,8 @@ def test_the_list_filters_sorts_and_counts(db):
     assert [d['device_id'] for d in typed['items']] == ['TAB']
     assert {'iPhone', 'iPad'} <= set(body['device_types'])
 
-    # Without GeoIP the location fields are there and empty
     assert body['items'][0]['country_code'] is None
 
-    # A wildcard typed into the search is a character, not a pattern
     assert client.get('/api/devices', params={'search': 'eas_test'}).json()['total'] == 0
     assert client.get('/api/devices', params={'sort_by': 'nope'}).status_code == 422
 
@@ -282,7 +270,6 @@ def test_each_device_carries_the_location_of_its_last_ip(db, monkeypatch):
 
 
 def _store_raw(db, rows):
-    """Put SOGo lines in the raw log table, as the raw logs worker does."""
     import hashlib
     from app.models import RawServiceLog
     for entry in rows:
@@ -329,7 +316,6 @@ def test_the_job_records_devices_from_the_stored_sogo_lines(raw, monkeypatch):
     [row] = _rows(raw)
     assert (row.device_type, row.last_command) == ('iPhone', 'Sync')
 
-    # Only lines stored after the last run are read: a newer Ping moves it on
     _store_raw(raw, [_entry(now, f'User={USER}&DeviceId=A&DeviceType=iPhone&Cmd=Ping')])
     asyncio.run(scheduler.update_eas_devices())
     [row] = _rows(raw)
@@ -341,15 +327,12 @@ def _device(device_id, when):
             'last_ip': None, 'last_status': 200, 'first_seen': when, 'last_seen': when}
 
 
-# NUL is refused by the driver before the statement is sent; a value longer
-# than the column is refused by the server and aborts the transaction
 @pytest.mark.parametrize('bad_id', ['a\x00b', 'x' * 300], ids=['nul', 'too-long'])
 def test_a_device_the_database_refuses_does_not_stop_the_others(db, bad_id, caplog):
     from app.services.eas_devices import store_devices
     t0 = datetime(2026, 10, 1, 12, 0, 0)
     assert store_devices(db, [_device('A', t0), _device(bad_id, t0), _device('B', t0)]) == 2
     assert [r.device_id for r in _rows(db)] == ['A', 'B']
-    # The kind of error only: no statement, no parameters
     kind = 'DataError 22001' if len(bad_id) > 255 else 'ValueError'
     [warning] = [r for r in caplog.records if r.levelname == 'WARNING']
     assert warning.getMessage() == (
@@ -360,7 +343,6 @@ def test_a_device_the_database_refuses_does_not_stop_the_others(db, bad_id, capl
 
 
 def test_a_database_failure_is_raised_and_writes_nothing(db, monkeypatch):
-    # A lost connection is not the row's fault: the batch must be read again
     from sqlalchemy.exc import OperationalError
     from app.services.eas_devices import store_devices
     t0 = datetime(2026, 10, 1, 12, 0, 0)
@@ -368,7 +350,7 @@ def test_a_database_failure_is_raised_and_writes_nothing(db, monkeypatch):
 
     def execute(statement, *args, **kwargs):
         calls.append(statement)
-        if len(calls) == 3:   # the batch, device A on its own, then the outage
+        if len(calls) == 3:
             raise OperationalError('INSERT', {}, Exception('server closed the connection'))
         return real_execute(statement, *args, **kwargs)
     monkeypatch.setattr(db, 'execute', execute)
@@ -389,7 +371,6 @@ def test_only_errors_in_the_row_itself_are_skipped():
         return error
     assert _is_row_error(ValueError('A string literal cannot contain NUL (0x00) characters.'))
     assert _is_row_error(DataError('INSERT', {}, orig('22001')))
-    # A spent id sequence or a broken constraint fails every row alike
     assert not _is_row_error(DataError('INSERT', {}, orig('2200H')))
     assert not _is_row_error(IntegrityError('INSERT', {}, orig('23505')))
     assert not _is_row_error(OperationalError('INSERT', {}, orig('08006')))
@@ -404,7 +385,6 @@ def test_a_line_the_database_cannot_store_does_not_stop_the_job(raw, monkeypatch
     from app.services import eas_devices
     monkeypatch.setattr(settings._inner, 'disabled_features', '')
     if not parser_check:
-        # Let the NUL through so the store has to skip it on its own
         monkeypatch.setattr(eas_devices, '_CONTROL_RE', re.compile(r'(?!)'))
     now = datetime.utcnow().replace(microsecond=0)
 
@@ -425,7 +405,6 @@ def test_a_line_the_database_cannot_store_does_not_stop_the_job(raw, monkeypatch
     assert [r.device_id for r in _rows(raw)] == ['OK-1', 'OK-2']
     assert mark == last
 
-    # A batch with nothing to record still moves past its lines
     _store_raw(raw, [_entry(now, 'User=eas-test%00x@example.test&DeviceId=OK-3&Cmd=Ping')])
     mark, last = run_and_read_mark()
     assert mark == last

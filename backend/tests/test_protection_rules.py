@@ -1,10 +1,3 @@
-"""Protection rules: the Trap and unknown-account rules in watch mode.
-
-A rule reads the failed logins netfilter records and notes which addresses it
-would ban and why. In watch mode nothing is written to Fail2ban; the hits are
-what the admin reviews before switching a rule to ban. The other rules and the
-writes to Fail2ban are covered in test_protection_enforce.py.
-"""
 import uuid
 from datetime import datetime, timedelta
 
@@ -59,7 +52,6 @@ def db():
     _cleanup()
     with get_db_context() as session:
         session.add(MailboxStatistics(username=f'info@{DOMAIN}', domain=DOMAIN))
-        # Start reading after whatever the database already holds
         last = session.query(NetfilterLog.id).order_by(NetfilterLog.id.desc()).first()
         session.add(SystemSetting(key=protection_rules.WATERMARK_KEY, value=str(last[0] if last else 0)))
         session.commit()
@@ -92,8 +84,6 @@ def _hits(session):
     from app.models import ProtectionHit
     return session.query(ProtectionHit).filter(ProtectionHit.ip.in_(ALL_IPS)).order_by(ProtectionHit.id).all()
 
-
-# ---------- Trap ----------
 
 def test_a_login_to_a_trap_name_is_noted_in_watch_mode(db):
     from app.services import protection_rules
@@ -131,25 +121,19 @@ def test_a_disabled_rule_notes_nothing_but_the_reading_moves_on(db):
     _fail(db, TRAP_IP, 'admin')
     protection_rules.evaluate(db, _context())
     assert _hits(db) == []
-    # Turning it on later does not reach back into lines already read
     _rules(db, trap={'enabled': True})
     protection_rules.evaluate(db, _context())
     assert _hits(db) == []
 
-
-# ---------- never ban ----------
 
 def test_allowlisted_and_private_addresses_are_never_noted(db):
     from app.services import protection_rules
     _rules(db, trap={'enabled': True, 'names': ['admin']})
     _fail(db, ALLOWED_IP, 'admin')
     _fail(db, PRIVATE_IP, 'admin')
-    # The allowlist is matched as a network, not only as a single address
     protection_rules.evaluate(db, _context(allowlist=['203.0.113.0/24']))
     assert _hits(db) == []
 
-
-# ---------- unknown accounts ----------
 
 def test_several_unknown_accounts_from_one_address_are_noted(db):
     from app.services import protection_rules
@@ -165,7 +149,6 @@ def test_several_unknown_accounts_from_one_address_are_noted(db):
 def test_existing_accounts_and_too_few_tries_are_not_noted(db):
     from app.services import protection_rules
     _rules(db, unknown_accounts={'enabled': True, 'threshold': 3, 'window_minutes': 60})
-    # A real mailbox with a wrong password is not an unknown account
     _fail(db, SPRAY_IP, f'info@{DOMAIN}')
     _fail(db, SPRAY_IP, 'ftpuser')
     _fail(db, SPRAY_IP, 'scanner')
@@ -174,7 +157,6 @@ def test_existing_accounts_and_too_few_tries_are_not_noted(db):
 
 
 def test_an_address_that_logged_in_successfully_is_not_noted(db):
-    """A real user who typed a wrong address a few times is not an attacker."""
     from app.models import PostfixLog
     from app.services import protection_rules
     db.add(PostfixLog(time=datetime.utcnow() - timedelta(hours=2), queue_id=MARKER[:20], program='postfix/submission/smtpd',
@@ -186,8 +168,6 @@ def test_an_address_that_logged_in_successfully_is_not_noted(db):
     protection_rules.evaluate(db, _context())
     assert _hits(db) == []
 
-
-# ---------- repeat reading ----------
 
 def test_a_second_run_adds_to_the_open_hit_instead_of_a_new_one(db):
     from app.services import protection_rules
@@ -202,15 +182,12 @@ def test_a_second_run_adds_to_the_open_hit_instead_of_a_new_one(db):
     assert sorted(hits[0].usernames) == ['admin', 'root']
 
 
-# ---------- API ----------
-
 def test_the_api_saves_rules_suggests_traps_and_lists_hits(db):
     from fastapi.testclient import TestClient
     from app.main import app
     from app.services import protection_rules
     client = TestClient(app)
 
-    # A real mailbox is refused with a message the admin can act on
     bad = client.put('/api/protection/rules', json={'rules': {'trap': {'enabled': True, 'names': ['info']}}})
     assert bad.status_code == 400 and 'info' in bad.json()['detail']
 
@@ -236,10 +213,7 @@ def test_the_api_saves_rules_suggests_traps_and_lists_hits(db):
     assert [h for h in client.get('/api/protection/hits').json()['hits'] if h['ip'] in ALL_IPS] == []
 
 
-# ---------- alias domains ----------
-
 def test_an_address_on_an_alias_domain_is_a_real_account(db):
-    """mailcow maps user@alias-domain to user@target-domain: it exists, so it is no trap and not unknown."""
     from app.services import protection_rules
     from app.services.alias_domains import persist_alias_domain_map, set_cached_alias_domain_map
     alias_domain = f'alias-{DOMAIN}'
@@ -258,10 +232,7 @@ def test_an_address_on_an_alias_domain_is_a_real_account(db):
         set_cached_alias_domain_map({})
 
 
-# ---------- review follow-ups ----------
-
 def test_a_trap_that_became_a_real_mailbox_catches_nobody(db):
-    """A trap saved before the mailbox existed must not ban its real user later."""
     from app.models import MailboxStatistics
     from app.services import protection_rules
     _rules(db, trap={'enabled': True, 'names': ['newhire']})

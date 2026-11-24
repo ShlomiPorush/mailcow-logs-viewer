@@ -1,18 +1,9 @@
-"""Whether one API answer matches what its operation in /openapi.json says it returns.
-
-The test contract check (contract.py) and the browser pass
-(.github/scripts/ui_smoke.py, which smoke.sh runs with this file next to it)
-both use these rules, so this module imports nothing from the test suite.
-"""
 import json
 from typing import Any, Dict, Optional, Tuple
 
 from jsonschema import Draft202012Validator
 
-# Answered by the auth middleware or the origin guard for any call, as the
-# document's description says; a route documents them only when it gives them itself
 APP_WIDE_STATUSES = {401, 403, 429}
-# The auth middleware's plain-text 401 answers (app/auth.py); any other 401 is a route's
 MIDDLEWARE_401_SENTENCES = {b"Authentication required", b"Incorrect username or password"}
 
 
@@ -21,8 +12,6 @@ def success_responses(operation: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def says_something(schema: Dict[str, Any]) -> bool:
-    """Whether a schema describes an answer. FastAPI's default ({}) and the one it
-    infers from a `-> Dict[str, Any]` annotation (any object) say nothing."""
     if not schema:
         return False
     if schema.get("type") == "object" and not schema.get("properties") \
@@ -32,7 +21,6 @@ def says_something(schema: Dict[str, Any]) -> bool:
 
 
 def is_documented(operation: Optional[Dict[str, Any]]) -> bool:
-    """Whether an operation says what it returns: a body schema, or a 3xx/204 without a body."""
     if not operation:
         return False
     for code, response in success_responses(operation).items():
@@ -48,19 +36,12 @@ def is_documented(operation: Optional[Dict[str, Any]]) -> bool:
 
 def check_answer(operation: Dict[str, Any], components: Dict[str, Any], status: int,
                  content_type: str, body: Optional[bytes]) -> Tuple[str, Optional[str]]:
-    """('checked', None) when the answer matches, ('skipped', why) when it is not
-    checked, ('mismatch', what) when it does not match. body is None when the
-    browser could not read it."""
     if not is_documented(operation):
         return "skipped", "documents nothing yet"
     media = (content_type or "").split(";")[0].strip()
     if status == 500 and media != "application/json":
-        # Not a route's answer: the auth middleware's plain sentence when Basic auth
-        # is on without a password, for any call (the document's description says so)
         return "skipped", "HTTP 500 from sign-in set up without a password"
     if status == 401 and media != "application/json" and body in MIDDLEWARE_401_SENTENCES:
-        # Not a route's answer either: the auth middleware's plain sentence for a
-        # call without credentials, for any call (the document's description says so)
         return "skipped", "HTTP 401 from sign-in"
     response = (operation.get("responses") or {}).get(str(status))
     if response is None:

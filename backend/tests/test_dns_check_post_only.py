@@ -1,11 +1,3 @@
-"""A domain's DNS check runs only from a POST sent by the app's own pages.
-
-GET /api/domains/{domain}/dns-check ran the DNS, MTA-STS and DANE probes for
-any valid domain. The origin guard only inspects POST, PUT, PATCH and DELETE,
-authentication is off by default and the session cookie is SameSite Lax, so a
-link on another site could make the app probe any domain. The GET is gone; the
-SPA and agents use POST /api/domains/{domain}/check-dns.
-"""
 import pytest
 from fastapi.testclient import TestClient
 

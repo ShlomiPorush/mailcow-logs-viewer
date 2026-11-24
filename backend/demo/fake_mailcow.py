@@ -1,16 +1,3 @@
-"""
-A fake mailcow and Rspamd HTTP API, served in-process.
-
-The demo does not replace MailcowAPI's methods. It hands MailcowAPI an httpx
-client whose transport answers from this module instead of the network, so
-every request, retry, parse and error path in the application runs exactly
-as it does against a real server. Writes change the in-memory state, so a
-visitor sees the result of a release, a ban or a rate-limit change until the
-nightly reset rebuilds the world.
-
-Log endpoints follow mailcow's Redis-list behaviour: newest first, 1-based
-ranges (0-based for rspamd-history), and an empty list past the end.
-"""
 import asyncio
 import copy
 import json
@@ -28,9 +15,7 @@ logger = logging.getLogger(__name__)
 
 LOG_SERVICES = ("acme", "api", "autodiscover", "dovecot", "netfilter", "postfix",
                 "ratelimited", "rspamd-history", "sogo", "watchdog")
-# mailcow keeps the newest LOG_LINES entries per service (default 9999)
 DEFAULT_LOG_CAP = 10000
-# Range requests on rspamd-history start at 0; the Redis lists start at 1
 _INDEX_BASE = {"rspamd-history": 0}
 
 
@@ -44,8 +29,6 @@ def _success(msg):
 
 
 class FakeMailcow:
-    """State of the fictional server plus the request router."""
-
     def __init__(self, now=None, log_cap=DEFAULT_LOG_CAP):
         self._lock = threading.RLock()
         self.log_cap = log_cap
@@ -58,7 +41,6 @@ class FakeMailcow:
             ("GET", re.compile(r"^/api/v1/get/quarantine/all$"), self._get_quarantine),
             ("GET", re.compile(r"^/inc/ajax/qitem_details\.php$"), self._get_qitem_details),
             ("POST", re.compile(r"^/api/v1/edit/qitem$"), self._edit_qitem),
-            # The Read-Write key check: mailcow answers an unknown edit route with 404
             ("POST", re.compile(r"^/api/v1/edit/mlv-key-check$"), self._route_not_found),
             ("POST", re.compile(r"^/api/v1/delete/qitem$"), self._delete_qitem),
             ("GET", re.compile(r"^/api/v1/get/status/containers$"), self._get_containers),
@@ -82,18 +64,13 @@ class FakeMailcow:
             ("GET", re.compile(r"^/api/v1/get/relayhost/all$"), self._get_relayhosts),
             ("GET", re.compile(r"^/api/v1/get/fail2ban$"), self._get_fail2ban),
             ("POST", re.compile(r"^/api/v1/edit/fail2ban$"), self._edit_fail2ban),
-            # Rspamd through the mailcow proxy, or direct when RSPAMD_URL is set
-            # The Rspamd password check logs in the way the Rspamd web UI does
             ("GET", re.compile(r"^(?:/rspamd)?/auth$"), self._get_rspamd_auth),
             ("GET", re.compile(r"^(?:/rspamd)?/maps$"), self._get_rspamd_maps),
             ("GET", re.compile(r"^(?:/rspamd)?/getmap$"), self._get_rspamd_map),
             ("POST", re.compile(r"^/api/v1/edit/rspamd-map$"), self._edit_rspamd_map),
         ]
 
-    # ------------------------------------------------------------------ state
-
     def reset(self, now=None):
-        """Rebuild the world as it is at ``now`` and drop every log line."""
         now = int(now or time.time())
         with self._lock:
             self.built_at = now
@@ -114,15 +91,12 @@ class FakeMailcow:
             self.logs = {svc: [] for svc in LOG_SERVICES}
 
     def push_logs(self, service, entries):
-        """Add entries (oldest first) at the head, like Redis LPUSH."""
         if service not in self.logs:
             raise ValueError(f"unknown log service: {service}")
         with self._lock:
             buf = self.logs[service]
             buf[0:0] = list(reversed(entries))
             del buf[self.log_cap:]
-
-    # ---------------------------------------------------------------- routing
 
     def handle(self, request: httpx.Request) -> httpx.Response:
         path = request.url.path
@@ -143,8 +117,6 @@ class FakeMailcow:
         except ValueError:
             return None
 
-    # ------------------------------------------------------------------- logs
-
     def _get_logs(self, request, svc, spec):
         buf = self.logs.get(svc)
         if buf is None:
@@ -156,8 +128,6 @@ class FakeMailcow:
                 return _json([])
             return _json(buf[max(start - base, 0):max(end - base + 1, 0)])
         return _json(buf[:int(spec)])
-
-    # ------------------------------------------------------------------ queue
 
     def _get_queue(self, request):
         return _json(self.queue)
@@ -171,7 +141,6 @@ class FakeMailcow:
             self.queue = [q for q in self.queue if not everything and q["queue_id"] not in items]
             return _success("Queue deleted")
         if action == "flush":
-            # Deferred mail is retried and, in this world, delivered
             self.queue = [q for q in self.queue if q["queue_name"] == "hold"]
             return _success("Queue flushed")
         for q in self.queue:
@@ -191,8 +160,6 @@ class FakeMailcow:
         items = {str(i) for i in (self._body(request) or [])}
         self.queue = [q for q in self.queue if q["queue_id"] not in items]
         return _success("Queue item(s) deleted")
-
-    # ------------------------------------------------------------- quarantine
 
     def _get_quarantine(self, request):
         return _json(self.quarantine)
@@ -220,8 +187,6 @@ class FakeMailcow:
         self.quarantine = [q for q in self.quarantine if str(q["id"]) not in items]
         return _success("Deleted")
 
-    # ----------------------------------------------------------------- status
-
     def _route_not_found(self, request):
         return _json({"type": "error", "msg": "route not found"}, status=404)
 
@@ -240,8 +205,6 @@ class FakeMailcow:
 
     def _get_host_ip(self, request):
         return _json([{"ipv4": world.SERVER_IPV4, "ipv6": world.SERVER_IPV6}])
-
-    # ------------------------------------------------ domains, mailboxes, aliases
 
     def _get_domains(self, request):
         return _json(self.domains)
@@ -298,8 +261,6 @@ class FakeMailcow:
     def _get_relayhosts(self, request):
         return _json([])
 
-    # ------------------------------------------------------------ rate limits
-
     def _get_rl_mbox(self, request, mailbox):
         for m in self.mailboxes:
             if m["username"] == mailbox and m["rl"]:
@@ -335,10 +296,7 @@ class FakeMailcow:
         return _success(["rl_saved", ", ".join(body.get("items", []))])
 
     def _delete_rlhash(self, request):
-        # mailcow answers an empty JSON body here
         return httpx.Response(200, content=b"", headers={"content-type": "application/json"})
-
-    # --------------------------------------------------------------- fail2ban
 
     def _get_fail2ban(self, request):
         return _json(self.fail2ban)
@@ -350,11 +308,9 @@ class FakeMailcow:
     def _edit_fail2ban(self, request):
         body = self._body(request) or {}
         attrs = body.get("attr") or {}
-        # Like mailcow: an action with networks (unban) is handled alone
         if attrs.get("action") and body.get("items"):
             return self._fail2ban_action(attrs["action"], body["items"])
         f2b = self.fail2ban
-        # Like mailcow: an edit that leaves this out turns it off
         f2b["manage_external"] = 1 if str(attrs.get("manage_external", "0")) == "1" else 0
         for key in ("ban_time", "max_ban_time", "ban_time_increment", "max_attempts",
                     "retry_window", "netban_ipv4", "netban_ipv6"):
@@ -387,13 +343,10 @@ class FakeMailcow:
     def _fail2ban_action(self, action, items):
         if action != "unban":
             return _json([{"type": "danger", "msg": f"unsupported action {action}"}])
-        # mailcow queues the unban and answers success whether or not it was banned
         networks = set(items if isinstance(items, list) else [items])
         self.fail2ban["active_bans"] = [b for b in self.fail2ban["active_bans"]
                                         if b["network"] not in networks and b["ip"] not in networks]
         return _success(f"Unbanned {', '.join(sorted(networks))}")
-
-    # ----------------------------------------------------------------- rspamd
 
     def _get_rspamd_auth(self, request):
         return _json({"auth": "ok", "read_only": False})
@@ -426,7 +379,6 @@ server = FakeMailcow()
 
 
 def install(fake=server):
-    """Route every MailcowAPI request to ``fake`` instead of the network."""
     from app.mailcow_api import MailcowAPI
 
     transport = httpx.MockTransport(fake.handle)

@@ -1,12 +1,3 @@
-"""The map editor never saves a map over a change made since it was read.
-
-A map is written whole, and the suppression sync writes the recipient
-denylist on its own. An editor opened before a sync used to save its old copy
-over the sync's lines. The editor now sends the content_hash of the map it
-read; the save is refused with 409 when the map changed, and the answer to a
-save carries the map as saved with its new hash. Every write goes to a fake
-mailcow.
-"""
 import hashlib
 import secrets
 
@@ -16,8 +7,6 @@ MAP = 'global_rcpt_blacklist.map'
 
 
 class FakeMaps:
-    """mailcow's map edit and Rspamd's getmap for one map: mailcow trims what it
-    is sent and ends it with a new line."""
     has_rw_key = True
 
     def __init__(self, content):
@@ -66,7 +55,7 @@ def _sha(text):
 
 def test_a_save_from_a_copy_read_before_a_change_is_refused(maps, client):
     opened = client.get(f'/api/rspamd/maps/{MAP}').json()
-    maps.content = opened['content'] + '/^b@example\\.com$/i\n'   # the suppression sync wrote meanwhile
+    maps.content = opened['content'] + '/^b@example\\.com$/i\n'
 
     saved = client.put(f'/api/rspamd/maps/{MAP}', json={
         'content': opened['content'] + '/^c@example\\.com$/i', 'base_hash': _sha(opened['content'])})

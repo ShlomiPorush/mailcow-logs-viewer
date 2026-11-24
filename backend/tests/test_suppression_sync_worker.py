@@ -1,4 +1,3 @@
-"""Both suppression sync entry points keep blocking work off the request loop."""
 import asyncio
 import secrets
 import threading

@@ -1,4 +1,3 @@
-"""Excluded-address cleanup keeps database work off the event loop and preserves queue scope."""
 import asyncio
 import threading
 import uuid
@@ -114,14 +113,11 @@ def test_cleanup_preserves_other_queue_chains(monkeypatch):
                                  (None, "bcc@example.com"), ("KEEP2", "BCC@example.com")]]
             db.add_all(rows)
             db.flush()
-            # A listed address matches in any case, and a line without a queue
-            # (NOQUEUE) goes on its own
             expected = {rows[3].id}
             db.commit()
         asyncio.run(scheduler.cleanup_blacklisted_queues())
         with session() as db:
             assert {row.id for row in db.query(PostfixLog).all()} == expected
-        # Running again is harmless when all matched queue chains are gone.
         scheduler.excluded_addresses.request_full_pass()
         asyncio.run(scheduler.cleanup_blacklisted_queues())
         with session() as db:

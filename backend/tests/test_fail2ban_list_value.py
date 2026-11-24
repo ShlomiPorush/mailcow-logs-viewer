@@ -1,12 +1,3 @@
-"""Ban and Allow take exactly one address or one network.
-
-mailcow keeps the Fail2ban allowlist and denylist as one comma (or newline)
-separated text, and the app writes the list back joined with commas. A value
-with a comma or a line break in it would add several entries at once, so
-"203.0.113.4/32,0.0.0.0/0" sent to Ban would deny every IPv4 address. The
-server refuses anything that is not a single IP address or a single network
-before it reads or writes the list.
-"""
 import pytest
 
 import starlette.staticfiles as sf
@@ -25,7 +16,6 @@ def _client():
 
 @pytest.fixture()
 def mailcow(monkeypatch):
-    """A mailcow with empty lists; records every write."""
     state = {'f2b': {'netban_ipv4': 32, 'netban_ipv6': 128, 'blacklist': '', 'whitelist': '', 'active_bans': []},
              'writes': [], 'reads': 0}
 
@@ -43,15 +33,15 @@ def mailcow(monkeypatch):
 
 
 BAD_VALUES = [
-    '203.0.113.4/32,0.0.0.0/0',     # two entries in one
+    '203.0.113.4/32,0.0.0.0/0',
     '203.0.113.4,203.0.113.5',
-    '203.0.113.4\n0.0.0.0/0',       # mailcow splits on line breaks too
+    '203.0.113.4\n0.0.0.0/0',
     '203.0.113.4/32\r\n',
     '203.0.113.4 203.0.113.5',
     ' 203.0.113.4',
     '203.0.113.4\t',
-    'mail.example.com',             # a name, not an address
-    'fe80::1%eth0',                 # an interface scope is not part of a list entry
+    'mail.example.com',
+    'fe80::1%eth0',
     '203.0.113.4/33',
     '203.0.113.300',
     '',

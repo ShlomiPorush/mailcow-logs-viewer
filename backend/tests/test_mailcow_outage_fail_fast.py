@@ -1,14 +1,3 @@
-"""While mailcow cannot be reached, the app fails at once instead of freezing.
-
-On DEV, with mailcow's traffic dropped, every mailcow read waited about 94
-seconds (three tries, each waiting for the connection timeout), the browser's
-connections filled up and pages that only read the database waited behind
-them, and a container started during the outage served nothing for about 96
-seconds because startup asked mailcow first. Now a failed connection marks
-mailcow's address as unreachable for a moment: requests to it fail locally
-with "mailcow cannot be reached", one request then tries again, and startup
-does not ask mailcow at all.
-"""
 import asyncio
 import secrets
 import threading
@@ -31,8 +20,6 @@ UNREACHABLE = "mailcow cannot be reached. It is tried again within 30 seconds."
 
 @pytest.fixture()
 def mailcow(monkeypatch):
-    """A fake mailcow. `answer` decides each attempt (a response, an exception,
-    or a coroutine for one); `requests` holds every attempt that reached the network."""
     state = {"answer": lambda request: httpx.Response(200, json=[{"ok": True}]),
              "requests": [], "timeouts": []}
 
@@ -56,7 +43,6 @@ def mailcow(monkeypatch):
 
 @pytest.fixture()
 def clock(module_clock):
-    """The breaker's clock, moved by hand."""
     now = {"t": 1000.0}
     module_clock(mod, monotonic=lambda: now["t"])
     return now
@@ -89,8 +75,6 @@ async def _closing(api, coro):
         await api.aclose()
 
 
-# ---------- one failed connection, then local refusals ----------
-
 @pytest.mark.parametrize("error", [httpx.ConnectError, httpx.ConnectTimeout], ids=["connect-error", "connect-timeout"])
 def test_an_unreachable_mailcow_is_asked_once_then_refused_locally(mailcow, error):
     mailcow["answer"] = _raise(error)
@@ -119,7 +103,6 @@ def test_the_refusal_is_shown_to_the_page_as_it_is(monkeypatch):
 
 
 def test_a_read_timeout_is_not_tried_again_and_does_not_mark_mailcow_unreachable(mailcow):
-    """A slow mailcow (a large log page) is not a missing one."""
     mailcow["answer"] = _raise(httpx.ReadTimeout)
     api = _api()
 
@@ -162,8 +145,6 @@ def test_the_connection_gets_at_most_ten_seconds(mailcow):
     assert (short.connect, short.read) == (5, 5)
 
 
-# ---------- the probe after the pause ----------
-
 def test_after_the_pause_one_request_tries_and_an_answer_clears(mailcow, clock):
     mailcow["answer"] = _raise(httpx.ConnectError)
     api = _api()
@@ -199,7 +180,6 @@ def test_any_http_answer_counts_as_reached(mailcow, clock):
         await api.aclose()
 
     run(scenario())
-    # The probe got an answer: the two tries after it went to mailcow as well
     assert len(mailcow["requests"]) == 4
 
 
@@ -299,7 +279,6 @@ def test_requests_during_the_probe_are_refused(mailcow, clock):
 
 
 def test_event_loops_in_other_threads_share_what_is_known(mailcow):
-    """Manual job runs use worker threads with their own event loops."""
     mailcow["answer"] = _raise(httpx.ConnectError)
     api = _api()
     outcomes = []
@@ -320,8 +299,6 @@ def test_event_loops_in_other_threads_share_what_is_known(mailcow):
     assert len(mailcow["requests"]) == 1
 
 
-# ---------- a Settings save ----------
-
 def test_a_new_address_is_tried_at_once_and_a_late_outcome_of_the_old_one_is_ignored(mailcow, clock, monkeypatch):
     mailcow["answer"] = _raise(httpx.ConnectError)
     api = _api()
@@ -339,7 +316,6 @@ def test_a_new_address_is_tried_at_once_and_a_late_outcome_of_the_old_one_is_ign
         mailcow["answer"] = fails_late
         probe = asyncio.create_task(_read(api))
         await started.wait()
-        # Saved in Settings while the probe runs: the same host, written differently
         monkeypatch.setattr(settings._inner, "mailcow_url", URL + ":443")
         api.reload_config()
         release.set()
@@ -370,9 +346,6 @@ def test_a_changed_timeout_tries_at_once(mailcow, monkeypatch):
 
 
 def test_a_client_made_before_a_settings_change_does_not_refuse_the_new_settings(mailcow, monkeypatch):
-    """The client was made with the old SSL setting, then Settings corrected
-    it (from a worker thread) before the client's request was admitted: its
-    failure must not refuse the corrected setting, and it is not used again."""
     api = _api()
 
     async def scenario():
@@ -393,9 +366,6 @@ def test_a_client_made_before_a_settings_change_does_not_refuse_the_new_settings
 
 
 def test_a_client_of_old_settings_never_holds_the_probe(mailcow, monkeypatch, clock):
-    """A client made before a settings change reaches its first request only
-    after the new settings failed and their cooldown ended: it must not take
-    the probe, whose outcome would then be ignored and never free it."""
     api = _api()
 
     async def scenario():
@@ -432,8 +402,6 @@ def test_an_unrelated_settings_save_keeps_mailcow_refused(mailcow, monkeypatch):
     run(scenario())
     assert len(mailcow["requests"]) == 1
 
-
-# ---------- Rspamd at its own address ----------
 
 @pytest.fixture()
 def rspamd_direct(monkeypatch):
@@ -483,8 +451,6 @@ def test_an_unreachable_mailcow_does_not_refuse_rspamd(mailcow, rspamd_direct):
     assert [r.url.host for r in mailcow["requests"]] == ["mail.example.com", "rspamd.example.test"]
 
 
-# ---------- the other requests ----------
-
 def _mark_unreachable(api):
     async def go():
         with pytest.raises(MailcowAPIError):
@@ -508,7 +474,6 @@ def test_every_kind_of_request_is_refused_locally(mailcow, monkeypatch):
             await api._make_rspamd_request("/rspamd/maps")
         with pytest.raises(MailcowUnreachableError):
             await api.release_quarantine(["1"])
-        # The credential checks keep their answer
         assert await api.check_rw_key() == {"configured": True, "valid": False, "error": "connection"}
         assert await api.check_rspamd_password() == {"configured": True, "valid": False, "error": "connection"}
         await api.aclose()
@@ -518,7 +483,6 @@ def test_every_kind_of_request_is_refused_locally(mailcow, monkeypatch):
 
 
 def test_a_write_whose_connection_failed_is_sent_once_and_fails_at_once(mailcow):
-    """No wait patched out: the page is told within the second."""
     mailcow["answer"] = _raise(httpx.ConnectError)
     api = _api()
     api.headers_rw = {"X-API-Key": secrets.token_hex(16), "Content-Type": "application/json"}
@@ -529,8 +493,6 @@ def test_a_write_whose_connection_failed_is_sent_once_and_fails_at_once(mailcow)
     assert not isinstance(raised.value, MailcowWriteUnknownError)
     assert len(mailcow["requests"]) == 1
 
-
-# ---------- which failures can pass ----------
 
 @pytest.mark.parametrize("answer, transient", [
     (_raise(httpx.ConnectError), True),
@@ -554,10 +516,7 @@ def test_a_refused_write_key_cannot_pass():
     assert MailcowAPIError("anything").transient is False
 
 
-# ---------- startup ----------
-
 def test_startup_does_not_ask_mailcow(mailcow, monkeypatch):
-    # app.main mounts the frontend folder of the image, which a test run does not have
     import starlette.staticfiles as sf
     real_init = sf.StaticFiles.__init__
     monkeypatch.setattr(sf.StaticFiles, "__init__", lambda s, *a, **k: real_init(s, *a, **{**k, "check_dir": False}))
@@ -587,8 +546,6 @@ def test_startup_does_not_ask_mailcow(mailcow, monkeypatch):
     run(start())
     assert mailcow["requests"] == []
 
-
-# ---------- the server IP for the transport sync ----------
 
 @pytest.fixture()
 def transports(monkeypatch):
@@ -621,7 +578,6 @@ def test_the_transport_sync_fails_without_touching_hosts_when_the_ip_cannot_be_a
     _host_ip_answer(monkeypatch, error)
     run(scheduler.sync_transports_job())
     transports.assert_not_called()
-    # Transient: run again within minutes once mailcow answers (retry_failed_jobs)
     scheduler.update_job_status.assert_called_with("sync_transports", "failed", str(error), retryable=True)
     assert domains.get_cached_server_ip() is None
 
@@ -640,11 +596,8 @@ def test_the_transport_sync_reads_the_ip_it_needs(transports, monkeypatch):
     assert domains.get_cached_server_ip() == "203.0.113.25"
 
 
-# ---------- the Rspamd import waits for the domain list ----------
-
 @pytest.fixture()
 def domain_cache(monkeypatch):
-    """The domain list as at startup: never read."""
     monkeypatch.setattr(config, "_cached_active_domains", None)
     monkeypatch.setattr(config, "_cached_domains_complete", None)
     monkeypatch.setattr(config, "_cached_hosted_domains", set())
@@ -668,13 +621,12 @@ def test_the_rspamd_import_waits_for_the_domains_while_postfix_and_netfilter_imp
         async def domain_sync():
             held.set()
             await release.wait()
-            return False   # mailcow could not be asked
+            return False
         monkeypatch.setattr(scheduler, "sync_local_domains", domain_sync)
         monkeypatch.setattr(scheduler, "fetch_and_store_postfix", AsyncMock(side_effect=lambda: imported["postfix"].set()))
         monkeypatch.setattr(scheduler, "fetch_and_store_netfilter", AsyncMock(side_effect=lambda: imported["netfilter"].set()))
         fetch = asyncio.create_task(scheduler.fetch_all_logs())
         await asyncio.wait_for(held.wait(), 5)
-        # The domain sync is still held: Postfix and Netfilter do not wait for it
         await asyncio.wait_for(asyncio.gather(*(e.wait() for e in imported.values())), 5)
         release.set()
         await fetch
@@ -692,18 +644,14 @@ def _domain_answers(monkeypatch, primary, alias):
 
 
 def test_a_mailcow_without_domains_lets_the_rspamd_import_run(domain_cache, monkeypatch):
-    """mailcow answers {} for both lists when it has no domains."""
     _domain_answers(monkeypatch, {}, {})
     run(scheduler.fetch_and_store_rspamd())
     assert config.local_domains_complete(scheduler.mailcow_api.base_url)
     domain_cache.assert_awaited_once_with("rspamd-history")
-    # Still a failed sync on the Status page, as before
     scheduler.update_job_status.assert_any_call("sync_local_domains", "failed", "No domains")
 
 
 def test_an_empty_answer_keeps_the_domains_this_mailcow_gave_before(domain_cache, monkeypatch):
-    """mailcow may answer {} for a moment while it starts: the list it gave
-    before stays, or every direction would be stored wrong until the next sync."""
     url = scheduler.mailcow_api.base_url
     config.set_cached_active_domains(["example.com"], complete_for=url)
     _domain_answers(monkeypatch, {}, {})
@@ -714,9 +662,6 @@ def test_an_empty_answer_keeps_the_domains_this_mailcow_gave_before(domain_cache
 
 
 def test_an_empty_answer_keeps_the_domains_this_mailcow_only_hosts(domain_cache, monkeypatch):
-    """A mailcow whose only domain is turned off still hosts it: mail for it
-    waiting in the queue must stay out of the automatic cleanup after an
-    empty answer."""
     _domain_answers(monkeypatch, [{"domain_name": "retired.test", "active": 0}], {})
     run(scheduler.sync_local_domains())
     assert scheduler._left_alone(["user@retired.test"])
@@ -765,7 +710,7 @@ def test_domains_read_once_are_not_read_again(domain_cache, monkeypatch):
     ([{"domain_name": "example.com", "active": 1}], "aliases"),
 ], ids=["null", "error-object", "string", "number", "alias-null", "alias-error-object", "alias-string"])
 def test_an_answer_that_is_not_a_domain_list_keeps_the_rspamd_import_waiting(domain_cache, monkeypatch, primary, alias):
-    config.set_cached_active_domains(["example.org"])   # an earlier list, of no known mailcow
+    config.set_cached_active_domains(["example.org"])
     _domain_answers(monkeypatch, primary, alias)
     run(scheduler.fetch_and_store_rspamd())
     assert not config.local_domains_complete(scheduler.mailcow_api.base_url)
@@ -780,7 +725,6 @@ def test_a_strict_domain_read_refuses_what_is_not_a_list(monkeypatch, answer):
     with pytest.raises(MailcowAPIError) as raised:
         run(mod.mailcow_api.get_domains(strict=True))
     assert raised.value.transient is False
-    # Other readers keep reading it as none
     assert run(mod.mailcow_api.get_domains()) == []
 
 

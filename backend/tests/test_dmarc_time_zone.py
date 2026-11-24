@@ -1,12 +1,3 @@
-"""DMARC & TLS times follow the app time zone, never the container's.
-
-TLS report periods are stored as naive UTC; calling .timestamp() on them read
-them as container local time, so with a non-UTC container every TLS epoch was
-off by the offset. The 30-day TLS window and the IMAP "last 24 hours" compared
-the container's local now with UTC columns. Days were container days for DMARC
-and UTC days for TLS; they are now days in the app time zone. Import dates and
-TLS periods are sent as UTC with Z.
-"""
 import os
 import time
 import uuid
@@ -30,7 +21,6 @@ TLS_ONLY = "tls-only.example.com"
 
 @pytest.fixture
 def container_tz():
-    """Run the test in a container whose own clock is in another zone."""
     saved = os.environ.get("TZ")
 
     def apply(name):
@@ -114,8 +104,6 @@ def _recent_utc_day(days_ago=3) -> date:
     return datetime.now(timezone.utc).date() - timedelta(days=days_ago)
 
 
-# ---- Finding 2: TLS epochs ----
-
 def test_tls_periods_are_utc_epochs_whatever_the_container_zone(db, container_tz):
     client, isolated = db
     container_tz("Asia/Tokyo")
@@ -133,8 +121,6 @@ def test_tls_periods_are_utc_epochs_whatever_the_container_zone(db, container_tz
     assert (entry["first_report"], entry["last_report"]) == (_utc_epoch(start), _utc_epoch(end))
     assert (entry["tls_first_report"], entry["tls_last_report"]) == (_utc_epoch(start), _utc_epoch(end))
 
-
-# ---- Finding 3 and 15: instants carry Z ----
 
 def test_import_dates_and_tls_periods_are_sent_as_utc_with_z(db, app_zone):
     client, isolated = db
@@ -157,14 +143,11 @@ def test_import_dates_and_tls_periods_are_sent_as_utc_with_z(db, app_zone):
     assert (details["providers"][0]["start_datetime"], details["providers"][0]["end_datetime"]) == expected
 
 
-# ---- Finding 4: DMARC and TLS days are days in the app time zone ----
-
 def test_dmarc_reports_are_grouped_by_app_zone_days(db, app_zone, container_tz):
     client, isolated = db
     container_tz("Asia/Tokyo")
     app_zone("America/New_York")
     day = _recent_utc_day()
-    # 02:00 UTC is the evening before in New York, and 11:00 the same day in Tokyo
     begin = datetime(day.year, day.month, day.day, 2, tzinfo=timezone.utc)
     _add_dmarc(isolated, DOMAIN, int(begin.timestamp()))
     local_day = begin.astimezone(ZoneInfo("America/New_York")).date().isoformat()
@@ -189,7 +172,7 @@ def test_tls_reports_are_grouped_by_app_zone_days(db, app_zone):
     client, isolated = db
     app_zone("America/New_York")
     day = _recent_utc_day()
-    start = datetime(day.year, day.month, day.day)  # midnight UTC: the evening before in New York
+    start = datetime(day.year, day.month, day.day)
     _add_tls(isolated, DOMAIN, start, start + timedelta(hours=23, minutes=59, seconds=59))
     local_day = (day - timedelta(days=1)).isoformat()
 
@@ -203,7 +186,6 @@ def test_tls_reports_are_grouped_by_app_zone_days(db, app_zone):
 
 
 def test_a_day_with_a_daylight_saving_change_holds_all_its_hours(db, app_zone):
-    """Europe/Berlin 2026-10-25 has 25 hours, from 22:00 UTC the day before to 23:00 UTC."""
     client, isolated = db
     app_zone("Europe/Berlin")
     for moment in (datetime(2026, 10, 24, 22, 30), datetime(2026, 10, 25, 22, 30)):
@@ -218,13 +200,10 @@ def test_a_day_with_a_daylight_saving_change_holds_all_its_hours(db, app_zone):
     assert client.get(f"/dmarc/domains/{DOMAIN}/tls-reports/2026-10-26/details").status_code == 404
 
 
-# ---- Finding 9: windows are counted in UTC ----
-
 def test_the_tls_30_day_window_is_counted_in_utc(db, container_tz):
     _, isolated = db
     container_tz("Asia/Tokyo")
     now = datetime.now(timezone.utc).replace(tzinfo=None)
-    # Inside the last 30 days by four hours; the container's local clock is 9 hours ahead
     _add_tls(isolated, TLS_ONLY, now - timedelta(days=30) + timedelta(hours=4), now - timedelta(days=29))
 
     domains, _ = dmarc_router._build_domains_list()

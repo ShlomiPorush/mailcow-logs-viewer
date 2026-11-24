@@ -1,11 +1,3 @@
-"""Fail2ban list entries an earlier version wrote as a /32 network.
-
-The app used to write a single IPv6 address as 2001:db8::1/32. mailcow stores the
-entry as sent and its netfilter reads it as all of 2001:db8::/32, so a Ban blocked
-a whole provider and an Allow exempted one. Such an entry has host bits set under
-its /32 prefix; a network written on purpose (2001:db8::/32) does not. The page
-shows these entries, and Repair replaces one with the address as /128.
-"""
 import pytest
 
 import starlette.staticfiles as sf
@@ -26,11 +18,11 @@ def _client():
 @pytest.mark.parametrize('entry, address', [
     ('2001:db8::1/32', '2001:db8::1'),
     (' 2001:db8:0:1::7/32 ', '2001:db8:0:1::7'),
-    ('2001:db8::/32', None),          # a network written on purpose
-    ('2001:db8::1/128', None),        # a single address, as written now
-    ('2001:db8::1/64', None),         # another prefix the old code never wrote
+    ('2001:db8::/32', None),
+    ('2001:db8::1/128', None),
+    ('2001:db8::1/64', None),
     ('2001:db8::1', None),
-    ('198.51.100.7/32', None),        # IPv4 /32 is a single address
+    ('198.51.100.7/32', None),
     ('198.51.100.0/24', None),
     ('mail.example.com', None),
     ('', None),
@@ -50,7 +42,6 @@ def test_legacy_entries_are_found_on_both_lists():
 
 @pytest.fixture()
 def mailcow(monkeypatch):
-    """A mailcow that keeps its lists like the real one: entries stored as sent."""
     state = {
         'answer': {'whitelist': '', 'blacklist': '', 'ban_time': 600, 'manage_external': 1},
         'calls': [], 'reply': [{'type': 'success', 'msg': 'f2b_modified'}], 'keep': False,
@@ -89,7 +80,6 @@ def test_repair_replaces_the_entry_with_the_address_in_one_edit_and_checks_it(ma
     assert mailcow['calls'][0] == 'get' and mailcow['calls'][-1] == 'get'
     assert len(edits) == 1
     assert edits[0]['blacklist'] == '198.51.100.7/32,2001:db8::1/128,2001:db8::/32'
-    # The other list, the deliberate network and the other settings stay as they were
     assert edits[0]['whitelist'] == '192.0.2.10,2001:db8::2/32'
     assert edits[0]['manage_external'] == '1' and edits[0]['ban_time'] == '600'
 

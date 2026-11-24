@@ -1,11 +1,3 @@
-"""Every API operation says what it returns in /openapi.json, or is hidden from it on purpose.
-
-The answers are described by app/api_models and checked against every test
-call by contract.py. This file keeps the inventory honest: the operations come
-from the routes the app registers (not from the document, which leaves out a
-route that forgot to declare itself), plus the two agent calls the auth
-middleware answers. HEAD and WebSocket routes are not API operations here.
-"""
 import json
 
 import starlette.staticfiles as sf
@@ -22,7 +14,6 @@ from openapi_pending import HIDDEN  # noqa: E402
 
 
 def _operations():
-    """(method, path) -> whether the route is in the document, for every /api operation."""
     found = {}
     for route in registered_routes(app):
         methods = getattr(route, "methods", None)
@@ -63,7 +54,6 @@ def test_the_hidden_list_holds_only_hidden_operations():
 
 
 def test_every_documented_answer_has_a_real_schema():
-    """No documented status may hide behind FastAPI's empty default."""
     empty = []
     for path, operations in _document()["paths"].items():
         for method, operation in operations.items():
@@ -76,7 +66,6 @@ def test_every_documented_answer_has_a_real_schema():
     assert empty == [], "Documented operations with an empty answer schema:\n  " + "\n  ".join(empty)
 
 
-# Statuses the reader sees in a handler's code that the handler cannot give, and why
 NOT_GIVEN = {
     ("GET", "/api/quarantine/{item_id}/details", 500): "the mailcow client turns every failure into "
                                                       "MailcowAPIError, which internal_error() answers 502",
@@ -145,5 +134,4 @@ def test_agents_see_what_each_documented_call_returns():
         "data": "array of MessageRow", "next_cursor": "string or null", "watermark": "integer"}
     undocumented = [k for k, e in entries.items() if "returns" not in e]
     assert undocumented == []
-    # The whole list stays a size an agent can read in one go
     assert len(json.dumps(info)) < 200_000

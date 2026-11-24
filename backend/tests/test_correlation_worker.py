@@ -1,4 +1,3 @@
-"""Correlation work stays off the event loop and owns its session."""
 import asyncio
 import threading
 from contextlib import contextmanager

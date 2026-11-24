@@ -1,4 +1,3 @@
-"""API fallbacks must not serialize database exception details."""
 import logging
 import secrets
 from unittest.mock import AsyncMock, Mock

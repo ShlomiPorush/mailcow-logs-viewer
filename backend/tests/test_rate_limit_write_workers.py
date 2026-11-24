@@ -1,4 +1,3 @@
-"""Rate limit writes keep database waits off the request loop."""
 import asyncio
 import threading
 from contextlib import contextmanager

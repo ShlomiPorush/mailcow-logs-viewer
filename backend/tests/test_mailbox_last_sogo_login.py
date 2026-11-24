@@ -1,5 +1,3 @@
-"""The last SOGo login mailcow reports since 2026-11a (last_sogo_login, Unix
-seconds, 0 for none). Older mailcow versions do not send the field."""
 import importlib.util
 import uuid
 from pathlib import Path
@@ -15,14 +13,13 @@ from fastapi.testclient import TestClient
 from app.scheduler import login_time
 
 DOMAIN = f'sogo-{uuid.uuid4().hex[:8]}.test'
-WHEN = 1763500000  # 2025-11-18T21:06:40Z
+WHEN = 1763500000
 
 
 @pytest.mark.parametrize('value, stored', [
     (WHEN, WHEN), (str(WHEN), WHEN), (f' {WHEN} ', WHEN),
     (0, None), ('0', None), (None, None), ('', None), ('-', None), ('x', None),
     (-5, None), (True, None), (False, None), (WHEN + 0.5, None), (f'{WHEN}.5', None),
-    # Past 9999 a date cannot show it; past BIGINT the column cannot hold it
     (253402300800, None), (2 ** 63, None), (str(10 ** 30), None),
 ])
 def test_a_login_time_is_unix_seconds_or_none(value, stored):
@@ -31,8 +28,6 @@ def test_a_login_time_is_unix_seconds_or_none(value, stored):
 
 @pytest.fixture()
 def db(app_schema):
-    """The test's own mailboxes; the sync marks every other mailbox inactive,
-    so the other tests' mailboxes get their state back afterwards."""
     from app.database import get_db_context
     from app.models import MailboxStatistics
     with get_db_context() as session:
@@ -64,13 +59,11 @@ def test_the_sync_keeps_the_last_sogo_login_and_the_page_shows_it(db):
         _mailbox('downgraded', last_sogo_login=WHEN),
         _mailbox('never', last_sogo_login=0),
         _mailbox('old-mailcow'),
-        # One odd value does not cost the other mailboxes their sync
         _mailbox('odd', last_sogo_login=2 ** 63, last_imap_login=10 ** 30),
     ])
     assert _shown() == {'webmail': ('2025-11-18T21:06:40Z', 1024), 'downgraded': ('2025-11-18T21:06:40Z', 1024),
                         'never': (None, 1024), 'old-mailcow': (None, 1024), 'odd': (None, 1024)}
 
-    # A later sync that reports none, or no field at all, clears a stored time
     _store_mailbox_statistics([
         _mailbox('webmail', last_sogo_login=0, quota=2048),
         _mailbox('downgraded'),
@@ -96,7 +89,6 @@ def test_the_upgrade_adds_the_column_empty_for_stored_mailboxes(app_schema):
     from sqlalchemy import create_engine, inspect, text
     from app.database import engine
     from app.models import Base, MailboxStatistics
-    # A schema of its own: the migration never touches the suite's tables
     schema = 'sogo_login_' + uuid.uuid4().hex[:8]
     with engine.begin() as conn:
         conn.execute(text(f'CREATE SCHEMA {schema}'))
@@ -112,14 +104,12 @@ def test_the_upgrade_adds_the_column_empty_for_stored_mailboxes(app_schema):
             return conn.execute(text('SELECT username, last_imap_login FROM mailbox_statistics')).all()
 
     try:
-        # As 0031 left it: the table without the column, with a mailbox in it
         Base.metadata.create_all(isolated, tables=[MailboxStatistics.__table__])
         with isolated.begin() as conn:
             conn.execute(text('ALTER TABLE mailbox_statistics DROP COLUMN last_sogo_login'))
             conn.execute(text("INSERT INTO mailbox_statistics (username, domain, last_imap_login) "
                               f"VALUES ('before@{DOMAIN}', '{DOMAIN}', {WHEN})"))
         run(_migration().upgrade)
-        # A restart, or a fresh install whose table already has it, changes nothing
         run(_migration().upgrade)
         with isolated.connect() as conn:
             assert conn.execute(text('SELECT last_sogo_login FROM mailbox_statistics')).all() == [(None,)]

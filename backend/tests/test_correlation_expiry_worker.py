@@ -1,4 +1,3 @@
-"""Expiry uses a worker and a bulk update without changing status semantics."""
 import asyncio
 import threading
 import uuid
@@ -126,7 +125,6 @@ def test_expiry_boundaries_and_bulk_query(monkeypatch, extra_rows):
                 assert row.subject == "Preserve this text"
         assert len(statements) == 1
         assert statements[0].lstrip().upper().startswith("UPDATE ")
-        # Repeated expiry is harmless and still succeeds.
         asyncio.run(scheduler.expire_old_correlations())
         assert scheduler.job_status["expire_correlations"]["status"] == "success"
     finally:

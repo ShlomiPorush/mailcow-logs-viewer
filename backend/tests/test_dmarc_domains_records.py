@@ -1,10 +1,3 @@
-"""The DMARC page's domains list says, for each domain, whether its DMARC and
-TLS-RPT records are in place and how many senders fail DMARC; the sources say
-who reported each address, for the mail flow.
-
-A domain with a stored DNS check is read from it; one without (a domain that is
-not in mailcow) is looked up live, and a lookup that fails is "not checked".
-"""
 import time
 from datetime import datetime
 
@@ -56,7 +49,6 @@ def seeded(monkeypatch):
             report = DMARCReport(domain=domain, org_name=org, report_id=f'{domain}-{org}-{now}', begin_date=now - 3600, end_date=now)
             db.add(report)
             db.flush()
-            # A sender that fails both, and one that passes
             db.add(DMARCRecord(dmarc_report_id=report.id, source_ip=FAILING_IP, count=5, spf_result='fail', dkim_result='fail', disposition='none'))
             db.add(DMARCRecord(dmarc_report_id=report.id, source_ip=PASSING_IP, count=20 if org == 'Receiver A' else 10, spf_result='pass', dkim_result='pass', disposition='none'))
     db.add(DomainDNSCheck(domain_name=STORED, checked_at=datetime.utcnow(),
@@ -129,7 +121,6 @@ def test_the_list_carries_messages_per_day_across_domains(seeded, monkeypatch):
     daily = client.get('/api/dmarc/domains').json()['daily']
     today = datetime.fromtimestamp(time.time() - 3600).date().isoformat()
     day = next(d for d in daily if d['date'] == today)
-    # Both seeded domains: 2 reports each, 5 failing + 20 or 10 passing per report
     assert day['total'] >= 2 * (5 + 20 + 5 + 10)
     assert day['dmarc_fail'] >= 2 * 10 and day['total'] == day['dmarc_pass'] + day['dmarc_fail']
 

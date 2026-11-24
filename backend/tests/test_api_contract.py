@@ -1,10 +1,3 @@
-"""contract.py catches an answer that drifted from its documentation.
-
-A small app of its own, so each kind of drift is shown on its own: a key the
-model does not have, a wrong type, a missing key, a status the route does not
-document. Operations that document nothing yet, and the statuses the auth
-middleware gives any call, are not checked.
-"""
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException
@@ -66,7 +59,6 @@ def test_a_status_the_route_does_not_document_fails():
 
 def test_documented_errors_pass():
     assert _problem({}, "/api/thing?fail=404") is None
-    # FastAPI's own validation list and a detail string are both a documented 422
     assert _problem({}, "/api/thing?fail=x") is None
     assert _problem({}, "/api/thing?fail=422") is None
 
@@ -98,7 +90,6 @@ def test_the_status_reader_sees_every_way_a_handler_writes_one():
 
 
 def test_the_sign_in_set_up_without_a_password_is_not_a_route_answer(monkeypatch):
-    # The auth middleware answers any call that needs sign-in with a plain 500 then
     import starlette.staticfiles as sf
     orig = sf.StaticFiles.__init__
     monkeypatch.setattr(sf.StaticFiles, "__init__", lambda s, *a, **k: orig(s, *a, **{**k, "check_dir": False}))
@@ -124,12 +115,9 @@ def test_a_bearer_call_may_get_the_route_answer_or_the_gateway_envelope():
     from contract import check_response
     contract = Contract(_app({}))
     envelope = {"error": "forbidden", "message": "Not available to agents."}
-    # The gateway's own answer, at a status the route does not document or does
     assert agent_envelope(contract, *_bearer_answer(413, envelope))
     check_response(contract, _bearer_answer(404, envelope)[1])
-    # The route's documented answer passes as always
     check_response(contract, _bearer_answer(404, {"detail": "gone"})[1])
-    # Neither the route's answer nor the envelope fails
     with pytest.raises(AssertionError):
         check_response(contract, _bearer_answer(404, {"detail": 5})[1])
     assert not agent_envelope(contract, *_bearer_answer(413, {"error": 1, "message": "x"}))

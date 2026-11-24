@@ -1,14 +1,3 @@
-"""A masked secret stays bound to the server it was entered for.
-
-GET /api/settings never returns stored secrets; it returns the mask instead,
-and PUT treats the mask (or an absent key) as "keep the stored value". Without
-a binding, a session that never saw the SMTP password could change only the
-SMTP host and receive the stored password at a server of its choice. Changing
-a server a stored secret is sent to must therefore come with the secret.
-
-The Settings page posts every editable key on each save, with '' for unset
-text fields, so an unchanged save must keep working.
-"""
 import secrets
 import types
 
@@ -35,13 +24,11 @@ SEED = {
 
 @pytest.fixture
 def store(monkeypatch):
-    """Real update_settings and build_settings; only the system_settings table is a dict."""
     data = {}
     for key in list(cfg.os.environ):
         if key.startswith(("SMTP_", "RSPAMD_", "DMARC_IMAP_", "OAUTH2_")):
             monkeypatch.delenv(key)
     monkeypatch.setenv("SETTINGS_EDIT_VIA_UI_ENABLED", "true")
-    # Values go through the same string round trip as the system_settings table
     monkeypatch.setattr(ss, "get_config_overrides_from_db", lambda db, types_: {
         k: ss._deserialize_value(ss._serialize_value(v), k, types_[k]) for k, v in data.items()})
     monkeypatch.setattr(rs, "save_config_overrides_to_db", lambda db, ov: data.update(ov))
@@ -64,12 +51,6 @@ def _put(body):
 
 
 def _form_payload(configuration):
-    """What the Settings page sends on Save (frontend/settings.js, form.onsubmit).
-
-    Every editable key is posted. A masked secret is left out, a checkbox is a
-    boolean, a number field a number, a select, text or hidden field (the Verify
-    SSL buttons) its string value ('' when unset).
-    """
     payload = {}
     for key, value in configuration.items():
         if key in rs._SENSITIVE_SETTING_KEYS and value == MASK:
@@ -136,7 +117,6 @@ def test_clearing_the_secret_with_the_server_change_is_allowed(store):
 def test_unchanged_full_form_save_succeeds(store):
     configuration = rs.get_editable_settings(db=object())["configuration"]
     payload = _form_payload(configuration)
-    # The page posts '' for every unset text field, e.g. the manual OAuth URLs
     assert payload["oauth2_token_url"] == ""
     assert payload["oauth2_authorization_url"] == ""
     assert "smtp_password" not in payload
@@ -192,14 +172,12 @@ def test_server_change_without_a_stored_secret_is_allowed(store):
 
 
 def test_env_locked_server_is_ignored(store, monkeypatch):
-    # ENV wins over the database, so a posted value for an ENV-set key changes nothing
     monkeypatch.setenv("SMTP_HOST", "smtp.example.com")
     cfg.reload_settings(object())
     _put({"smtp_host": "collector.example.net", "smtp_password": MASK})
 
 
 def test_secret_from_env_cannot_follow_a_server_change(store, monkeypatch):
-    # The page cannot re-enter a secret that ENV sets, so the server must be changed there too
     monkeypatch.setenv("SMTP_PASSWORD", secrets.token_hex(16))
     cfg.reload_settings(object())
     with pytest.raises(HTTPException) as exc:
@@ -216,9 +194,6 @@ def test_every_bound_key_is_editable():
         assert set(endpoints) <= EDITABLE_SETTING_KEYS
 
 
-# On/off settings bound to a secret. A value posted as text is checked, saved
-# and loaded as the same True or False: "on" once passed the check as on and
-# loaded as off, which turned STARTTLS off with the stored password kept.
 BOUND_FLAGS = [
     ("smtp_password", "smtp_use_tls"),
     ("smtp_password", "smtp_use_ssl"),
@@ -277,7 +252,6 @@ def test_a_flag_that_is_neither_on_nor_off_is_refused(store):
 
 
 def test_a_flag_stored_as_on_loads_as_on(store):
-    # Saved by an earlier version as the text it was posted as
     store.update({"smtp_use_tls": "on", "dmarc_imap_use_ssl": "On", "oauth2_use_oidc_discovery": " yes "})
     cfg.reload_settings(object())
     assert cfg.settings.smtp_use_tls is True

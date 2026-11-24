@@ -1,4 +1,3 @@
-"""Background DNS persistence runs outside the event loop."""
 import asyncio
 import threading
 from contextlib import contextmanager

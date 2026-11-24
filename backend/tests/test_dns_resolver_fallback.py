@@ -1,7 +1,3 @@
-"""DoH fallback of the shared resolver (issue #360): a SERVFAIL is a failed
-lookup, not a missing record. Reporting it as NoAnswer made the Domains page
-say "No TXT records found" for a domain whose DNSSEC validation failed.
-UDP and DoH are injected; no live lookups."""
 import asyncio
 
 import pytest
@@ -36,7 +32,6 @@ def _doh_answers(monkeypatch, rcode, answer=None):
         response.set_rcode(rcode)
         if answer:
             response.answer.append(answer)
-        # The real https() parses the answer off the wire
         return dns.message.from_wire(response.to_wire())
     monkeypatch.setattr(dns.asyncquery, 'https', https)
 

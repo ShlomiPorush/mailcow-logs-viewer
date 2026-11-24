@@ -1,5 +1,3 @@
-"""Upgrade steps that repair what earlier bounce counting and rule editing left
-in the database. Each runs on seeded rows in a schema of its own."""
 import importlib.util
 import pathlib
 import uuid
@@ -54,8 +52,6 @@ def _upgrade(isolated, revision):
             revision.upgrade()
 
 
-# -- 0016: bounce detection's mark starts at the lines already stored ---------
-
 def _mark(isolated):
     with isolated.connect() as conn:
         return conn.execute(text(
@@ -68,7 +64,7 @@ def test_bounce_mark_starts_at_the_newest_stored_line():
     assert revision.KEY == sch.BOUNCE_WATERMARK_KEY
     with _schema(PostfixLog, SystemSetting) as isolated:
         _upgrade(isolated, revision)
-        assert _mark(isolated) == "0"   # no lines yet
+        assert _mark(isolated) == "0"
 
     with _schema(PostfixLog, SystemSetting) as isolated:
         now = datetime.utcnow()
@@ -80,7 +76,6 @@ def test_bounce_mark_starts_at_the_newest_stored_line():
             newest = max(row.id for row in db.query(PostfixLog).all())
         _upgrade(isolated, revision)
         assert _mark(isolated) == str(newest)
-        # Running it again keeps the mark detection has moved on since
         with isolated.begin() as conn:
             conn.execute(text("UPDATE system_settings SET value = '999999' "
                               "WHERE key = 'suppression_bounce_log_watermark'"))
@@ -88,11 +83,6 @@ def test_bounce_mark_starts_at_the_newest_stored_line():
         assert _mark(isolated) == "999999"
 
 
-# -- 0017: automatic soft-bounce suppressions start counting again -------------
-
-# email -> (reason, source, soft_bounce_count, active). Earlier versions could
-# count a bounce twice, so with Count then suppress every automatic soft-bounce
-# entry is lifted and its counts start again, at, above or below the threshold
 SUPPRESSIONS = {
     "below@example.com": ("soft_bounce", "auto", 2, True),
     "four@example.com": ("soft_bounce", "auto", 4, True),
@@ -141,7 +131,6 @@ def _check_soft_bounces_lifted(isolated, upgraded_at):
         row = rows[email]
         assert (row.active, row.synced_to_rspamd) == (False, False), email
         assert (row.soft_bounce_count, row.bounce_count) == (0, 0), email
-        # The escalated expiry is not kept: the entry reads as expired
         assert upgraded_at - timedelta(minutes=1) <= row.expires_at <= datetime.utcnow(), email
     for email, (reason, _, soft, active) in SUPPRESSIONS.items():
         if email not in LIFTED:
@@ -162,7 +151,6 @@ def test_automatic_soft_bounce_suppressions_are_lifted_and_counted_again(suppres
         _check_soft_bounces_lifted(isolated, upgraded_at)
         assert ("lifted 5 automatic soft-bounce suppression(s) (4 of them active) and reset their bounce counts; "
                 "the Soft Bounce Threshold of 5 counts new bounces only") in caplog.text
-        # Running it again changes nothing and says nothing
         caplog.clear()
         before = _suppressions(isolated)
         _upgrade(isolated, revision)
@@ -203,10 +191,6 @@ def test_nothing_changes_when_soft_bounces_are_not_counted(suppression_settings)
 
 
 def test_after_the_upgrade_the_threshold_counts_new_bounces_only(suppression_settings, monkeypatch):
-    """Threshold 3. An earlier version counted one real soft bounce twice
-    (count 2, suppressed), and another recipient reached the threshold the
-    same way. After the upgrade one new real soft bounce suppresses neither;
-    the third new one does, with the expiry of three bounces."""
     from app.config import settings
     from app.models import SpamSuppression
     import app.scheduler as sch
@@ -215,7 +199,6 @@ def test_after_the_upgrade_the_threshold_counts_new_bounces_only(suppression_set
         "suppression_soft_bounce_action": "count", "suppression_soft_bounce_threshold": 3,
         "suppression_hard_bounce_action": "suppress", "suppression_whitelist_domains": "",
         "suppression_base_expiry_days": 7, "suppression_max_expiry_days": 90, "queue_cleanup_enabled": False,
-        # The count itself: 4.4.1 is a standard code left alone by default
         "suppression_soft_bounce_standard_codes": False,
     }.items():
         monkeypatch.setattr(settings._inner, key, value)
@@ -262,22 +245,12 @@ def test_after_the_upgrade_the_threshold_counts_new_bounces_only(suppression_set
             assert rows[email].expires_at < datetime.utcnow() + timedelta(days=21, minutes=1), email
 
 
-# -- 0018: Sender Domain Contains rules an earlier edit escaped twice ----------
-
-# The pattern the rule dialog saves for a Contains rule on example.com after
-# an earlier version opened and saved it again (made by the real dialog code
-# in .github/tests/queue-quarantine-actions.test.cjs)
 TWICE_SAVED = r"example\\\.com"
 REPAIRED = r"example\.com"
-# A Sender Contains rule created once for the text a\.b: a quoted local part
-# can hold that, so the same shape is not proof of damage there
 SENDER_BACKSLASH = r"a\\\.b"
-# A Subject Contains rule for Invoice.pdf an earlier edit escaped twice, and
-# what its Repair button in the Auto-Rules list saves (queue-quarantine-actions.test.cjs)
 SUBJECT_TWICE = r"Invoice\\\.pdf"
 SUBJECT_REPAIRED = r"Invoice\.pdf"
 
-# name -> (match_type, match_value, is_regex, value after the upgrade)
 RULES = {
     "domain twice": ("sender_domain", TWICE_SAVED, True, REPAIRED),
     "domain three times": ("sender_domain", r"example\\\\\\\.com", True, REPAIRED),
@@ -334,7 +307,6 @@ def test_only_twice_escaped_sender_domain_rules_are_repaired(caplog):
             assert _matches(after[name]), name
         assert caplog.text.count("Upgrade: repaired rule") == 2
         assert f"sender_domain pattern {TWICE_SAVED} is now {REPAIRED}" in caplog.text
-        # Running it again changes nothing
         caplog.clear()
         _upgrade(isolated, revision)
         assert {n: r.match_value for n, r in _rules(isolated).items()} == {n: v[3] for n, v in RULES.items()}
@@ -364,7 +336,6 @@ def test_a_twice_escaped_subject_rule_is_left_for_its_repair_button():
         rule = _rules(isolated)["subject twice"]
         assert rule.match_value == SUBJECT_TWICE
         assert not _matches(rule, subject="Invoice.pdf")
-        # What the Repair button saves matches the subject the rule was made for
         rule.match_value = SUBJECT_REPAIRED
         assert _matches(rule, subject="Invoice.pdf")
         assert not _matches(rule, subject="Invoice-pdf")

@@ -1,13 +1,3 @@
-"""Two Postfix lines are the same line only when the whole line matches.
-
-The duplicate cache of the Postfix import keyed a line on its time and the
-first 100 characters of its message. Lines of one queue in the same second
-often share a long start: a message delivered to one mailbox through two
-long aliases logs two lines that differ only in orig_to, after character 100.
-The second line was taken for a duplicate before the database check saw it,
-so it was never stored and a recipient was missing. The message details now
-compare stored lines by the same fields. Exact duplicates are still stored once.
-"""
 import asyncio
 import uuid
 from contextlib import contextmanager
@@ -29,7 +19,6 @@ TIME = 1700000000
 
 
 def _delivery(alias: str, queue: str = QUEUE) -> str:
-    """A delivery line whose orig_to only differs at the very end."""
     return (f'{queue}: to=<mailbox@example.com>, orig_to=<'
             f'{"team-distribution-list-" * 4}{alias}@example.com>, relay=dovecot, delay=0.4, '
             f'delays=0.1/0/0/0.3, dsn=2.0.0, status=sent (delivered via dovecot service)')
@@ -58,7 +47,6 @@ def _postgres_available() -> bool:
 
 @pytest.fixture()
 def ingest(monkeypatch):
-    """A schema of its own and a mailcow that serves whatever page is set."""
     if not _postgres_available():
         pytest.skip('PostgreSQL not available')
     from sqlalchemy import create_engine, text
@@ -119,7 +107,6 @@ def test_lines_in_one_second_sharing_a_long_start_are_both_stored(ingest):
 def test_a_line_sharing_a_long_start_with_an_earlier_fetch_is_stored(ingest):
     fetch, stored, _ = ingest
     fetch([_line(SALES)])
-    # The first line is in the duplicate cache now; the second must not match it
     fetch([_line(SUPPORT), _line(SALES)])
     assert stored() == sorted([SALES, SUPPORT])
 
@@ -134,7 +121,6 @@ def test_an_exact_duplicate_in_a_later_fetch_is_skipped_by_the_cache(ingest):
     fetch, stored, session = ingest
     fetch([_line(SALES)])
     assert stored() == [SALES]
-    # With the stored row gone, only the cache can tell that the line was seen
     from app.models import PostfixLog
     with session() as db:
         db.query(PostfixLog).delete()
@@ -161,9 +147,6 @@ def test_the_cache_keeps_a_short_key_per_line(ingest):
 
 
 def test_an_over_long_program_or_queue_id_matches_its_stored_row(ingest):
-    """Program and queue id are cut to their columns when stored, so the key
-    is built from the cut values: with the cache cleared, the stored row
-    still tells the line was seen."""
     fetch, stored, _ = ingest
     lines = [
         {'time': str(TIME), 'program': 'postfix/' + 'p' * 150, 'priority': 'info', 'message': SALES},
@@ -193,8 +176,6 @@ def test_grouping_by_recipient_keeps_lines_sharing_a_long_start():
 
 
 def test_grouping_by_recipient_keeps_lines_of_another_program_or_queue():
-    """Same time and message, but another program or another queue id: the
-    database stores them as two lines, and the details show both."""
     from app.routers.messages import _group_postfix_by_recipient
     now = datetime(2026, 1, 1, 12, 0, 0)
     rows = [_row(SALES, now), _row(SALES, now, program='postfix/pipe'), _row(SALES, now, queue_id='5C0FFEE0'),
@@ -206,8 +187,6 @@ def test_grouping_by_recipient_keeps_lines_of_another_program_or_queue():
 
 @pytest.fixture()
 def details(monkeypatch):
-    """Two messages whose Postfix lines share time and message: one by queue id
-    with another program, one linked by line ids with another queue id."""
     if not _postgres_available():
         pytest.skip('PostgreSQL not available')
     for key in ('auth_enabled', 'basic_auth_enabled', 'oauth2_enabled'):

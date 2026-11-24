@@ -1,6 +1,3 @@
-"""The time of the last full DNS check (the 6-hourly job or Check all) stays
-put when one domain is checked again on its own. Each test runs in a schema
-of its own on the CI PostgreSQL."""
 import uuid
 from contextlib import contextmanager
 

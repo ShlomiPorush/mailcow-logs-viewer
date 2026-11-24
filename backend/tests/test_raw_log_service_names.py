@@ -1,7 +1,3 @@
-"""
-The raw log services setting is free text; only known mailcow services may
-come out of it, because the names go into mailcow API paths and the Logs page.
-"""
 import pytest
 
 from app.config import ALL_RAW_LOG_SERVICES, settings

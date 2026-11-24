@@ -1,19 +1,9 @@
-"""Protection rules: which log lines count as a successful login.
-
-A successful login exempts an address from the unknown-accounts rule and is
-what the breach alert reports. Only the line the server writes for a login
-counts: smtpd's "client=..., sasl_method=..., sasl_username=..." line and
-Dovecot's "<service>-login: Login: user=<...>" line, read from their start.
-Postfix also logs text a client sends (a rejected command), and Dovecot logs
-the user name a failed login typed, so the same words elsewhere in a line
-prove nothing.
-"""
 import uuid
 from datetime import datetime, timedelta
 
 import pytest
 
-from test_protection_rules import (  # noqa: F401  (db is a fixture)
+from test_protection_rules import (  # noqa: F401
     DOMAIN, MARKER, SPRAY_IP, TRAP_IP, TYPO_IP, _context, _fail, _hits, _rules, db,
 )
 
@@ -51,8 +41,6 @@ def _caught(session):
     return [(h.ip, h.rule) for h in _hits(session)]
 
 
-# ---------- what the client sent is not a login ----------
-
 def test_a_rejected_command_naming_its_own_address_does_not_exempt_it(db):
     from app.services import protection_rules
     _postfix(db, f'warning: non-SMTP command from unknown[{SPRAY_IP}]: GET / client=x[{SPRAY_IP}], '
@@ -84,7 +72,7 @@ def test_a_failed_imap_login_whose_user_name_looks_like_a_login_does_not_exempt(
 def test_a_rejected_command_does_not_raise_a_breach_alert(db):
     from app.services import protection_rules
     _rules(db, breach={'enabled': True, 'failures': 3, 'window_minutes': 60, 'new_country': False})
-    protection_rules.evaluate(db, _context())  # starts reading the logins from now
+    protection_rules.evaluate(db, _context())
     for _ in range(3):
         _fail(db, SPRAY_IP, f'info@{DOMAIN}', minutes_ago=10)
     _postfix(db, f'warning: non-SMTP command from unknown[{TRAP_IP}]: GET / {MARKER[:10]}: '
@@ -107,8 +95,6 @@ def test_a_failed_imap_login_does_not_raise_a_breach_alert(db, raw):
     protection_rules.evaluate(db, context)
     assert _hits(db) == []
 
-
-# ---------- the server's own login lines still count ----------
 
 def test_a_real_imap_login_exempts_the_address(db, raw):
     from app.services import protection_rules
@@ -135,8 +121,6 @@ def test_a_real_login_behind_many_lines_that_only_look_like_one_still_counts(db)
     assert _hits(db) == []
 
 
-# ---------- line shapes ----------
-
 @pytest.mark.parametrize('program,message,expected', [
     ('postfix/smtpd', 'ABC123DEF: client=unknown[192.0.2.7], sasl_method=PLAIN, sasl_username=a@example.com',
      ('192.0.2.7', 'a@example.com')),
@@ -144,10 +128,8 @@ def test_a_real_login_behind_many_lines_that_only_look_like_one_still_counts(db)
      'sasl_username=A@Example.com, sasl_sender=b@example.com', ('2001:db8::7', 'a@example.com')),
     ('postfix/smtps/smtpd', 'ABC123DEF: client=unknown[IPv6:2001:db8::8], sasl_method=PLAIN, sasl_username=a@example.com',
      ('2001:db8::8', 'a@example.com')),
-    # a rejected command that carries the words
     ('postfix/smtpd', 'warning: non-SMTP command from unknown[192.0.2.9]: GET / ABC: client=x[192.0.2.7], '
      'sasl_method=PLAIN, sasl_username=a@example.com', None),
-    # the right words from a program that does not log logins
     ('postfix/cleanup', 'ABC123DEF: client=unknown[192.0.2.7], sasl_method=PLAIN, sasl_username=a@example.com', None),
     ('postfix/smtpd', 'ABC123DEF: client=unknown[192.0.2.7]', None),
 ])

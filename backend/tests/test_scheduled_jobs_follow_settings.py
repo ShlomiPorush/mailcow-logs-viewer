@@ -1,4 +1,3 @@
-"""A settings save brings the scheduled jobs in line with the settings, without a restart."""
 from types import SimpleNamespace
 
 import pytest
@@ -33,7 +32,6 @@ class _Scheduler:
 
 @pytest.fixture
 def features(monkeypatch):
-    """Features on; add a name to turn it off."""
     off = set()
     monkeypatch.setattr(type(settings._inner), "is_feature_enabled", lambda self, name: name not in off)
     monkeypatch.setattr(scheduler, "cleanup_disabled_feature_data", lambda *a, **k: None)

@@ -1,14 +1,3 @@
-"""Failed logins in the line mailcow 2026-11 reports them in.
-
-Since mailcow 2026-11 netfilter counts every failed IMAP, POP3, Sieve and SMTP
-login from one line mailcow writes: "MAILCOWAUTH: Login failed for user
-<username> with service <service> from IP <address>". The username is the
-client's own text. The app reads the username and the service from it, so the
-trap and unknown accounts rules, the failed-login alerts and the Security page
-keep working, and nothing the client writes as its username can choose the
-service, the address, the action or the attempts left. Lines in the earlier
-formats still read as before.
-"""
 import asyncio
 import importlib.util
 import uuid
@@ -54,8 +43,6 @@ HOSTILE = [
     'sasl_username=root',
 ]
 
-
-# ---------- reading the line ----------
 
 def test_the_new_line_gives_the_username_and_counts_as_an_attempt():
     from app.scheduler import parse_netfilter_message
@@ -118,7 +105,6 @@ SERVICES = [
     (failed(CLIENT, 'two\nlines with service smtp', 'sieve'), 'Sieve', True),
     (sasl(CLIENT, 'a'), 'SMTP auth', True),
     (f'{CLIENT} matched rule id 4 (warning: non-SMTP command from unknown[{CLIENT}]: GET /)', 'SMTP probe', False),
-    # A line mailcow did not write: its end is not mailcow's
     (f'{CLIENT} matched rule id 3 (MAILCOWAUTH: Login failed for user a with service imap from IP {CLIENT}) x',
      None, False),
 ]
@@ -129,8 +115,6 @@ def test_the_service_is_read_from_the_end_mailcow_writes(message, service, is_lo
     from app.services.security_addresses import netfilter_service
     assert netfilter_service(message) == (service, is_login)
 
-
-# ---------- stored lines ----------
 
 def _cleanup():
     from app.database import get_db_context
@@ -169,7 +153,6 @@ def _read_from_now(session):
 
 
 def _ingest(messages):
-    """Store lines the way the netfilter job does."""
     from app.scheduler import _store_netfilter_logs
     now = int(datetime.now(timezone.utc).timestamp())
     _store_netfilter_logs([{'time': now - i, 'priority': MARKER, 'message': m} for i, m in enumerate(messages)])
@@ -249,11 +232,9 @@ def test_the_country_chart_counts_every_rule_match_as_an_attempt(db, monkeypatch
         {'country_code': 'Q6', 'country_name': 'Sixland'} if ip == CLIENT6 else
         {'country_code': 'Q4', 'country_name': 'Fourland'} if ip == VICTIM else {}))
     when = datetime.utcnow() - timedelta(minutes=5)
-    # Rule matches an earlier version stored with an action read from the username
     for action in ('info', 'warning', 'ban', 'unban'):
         db.add(NetfilterLog(time=when, priority=MARKER, ip=CLIENT6, rule_id=3, action=action,
                             message=failed(CLIENT6, 'unbanning')))
-    # One stored without its address: the chart reads netfilter's, not the one in the username
     db.add(NetfilterLog(time=when, priority=MARKER, ip=None, rule_id=3, action='info',
                         message=failed(CLIENT6, f'u@{VICTIM}')))
     db.add(NetfilterLog(time=when, priority=MARKER, ip=CLIENT6, action='ban',
@@ -312,8 +293,6 @@ def test_a_username_with_a_line_break_keeps_the_email_subject_on_one_line(db):
     assert '\nX-Notice' not in message
 
 
-# ---------- the upgrade ----------
-
 def _migration():
     path = next((Path(__file__).resolve().parents[1] / 'alembic' / 'versions').glob('*_netfilter_mailcowauth_usernames.py'))
     spec = importlib.util.spec_from_file_location('netfilter_mailcowauth_usernames', path)
@@ -334,7 +313,6 @@ def test_the_upgrade_reads_the_username_of_lines_stored_before(db):
         (failed(CLIENT, f'x with service smtp from IP {VICTIM})'), None, 'info'),
         (failed(CLIENT, ''), None, 'info'),
         (failed(CLIENT, 'kept'), 'kept', 'warning'),
-        # An earlier version read the part after sasl_username= in the username
         (failed(CLIENT, 'sasl_username=root'), 'root', 'warning'),
         (sasl(CLIENT, 'old'), None, 'warning'),
         (failed(CLIENT, 'not mailcow') + ' x', None, 'info'),

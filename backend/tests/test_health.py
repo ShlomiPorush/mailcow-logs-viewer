@@ -1,4 +1,3 @@
-"""Verify the public health status consumed by container monitoring."""
 import pytest
 from fastapi.testclient import TestClient
 from app import main

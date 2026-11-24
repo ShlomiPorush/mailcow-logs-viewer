@@ -1,13 +1,8 @@
-"""The suppression list loads page after page as it scrolls, so the pages of
-one sort must neither repeat nor miss a row, also among rows that sort equal.
-
-Fictional addresses only."""
 import uuid
 from datetime import datetime
 
 import pytest
 
-# init_db creates the tables of the models imported so far
 import app.models  # noqa: F401
 
 MARK = uuid.uuid4().hex[:8]

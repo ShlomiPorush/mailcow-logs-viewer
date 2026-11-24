@@ -1,9 +1,3 @@
-"""Every answer the sign-in calls can give, so the contract check (conftest.py,
-contract.py) holds each one to /openapi.json: the sign-in state and methods, a Basic
-Auth session (also refused while Basic Auth is off, after a sign-in change during the
-login, and at capacity), the OAuth2 login and callback redirects, their refusals
-while OAuth2 is off or not set up, and signing out. The OAuth2 provider is faked;
-the sessions and used login states of this test are kept apart from everyone else's."""
 import base64
 import secrets
 from collections import OrderedDict
@@ -35,7 +29,6 @@ USERINFO = 'https://id.example.com/userinfo'
 
 @pytest.fixture(autouse=True)
 def own_sessions(monkeypatch):
-    """This test's sessions and used OAuth2 states, in stores of their own."""
     monkeypatch.setattr(session_module, '_session_store', {})
     monkeypatch.setattr(auth, '_consumed_states', OrderedDict())
 
@@ -58,7 +51,6 @@ def basic(monkeypatch):
 
 @pytest.fixture
 def provider(monkeypatch):
-    """OAuth2 on, the real client against a fake provider (as in test_oauth_pkce.py)."""
     client = auth.oauth2_client
     monkeypatch.setattr(settings._inner, 'oauth2_enabled', True)
     monkeypatch.setattr(settings._inner, 'basic_auth_enabled', False)
@@ -89,8 +81,6 @@ def _client():
     return TestClient(app, raise_server_exceptions=False)
 
 
-# ---------------------------------------------------------------- state and methods
-
 def test_verify_and_provider_info(signed_out):
     client = _client()
     assert client.get('/api/auth/verify').json() == {'verified': True}
@@ -105,7 +95,6 @@ def test_provider_info_with_oauth2(provider):
 
 def test_status_signed_out(signed_out):
     r = _client().get('/api/auth/status')
-    # Sign-in off: whoever reaches the app may do everything, as before users existed
     assert r.status_code == 200 and r.json() == {'authenticated': False, 'auth_type': None, 'user': None, 'session': None,
                                                  'user_name': None, 'is_admin': True, 'scopes': list(all_scopes())}
 
@@ -122,14 +111,11 @@ def test_status_with_basic_auth_and_with_a_session(basic):
     assert status.json()['user'] == {'username': USERNAME, 'auth_method': 'basic'}
 
 
-# ---------------------------------------------------------------- Basic Auth session
-
 def test_session_while_basic_auth_is_off(signed_out):
     assert _client().post('/api/auth/session').status_code == 400
 
 
 def test_session_after_a_sign_in_change_during_the_login(basic, monkeypatch):
-    """Sign-in settings change between the check of the password and the session."""
     real = session_module.create_session
 
     def changed_meanwhile(user_info, *, generation, **kwargs):
@@ -148,8 +134,6 @@ def test_session_at_capacity(basic, monkeypatch):
     assert r.status_code == 503 and r.headers['retry-after'] == '60'
 
 
-# ---------------------------------------------------------------- OAuth2
-
 def test_login_and_callback_while_oauth2_is_off(signed_out):
     client = _client()
     assert client.get('/api/auth/login', follow_redirects=False).status_code == 400
@@ -162,7 +146,6 @@ def test_login_when_oauth2_is_not_set_up(provider, monkeypatch):
 
 
 def test_login_when_discovery_fails(provider, monkeypatch):
-    """Discovery at the provider fails and no endpoints are set by hand."""
     monkeypatch.setattr(provider, 'issuer_url', 'https://id.example.com')
     monkeypatch.setattr(provider, 'authorization_url', None)
     monkeypatch.setattr(provider, '_discovery_cache', None, raising=False)
@@ -198,8 +181,6 @@ def test_callback_when_the_provider_declines(provider):
     r = client.get('/api/auth/callback', params={'state': state, 'error': 'access_denied'}, follow_redirects=False)
     assert r.status_code == 302 and r.headers['location'] == '/login?error=oauth2_error'
 
-
-# ---------------------------------------------------------------- signing out
 
 def test_logout(basic):
     client = _client()

@@ -1,4 +1,3 @@
-"""DMARC and TLS detail endpoints: a missing day or sender is 404, a malformed date 400."""
 from unittest.mock import MagicMock
 
 import pytest

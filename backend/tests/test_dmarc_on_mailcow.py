@@ -1,11 +1,3 @@
-"""The DMARC & TLS page says which domains are not on this mailcow server (issue #412).
-
-A domain removed from mailcow keeps its reports for history; the domains list and
-the domain overview carry on_mailcow so the page can mark it. While the server's
-domains are not known (before the first domain sync) every domain is None, never
-False, so no domain is marked by mistake. The database is stubbed at the route's
-helpers, so these run without PostgreSQL.
-"""
 import pytest
 
 import starlette.staticfiles as sf
@@ -17,7 +9,6 @@ from fastapi.testclient import TestClient
 from app import config
 from app.routers import dmarc as dmarc_router
 
-# The routes' own builders are stubbed with partial answers: not checked against /openapi.json
 pytestmark = pytest.mark.no_contract(reason="stubs the DMARC domain list and overview builders")
 
 HOSTED, ALIAS, GONE = 'hosted.example.com', 'alias.example.com', 'removed.example.com'
@@ -29,7 +20,6 @@ def _entry(domain):
 
 @pytest.fixture()
 def active_domains():
-    """Set the cached mailcow domains through the real config cache, and restore it."""
     previous = config._cached_active_domains
 
     def set_to(domains):
@@ -85,7 +75,6 @@ def test_unknown_server_domains_mark_nothing(client, active_domains, cached):
 def test_a_cached_list_follows_the_current_server_domains(client, active_domains):
     active_domains(None)
     assert set(_flags(client).values()) == {None}
-    # The domain sync ran after the list was cached: the cached list shows it at once
     active_domains([HOSTED])
     flags = _flags(client)
     assert flags[HOSTED] is True and flags[GONE] is False

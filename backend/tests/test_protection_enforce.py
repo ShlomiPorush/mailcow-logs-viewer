@@ -1,22 +1,15 @@
-"""Protection rules that ban, and the rules added after Trap and unknown accounts.
-
-In ban mode a hit waits as pending until enforce() writes it to the Fail2ban
-blacklist. The app lifts only the entries it added. Every write here goes to a
-fake mailcow, never to a real one.
-"""
 import asyncio
 from datetime import datetime, timedelta
 
 import pytest
 
-from test_protection_rules import (  # noqa: F401  (db is a fixture)
+from test_protection_rules import (  # noqa: F401
     ALL_IPS, DOMAIN, MARKER, SPRAY_IP, SUBNET, SUBNET_IPS, TRAP_IP, TYPO_IP,
     _context, _fail, _hits, _rules, db,
 )
 
 
 class FakeMailcow:
-    """Stands in for the mailcow Fail2ban API: keeps the lists and records every edit."""
     has_rw_key = True
 
     def __init__(self, blacklist='', whitelist='', fail=None):
@@ -56,8 +49,6 @@ def _trap_hit(session, **rule):
     _fail(session, TRAP_IP, 'admin')
     protection_rules.evaluate(session, _context())
 
-
-# ---------- writing bans ----------
 
 def test_a_banning_rule_writes_the_address_and_keeps_every_other_setting(db):
     _trap_hit(db, ban_hours=720)
@@ -189,8 +180,6 @@ def test_undo_lifts_the_ban_and_the_rule_leaves_the_address_alone_for_a_week(db)
     assert [h.status for h in _fresh(db)] == ['undone']
 
 
-# ---------- repeat offender, subnet, country ----------
-
 def _ban_line(session, ip, days_ago):
     from app.models import NetfilterLog
     session.add(NetfilterLog(time=datetime.utcnow() - timedelta(days=days_ago), priority=MARKER, ip=ip,
@@ -201,7 +190,7 @@ def _ban_line(session, ip, days_ago):
 def test_an_address_fail2ban_banned_again_and_again_is_caught(db):
     from app.services import protection_rules
     _rules(db, repeat_offender={'enabled': True, 'threshold': 3, 'window_days': 30})
-    _ban_line(db, SPRAY_IP, 40)  # outside the window
+    _ban_line(db, SPRAY_IP, 40)
     _ban_line(db, SPRAY_IP, 10)
     _ban_line(db, SPRAY_IP, 5)
     protection_rules.evaluate(db, _context())
@@ -269,8 +258,6 @@ def test_the_country_rule_needs_geoip_and_catches_the_chosen_countries(db):
         _rules(db, country={'countries': ['Testland']})
 
 
-# ---------- breach alert ----------
-
 def _login(session, ip, username, minutes_ago=0):
     from app.models import PostfixLog
     session.add(PostfixLog(time=datetime.utcnow() - timedelta(minutes=minutes_ago), queue_id=MARKER[:20],
@@ -282,11 +269,11 @@ def _login(session, ip, username, minutes_ago=0):
 def test_a_login_after_failed_tries_raises_an_alert_and_never_bans(db):
     from app.services import protection_rules
     _rules(db, breach={'enabled': True, 'failures': 3, 'window_minutes': 60})
-    protection_rules.evaluate(db, _context())  # starts reading the logins from now
+    protection_rules.evaluate(db, _context())
     for _ in range(3):
         _fail(db, SPRAY_IP, f'info@{DOMAIN}', minutes_ago=10)
     _login(db, SPRAY_IP, f'info@{DOMAIN}')
-    _login(db, TYPO_IP, f'info@{DOMAIN}')  # no failures from here: nothing to say
+    _login(db, TYPO_IP, f'info@{DOMAIN}')
     protection_rules.evaluate(db, _context())
     hits = _hits(db)
     assert [(h.ip, h.rule, h.status) for h in hits] == [(SPRAY_IP, 'breach', 'alert')]
@@ -308,8 +295,6 @@ def test_logins_from_before_the_alert_was_on_are_not_read(db):
     protection_rules.evaluate(db, _context())
     assert _hits(db) == []
 
-
-# ---------- API: ban now and undo ----------
 
 def test_the_api_bans_a_watched_hit_now_and_undoes_it(db, monkeypatch):
     from fastapi.testclient import TestClient
@@ -361,8 +346,6 @@ def test_the_api_refuses_to_ban_without_the_rw_key(db, monkeypatch):
     assert api.edits == []
 
 
-# ---------- review follow-ups ----------
-
 def test_a_watched_address_that_attacks_again_after_the_switch_to_ban_is_banned(db):
     from app.services import protection_rules
     _rules(db, trap={'enabled': True, 'names': ['admin']})
@@ -372,7 +355,7 @@ def test_a_watched_address_that_attacks_again_after_the_switch_to_ban_is_banned(
 
     _rules(db, trap={'mode': 'enforce', 'ban_hours': 24})
     protection_rules.evaluate(db, _context())
-    assert [h.status for h in _fresh(db)] == ['watching']  # switching alone bans nothing
+    assert [h.status for h in _fresh(db)] == ['watching']
 
     _fail(db, TRAP_IP, 'admin')
     protection_rules.evaluate(db, _context())
@@ -406,8 +389,6 @@ def test_the_notification_names_the_bans_and_the_alerts(monkeypatch):
     assert TRAP_IP in kw['html_content'] and SPRAY_IP in kw['html_content']
 
 
-# ---------- how a ban is written, and watched catches that go quiet ----------
-
 @pytest.mark.parametrize('target,entry', [
     ('198.51.100.10', '198.51.100.10/32'),
     ('2001:db8::1', '2001:db8::1/128'),
@@ -433,7 +414,6 @@ def test_a_watched_catch_with_no_new_activity_for_a_week_moves_to_the_history(db
     hit = _fresh(db)[0]
     assert hit.status == 'expired' and hit.mode == 'watch' and hit.ended_at == later
 
-    # It comes back: the rule catches it again, as a new catch
     _fail(db, TRAP_IP, 'admin', minutes_ago=-8 * 24 * 60)
     protection_rules.evaluate(db, _context(), now=later + timedelta(minutes=1))
     assert [h.status for h in _fresh(db)] == ['expired', 'watching']

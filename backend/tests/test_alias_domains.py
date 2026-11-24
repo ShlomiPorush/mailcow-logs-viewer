@@ -1,6 +1,3 @@
-"""Domain aliases (issue #92): user@alias.tld is the same mailbox as
-user@target.tld. The mapping is fetched from mailcow, persisted, and used by
-Mailbox Statistics attribution, the domain filter, and the Domains page."""
 import asyncio
 import uuid
 from datetime import datetime, timedelta
@@ -19,8 +16,6 @@ ALIAS = 'mirror.example'
 USER = f'user-{uuid.uuid4().hex[:8]}'
 
 
-# ---------- pure unit tests (no network, no database) ----------
-
 def test_mailcow_map_parsing(monkeypatch):
     from app.mailcow_api import MailcowAPI
     api = MailcowAPI()
@@ -30,7 +25,7 @@ def test_mailcow_map_parsing(monkeypatch):
         return [
             {'alias_domain': 'Mirror.Example', 'target_domain': 'Primary.Example', 'active': 1},
             {'alias_domain': 'off.example', 'target_domain': 'primary.example', 'active': 0},
-            {'alias_domain': 'broken.example', 'active': 1},   # no target - skipped
+            {'alias_domain': 'broken.example', 'active': 1},
         ]
     monkeypatch.setattr(api, '_make_request', fake)
     assert asyncio.run(api.get_alias_domain_map()) == {'mirror.example': 'primary.example'}
@@ -49,8 +44,6 @@ def test_expand_addresses_deduplicates():
     out = ad.expand_addresses(['a@primary.example', 'A@PRIMARY.EXAMPLE', 'b@primary.example'], mapping)
     assert out == ['a@mirror.example', 'b@mirror.example']
 
-
-# ---------- database-backed attribution tests ----------
 
 def _postgres_available() -> bool:
     try:
@@ -91,8 +84,6 @@ def env():
     with get_db_context() as db:
         ad.persist_alias_domain_map(db, {ALIAS: TARGET})
         db.add(MailboxStatistics(username=f'{USER}@{TARGET}', domain=TARGET, active=True))
-        # 2 messages sent as the primary address, 3 sent as the alias-domain
-        # address, 1 received at the alias-domain address
         for k in range(2):
             db.add(MessageCorrelation(
                 correlation_key=uuid.uuid4().hex, message_id=f'<p{k}-{uuid.uuid4().hex}@{TARGET}>',
@@ -128,9 +119,6 @@ def _get_all(domain=None):
 
 
 def test_alias_domain_traffic_is_attributed_to_the_mailbox(env):
-    """The bug the issue reports: mail sent as user@alias.tld was invisible.
-    It must appear on the mailbox user@target.tld as an alias row and count
-    into the combined totals exactly once."""
     data = _get_all()
     mb = next(m for m in data['mailboxes'] if m['username'] == f'{USER}@{TARGET}')
     assert mb['combined_sent'] == 5, 'alias-domain sends must count toward the mailbox'
@@ -139,7 +127,6 @@ def test_alias_domain_traffic_is_attributed_to_the_mailbox(env):
     assert row['is_domain_alias'] is True
     assert row['sent_total'] == 3
     assert row['received_total'] == 1
-    # the mailbox's own count stays its own - no double counting
     assert mb['mailbox_counts']['sent_total'] == 2
 
 
@@ -180,7 +167,6 @@ def test_anomaly_local_set_includes_alias_variants(env):
 
 
 def test_map_survives_a_process_restart(env):
-    """The cache is per-process; a fresh process must reload the persisted map."""
     from app.database import get_db_context
     ad.set_cached_alias_domain_map({})
     ad._cache_loaded_at = 0.0

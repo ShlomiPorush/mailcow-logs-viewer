@@ -1,4 +1,3 @@
-"""Verify incremental output and byte-compatible Unicode CSV across chunks."""
 import asyncio
 import csv
 import io

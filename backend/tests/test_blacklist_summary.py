@@ -1,8 +1,3 @@
-"""
-Tests for the aggregated dashboard blacklist summary:
-aggregate_blacklist_summary combines the latest check of every active
-monitored host into the /api/blacklist/summary payload.
-"""
 from datetime import datetime, timedelta, timezone
 
 from app.services.blacklist_service import (
@@ -77,7 +72,7 @@ def test_all_clean_is_clean():
     assert result["status"] == "clean"
     assert result["has_data"] is True
     assert result["listed_count"] == 0
-    assert result["total_blacklists"] == 42  # sum across hosts
+    assert result["total_blacklists"] == 42
 
 
 def test_listed_count_is_sum_across_hosts():
@@ -92,7 +87,6 @@ def test_listed_count_is_sum_across_hosts():
 
 
 def test_each_host_reports_its_own_list_count():
-    # The dashboard names the host that is actually listed and its own ratio
     result = aggregate_blacklist_summary([
         host("a", "clean", 0, 30, FRESH),
         host("b", "listed", 1, 30, FRESH),
@@ -104,14 +98,12 @@ def test_each_host_reports_its_own_list_count():
 
 
 def test_stale_check_counts_as_no_data():
-    # Preserves the old single-host behavior: has_data drops after the TTL
     result = aggregate_blacklist_summary(
         [host("a", "listed", 2, 30, STALE)], now=NOW)
     assert result["has_data"] is False
     assert result["status"] == "unknown"
     assert result["listed_count"] == 0
     assert result["hosts"][0]["status"] == "unknown"
-    # checked_at still reports the last known check time
     assert result["checked_at"] is not None
 
 

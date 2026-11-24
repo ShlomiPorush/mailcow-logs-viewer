@@ -1,6 +1,3 @@
-"""A mailbox that bursts at the same hour every day (scheduled reports) must
-not trigger volume-spike alerts - but the same mailbox bursting at an unusual
-hour, or far above its usual batch size, still must."""
 import uuid
 from datetime import datetime, timedelta
 
@@ -26,7 +23,6 @@ def _postgres_available() -> bool:
 
 def _seed_burst(db, count, when):
     from app.models import MessageCorrelation, RspamdLog
-    # Only authenticated submissions count as the mailbox's own sending
     scan = RspamdLog(time=when, message_id=f"<{uuid.uuid4().hex}@pattern.example>",
                      sender_smtp=SENDER, has_auth=True, user=SENDER, direction='outbound')
     db.add(scan)
@@ -86,9 +82,9 @@ def test_daily_batch_at_usual_hour_does_not_alert(anomaly_env):
     from app.database import get_db_context
     now = datetime.utcnow()
     with get_db_context() as db:
-        _seed_burst(db, 30, now - timedelta(minutes=5))          # current burst
-        _seed_burst(db, 28, now - timedelta(days=1, minutes=5))  # same hour yesterday
-        _seed_burst(db, 32, now - timedelta(days=2, minutes=5))  # and the day before
+        _seed_burst(db, 30, now - timedelta(minutes=5))
+        _seed_burst(db, 28, now - timedelta(days=1, minutes=5))
+        _seed_burst(db, 32, now - timedelta(days=2, minutes=5))
         db.commit()
     assert _run_detector() == 0, "recurring same-hour batch must be treated as scheduled"
 
@@ -107,7 +103,6 @@ def test_burst_at_unusual_hour_still_alerts(anomaly_env):
     now = datetime.utcnow()
     with get_db_context() as db:
         _seed_burst(db, 30, now - timedelta(minutes=5))
-        # history exists, but 12 hours away from the current slot
         _seed_burst(db, 30, now - timedelta(days=1, hours=12))
         _seed_burst(db, 30, now - timedelta(days=2, hours=12))
         db.commit()
@@ -118,7 +113,7 @@ def test_burst_far_above_usual_batch_still_alerts(anomaly_env):
     from app.database import get_db_context
     now = datetime.utcnow()
     with get_db_context() as db:
-        _seed_burst(db, 90, now - timedelta(minutes=5))          # 3x the usual batch
+        _seed_burst(db, 90, now - timedelta(minutes=5))
         _seed_burst(db, 30, now - timedelta(days=1, minutes=5))
         _seed_burst(db, 30, now - timedelta(days=2, minutes=5))
         db.commit()

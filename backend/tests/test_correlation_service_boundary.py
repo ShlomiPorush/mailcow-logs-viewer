@@ -1,4 +1,3 @@
-"""Correlation workflows can run without scheduler-owned global dependencies."""
 import subprocess
 import sys
 from contextlib import contextmanager

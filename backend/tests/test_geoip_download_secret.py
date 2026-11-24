@@ -1,11 +1,3 @@
-"""The MaxMind license key never reaches the logs.
-
-The download used to put license_key in the query string, and a network error
-was logged with str(e), which requests fills with the full request URL. The
-key then showed up in container.log and on the Status page log viewer. The
-download now authenticates with HTTP Basic auth (account ID + license key, as
-MaxMind documents), and any error text is redacted before it is logged.
-"""
 import logging
 import secrets
 
@@ -26,7 +18,6 @@ def configured(monkeypatch, tmp_path):
     calls = []
 
     def fail_like_requests(url, **kwargs):
-        """Raise the way requests does: the message quotes the request path and query."""
         calls.append((url, kwargs))
         prepared = requests.Request("GET", url, params=kwargs.get("params")).prepare()
         raise requests.exceptions.ConnectionError(
@@ -56,7 +47,6 @@ def test_license_key_is_not_sent_in_the_url(configured, caplog):
 
 
 def test_error_text_that_quotes_the_key_is_redacted(monkeypatch, caplog, tmp_path):
-    """Whatever an error says, the key is masked before it is logged."""
     monkeypatch.setattr(gd, "get_maxmind_license_key", lambda: KEY)
     monkeypatch.setattr(gd, "get_maxmind_account_id", lambda: ACCOUNT)
 
@@ -71,9 +61,6 @@ def test_error_text_that_quotes_the_key_is_redacted(monkeypatch, caplog, tmp_pat
 
 
 def test_rejected_account_id_falls_back_without_logging_the_key(configured, monkeypatch, caplog):
-    """The account ID was required but never checked before Basic auth. When
-    MaxMind rejects the pair, the download retries with the key alone, and an
-    error on that request is still redacted."""
     fail_like_requests = gd.requests.get
 
     class Rejected:

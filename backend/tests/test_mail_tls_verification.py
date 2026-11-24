@@ -1,16 +1,3 @@
-"""SMTP and IMAP clients verify the server certificate before they send a password.
-
-Without an ssl context, smtplib and imaplib fall back to an unverified one, so
-anyone able to intercept the connection could present any certificate and read
-the SMTP or IMAP password. The servers here run on loopback with a self-signed
-certificate for an unrelated name, the way an interceptor would; nothing leaves
-the machine (a dotted name is pointed at loopback by patching getaddrinfo).
-
-SMTP_VERIFY_SSL / DMARC_IMAP_VERIFY_SSL: false (also unset, the default, so an
-upgrade changes nothing) does not check, auto checks dotted host names and skips
-localhost, IP addresses and single-label names such as Docker container names,
-true always checks.
-"""
 import base64
 import datetime
 import logging
@@ -32,7 +19,7 @@ from app.services.smtp_service import SmtpService
 
 PASSWORD = secrets.token_hex(16)
 DOTTED = "mail.example.com"
-UNSET = object()  # keep the setting's default
+UNSET = object()
 
 
 def _server_context(tmp_path_factory):
@@ -55,8 +42,6 @@ def _server_context(tmp_path_factory):
 
 
 class RogueServers:
-    """SMTPS, SMTP with STARTTLS and IMAPS listeners that record any password they get."""
-
     def __init__(self, sctx):
         self.sctx = sctx
         self.captured = []
@@ -88,7 +73,7 @@ class RogueServers:
             else:
                 self._smtp(conn, starttls=(kind == "starttls"))
         except (OSError, ssl.SSLError):
-            pass  # the client refused the certificate
+            pass
         finally:
             try:
                 conn.close()
@@ -155,7 +140,6 @@ def rogue(tmp_path_factory):
 
 @pytest.fixture
 def mail(rogue, monkeypatch):
-    """Point SMTP and IMAP at the rogue servers; returns a function to set the host and verify mode."""
     rogue.captured.clear()
     real_getaddrinfo = socket.getaddrinfo
 
@@ -180,8 +164,6 @@ def mail(rogue, monkeypatch):
 
     return configure
 
-
-# What a verifying client must do: refuse the certificate before any password is sent
 
 @pytest.mark.parametrize("host,verify", [("localhost", "true"), (DOTTED, "true"), (DOTTED, "auto")])
 @pytest.mark.parametrize("smtp_mode", ["smtps", "starttls"])
@@ -218,8 +200,6 @@ def test_dmarc_imap_sync_refuses_and_names_the_setting(rogue, mail, host, verify
     assert not rogue.got_password()
 
 
-# Off (the default) and auto with a local name do not check: the password still goes out
-
 @pytest.mark.parametrize("host,verify", [
     (DOTTED, UNSET), ("localhost", UNSET), (DOTTED, "false"), ("localhost", "auto"), ("127.0.0.1", "auto"),
 ])
@@ -227,13 +207,13 @@ def test_unverified_by_default_when_off_or_auto_with_a_local_name(rogue, mail, h
     mail(host, verify, "smtps")
     SmtpService().send_email("admin@example.com", "subject", "text")
     with pytest.raises(Exception):
-        DMARCImapService().connect()  # the rogue server rejects the login
+        DMARCImapService().connect()
     assert sum(PASSWORD in c for c in rogue.captured) == 2
 
 
 def test_auto_mode_warns_and_names_the_setting(rogue, mail, caplog):
     from app.services import mail_tls
-    mail_tls._warned.clear()  # the warning is given once per host
+    mail_tls._warned.clear()
     mail("localhost", "auto", "smtps")
     with caplog.at_level(logging.WARNING):
         SmtpService().send_email("admin@example.com", "subject", "text")
