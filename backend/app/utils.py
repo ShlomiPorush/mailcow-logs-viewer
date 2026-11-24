@@ -39,21 +39,6 @@ def format_datetime_for_api(dt: Optional[datetime]) -> Optional[str]:
     return dt_utc.replace(microsecond=0).isoformat().replace('+00:00', 'Z')
 
 
-def ensure_timezone_aware(dt: datetime) -> datetime:
-    """
-    Ensure datetime is timezone-aware (has tzinfo)
-
-    Args:
-        dt: datetime object
-
-    Returns:
-        Timezone-aware datetime (assumes UTC if naive)
-    """
-    if dt.tzinfo is None:
-        return dt.replace(tzinfo=timezone.utc)
-    return dt
-
-
 def _date_as_day(end: bool):
     """Read a date (YYYY-MM-DD) as a day in the app's time zone; leave an
     instant to the usual datetime parsing, which refuses what it cannot read."""

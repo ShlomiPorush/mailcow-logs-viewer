@@ -327,15 +327,6 @@ def get_bulk_activity(db: Session, addresses_by_mailbox: dict, start_date: datet
     return {'unit': unit, 'buckets': keys, 'series': series}
 
 
-def get_message_counts_for_email(db: Session, email: str, start_date: datetime, end_date: datetime) -> dict:
-    """
-    Get message counts for a single email. Thin wrapper around bulk version.
-    Kept for backward compatibility with summary endpoint.
-    """
-    bulk = get_bulk_message_counts(db, [email], start_date, end_date)
-    return bulk.get(email.lower(), _empty_counts())
-
-
 @router.get("/mailbox-stats/summary", responses=documented(m.MailboxSummaryResponse))
 def get_mailbox_stats_summary(
     date_range: str = Query("30days", description="Date range: today, 7days, 30days, 90days, custom"),
@@ -477,9 +468,6 @@ def get_all_mailbox_stats(
                 forms = [username.strip().lower()]
             query = query.filter(func.lower(MailboxStatistics.username).in_(forms))
 
-        # Get total count before pagination
-        total_count = query.count()
-        
         # Get all for sorting (we need to calculate counts before pagination)
         mailboxes = query.all()
         
