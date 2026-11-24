@@ -278,18 +278,10 @@ def test_a_sources_queries_stop_together_at_its_time_budget(db_ready):
     assert seen.endswith('ms') and 19000 <= int(seen[:-2]) <= 20000
 
 
-def test_only_storage_and_the_security_counts_have_a_trend_and_others_samples_go(db_ready, monkeypatch):
-    """Message linking and Blocklists have no trend: not sampled, not served, and
-    samples kept from before are deleted at the next run."""
-    from app.database import get_db_context
-    from app.models import MetricSnapshot
+def test_only_storage_and_the_security_counts_have_a_trend(db_ready, monkeypatch):
+    """Message linking and Blocklists have no trend: not sampled and not served."""
     figures = _fake_sources(monkeypatch)
     assert set(figures.METRICS) == {'storage_used', 'security_review', 'security_banned'}
-    slot = figures.slot_of(datetime.utcnow()) - timedelta(hours=3)
-    with get_db_context() as db:
-        for name in ('linking_rate', 'blocklists_listed'):
-            db.add(MetricSnapshot(name=name, slot=slot, value=1.0, as_of=slot))
-        db.commit()
     asyncio.run(figures.run_trend_samples())
     assert {r.name for r in _rows()} == set(figures.METRICS)
     from app.main import app

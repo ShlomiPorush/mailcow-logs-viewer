@@ -282,8 +282,6 @@ def write_points(points: Dict[str, dict], epochs: Dict[str, int], slot: datetime
                 index_elements=['name', 'slot'], set_={'value': row['value'], 'of': row['of'], 'as_of': row['as_of']}))
             written += 1
         db.query(MetricSnapshot).filter(MetricSnapshot.slot < _now() - timedelta(days=KEEP_DAYS)).delete(synchronize_session=False)
-        # A figure that no longer has a trend keeps no samples
-        db.query(MetricSnapshot).filter(MetricSnapshot.name.notin_(list(METRICS))).delete(synchronize_session=False)
         db.commit()
     return written
 
