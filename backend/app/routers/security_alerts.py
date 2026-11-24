@@ -74,7 +74,6 @@ def list_security_alerts(
         readable = _allowed(request, READ)
         writable = _allowed(request, WRITE)
         is_open = SecurityAlert.acknowledged == False  # noqa: E712
-        # Without one snapshot, an alert committed between the two queries is dismissed unseen.
         db.connection(execution_options={"isolation_level": "REPEATABLE READ"})
         q = db.query(SecurityAlert).filter(readable)
         if acknowledged is not None:

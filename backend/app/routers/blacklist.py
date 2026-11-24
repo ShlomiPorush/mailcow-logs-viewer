@@ -114,7 +114,6 @@ async def check_blacklists(
               pass
              
     try:
-        # A full scan may have taken the lock while the host name resolved.
         if not blacklist_check_admits():
             return {"status": "busy", "message": BUSY_TEXT}
         async with blacklist_check_lock():

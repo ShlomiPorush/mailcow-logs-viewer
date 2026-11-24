@@ -4215,7 +4215,6 @@ function renderQuarantineDetailContent(data, itemId) {
         <th>Symbol</th><th>Group</th><th class="ui-td-end">Score</th><th>Details</th>
     </tr></thead><tbody>${rows}</tbody></table></div>`;
 
-    // mailcow sends a literal '-' when the message has no plain-text part.
     const plainText = (data.text_plain || '').trim();
     const textContent = (plainText && plainText !== '-') ? data.text_plain : (data.text_html || '');
     const mayAct = userCan('quarantine', 'write');

@@ -16,7 +16,6 @@ class OAuth2ClientError(Exception):
 class OAuth2Client:
 
     def __init__(self):
-        # Held across the network request, it would stall the event loop and every settings save until the provider answers.
         self._config_lock = threading.Lock()
         self._config_version = 0
         self._update_config()
@@ -57,7 +56,6 @@ class OAuth2Client:
                 response.raise_for_status()
                 discovery = response.json()
 
-                # Without the version check, a discovery answer from before a settings change replaces the new provider's endpoints.
                 with self._config_lock:
                     if version != self._config_version:
                         raise OAuth2ClientError("The OAuth2 settings changed during discovery")
