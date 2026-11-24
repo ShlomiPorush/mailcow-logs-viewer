@@ -1926,13 +1926,6 @@ async function loadSettings() {
             console.warn('Could not load editable settings:', e);
         }
 
-        if (versionInfoCache.app_version) {
-            data.app_version = versionInfoCache.app_version;
-        }
-        if (versionInfoCache.version_info) {
-            data.version_info = versionInfoCache.version_info;
-        }
-
         renderSettings(content, data);
 
         loading.classList.add('hidden');
@@ -1954,18 +1947,6 @@ async function loadSettings() {
                 }
                 if (versionInfo) {
                     versionInfoCache.version_info = versionInfo;
-                }
-
-                if ((appInfo || versionInfo) && !uiUnsavedCount({ route: 'settings', reload: true })) {
-                    const currentData = { ...data };
-                    if (appInfo) {
-                        currentData.app_version = appInfo.version;
-                    }
-                    if (versionInfo) {
-                        currentData.version_info = versionInfo;
-                    }
-                    renderSettings(content, currentData);
-                    uiPickerRefocus();
                 }
             } catch (error) {
                 console.error('Failed to load version info:', error);
@@ -2022,10 +2003,8 @@ function updateVersionInfoUI(versionInfo) {
 
 function renderSettings(content, data) {
     const config = data.configuration || {};
-    const appVersion = data.app_version || 'Unknown';
-    const versionInfo = data.version_info || {};
 
-    const kv = (label, value, cls = '') => `<div class="ui-kv"><span>${label}</span><b class="${cls}">${value}</b></div>`;
+    const kv =(label, value, cls = '') => `<div class="ui-kv"><span>${label}</span><b class="${cls}">${value}</b></div>`;
     const readOnlyFacts = [
         ['Fetch interval', `${escapeHtml(String(config.fetch_interval || 0))} seconds`],
         ['Postfix logs per request', `${escapeHtml(String(config.fetch_count_postfix || config.fetch_count || 0))} per request`],
