@@ -2289,16 +2289,6 @@ function renderSettings(content, data) {
     const appVersion = data.app_version || 'Unknown';
     const versionInfo = data.version_info || {};
 
-    // Sync MaxMind status: backend DB is the source of truth.
-    // Frontend cache only bridges the gap between a validate click and next full reload.
-    if (config.maxmind_status !== null && config.maxmind_status !== undefined) {
-        // Backend returned a persisted result from DB - use it
-        _cachedMaxMindStatus = config.maxmind_status;
-    } else if (_cachedMaxMindStatus) {
-        // Backend returned null (never checked) but we just validated in this session - show it
-        config.maxmind_status = _cachedMaxMindStatus;
-    }
-
     const kv = (label, value, cls = '') => `<div class="ui-kv"><span>${label}</span><b class="${cls}">${value}</b></div>`;
     const readOnlyFacts = [
         ['Fetch interval', `${escapeHtml(String(config.fetch_interval || 0))} seconds`],
@@ -2903,7 +2893,6 @@ function renderSettings(content, data) {
                     
                     // Detect if MaxMind credentials were changed - show setup modal
                     const _maxmindChanged = ('maxmind_account_id' in payload || 'maxmind_license_key' in payload);
-                    if (_maxmindChanged) _cachedMaxMindStatus = null; // Clear stale validation cache
                     const _maxmindHasValues = (payload.maxmind_license_key && payload.maxmind_license_key !== '' && payload.maxmind_license_key !== '********');
                     // The rest of the app reads features, title, logo, sign-in and the mailcow
                     // address once, when the page loads: a change to one of them reloads it.
@@ -3102,10 +3091,8 @@ async function showGeoIPSetupModal(reloadPage = false) {
             const valLicData = valLicRes.ok ? await valLicRes.json() : null;
             
             if (valLicData && valLicData.valid) {
-                _cachedMaxMindStatus = valLicData;
                 setStepStatus(1, 'success', 'Credentials configured');
             } else if (valLicData && valLicData.error) {
-                _cachedMaxMindStatus = valLicData;
                 setStepStatus(1, 'error', 'Could not validate the license. Check your MaxMind credentials. Details: ' + valLicData.error);
                 setupOver();
                 return;
@@ -3191,9 +3178,6 @@ async function showGeoIPSetupModal(reloadPage = false) {
     setupOver();
 }
 
-// Cache last MaxMind validation result so re-renders don't lose it
-var _cachedMaxMindStatus = null;
-
 async function validateMaxMindLicense() {
     // Show checking state on all MaxMind status badges
     const checkingHtml = `
@@ -3215,9 +3199,6 @@ async function validateMaxMindLicense() {
         // A failed request: the tag stays short, the message says why
         const result = response.ok ? await response.json()
             : { configured: true, valid: false, error: 'Request failed', failure: uiHttpErrorText(response.status, await uiReadJson(response)) };
-        
-        // Cache the result so re-renders preserve it
-        _cachedMaxMindStatus = result;
 
         const statusHtml = renderMaxMindStatus(result);
         ['maxmind-license-status', 'maxmind-license-status-tab'].forEach(id => {
