@@ -114,7 +114,6 @@ def env(monkeypatch):
     # getattr so the file also runs against the pre-fix worker, which has no
     # catch-up state: that is how the burst test records its failure on old code.
     getattr(worker, '_catchup_state', {}).clear()
-    worker._unavailable_services.clear()
 
     def cycle(services):
         monkeypatch.setattr(settings._inner, 'raw_logs_services', ','.join(services))

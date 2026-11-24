@@ -123,9 +123,6 @@ SERVICE_METADATA = {
     "watchdog":      {"name": "Watchdog",     "icon": "eye",      "description": "Container monitoring logs"},
 }
 
-# Track services that returned 404 (not available on this mailcow instance)
-_unavailable_services: Set[str] = set()
-
 # Job status for monitoring
 raw_logs_job_status = {
     'fetch_raw_logs': {'last_run': None, 'status': 'idle', 'error': None, 'stats': {}},
@@ -307,8 +304,8 @@ def _collect_service_worker(service: str, page_size: int, request_loop) -> tuple
 async def _collect_service_in_worker(service: str, page_size: int, fetch) -> tuple:
     """Fetch and store one service for this cycle.
 
-    Returns (head_entries, deeper_entries, pages, pending_state); head_entries
-    is None when the service is unavailable. The head page (newest N) is always
+    Returns (head_entries, deeper_entries, pages, pending_state). The head
+    page (newest N) is always
     fetched, so the Live Logs page stays current, and only its new lines are
     broadcast live. For CATCHUP_SERVICES the head page is then read as
     evidence: a full page on which every row was new means lines may have been
@@ -319,8 +316,6 @@ async def _collect_service_in_worker(service: str, page_size: int, fetch) -> tup
     a failed commit leaves the previous resume position in place.
     """
     logs = await fetch('get_raw_logs', service, count=page_size)
-    if logs is None:
-        return (None, [], 0, _catchup_state.get(service))
     if not logs:
         return ([], [], 1, _catchup_state.get(service))
 
@@ -422,20 +417,10 @@ async def fetch_raw_service_logs():
         stats: Dict[str, int] = {}
 
         for service in enabled_services:
-            # Skip services that we know are unavailable on this mailcow instance
-            if service in _unavailable_services:
-                continue
-
             try:
                 # Use fetch_count_rspamd for rspamd-history (each entry is a full email record, much heavier)
                 count = fetch_count_rspamd if service == 'rspamd-history' else fetch_count
                 head_entries, deeper, _pages, next_state = await _collect_service(service, count)
-
-                if head_entries is None:
-                    # Service returned an error - mark as unavailable
-                    _unavailable_services.add(service)
-                    logger.warning(f"[RAW LOGS] Service '{service}' is not available on this mailcow instance, skipping in future runs")
-                    continue
 
                 # The commit succeeded (or there was nothing to commit): only now
                 # is it safe to move or clear the resume position.
@@ -645,10 +630,7 @@ def reschedule_raw_logs_jobs():
             replace_existing=True,
             max_instances=1
         )
-        
-        # Clear unavailable services cache so they're retried
-        _unavailable_services.clear()
-        
+
         logger.info(f"[RAW LOGS] Rescheduled: fetch every {settings.raw_logs_fetch_interval}s, "
                      f"services: {', '.join(settings.raw_logs_collected_list)}")
     except Exception as e:
