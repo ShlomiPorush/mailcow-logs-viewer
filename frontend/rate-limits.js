@@ -347,8 +347,6 @@ function renderRateLimitSendersTable(senders) {
                 <td class="ui-nowrap">${uiTime(group.last_seen, formatAgo(group.last_seen), { title: formatTime(group.last_seen) })}</td>
                 <td class="hide-mobile">${renderRateLimitBadge(group.current_limit)}</td>
                 <td class="hide-mobile" data-sort="${Date.parse(group.last_reset) || ''}">${group.last_reset ? uiTag(`Reset ${formatAgo(group.last_reset)}`, 'ok') : ''}</td>
-                <!-- On a phone the action lives in the detail view a tap away;
-                     a button beyond the scroll edge is a button nobody finds -->
                 <td class="ui-td-end ui-nowrap hide-mobile">${resetButton}</td>
             </tr>
         `;

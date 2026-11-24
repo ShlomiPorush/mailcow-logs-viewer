@@ -164,8 +164,6 @@ def _lenient_manual_hosts_list(value: str, setting_name: str) -> List[str]:
     return result
 
 class Settings(BaseSettings):
-    """Application settings"""
-    
     mailcow_url: str = Field(..., description="mailcow instance URL")
     mailcow_api_key: str = Field(..., description="mailcow API key (Read-Only)")
     mailcow_api_key_rw: Optional[str] = Field(

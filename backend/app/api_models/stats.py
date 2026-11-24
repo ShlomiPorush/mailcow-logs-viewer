@@ -9,7 +9,6 @@ FAILED = "Only when the figures could not be read: what to do"
 
 
 class _Keyed(Fixed):
-    """Keys such as 24h are not Python names; they are given as aliases."""
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
 

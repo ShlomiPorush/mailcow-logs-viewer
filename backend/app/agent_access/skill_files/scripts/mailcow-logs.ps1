@@ -49,7 +49,6 @@ $Fields = @(
   @('userCode', 's'), @('link', 's'), @('deviceExpiresAt', 'n'), @('interval', 'n'), @('nextPollAt', 'n'), @('toRevoke', 's')
 )
 $Utf8 = New-Object System.Text.UTF8Encoding($false)
-# Windows tools by their full path: started from Git Bash, for one, whoami.exe may be a different program.
 $Icacls = Join-Path $env:SystemRoot 'System32\icacls.exe'
 $Whoami = Join-Path $env:SystemRoot 'System32\whoami.exe'
 

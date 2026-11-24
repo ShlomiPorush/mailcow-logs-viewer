@@ -433,7 +433,7 @@ function alive(pid) {
     process.kill(pid, 0)
     return true
   } catch (e) {
-    // Taking EPERM as alive keeps a dead holder's lock forever on Windows, where that number is another user's.
+    // Outside Windows, taking EPERM as alive keeps a dead holder's lock forever: that number is now another user's.
     return win && e.code === "EPERM"
   }
 }

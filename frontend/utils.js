@@ -2474,7 +2474,7 @@ function uiSparkline(points, { days = 7, now = Date.now(), format = v => String(
     return `<svg class="ui-spark-svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="${escapeHtml(words)}"><title>${escapeHtml(words)}</title><path d="${d}"/>${lone}<circle cx="${x(Date.parse(last.slot)).toFixed(1)}" cy="${y(Number(last.value)).toFixed(1)}" r="1.8"/></svg>`;
 }
 
-// Overview strip under a zoomable chart:
+// Overview strip under a zoomable chart
 
 // The span a drag of the window by dt makes
 function uiOverviewMove(start, dt, limits, snap = t => t) {

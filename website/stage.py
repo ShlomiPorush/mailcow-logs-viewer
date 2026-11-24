@@ -13,8 +13,6 @@ EXCLUDE = {"documentation/UI_Behavior_Catalog.md"}
 
 LINK = re.compile(r"(\]\()([^)\s]+)(\))")
 
-# GitHub callouts ("> [!NOTE]"), which GitHub and the app's help render as
-# boxes, become Material admonitions
 CALLOUT = re.compile(r"^> \[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\][ \t]*\n((?:>.*(?:\n|$))*)", re.M)
 CALLOUT_KIND = {"NOTE": "note", "TIP": "tip", "IMPORTANT": 'info "Important"',
                 "WARNING": "warning", "CAUTION": 'danger "Caution"'}

@@ -122,7 +122,7 @@ test('the session check and a refused call both compare the access', () => {
     const send = guard.slice(guard.indexOf('async function sessionGuardSend'), guard.indexOf('function sessionGuardHandle'));
     assert.match(send, /appAccessCheck\(body\)/);
     const app = fs.readFileSync(path.join(frontend, 'app.js'), 'utf8');
-    const refresh = app.slice(app.indexOf('async function refreshAppAccess'), app.indexOf('// Hide the tabs of features'));
+    const refresh = app.slice(app.indexOf('async function refreshAppAccess'), app.indexOf('// Hide the tabs of features that are off'));
     assert.match(refresh, /appAccessCheck\(/);
 });
 

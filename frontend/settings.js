@@ -2216,24 +2216,18 @@ function renderSettings(content, data) {
                 tabsHtml += '</div>';
             });
             return mobileNavHtml + `
-        <!-- Edit Configuration (only when SETTINGS_EDIT_VIA_UI_ENABLED) -->
         <div class="settings-edit-layout ui-set-edit">
             ${navHtml}
-            <!-- The column scrolls on a wide screen; a section redrawn by its refresh keeps the place (app.js uiReplaceKeepingFocus) -->
             <div class="settings-edit-content" data-keep-scroll>
                 ${!data.settings_migrated ? `<div class="ui-set-actions" id="settings-edit-actions">
                     <button type="button" id="settings-import-env-btn" class="ui-btn ui-btn-primary">Migrate Settings from ENV</button>
                     <p class="ui-set-migrate-note">Copy your current configuration to the database to start editing settings here.</p>
                 </div>` : ''}
                 <form id="settings-edit-form" class="ui-set-form">
-                    <!-- Until the first migration nothing can be saved, so the fields stay
-                         read-only instead of accepting edits that would be lost -->
                     <fieldset class="ui-set-fieldset"${data.settings_migrated ? '' : ' disabled'}>
                     ` + tabsHtml + `
                     </fieldset>
                 </form>
-                <!-- Connected agents (agents.js) under the Agents section. Outside the form:
-                     its buttons act at once, and the fieldset above is disabled until migration -->
                 <div class="hidden" data-tab-extra="users"><div id="users-panel" class="ui-agent-sections"></div></div>
                 <div class="hidden" data-tab-extra="agents"><div id="agents-panel" class="ui-agent-sections"></div></div>
             </div>
@@ -2244,7 +2238,6 @@ function renderSettings(content, data) {
 
         ${!data.settings_edit_via_ui_enabled ? `
         <div class="ui-dash-grid ui-status-pair">
-            <!-- Global SMTP Configuration -->
             <section class="ui-panel">
                 <div class="ui-panel-head">SMTP configuration
                     <button type="button" onclick="testSmtpConnection()" class="ui-btn ui-btn-sm ui-head-actions">Send test email</button></div>
@@ -2255,7 +2248,6 @@ function renderSettings(content, data) {
                 ` : ''}
             </section>
 
-            <!-- DMARC & TLS report management -->
             <section class="ui-panel">
                 <div class="ui-panel-head">DMARC &amp; TLS reports
                     <button type="button" onclick="testImapConnection()" class="ui-btn ui-btn-sm ui-head-actions">Test IMAP connection</button></div>
@@ -2265,7 +2257,6 @@ function renderSettings(content, data) {
             </section>
         </div>
 
-        <!-- Users (users.js) and connected agents (agents.js): managed here even while editing settings is off -->
         <div id="users-panel" class="ui-agent-sections"></div>
         <div id="agents-panel" class="ui-agent-sections"></div>
         ` : ''}

@@ -867,8 +867,8 @@ def run_alembic_upgrade():
 
     cfg = AlembicConfig(str(ini_path))
     cfg.set_main_option("script_location", str(ini_path.parent / "alembic"))
-    # without %% a database password containing % breaks ConfigParser interpolation
     from .config import settings
+    # without %% a database password containing % breaks ConfigParser interpolation
     cfg.set_main_option("sqlalchemy.url", settings.database_url.replace("%", "%%"))
 
     command.upgrade(cfg, "head")

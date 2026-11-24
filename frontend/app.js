@@ -296,7 +296,7 @@ async function refreshAppAccess() {
     }
 }
 
-// Hide the tabs of features
+// Hide the tabs of features that are off
 function applyTabFeatures(page) {
     const prefix = `${page}-tab-btn-`;
     let shown = 0;

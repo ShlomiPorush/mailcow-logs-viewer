@@ -5,7 +5,6 @@ from starlette.responses import Response
 
 
 class Fixed(BaseModel):
-    """A response object with exactly these keys."""
     model_config = ConfigDict(extra="forbid")
 
 

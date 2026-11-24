@@ -234,15 +234,6 @@ async def websocket_raw_logs(
     service: str = Query(default="postfix"),
     token: str = Query(default=None),
 ):
-    """
-    WebSocket endpoint for real-time log streaming.
-    
-    1. Client calls GET /api/raw-logs/ws-token (authenticated) to get a one-time token
-    2. Client connects: wss://host/ws/raw-logs?service=postfix&token=<one-time-token>  # nosemgrep: javascript.lang.security.detect-insecure-websocket.detect-insecure-websocket
-    
-    Client can send messages to switch service:
-      {"action": "subscribe", "service": "dovecot"}
-    """
     authority: Authority = (None, auth_generation())
     if settings.is_authentication_enabled:
         authenticated = False

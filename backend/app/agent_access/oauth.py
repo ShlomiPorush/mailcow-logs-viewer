@@ -158,13 +158,6 @@ def authorization_server_metadata():
 
 @router.get("/oauth/authorize")
 async def authorize(request: Request):
-    """Check the request, then hand it to the consent page.
-
-    The middleware has already sent a signed-out browser to the login page.
-    Every problem is shown here and never sent anywhere: anyone can register
-    a redirect address, so the browser goes to it only with the person's
-    answer on the consent page (RFC 9700 section 4.11.2).
-    """
     require_live()
     q = request.query_params
     session_key = session_key_from_request(request)
@@ -221,7 +214,6 @@ def clean_label(raw: Optional[str]) -> Optional[str]:
 
 @router.post("/oauth/device")
 async def device_authorization(request: Request):
-    """An agent asks to connect: a secret device code for it, and a short code for the person to approve."""
     require_live()
     ip = _client_ip(request)
     if device_requests.full(ip):
@@ -278,11 +270,6 @@ def code_page(message: Optional[str] = None, status_code: int = 200, value: str 
 
 @router.get("/oauth/device")
 async def device_page(request: Request):
-    """The link the agent shows: checks the code, then opens the approval page for it.
-
-    The middleware has already sent a signed-out browser to the login page.
-    Every code tried counts against the person's address and session.
-    """
     require_live()
     session_key = session_key_from_request(request)
     if not session_key:
@@ -372,7 +359,6 @@ async def token(request: Request):
 
 @router.post("/oauth/register")
 async def register(request: Request):
-    """Dynamic Client Registration (RFC 7591) for public clients."""
     require_live()
     ip = _client_ip(request)
     if registrations.full(ip):
@@ -416,7 +402,6 @@ async def register(request: Request):
 
 @router.post("/oauth/revoke")
 async def revoke(request: Request):
-    """RFC 7009. Always 200 for a well-formed request, whether or not the token was known."""
     require_live()
     if not token_requests.hit(_client_ip(request)):
         return _oauth_error("slow_down", "Too many requests. Try again in a minute.", 429)

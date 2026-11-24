@@ -382,7 +382,6 @@ def oauth2_logout(request: Request):
 
 @router.get("/auth/logout", include_in_schema=False)
 def oauth2_logout_get():
-    """Explicit 405: without this route the SPA catch-all would answer GET with the page."""
     raise HTTPException(
         status_code=status.HTTP_405_METHOD_NOT_ALLOWED,
         detail="Log out with POST",

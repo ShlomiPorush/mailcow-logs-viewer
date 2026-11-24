@@ -1657,7 +1657,6 @@ def trigger_manual_sync(background_tasks: BackgroundTasks):
                 result = sync_dmarc_reports_from_imap(sync_type='manual')
                 
                 if result.get('status') == 'already_running':
-                    # Setting the job status here would overwrite the status of the import that started first
                     return
                 if result.get('status') == 'error':
                     update_job_status('dmarc_imap_sync', 'failed', result.get('error_message'))

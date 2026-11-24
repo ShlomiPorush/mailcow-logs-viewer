@@ -357,8 +357,6 @@ function renderRelatedDeliveries(data) {
 
     return `
         <section class="ui-md-card">
-            <!-- Collapsed by default so several legs do not push the rest of
-                 the overview down; the summary line already tells the story -->
             <div class="ui-md-toggle" role="button" tabindex="0" data-row-open aria-expanded="false" aria-controls="delivery-journey-legs" onclick="if (!uiRowHeld(event)) toggleDeliveryJourney()">
                 <div>
                     <h4 class="ui-md-h">Delivery journey</h4>
@@ -1095,13 +1093,10 @@ function renderPostfixTab(content, data) {
     content.innerHTML = `
         <div class="ui-md-fill">
             ${errorSummaryHtml}
-            <!-- Compact mail summary strip so the logs get the room. The
-                 full details live in the Overview tab -->
             ${stripFacts ? `<div class="ui-md-facts ui-md-strip">${stripFacts}</div>` : ''}
 
             ${renderRecipientsSection()}
 
-            <!-- Complete Log Timeline: its head and filters stay under the tabs -->
             <div id="md-timeline-slot">${renderLogTimeline(data.postfix, dovecotLogs)}</div>
         </div>
     `;
