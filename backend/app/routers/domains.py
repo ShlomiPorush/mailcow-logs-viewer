@@ -2189,9 +2189,8 @@ def notify_dns_changes(domain_name: str, changes: List[Dict[str, str]]) -> None:
 
 
 def store_dns_check_worker(domain_name, dns_data, is_full_check):
-    """Own the session in the worker, including the async notification step."""
     with get_db_context() as db:
-        asyncio.run(save_dns_check_to_db(db, domain_name, dns_data, is_full_check=is_full_check))
+        save_dns_check_to_db(db, domain_name, dns_data, is_full_check=is_full_check)
 
 
 def _load_alias_map_for_dns_checks():
@@ -2199,7 +2198,7 @@ def _load_alias_map_for_dns_checks():
         return get_alias_domain_map(db)
 
 
-async def save_dns_check_to_db(db: Session, domain_name: str, dns_data: Dict[str, Any], is_full_check: bool = False):
+def save_dns_check_to_db(db: Session, domain_name: str, dns_data: Dict[str, Any], is_full_check: bool = False):
     """Save DNS check results to database (upsert), alerting on real changes."""
     try:
         checked_at = datetime.now(timezone.utc)
@@ -2253,7 +2252,7 @@ async def save_dns_check_to_db(db: Session, domain_name: str, dns_data: Dict[str
 
         if changes:
             logger.warning(f"[DNS CHANGE] {domain_name}: {', '.join(c['type'] for c in changes)}")
-            await asyncio.to_thread(notify_dns_changes, domain_name, changes)
+            notify_dns_changes(domain_name, changes)
         
     except Exception as e:
         logger.error(f"Error saving DNS check for {domain_name}: {e}")

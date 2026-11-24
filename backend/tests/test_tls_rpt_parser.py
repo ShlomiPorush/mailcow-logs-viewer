@@ -5,7 +5,6 @@ import json
 import pytest
 
 from app.services.tls_rpt_parser import (
-    is_tls_rpt_json,
     parse_iso_datetime,
     parse_tls_rpt_file,
     parse_tls_rpt_json,
@@ -85,9 +84,3 @@ def test_parse_iso_datetime_offset():
 def test_parse_iso_datetime_invalid():
     assert parse_iso_datetime("") is None
     assert parse_iso_datetime("garbage") is None
-
-
-def test_is_tls_rpt_json_detection():
-    assert is_tls_rpt_json(json.dumps(VALID_REPORT)) is True
-    assert is_tls_rpt_json('{"some": "other json"}') is False
-    assert is_tls_rpt_json("not json") is False

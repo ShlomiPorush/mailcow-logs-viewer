@@ -175,11 +175,6 @@ def store_report(db: Session, prepared: PreparedReport) -> Tuple[str, object]:
             db.flush()
     except SQLAlchemyError as e:
         # Only this report's savepoint is rolled back; the session stays usable
-        if isinstance(e, IntegrityError) and _constraint(e) == spec.constraint:
-            # The same report stored at the same moment by another import
-            existing = _same_report(db, spec, prepared.report_id, prepared.content_hash)
-            if existing is not None:
-                return 'duplicate', existing
         raise ReportNotStored(str(e)) from e
 
     if db.query(spec.report.id).filter(

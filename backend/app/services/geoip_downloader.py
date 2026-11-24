@@ -26,8 +26,6 @@ def get_maxmind_account_id() -> str:
     """Get MaxMind account ID from settings (supports DB overrides)"""
     return settings.maxmind_account_id or ''
 
-MAXMIND_LICENSE_KEY = get_maxmind_license_key()
-MAXMIND_ACCOUNT_ID = get_maxmind_account_id()
 GEOIP_DB_DIR = os.getenv('GEOIP_DB_DIR', '/app/data')
 
 # Database paths
@@ -199,17 +197,7 @@ def download_single_database(db_name: str) -> bool:
         with tempfile.TemporaryDirectory() as tmp_dir:
             with tarfile.open(tmp_path, 'r:gz') as tar:
                 # Prevent path traversal attacks (defense-in-depth; source is trusted MaxMind)
-                try:
-                    tar.extractall(tmp_dir, filter='data')  # Python 3.12+ safe filter
-                except TypeError:
-                    # Fallback for Python < 3.12: manually filter dangerous members
-                    safe_members = []
-                    for member in tar.getmembers():
-                        if member.name.startswith('/') or '..' in member.name:
-                            logger.warning(f"Skipping suspicious tar member: {member.name}")
-                            continue
-                        safe_members.append(member)
-                    tar.extractall(tmp_dir, members=safe_members)
+                tar.extractall(tmp_dir, filter='data')
             
             # Find the .mmdb file (it's in a subdirectory)
             mmdb_files = list(Path(tmp_dir).rglob('*.mmdb'))

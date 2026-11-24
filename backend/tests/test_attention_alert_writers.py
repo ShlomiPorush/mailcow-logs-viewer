@@ -179,7 +179,7 @@ def test_a_dns_check_that_could_not_be_saved_stores_no_alert(monkeypatch, record
     db.query.return_value.filter.return_value.first.return_value = None
     db.commit.side_effect = RuntimeError('database is gone')
     with pytest.raises(RuntimeError):
-        asyncio.run(domains.save_dns_check_to_db(db, DOMAIN, {'spf': {'status': 'success', 'record': 'b'}}))
+        domains.save_dns_check_to_db(db, DOMAIN, {'spf': {'status': 'success', 'record': 'b'}})
     assert recorded == []
 
 

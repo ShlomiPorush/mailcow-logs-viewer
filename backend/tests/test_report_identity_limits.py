@@ -470,25 +470,13 @@ def test_reports_stored_without_a_hash_are_matched_and_hashed(env):
     assert count(env, DMARCReport) == 4
 
 
-def test_the_same_report_stored_at_the_same_moment_is_a_duplicate(env, monkeypatch):
+def test_a_stored_report_the_lookup_missed_is_refused_not_stored_twice(env, monkeypatch):
     report = dmarc_gz()
     upload("a.xml.gz", report)
-    # The other import stored it after this one looked for it
-    original = report_store._same_report
-    calls = []
-
-    def missed_first(*args):
-        calls.append(1)
-        return None if len(calls) == 1 else original(*args)
-
-    monkeypatch.setattr(report_store, "_same_report", missed_first)
-    assert upload("a.xml.gz", report)["status"] == "duplicate"
-    assert count(env, DMARCReport) == 1
-
-    calls.clear()
-    monkeypatch.setattr(report_store, "_constraint", lambda error: "some_other_constraint")
+    monkeypatch.setattr(report_store, "_same_report", lambda *args: None)
     with pytest.raises(report_store.ReportNotStored):
         upload("a.xml.gz", report)
+    assert count(env, DMARCReport) == 1
 
 
 def test_a_record_count_that_merges_beyond_the_column_is_refused():

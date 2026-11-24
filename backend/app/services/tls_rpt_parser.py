@@ -258,24 +258,3 @@ def parse_iso_datetime(datetime_str: str) -> Optional[datetime]:
     except Exception as e:
         logger.error(f"Error parsing datetime '{datetime_str}': {e}")
         return None
-
-
-def is_tls_rpt_json(json_content: str) -> bool:
-    """
-    Check if JSON content is a valid TLS-RPT report
-    
-    Used to detect TLS-RPT vs other JSON files
-    """
-    try:
-        data = json.loads(json_content)
-        
-        # Check for required TLS-RPT fields
-        has_report_id = 'report-id' in data
-        has_date_range = 'date-range' in data
-        has_policies = 'policies' in data
-        
-        # At minimum, should have policies and date-range
-        return has_policies and (has_date_range or has_report_id)
-        
-    except Exception:
-        return False
