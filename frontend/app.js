@@ -6171,7 +6171,6 @@ document.addEventListener('DOMContentLoaded', function () {
 const DOCS_SITE_URL = 'https://shlomiporush.github.io/mailcow-logs-viewer/';
 const DOCS_REPO_URL = 'https://github.com/ShlomiPorush/mailcow-logs-viewer/blob/main/';
 
-// A help page's relative links point to the documentation site, where they work
 function helpDocMarkdown(markdown, docName) {
     return markdown
         .replace(/^[ \t]*!\[[^\]]*\]\([^)\s]*\)[ \t]*$/gm, '')
