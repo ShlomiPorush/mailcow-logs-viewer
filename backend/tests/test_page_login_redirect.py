@@ -7,7 +7,10 @@ and signing in returns there. The login page itself is skipped when there is
 a session already, so neither page flashes before the other.
 """
 import base64
+import builtins
+import re
 import secrets
+from pathlib import Path
 
 import pytest
 import starlette.staticfiles as sf
@@ -16,11 +19,14 @@ sf.StaticFiles.__init__ = lambda s, *a, **k: _orig_init(s, *a, **{**k, 'check_di
 
 from fastapi.testclient import TestClient  # noqa: E402
 
+from app import main as main_module  # noqa: E402
 from app import session as session_module  # noqa: E402
 from app.auth import safe_return_path  # noqa: E402
 from app.config import settings  # noqa: E402
+from app.frontend_assets import stamp_asset_versions  # noqa: E402
 from app.main import app  # noqa: E402
 
+FRONTEND = Path(__file__).resolve().parents[2] / "frontend"
 USERNAME = "admin"
 PASSWORD = secrets.token_hex(16)
 
@@ -88,6 +94,22 @@ def test_login_page_is_served_when_signed_out(auth_mode, client):
     auth_mode(basic=True, oauth2=False)
     assert client.get("/login?next=%2Fmessages").status_code != 302
     assert client.get("/static/app.js").status_code != 302
+
+
+def test_login_page_links_its_files_by_content_hash(auth_mode, client, monkeypatch):
+    def frontend_open(path, *args, **kwargs):
+        if str(path).startswith("/app/frontend/"):
+            path = FRONTEND / str(path)[len("/app/frontend/"):]
+        return builtins.open(path, *args, **kwargs)
+
+    monkeypatch.setattr(main_module, "open", frontend_open, raising=False)
+    monkeypatch.setattr(main_module, "stamp_asset_versions", lambda html, _: stamp_asset_versions(html, str(FRONTEND)))
+    auth_mode(basic=True, oauth2=False)
+    response = client.get("/login")
+    assert response.status_code == 200
+    refs = re.findall(r'/static/[^"]+\.(?:css|js)\?v=([^"]*)"', response.text)
+    assert len(refs) == 2
+    assert all(re.fullmatch(r"[0-9a-f]{12}", ref) for ref in refs), refs
 
 
 @pytest.mark.parametrize("query,location", [

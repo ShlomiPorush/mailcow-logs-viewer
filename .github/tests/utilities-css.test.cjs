@@ -23,7 +23,7 @@ test('no page loads the Tailwind browser runtime', () => {
         const html = fs.readFileSync(path.join(FRONTEND, page), 'utf8');
         assert.ok(!/tailwindcss(\.min)?\.js/.test(html), `${page} still loads the Tailwind runtime`);
         assert.ok(!/tailwind\.config\s*=/.test(html), `${page} still configures the Tailwind runtime`);
-        assert.match(html, /\/static\/assets\/css\/utilities\.css\?v=\d+/, `${page} does not load utilities.css`);
+        assert.match(html, /\/static\/assets\/css\/utilities\.css\?v=/, `${page} does not load utilities.css`);
     }
     assert.ok(!fs.existsSync(path.join(FRONTEND, 'assets', 'libs', 'tailwindcss.min.js')));
 });

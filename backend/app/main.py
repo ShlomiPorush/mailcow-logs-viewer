@@ -502,7 +502,8 @@ def login_page(request: Request, next: Optional[str] = None):
         return RedirectResponse(url=safe_return_path(next), status_code=302, headers={"Cache-Control": "no-store"})
     try:
         with open("/app/frontend/login.html", "r") as f:
-            return HTMLResponse(content=f.read())
+            html = f.read()
+        return HTMLResponse(content=stamp_asset_versions(html, "/app/frontend"))
     except FileNotFoundError:
         return HTMLResponse(
             content="<h1>mailcow Logs Viewer</h1><p>Login page not found. Please check installation.</p>",

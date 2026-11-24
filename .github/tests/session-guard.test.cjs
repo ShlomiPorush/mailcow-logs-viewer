@@ -123,7 +123,7 @@ test('failures wait longer each time, never more than a minute', () => {
 test('every page behind the sign-in loads the guard', () => {
     for (const page of ['index.html', 'authorize.html', 'api-docs.html']) {
         const html = fs.readFileSync(path.join(frontend, page), 'utf8');
-        assert.match(html, /<script src="\/static\/session-guard\.js\?v=\d+"><\/script>/, page);
+        assert.match(html, /<script src="\/static\/session-guard\.js\?v="><\/script>/, page);
     }
 });
 
