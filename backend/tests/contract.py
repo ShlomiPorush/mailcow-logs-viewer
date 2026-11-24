@@ -17,48 +17,11 @@ import re
 import textwrap
 from typing import Any, Dict, Optional, Tuple
 
-from jsonschema import Draft202012Validator
-
 from conftest import registered_routes
-
-# Answered by the auth middleware or the origin guard for any call, as the
-# document's description says; a route documents them only when it gives them itself
-APP_WIDE_STATUSES = {401, 403, 429}
-# The auth middleware's plain-text 401 answers (app/auth.py); any other 401 is a route's
-_MIDDLEWARE_401_SENTENCES = {b"Authentication required", b"Incorrect username or password"}
+from contract_rules import check_answer
 
 # Answered by the auth middleware for an agent's bearer token, not by a route
 MIDDLEWARE_OPERATIONS = {("GET", "/api/agent/access"), ("GET", "/api/agent/endpoints")}
-
-
-def success_responses(operation: Dict[str, Any]) -> Dict[str, Any]:
-    return {code: r for code, r in (operation.get("responses") or {}).items() if code[:1] in ("2", "3")}
-
-
-def says_something(schema: Dict[str, Any]) -> bool:
-    """Whether a schema describes an answer. FastAPI's default ({}) and the one it
-    infers from a `-> Dict[str, Any]` annotation (any object) say nothing."""
-    if not schema:
-        return False
-    if schema.get("type") == "object" and not schema.get("properties") \
-            and schema.get("additionalProperties", True) in (True, {}):
-        return False
-    return True
-
-
-def is_documented(operation: Optional[Dict[str, Any]]) -> bool:
-    """Whether an operation says what it returns: a body schema, or a 3xx/204 without a body."""
-    if not operation:
-        return False
-    for code, response in success_responses(operation).items():
-        content = response.get("content")
-        if not content:
-            if code.startswith("3") or code == "204":
-                return True
-            continue
-        if any(says_something(media.get("schema") or {}) for media in content.values()):
-            return True
-    return False
 
 
 class Contract:
@@ -74,10 +37,6 @@ class Contract:
         if self._document is None:
             self._document = copy.deepcopy(self.app.openapi())
         return self._document
-
-    def _reached(self, method: str, template: str, status: int) -> None:
-        """Count a matching answer for the CONTRACT_SEEN report (conftest.py)."""
-        self.seen.add((method, template, status))
 
     def operation_for(self, method: str, path: str) -> Optional[Tuple[str, Dict[str, Any]]]:
         """The route template a request reached and its operation in the document."""
@@ -104,44 +63,11 @@ class Contract:
         if not found:
             return None
         template, operation = found
-        if not is_documented(operation):
-            return None
-        where = f"{method} {template} answered {status}"
-        responses = operation.get("responses") or {}
-        response = responses.get(str(status))
-        media = (content_type or "").split(";")[0].strip()
-        if status == 500 and media != "application/json":
-            # Not a route's answer: the auth middleware's plain sentence when Basic auth
-            # is on without a password, for any call (the document's description says so)
-            return None
-        if status == 401 and media != "application/json" and body in _MIDDLEWARE_401_SENTENCES:
-            # Not a route's answer either: the auth middleware's plain sentence for a
-            # call without credentials, for any call (the document's description says so)
-            return None
-        if response is None:
-            if status in APP_WIDE_STATUSES:
-                return None
-            return f"{where}, a status its documentation does not list: {body[:300]!r}"
-        content = response.get("content") or {}
-        if not content:
-            if body:
-                return f"{where} with a body, but its documentation says it has none"
-            return self._reached(method, template, status)
-        if media not in content:
-            return f"{where} as {media or 'no type'}, documented as {', '.join(content)}"
-        schema = content[media].get("schema") or {}
-        if media != "application/json" or not schema:
-            return self._reached(method, template, status)
-        try:
-            data = json.loads(body)
-        except ValueError:
-            return f"{where} with a body that is not JSON: {body[:300]!r}"
-        validator = Draft202012Validator({**schema, "components": self.document.get("components", {})})
-        errors = sorted(validator.iter_errors(data), key=lambda e: list(e.absolute_path))
-        if not errors:
-            return self._reached(method, template, status)
-        lines = [f"  at {'/'.join(str(p) for p in e.absolute_path) or '(top)'}: {e.message[:300]}" for e in errors[:5]]
-        return f"{where} with an answer that does not match its documentation:\n" + "\n".join(lines)
+        outcome, detail = check_answer(operation, self.document.get("components", {}),
+                                       status, content_type, body)
+        if outcome == "checked":
+            self.seen.add((method, template, status))
+        return f"{method} {template}: {detail}" if outcome == "mismatch" else None
 
 
 def agent_envelope(contract: "Contract", request, response) -> bool:

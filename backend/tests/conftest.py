@@ -161,7 +161,7 @@ def pytest_sessionfinish(session, exitstatus):
     target = os.environ.get("CONTRACT_SEEN")
     if not target:
         return
-    from contract import is_documented
+    from contract_rules import is_documented
     lines = []
     for contract in _contracts.values():
         for path, operations in contract.document.get("paths", {}).items():

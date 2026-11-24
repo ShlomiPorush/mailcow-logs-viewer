@@ -26,8 +26,9 @@ import sys
 import urllib.request
 from urllib.parse import urlparse
 
-from jsonschema import Draft202012Validator
 from playwright.sync_api import sync_playwright
+
+from contract_rules import check_answer
 
 BASE = sys.argv[1].rstrip('/') if len(sys.argv) > 1 else 'http://localhost:8080'
 
@@ -139,68 +140,6 @@ def route_matchers(spec):
     return out
 
 
-# Answered by the auth middleware or the origin guard for any call; a route
-# documents them only when it gives them itself (backend/tests/contract.py)
-APP_WIDE_STATUSES = {401, 403, 429}
-
-
-def documented_schema(schema):
-    """Whether a schema says anything: FastAPI's default ({}) and any-object do not."""
-    if not schema:
-        return False
-    return not (schema.get('type') == 'object' and not schema.get('properties')
-                and schema.get('additionalProperties', True) in (True, {}))
-
-
-def is_documented(operation):
-    """Whether an operation says what it returns: a body schema, or a 3xx/204 without a body."""
-    for code, response in (operation.get('responses') or {}).items():
-        if code[:1] not in '23':
-            continue
-        content = response.get('content')
-        if not content:
-            if code[:1] == '3' or code == '204':
-                return True
-        elif any(documented_schema(media.get('schema') or {}) for media in content.values()):
-            return True
-    return False
-
-
-def check_answer(spec, operation, status, content_type, body):
-    """An answer against its operation's documentation, as tests/contract.py checks it.
-    Returns (outcome, reason): 'checked', 'skipped' (with why) or 'mismatch' (with what).
-    body is None when the browser could not read it."""
-    if not is_documented(operation):
-        return 'skipped', 'documents nothing yet'
-    response = (operation.get('responses') or {}).get(str(status))
-    if status == 500 and not (content_type or '').startswith('application/json'):
-        return 'skipped', 'HTTP 500 from sign-in set up without a password'
-    if response is None:
-        if status in APP_WIDE_STATUSES:
-            return 'skipped', f'HTTP {status} from sign-in or the origin guard'
-        return 'mismatch', f'HTTP {status}, a status its documentation does not list'
-    content = response.get('content') or {}
-    if not content:
-        return ('checked', None) if not body else ('mismatch', f'HTTP {status} with a body, documented without one')
-    if body is None:
-        return 'skipped', 'the browser could not read the body'
-    media = (content_type or '').split(';')[0].strip()
-    if media not in content:
-        return 'mismatch', f'HTTP {status} as {media or "no type"}, documented as {", ".join(content)}'
-    schema = content[media].get('schema') or {}
-    if media != 'application/json':
-        return 'checked', None
-    try:
-        data = json.loads(body)
-    except ValueError:
-        return 'mismatch', f'HTTP {status} with a body that is not JSON'
-    errors = list(Draft202012Validator({**schema, 'components': spec.get('components', {})}).iter_errors(data))
-    if not errors:
-        return 'checked', None
-    return 'mismatch', f'HTTP {status} does not match its documentation: ' + '; '.join(
-        f"{'/'.join(str(p) for p in e.absolute_path) or '(top)'}: {e.message[:200]}" for e in errors[:3])
-
-
 def spa_routes():
     """URL paths for every page the router accepts (router.js is the source)."""
     router = fetch('/static/router.js')
@@ -299,7 +238,8 @@ def main():
                 body = resp.body()
             except Exception:   # a redirect or an aborted request: nothing to read
                 body = None if resp.status < 300 or resp.status >= 400 else b''
-            outcome, reason = check_answer(spec, operation, resp.status, resp.headers.get('content-type', ''), body)
+            outcome, reason = check_answer(operation, spec.get('components', {}), resp.status,
+                                           resp.headers.get('content-type', ''), body)
             name = f'{method} {template}'
             if outcome == 'checked':
                 checked.add(name)

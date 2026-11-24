@@ -16,8 +16,8 @@ from jsonschema import Draft202012Validator  # noqa: E402
 
 from app.main import app  # noqa: E402
 from conftest import registered_routes  # noqa: E402
-from contract import (MIDDLEWARE_OPERATIONS, Contract, is_documented, says_something, statuses_in_source,  # noqa: E402
-                      unresolved_refs)
+from contract import MIDDLEWARE_OPERATIONS, Contract, statuses_in_source, unresolved_refs  # noqa: E402
+from contract_rules import is_documented, says_something  # noqa: E402
 from openapi_pending import HIDDEN, PENDING  # noqa: E402
 
 
