@@ -505,7 +505,7 @@ For both traffic endpoints, `today` and custom date-only boundaries are days in 
 | `page` | integer | `1` | Page number, at least 1 |
 | `page_size` | integer | `50` | Items per page, 10 to 100 |
 
-Mailboxes with their message counts and aliases, paged. Results are cached in memory for 5 minutes per combination of query parameters.
+Mailboxes with their message counts and aliases, paged.
 
 ```json
 {

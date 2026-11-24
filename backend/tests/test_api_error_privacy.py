@@ -25,7 +25,6 @@ def test_database_errors_remain_server_side(monkeypatch, caplog, module, path, f
     private_detail = f"SELECT private_column FROM private_table; token={secrets.token_hex(16)}"
     db = Mock()
     db.query.side_effect = RuntimeError(private_detail)
-    monkeypatch.setattr(mailbox_stats, "_stats_cache", {})
     app = FastAPI()
     app.include_router(module.router)
     app.dependency_overrides[module.get_db] = lambda: db

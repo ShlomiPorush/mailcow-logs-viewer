@@ -32,7 +32,6 @@ def _postgres_available() -> bool:
 def _cleanup():
     from app.database import get_db_context
     from app.models import AliasStatistics, MailboxStatistics, MessageCorrelation
-    from app.routers.mailbox_stats import clear_stats_cache
     with get_db_context() as db:
         db.query(MessageCorrelation).filter(
             MessageCorrelation.correlation_key.like(f'%{MARK}')
@@ -42,7 +41,6 @@ def _cleanup():
         db.query(MailboxStatistics).filter(
             MailboxStatistics.domain == DOMAIN).delete(synchronize_session=False)
         db.commit()
-    clear_stats_cache()
 
 
 @pytest.fixture()
@@ -77,8 +75,7 @@ def _leg(sender, recipient, when, direction):
 
 def _page(date_range, start_date=None, end_date=None):
     from app.database import get_db_context
-    from app.routers.mailbox_stats import clear_stats_cache, get_all_mailbox_stats
-    clear_stats_cache()
+    from app.routers.mailbox_stats import get_all_mailbox_stats
     with get_db_context() as db:
         payload = get_all_mailbox_stats(
             domain=DOMAIN, active_only=False, hide_zero=False, search=None,

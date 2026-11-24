@@ -58,7 +58,6 @@ def _shown():
 
 
 def test_the_sync_keeps_the_last_sogo_login_and_the_page_shows_it(db):
-    from app.routers import mailbox_stats
     from app.scheduler import _store_mailbox_statistics
     _store_mailbox_statistics([
         _mailbox('webmail', last_sogo_login=WHEN),
@@ -68,7 +67,6 @@ def test_the_sync_keeps_the_last_sogo_login_and_the_page_shows_it(db):
         # One odd value does not cost the other mailboxes their sync
         _mailbox('odd', last_sogo_login=2 ** 63, last_imap_login=10 ** 30),
     ])
-    mailbox_stats.clear_stats_cache()
     assert _shown() == {'webmail': ('2025-11-18T21:06:40Z', 1024), 'downgraded': ('2025-11-18T21:06:40Z', 1024),
                         'never': (None, 1024), 'old-mailcow': (None, 1024), 'odd': (None, 1024)}
 
@@ -80,7 +78,6 @@ def test_the_sync_keeps_the_last_sogo_login_and_the_page_shows_it(db):
         _mailbox('old-mailcow'),
         _mailbox('odd', last_sogo_login='x'),
     ])
-    mailbox_stats.clear_stats_cache()
     assert _shown() == {'webmail': (None, 2048), 'downgraded': (None, 1024), 'never': ('2025-11-18T21:06:40Z', 1024),
                         'old-mailcow': (None, 1024), 'odd': (None, 1024)}
 

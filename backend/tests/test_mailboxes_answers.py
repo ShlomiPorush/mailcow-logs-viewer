@@ -19,7 +19,7 @@ from app.config import settings  # noqa: E402
 from app.database import get_db  # noqa: E402
 from app.mailcow_api import MailcowAPIError, mailcow_api  # noqa: E402
 from app.main import app  # noqa: E402
-from app.routers import mailbox_stats, reporting  # noqa: E402
+from app.routers import reporting  # noqa: E402
 from app.services.csv_export import get_csv_db  # noqa: E402
 
 
@@ -50,11 +50,9 @@ def _postgres_available() -> bool:
 def client(monkeypatch):
     for key in ('auth_enabled', 'basic_auth_enabled', 'oauth2_enabled'):
         monkeypatch.setattr(settings._inner, key, False)
-    mailbox_stats.clear_stats_cache()
     yield TestClient(app, raise_server_exceptions=False)
     app.dependency_overrides.pop(get_db, None)
     app.dependency_overrides.pop(get_csv_db, None)
-    mailbox_stats.clear_stats_cache()
 
 
 @pytest.fixture

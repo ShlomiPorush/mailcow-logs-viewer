@@ -116,7 +116,6 @@ def boxes(client):
         pytest.skip('PostgreSQL not available')
     from app.database import init_db, get_db_context
     from app.models import AliasStatistics, MailboxStatistics
-    from app.routers.mailbox_stats import clear_stats_cache
     init_db()
 
     def cleanup():
@@ -136,10 +135,8 @@ def boxes(client):
         db.add(AliasStatistics(alias_address=TO_OUTSIDE, goto="ann@outside.test", domain=DOMAIN,
                                active=True, primary_mailbox="ann@outside.test"))
         db.commit()
-    clear_stats_cache()
     yield client
     cleanup()
-    clear_stats_cache()
 
 
 def _mailbox_source(client, address):

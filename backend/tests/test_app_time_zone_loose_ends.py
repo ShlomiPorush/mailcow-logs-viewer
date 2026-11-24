@@ -46,32 +46,6 @@ def app_zone(monkeypatch):
 
 # --- 1. Caches key on the zone -----------------------------------------------
 
-def test_mailbox_stats_cache_keys_on_the_zone(app_zone):
-    from app.routers import mailbox_stats
-
-    params = dict(date_range="7days", page=1, page_size=50)
-    app_zone("")
-    in_utc = mailbox_stats._get_cache_key("mailbox_stats_all", **params)
-    app_zone("Europe/Berlin")
-    in_berlin = mailbox_stats._get_cache_key("mailbox_stats_all", **params)
-
-    assert in_utc != in_berlin
-    assert mailbox_stats._get_cache_key("mailbox_stats_all", **params) == in_berlin
-
-
-def test_a_cached_mailbox_stats_page_is_not_served_in_a_new_zone(app_zone):
-    from app.routers import mailbox_stats
-
-    params = dict(date_range="today", page=1, page_size=50)
-    app_zone("")
-    mailbox_stats._set_cache(mailbox_stats._get_cache_key("mailbox_stats_all", **params), {"days": "UTC"})
-    try:
-        app_zone("Europe/Berlin")
-        assert mailbox_stats._get_cached(mailbox_stats._get_cache_key("mailbox_stats_all", **params)) is None
-    finally:
-        mailbox_stats.clear_stats_cache()
-
-
 def test_dmarc_cache_keys_on_the_zone(app_zone):
     from app.services.dmarc_cache import get_dmarc_cache_key
 

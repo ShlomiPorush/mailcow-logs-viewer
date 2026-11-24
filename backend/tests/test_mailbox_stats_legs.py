@@ -36,7 +36,6 @@ def _postgres_available() -> bool:
 def _cleanup():
     from app.database import get_db_context
     from app.models import MailboxStatistics, MessageCorrelation
-    from app.routers.mailbox_stats import clear_stats_cache
     with get_db_context() as db:
         db.query(MessageCorrelation).filter(
             MessageCorrelation.correlation_key.like(f'%{MARK}')
@@ -44,7 +43,6 @@ def _cleanup():
         db.query(MailboxStatistics).filter(
             MailboxStatistics.domain == DOMAIN).delete(synchronize_session=False)
         db.commit()
-    clear_stats_cache()
 
 
 @pytest.fixture()
@@ -103,8 +101,7 @@ def _seed_forward_scenario():
 def _mailboxes():
     """Call the Mailbox Statistics list the way FastAPI calls it."""
     from app.database import get_db_context
-    from app.routers.mailbox_stats import clear_stats_cache, get_all_mailbox_stats
-    clear_stats_cache()
+    from app.routers.mailbox_stats import get_all_mailbox_stats
     with get_db_context() as db:
         payload = get_all_mailbox_stats(
             domain=DOMAIN, active_only=False, hide_zero=False, search=None,

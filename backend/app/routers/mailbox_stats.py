@@ -3,9 +3,6 @@ API endpoints for mailbox statistics with message counts
 Shows per-mailbox/per-alias message statistics from MessageCorrelation table
 """
 import logging
-import hashlib
-import json
-from threading import Lock
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import func, case, and_, or_
@@ -26,51 +23,6 @@ from app.services.alias_domains import get_alias_domain_map, expand_address
 from app.services import entity_values
 
 router = APIRouter()
-
-# =============================================================================
-# CACHING SYSTEM
-# =============================================================================
-
-# In-memory cache for mailbox stats
-_stats_cache = {}
-_stats_cache_lock = Lock()
-_cache_ttl_seconds = 300  # 5 minutes cache TTL
-
-
-def _get_cache_key(prefix: str, **params) -> str:
-    """Generate a cache key from parameters. The app's time zone is part of it:
-    days and ranges depend on it, so a new zone never serves the old one's."""
-    param_str = json.dumps({**params, "_tz": app_tz().key}, sort_keys=True, default=str)
-    hash_val = hashlib.md5(param_str.encode()).hexdigest()[:16]
-    return f"{prefix}:{hash_val}"
-
-
-def _get_cached(key: str):
-    """Get cached value if not expired"""
-    with _stats_cache_lock:
-        if key in _stats_cache:
-            cached_data, cached_time = _stats_cache[key]
-            if datetime.now(timezone.utc) - cached_time < timedelta(seconds=_cache_ttl_seconds):
-                logger.debug(f"Cache hit for key: {key}")
-                return cached_data
-            else:
-                # Cache expired, remove it
-                del _stats_cache[key]
-    return None
-
-
-def _set_cache(key: str, data):
-    """Set cached value with current timestamp"""
-    with _stats_cache_lock:
-        _stats_cache[key] = (data, datetime.now(timezone.utc))
-    logger.debug(f"Cache set for key: {key}")
-
-
-def clear_stats_cache():
-    """Clear all stats cache - call after data changes"""
-    with _stats_cache_lock:
-        _stats_cache.clear()
-    logger.info("Stats cache cleared")
 
 
 def format_bytes(bytes_value) -> str:
@@ -486,27 +438,6 @@ def get_all_mailbox_stats(
     Get all mailbox statistics with message counts and aliases (paginated)
     """
     try:
-        # Check cache first
-        cache_key = _get_cache_key(
-            "mailbox_stats_all",
-            domain=domain,
-            active_only=active_only,
-            hide_zero=hide_zero,
-            search=search,
-            username=username,
-            date_range=date_range,
-            start_date=start_date,
-            end_date=end_date,
-            sort_by=sort_by,
-            sort_order=sort_order,
-            page=page,
-            page_size=page_size
-        )
-        
-        cached_result = _get_cached(cache_key)
-        if cached_result is not None:
-            return cached_result
-        
         parsed_start, parsed_end = parse_date_range(date_range, start_date, end_date)
         
         query = db.query(MailboxStatistics)
@@ -713,7 +644,7 @@ def get_all_mailbox_stats(
         for mb in paginated_result:
             mb['activity'] = activity['series'][mb['username']]
 
-        response = {
+        return {
             "total": len(result),
             "page": page,
             "page_size": page_size,
@@ -725,11 +656,6 @@ def get_all_mailbox_stats(
             "activity_unit": activity['unit'],
             "activity_buckets": activity['buckets']
         }
-        
-        # Cache the result
-        _set_cache(cache_key, response)
-        
-        return response
     except Exception as e:
         logger.error(f"Error fetching all mailbox stats: {e}")
         return {"error": "Unable to load mailbox statistics. Check the application logs.", "total": 0, "mailboxes": []}
