@@ -1,7 +1,7 @@
 """
 The demo image's network guard: every outbound path a service could take
-fails like an unreachable network, while loopback and the database host stay
-reachable. Addresses are RFC 5737 documentation ranges and example.com names,
+fails like an unreachable network, while loopback stays reachable. The
+database host is blocked like any other: libpq reaches it in C. Addresses are RFC 5737 documentation ranges and example.com names,
 so a guard that fails open still cannot reach a real server.
 """
 import asyncio
@@ -18,7 +18,7 @@ from demo import network_guard
 
 @pytest.fixture
 def guard():
-    network_guard.install(allowed_hosts=["db.demo.test"])
+    network_guard.install()
     try:
         yield
     finally:
@@ -109,11 +109,17 @@ def test_loopback_stays_reachable(guard, loopback_server):
         pass
 
 
-def test_the_database_host_name_stays_resolvable(guard):
-    # The name is allowed; whether it resolves is up to the resolver.
-    assert network_guard._lookup_allowed("db.demo.test")
-    assert network_guard._lookup_allowed("DB.demo.test.")
-    assert not network_guard._lookup_allowed("mail.example.com")
+def test_the_database_host_is_blocked_like_any_other_host(guard):
+    # "db" is the database service name in docker-compose.yml
+    with pytest.raises(socket.gaierror):
+        socket.getaddrinfo("db", 5432)
+    with pytest.raises(socket.gaierror):
+        socket.gethostbyname("DB.")
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        assert sock.connect_ex(("db", 5432)) == errno.ENETUNREACH
+    finally:
+        sock.close()
 
 
 def test_http_clients_cannot_reach_mailcow(guard):

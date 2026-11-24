@@ -24,7 +24,6 @@ for _name in ("MAILCOW_API_KEY", "MAILCOW_API_KEY_RW", "RSPAMD_PASSWORD"):
     os.environ.setdefault(_name, secrets.token_hex(32))
 
 import app.main as app_main
-from app.config import settings
 from app.main import app  # noqa: F401  (served by uvicorn)
 
 from . import fake_internet, fake_mailcow, network_guard, seed
@@ -33,7 +32,7 @@ from .rate_limit import WriteRateLimitMiddleware
 
 logger = logging.getLogger(__name__)
 
-network_guard.install(allowed_hosts=[settings.postgres_host])
+network_guard.install()
 fake_mailcow.install()
 fake_internet.install()
 
