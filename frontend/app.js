@@ -984,6 +984,34 @@ function setNavCount(page, count, isFail, title) {
     }
 }
 
+// A read that failed: not an answer that found nothing
+const READ_FAILED = { failed: true };
+
+// What a server check found, read one way by the counters, the server card, the
+// phone's mark and Needs attention: null when the check could not run (its read
+// failed, the blocklist check ended in an error, or the container counts came
+// without an answer from mailcow), else what needs a look, empty when nothing
+// does. A check not read (feature off, area not viewable, no answer yet) found
+// nothing; a check only Needs attention reads gives its answer as it came
+function serverCheckFound(key, data) {
+    if (data === READ_FAILED) return null;
+    if (!data) return [];
+    if (key === 'connection') return data.connected === false ? [data] : [];
+    if (key === 'blocklist') return data.status === 'error' ? null : data.status === 'listed' ? [data] : [];
+    if (key === 'containers') {
+        if (data.containers_known === false) return null;
+        return data.containers && data.containers.stopped > 0 ? [data.containers] : [];
+    }
+    if (key === 'dmarc') {
+        return (data.insights || []).filter(i =>
+            i.recommendations.some(r => r.type === 'tighten_policy' || r.type === 'low_pass_rate') || (i.new_sources && i.new_sources.length > 0));
+    }
+    return [data];
+}
+
+// The last answer of the connection check (loadMailcowConnectionStatus)
+let mailcowConnection;
+
 // Counters next to the pages that can need attention, and the problems shown
 // on the server card, the phone top bar and the Status tab.
 // The counters are read every five minutes; a hidden browser tab reads nothing
@@ -1013,13 +1041,12 @@ async function loadNavCounters() {
     // A counter of a feature that is off, or of an area the person cannot view, is not read
     const off = (feature, area) => (window.disabledFeatures || []).includes(feature) || !userCan(area);
     // A read that failed is not a count of 0: its counter stays as it was
-    const FAILED = Symbol('failed');
     const get = async url => {
         try {
             const res = await authenticatedFetch(url);
-            return res.ok ? await res.json() : FAILED;
+            return res.ok ? await res.json() : READ_FAILED;
         } catch (e) {
-            return FAILED;
+            return READ_FAILED;
         }
     };
     const [dashboard, queue, quarantine, insights, summary, blacklist, info] = await Promise.all([
@@ -1032,34 +1059,35 @@ async function loadNavCounters() {
         off('', 'status') ? null : get('/api/settings/info'),
     ]);
 
-    if (dashboard !== FAILED) {
+    if (dashboard !== READ_FAILED) {
         const failedLogins = dashboard ? dashboard.failed_logins || 0 : 0;
         setNavCount('netfilter', failedLogins, false, `${failedLogins} failed logins in the last 24 hours`);
     }
-    if (queue !== FAILED) {
+    if (queue !== READ_FAILED) {
         const queued = queue && Array.isArray(queue.data) ? queue.data.length : 0;
         setNavCount('outbound', queued, false, `${queued} messages in the queue`);
     }
-    if (quarantine !== FAILED) {
+    if (quarantine !== READ_FAILED) {
         const held = quarantine ? (quarantine.total || (quarantine.data || []).length) : 0;
         setNavCount('quarantine', held, false, `${held} quarantined messages`);
     }
-    if (insights !== FAILED) {
-        const dmarcActions = insights ? (insights.insights || []).filter(i =>
-            i.recommendations.some(r => r.type === 'tighten_policy' || r.type === 'low_pass_rate') ||
-            (i.new_sources && i.new_sources.length > 0)).length : 0;
+    if (insights !== READ_FAILED) {
+        const dmarcActions = serverCheckFound('dmarc', insights).length;
         setNavCount('dmarc', dmarcActions, false, `${dmarcActions} DMARC insights`);
     }
 
+    const found = {
+        connection: serverCheckFound('connection', off('', 'status') ? null : mailcowConnection),
+        containers: serverCheckFound('containers', summary),
+        blocklist: serverCheckFound('blocklist', blacklist),
+    };
     const problems = [];
-    const indicator = document.getElementById('mailcow-connection-indicator');
-    if (indicator && indicator.title === 'Not connected to mailcow') problems.push('not connected to mailcow');
-    const stopped = summary && summary !== FAILED && summary.containers ? summary.containers.stopped || 0 : 0;
+    if (found.connection && found.connection.length) problems.push('not connected to mailcow');
+    const stopped = found.containers && found.containers.length ? found.containers[0].stopped : 0;
     if (stopped > 0) problems.push(`${stopped} container${stopped === 1 ? '' : 's'} stopped`);
-    if (blacklist && blacklist !== FAILED && blacklist.status === 'listed') problems.push('listed on a blocklist');
+    if (found.blocklist && found.blocklist.length) problems.push('listed on a blocklist');
     // A check that could not run is not "No problems"
-    const unchecked = summary === FAILED || blacklist === FAILED
-        || (summary && summary.containers_known === false) || (blacklist && blacklist.status === 'error');
+    const unchecked = Object.values(found).includes(null);
     if (problems.length || !unchecked) setNavCount('status', problems.length, true, problems.join(', '));
 
     const label = problems.length ? `${problems.length} problem${problems.length === 1 ? '' : 's'}`
@@ -1086,9 +1114,13 @@ async function loadMailcowConnectionStatus() {
     if (!userCan('status')) return;
     try {
         const response = await authenticatedFetch('/api/status/mailcow-connection');
-        if (!response.ok) return;
+        if (!response.ok) {
+            mailcowConnection = READ_FAILED;
+            return;
+        }
 
         const data = await response.json();
+        mailcowConnection = data;
         const indicator = document.getElementById('mailcow-connection-indicator');
 
         if (indicator) {
@@ -1116,6 +1148,7 @@ async function loadMailcowConnectionStatus() {
         }
     } catch (error) {
         console.error('Failed to load mailcow connection status:', error);
+        mailcowConnection = READ_FAILED;
         const indicator = document.getElementById('mailcow-connection-indicator');
         if (indicator) {
             indicator.classList.remove('hidden');
@@ -2660,7 +2693,6 @@ const ATTENTION_ALERTS_EVERY = 30000;
 const ATTENTION_CHECKS_EVERY = 5 * 60 * 1000;
 // The server checks, each read on its own: one that fails keeps what it showed
 const ATTENTION_CHECKS = ['connection', 'blocklist', 'containers', 'fail2ban', 'dmarc', 'appVersion', 'mailcowVersion'];
-const ATTENTION_FAILED = { failed: true };
 const attention = {
     ready: false, // the refresh starts once the app's features are known
     timeout: 20000, // a read without an answer by then has failed
@@ -2718,13 +2750,13 @@ function attentionRead(url) {
         (async () => {
             try {
                 const res = await authenticatedFetch(url);
-                return res.ok ? await res.json() : ATTENTION_FAILED;
+                return res.ok ? await res.json() : READ_FAILED;
             } catch (e) {
                 console.warn(`Needs attention could not read ${url}:`, e);
-                return ATTENTION_FAILED;
+                return READ_FAILED;
             }
         })(),
-        new Promise(resolve => setTimeout(() => resolve(ATTENTION_FAILED), attention.timeout)),
+        new Promise(resolve => setTimeout(() => resolve(READ_FAILED), attention.timeout)),
     ]);
 }
 
@@ -2735,7 +2767,7 @@ function loadDashboardSecurityAlerts({ force = true } = {}) {
         // The server answers with the alerts of the areas the person may view: without
         // View in any of them, none to show
         const read = userCan('alerts') ? await attentionRead('/api/security-alerts?acknowledged=false&limit=20') : { alerts: [] };
-        const data = read === ATTENTION_FAILED ? null : read;
+        const data = read === READ_FAILED ? null : read;
         return () => {
             s.at = Date.now();
             // A failed read keeps the alerts the last one had
@@ -3030,16 +3062,15 @@ function attentionDmarcLine(insight, domains) {
 // Server checks that need a look, each with the place to handle it: go is the
 // page it opens, popup an action that opens a window
 function attentionCheckItems(key, data) {
-    if (!data) return [];
+    const found = serverCheckFound(key, data);
+    if (!found || !found.length) return [];
     if (key === 'connection') {
-        if (data.connected !== false) return [];
         const item = { tone: 'fail', title: 'mailcow is not reachable', detail: 'Logs and server data may be out of date.' };
         // Only an admin can change the connection; anyone else sees it on Status
         return [userIsAdmin() ? { ...item, action: 'Open settings', onclick: "navigateTo('settings')", go: ['settings'] }
             : { ...item, action: 'Open status', onclick: "navigateTo('status')", go: ['status'] }];
     }
     if (key === 'blocklist') {
-        if (data.status !== 'listed') return [];
         // Name the host that is actually listed, with its own list count
         const listedHosts = (data.hosts || []).filter(h => h.status === 'listed');
         const first = listedHosts[0];
@@ -3055,8 +3086,7 @@ function attentionCheckItems(key, data) {
         return [{ tone: 'fail', title, detail, action: 'Check listing', onclick: "navigateTo('status')", go: ['status'] }];
     }
     if (key === 'containers') {
-        const containers = data.containers;
-        if (!containers || !(containers.stopped > 0)) return [];
+        const containers = found[0];
         return [{ tone: 'fail', title: containers.stopped === 1 ? 'A mailcow container is stopped' : `${containers.stopped} mailcow containers are stopped`,
             detail: `${containers.running || 0} of ${containers.total || 0} containers are running.`, action: 'Open status', onclick: "navigateTo('status')", go: ['status'] }];
     }
@@ -3071,9 +3101,7 @@ function attentionCheckItems(key, data) {
             action: 'Open lists', onclick: "navigateTo('netfilter', { sub: 'lists' })", go: ['netfilter', { sub: 'lists' }] }];
     }
     if (key === 'dmarc') {
-        const dmarc = (data.insights || []).filter(i =>
-            i.recommendations.some(r => r.type === 'tighten_policy' || r.type === 'low_pass_rate') || (i.new_sources && i.new_sources.length > 0));
-        if (!dmarc.length) return [];
+        const dmarc = found;
         return [{ tone: 'warn', title: dmarc.length === 1 ? `DMARC needs attention for ${dmarc[0].domain}` : `DMARC needs attention for ${dmarc.length} domains`,
             detail: attentionDmarcLine(dmarc[0], dmarc.length), action: 'Open DMARC', onclick: "navigateTo('dmarc')", go: ['dmarc'] }];
     }
@@ -3095,16 +3123,15 @@ function attentionCheckItems(key, data) {
     return [];
 }
 
-// The server checks; a check whose read fails keeps the items it had and is
-// tried again in a minute. A blocklist check that ended in an error has failed
-// too, and so have container counts read without an answer from mailcow
+// The server checks; a check that could not run (serverCheckFound) keeps the
+// items it had and is tried again in a minute
 function loadDashboardAttention({ force = true } = {}) {
     const s = attention.checks;
     return attentionLoad(s, force, async () => {
         // A check of a feature that is off, or of an area the person cannot view, is not read
         const off = (feature, area) => (window.disabledFeatures || []).includes(feature) || !userCan(area);
         const get = attentionRead;
-        const [blocklistRead, summary, dmarc, appVersion, mailcowVersion, connection, fail2ban] = await Promise.all([
+        const [blocklist, containers, dmarc, appVersion, mailcowVersion, connection, fail2ban] = await Promise.all([
             off('blacklist', 'status') ? null : get('/api/blacklist/summary'),
             off('', 'status') ? null : get('/api/status/summary'),
             off('dmarc', 'dmarc') ? null : get('/api/dmarc/insights'),
@@ -3113,13 +3140,10 @@ function loadDashboardAttention({ force = true } = {}) {
             off('', 'status') ? null : get('/api/status/mailcow-connection'),
             off('netfilter', 'security') ? null : get('/api/fail2ban'),
         ]);
-        const answered = data => data && data !== ATTENTION_FAILED;
-        const blocklist = answered(blocklistRead) && blocklistRead.status === 'error' ? ATTENTION_FAILED : blocklistRead;
-        const containers = answered(summary) && summary.containers_known === false ? ATTENTION_FAILED : summary;
         const read = { connection, blocklist, containers, fail2ban, dmarc, appVersion, mailcowVersion };
         return () => {
             for (const key of ATTENTION_CHECKS) {
-                if (read[key] === ATTENTION_FAILED) { s.ok[key] = false; continue; }
+                if (!serverCheckFound(key, read[key])) { s.ok[key] = false; continue; }
                 s.ok[key] = true;
                 s.items[key] = attentionCheckItems(key, read[key]);
             }

@@ -137,6 +137,23 @@ test('checks that answered "not known" are not "No problems", and Containers say
     assert.equal(text(w, 'dash-kpi-containers-note'), 'mailcow did not answer');
 });
 
+test('the server card reads the checks as Needs attention does: a connection check that failed and counts mailcow did not give are not "No problems"', async () => {
+    const w = page();
+    w.reply = url => url.startsWith('/api/status/mailcow-connection') ? FAIL : {};
+    await w.eval('loadMailcowConnectionStatus()');
+    await w.eval('loadNavCounters()');
+    assert.equal(text(w, 'ui-server-problems'), 'Could not check');
+    w.reply = url => url.startsWith('/api/status/summary') ? { containers_known: false, containers: { running: 0, total: 18, stopped: 18 } } : {};
+    await w.eval('loadMailcowConnectionStatus()');
+    await w.eval('loadNavCounters()');
+    assert.equal(text(w, 'ui-server-problems'), 'Could not check');
+    w.reply = url => url.startsWith('/api/status/mailcow-connection') ? { connected: false } : {};
+    await w.eval('loadMailcowConnectionStatus()');
+    await w.eval('loadNavCounters()');
+    assert.equal(text(w, 'ui-server-problems'), '1 problem');
+    assert.equal(w.document.getElementById('ui-server-problems').title, 'not connected to mailcow');
+});
+
 test('the phone\'s problem mark stays when the next read fails', async () => {
     const w = page();
     w.reply = url => url.startsWith('/api/status/summary') ? { containers: { running: 17, total: 18, stopped: 1 } } : {};
