@@ -1520,12 +1520,13 @@ async def update_geoip_database():
         is_license_configured
     )
     
-    if not is_license_configured():
-        return JOB_STATUS_SET
-
     try:
         update_job_status('update_geoip', 'running')
-
+        
+        if not is_license_configured():
+            update_job_status('update_geoip', 'idle', 'Add a MaxMind account ID and license key in Settings > MaxMind.')
+            return JOB_STATUS_SET
+        
         loop = asyncio.get_event_loop()
         status = await loop.run_in_executor(None, update_geoip_database_if_needed)
         

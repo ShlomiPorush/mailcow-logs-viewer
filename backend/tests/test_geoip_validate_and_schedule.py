@@ -83,6 +83,5 @@ def test_removing_the_license_leaves_the_weekly_update_doing_nothing(monkeypatch
     saved = dict(scheduler.job_status['update_geoip'])
     try:
         assert asyncio.run(scheduler.update_geoip_database()) == scheduler.JOB_STATUS_SET
-        assert scheduler.job_status['update_geoip'] == saved
     finally:
         scheduler.job_status['update_geoip'] = saved
