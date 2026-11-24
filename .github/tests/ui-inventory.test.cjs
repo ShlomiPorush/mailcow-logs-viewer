@@ -29,7 +29,6 @@ test('nothing in the UI baseline has disappeared', () => {
 });
 
 test('the handler check catches a button whose function was removed', () => {
-    // Same shape as the "Run Check for this Host" bug fixed in #101.
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ui-inventory-'));
     try {
         fs.writeFileSync(path.join(dir, 'router.js'), "const VALID_ROUTES = [\n    'status'\n];\n");

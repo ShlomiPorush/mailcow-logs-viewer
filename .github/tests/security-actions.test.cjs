@@ -1,7 +1,3 @@
-// The Security page's actions say and send what really happens: a single
-// IPv6 address is written to the Fail2ban lists as /128, not as a /32 network;
-// a button is offered only when the server will take its request; and the texts
-// describe the period and the settings in force.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -10,7 +6,6 @@ const { test } = require('node:test');
 
 const frontend = path.join(__dirname, '../../frontend');
 
-// Any DOM access returns another inert stub, so a file's top-level code runs
 function stub() {
     const fn = function () { return proxy; };
     const proxy = new Proxy(fn, {
@@ -32,7 +27,6 @@ function load() {
     return context;
 }
 
-// Confirms every dialog and records what is asked and what is sent
 function recordRequests(context) {
     const sent = [];
     const asked = [];
@@ -100,9 +94,7 @@ test('a ban the rules wrote offers Undo only with the Read-Write key', () => {
     const banned = address({ state: 'banned', hits: [ownedBan] });
     vm.runInContext('mailcowRwConfigured = false', context);
     assert.doesNotMatch(context.securityDescribe(banned).acts, /Undo/);
-    // A ban the rules did not write is only forgotten, which needs no key
     assert.match(context.securityDescribe(address({ state: 'banned', hits: [{ ...ownedBan, owned: false }] })).acts, /Undo/);
-    // A ban that is not written yet can always be cancelled
     assert.match(context.securityDescribe(address({ state: 'review', hits: [{ ...ownedBan, status: 'pending' }] })).acts, /Undo/);
     vm.runInContext('mailcowRwConfigured = true', context);
     assert.match(context.securityDescribe(banned).acts, /Undo/);
@@ -185,12 +177,10 @@ test('Unban names and drops the network Fail2ban banned around the address', asy
     vm.runInContext(`mailcowRwConfigured = true; fail2banActiveBans = [
         { network: '198.51.100.0/24', ip: '198.51.100.0', banned_until: '00h 20m 00s', queued_for_unban: 0 },
         { network: '203.0.113.5/32', ip: '203.0.113.5', banned_until: '00h 20m 00s', queued_for_unban: 0 }]`, context);
-    // The Security page row of a network ban unbans, and names, the network
     const { acts } = context.securityDescribe(address({ ip: '198.51.100.0', state: 'banned',
         f2b: { network: '198.51.100.0/24', ip: '198.51.100.0', banned_until: '00h 20m 00s', queued_for_unban: 0 } }));
     assert.match(acts, /unbanIP\('198\.51\.100\.0\/24'/);
     assert.match(acts, /title="Unban 198\.51\.100\.0\/24"/);
-    // The Events list unbans the address that tried; the answer says what was lifted
     await context.unbanIP('198.51.100.7');
     assert.deepEqual(sent, [['/api/fail2ban/unban', { ip: '198.51.100.7/32' }]]);
     assert.doesNotMatch(asked[0], /\/32/);
@@ -248,7 +238,6 @@ test('a Fail2ban network ban is a row named by the network, and its attackers ar
         networkSize: 2 ** 64, networkRange: ['2001:db8::', '2001:db8::ffff:ffff:ffff:ffff'] }));
     assert.match(v6.tag, /Whole network</);
 
-    // Unban sends the network itself
     const { sent } = recordRequests(context);
     await context.unbanIP('198.51.96.0/20');
     assert.deepEqual(sent.map(([url, body]) => [url, body.ip]), [['/api/fail2ban/unban', '198.51.96.0/20']]);

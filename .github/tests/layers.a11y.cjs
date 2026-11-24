@@ -1,9 +1,3 @@
-// Layers (router.js): dialogs and sheets. Escape and Back close the top layer
-// only, focus moves into a layer and back to its opener, and what lies under the
-// top layer is inert. Runs in a real DOM (jsdom), installed by CI outside the
-// repository; set A11Y_MODULES to its node_modules to run it locally:
-//   npm install --no-save --prefix /tmp/a11y jsdom axe-core
-//   A11Y_MODULES=/tmp/a11y/node_modules node --test .github/tests/layers.a11y.cjs
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -23,18 +17,15 @@ function page(body, extra = []) {
     const dom = new JSDOM(`<!doctype html><html lang="en"><head><title>t</title><style>${STYLE}</style></head><body>${body}</body></html>`,
         { runScripts: 'dangerously', pretendToBeVisual: true, url: 'http://localhost/messages' });
     const w = dom.window;
-    // jsdom does no layout: an element counts as shown when nothing hides it
     w.Element.prototype.getClientRects = function () {
         return this.isConnected && !this.closest('.hidden') ? [{}] : [];
     };
     w.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} });
-    // jsdom has no inert property; browsers reflect it to the attribute
     if (!('inert' in w.HTMLElement.prototype)) {
         Object.defineProperty(w.HTMLElement.prototype, 'inert', { configurable: true,
             get() { return this.hasAttribute('inert'); },
             set(value) { if (value) this.setAttribute('inert', ''); else this.removeAttribute('inert'); } });
     }
-    // As script elements, so the files share their top-level names as in a browser
     const run = source => {
         const script = w.document.createElement('script');
         script.textContent = source;
@@ -176,7 +167,6 @@ test('Keep editing keeps the dialog, Discard drops it, and every change kind cou
         change(w.document);
         let closing = w.uiCloseGuarded(dlg, () => dlg.remove());
         await settle(w);
-        // A second close while the question is open asks nothing more
         await w.uiCloseGuarded(dlg, () => dlg.remove());
         assert.equal(w.document.querySelectorAll('#app-confirm-modal').length, 1);
         w.document.getElementById('app-confirm-cancel').click();

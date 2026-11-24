@@ -1,8 +1,3 @@
-// Alert rows have no colored bar on their start edge: the Needs attention rows (app.js
-// attentionAlertRows and attentionCheckRows, on the Dashboard and in the bell), the Status
-// page list, the DMARC To do card, the Settings update note and the quarantine rule note.
-// The severity tag or the text carries the tone. The rows keep their tag, text and actions,
-// and the base .ui-alert gives the text its start padding instead of the bar's column.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -66,7 +61,6 @@ test('checks (such as a new version) keep their action on the Dashboard', () => 
     for (const where of ['dashboard', 'bell']) {
         const html = c.attentionCheckRows(where);
         assert.match(html, /class="ui-alert ui-alert-info/, where);
-        // The bell has no buttons under its rows; the Dashboard keeps the action
         if (where === 'dashboard') assert.match(html, />Read changes<\/button>/, where);
     }
 });
@@ -117,7 +111,6 @@ test('the base alert pads both sides, and no alert grid keeps a column for the b
     const grids = css.split('\n').filter(l => /\.ui-alert \{[^}]*grid-template-columns/.test(l));
     assert.equal(grids.length, 3, 'Dashboard on phones, the bell, the DMARC To do card');
     for (const line of grids) assert.match(line, /grid-template-columns: minmax\(0, 1fr\);/, line.trim());
-    // The phone indent of the actions was the bar and its gap
     assert.doesNotMatch(css, /\.ui-alert-acts \{ margin-inline-start: 18px/);
     assert.doesNotMatch(css, /\.ui-st-acts \{[^}]*padding-inline-start: 18px/);
     assert.doesNotMatch(css, /\.ui-alert > \.ui-btn \{ margin-inline-start: 18px/);

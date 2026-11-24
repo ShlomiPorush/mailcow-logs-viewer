@@ -1,10 +1,3 @@
-// Every dialog in the app, opened in a real DOM (jsdom) over the real index.html
-// with the real page scripts: each has the shared frame (a head with its title
-// and an X, unless it is a question; its actions in the foot), keeps the rule for
-// a click outside (DS-9), asks before dropping typed changes, closes on a pull
-// down on a phone (a question as Cancel), and a question shows above the dialog
-// or sheet it was asked from. popups.test.cjs keeps new popups on this frame.
-// Set A11Y_MODULES to jsdom's node_modules to run it locally (see layers.a11y.cjs).
 const assert = require('node:assert/strict');
 const { randomBytes } = require('node:crypto');
 const fs = require('node:fs');
@@ -17,7 +10,6 @@ const { JSDOM } = require(path.join(modules, 'jsdom'));
 const frontend = path.join(__dirname, '../../frontend');
 const read = name => fs.readFileSync(path.join(frontend, name), 'utf8');
 const SCRIPTS = ['utils.js', 'router.js', 'app.js', 'settings.js', 'notifications.js', 'agents.js', 'spam_filter.js'].map(read);
-// The page without its script files and style sheets; the tests add the scripts themselves
 const HTML = (() => {
     const dom = new JSDOM(read('index.html'));
     dom.window.document.querySelectorAll('script[src], link').forEach(el => el.remove());
@@ -25,12 +17,9 @@ const HTML = (() => {
 })();
 const STYLE = '<style>.hidden { display: none; } .ui-dialog-backdrop { z-index: 50; } .ui-sheet { z-index: 70; } .ui-confirm { z-index: 99999; }</style>';
 
-// Every window a test opened closes after it, timers and all, so a failing test
-// cannot leave a refresh running that keeps the run from ending
 const opened = [];
 afterEach(() => { while (opened.length) opened.pop().close(); });
 
-// The app, with the network answered by answer(url) (pending when it returns undefined)
 function page({ phone = false, answer = () => undefined } = {}) {
     const dom = new JSDOM(HTML.replace('</head>', `${STYLE}</head>`), {
         runScripts: 'dangerously', pretendToBeVisual: true, url: 'http://localhost/settings',
@@ -42,9 +31,7 @@ function page({ phone = false, answer = () => undefined } = {}) {
     });
     const w = dom.window;
     opened.push(w);
-    // jsdom has no scrollingElement; the app resets the window's pan through it
     if (!w.document.scrollingElement) Object.defineProperty(w.document, 'scrollingElement', { value: w.document.documentElement });
-    // jsdom does no layout: an element counts as shown when nothing hides it
     w.Element.prototype.getClientRects = function () {
         return this.isConnected && !this.closest('.hidden') ? [{}] : [];
     };
@@ -69,8 +56,6 @@ function page({ phone = false, answer = () => undefined } = {}) {
 
 const frame = w => new Promise(resolve => w.requestAnimationFrame(() => setTimeout(resolve, 0)));
 const settle = async w => { await frame(w); await frame(w); };
-// Waits for a condition the app reaches through its own timers, up to a limit,
-// so a busy machine does not fail a check that only came late
 async function until(condition, limit = 3000) {
     const end = Date.now() + limit;
     while (Date.now() < end) {
@@ -81,11 +66,9 @@ async function until(condition, limit = 3000) {
 }
 const $ = (w, sel) => w.document.querySelector(sel);
 const escape = w => w.document.body.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
-// A click with no mouse press counts as a click on the backdrop (uiBackdropClick)
 const clickOutside = (w, el) => el.dispatchEvent(new w.MouseEvent('click', { bubbles: true, detail: 0 }));
 const shown = (w, id) => { const el = w.document.getElementById(id); return !!el && !el.classList.contains('hidden'); };
 
-// A finger pulls the sheet down by its head (utils.js, uiDialogSheet)
 async function pullDown(w, backdrop) {
     const head = backdrop.querySelector('.ui-dialog-head');
     const touch = (type, y) => {
@@ -106,7 +89,6 @@ const AGENTS = { live: true, areas: [{ id: 'security', label: 'Security', view: 
     periods: [{ days: 7, label: '7 days' }],
     agents: [{ id: 5, name: 'Claude Code', state: 'connected', kind: 'device', areas: { security: 'view' }, expires_at: '2026-11-01T10:00:00Z', version: 'v1' }] };
 
-// Every dialog built in JavaScript: how it opens, what it is, and a change for a typed one
 const DIALOGS = [
     { name: 'Confirm', id: 'app-confirm-modal', kind: 'question',
       open: w => w.showConfirmModal({ title: 'Delete Message', message: 'Delete this message?', confirmText: 'Delete', isDangerous: true }), cancelled: false },
@@ -222,7 +204,6 @@ test('GeoIP setup: its X is off while the setup runs, like its Close', async () 
     assert.ok(backdrop.isConnected, 'Escape does not stop it halfway');
 });
 
-// Enter on a focused button presses that button (here as its click), never the confirm
 const enterOn = (w, el) => {
     el.focus();
     const event = new w.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
@@ -242,7 +223,6 @@ test('Verify credentials: Enter on the X cancels, Enter in a field confirms', as
     $(w, '#verify-auth-username').value = 'admin';
     $(w, '#verify-auth-password').value = password;
     enterOn(w, $(w, '#verify-auth-password'));
-    // Compared as plain values: the answer is an object of the page's own realm
     assert.deepEqual({ ...(await result) }, { username: 'admin', password });
 });
 
@@ -302,7 +282,6 @@ test('the builder: sizes, ids, data, a form, and an X called without arguments',
     assert.equal(question.dialog.querySelector('[aria-label="Close"]'), null);
 });
 
-// The log box with a size, since jsdom does no layout: 20px a line, 400px tall
 function sizeLogBox(w) {
     const box = $(w, '#container-logs-content').parentElement;
     let top = 0;
@@ -317,7 +296,6 @@ const logLines = w => w.document.querySelectorAll('#container-logs-content .ui-l
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 test('the container log: the shared frame, a terminal inside, the whole screen on a phone, at its end, following', async () => {
-    // Each read returns ten more lines, as a live log does
     let reads = 0;
     const w = page({ phone: true, answer: url => (/container-logs/.test(url)
         ? { logs: Array.from({ length: 300 + 10 * reads++ }, (_, i) => `line ${i}\n`) } : undefined) });
@@ -335,10 +313,8 @@ test('the container log: the shared frame, a terminal inside, the whole screen o
         const first = logLines(w);
         assert.ok(first >= 300, `opening ${opening}: the log loaded`);
         assert.ok(atEnd() && box.scrollTop > 0, `opening ${opening}: it opens at its end`);
-        // The refresh (every 2 seconds) adds lines and follows them
         assert.ok(await until(() => logLines(w) > first, 6000), `opening ${opening}: new lines arrive`);
         assert.ok(atEnd(), `opening ${opening}: it keeps following the end`);
-        // Scrolled up, the reader keeps the place and the refresh waits
         box.scrollTop = 0;
         const held = logLines(w);
         await wait(2300);
@@ -349,7 +325,6 @@ test('the container log: the shared frame, a terminal inside, the whole screen o
     }
 });
 
-// The phone hides the sidebar tools, so the More sheet is its way to the log
 test('the container log on a phone: More opens it, in place of the More sheet, with one history step', async () => {
     const w = page({ phone: true, answer: url => (/container-logs/.test(url) ? { logs: ['line\n'] } : undefined) });
     await settle(w);
@@ -374,7 +349,6 @@ test('the container log on a phone: More opens it, in place of the More sheet, w
 });
 
 test('the Suppressions More menu is a popover menu of buttons with an icon button', () => {
-    // jsdom runs no script unless asked to
     const w = new JSDOM(read('index.html')).window;
     const button = w.document.getElementById('suppression-more-btn');
     const menu = w.document.getElementById('suppression-more-menu');

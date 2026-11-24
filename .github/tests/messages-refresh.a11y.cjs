@@ -1,10 +1,3 @@
-// The Messages list takes in new mail in a real DOM (jsdom): a list longer than
-// one request is read page by page from the first page's watermark and drawn
-// once; an answer that comes after the user moved away keeps the list and offers
-// the new mail; a redraw at the top gives the focus back to its row. jsdom is
-// installed by CI outside the repository; set A11Y_MODULES to its node_modules:
-//   npm install --no-save --prefix /tmp/a11y jsdom axe-core
-//   A11Y_MODULES=/tmp/a11y/node_modules node --test .github/tests/messages-refresh.a11y.cjs
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -21,7 +14,6 @@ const BODY = `<section id="content-messages"><span id="messages-count"></span><d
 const message = n => ({ correlation_key: `k${n}`, message_id: `<m${n}@example.com>`, sender: 's@example.com', recipient: 'r@example.org',
     subject: `Message ${n}`, direction: 'inbound', final_status: 'delivered', first_seen: '2026-10-24T10:00:00Z' });
 
-// The row of what has the focus: a row opens on its subject, a button (renderMessageRow)
 const rowOf = p => p.w.document.activeElement.closest('[data-key]');
 
 function page() {
@@ -36,7 +28,6 @@ function page() {
         w.document.head.appendChild(script);
     };
     [read('utils.js'), read('router.js'), read('app.js')].forEach(run);
-    // A server of 700 messages oldest first, paged by cursor; the asked addresses kept
     run(`checkAuthentication = async () => false; var asked = []; var total = 700;
         loadMessageFacets = () => {}; afterMessagesRendered = () => {}; updateMessagesFilterState = () => {};
         authenticatedFetch = async url => {
@@ -57,7 +48,6 @@ test('a list longer than one request is read page by page from its first waterma
     const p = page();
     await p.w.loadMessages({ rows: 620, quiet: true });
     assert.equal(p.$$('.ui-msg-item').length, 620);
-    // The list's requests (the count of messages without a Message-ID is asked apart)
     const list = p.w.asked.filter(url => url.startsWith('/api/messages?'));
     assert.equal(list.length, 2);
     const second = new URL(list[1], 'http://localhost').searchParams;
@@ -83,7 +73,6 @@ test('a redraw at the top gives the focus back to its row', async () => {
     await p.w.loadMessages({ rows: 50 });
     p.$$('.ui-msg-item .ui-row-open')[3].focus();
     assert.equal(rowOf(p).dataset.key, 'k4');
-    // Something changed on the first page; the user is at the top
     p.run("messagesAtNewEdge = () => true; lastDataCache.messages = { stale: true }");
     await p.w.smartRefreshMessages();
     assert.equal(rowOf(p).dataset.key, 'k4');
@@ -95,7 +84,6 @@ test('oldest first at the end, a status change is drawn with nothing new, and th
     p.run('total = 30');
     await p.w.loadMessages({ rows: 50 });
     p.$$('.ui-msg-item .ui-row-open')[29].focus();
-    // Message 3 was delivered late: deferred before, delivered now; no new mail
     p.run(`messagesAtNewEdge = () => true;
         const read = authenticatedFetch;
         authenticatedFetch = async url => url.startsWith('/api/messages/new') ? { ok: true, status: 200, json: async () => ({ count: 0, watermark: 900 }) } : read(url);
@@ -105,7 +93,6 @@ test('oldest first at the end, a status change is drawn with nothing new, and th
     assert.ok(p.w.asked.some(url => url.startsWith('/api/messages?')), 'the list was read again');
     assert.equal(p.w.eval('lastDataCache.messages.data[2].final_status'), 'delivered');
     assert.equal(rowOf(p).dataset.key, 'k30');
-    // Read again with nothing changed: not drawn again
     p.$$('.ui-msg-item')[0].dataset.mark = '1';
     await p.w.smartRefreshMessages();
     assert.equal(p.$$('.ui-msg-item')[0].dataset.mark, '1');

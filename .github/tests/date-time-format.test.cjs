@@ -1,9 +1,3 @@
-// How dates and times are written: Settings > Application > Time (/api/info
-// `date_format`, `time_format`). Every date and time on screen goes through
-// the helpers in utils.js; "browser" leaves the order or the clock to the
-// browser's language, every other choice reads the same in every browser.
-// The browser here is in New York; the app's zone is Europe/Berlin, whose
-// summer time ends on 2026-10-25 (02:00 to 03:00 happens twice).
 process.env.TZ = 'America/New_York';
 
 const assert = require('node:assert/strict');
@@ -24,8 +18,6 @@ function stub() {
     return proxy;
 }
 
-// The page scripts in one scope, as in the browser. `language` is the
-// browser's: Intl without a locale reads it.
 function load({ zone = 'Europe/Berlin', date = 'browser', time = '24h', language = 'en-US', files = [] } = {}) {
     const RealFormat = Intl.DateTimeFormat;
     function DateTimeFormat(locale, options) { return new RealFormat(locale === undefined ? language : locale, options); }
@@ -43,10 +35,8 @@ function load({ zone = 'Europe/Berlin', date = 'browser', time = '24h', language
     return context;
 }
 
-const NOON = '2026-01-15T12:05:09Z';        // 13:05:09 in Berlin, a Thursday
-const MIDNIGHT = '2026-01-14T23:00:00Z';    // 00:00 on the 15th in Berlin
-
-// ---------- each choice ----------
+const NOON = '2026-01-15T12:05:09Z';
+const MIDNIGHT = '2026-01-14T23:00:00Z';
 
 test('every date format writes the same date in the order it names', () => {
     const cases = {
@@ -73,7 +63,6 @@ test('browser dates follow the browser language, as they always did', () => {
     assert.equal(load({ language: 'en-GB' }).formatDay(NOON), '15/01/2026');
     assert.equal(load({ language: 'de-DE' }).formatDay(NOON), '15.01.2026');
     assert.equal(load({ language: 'en-US' }).formatTime(NOON), '01/15/2026, 13:05:09');
-    // A browser language with its own calendar keeps it: that is what Browser means
     assert.match(load({ language: 'th-TH' }).formatDay(NOON), /2569/);
 });
 
@@ -106,8 +95,8 @@ test('the browser clock follows the browser language', () => {
 
 test('an unknown value from the server falls back to the defaults', () => {
     const c = load({ date: 'DD-MM-YY', time: 'am/pm', language: 'de-DE' });
-    assert.equal(c.formatDay(NOON), '15.01.2026');   // browser
-    assert.equal(c.formatClock(NOON), '13:05');      // 24h
+    assert.equal(c.formatDay(NOON), '15.01.2026');
+    assert.equal(c.formatClock(NOON), '13:05');
 });
 
 test('a missing or unreadable time is a dash, never Invalid Date', () => {
@@ -119,8 +108,6 @@ test('a missing or unreadable time is a dash, never Invalid Date', () => {
     }
     assert.equal(c.formatDayKey('nope'), '-');
 });
-
-// ---------- zones and days ----------
 
 test('an instant takes the day of the app zone, a day key stays the day it names', () => {
     const west = load({ zone: 'America/Los_Angeles', date: 'YYYY-MM-DD' });
@@ -135,7 +122,7 @@ test('an instant takes the day of the app zone, a day key stays the day it names
 
 test('the hour that happens twice is written twice and still sorts in order', () => {
     const c = load({ date: 'DD/MM/YYYY' });
-    const first = '2026-10-25T00:30:00Z', second = '2026-10-25T01:30:00Z';   // both 02:30 in Berlin
+    const first = '2026-10-25T00:30:00Z', second = '2026-10-25T01:30:00Z';
     assert.equal(c.formatTime(first), c.formatTime(second));
     const cell = iso => {
         const time = { getAttribute: () => /datetime="([^"]+)"/.exec(c.uiTime(iso, c.formatTime(iso)))[1], textContent: c.formatTime(iso) };
@@ -149,12 +136,10 @@ test('a list cell names its instant, so it sorts whatever the text says', () => 
     assert.equal(c.uiTime('2026-01-15T12:05:09Z', '5 min ago', { title: 'x"y', cls: 'ui-muted' }),
         '<time class="ui-muted" datetime="2026-01-15T12:05:09.000Z" title="x&quot;y">5 min ago</time>');
     assert.equal(c.uiTime(null, 'Never'), '<time>Never</time>');
-    // An empty data-sort is no value, not zero
     const empty = { hasAttribute: () => true, getAttribute: () => '' };
     assert.equal(c.uiSortValue(empty).n, null);
 });
 
-// A cell as the sorter reads it, from the markup a page renders
 function sortedCell(c, html) {
     const time = /<time[^>]*datetime="([^"]+)"[^>]*>([^<]*)<\/time>/.exec(html);
     const sort = /data-sort="([^"]*)"/.exec(html);
@@ -167,13 +152,11 @@ function sortedCell(c, html) {
 test('the lists the pages render sort their times by the instant', () => {
     const c = load({ date: 'DD/MM/YYYY', time: '12h', files: ['devices.js', 'rate-limits.js'] });
     const early = '2026-01-10T08:00:00Z', late = '2026-03-02T07:00:00Z';
-    // Devices: First seen and Last seen
     const row = c.renderDeviceRow({ username: 'a@example.com', device_id: 'x', first_seen: late, last_seen: early, client: '' }, 0, 0);
     const cells = row.split('<span class="ui-td').filter(s => /First seen|Last seen/.test(s));
     assert.equal(cells.length, 2);
     assert.equal(sortedCell(c, cells.find(s => s.includes('First seen'))), Date.parse(late));
     assert.equal(sortedCell(c, cells.find(s => s.includes('Last seen'))), Date.parse(early));
-    // Rate Limits: an event's time in two spans (phone and wide) sorts by its instant
     const event = c.renderRateLimitEventRow({ time: late, rcpt: 'b@example.com', subject: 's' });
     assert.equal(sortedCell(c, event.split('</td>')[0]), Date.parse(late));
 });
@@ -185,26 +168,17 @@ test('a list row shows the time today, the day and month this year, the whole da
     assert.equal(c.formatListTime('2020-03-04T12:00:00Z'), '04.03.2020');
 });
 
-// ---------- the Dashboard span ----------
-
 test('a span of whole days names the days; a span inside a day names the hours', () => {
     const c = load({ date: 'DD/MM/YYYY', time: '12h' });
     const at = s => Date.parse(s);
-    // One whole day, also the 25-hour day the clocks go back on
     assert.equal(c.mailFlowSpan(at('2026-10-13T22:00:00Z'), at('2026-10-14T22:00:00Z')), '14/10/2026');
     assert.equal(c.mailFlowSpan(at('2026-10-24T22:00:00Z'), at('2026-10-25T23:00:00Z')), '25/10/2026');
-    // Several whole days: the first and the last
     assert.equal(c.mailFlowSpan(at('2026-10-12T22:00:00Z'), at('2026-10-14T22:00:00Z')), '13/10/2026 to 14/10/2026');
-    // Midnight on the 12-hour clock is still midnight
     assert.equal(c.mailFlowSpan(at('2026-10-14T04:00:00Z'), at('2026-10-14T10:00:00Z')), '14/10/2026, 6:00 AM to 12:00 PM');
-    // A second past midnight is not a whole day: it names its hours
     assert.equal(c.mailFlowSpan(at('2026-10-13T22:00:01Z'), at('2026-10-14T22:00:00Z')), '14/10/2026, 12:00 AM to 12:00 AM');
-    // A span over midnight that is not whole days names both days
     assert.equal(c.mailFlowSpan(at('2026-10-14T16:00:00Z'), at('2026-10-15T04:00:00Z')),
         '14/10/2026, 6:00 PM to 15/10/2026, 6:00 AM');
 });
-
-// ---------- the jobs list and Settings ----------
 
 test('a clock-time job is written with the time setting, in the zone it runs in', () => {
     const c = load({ time: '12h' });
@@ -215,7 +189,6 @@ test('a clock-time job is written with the time setting, in the zone it runs in'
     const daily = c.renderJobCard('Cleanup', 'cleanup_logs', {
         schedule: 'Daily at 02:00 (UTC)', status: 'idle', clock: { hour: 2, minute: 0, weekday: null, zone: 'UTC' } });
     assert.match(daily, /Daily at 2:00 AM \(UTC\)/);
-    // An older server sends only the text
     assert.match(c.renderJobCard('Cleanup', 'cleanup_logs', { schedule: 'Daily at 02:00 (UTC)', status: 'idle' }), /Daily at 02:00 \(UTC\)/);
 });
 
@@ -232,15 +205,10 @@ test('Settings offers the formats under Time', () => {
     assert.match(html, /<option value="24h" selected>/);
 });
 
-// ---------- one way in ----------
-
-// Formatting a date anywhere but the helpers in utils.js would miss the
-// setting. These are the places allowed to build an Intl date format, by the
-// function they are in, and why.
 const ALLOWED_INTL = {
-    'utils.js': ['tzPartFormat', 'browserFormat', 'writeDate'],   // the helpers themselves
-    'app.js': ['setAppTimezone'],                                  // checks the zone is usable
-    'settings.js': ['settingsZoneOffset', 'settingsTimeZoneKnown'],  // the zone list: offsets, known names
+    'utils.js': ['tzPartFormat', 'browserFormat', 'writeDate'],
+    'app.js': ['setAppTimezone'],
+    'settings.js': ['settingsZoneOffset', 'settingsTimeZoneKnown'],
 };
 
 function frontendScripts(dir = frontend) {
@@ -257,25 +225,20 @@ function enclosingFunction(source, index) {
     return matches.length ? matches[matches.length - 1][1] : null;
 }
 
-// A source with its comments blanked out (same length, so positions and lines
-// stay), so a comment that names a method is not a use of it
 function withoutComments(source) {
     return source
         .replace(/\/\*[\s\S]*?\*\//g, m => m.replace(/[^\n]/g, ' '))
         .replace(/(^|[ \t])\/\/[^\n]*/gm, m => m.replace(/[^\n]/g, ' '));
 }
 
-// What formats a date on its own in one file: [line, what, function] for each
 function scanSource(name, original) {
     const source = withoutComments(original);
     const rules = [
         [/Intl\s*\.\s*DateTimeFormat\s*\(/g, i => (ALLOWED_INTL[name] || []).includes(enclosingFunction(source, i))],
         [/toLocale(Date|Time)String\s*\(/g, () => false],
-        // toLocaleString is fine on a count; on a date it writes the browser's zone and order
         [/(?:\bDate\s*\([^)]*\)|\b[\w$.]*(?:date|time|when|moment|instant|seen|_at|At)\b)\s*\.toLocaleString\s*\(/gi, () => false],
         [/\bhour12\b|\bhourCycle\b|\bdateStyle\b|\btimeStyle\b/g, i => name === 'utils.js' && ['tzPartFormat', 'writeClock'].includes(enclosingFunction(source, i))],
         [/\bformatInZone\s*\(/g, () => false],
-        // The browser's own zone and clock: every time on screen is in the app's zone
         [/\.get(Hours|Minutes|Seconds|Date|Day|Month|FullYear)\s*\(/g, () => false],
     ];
     const problems = [];
@@ -316,6 +279,5 @@ test('the check above catches a page that formats a date on its own, and only th
         'function setAppTimezone(z) { new Intl.DateTimeFormat(\'en-US\', { timeZone: z }); }',
     ];
     for (const source of fine) assert.deepEqual(scanSource(source.includes('setAppTimezone') ? 'app.js' : 'pages.js', source), [], source);
-    // Allowed by the function it is in, not by the file
     assert.notDeepEqual(scanSource('app.js', 'function other(z) { new Intl.DateTimeFormat(\'en-US\', { timeZone: z }); }'), []);
 });

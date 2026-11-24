@@ -1,7 +1,3 @@
-// The login page's ?next= target: only a page on this site, whatever dot
-// segments or encoded dots it holds. The browser removes /./ and /../ while
-// parsing, so a value that passes as /.//host can come out as //host, which
-// location.replace() reads as another site.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -26,7 +22,6 @@ const context = vm.createContext({ URL, window: { location: { origin: ORIGIN } }
 vm.runInContext(functionSource('safeReturnPath'), context);
 const safeReturnPath = context.safeReturnPath;
 
-// Where location.replace(result) goes from the login page
 function landsOn(value) {
     return new URL(safeReturnPath(value), `${ORIGIN}/login?next=x`);
 }

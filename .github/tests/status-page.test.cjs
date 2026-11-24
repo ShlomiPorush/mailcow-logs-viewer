@@ -17,7 +17,6 @@ function slice(source, from, to) {
 }
 
 test('Status, Jobs lists every job the server reports', () => {
-    // The job keys of background_jobs in GET /api/settings/info
     const routers = fs.readFileSync(path.join(root, 'backend/app/routers/settings.py'), 'utf8');
     const block = slice(routers, '"background_jobs": {', '"smtp_configuration": {');
     const serverJobs = [...block.matchAll(/^ {16}"(\w+)": \{$/gm)].map(m => m[1]);
@@ -32,8 +31,6 @@ test('Status, Jobs lists every job the server reports', () => {
 });
 
 test('every job Status, Jobs and the search offer to run is in the manual-run map', () => {
-    // The keys of job_mapping in POST /api/settings/jobs/{job}/run: a key missing
-    // there answers 404 on Run (issue #82)
     const routers = fs.readFileSync(path.join(root, 'backend/app/routers/settings.py'), 'utf8');
     const block = slice(routers, 'job_mapping = {', '\n    }\n');
     const runnable = [...block.matchAll(/^ {8}'(\w+)': \(/gm)].map(m => m[1]);
@@ -57,7 +54,6 @@ test('the blocklist button reads Check all now again after a check', async () =>
         authenticatedFetch: async () => ({ ok: true, json: async () => ({}) }),
         loadBlacklistStatus: async () => {},
         console: { error() {} },
-        // Full access, as for the built-in admin (utils.js)
         uiMayAct: () => true,
     });
     vm.runInContext(slice(app, 'function checkHost(hostname)', 'async function loadBlacklistStatus'), context);
@@ -75,10 +71,8 @@ test('About does not call a failed version check Up to Date', () => {
     vm.runInContext(slice(utils, 'function uiTag(', 'function uiDirectionTag'), context);
     vm.runInContext(slice(utils, 'function escapeHtml(', '\n}\n') + '\n}', context);
     vm.runInContext(slice(settingsJs, 'function renderLatestVersionState', 'function renderUpdateNote'), context);
-    // The text between the tags
     const render = info => context.renderLatestVersionState(info).split(/<[^>]*>/).join('').trim();
 
-    // GitHub could not be reached: the server answers "unknown"
     const failed = render({ latest_version: 'unknown', update_available: false });
     assert.doesNotMatch(failed, /Up to date|vunknown/i);
     assert.match(failed, /Check failed/);

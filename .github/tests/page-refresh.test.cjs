@@ -1,6 +1,3 @@
-// The open page refreshes itself: a tick runs its refresher when the page's
-// cadence is due, never twice at once, never while the browser tab is hidden
-// or a message dialog covers the page, and a hidden tab catches up when shown.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -9,7 +6,6 @@ const { test } = require('node:test');
 
 const frontend = path.join(__dirname, '../../frontend');
 
-// Any other DOM access returns another inert stub, so a file's top-level code runs
 function stub() {
     const fn = function () { return proxy; };
     const proxy = new Proxy(fn, {
@@ -59,7 +55,6 @@ function load() {
     });
     for (const file of ['utils.js', 'router.js', 'app.js']) vm.runInContext(fs.readFileSync(path.join(frontend, file), 'utf8'), context);
     const run = code => vm.runInContext(code, context);
-    // A page of our own, counting its runs; each run waits until it is let go
     run(`var refreshRuns = 0, refreshRelease = null;
         registerPageRefresh('testpage', 60000, () => { refreshRuns++; return new Promise(r => { refreshRelease = r; }); });
         currentTab = 'testpage';`);
@@ -69,7 +64,6 @@ function load() {
     return { context, run, own, elements, timers, show };
 }
 
-// Moves the page's last refresh back, as if that much time had passed
 const ago = (p, ms) => p.run(`pageRefreshState.route = currentTab; pageRefreshState.at = Date.now() - ${ms}`);
 
 test('a tick runs the open page only when its cadence is due', () => {
@@ -84,7 +78,6 @@ test('a tick runs the open page only when its cadence is due', () => {
 
 test('a page the person cannot view is not refreshed, like a page that is off', () => {
     const p = load();
-    // Security's refresher, counted; the page is open by its address with View on Messages only
     p.run(`var securityRuns = 0; registerPageRefresh('netfilter', 30000, () => { securityRuns++; });
         setAppAccess({ is_admin: false, scopes: ['messages:read'] }); currentTab = 'netfilter';`);
     ago(p, 60000);
@@ -151,7 +144,6 @@ test('the sidebar counters wait for a shown tab and their five minutes', async (
     const p = load();
     let reads = 0, checks = 0;
     p.context.loadNavCounters = () => { reads++; p.run('navCountersAt = Date.now()'); };
-    // The connection indicator is read first, so the Status counter counts it
     p.context.loadMailcowConnectionStatus = async () => { checks++; };
     p.run('navCountersAt = Date.now() - 6 * 60 * 1000');
     p.own.hidden = true;

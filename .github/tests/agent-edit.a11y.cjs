@@ -1,8 +1,3 @@
-// Settings > Agents > Edit in a real DOM (jsdom): the dialog shows the agent's
-// current access, Take action includes View, and saving sends the version of the
-// access the dialog opened with, also when the list reloaded meanwhile (so an
-// older dialog cannot pass for an edit of newer access).
-// Set A11Y_MODULES to jsdom's node_modules to run it locally (see layers.a11y.cjs).
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -53,7 +48,6 @@ test('the dialog shows the current access and Take action includes View', () => 
     assert.equal(p.$('input[data-area="security"][data-kind="act"]').checked, true);
     assert.equal(p.$('input[data-area="security"][data-kind="view"]').checked, true);
     assert.equal(p.$('input[data-area="logs"][data-kind="view"]').checked, false);
-    // Clearing View clears Take action
     const view = p.$('input[data-area="security"][data-kind="view"]');
     view.checked = false;
     view.dispatchEvent(new p.w.Event('change', { bubbles: true }));
@@ -63,7 +57,6 @@ test('the dialog shows the current access and Take action includes View', () => 
 test('saving sends the version the dialog opened with, not a newer one', async () => {
     const p = page();
     p.w.editAgentAccess(5);
-    // The list reloads while the dialog is open: someone else changed the access
     p.run(`agentsData = ${JSON.stringify(DATA('v-new'))};`);
     const form = p.$('#agent-edit-form');
     await p.w.saveAgentAccess({ preventDefault() {} }, 5);
@@ -93,7 +86,6 @@ test('Save and the error stay in the foot, outside the list that scrolls', async
     assert.equal(p.$('#agent-edit-form').contains(save), false);
     assert.equal(save.form, p.$('#agent-edit-form'));
     assert.ok(p.$('#agent-edit-modal .ui-dialog-foot #agent-edit-error'));
-    // Clicking Save submits the form it points to
     save.click();
     await new Promise(resolve => setTimeout(resolve, 0));
     assert.equal(p.sent.length, 1);

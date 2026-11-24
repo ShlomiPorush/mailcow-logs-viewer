@@ -1,11 +1,3 @@
-// Needs attention in the header bell (app.js): one state for the Dashboard panel
-// and the bell, an answer a newer load replaced is dropped, a check that cannot
-// run is said and keeps what it showed, and the bell's window is a layer
-// (router.js): focus in and back, Escape, inert behind it, a move to another
-// page. Runs in a real DOM (jsdom), installed by CI outside the repository; set
-// A11Y_MODULES to its node_modules to run it locally:
-//   npm install --no-save --prefix /tmp/a11y jsdom axe-core
-//   A11Y_MODULES=/tmp/a11y/node_modules node --test .github/tests/attention-bell.a11y.cjs
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -40,7 +32,6 @@ const BODY = `
 
 const alert = (id, severity = 'warning', alert_type = 'volume_spike') => ({ id, alert_type, severity, title: `Alert ${id}`, detail: 'detail', created_at: '2026-10-22T10:00:00Z' });
 
-// Answers by path; a function answers late or fails on purpose
 function answers(over = {}) {
     return {
         '/api/security-alerts': { alerts: [alert(1, 'critical'), alert(2)], unacknowledged_count: 2, unacknowledged_critical: 1, unacknowledged_ids: [1, 2], writable_ids: [1, 2] },
@@ -55,14 +46,12 @@ function answers(over = {}) {
     };
 }
 
-// scripts: more page scripts to load; realSwitch keeps app.js's own switchTab
 function page(over, { scripts = [], realSwitch = false } = {}) {
     const dom = new JSDOM(`<!doctype html><html lang="en"><head><title>t</title><style>.hidden { display: none; }</style></head><body>${BODY}</body></html>`,
         { runScripts: 'dangerously', pretendToBeVisual: true, url: 'http://localhost/netfilter' });
     const w = dom.window;
     w.Element.prototype.getClientRects = function () { return this.isConnected && !this.closest('.hidden') ? [{}] : []; };
     w.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} });
-    // jsdom has no scrolling element; app.js reads it when the focus leaves a field
     Object.defineProperty(w.document, 'scrollingElement', { get: () => w.document.documentElement });
     if (!('inert' in w.HTMLElement.prototype)) {
         Object.defineProperty(w.HTMLElement.prototype, 'inert', { configurable: true,
@@ -75,8 +64,6 @@ function page(over, { scripts = [], realSwitch = false } = {}) {
         w.document.head.appendChild(script);
     };
     [read('utils.js'), read('router.js'), read('app.js'), ...scripts.map(read), 'watchOverlays();'].forEach(run);
-    // The page switch, reduced to what these tests watch: the page's title goes up
-    // into the top bar, as placeTopbar does on a wide screen
     if (!realSwitch) run(`var switched = []; function switchTab(tab) { switched.push(tab);
         document.querySelectorAll('.ui-page').forEach(p => p.classList.toggle('hidden', p.id !== 'content-' + tab));
         const bar = document.getElementById('ui-topbar-title');
@@ -87,7 +74,6 @@ function page(over, { scripts = [], realSwitch = false } = {}) {
     w.asked = [];
     w.answers = answers(over);
     w.appAuthenticatedFetch = w.authenticatedFetch;
-    // A late answer past the time limit fails, as app.js's own authenticatedFetch aborts it
     w.authenticatedFetch = async (url, { timeout } = {}) => {
         const key = url.split('?')[0];
         w.asked.push(key);
@@ -115,12 +101,10 @@ test('the bell counts every open item, also alerts past the rows read, red for a
     await loadAll(w);
     const bell = w.document.getElementById('ui-bell');
     const badge = bell.querySelector('.ui-bell-n');
-    // 25 alerts and the DMARC row; the critical alert is not among the 20 rows, still red
     assert.equal(badge.textContent, '26');
     assert.equal(badge.className, 'ui-bell-n is-fail');
     assert.equal(bell.getAttribute('aria-label'), 'Needs attention, 26 items');
     assert.equal(w.document.getElementById('dashboard-attention-count').textContent, '26');
-    // Warnings only: amber; news only: plain; nothing: no badge and all clear
     w.answers['/api/security-alerts'] = { alerts: [alert(3)], unacknowledged_count: 1, unacknowledged_critical: 0, unacknowledged_ids: [3] };
     await w.loadDashboardSecurityAlerts();
     assert.equal(badge.className, 'ui-bell-n is-warn');
@@ -139,49 +123,41 @@ test('the bell counts every open item, also alerts past the rows read, red for a
 test('a list read before a Dismiss and answering after it does not bring the alert back', async () => {
     const w = page();
     await loadAll(w);
-    // The timer's load starts and is slow: it still has alert 1
     let release;
     const old = { alerts: [alert(1, 'critical'), alert(2)], unacknowledged_count: 2, unacknowledged_critical: 1, unacknowledged_ids: [1, 2] };
     w.answers['/api/security-alerts'] = () => new Promise(resolve => { release = () => resolve(old); });
     const polling = w.loadDashboardSecurityAlerts({ force: false });
-    // A Dismiss of alert 1 reads the list again (force) while that load is on its way
     w.answers['/api/security-alerts'] = { alerts: [alert(2)], unacknowledged_count: 1, unacknowledged_critical: 0, unacknowledged_ids: [2] };
     assert.equal(await w.loadDashboardSecurityAlerts(), true);
     release();
     await polling;
     assert.deepEqual(state(w).alerts.list.map(a => a.id), [2]);
     assert.equal(w.document.querySelector('#ui-bell .ui-bell-n').textContent, '1');
-    // A load without force joins the one on its way instead of asking twice
     w.asked.length = 0;
     await Promise.all([w.loadDashboardSecurityAlerts({ force: false }), w.loadDashboardSecurityAlerts({ force: false })]);
     assert.equal(w.asked.filter(u => u === '/api/security-alerts').length, 1);
 });
 
 test('a check that cannot run says so, keeps what it showed, and a container count without mailcow is no all clear', async () => {
-    // Cold start: the blocklist cannot be read, the rest can
     const w = page({ '/api/blacklist/summary': 'fail', '/api/status/summary': { containers: { running: 17, stopped: 1, total: 18 }, containers_known: true } });
     await loadAll(w);
     const note = w.document.getElementById('dashboard-attention-clear');
     assert.match(note.textContent, /Some checks could not run\. Try again/);
     assert.match(w.document.getElementById('dashboard-attention').innerHTML, /A mailcow container is stopped/);
-    // Next time mailcow does not answer: zeros that must not drop the stopped container
     w.answers['/api/status/summary'] = { containers: { running: 0, stopped: 0, total: 0 }, containers_known: false };
     w.answers['/api/blacklist/summary'] = { status: 'clean' };
     await w.loadDashboardAttention();
     assert.match(w.document.getElementById('dashboard-attention').innerHTML, /A mailcow container is stopped/);
     assert.match(note.textContent, /Some checks could not run/);
-    // The alerts cannot be read: those shown stay
     w.answers['/api/security-alerts'] = 'fail';
     assert.equal(await w.loadDashboardSecurityAlerts(), false);
     assert.equal(state(w).alerts.list.length, 2);
-    // Nothing known to need a look, but not everything checked: a grey dot, no all clear
     const quiet = page({ '/api/security-alerts': 'fail' });
     quiet.answers['/api/security-alerts'] = 'fail';
     await loadAll(quiet);
     assert.equal(quiet.document.querySelector('#ui-bell .ui-bell-n').className, 'ui-bell-n is-unknown');
     assert.equal(quiet.document.getElementById('ui-bell').getAttribute('aria-label'), 'Needs attention, some checks could not run');
     assert.doesNotMatch(quiet.document.getElementById('dashboard-attention-clear').textContent, /Nothing needs attention/);
-    // Retry reads again what failed
     quiet.answers['/api/security-alerts'] = { alerts: [], unacknowledged_count: 0, unacknowledged_critical: 0, unacknowledged_ids: [] };
     quiet.attentionRetry();
     await state(quiet).alerts.busy;
@@ -232,7 +208,6 @@ test('a page opened from the window takes the focus; a move cancelled over unsav
     bell.focus();
     bell.click();
     await settle(w);
-    // Unsaved changes, and the answer is Stay
     w.uiUnsavedCount = () => 1;
     w.uiConfirmLeave = async () => false;
     await w.attnBellGo(['dashboard']);
@@ -243,7 +218,6 @@ test('a page opened from the window takes the focus; a move cancelled over unsav
     await settle(w);
     assert.equal(w.document.getElementById('attn-window'), null);
     assert.equal(w.eval('switched').at(-1), 'dashboard');
-    // Its title is in the top bar there, not in the page
     assert.equal(w.document.activeElement.textContent, 'Dashboard');
     assert.equal(w.document.activeElement.parentElement.id, 'ui-topbar-title');
 });
@@ -255,7 +229,6 @@ test('Show activity from the window closes it, and the activity window gives the
     bell.focus();
     bell.click();
     await settle(w);
-    // The activity window, reduced to a dialog
     w.openAlertActivity = id => {
         const dlg = w.document.createElement('div');
         dlg.id = 'activity';
@@ -263,7 +236,6 @@ test('Show activity from the window closes it, and the activity window gives the
         dlg.innerHTML = `<div role="dialog" aria-label="Activity ${id}"><button type="button" aria-label="Close" onclick="document.getElementById('activity').remove()">x</button></div>`;
         w.document.body.appendChild(dlg);
     };
-    // The window has no Show activity button: a click on the alert's row opens its activity
     const show = w.document.querySelector('#attn-win-alerts .ui-alert-go[onclick*="openAlertActivity("]');
     show.click();
     await settle(w);
@@ -318,7 +290,6 @@ test('a hidden browser tab reads nothing, and shown again reads what is due', as
     const w = page();
     state(w).ready = true;
     await loadAll(w);
-    // The alerts are due, the server checks were just read
     state(w).alerts.at = Date.now() - 60000;
     w.asked.length = 0;
     Object.defineProperty(w.document, 'hidden', { configurable: true, get: () => true });
@@ -335,13 +306,11 @@ test('an alerts read that never answers has failed by the time limit, and the ne
     const w = page();
     await loadAll(w);
     state(w).timeout = 50;
-    // The server stops answering: the list read hangs
     w.answers['/api/security-alerts'] = () => new Promise(() => {});
     assert.equal(await w.loadDashboardSecurityAlerts({ force: false }), false);
     assert.equal(state(w).alerts.ok, false);
     assert.equal(state(w).alerts.busy, null);
     assert.match(w.document.getElementById('dashboard-attention-clear').textContent, /Some checks could not run/);
-    // The alerts it showed stay, and the next load goes out instead of joining the hung one
     assert.equal(state(w).alerts.list.length, 2);
     w.answers['/api/security-alerts'] = { alerts: [alert(2)], unacknowledged_count: 1, unacknowledged_critical: 0, unacknowledged_ids: [2] };
     assert.equal(await w.loadDashboardSecurityAlerts({ force: false }), true);
@@ -351,7 +320,6 @@ test('an alerts read that never answers has failed by the time limit, and the ne
 test('a read past the time limit is aborted, not left running', async () => {
     const w = page();
     state(w).timeout = 50;
-    // The alerts request never answers; the page's other requests are not answered either
     let signal = null;
     w.fetch = (url, { signal: own } = {}) => {
         if (!url.startsWith('/api/security-alerts')) return Promise.reject(new Error('offline'));
@@ -363,8 +331,6 @@ test('a read past the time limit is aborted, not left running', async () => {
     assert.ok(signal && signal.aborted, 'the request was aborted');
     assert.equal(state(w).alerts.ok, false);
 });
-
-// ---------- alerts of three areas: Security, Domains, DMARC & TLS ----------
 
 const STORED_ALERTS = { alerts: [alert(1, 'critical'), { ...alert(5, 'warning', 'dns_change'), subject: 'example.com' }, alert(6, 'warning', 'dmarc_import_failed')],
     unacknowledged_count: 3, unacknowledged_critical: 1, unacknowledged_ids: [1, 5, 6] };
@@ -400,7 +366,6 @@ test('Dismiss all counts and sends only the alerts the person may dismiss, and i
     };
     await w.acknowledgeAllSecurityAlerts();
     assert.deepEqual(sent, [5]);
-    // Only View: the list is there, Dismiss all is not
     const viewer = page({ '/api/security-alerts': { ...STORED_ALERTS, writable_ids: [] } });
     person(viewer, ['security:read', 'domains:read']);
     await viewer.loadDashboardSecurityAlerts();
@@ -428,7 +393,6 @@ test('Dismiss and Undo ask for Take action in the area of the alert, in the wind
         assert.equal(w.toasts.at(-1)[0], 'You do not have permission for this.');
         await w.acknowledgeSecurityAlert(mine);
         assert.ok(w.asked.includes(`/api/security-alerts/${mine}/acknowledge`), area);
-        // Undo asks again: its own area yes, another no
         w.answers['/api/security-alerts/acknowledgements/r-mine/undo'] = { restored: 1, ids: [mine] };
         w.asked.length = 0;
         await w.undoAlertDismissal('r-other', 'Undo', [area === 'security' ? 'dmarc' : 'security']);
@@ -436,7 +400,6 @@ test('Dismiss and Undo ask for Take action in the area of the alert, in the wind
         await w.undoAlertDismissal('r-mine', 'Undo', [area]);
         assert.ok(w.asked.includes('/api/security-alerts/acknowledgements/r-mine/undo'), area);
     }
-    // Only View: nothing is sent
     const viewer = page({ '/api/security-alerts': { ...STORED_ALERTS, writable_ids: [] } });
     person(viewer, ['domains:read']);
     await viewer.loadDashboardSecurityAlerts();
@@ -475,11 +438,9 @@ test('Open on an alert moves to its page and then shows its place; from the wind
         function showDmarcSyncHistory() { opened.push('history'); }
         var securityCountry = 'DE', securityNetwork = 'Example Net', securityTab = 'settings';
         function setSecurityFilter(key) { opened.push('security:' + key); }`);
-    // The window has no buttons under its rows: a click on the row opens the alert
     const openRow = id => w.document.querySelector(`#attn-win-alerts [data-key="alert-${id}"][onclick*="openStoredAlert(${id}, 'bell')"]`);
     w.document.getElementById('ui-bell').click();
     await settle(w);
-    // Unsaved changes, and the answer is Stay: the window stays and nothing opens
     w.uiUnsavedCount = () => 1;
     w.uiConfirmLeave = async () => false;
     await w.openStoredAlert(6, 'bell');
@@ -492,7 +453,6 @@ test('Open on an alert moves to its page and then shows its place; from the wind
     assert.equal(w.document.getElementById('attn-window'), null);
     assert.equal(w.eval('switched').at(-1), 'dmarc');
     assert.equal(w.eval('JSON.stringify(opened)'), '["history"]');
-    // The domain: its details open in the list, whatever the filters showed
     w.document.getElementById('ui-bell').click();
     await settle(w);
     assert.ok(openRow(5));
@@ -503,13 +463,10 @@ test('Open on an alert moves to its page and then shows its place; from the wind
     assert.equal(w.eval('cleared'), 1);
     assert.equal(w.document.getElementById('domain-example-com-details').classList.contains('hidden'), false);
     assert.equal(w.scrolled.dataset.domainRow, 'example.com');
-    // A domain no longer on the server says so
     w.document.getElementById('domain-example-com-details').remove();
     await w.openStoredAlert(5, 'page');
     assert.match(w.toasts.at(-1), /example\.com is not in the domain list any more\./);
-    // Protection: To review, with no country or network that could hide the address
     w.eval(`attention.alerts.list.push({ id: 7, alert_type: 'protection_breach', severity: 'critical', title: 'Possible stolen password: user@example.com', subject: 'user@example.com', detail: 'An unusual sign-in may mean someone else has access.', created_at: '2026-10-22T10:00:00Z' }); dashboardAlerts.set(7, attention.alerts.list.at(-1));`);
-    // A move cancelled over unsaved changes keeps the list as it was
     w.uiUnsavedCount = () => 1;
     await w.openStoredAlert(7, 'page');
     assert.equal(w.eval('JSON.stringify([securityCountry, securityNetwork, opened.at(-1)])'), '["DE","Example Net","history"]');
@@ -527,7 +484,6 @@ test('Open Security from another tab of the Security page loads and draws To rev
     }, { scripts: ['security.js'], realSwitch: true });
     const fetch = w.authenticatedFetch;
     w.authenticatedFetch = (url, options) => { asked.push(url); return fetch(url, options); };
-    // The Security page is open on Settings; Overview was left on Banned, for one country and network
     const security = w.document.getElementById('content-security');
     security.id = 'content-netfilter';
     security.classList.add('tab-content');
@@ -543,7 +499,6 @@ test('Open Security from another tab of the Security page loads and draws To rev
     assert.equal(w.eval('securityTab'), 'overview');
     assert.equal(w.document.getElementById('security-tab-overview').classList.contains('hidden'), false);
     assert.equal(w.eval('JSON.stringify([securityFilter, securityCountry, securityNetwork])'), '["review",null,null]');
-    // The list is asked for again, for To review in every country and network, and drawn anew
     const lists = asked.filter(u => u.startsWith('/api/security/addresses?'));
     assert.equal(lists.length, 1, asked.join(' '));
     const query = new URLSearchParams(lists[0].split('?')[1]);
@@ -561,7 +516,6 @@ test('Open domain says the domain is gone only when the list loaded without it, 
         section.id = 'content-domains';
         section.innerHTML = '<h1>Domains</h1><div id="domains-loading"></div><div id="domains-content" class="hidden"></div>';
         w.document.querySelector('main').appendChild(section);
-        // The page switch loads the list, as app.js does for Domains
         w.eval(`function switchTab(tab) { switched.push(tab); if (tab === 'domains') loadDomains(); }`);
         w.toasts = [];
         w.showToast = message => w.toasts.push(message);
@@ -569,7 +523,6 @@ test('Open domain says the domain is gone only when the list loaded without it, 
         await w.openStoredAlert(5, 'page');
         assert.equal(w.eval('switched').at(-1), 'domains');
         if (answer === 'fail') {
-            // The page says the list could not load; the alert adds nothing untrue
             assert.match(w.document.getElementById('domains-loading').textContent, /Failed to load domains/);
             assert.equal(w.toasts.length, 0, w.toasts.join(' | '));
         } else {

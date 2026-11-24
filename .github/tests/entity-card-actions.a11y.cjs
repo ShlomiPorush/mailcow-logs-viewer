@@ -1,13 +1,3 @@
-// The entity card's actions (entity-card.js) in a real DOM (jsdom) over the whole
-// page (index.html with app.js, security.js, mailbox-stats.js, spam_filter.js and
-// export.js): Show messages and Show security events open their page with the
-// value matched whole, the filter shows as a chip, holds through a facet change
-// and reaches the CSV export; Ban and Allow go through their confirmation and are
-// locked, not hidden, without the Read-Write key; Check now posts the address and
-// force in the URL and shows its progress; Open mailbox finds the mailbox when
-// Mailbox Stats never loaded and for an alias; an action whose source is off or
-// does not apply is not offered.
-//   A11Y_MODULES=/tmp/a11y/node_modules node --test .github/tests/entity-card-actions.a11y.cjs
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -18,15 +8,11 @@ const { JSDOM } = require(path.join(modules, 'jsdom'));
 
 const frontend = path.join(__dirname, '../../frontend');
 const read = name => fs.readFileSync(path.join(frontend, name), 'utf8');
-// The page as index.html has it, without its scripts (they are run below, in order).
-// Parsed, not cut with a regex, so CodeQL sees no HTML sanitizing.
 const PAGE = new JSDOM(read('index.html')).window.document;
 PAGE.querySelectorAll('script').forEach(el => el.remove());
 const BODY = PAGE.body.innerHTML;
-// The page's own scripts, in its order (session-guard.js, which signs out, aside)
 const SCRIPTS = [...read('index.html').matchAll(/src="\/static\/([a-z_-]+\.js)/g)].map(m => m[1]).filter(name => name !== 'session-guard.js');
 
-// The server: each request is kept; reply(url, method) answers it (a promise is held until resolved)
 const STUBS = `
     window.requests = [];
     window.navs = [];
@@ -78,7 +64,7 @@ const $ = (w, s) => w.document.querySelector(s);
 const acts = w => [...w.document.querySelectorAll('#entity-card-actions > button')].map(b => b.textContent.trim());
 const menu = w => [...w.document.querySelectorAll('#entity-card-actions .ui-menu button')].map(b => `${b.textContent.trim()}${b.classList.contains('ui-ent-phone') ? ' (phone)' : ''}`);
 const asked = (w, part, method = 'GET') => w.requests.filter(r => r.url.includes(part) && r.method === method);
-const nav = w => JSON.parse(JSON.stringify(w.navs.at(-1)));   // the last move, out of the page's realm
+const nav = w => JSON.parse(JSON.stringify(w.navs.at(-1)));
 const params = url => new URL(url, 'http://localhost').searchParams;
 
 const range = { start: '2026-10-21T12:00:00Z', end: '2026-10-28T12:00:00Z' };
@@ -122,8 +108,6 @@ async function openCard(w, kind, value, card) {
     assert.ok(!$(w, '#entity-card').classList.contains('hidden'), 'the card is open');
 }
 
-// --------------------------------------------------------------- the actions offered
-
 test('each kind offers its actions, the main one stays on a phone and the rest fold into More', async () => {
     const w = page();
     await openCard(w, 'ip', '203.0.113.45', ipCard());
@@ -133,7 +117,6 @@ test('each kind offers its actions, the main one stays on a phone and the rest f
     assert.ok(!$(w, '[data-ent-act="ban"]').classList.contains('ui-ent-fold'), 'Ban stays on a phone');
     assert.ok($(w, '[data-ent-act="allow"]').classList.contains('ui-ent-fold'));
     assert.ok($(w, '#entity-card-watch').hidden, 'the slot for Watch is there, empty');
-    // No value in a handler: the action reads it from the card
     assert.doesNotMatch($(w, '#entity-card-actions').innerHTML, /onclick="[^"]*203\.0\.113\.45/);
 
     await openCard(w, 'address', 'j.doe@example.net', addressCard('j.doe@example.net'));
@@ -145,14 +128,12 @@ test('each kind offers its actions, the main one stays on a phone and the rest f
     assert.deepEqual(menu(w), [], 'one action to fold stays a button: no More for it');
     assert.equal($(w, '#entity-card-actions .ui-ent-more-phone'), null);
     assert.ok(!$(w, '[data-ent-act="security"]').classList.contains('ui-ent-fold'), 'it stays a button on a phone too');
-    // More is a phone's alone: it holds what a phone folds away
     await openCard(w, 'ip', '203.0.113.45', ipCard());
     assert.ok($(w, '#entity-card-actions > .ui-ent-more-phone'));
 });
 
 test('an action that does not apply, or whose source is off, is not offered', async () => {
     const w = page();
-    // An outside address: no mailbox here; Suppressions off; its mail excluded
     await openCard(w, 'address', 'ann@example.org', addressCard('ann@example.org', {
         mailbox: ok({ local: false, mailbox: null, alias: null }),
         suppression: turnedOff('Sync with Rspamd is off, so the app keeps no suppression list.'),
@@ -160,14 +141,12 @@ test('an action that does not apply, or whose source is off, is not offered', as
     }));
     assert.deepEqual(acts(w), ['Show security events']);
     assert.deepEqual(menu(w), []);
-    // Already on the suppression list; Mailbox Stats could not be read
     await openCard(w, 'address', 'bob@example.net', addressCard('bob@example.net', {
         suppression: ok({ entry: { active: true, reason: 'manual' }, domain_entry: null }),
         mailbox: { state: 'error', reason: 'Could not read the mailboxes.' },
     }));
     assert.deepEqual(acts(w), ['Show messages', 'Show security events']);
     assert.ok(!$(w, '[data-ent-act="messages"]').classList.contains('ui-ent-fold'), 'the first stays on a phone when the main one is not offered');
-    // Security off: no events, no Ban or Allow and no lock either; blocklists off: no Check now
     await openCard(w, 'ip', '203.0.113.45', ipCard({
         security: turnedOff('The Security feature is turned off.'), lists: turnedOff('The Security feature is turned off.'),
         protection: turnedOff('The Security feature is turned off.'), rbl: turnedOff('The IP blocklists feature is turned off.'),
@@ -179,8 +158,6 @@ test('an action that does not apply, or whose source is off, is not offered', as
     assert.match($(w, '#entity-rbl-tile').textContent, /Disabled in Settings/);
 });
 
-// --------------------------------------------------------------- Show messages
-
 test('Show messages opens Messages on the IP matched whole: a chip says so, a facet keeps it, the export sends it', async () => {
     const w = page();
     w.reply = url => (url.startsWith('/api/messages/facets') ? { status: {}, direction: {}, time: {} } : url.startsWith('/api/messages') ? { data: [], total: 0, watermark: 5 } : {});
@@ -189,7 +166,7 @@ test('Show messages opens Messages on the IP matched whole: a chip says so, a fa
     await settle(w);
     assert.deepEqual(nav(w), ['messages']);
     assert.ok($(w, '#entity-card').classList.contains('hidden'), 'the card closed once Messages opened');
-    await wait(w, 150);   // the filters apply after the move (navigateToMessagesWithFilter)
+    await wait(w, 150);
     await settle(w);
     let list = params(asked(w, '/api/messages?').at(-1).url);
     assert.equal(list.get('ip'), '203.0.113.45');
@@ -200,7 +177,6 @@ test('Show messages opens Messages on the IP matched whole: a chip says so, a fa
     const chip = $(w, '#messages-exact .ui-sec-filter');
     assert.ok(chip, 'the whole-value filter shows');
     assert.match(chip.textContent, /IP\s+203\.0\.113\.45/);
-    // A facet keeps it, and the counts and the new-mail count ask with it
     w.setMessagesFacet('status', 'delivered');
     await settle(w);
     list = params(asked(w, '/api/messages?').at(-1).url);
@@ -209,12 +185,10 @@ test('Show messages opens Messages on the IP matched whole: a chip says so, a fa
     const facets = params(asked(w, '/api/messages/facets').at(-1).url);
     assert.equal(facets.get('exact_ip'), 'true');
     assert.equal(facets.get('ip'), '203.0.113.45');
-    // The export sends what the list shows
     await w.exportCSV('messages');
     const exported = params(asked(w, '/api/export/messages/csv', 'HEAD').at(-1).url);
     assert.equal(exported.get('exact_ip'), 'true');
     assert.equal(exported.get('ip'), '203.0.113.45');
-    // The chip's X takes it off, with the IP it set
     $(w, '#messages-exact button').click();
     await settle(w);
     list = params(asked(w, '/api/messages?').at(-1).url);
@@ -227,7 +201,6 @@ test('Show messages for an address or a domain filters from or to it; another co
     const w = page();
     w.reply = url => (url.startsWith('/api/messages') ? { data: [], total: 0, status: {}, direction: {} } : {});
     await openCard(w, 'address', 'J.Doe@Example.net', addressCard('j.doe@example.net'));
-    // The Messages tab's count bar is the same action
     w.entityCardTab('messages');
     const bar = $(w, '#entity-card-content [data-ent-act="messages-bar"]');
     assert.match(bar.textContent, /Open in Messages/);
@@ -247,7 +220,6 @@ test('Show messages for an address or a domain filters from or to it; another co
     list = params(asked(w, '/api/messages?').at(-1).url);
     assert.equal(list.get('domain'), 'example.net');
     assert.equal(list.get('address'), null, 'the address before is gone');
-    // An IP typed into the filters: another condition, so the card's domain stays
     $(w, '#messages-filter-ip').value = '192.0.2.9';
     w.applyMessagesFilters();
     await settle(w);
@@ -282,7 +254,6 @@ test('a condition added keeps the whole value the card set; changing or clearing
     assert.equal(list.get('exact_ip'), null, 'the IP it set was changed');
     assert.equal($(w, '#messages-exact').innerHTML, '');
 
-    // The same on Security events: a Username added keeps the IP whole, the IP cleared drops it
     await openCard(w, 'ip', '203.0.113.45', ipCard());
     $(w, '[data-ent-act="security"]').click();
     await settle(w);
@@ -308,8 +279,6 @@ test('filters set any other way take the card\'s whole values with them: no stal
         await settle(w);
         assert.match($(w, '#netfilter-exact').textContent, /Accounts on\s+example\.net/);
     };
-    // The search's address row (search.js gsOpenAddress) sets the filters itself, from another
-    // page: Security then loads with them (loadNetfilterLogs, as the router does)
     await fromDomainCard();
     await w.navigateTo('dashboard');
     await w.gsOpenAddress('198.51.100.7');
@@ -318,20 +287,17 @@ test('filters set any other way take the card\'s whole values with them: no stal
     assert.equal($(w, '#netfilter-exact').innerHTML, '', 'no chip left from the card');
     w.applyNetfilterFilters();
     assert.equal(w.eval('currentFilters.netfilter').username_domain, undefined);
-    // An alert's events (alert-activity.js openAlertSecurityEvents), applied later
     await fromDomainCard();
     w.openAlertSecurityEvents('ann@example.org');
     await wait(w, 150);
     await settle(w);
     assert.equal(w.eval('currentFilters.netfilter').username_domain, undefined);
     assert.equal(w.eval('currentFilters.netfilter').username, 'ann@example.org');
-    // Security's own Events link for an address (security.js securityOpenEvents)
     await fromDomainCard();
     w.securityOpenEvents('198.51.100.8');
     await settle(w);
     assert.equal(w.eval('currentFilters.netfilter').username_domain, undefined);
     assert.equal($(w, '#netfilter-exact').innerHTML, '');
-    // Messages: the Dashboard chart's range (openMessagesRange)
     await openCard(w, 'address', 'j.doe@example.net', addressCard('j.doe@example.net'));
     $(w, '[data-ent-act="messages"]').click();
     await wait(w, 150);
@@ -344,8 +310,6 @@ test('filters set any other way take the card\'s whole values with them: no stal
     assert.equal(list.get('exact'), null);
     assert.equal($(w, '#messages-exact').innerHTML, '');
 });
-
-// --------------------------------------------------------------- Show security events
 
 test('Show security events opens the Events on the account matched whole, and its export sends it', async () => {
     const w = page();
@@ -370,7 +334,6 @@ test('Show security events opens the Events on the account matched whole, and it
     assert.equal(exported.get('exact_username'), 'true');
     assert.equal(exported.get('username'), 'j.doe@example.net');
 
-    // A domain: the accounts on it; an IP: exact_ip
     await openCard(w, 'domain', 'example.net', domainCard());
     $(w, '[data-ent-act="security"]').click();
     await settle(w);
@@ -384,8 +347,6 @@ test('Show security events opens the Events on the account matched whole, and it
     assert.equal(ipFilters.exact_ip, 'true');
     assert.equal(ipFilters.username_domain, undefined);
 });
-
-// --------------------------------------------------------------- Ban and Allow
 
 test('Ban asks first: Cancel changes nothing, Ban bans and the card reads itself again', async () => {
     const w = page();
@@ -449,14 +410,11 @@ test('without the Read-Write key Ban and Allow are locked, not hidden, and a lis
     await settle(w);
     assert.equal($(w, '#app-confirm-modal'), null, 'no ban without the key');
 
-    // With the key, a list that could not be read leaves both; the state reads as not known
     w.eval('mailcowRwConfigured = true');
     await openCard(w, 'ip', '203.0.113.45', ipCard({ lists: { state: 'error', reason: 'mailcow did not answer.' } }));
     assert.deepEqual(acts(w), ['Show messages', 'Show security events', 'Ban', 'Allow']);
     assert.match($(w, '#entity-card-header').textContent, /ban state not known/);
 });
-
-// --------------------------------------------------------------- Check now
 
 test('Check now posts the address and force in the URL, shows the progress and then the stored result', async () => {
     const w = page();
@@ -481,7 +439,6 @@ test('Check now posts the address and force in the URL, shows the progress and t
     await settle(w);
     assert.match($(w, '#entity-rbl-tile').textContent, /12 of 42 lists checked/);
     assert.equal($(w, '#entity-rbl-tile [role="progressbar"]').getAttribute('aria-valuenow'), '28');
-    // A second click while it runs posts nothing more
     $(w, '[data-ent-act="rbl-tile"]').click();
     await settle(w);
     assert.equal(asked(w, '/api/blacklist/check', 'POST').length, 1);
@@ -491,8 +448,6 @@ test('Check now posts the address and force in the URL, shows the progress and t
     assert.match($(w, '#entity-rbl-tile').textContent, /On none of 42/);
     assert.equal($(w, '[data-ent-act="rbl-tile"]').getAttribute('aria-disabled'), null);
 });
-
-// --------------------------------------------------------------- Open mailbox
 
 const mailboxRow = (username, aliases = []) => ({
     username, name: 'J. Doe', active: true, combined_sent: 3, combined_received: 7, combined_failure_rate: 0,
@@ -533,7 +488,6 @@ test('Open mailbox on an alias opens the mailbox here it delivers to, and is not
     await settle(w, 10);
     assert.equal(params(asked(w, '/api/mailbox-stats/all').at(-1).url).get('username'), 'j.doe@example.net', 'the mailbox the server resolved');
     assert.equal($(w, '#mailbox-activity-title').textContent, 'j.doe@example.net');
-    // Its first target is outside this mailcow: no mailbox to open
     await openCard(w, 'address', 'sales@example.net', addressCard('sales@example.net', { mailbox: aliasSource(null) }));
     assert.equal($(w, '[data-ent-act="mailbox"]'), null);
 });
@@ -559,11 +513,10 @@ test('a mailbox that comes after the user left Mailbox Stats, or after another o
     await openCard(w, 'address', 'j.doe@example.net', addressCard('j.doe@example.net'));
     $(w, '[data-ent-act="mailbox"]').click();
     await settle(w);
-    await w.navigateTo('messages');   // the user moved on while it loaded
+    await w.navigateTo('messages');
     answer(0, 'j.doe@example.net');
     await settle(w, 10);
     assert.ok($(w, '#mailbox-activity-modal').classList.contains('hidden'), 'not over Messages');
-    // Two openings: only the last one opens
     const first = w.openMailboxFor('j.doe@example.net', { preset: '7days' });
     await settle(w);
     const second = w.openMailboxFor('bob@example.net', { preset: '7days' });
@@ -575,8 +528,6 @@ test('a mailbox that comes after the user left Mailbox Stats, or after another o
     await settle(w);
     assert.equal($(w, '#mailbox-activity-title').textContent, 'bob@example.net');
 });
-
-// --------------------------------------------------------------- Add to Suppressions
 
 test('Add to Suppressions opens the Add dialog with the address, and the card reads itself again once added', async () => {
     const w = page();
@@ -594,8 +545,6 @@ test('Add to Suppressions opens the Add dialog with the address, and the card re
     assert.deepEqual(acts(w), ['Open mailbox', 'Show messages', 'Show security events'], 'already on the list: not offered again');
     assert.match($(w, '#entity-card-header').textContent, /On the suppression list/);
 });
-
-// --------------------------------------------------------------- Check now: one check at a time
 
 test('Check now when another check runs: the server starts nothing, the tile says so and Check now stays to try again', async () => {
     const w = page();
@@ -644,20 +593,16 @@ test('the progress of a check stops with its card, and a late answer of an older
     assert.ok(progress.length >= 1, 'the progress is asked for');
     assert.equal(progress.length, asked(w, '/api/blacklist/progress').length);
     assert.equal(w.requests.filter(r => r.url === '/api/blacklist/progress').length, progress.length);
-    // One request at a time: no second while the first is out
     assert.equal(progress.length, 1);
-    // The card shows another address: its own check is gone, the old progress lands on nothing
     await openCard(w, 'ip', '198.51.100.23', ipCard());
     progress[0]({ in_progress: true, current: 40, total: 42, percent: 95 });
     await wait(w, 200);
     assert.equal(asked(w, '/api/blacklist/progress').length, 1, 'no more progress asked for after the card changed');
     assert.doesNotMatch($(w, '#entity-rbl-tile').textContent, /40 of 42/);
-    // The old check ends: the card of the other address is not read again
     const reads = asked(w, '/api/entities/ip').length;
     finish({ status: 'clean', total_blacklists: 42 });
     await settle(w, 10);
     assert.equal(asked(w, '/api/entities/ip').length, reads);
-    // Closed while it runs: the progress stops too
     $(w, '[data-ent-act="rbl-tile"]').click();
     await wait(w, 120);
     const before = asked(w, '/api/blacklist/progress').length;
@@ -686,15 +631,12 @@ test('the progress is asked for a limited time, each request with a time limit',
     assert.match($(w, '#entity-rbl-tile').textContent, /Still checking/);
 });
 
-// --------------------------------------------------------------- review round 2
-
 test('a condition added to a card\'s filter is matched as a part, in the list, the counts, the new mail and the export', async () => {
     const w = page();
     w.reply = url => (url.startsWith('/api/messages/facets') ? { status: {}, direction: {}, time: {} }
         : url.startsWith('/api/messages/new') ? { count: 0, watermark: 5 }
         : url.startsWith('/api/messages') ? { data: [], total: 0, watermark: 5 } : {});
     const sent = (part, method = 'GET') => params(asked(w, part, method).at(-1).url);
-    // A domain card, then a partial sender typed in: no exact anywhere
     await openCard(w, 'domain', 'example.net', domainCard());
     $(w, '[data-ent-act="messages"]').click();
     await wait(w, 150);
@@ -712,11 +654,9 @@ test('a condition added to a card\'s filter is matched as a part, in the list, t
     const exported = sent('/api/export/messages/csv', 'HEAD');
     assert.equal(exported.get('exact'), null);
     assert.equal(exported.get('domain'), 'example.net');
-    // The new-mail count asks with the same filters
     const fresh = w.messagesFilterParams(w.eval('currentFilters.messages'));
     assert.equal(fresh.get('exact'), null);
     assert.equal(fresh.get('domain'), 'example.net');
-    // An IP card: the IP whole (exact_ip), the sender added still a part
     await openCard(w, 'ip', '203.0.113.45', ipCard());
     $(w, '[data-ent-act="messages"]').click();
     await wait(w, 150);
@@ -739,7 +679,6 @@ test('a mailbox that comes after the period, the filters or the view changed ope
     const held = [];
     w.reply = url => (url.startsWith('/api/mailbox-stats/all') && url.includes('username=') ? new Promise(resolve => held.push(resolve)) : {});
     const answer = i => held[i]({ mailboxes: [mailboxRow('j.doe@example.net')], activity_unit: 'day', activity_buckets: [] });
-    // Asked over 7 days, then Today chosen before the answer
     const first = w.openMailboxFor('j.doe@example.net', { preset: '7days' });
     await settle(w);
     w.selectDatePreset('today');
@@ -748,7 +687,6 @@ test('a mailbox that comes after the period, the filters or the view changed ope
     await first;
     await settle(w);
     assert.ok($(w, '#mailbox-activity-modal').classList.contains('hidden'), 'not over another period');
-    // Asked, then Rate Limits opened on the same page
     const second = w.openMailboxFor('j.doe@example.net', { preset: '7days' });
     await settle(w);
     w.mailboxStatsSwitchView('rate-limits');

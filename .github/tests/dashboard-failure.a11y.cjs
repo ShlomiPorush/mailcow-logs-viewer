@@ -1,7 +1,3 @@
-// The Dashboard when a read fails (app.js), in a real DOM (jsdom): a figure that
-// could not be read is never shown as 0 or as the last period's, a card says it
-// could not load or update, Hosted says why instead of loading forever, and a
-// sidebar counter that could not be read keeps what it showed.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -12,13 +8,11 @@ const { JSDOM } = require(path.join(modules, 'jsdom'));
 
 const frontend = path.join(__dirname, '../../frontend');
 const read = name => fs.readFileSync(path.join(frontend, name), 'utf8');
-// The page as index.html has it, without its scripts; parsed, not cut with a regex
 const PAGE = new JSDOM(read('index.html')).window.document;
 PAGE.querySelectorAll('script').forEach(el => el.remove());
 const BODY = PAGE.body.innerHTML;
 const SCRIPTS = [...read('index.html').matchAll(/src="\/static\/([a-z_-]+\.js)/g)].map(m => m[1]).filter(name => name !== 'session-guard.js');
 
-// The server: reply(url) answers each request; { __status } makes it fail
 const STUBS = `
     window.reply = () => ({});
     authenticatedFetch = (url, options = {}) => Promise.resolve(window.reply(url, (options.method || 'GET').toUpperCase()))
@@ -118,7 +112,6 @@ test('a refresh of the same period that fails keeps the figures it had; Clear ne
     w.eval('loadMailFlowChart()');
     await settle(w);
     assert.equal(text(w, 'stat-messages-24h'), '66', 'a failed refresh keeps the answer shown');
-    // Another period: the last one's answer is gone, even through Clear
     w.eval("setDashFlowPeriod('7d')");
     assert.equal(text(w, 'stat-messages-24h'), '-', 'nothing of the last period while the new one loads');
     await settle(w);
@@ -170,13 +163,11 @@ test('an answer that mailcow could not give keeps the reading shown before, and 
     const answer = known => ({ containers: known ? { running: 17, total: 18, stopped: 1 } : { running: 0, total: 0, stopped: 0 }, containers_known: known,
         storage: known ? { used_percent: '11%', used: '21G', total: '200G', known: true } : { used_percent: '0%', used: '0', total: '0', known: false },
         system: known ? { domains: 4, mailboxes: 13, aliases: 10, known: true } : { domains: 0, mailboxes: 0, aliases: 0, known: false } });
-    // Never answered: Unknown, and Hosted says so instead of three zeros
     w.reply = url => url.startsWith('/api/status/summary') ? answer(false) : {};
     await w.eval('loadDashboardStatusSummary()');
     assert.equal(text(w, 'dash-kpi-containers'), 'Unknown');
     assert.equal(text(w, 'dash-kpi-storage'), 'Unknown');
     assert.equal(text(w, 'dashboard-system-summary'), 'Could not load: mailcow did not answer');
-    // Answered once, then not: the readings stay, red included, and say they are not current
     w.reply = url => url.startsWith('/api/status/summary') ? answer(true) : {};
     await w.eval('loadDashboardStatusSummary()');
     w.reply = url => url.startsWith('/api/status/summary') ? answer(false) : {};

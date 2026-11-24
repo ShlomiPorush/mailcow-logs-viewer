@@ -1,6 +1,3 @@
-// Spam Filter > Suppressions while Sync with Rspamd is off: the app keeps no
-// list, so the page shows only a note, asks for no list, and an older answer
-// about the sync never undoes a newer one.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -19,7 +16,6 @@ function stub() {
     return proxy;
 }
 
-// spam_filter.js with elements that keep their HTML and their hidden class
 function loadPage() {
     const elements = {};
     const element = () => {
@@ -73,7 +69,7 @@ test('an older answer about the sync never undoes a newer one', async () => {
         : Promise.resolve({ ok: true, json: async () => ({ items: [], total: 0, total_pages: 1 }) });
     const older = page.context.loadSuppressionSyncNote();
     const newer = page.context.loadSuppressionSyncNote();
-    answers[1](false);   // turned off since
+    answers[1](false);
     await newer;
     answers[0](true);
     await older;
@@ -99,7 +95,6 @@ test('turned on again, the list comes back', async () => {
     assert.ok(asked.some(url => url.startsWith('/api/suppressions?')), 'the list loads once the sync is on');
 });
 
-// settings.js with the same inert page
 function loadSettings() {
     const document = new Proxy(stub(), { get: (target, key) => stub() });
     const base = stub();
@@ -119,7 +114,6 @@ test('Remove runs only with the token of the save that turned the sync off', asy
         asked.push([url, options && options.body]);
         return { ok: true, json: async () => ({ removed_blocks: 3 }) };
     };
-    // Another window turned the sync off first: this save named no transition
     const [text, kind] = await context.settingsRspamdAfterSave({ action: 'remove' }, { rspamd_off_transition: null });
     assert.equal(asked.length, 0, 'nothing is removed');
     assert.equal(kind, 'error');

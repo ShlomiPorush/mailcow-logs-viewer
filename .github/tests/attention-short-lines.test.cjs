@@ -1,6 +1,3 @@
-// Needs attention and the bell show one short line per alert, built from its
-// numbers; what to do is in its Show activity window. The stored detail (emails,
-// channels) keeps the long text.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -35,9 +32,7 @@ test('a volume spike says how much was sent, in which window, and how many times
     const c = load();
     const line = a => c.attentionAlertLine(a);
     assert.equal(line({ alert_type: 'volume_spike', metric_value: 34, baseline_value: 1, detail: spikeDetail }), 'Sent 34 messages in 15 minutes, about 136 times usual.');
-    // No usual rate: no ratio is made up
     assert.equal(line({ alert_type: 'volume_spike', metric_value: 34, baseline_value: 0, detail: spikeDetail }), 'Sent 34 messages in 15 minutes.');
-    // A window the detail does not name is left out, not taken from today's setting
     assert.equal(line({ alert_type: 'volume_spike', metric_value: 1, baseline_value: 1, detail: 'Something else.' }), 'Sent 1 message.');
     assert.equal(line({ alert_type: 'volume_spike', metric_value: null, detail: spikeDetail }), 'Unusual sending was detected.');
 });
@@ -51,12 +46,9 @@ test('a sign-in burst and a sending block say what happened in one line', () => 
     assert.equal(c.attentionAlertLine({ alert_type: 'smtp_abuse_block', metric_value: 140, baseline_value: 100, detail: block }), 'Sending stopped after 140 messages in 60 minutes.');
     assert.match(c.attentionAlertAdvice({ alert_type: 'smtp_abuse_block', detail: block }), /Outgoing spam\.$/);
     assert.match(c.attentionAlertAdvice({ alert_type: 'smtp_abuse_block', detail: block.replace('revoked: 0', 'revoked: 2') }), /new app passwords\.$/);
-    // A kind this version does not know has no activity: the first line it was stored with
     assert.equal(c.attentionAlertLine({ alert_type: 'something_new', detail: 'x\n\nmore' }), 'x');
 });
 
-// The alerts that used to go only by email (stored_alerts.py) show the line they were
-// stored with, open their page instead of activity, and are dismissed in their own area
 const STORED = [
     ['dns_change', 'domains', 'DNS changes detected for example.com', 'SPF and DKIM changed.', 'Open domain'],
     ['dmarc_import_failed', 'dmarc', 'DMARC & TLS report import errors', 'Could not fully import 3 report emails.', 'Open fetch history'],
@@ -71,7 +63,6 @@ test('an alert that opens its page shows its stored line, its Open button and Di
         for (const where of ['dashboard', 'bell']) {
             const html = c.attentionAlertRows(where);
             assert.match(html, new RegExp(`<p>${line.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}</p>`), type);
-            // The Dashboard shows the Open button; the bell has no buttons under its rows, and its row click opens the page
             if (where === 'bell') {
                 assert.match(html, /onclick="if \(uiAlertRowClick\(event\)\) \{ openStoredAlert\(7, 'bell'\) \}"/, type);
                 assert.doesNotMatch(html, new RegExp(`>${open}</button>`), type);
@@ -83,10 +74,8 @@ test('an alert that opens its page shows its stored line, its Open button and Di
             assert.ok(!/[\u2010-\u2015\u2212]/.test(line + title + open), `${type}: no dash characters`);
         }
     }
-    // Activity stays with the alerts that have it
     vm.runInContext(`attention.alerts.list = ${JSON.stringify([{ id: 8, alert_type: 'auth_failure_burst', severity: 'warning', title: 't', detail: '', created_at: '2026-11-10T10:00:00Z' }])}`, c);
     assert.match(c.attentionAlertRows('dashboard'), /openAlertActivity\(8\)[\s\S]*data-acts="alerts security"/);
-    // A kind this version does not know: no way on, and only an admin dismisses it
     vm.runInContext(`attention.alerts.list = ${JSON.stringify([{ id: 9, alert_type: 'something_new', severity: 'warning', title: 't', detail: 'x', created_at: '2026-11-10T10:00:00Z' }])}`, c);
     const unknown = c.attentionAlertRows('dashboard');
     assert.doesNotMatch(unknown, /ui-alert-go|openAlertActivity|openStoredAlert/);
@@ -112,7 +101,6 @@ test('the check rows keep to one short line', () => {
     const insight = (over) => ({ domain: 'example.com', pass_rate: 81.6, new_sources: [], recommendations: [{ type: 'low_pass_rate' }], ...over });
     assert.equal(one('dmarc', { insights: [insight()] }), 'Only 82% passed mail identity checks.');
     assert.equal(one('dmarc', { insights: [insight(), insight({ domain: 'example.org' })] }), 'example.com: Only 82% passed mail identity checks.');
-    // The reason the row is there, not whatever recommendation comes first
     assert.equal(one('dmarc', { insights: [insight({ recommendations: [{ type: 'monitor' }], new_sources: [{}] })] }), 'Mail from a new source failed identity checks.');
     assert.equal(one('dmarc', { insights: [insight({ recommendations: [{ type: 'tighten_policy' }] })] }), 'Reports suggest stronger protection is safe.');
     for (const [key, data] of [['connection', { connected: false }], ['fail2ban', { legacy_entries: [{ list: 'blacklist', network: '2001:db8::/32', address: '2001:db8::1', entry: '2001:db8::/32' }] }]]) {

@@ -1,10 +1,3 @@
-// Settings > Users refreshes by itself (users.js refreshUsersPanel): a button that had the
-// focus keeps it through a redraw (its row, by data-key, as app.js uiReplaceKeepingFocus
-// finds it), a row that left gives the focus to the row now in its place, and an answer
-// read before a change made here never draws the old state over it. Runs in a real DOM
-// (jsdom), installed by CI outside the repository; set A11Y_MODULES to its node_modules:
-//   npm install --no-save --prefix /tmp/a11y jsdom axe-core
-//   A11Y_MODULES=/tmp/a11y/node_modules node --test .github/tests/users-refresh.a11y.cjs
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -38,13 +31,11 @@ function page() {
         w.document.head.appendChild(script);
     };
     [read('utils.js'), read('router.js'), read('app.js'), read('users.js')].forEach(run);
-    // A request answers what is served for it; a function answers when it wants to
     run(`var served = {}; authenticatedFetch = async (url, options) => {
         const answer = served[((options && options.method) || 'GET') + ' ' + url.split('?')[0]];
         const data = typeof answer === 'function' ? await answer() : answer;
         return { ok: true, status: 200, json: async () => data };
     };`);
-    // jsdom has no layout: the section counts as shown
     w.document.getElementById('users-panel').getClientRects = () => [{}];
     const $ = s => w.document.querySelector(s);
     const button = (key, text) => [...w.document.querySelectorAll(`[data-key="${key}"] button`)].find(b => b.textContent.trim() === text);
@@ -56,7 +47,6 @@ test('a refresh keeps the focus on the same button of the same user', async () =
     p.w.served['GET /api/users'] = overview([user(2, 'dana'), user(3, 'noc')]);
     await p.w.loadUsersPanel();
     p.button('user-3', 'Delete').focus();
-    // Someone else added a user listed above noc
     p.w.served['GET /api/users'] = overview([user(4, 'ann'), user(2, 'dana'), user(3, 'noc')]);
     await p.w.refreshUsersPanel();
     assert.ok(p.$('[data-key="user-4"]'), 'the new user is shown');
@@ -79,11 +69,9 @@ test('an answer read before a change made here does not draw the old state', asy
     const p = page();
     p.w.served['GET /api/users'] = overview([user(2, 'dana')], 'admin', 1);
     await p.w.loadUsersPanel();
-    // A refresh starts and its answer (the state before the change) is slow
     let release;
     p.w.served['GET /api/users'] = () => new Promise(resolve => { release = () => resolve(overview([user(2, 'dana')], 'admin', 1)); });
     const refreshing = p.w.refreshUsersPanel();
-    // Meanwhile the admin changes the access for everyone else; the server stores it
     p.w.served['PUT /api/users/oauth2-default'] = () => {
         p.w.served['GET /api/users'] = overview([user(2, 'dana')], 'viewer', 2);
         return { default_access: 'viewer', version: 2 };
@@ -123,7 +111,6 @@ test('save starts, a refresh starts and ends first with the old state, save ends
     let endSave;
     p.w.served['PUT /api/users/oauth2-default'] = () => new Promise(resolve => { endSave = () => resolve({ default_access: 'viewer', version: 2 }); });
     const saving = p.w.setUsersDefault('viewer');
-    // Read before the save was stored: the old access, with a new user someone else added
     p.w.served['GET /api/users'] = overview([user(2, 'dana'), user(6, 'eve')], 'admin', 1);
     await p.w.refreshUsersPanel();
     p.w.served['GET /api/users'] = overview([user(2, 'dana'), user(6, 'eve')], 'viewer', 2);
@@ -166,7 +153,6 @@ test('a late save answer does not undo a newer change a refresh already shows', 
     let endSave;
     p.w.served['PUT /api/users/oauth2-default'] = () => new Promise(resolve => { endSave = () => resolve({ default_access: 'viewer', version: 2 }); });
     const saving = p.w.setUsersDefault('viewer');
-    // Another admin changed it again meanwhile; the refresh shows that (version 3)
     p.w.served['GET /api/users'] = overview([user(2, 'dana')], 'operator', 3);
     await p.w.refreshUsersPanel();
     endSave();

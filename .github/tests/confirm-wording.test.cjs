@@ -1,6 +1,3 @@
-// The questions the app asks before an action (showConfirmModal in utils.js) read
-// alike: a sentence-case title, a direct question instead of "Are you sure", and a
-// permanent delete says it cannot be undone.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -9,7 +6,6 @@ const { test } = require('node:test');
 const frontend = path.join(__dirname, '../../frontend');
 const files = fs.readdirSync(frontend).filter(name => name.endsWith('.js'));
 
-// Every call's argument object, up to the }) that closes it (the definition is not a call)
 const calls = files.flatMap(name => {
     const source = fs.readFileSync(path.join(frontend, name), 'utf8');
     return [...source.matchAll(/(?<!function )showConfirmModal\(\{([\s\S]*?)\}\)/g)].map(m => ({ where: `${name}:${source.slice(0, m.index).split('\n').length}`, args: m[1] }));

@@ -1,5 +1,3 @@
-// The short line under a Settings field and the longer help behind its "i":
-// every entry belongs to a real field, and the text follows the rules for both.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -59,7 +57,6 @@ test('a field with help has a name the button can use, and its text in paragraph
     const id = html.match(/data-help="(ui-help-\d+)"/)[1];
     assert.match(html, /aria-label="More about Rspamd URL"/);
     assert.match(html, new RegExp(`role="button" tabindex="0" data-help="${id}" aria-controls="${id}" aria-expanded="false"`));
-    // Not a button: the Settings form is a disabled fieldset until the settings are migrated
     assert.doesNotMatch(html, /<button/);
     assert.match(html, new RegExp(`<div id="${id}" popover class="ui-field-help-panel">`));
     assert.match(html, /<p>First &lt;b&gt;\.<\/p><p>Second\.<\/p>/);

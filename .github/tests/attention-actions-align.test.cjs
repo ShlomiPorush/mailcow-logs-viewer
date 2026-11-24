@@ -1,9 +1,3 @@
-// On screens wider than a phone, every row of the Dashboard's Needs attention keeps an X's
-// slot at its end (24px and the 8px gap): an alert's X sits in it, after the button and
-// centered in the row, and a row without one (a check such as "Read changes", or an alert
-// the person may not dismiss) leaves it empty. So every button ends at one edge and every X
-// at the row's end. The X comes after the button in the markup too, so the keyboard meets
-// them in the order the eye does. The bell (no buttons) and phones keep their layout.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -15,7 +9,6 @@ const app = fs.readFileSync(path.join(frontend, 'app.js'), 'utf8');
 
 const SLOT = '#dashboard-attention-panel .ui-alert { padding-inline-end: calc(var(--ui-pad-x) + 32px); }';
 const X = '#dashboard-attention-panel .ui-alert > .ui-alert-x { align-self: center; margin-block: 0; margin-inline-end: -32px; }';
-// The gap between the button and the X: the rows with an X use 8px (the bell and phone grid rule)
 const GAP = ':is(#dashboard-attention-panel, .ui-attn-win, #attn-sheet) .ui-alert:has(> .ui-alert-x) { grid-template-columns: minmax(0, 1fr) auto; column-gap: 8px; }';
 
 test('wider than a phone, every row keeps the X\'s slot and the X sits in it, centered', () => {
@@ -26,10 +19,8 @@ test('wider than a phone, every row keeps the X\'s slot and the X sits in it, ce
     assert.ok(css.indexOf(X) > at, 'the X moves into the slot (24px + the 8px gap = 32px)');
     assert.ok(css.includes(GAP));
     assert.ok(css.indexOf(X) > css.indexOf('.ui-alert > .ui-alert-x { width: 24px; height: 24px; flex: none; align-self: flex-start;'));
-    // Neither earlier try: the X above the button, or the X before it
     assert.doesNotMatch(css, /#dashboard-attention-panel \.ui-alert:has\(> \.ui-alert-x\) \{ display: grid;/);
     assert.doesNotMatch(css, /\.ui-alert-x \+ \.ui-alert-acts/);
-    // A long address in a title breaks rather than running into the button
     assert.ok(css.includes('.ui-alert-title b { overflow-wrap: anywhere; }'));
 });
 

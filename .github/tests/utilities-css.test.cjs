@@ -1,7 +1,3 @@
-// The Tailwind utilities are compiled once into frontend/assets/css/utilities.css
-// (.github/scripts/build-utilities-css.sh) instead of by a browser runtime. A
-// class name assembled at runtime, like bg-${color}-100, is invisible to that
-// build and must be listed in the safelist of .github/tailwind/tailwind.config.cjs.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -11,7 +7,6 @@ const ROOT = path.join(__dirname, '..', '..');
 const FRONTEND = path.join(ROOT, 'frontend');
 const config = require(path.join(ROOT, '.github', 'tailwind', 'tailwind.config.cjs'));
 const safelist = new Set(config.safelist);
-// The status colours a script would pass into such a template
 const RUNTIME_COLOURS = ['gray', 'green', 'red', 'yellow', 'orange'];
 
 function scripts() {

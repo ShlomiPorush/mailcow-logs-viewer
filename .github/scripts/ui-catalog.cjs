@@ -1,13 +1,4 @@
 #!/usr/bin/env node
-// Generates the reference tables of documentation/UI_Behavior_Catalog.md:
-// every small UI behaviour (click to copy, tooltips, toasts, confirmations,
-// flags, empty and loading states, persisted preferences, timers, deep links,
-// keyboard handling, help topics, badge colours) with the page it belongs to
-// and the exact place in the code.
-//
-// Usage:
-//   node .github/scripts/ui-catalog.cjs            print the generated section
-//   node .github/scripts/ui-catalog.cjs --write    replace the generated section in the catalog
 'use strict';
 
 const fs = require('node:fs');
@@ -55,8 +46,6 @@ function loadFiles() {
 
 const lineOf = (text, idx) => text.slice(0, idx).split('\n').length;
 
-// Top-level functions only (declared at column 0), so a call inside a nested
-// helper or callback is attributed to the function a reader would look for.
 const FN_CACHE = new Map();
 function topLevelFunctions(text) {
     if (FN_CACHE.has(text)) return FN_CACHE.get(text);
@@ -66,9 +55,6 @@ function topLevelFunctions(text) {
     return fns;
 }
 
-// End of a function's body. The body starts after the parameter list, so
-// default values and destructuring ("params = {}", "{ total, page }") in the
-// signature are not mistaken for it.
 function functionEnd(text, m) {
     let i = m.index + m[0].length;
     if (!m[0].endsWith('(')) {
@@ -79,14 +65,13 @@ function functionEnd(text, m) {
             i++;
         } else {
             while (/\s/.test(text[i])) i++;
-            if (text[i] !== '{') {   // expression body: ends with the statement
+            if (text[i] !== '{') {
                 const semi = text.indexOf(';\n', i);
                 return semi < 0 ? text.length : semi;
             }
             return scanCode(text, i + 1);
         }
     }
-    // i is just after '(': skip to the matching ')'
     let depth = 0;
     for (; i < text.length; i++) {
         const c = text[i];
@@ -99,7 +84,6 @@ function functionEnd(text, m) {
     return open < 0 ? text.length : scanCode(text, open + 1);
 }
 
-// From i, returns the index of the '}' that closes the current block.
 function scanCode(text, i) {
     let depth = 0;
     for (; i < text.length; i++) {
@@ -114,7 +98,6 @@ function scanCode(text, i) {
     return text.length;
 }
 
-// From the opening backtick at i, returns the index of the closing one.
 function scanTemplate(text, i) {
     for (i++; i < text.length; i++) {
         const c = text[i];
@@ -125,7 +108,6 @@ function scanTemplate(text, i) {
     return text.length;
 }
 
-// The top-level function that contains idx, or null for top-level code.
 function containingFunction(text, idx) {
     for (const f of topLevelFunctions(text)) if (f.start <= idx && idx <= f.end) return f;
     return null;
@@ -136,7 +118,6 @@ function enclosingFunction(text, idx) {
     return f ? f.name : null;
 }
 
-// End of the <div> element whose opening tag contains position `at`.
 const DIV_END = new Map();
 function divEnd(html, at) {
     if (DIV_END.has(at)) return DIV_END.get(at);
@@ -151,7 +132,6 @@ function divEnd(html, at) {
     return end;
 }
 
-// Innermost page section or modal that contains idx.
 function htmlPageAt(html, idx) {
     const scopes = [
         ...[...html.matchAll(/<div[^>]*\sid="content-([a-z-]+)"/g)].map(m => ({ at: m.index + 4, label: PAGE_BY_SECTION[m[1]] || m[1] })),
@@ -160,7 +140,7 @@ function htmlPageAt(html, idx) {
     return scopes.length ? scopes[0].label : 'Shell';
 }
 
-let ID_PAGE = null;   // element id in index.html -> page it lives on
+let ID_PAGE = null;
 function idPages(files) {
     if (ID_PAGE) return ID_PAGE;
     const html = files.find(f => f.name === 'index.html').text;
@@ -168,17 +148,13 @@ function idPages(files) {
     return ID_PAGE;
 }
 
-// For JS, the page is read from the DOM ids the enclosing top-level function
-// touches (majority vote), then from its name, then from the file.
 function pageOf(file, idx, files) {
     if (file.name === 'index.html') return htmlPageAt(file.text, idx);
     if (PAGE_BY_FILE[file.name] && file.name !== 'app.js') {
-        // spam_filter.js holds the Rspamd maps editor too, the Rspamd page
         const fnName = (containingFunction(file.text, idx) || {}).name || '';
         if (file.name === 'spam_filter.js' && /rspamdmap|map(editor|content|crumb|meta)|regex/i.test(fnName)) return 'Rspamd';
         return PAGE_BY_FILE[file.name];
     }
-    // Inside a function: its whole body. Top-level code: the statement around idx.
     const fn = containingFunction(file.text, idx) || { name: '', start: idx, end: Math.min(file.text.length, idx + 800) };
     {
         const body = file.text.slice(fn.start, fn.end + 1);
@@ -193,9 +169,6 @@ function pageOf(file, idx, files) {
         const best = Object.entries(votes).sort((a, b) => b[1] - a[1])[0]
             || Object.entries(modalVotes).sort((a, b) => b[1] - a[1])[0];
         if (best) return best[0];
-        // Every element this function writes to is missing from the markup and
-        // from every rendered template: nothing on screen can show its output.
-        // A dialog from the shared builder (utils.js, uiDialog) gets its ids as options
         const rendered = files.map(f => f.text).join('\n');
         const builtIds = new Set([...rendered.matchAll(/\b(?:id|bodyId|footId|titleId):\s*['"`]([^'"`$]+)['"`]/g)].map(m => m[1]));
         if (ids.length && ids.every(id => !rendered.includes(`id="${id}"`) && !rendered.includes(`id=\\"${id}\\"`) && !builtIds.has(id))) {
@@ -211,7 +184,6 @@ function where(file, idx) {
     return `\`frontend/${file.name}:${lineOf(file.text, idx)}\`${fn ? ` (${fn})` : ''}`;
 }
 
-// Arguments of a call whose '(' is at `open`, split at top-level commas.
 function callArgs(text, open) {
     const args = [];
     let depth = 0, cur = '', quote = null;
@@ -248,7 +220,7 @@ function calls(files, nameRe, fn) {
         let m;
         while ((m = re.exec(f.text))) {
             const before = f.text.slice(Math.max(0, m.index - 12), m.index);
-            if (/function\s+$/.test(before)) continue;   // the definition itself
+            if (/function\s+$/.test(before)) continue;
             const row = fn(callArgs(f.text, m.index + m[0].length - 1), m[1], f, m.index);
             if (row) out.push({ page: pageOf(f, m.index, files), where: where(f, m.index), ...row });
         }
@@ -278,11 +250,10 @@ function collect() {
 
     cats.push({ title: 'Tooltips', note: 'Native `title` tooltips. Dynamic ones show the expression that builds the text.',
         rows: matches(files, /\stitle=\\?(["'])((?:(?!\1).){1,300}?)\\?\1/g, (m, f) => {
-            if (f.name === 'utils.js' && m[2] === 'Click to copy') return null;   // part of copyableText
+            if (f.name === 'utils.js' && m[2] === 'Click to copy') return null;
             return { what: m[2].includes('${') ? `dynamic: \`${short(m[2], 80)}\`` : `"${short(m[2])}"` };
         }) });
 
-    // Tooltips assigned from JavaScript (el.title = ...).
     cats[cats.length - 1].rows.push(...matches(files, /\.title\s*=\s*([^;\n]+);/g, m => ({ what: `set in JS: ${show(m[1].trim())}` })));
 
     cats.push({ title: 'Toasts', note: 'Transient notifications from `showToast(message, type)` (utils.js). Type defaults to info.',

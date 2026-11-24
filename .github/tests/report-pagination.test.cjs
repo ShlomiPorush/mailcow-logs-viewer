@@ -8,17 +8,14 @@ const source = fs.readFileSync(path.join(__dirname, '../../frontend/dmarc.js'), 
 const start = source.indexOf('const REPORTS_DEFAULT_SORT =');
 const end = source.length;
 assert.ok(start > 0 && end > start);
-// The time helpers the page formats dates with (the app's zone is UTC here)
 const utilsSource = fs.readFileSync(path.join(__dirname, '../../frontend/utils.js'), 'utf8');
 const zoneHelpers = utilsSource.slice(utilsSource.indexOf('function appTz()'), utilsSource.indexOf('function formatSeconds('));
-// The words a failure is shown with (utils.js) and responseError (app.js)
 const errorStart = utilsSource.indexOf('function uiApiErrorText(');
 const errorHelpers = utilsSource.slice(errorStart, utilsSource.indexOf('\n// ====', errorStart));
 const appSource = fs.readFileSync(path.join(__dirname, '../../frontend/app.js'), 'utf8');
 const responseErrorStart = appSource.indexOf('async function responseError(');
 const responseErrorSource = appSource.slice(responseErrorStart, appSource.indexOf('\n}\n', responseErrorStart) + 3);
 
-// What GET /api/dmarc/reports/domains answers in these tests
 const DOMAINS = [
     { domain: 'example.com', dmarc_reports: 3, tls_reports: 1, last_report: 1767225600 },
     { domain: 'example.net', dmarc_reports: 1, tls_reports: 0, last_report: 1767312000 },
@@ -55,7 +52,6 @@ function harness({ allowDelete = true, confirm = true } = {}) {
         dmarcUpdateManageButton: () => { calls.manageButton++; },
         loadDmarcDomains: async () => { calls.domainsList++; },
         appTimezone: 'UTC',
-        // Full access, as for the built-in admin (utils.js)
         userCan: () => true, uiMayAct: () => true,
     });
     vm.runInContext(zoneHelpers, context);
@@ -218,7 +214,6 @@ test('the search filters All reports on the server from page 1, debounced', asyn
     h.resolve(1, 1, 200, 7);
     await tick();
     assert.match(h.element('dmarc-reports-total').innerHTML, />7<\/span> matching reports/);
-    // The summary is not filtered by the search
     assert.match(h.element('dmarc-reports-domains').innerHTML, /example\.net/);
 });
 
@@ -288,24 +283,20 @@ test('reopening the dialog clears the search', async () => {
     await reopening;
 });
 
-// The header click goes through the real sorter in utils.js (server-paged mode:
-// data-sort-handler and data-sort-key, as on the Devices page)
 const utils = fs.readFileSync(path.join(__dirname, '../../frontend/utils.js'), 'utf8');
 const sorterSource = utils.slice(utils.indexOf('const uiTableSorts'), utils.indexOf('// Mark the sortable headers'));
 
-// A stand-in for the rendered All reports table, read from its markup
 function fakeTable(html) {
     const attrs = text => Object.fromEntries([...text.matchAll(/([\w-]+)="([^"]*)"/g)].map(m => [m[1], m[2]]));
     const element = (attributes, text) => ({
         attributes, textContent: text, children: [], dataset: {}, classList: { contains: () => false },
         hasAttribute: name => name in attributes, getAttribute: name => attributes[name] ?? null,
-        // The headers show a new order at once, before the server answers
         setAttribute: (name, value) => { attributes[name] = String(value); }, removeAttribute: name => { delete attributes[name]; }, querySelector: () => null,
         cloneNode() { return { querySelectorAll: () => [], textContent: text }; },
     });
     const table = element(attrs(html.match(/<div ([^>]*class="ui-table[^>]*)>/)[1]), '');
     table.tagName = 'DIV';
-    table.closest = () => null;   // not inside help or release notes
+    table.closest = () => null;
     const headHtml = html.match(/<div class="ui-tr ui-tr-head">(.*?)<\/div>/s)[1];
     const heads = [...headHtml.matchAll(/<span([^>]*)>([^<]*)<\/span>/g)].map(m => element(attrs(m[1]), m[2]));
     const head = { children: heads };
@@ -349,14 +340,12 @@ test('a header click sorts All reports on the server, from page 1, keeping the s
     assert.match(h.content.innerHTML, /data-sort-key="domain" aria-sort="ascending">Domain/);
     assert.match(h.content.innerHTML, /data-sort-key="created_at" aria-sort="none">Import Date/);
 
-    // A second click turns it around
     click('Domain');
     assert.equal(h.requests[3].url, '/api/dmarc/reports/all?page=1&limit=50&search=example&sort_by=domain&sort_dir=desc');
     h.resolve(3, 1, 200, 120);
     await tick();
     assert.match(h.content.innerHTML, /data-sort-key="domain" aria-sort="descending">Domain/);
 
-    // Paging and a single delete keep the order
     const paging = h.run('loadReportsManagementPage(2)');
     assert.equal(h.requests[4].url, '/api/dmarc/reports/all?page=2&limit=50&search=example&sort_by=domain&sort_dir=desc');
     h.resolve(4, 2, 200, 120);
@@ -390,8 +379,6 @@ test('every listed column sorts except Actions, and reopening restores the defau
     h.resolve(before + 1);
     await reopening;
 });
-
-// No flashing: search, sort and paging keep the rows on screen until the answer arrives
 
 const LOADING = /Loading reports/;
 
@@ -437,13 +424,12 @@ test('typing is never undone and the search box is never rendered by the list', 
     input.value = 'exam';
     h.run('searchReportsManagement()');
     await debounce();
-    input.value = 'example.co';  // still typing while the answer is on its way
+    input.value = 'example.co';
     h.resolve(1, 1, 200, 3);
     await tick();
     assert.equal(h.element('dmarc-reports-search'), input);
     assert.equal(input.value, 'example.co');
     for (const id of ['dmarc-reports-management-content', 'dmarc-reports-total', 'dmarc-reports-domains']) {
-        // The list names the search as its Sort button's place (data-sort-at); it never draws the field
         assert.doesNotMatch(h.element(id).innerHTML, /id="dmarc-reports-search"/);
     }
 });

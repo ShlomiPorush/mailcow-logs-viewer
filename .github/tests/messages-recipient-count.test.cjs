@@ -1,6 +1,3 @@
-// The "+N" a Messages row shows beside its first recipient (utils.js
-// renderRecipientMore): nothing for one recipient, else the other recipients
-// counted, with words for the tooltip and for a screen reader.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');

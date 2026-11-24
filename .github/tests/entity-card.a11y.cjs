@@ -1,8 +1,3 @@
-// Entity values and the entity card (utils.js uiEntity, entity-card.js) in a real
-// DOM (jsdom): a value opens its card and not the row it sits in, a late answer
-// for a card opened before is dropped, Escape closes the card before the dialog
-// under it, and a source that is off or failed never shows as zero.
-//   A11Y_MODULES=/tmp/a11y/node_modules node --test .github/tests/entity-card.a11y.cjs
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -14,12 +9,10 @@ const { JSDOM } = require(path.join(modules, 'jsdom'));
 const frontend = path.join(__dirname, '../../frontend');
 const read = name => fs.readFileSync(path.join(frontend, name), 'utf8');
 const html = read('index.html');
-// The card's own markup, as index.html has it
 const CARD = html.slice(html.indexOf('<div id="entity-card"'), html.indexOf('<!-- Changelog Modal -->'));
 
 const STYLE = '.hidden { display: none; } .ui-dialog-backdrop { z-index: 50; }';
 
-// Pages the card draws with, standing in for app.js and devices.js
 const STUBS = `
     window.fetches = [];
     function authenticatedFetch(url) { return new Promise(resolve => window.fetches.push({ url, resolve })); }
@@ -76,11 +69,9 @@ test('kinds are told apart as the API reads them, and other values stay text', (
     for (const v of ['192.0.2.0/24', 'fe80::1%eth0', '256.1.1.1', 'ann@', '@example.com', 'a b@example.com', 'localhost', '-', 'unknown', '1.2.3']) {
         assert.equal(kind(v), null, v);
     }
-    // A network is not an IP: it stays click to copy
     assert.match(w.uiEntity('ip', '192.0.2.0/24'), /class="copyable/);
     assert.doesNotMatch(w.uiEntity('ip', '192.0.2.0/24'), /data-entity-kind/);
     assert.equal(w.uiEntity('address', 'MAILER-DAEMON', { plain: true }), 'MAILER-DAEMON');
-    // A kind asked for that the value is not: not a card of another kind
     assert.doesNotMatch(w.uiEntity('ip', 'mail.example.com'), /data-entity-kind/);
 });
 
@@ -109,11 +100,9 @@ test('a click on a value opens its card and not the row it sits in', async () =>
     const card = w.document.getElementById('entity-card');
     assert.ok(!card.classList.contains('hidden'));
     assert.equal(w.fetches[0].url, '/api/entities/ip?value=203.0.113.45');
-    // Enter on the value: the row's own key handler leaves it to the button
     const button = row.querySelector('[data-entity-kind="address"]');
     button.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
     assert.equal(w.rowOpened, undefined, 'Enter on the value does not open the row');
-    // A click on the row itself still opens it
     row.click();
     assert.equal(w.rowOpened, 1);
 });
@@ -142,7 +131,6 @@ test('an answer for a card opened before the last one is dropped', async () => {
     const header = w.document.getElementById('entity-card-header').textContent;
     assert.match(header, /192\.0\.2\.20/);
     assert.doesNotMatch(header, /192\.0\.2\.10/);
-    // Closed while loading: nothing draws into the closed card
     w.openEntityCard('ip', '192.0.2.30');
     w.closeEntityCard();
     answer(w, 2, ipCard('192.0.2.30'));
@@ -200,9 +188,6 @@ test('a card that cannot load says why', async () => {
     assert.match(content, /Enter one IP address/);
 });
 
-// ---------------------------------------------------------------- review fixes
-
-// The pages themselves (app.js renderMessageRow, message-details.js), for the rows
 function appPage(body) {
     const dom = new JSDOM(`<!doctype html><html lang="en"><head><title>t</title><style>${STYLE}</style></head><body>${body}${CARD}</body></html>`,
         { runScripts: 'dangerously', pretendToBeVisual: true, url: 'http://localhost/dashboard' });
@@ -278,7 +263,6 @@ test('U3: a click that ends a selection, or one with a modifier, leaves the row 
         assert.ok(!card(), `no card on ${JSON.stringify(init)}`);
         assert.equal(w.rowOpened, 1, `the click went on to the row on ${JSON.stringify(init)}`);
     }
-    // The end of a drag that selected text over the value
     const range = w.document.createRange();
     range.setStart(w.document.getElementById('text').firstChild, 3);
     range.setEnd(button.querySelector('bdi').firstChild, 3);
@@ -289,7 +273,6 @@ test('U3: a click that ends a selection, or one with a modifier, leaves the row 
     await settle(w);
     assert.ok(!card(), 'no card at the end of a selection');
     assert.equal(w.rowOpened, 1, 'the row saw the click (its own uiRowHeld decides)');
-    // A plain click, and the keyboard (detail 0), still open it
     w.getSelection().removeAllRanges();
     click({ detail: 0 });
     await settle(w);
@@ -303,7 +286,6 @@ test('U4: message, recipient and delivery rows hold buttons but are no buttons t
     const list = w.document.getElementById('list');
     list.innerHTML = w.renderMessageRow({ correlation_key: 'k1', sender: 'ann@example.com', recipient: 'bob@example.net', subject: 'Hello',
         first_seen: '2026-10-28T10:00:00Z', final_status: 'delivered', is_complete: true, direction: 'inbound' });
-    // Recipients and deliveries of a message, drawn by message-details.js itself
     const at = s => `2026-01-01T00:00:0${s}Z`;
     const data = { correlation_key: 'k1', sender: 'ann@example.com', recipient: 'a@example.net', first_seen: at(5), final_status: 'deferred',
         recipients: ['a@example.net', 'b@example.net'], dovecot: null, rspamd: null,
@@ -317,8 +299,6 @@ test('U4: message, recipient and delivery rows hold buttons but are no buttons t
     assert.deepEqual(await nestedInteractive(w, list), []);
     assert.equal(list.querySelectorAll('[role="button"] button, [tabindex] button, button button').length, 0);
 
-    // Messages row: its time is the button that opens it, named by the time it shows and
-    // the subject (the subject stays text that can be selected); the values open their cards
     const row = list.querySelector('.ui-msg-item');
     const open = row.querySelector('.ui-row-open');
     assert.equal(open.tagName, 'BUTTON');
@@ -329,9 +309,9 @@ test('U4: message, recipient and delivery rows hold buttons but are no buttons t
     assert.ok(!row.hasAttribute('role') && !row.hasAttribute('tabindex'));
     const tabbable = [...row.querySelectorAll('button')].filter(b => !b.matches('.ui-ent-copy'));
     assert.deepEqual(Array.from(tabbable, b => b.getAttribute('aria-label') || b.textContent.trim()), ['ann@example.com', `${shown}, open the message: Hello`, 'bob@example.net']);
-    open.click();            // Enter on a button is its click
+    open.click();
     assert.deepEqual(opened, ['k1']);
-    row.querySelector('.ui-msg-l3').click();   // anywhere on the row, with the mouse
+    row.querySelector('.ui-msg-l3').click();
     assert.deepEqual(opened, ['k1', 'k1']);
     row.querySelector('[data-entity-kind]').click();
     await settle(w);
@@ -339,14 +319,11 @@ test('U4: message, recipient and delivery rows hold buttons but are no buttons t
     assert.ok(!w.document.getElementById('entity-card').classList.contains('hidden'));
     w.closeEntityCard();
 
-    // Recipient rows: the status is the toggle that shows that recipient's logs
     const toggles = [...list.querySelectorAll('#rcpts .ui-md-rrow > .ui-row-open')];
     assert.equal(toggles.length, 2);
-    // Named by the status it shows, so a screen reader hears it too
     for (const t of toggles) assert.ok(t.getAttribute('aria-label').startsWith(`${t.textContent.trim()}, show the logs of `));
     toggles.find(t => t.getAttribute('aria-label').endsWith(', show the logs of b@example.net')).click();
     assert.equal(w.eval('mdView.picked'), w.eval("mdRecipients.findIndex(r => r.key === 'b@example.net')"));
-    // A delivery leg opens its message from its number
     const leg = list.querySelector('.ui-md-leg:not(.is-current) .ui-row-open');
     assert.match(leg.getAttribute('aria-label'), /^Open delivery 1: /);
     leg.click();
@@ -393,7 +370,7 @@ test('U7: a card opened from code gives the focus back to its opener', async () 
     const w = page('<main><section class="ui-page"><h1>Page</h1><button id="opener" type="button">Open</button></section></main>');
     const opener = w.document.getElementById('opener');
     opener.focus();
-    w.document.body.focus();     // the focus moved on; no click or key named the opener
+    w.document.body.focus();
     w.openEntityCard('ip', '203.0.113.45', { from: opener });
     answer(w, 0, ipCard('203.0.113.45'));
     await settle(w);

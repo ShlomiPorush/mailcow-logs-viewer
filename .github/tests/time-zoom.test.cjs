@@ -1,5 +1,3 @@
-// The time zoom of the bar charts (utils.js): the button steps, and the gesture
-// state machine driven with pointer events on a stand-in chart
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -16,7 +14,6 @@ function load() {
     return context;
 }
 
-// A chart 240px wide at x 0, with 24 bars of an hour each from 0
 function chart({ span = { from: 0, to: 24 * H }, limits = { from: 0, to: 24 * H, min: H } } = {}) {
     const listeners = {};
     const bars = Array.from({ length: 24 }, (_, i) => ({
@@ -51,7 +48,6 @@ test('the buttons step in, out, earlier and later, and stay inside the data', ()
     assert.deepEqual(plain(c.uiTimeZoomStep({ from: 6 * H, to: 18 * H }, limits, 'out')), { from: 0, to: 24 * H });
     assert.deepEqual(plain(c.uiTimeZoomStep({ from: 6 * H, to: 18 * H }, limits, 'earlier')), { from: 0, to: 12 * H });
     assert.deepEqual(plain(c.uiTimeZoomStep({ from: 12 * H, to: 24 * H }, limits, 'later')), { from: 12 * H, to: 24 * H });
-    // Never shorter than the shortest span, never longer than the data
     assert.deepEqual(plain(c.uiTimeZoomStep({ from: 0, to: H }, limits, 'in')), { from: 0, to: H });
     assert.deepEqual(plain(c.uiTimeZoomClamp({ from: -5 * H, to: 40 * H }, limits)), { from: 0, to: 24 * H });
 });
@@ -81,14 +77,12 @@ test('a zoomed chart moves under one finger, though the bar hands its own captur
     const { fire, seen, zoom, bars } = chart({ span: { from: 6 * H, to: 12 * H } });
     fire('pointerdown', { pointerId: 7, clientX: 60, clientY: 50, target: bars[6] });
     fire('pointermove', { pointerId: 7, clientX: 80, clientY: 51, target: bars[6] });
-    // The bar under the finger had the touch's implicit capture; it bubbles up as it goes
     fire('lostpointercapture', { pointerId: 7, target: bars[6] });
     assert.equal(zoom.busy(), true, 'the move goes on');
     fire('pointermove', { pointerId: 7, clientX: 120, clientY: 51 });
     fire('pointerup', { pointerId: 7, clientX: 120, clientY: 51 });
     assert.equal(seen.cancels, 0);
     assert.equal(seen.changes.length, 1);
-    // 60px of 240 is a quarter of the 6 hours shown: an hour and a half earlier
     assert.deepEqual(JSON.parse(JSON.stringify(seen.changes[0])), { from: 4.5 * H, to: 10.5 * H });
 });
 
@@ -110,7 +104,6 @@ test('two fingers apart zoom in around them; lifting one goes on as a move witho
     fire('pointermove', { pointerId: 2, clientX: 160, clientY: 50 });
     const pinch = seen.previews.at(-1);
     assert.equal(pinch[0], 'pinch');
-    // Twice as far apart: half the span, the time under their middle (12:00) stays under it
     assert.equal(pinch[1].to - pinch[1].from, 12 * H);
     assert.equal(pinch[1].from + (120 / 240) * 12 * H, 12 * H);
     fire('pointerup', { pointerId: 2, clientX: 160, clientY: 50 });
@@ -123,18 +116,16 @@ test('two fingers apart zoom in around them; lifting one goes on as a move witho
 
 test('a pinch keeps its frame while the preview stretches the chart', () => {
     const { fire, seen, box } = chart();
-    // Laid out at 0..240 in its frame; the stretch a preview puts on it moves its drawn rectangle
     box.offsetParent = { getBoundingClientRect: () => ({ left: 0 }), clientLeft: 0 };
     box.offsetLeft = 0;
     box.offsetWidth = 240;
     let stretched = false;
-    box.getBoundingClientRect = () => (stretched ? { left: 0, width: 480 } : { left: 0, width: 240 });   // stretched from its left edge, as the preview does
+    box.getBoundingClientRect = () => (stretched ? { left: 0, width: 480 } : { left: 0, width: 240 });
     fire('pointerdown', { pointerId: 1, clientX: 100, clientY: 50 });
     fire('pointerdown', { pointerId: 2, clientX: 140, clientY: 50 });
     fire('pointermove', { pointerId: 1, clientX: 80, clientY: 50 });
     stretched = true;
     fire('pointermove', { pointerId: 2, clientX: 160, clientY: 50 });
-    // Twice as far apart around 12:00: 06:00 to 18:00
     assert.deepEqual(JSON.parse(JSON.stringify(seen.previews.at(-1)[1])), { from: 6 * H, to: 18 * H });
 });
 
@@ -146,7 +137,6 @@ test('the browser taking one finger of a pinch calls the pinch off', () => {
     fire('pointercancel', { pointerId: 2 });
     assert.equal(seen.cancels, 1);
     assert.equal(zoom.busy(), false);
-    // The finger left lifts as a plain lift: no zoom from the old preview
     fire('pointermove', { pointerId: 1, clientX: 60, clientY: 50 });
     fire('pointerup', { pointerId: 1, clientX: 60, clientY: 50 });
     assert.equal(seen.changes.length, 0);

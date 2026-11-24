@@ -1,7 +1,3 @@
-// Every time on screen, every day and every time a user types or picks follows
-// the app's time zone (/api/info `timezone`), never the browser's. The browser
-// in these tests is in New York and the app's zone is Europe/Berlin, whose
-// daylight saving changes (2026-03-29 and 2026-10-25) fall on other days.
 process.env.TZ = 'America/New_York';
 
 const assert = require('node:assert/strict');
@@ -12,7 +8,6 @@ const { test } = require('node:test');
 
 const frontend = path.join(__dirname, '../../frontend');
 
-// Any DOM access returns another inert stub, so a file's top-level code runs
 function stub() {
     const fn = function () { return proxy; };
     const proxy = new Proxy(fn, {
@@ -23,7 +18,6 @@ function stub() {
     return proxy;
 }
 
-// The page scripts in one global scope, as in the browser, with the app's zone set
 function load(files, zone = 'Europe/Berlin', dateFormat = 'browser', timeFormat = '24h') {
     const context = vm.createContext({
         document: stub(), window: { matchMedia: () => ({ matches: false }), addEventListener() {} }, localStorage: stub(),
@@ -37,7 +31,6 @@ function load(files, zone = 'Europe/Berlin', dateFormat = 'browser', timeFormat 
     return context;
 }
 
-// A page whose elements are plain objects, kept by id
 function page(context) {
     const elements = {};
     const element = id => elements[id] || (elements[id] = {
@@ -51,13 +44,9 @@ function page(context) {
 
 const iso = date => new Date(date).toISOString();
 
-// ---------- the helpers in utils.js ----------
-
 test('a wall time in the app zone is one instant, whatever the browser zone', () => {
     const c = load([]);
-    // 02:30 does not exist on 2026-03-29 in Berlin: it moves forward to 03:30 CEST
     assert.equal(iso(c.zonedTimeToDate(2026, 3, 29, 2, 30)), '2026-03-29T01:30:00.000Z');
-    // 02:30 happens twice on 2026-10-25 in Berlin: the first one, in CEST
     assert.equal(iso(c.zonedTimeToDate(2026, 10, 25, 2, 30)), '2026-10-25T00:30:00.000Z');
     assert.equal(iso(c.fromZonedInputValue('2026-10-25T12:00')), '2026-10-25T11:00:00.000Z');
     assert.equal(c.toZonedInputValue('2026-10-25T11:00:00Z'), '2026-10-25T12:00');
@@ -75,9 +64,7 @@ test('a day in the app zone is 23 hours on 2026-03-29 and 25 hours on 2026-10-25
 
 test('n days later keeps the wall time in the app zone across a daylight saving change', () => {
     const c = load([]);
-    // Noon CET on 2026-03-28 is noon CEST a day later, 23 hours on
     assert.equal(iso(c.addDaysInZone(new Date('2026-03-28T11:00:00Z'), 1)), '2026-03-29T10:00:00.000Z');
-    // 11:00 CET on 2026-10-25 is 11:00 CEST the day before, 25 hours earlier
     assert.equal(iso(c.addDaysInZone(new Date('2026-10-25T10:00:00Z'), -1)), '2026-10-24T09:00:00.000Z');
 });
 
@@ -88,7 +75,6 @@ test('a day key is named as it is, in any browser zone', () => {
 });
 
 test('a day key keeps its day in an app zone west of UTC, an instant takes the day of the app zone', () => {
-    // Read as UTC midnight, 2026-10-25 would be the 24th in Los Angeles
     const west = load([], 'America/Los_Angeles', 'DD/MM/YYYY');
     assert.equal(west.formatDayKey('2026-10-25', { year: false }), '25/10');
     const c = load([], 'Europe/Berlin', 'DD/MM/YYYY');
@@ -99,7 +85,6 @@ test('the app zone is used when it is UTC, and an unknown zone falls back to UTC
     const c = load([]);
     c.setAppTimezone({ timezone: 'UTC', timezone_valid: true, timezone_configured: 'UTC' });
     assert.equal(c.formatClock('2026-10-25T00:30:00Z'), '00:30');
-    // The server sends only known zones; one the browser cannot use must not break every time
     c.setAppTimezone({ timezone: 'Europe/Berlinn', timezone_valid: false, timezone_configured: 'Europe/Berlinn' });
     assert.equal(vm.runInContext('appTimezone', c), 'UTC');
     assert.equal(vm.runInContext('appTimezoneStatus.valid', c), false);
@@ -110,14 +95,11 @@ test('the app zone is used when it is UTC, and an unknown zone falls back to UTC
 test('a table sorts shown times in order, also those in the hour the browser zone skips', () => {
     const c = load([]);
     const cell = text => ({ hasAttribute: () => false, cloneNode: () => ({ querySelectorAll: () => [], textContent: text }) });
-    // 02:30 does not exist on 2026-03-08 in New York; in Berlin it is just a time before 03:15
     const early = c.uiSortValue(cell('03/08/2026, 02:30:00')).n;
     const late = c.uiSortValue(cell('03/08/2026, 03:15:00')).n;
     assert.ok(early < late, `${early} < ${late}`);
     assert.equal(c.uiSortValue(cell('25.10.2026 02:30')).n, Date.parse('2026-10-25T02:30:00Z'));
 });
-
-// ---------- finding 1: the suppression expiry editor ----------
 
 function suppressionEditor(expiresAt) {
     const c = load(['spam_filter.js']);
@@ -132,7 +114,6 @@ function suppressionEditor(expiresAt) {
     vm.runInContext('suppressionItemsById.set(7, __item)', c);
     c.showEditSuppressionModal(item);
     const shown = body.match(/id="edit-suppression-expiry" value="([^"]*)"/)[1];
-    // The field as the browser builds it from the HTML
     element('edit-suppression-expiry').value = shown;
     element('edit-suppression-expiry').dataset.shown = body.match(/id="edit-suppression-expiry" value="[^"]*" data-shown="([^"]*)"/)[1];
     return { c, element, shown, sent };
@@ -140,16 +121,13 @@ function suppressionEditor(expiresAt) {
 
 test('the expiry editor shows the expiry in the app zone and reads a new one there', async () => {
     const { c, element, shown, sent } = suppressionEditor('2026-10-25T00:30:00Z');
-    // 00:30 UTC is the first 02:30 in Berlin that night
     assert.equal(shown, '2026-10-25T02:30');
-    // 03:30 on the same night is after the clocks went back, so UTC+1
     element('edit-suppression-expiry').value = '2026-10-25T03:30';
     await c.saveEditSuppression(7);
     assert.equal(sent[0].expires_at, '2026-10-25T02:30:00.000Z');
 });
 
 test('saving an expiry that was not touched keeps it to the second', async () => {
-    // A real expiry is "now plus N days", with seconds; the field only holds minutes
     const { c, shown, sent } = suppressionEditor('2026-10-31T21:25:10.541492Z');
     assert.equal(shown, '2026-10-31T22:25');
     await c.saveEditSuppression(7);
@@ -162,8 +140,6 @@ test('+7 days on the expiry keeps its time of day across the change to summer ti
     c.extendExpiryBy(7);
     assert.equal(element('edit-suppression-expiry').value, '2026-04-01T12:00');
 });
-
-// ---------- finding 4: the Logs time inputs ----------
 
 test('the Logs range is read in the app zone, and To covers its whole minute', async () => {
     const c = load(['logs-viewer.js']);
@@ -194,16 +170,13 @@ function logsRange() {
 
 test('a Logs preset shows wall times in the app zone and sends the exact hour it means', async () => {
     const { c, element, sent } = logsRange();
-    // 01:10 UTC on 2026-10-25 is the second 02:10 in Berlin, an hour after the first one
     c.__now = new Date('2026-10-25T01:10:00Z');
     await vm.runInContext('setLogTimePreset(60, __now)', c);
     assert.equal(element('logs-date-from').value, '2026-10-25T02:10');
     assert.equal(element('logs-date-to').value, '2026-10-25T02:10');
     assert.deepEqual(sent(), ['2026-10-25T00:10:00.000Z', '2026-10-25T01:10:00.000Z']);
-    // Load again on the untouched fields keeps the same hour
     await c.loadDateRangeLogs();
     assert.deepEqual(sent(), ['2026-10-25T00:10:00.000Z', '2026-10-25T01:10:00.000Z']);
-    // A time typed over the preset is read in the app zone, To with its whole minute
     element('logs-date-to').value = '2026-10-25T02:40';
     await c.loadDateRangeLogs();
     assert.deepEqual(sent(), ['2026-10-25T00:10:00.000Z', '2026-10-25T00:40:59.999Z']);
@@ -213,7 +186,6 @@ test('a Logs preset does not outlive the fields it filled', async () => {
     const { c, element, sent } = logsRange();
     c.__now = new Date('2026-10-25T01:10:00Z');
     await vm.runInContext('setLogTimePreset(60, __now)', c);
-    // Back to live clears the fields; the same text typed later is read as typed
     c.fetchInitialLogs = async () => {};
     c.connectLogWebSocket = async () => {};
     await c.resetToLiveLogs();
@@ -229,11 +201,8 @@ test('a raw log time is shown in the app zone, also when it is UTC', () => {
     assert.match(c.formatLogTimestamp(epoch), /00:30:00/);
 });
 
-// ---------- finding 5: hour buckets ----------
-
 test('a Rate Limits hour bucket is a UTC instant shown in the app zone', () => {
     const c = load(['rate-limits.js'], 'Europe/Berlin', 'DD.MM.YYYY');
-    // The two hours that start at 02:00 in Berlin on 2026-10-25 stay two buckets
     assert.equal(c.rateLimitBucketLabel('2026-10-25T00:00:00Z', 'hour'), '02:00');
     assert.equal(c.rateLimitBucketLabel('2026-10-25T01:00:00Z', 'hour'), '02:00');
     assert.equal(c.rateLimitBucketLabel('2026-10-25T02:00:00Z', 'hour'), '03:00');
@@ -252,18 +221,13 @@ test('a Mailbox Stats hour slot is a UTC instant shown in the app zone, a day sl
     assert.equal(c.mailboxActivityLabel('2026-03-29T00:00:00', 'day'), 'Sun, 29/03');
 });
 
-// ---------- finding 6: the Mailbox Stats range ----------
-
 test('the Mailbox Stats custom range starts as the last 30 days of the app zone', () => {
     const c = load(['mailbox-stats.js']);
     const element = page(c);
-    // 22:30 UTC on 2026-10-24 is already the 25th in Berlin (still the 24th in New York)
     c.mailboxStatsPeriodOpened(new Date('2026-10-24T22:30:00Z'));
     assert.equal(element('date-range-end').value, '2026-10-25');
     assert.equal(element('date-range-start').value, '2026-09-25');
 });
-
-// ---------- finding 8: Security ----------
 
 test('the Security period names the day its logs start on in the app zone', () => {
     const c = load(['smtp-abuse.js', 'protection.js', 'security.js'], 'Europe/Berlin', 'DD/MM/YYYY');
@@ -284,15 +248,11 @@ test('the allowlist and denylist count failed logins over the last 24 hours, not
     assert.doesNotMatch(box.innerHTML, /today/);
 });
 
-// ---------- finding 19: Mailbox Stats dates ----------
-
 test('Mailbox Stats names its own dates First seen and Last synced, not mailcow\'s', () => {
     const source = fs.readFileSync(path.join(frontend, 'mailbox-stats.js'), 'utf8');
     assert.match(source, /<span>First seen \/ Last synced<\/span>/);
     assert.doesNotMatch(source, /Created \/ Modified/);
 });
-
-// ---------- DMARC and TLS: report periods and Import Date ----------
 
 test('Manage Reports shows the Import Date and the period in the app zone', () => {
     const c = load(['dmarc.js'], 'Europe/Berlin', 'MM/DD/YYYY', '12h');
@@ -314,8 +274,6 @@ test('a DMARC day from the server is named as it is', () => {
     assert.equal(c.dmarcDay('2026-03-29', true), 'Sunday, 29/03/2026');
 });
 
-// ---------- Settings > Application > Time Zone, and About ----------
-
 function settingsField(value, { envLocked = false, status = { valid: true, configured: value } } = {}) {
     const c = load(['settings.js']);
     c.__status = status;
@@ -324,7 +282,6 @@ function settingsField(value, { envLocked = false, status = { valid: true, confi
         SETTINGS_FIELD_DESCRIPTIONS.tz, ${envLocked}, 'UTC')`, c);
 }
 
-// One option of the Time Zone picker: chosen or not, its value, its text
 const literal = text => text.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&');
 const zoneOption = (selected, value, text) => new RegExp(literal(
     `aria-selected="${selected}" data-value="${value}" onclick="settingsPickZone(this)"><span>${text}</span>`));
@@ -347,10 +304,8 @@ test('the Time Zone setting is a searchable list of IANA zones under Application
 test('with no zone set the Time Zone field shows UTC, said once', () => {
     for (const value of ['', 'UTC']) {
         const html = settingsField(value);
-        // The field says it; no description or note repeats it
         assert.doesNotMatch(html, /Default: UTC/);
         assert.doesNotMatch(html, /data-zone-note/);
-        // Empty is UTC, the default: not marked as changed
         assert.doesNotMatch(html, /Changed|Reset to default/);
     }
     assert.match(settingsField(''), zoneOption(true, '', 'Not set (UTC)'));
@@ -358,18 +313,15 @@ test('with no zone set the Time Zone field shows UTC, said once', () => {
 });
 
 test('every zone shows how far its clock is from UTC', () => {
-    // Zones without daylight saving, so the offsets hold all year
     const c = load(['settings.js']);
     for (const [zone, offset] of [['', 'UTC+00:00'], ['UTC', 'UTC+00:00'], ['Asia/Kolkata', 'UTC+05:30'], ['Asia/Kathmandu', 'UTC+05:45'], ['America/Bogota', 'UTC-05:00']]) {
         assert.equal(c.settingsZoneOffset(zone), offset, zone);
     }
-    // On the button after the name, and at the end of each option
     const html = settingsField('Asia/Kolkata');
     assert.match(html, /<span>Asia\/Kolkata <small class="ui-zone-offset">UTC\+05:30<\/small><\/span>/);
     for (const [zone, offset] of [['', 'UTC+00:00'], ['UTC', 'UTC+00:00'], ['Asia/Kolkata', 'UTC+05:30'], ['America/Bogota', 'UTC-05:00']]) {
         assert.match(html, new RegExp(literal(`data-value="${zone}" onclick="settingsPickZone(this)"><span>`) + '[^<]*' + literal(`</span><small>${offset}</small>`)));
     }
-    // A name the browser does not know has no offset to show
     assert.equal(c.settingsZoneOffset('Europe/Berlinn'), '');
     assert.match(settingsField('Europe/Berlinn'), /<span>Europe\/Berlinn<\/span><svg/);
 });

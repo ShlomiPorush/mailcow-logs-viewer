@@ -1,8 +1,4 @@
 #!/usr/bin/env bash
-# Build frontend/assets/css/utilities.css: the Tailwind utility classes the
-# markup still uses, compiled once instead of in the browser. Runs Tailwind
-# 3.4.17 (the version of the former runtime) in a throwaway Node container,
-# so the host needs only Docker. Commit the result.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && (pwd -W 2>/dev/null || pwd))"
 MSYS_NO_PATHCONV=1 docker run --rm -v "${ROOT}:/repo" -w /repo node:20-alpine sh -c "

@@ -4,11 +4,9 @@ const path = require('node:path');
 const vm = require('node:vm');
 const { test } = require('node:test');
 
-// Exercise the shipped handler, without booting unrelated page modules.
 const source = fs.readFileSync(path.join(__dirname, '../../frontend/export.js'), 'utf8');
 const handler = source.match(/async function exportCSV\(type\) \{[\s\S]*?\n\}/)?.[0];
 assert.ok(handler, 'The CSV download handler must be present');
-// The words a failure is shown with (utils.js)
 const utils = fs.readFileSync(path.join(__dirname, '../../frontend/utils.js'), 'utf8');
 const errorStart = utils.indexOf('function uiApiErrorText(');
 const errorHelpers = utils.slice(errorStart, utils.indexOf('\n// ====', errorStart));

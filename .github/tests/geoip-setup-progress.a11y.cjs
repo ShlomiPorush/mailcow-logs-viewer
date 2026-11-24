@@ -1,8 +1,3 @@
-// GeoIP setup in a real DOM (jsdom) over the real index.html and page scripts:
-// when the download fails its progress bar ends red and full, and when it does
-// not finish in time amber, in the state colors meters use (app.js mailbox
-// storage), instead of staying blue part of the way.
-// Set A11Y_MODULES to jsdom's node_modules to run it locally (see layers.a11y.cjs).
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -23,8 +18,6 @@ const HTML = (() => {
 const opened = [];
 afterEach(() => { while (opened.length) opened.pop().close(); });
 
-// The app with the setup's requests answered: a license that checks out and no
-// databases yet, so the setup downloads; the download run answers result
 function page(result) {
     const dom = new JSDOM(HTML.replace('</head>', '<style>.hidden { display: none; }</style></head>'), {
         runScripts: 'dangerously', pretendToBeVisual: true, url: 'http://localhost/settings/maxmind',
@@ -53,7 +46,6 @@ function page(result) {
             : {};
         return { ok: true, status: 200, json: async () => body };
     };
-    // The run's own result; geoipDownloadRun is tested on its own (geoip-download-run.test.cjs)
     w.geoipDownloadRun = async () => result;
     return w;
 }

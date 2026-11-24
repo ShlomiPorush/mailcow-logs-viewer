@@ -1,12 +1,3 @@
-"""Seed the smoke-test database with a small, fake data set.
-
-Runs inside the application container (cwd /app) so it uses the app's own
-models: a schema change that breaks the seed fails loudly instead of the
-browser pass silently testing empty pages. Every address, domain and IP is
-fake: example.com/.org/.net, .test, and the RFC 5737 documentation ranges.
-
-Usage (from smoke.sh): docker exec -i -w /app <app> python - < smoke_seed.py
-"""
 import hashlib
 import json
 from datetime import datetime, timedelta, timezone
@@ -16,7 +7,6 @@ from app import models as m
 
 NOW = datetime.utcnow()
 ago = lambda **kw: NOW - timedelta(**kw)
-# Unix seconds of a naive UTC time (timestamp() alone would read it as the container's local time)
 epoch = lambda dt: int(dt.replace(tzinfo=timezone.utc).timestamp())
 sha = lambda s: hashlib.sha256(s.encode()).hexdigest()
 
@@ -146,7 +136,6 @@ def seed_mailboxes(db):
 
 
 def seed_devices(db):
-    # A connected phone, a new tablet failing to sign in, and a phone gone quiet
     for user, device_id, kind, ip, command, status, first, last in [
         ('dana@example.com', 'ApplF2C8A1D94B7E', 'iPhone', '192.0.2.10', 'Ping', 200, ago(days=40), ago(minutes=12)),
         ('noa@example.org', 'ApplDMPXK2LZ9B1E', 'iPad', '2001:db8::7', 'Sync', 401, ago(days=2), ago(hours=3)),

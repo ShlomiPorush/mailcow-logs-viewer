@@ -1,6 +1,3 @@
-// The browser loads nothing from outside the app: no CDN, no web fonts, no
-// remote images (see "Everything is served locally" in
-// documentation/UI_Behavior_Catalog.md). Links a user clicks (<a href>) are fine.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -40,7 +37,7 @@ test('stylesheets load fonts and images only from the app, and every file exists
             const target = m[1];
             if (target.startsWith('data:')) continue;
             if (EXTERNAL.test(target)) { problems.push(`${rel}: url(${target})`); continue; }
-            if (target.startsWith('/')) continue;   // absolute app path, served by the backend
+            if (target.startsWith('/')) continue;
             const resolved = path.resolve(path.dirname(file), target.split(/[?#]/)[0]);
             if (!fs.existsSync(resolved)) problems.push(`${rel}: url(${target}) does not exist`);
         }

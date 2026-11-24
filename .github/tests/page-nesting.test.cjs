@@ -3,12 +3,6 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { test } = require('node:test');
 
-// Every page must sit directly in the content area. A wrapper opened in one
-// page and closed in the wrong place nests the following pages inside it, and
-// they vanish whenever that page is hidden - while the div count stays even.
-// Comments and scripts are cut out by position rather than by a pattern, so nothing
-// inside them is read as markup. A script ends at the '>' after '</script', so
-// '</script >' ends it too.
 function cutBlocks(text, open, close) {
     const lower = text.toLowerCase();
     let out = '';

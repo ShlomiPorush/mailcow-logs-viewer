@@ -1,10 +1,3 @@
-// A toast with an action (utils.js showToast): Undo after a dismissal, Retry after
-// a failure. Its role, the action's own name, the keyboard's place when a toast
-// is replaced, a pause while it has the focus, and a failure that stays until
-// closed. Runs in a real DOM (jsdom), installed by CI outside the repository;
-// set A11Y_MODULES to run it locally:
-//   npm install --no-save --prefix /tmp/a11y jsdom axe-core
-//   A11Y_MODULES=/tmp/a11y/node_modules node --test .github/tests/toast-action.a11y.cjs
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -53,7 +46,6 @@ test('a toast replaced while the keyboard is in it hands the keyboard to the new
     assert.equal(w.document.querySelectorAll('#toast-notification').length, 1);
     assert.equal(w.document.activeElement.textContent, 'Undo');
     assert.ok(w.document.getElementById('toast-notification').contains(w.document.activeElement));
-    // Not in it: the keyboard stays where it was
     w.document.getElementById('row').focus();
     w.showToast('Saved', 'success');
     assert.equal(w.document.activeElement.id, 'row');
@@ -136,7 +128,7 @@ test('an action clicked while its toast fades keeps the toast until it is done',
     let finish;
     w.showToast('Alert dismissed', 'success', { duration: 60, action: { label: 'Undo', onAction: () => new w.Promise(r => { finish = r; }) } });
     const toast = w.document.getElementById('toast-notification');
-    await wait(120);   // the fade has begun
+    await wait(120);
     assert.equal(toast.style.opacity, '0');
     toast.querySelector('.ui-toast-action').click();
     await wait(600);

@@ -1,6 +1,3 @@
-// Outbound (Queue and Suppressions) and the Rspamd page (the maps): old
-// addresses and old history entries open the new place, and each Outbound tab
-// follows its own feature switch, the page going only when both are off.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -9,7 +6,6 @@ const { test } = require('node:test');
 
 const frontend = path.join(__dirname, '../../frontend');
 
-// Any other DOM access returns another inert stub, so a file's top-level code runs
 function stub() {
     const fn = function () { return proxy; };
     const proxy = new Proxy(fn, {
@@ -66,12 +62,10 @@ function load(files, { pathname = '/', disabled = [] } = {}) {
     return { context, elements, calls, listeners };
 }
 
-// Objects made in the page's realm, compared by value
 const plain = value => JSON.parse(JSON.stringify(value));
 
 function loadRouter(pathname) {
     const r = load(['router.js'], { pathname });
-    // The pages' own state, kept in app.js
     vm.runInContext(`var outboundTab = 'queue', quarantineTab = 'messages', settingsTab = 'features', settingsFirstTab = 'features';`, r.context);
     r.context.switchTab = (route, params) => r.calls.switchTab.push({ route, params });
     return r;
@@ -89,7 +83,6 @@ test('the old addresses open the new places', () => {
         const info = r.context.initRouter();
         assert.equal(info.baseRoute, route, pathname);
         assert.equal(info.params.sub, sub, pathname);
-        // The address bar shows the new address, without a new history entry
         assert.equal(r.calls.replaceState.at(-1).url, canonical, pathname);
         assert.equal(r.calls.pushState.length, 0);
     }
@@ -150,7 +143,6 @@ test('each Outbound tab follows its own switch', () => {
         assert.equal(a.elements['mobile-tab-outbound'].style.display, nav, `sheet, off: ${disabled}`);
         assert.equal(hidden(a, 'outbound-tab-btn-queue'), queueGone, `Queue tab, off: ${disabled}`);
         assert.equal(hidden(a, 'outbound-tab-btn-suppressions'), suppressionsGone, `Suppressions tab, off: ${disabled}`);
-        // One tab left: no tab bar
         assert.equal(hidden(a, 'outbound-tabs'), barGone, `tab bar, off: ${disabled}`);
     }
 });
@@ -161,7 +153,6 @@ test('the Rspamd page has its own switch, and Quarantine keeps its two tabs', ()
     assert.equal(a.elements['tab-rspamd'].style.display, 'none');
     assert.equal(a.elements['mobile-tab-rspamd'].style.display, 'none');
     assert.equal(a.elements['tab-quarantine'].style.display, '');
-    // Suppressions no longer offer to open the map
     assert.equal(a.elements['suppression-open-map'].style.display, 'none');
 
     a = loadApp(['quarantine']);
@@ -196,7 +187,6 @@ test('a page goes only when all of its switches are off', () => {
     a.context.loadSuppressionStats = () => loaded.push('stats');
     a.context.switchTab('outbound', { sub: 'queue' });
     assert.doesNotMatch(a.elements['content-outbound'].innerHTML, /is disabled/);
-    // Queue is off: only the Suppressions tab shows, and the queue is not asked
     assert.deepEqual(loaded, ['suppressions']);
     assert.equal(hidden(a, 'outbound-tab-suppressions'), false);
     assert.equal(hidden(a, 'outbound-tab-queue'), true);
@@ -209,7 +199,6 @@ test('a page goes only when all of its switches are off', () => {
 });
 
 test('the old feature name is not used in the code any more', () => {
-    // Only the alias in the router (old addresses) may still name spam-filter
     for (const file of fs.readdirSync(frontend).filter(f => f.endsWith('.js') || f.endsWith('.html'))) {
         const text = fs.readFileSync(path.join(frontend, file), 'utf8');
         const uses = text.match(/['"`]spam-filter['"`]/g) || [];
@@ -218,7 +207,6 @@ test('the old feature name is not used in the code any more', () => {
 });
 
 test('falling back from a tab that is off replaces the history entry instead of adding one', () => {
-    // Queue off, Outbound open on Suppressions, Back to an entry that names the Queue tab
     let a = loadApp(['queue']);
     a.context.loadSuppressionsTab = () => {};
     a.context.loadSuppressionStats = () => {};
@@ -227,7 +215,6 @@ test('falling back from a tab that is off replaces the history entry instead of 
     a.context.switchTab('outbound', { sub: 'queue' });
     assert.deepEqual(plain(a.synced), [{ route: 'outbound', sub: 'suppressions', replace: true }]);
 
-    // A tab the user picks adds an entry, as before
     a = loadApp([]);
     a.context.loadQueue = () => {};
     a.context.loadSuppressionsTab = () => {};
@@ -263,7 +250,6 @@ test('Suppressions open the map they are written to on the Rspamd page', async (
     assert.deepEqual(went, ['rspamd']);
     await a.context.loadRspamdMaps();
     assert.deepEqual(opened, ['global_rcpt_blacklist.map']);
-    // Only once: the next visit shows the list
     await a.context.loadRspamdMaps();
     assert.deepEqual(opened, ['global_rcpt_blacklist.map']);
 });

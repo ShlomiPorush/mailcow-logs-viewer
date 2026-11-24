@@ -1,25 +1,4 @@
 #!/usr/bin/env python3
-"""Browser pass over every page of a running mailcow Logs Viewer.
-
-Opens each SPA route in headless Chromium, clicks every control that only
-switches what is shown (sub-tabs, views, date presets, filters), opens the
-detail views of the seeded data (smoke_seed.py) and fails on:
-
-  - an uncaught JavaScript error,
-  - an inline handler (onclick="fn()" and friends) whose function does not
-    exist at runtime, including handlers rendered from API data,
-  - an API call to a path the backend does not serve (checked against
-    /openapi.json, because the SPA catch-all answers unknown paths with 200),
-  - an API response of 404 or any 5xx that is not listed in EXPECTED_ERRORS,
-  - an API answer that does not match what /openapi.json says the operation
-    returns (operations that document nothing yet are counted as skipped).
-
-Buttons that act (run, save, delete, ban, release) are never clicked.
-
-Usage: python ui_smoke.py <base url>
-Run it with: UI_SMOKE=1 bash .github/scripts/smoke.sh <image tag>
-It runs inside mcr.microsoft.com/playwright/python; CI does not run it.
-"""
 import json
 import re
 import sys
@@ -62,8 +41,6 @@ EXPECTED_ERRORS = [
 
 MAX_CLICKS_PER_PAGE = 60
 
-# Runs in the page: clicks the next not-yet-clicked, visible control that is
-# safe to press, and returns its key (or null when there is none left).
 CLICK_NEXT_JS = r"""([safePattern, openPattern, selectors, openCap]) => {
     const state = (window.__uiSmoke ||= { seen: new Set(), perFn: {} });
     const safe = new RegExp(safePattern), open = new RegExp(openPattern);
@@ -93,8 +70,6 @@ CLICK_NEXT_JS = r"""([safePattern, openPattern, selectors, openCap]) => {
     return null;
 }"""
 
-# Runs in the page: every inline handler must resolve to a function. Uses the
-# Function constructor so top-level const/let functions are visible too.
 MISSING_HANDLERS_JS = r"""() => {
     const attrs = ['onclick', 'onchange', 'oninput', 'onsubmit', 'onkeyup', 'onkeydown'];
     const skip = new Set(['if', 'for', 'while', 'switch', 'return', 'typeof', 'function', 'new']);
@@ -123,9 +98,6 @@ def fetch(path):
 
 
 def route_matchers(spec):
-    """(regex, path template) for every path the backend serves, from its OpenAPI schema.
-    Templates with fewer parameters come first, so /api/messages/new is not taken
-    for a /api/messages/{id}."""
     out = []
     for p in sorted(spec['paths'], key=lambda t: t.count('{')):
         parts = []
@@ -141,7 +113,6 @@ def route_matchers(spec):
 
 
 def spa_routes():
-    """URL paths for every page the router accepts (router.js is the source)."""
     router = fetch('/static/router.js')
     valid = re.findall(r"'([^']+)'", re.search(r'const VALID_ROUTES = \[(.*?)\];', router, re.S).group(1))
     display = dict(re.findall(r"'([^']+)':\s*'([^']+)'",
@@ -153,13 +124,8 @@ def expected(method, path, status):
     return any(m == method and re.search(rx, path) and s == status for m, rx, s, _ in EXPECTED_ERRORS)
 
 
-# The API reference (/docs) runs the vendored Scalar bundle, which can talk to
-# scalar.com in several ways that frontend/api-docs.js turns off. Only a real
-# browser shows whether a new bundle still honours that, so run this pass
-# after every Scalar update.
 SCALAR_FEATURES = ['Open API Client', 'Ask AI', 'Generate MCP', 'Connect MCP', 'Generate SDK',
                    'Developer Tools', 'Share', 'Register', 'Deploy']
-# "Powered by Scalar": plain links that carry nothing about this server
 SCALAR_CREDITS = {'https://scalar.com/?utm_source=powered-by&utm_medium=api-reference', 'https://www.scalar.com/'}
 
 
@@ -180,7 +146,6 @@ def check_api_docs(browser):
 
     page.goto(f'{BASE}/docs', wait_until='networkidle', timeout=60000)
     page.wait_for_selector("a[href*='GET/api/health']", state='attached', timeout=30000)
-    # A second reference means the bundle started one of its own, with Scalar's defaults
     if page.locator('.darklight-reference').count() != 1:
         problems.append('more than one reference on the page')
     check_page('reference')
@@ -236,7 +201,7 @@ def main():
                 return
             try:
                 body = resp.body()
-            except Exception:   # a redirect or an aborted request: nothing to read
+            except Exception:
                 body = None if resp.status < 300 or resp.status >= 400 else b''
             outcome, reason = check_answer(operation, spec.get('components', {}), resp.status,
                                            resp.headers.get('content-type', ''), body)
@@ -262,10 +227,6 @@ def main():
 
             clicked = set()
             for _ in range(MAX_CLICKS_PER_PAGE):
-                # Re-query each time: a click may re-render the page. The click
-                # is dispatched on the element itself so an open modal or
-                # overlay cannot swallow it; handler exceptions still surface
-                # as 'pageerror'.
                 target = page.evaluate(CLICK_NEXT_JS, [SAFE_CLICK.pattern, OPEN_CLICK.pattern, SAFE_SELECTORS, OPEN_CAP])
                 if not target:
                     break
