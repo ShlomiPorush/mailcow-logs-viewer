@@ -237,8 +237,6 @@ test('a Rate Limits hour bucket is a UTC instant shown in the app zone', () => {
     assert.equal(c.rateLimitBucketLabel('2026-10-25T00:00:00Z', 'hour'), '02:00');
     assert.equal(c.rateLimitBucketLabel('2026-10-25T01:00:00Z', 'hour'), '02:00');
     assert.equal(c.rateLimitBucketLabel('2026-10-25T02:00:00Z', 'hour'), '03:00');
-    // The older shape, the UTC hour without a zone
-    assert.equal(c.rateLimitBucketLabel('2026-10-25T02:00', 'hour'), '03:00');
     assert.equal(c.rateLimitBucketLabel('2026-10-25', 'day'), '25.10');
     const utc = load(['rate-limits.js'], 'UTC');
     assert.equal(utc.rateLimitBucketLabel('2026-10-25T02:00:00Z', 'hour'), '02:00');

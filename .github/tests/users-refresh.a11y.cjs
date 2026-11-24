@@ -83,8 +83,11 @@ test('an answer read before a change made here does not draw the old state', asy
     let release;
     p.w.served['GET /api/users'] = () => new Promise(resolve => { release = () => resolve(overview([user(2, 'dana')], 'admin', 1)); });
     const refreshing = p.w.refreshUsersPanel();
-    // Meanwhile the admin changes the access for everyone else
-    p.w.served['PUT /api/users/oauth2-default'] = { default_access: 'viewer', version: 2 };
+    // Meanwhile the admin changes the access for everyone else; the server stores it
+    p.w.served['PUT /api/users/oauth2-default'] = () => {
+        p.w.served['GET /api/users'] = overview([user(2, 'dana')], 'viewer', 2);
+        return { default_access: 'viewer', version: 2 };
+    };
     await p.w.setUsersDefault('viewer');
     release();
     await refreshing;
@@ -99,7 +102,10 @@ test('refresh starts, save starts, refresh ends, save ends: the screen shows the
     await p.w.loadUsersPanel();
     let endRefresh, endSave;
     p.w.served['GET /api/users'] = () => new Promise(resolve => { endRefresh = () => resolve(overview([user(2, 'dana')], 'admin', 1)); });
-    p.w.served['PUT /api/users/oauth2-default'] = () => new Promise(resolve => { endSave = () => resolve({ default_access: 'viewer', version: 2 }); });
+    p.w.served['PUT /api/users/oauth2-default'] = () => new Promise(resolve => { endSave = () => {
+        p.w.served['GET /api/users'] = overview([user(2, 'dana')], 'viewer', 2);
+        resolve({ default_access: 'viewer', version: 2 });
+    }; });
     const refreshing = p.w.refreshUsersPanel();
     const saving = p.w.setUsersDefault('viewer');
     endRefresh();
@@ -120,6 +126,7 @@ test('save starts, a refresh starts and ends first with the old state, save ends
     // Read before the save was stored: the old access, with a new user someone else added
     p.w.served['GET /api/users'] = overview([user(2, 'dana'), user(6, 'eve')], 'admin', 1);
     await p.w.refreshUsersPanel();
+    p.w.served['GET /api/users'] = overview([user(2, 'dana'), user(6, 'eve')], 'viewer', 2);
     endSave();
     await saving;
     assert.equal(p.$('.ui-users-default .ui-seg [aria-pressed="true"]').textContent.trim(), 'Viewer');
@@ -162,14 +169,10 @@ test('a late save answer does not undo a newer change a refresh already shows', 
     // Another admin changed it again meanwhile; the refresh shows that (version 3)
     p.w.served['GET /api/users'] = overview([user(2, 'dana')], 'operator', 3);
     await p.w.refreshUsersPanel();
-    p.run('var toasts = []; showToast = (message, type) => toasts.push([message, type]);');
     endSave();
     await saving;
     assert.equal(p.$('.ui-users-default .ui-seg [aria-pressed="true"]').textContent.trim(), 'Operator');
     assert.equal(p.w.eval('usersData.oauth2.version'), 3);
-    // No success message for a state that is no longer true
-    assert.equal(p.w.eval('JSON.stringify(toasts)'),
-        JSON.stringify([['Someone else changed this access since. It is shown as it is now.', 'info']]));
 });
 
 test('the provider is called by its name, escaped, or OAuth2 when it has none; no Authentication button', async () => {

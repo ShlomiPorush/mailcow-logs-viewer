@@ -137,8 +137,7 @@ function renderRspamdMapsList(maps, rwKeyConfigured) {
                 <div class="ui-list-head"><h2 class="ui-h2">${cat.label}</h2> <span class="ui-count">${cat.maps.length}</span></div>
                 <div class="ui-table ui-stack ui-map-table">
                     ${cat.maps.map(m => {
-                        // Use our metadata description, not the rspamd technical description
-                        const displayDesc = _getMapMetaDescription(m.filename) || m.description || '';
+                        const displayDesc = m.description || '';
                         return `
                         <div class="ui-tr" role="button" tabindex="0" data-row-open onclick="if (!uiRowHeld(event)) openMapEditor('${escapeJsArg(m.filename)}')">
                             <div class="ui-td ui-q-who">
@@ -1322,29 +1321,6 @@ function toggleSuppressionMoreMenu() {
 // =============================================================================
 // HELPER FUNCTIONS
 // =============================================================================
-
-/**
- * Static map descriptions lookup (fallback if backend sends Rspamd's technical description)
- */
-const _MAP_META_DESCRIPTIONS = {
-    'global_mime_from_blacklist.map': 'Block emails by From header address',
-    'global_mime_from_whitelist.map': 'Allow emails by From header address',
-    'global_smtp_from_blacklist.map': 'Block by envelope sender address',
-    'global_smtp_from_whitelist.map': 'Allow by envelope sender address',
-    'global_rcpt_blacklist.map': 'Block sending to these recipient addresses',
-    'global_rcpt_whitelist.map': 'Allow sending to these recipient addresses',
-    'fishy_tlds.map': 'Suspicious TLDs (only fired in combination with bad words)',
-    'bad_words.map': 'Bad words (only fired in combination with fishy TLDs)',
-    'bad_words_de.map': 'German bad words (only fired in combination with fishy TLDs)',
-    'bad_languages.map': 'Blocked languages',
-    'bulk_header.map': 'Bulk/mass mail header patterns',
-    'bad_header.map': 'Junk mail header patterns',
-    'monitoring_nolog.map': 'Hosts excluded from logging',
-};
-
-function _getMapMetaDescription(filename) {
-    return _MAP_META_DESCRIPTIONS[filename] || null;
-}
 
 /**
  * Extract clean domain from regex pattern like /.+@example\.com/i → example.com

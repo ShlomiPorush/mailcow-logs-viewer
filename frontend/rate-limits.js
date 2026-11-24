@@ -270,9 +270,7 @@ function rateLimitBucketLabel(bucket, granularity) {
     if (!bucket) return '';
 
     if (granularity === 'hour') {
-        // An older server sends the UTC hour without a zone (YYYY-MM-DDTHH:00)
-        const date = new Date(/(Z|[+-]\d{2}:?\d{2})$/.test(bucket) ? bucket : `${bucket}:00Z`);
-        return formatClock(date, { compact: true });
+        return formatClock(new Date(bucket), { compact: true });
     }
 
     return formatDayKey(bucket, { year: false });
@@ -768,13 +766,9 @@ function applyRateLimitConfigFilters() {
     const card = document.getElementById('rate-limits-config-card');
     if (!card) return;
 
-    const q = rateLimitConfigSearch.trim().toLowerCase();
     let shown = 0;
     card.querySelectorAll('tbody tr[data-rl-name]').forEach(tr => {
-        const matchesName = !q || (tr.dataset.rlName || '').includes(q);
-        const matchesKind = rateLimitConfigFilter === 'all' || tr.dataset.rlKind === rateLimitConfigFilter;
-        const matchesLimit = !rateLimitHideUnlimited || tr.dataset.rlLimited === '1';
-        const match = matchesName && matchesKind && matchesLimit;
+        const match = rateLimitConfigMatches(tr.dataset.rlKind, tr.dataset.rlName, tr.dataset.rlLimited === '1');
         tr.classList.toggle('hidden', !match);
         if (match && !tr.hasAttribute('data-rl-editrow')) shown++;
     });
@@ -793,9 +787,9 @@ function applyRateLimitConfigFilters() {
 // opening 40 rows one after another. What gets changed is exactly what the
 // table shows: search plus the type chips, nothing hidden.
 
-// The match applyRateLimitConfigFilters runs on the rows, run against the data
-// instead of the DOM - the counts have to be right even while the table is
-// being rebuilt, and the DOM is only ever a picture of this
+// One match for the table's rows and for the bulk targets, so a bulk apply
+// writes exactly the rows shown; the targets are read from the data, which
+// stays right even while the table is being rebuilt
 function rateLimitConfigMatches(kind, name, value) {
     const q = rateLimitConfigSearch.trim().toLowerCase();
     const matchesName = !q || (name || '').toLowerCase().includes(q);

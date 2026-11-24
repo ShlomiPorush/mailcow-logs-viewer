@@ -605,19 +605,9 @@ async function setUsersDefault(value) {
             if (response.status === 409) loadUsersPanel();
             return;
         }
-        // Onto the list as it is now (a refresh may have replaced it meanwhile); one that
-        // started during the save and is still on its way is dropped
-        usersSeq++;
-        // A newer version already shown (another admin changed it since) stays
-        const current = usersData.oauth2;
-        const latest = Number(body.version) >= Number(current.version);
-        if (latest) {
-            current.default_access = body.default_access || value;
-            current.version = body.version;
-        }
-        renderUsersPanel();
-        if (latest) showToast(value === 'none' ? 'Only users on the list can sign in now' : 'Access changed', 'success');
-        else showToast('Someone else changed this access since. It is shown as it is now.', 'info');
+        showToast(value === 'none' ? 'Only users on the list can sign in now' : 'Access changed', 'success');
+        // Awaited, so a second change sends the new version and is not told "changed meanwhile"
+        await loadUsersPanel();
     } catch (e) {
         showToast(`Could not change the access: ${uiErrorText(e)}`, 'error');
     }

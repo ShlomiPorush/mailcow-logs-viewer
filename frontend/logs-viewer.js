@@ -843,10 +843,6 @@ async function connectLogWebSocket(serviceId) {
                     }
                 } else if (data.type === 'error') {
                     console.warn('[LOGS WS] Server error:', data.message);
-                    // Don't reconnect on auth errors
-                    if (data.message && data.message.includes('Authentication')) {
-                        logsState._authFailed = true;
-                    }
                 } else if (data.type === 'connected' || data.type === 'subscribed') {
                     console.log('[LOGS WS]', data.message);
                 }
@@ -867,9 +863,8 @@ async function connectLogWebSocket(serviceId) {
             }
 
             // Don't reconnect on authentication failure
-            if (event.code === 4401 || logsState._authFailed) {
+            if (event.code === 4401) {
                 console.warn('[LOGS WS] Authentication failed - not reconnecting');
-                logsState._authFailed = false;
                 return;
             }
             

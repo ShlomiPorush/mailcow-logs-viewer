@@ -88,7 +88,8 @@ function alertActivityQuarters(data) {
     });
 }
 
-// The span the range buttons show: the last hours of the data
+// The span the range buttons show: the last hours of the data, from the first
+// quarter at or after their start, as the chart's columns start
 function alertActivityRangeSpan(data) {
     const q = alertActivityQuarters(data);
     if (!q.length) return null;
@@ -97,7 +98,8 @@ function alertActivityRangeSpan(data) {
     const to = q[q.length - 1].end;
     // As before: the chosen hours and the two after the alert, from the end of the data
     const from = Math.max(q[0].start, to - (hours + 2) * 3600000);
-    return { from, to };
+    const quarter = data.bucket_minutes * 60000;
+    return { from: Math.min(to, q[0].start + Math.ceil((from - q[0].start) / quarter) * quarter), to };
 }
 
 // The columns of a span: quarters of an hour up to two days, hours beyond
@@ -205,23 +207,9 @@ function alertActivitySnap(data) {
     };
 }
 
-// A span as the chart shows it: its columns start on the first quarter at or after its start
-function alertActivityShown(data, span) {
-    const l = alertActivityLimits(data), quarter = data.bucket_minutes * 60000;
-    return { from: Math.min(span.to, l.from + Math.ceil((span.from - l.from) / quarter) * quarter), to: span.to };
-}
-
 // Show a span: snapped to the quarters (at least the shortest span); the pressed range's own span is no zoom
 function alertActivityShow(data, next) {
     const l = alertActivityLimits(data), snap = alertActivitySnap(data);
-    // The range itself, asked as it is: no zoom
-    const raw = alertActivityRangeSpan(data);
-    if (raw && Math.abs(next.from - raw.from) <= 1 && Math.abs(next.to - raw.to) <= 1) {
-        alertActivityZoom = null;
-        alertActivityPick = null;
-        renderAlertActivity();
-        return;
-    }
     let from = snap(next.from), to = snap(next.to);
     if (to - from < l.min) {
         to = Math.min(l.to, snap(from + l.min));
@@ -231,8 +219,7 @@ function alertActivityShow(data, next) {
             from = Math.max(l.from, l.from + Math.floor((to - l.min - l.from) / quarter) * quarter);
         }
     }
-    // The range is counted back from the data's end, off the quarters: compared as the chart shows it
-    const range = raw && alertActivityShown(data, raw);
+    const range = alertActivityRangeSpan(data);
     alertActivityZoom = range && Math.abs(range.from - from) <= 1 && Math.abs(range.to - to) <= 1 ? null : { from, to };
     alertActivityPick = null;
     renderAlertActivity();
@@ -260,7 +247,7 @@ function alertActivityOverview(data, span) {
     alertActivityOverviewer = uiTimeOverview(strip, {
         limits: () => l,
         // Its edges where the chart's columns are
-        span: () => alertActivityShown(data, span),
+        span: () => span,
         snap: alertActivitySnap(data),
         // One step is one bar of the strip, a big step a day
         step: (t, dir, big) => (big ? t + dir * 86400000

@@ -9,8 +9,6 @@ let protectionRules = null;
 let protectionCaps = { can_ban: false, geoip: false, raw_logs: false };
 let protectionSuggestions = [];
 let protectionCountrySuggestions = [];
-let protectionHits = [];
-let protectionCounts = {};
 let protectionDirty = false;
 let protectionSaved = null;  // the rules as stored, to count unsaved changes
 
@@ -29,14 +27,9 @@ let protectionLoadError = null;
 
 async function loadProtection() {
     try {
-        const [rulesRes, hitsRes] = await Promise.all([
-            authenticatedFetch('/api/protection/rules'),
-            authenticatedFetch('/api/protection/hits?status=active&limit=500')
-        ]);
+        const rulesRes = await authenticatedFetch('/api/protection/rules');
         if (!rulesRes.ok) throw await responseError(rulesRes);
-        if (!hitsRes.ok) throw await responseError(hitsRes);
         const rulesData = await rulesRes.json();
-        const hitsData = await hitsRes.json();
         // Unsaved edits stay on screen through the page's own refresh
         if (!protectionDirty) {
             protectionRules = rulesData.rules;
@@ -45,8 +38,6 @@ async function loadProtection() {
         protectionCaps = rulesData.capabilities || protectionCaps;
         protectionSuggestions = rulesData.trap_suggestions || [];
         protectionCountrySuggestions = rulesData.country_suggestions || [];
-        protectionHits = hitsData.hits || [];
-        protectionCounts = hitsData.counts || {};
         protectionLoadError = null;
         renderProtection();
     } catch (error) {
@@ -149,9 +140,7 @@ function protectionChangeCount() {
     let n = 0;
     for (const [rule, values] of Object.entries(protectionRules)) {
         for (const [key, value] of Object.entries(values)) {
-            const saved = (protectionSaved[rule] || {})[key];
-            // Number inputs hand over strings; 5 and "5" are the same setting
-            if (String(JSON.stringify(value)).replace(/"/g, '') !== String(JSON.stringify(saved)).replace(/"/g, '')) n++;
+            if (JSON.stringify(value) !== JSON.stringify((protectionSaved[rule] || {})[key])) n++;
         }
     }
     return n;
