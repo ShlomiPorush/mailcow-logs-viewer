@@ -1,16 +1,9 @@
-// =============================================================================
-// PROTECTION RULES (Security page: their data and editing; security.js draws them)
-// The rules read the failed logins and catch the addresses that attack. A rule
-// in watch mode only notes what it catches; in ban mode the address goes on
-// the Fail2ban blacklist for the rule's ban length. The breach alert never bans.
-// =============================================================================
-
 let protectionRules = null;
 let protectionCaps = { can_ban: false, geoip: false, raw_logs: false };
 let protectionSuggestions = [];
 let protectionCountrySuggestions = [];
 let protectionDirty = false;
-let protectionSaved = null;  // the rules as stored, to count unsaved changes
+let protectionSaved = null;
 
 const PROTECTION_RULE_LABELS = {
     trap: 'Trap account',
@@ -30,7 +23,6 @@ async function loadProtection() {
         const rulesRes = await authenticatedFetch('/api/protection/rules');
         if (!rulesRes.ok) throw await responseError(rulesRes);
         const rulesData = await rulesRes.json();
-        // Unsaved edits stay on screen through the page's own refresh
         if (!protectionDirty) {
             protectionRules = rulesData.rules;
             protectionSaved = JSON.parse(JSON.stringify(rulesData.rules));
@@ -48,8 +40,6 @@ async function loadProtection() {
     loadProtectionOverview();
 }
 
-// Only the hits refresh on the page's timer; the rule editors keep their state.
-// Rules that could not load are tried again
 function refreshProtectionHits() {
     if (protectionLoadError || !protectionRules) return loadProtection();
     loadProtectionOverview();
@@ -59,19 +49,13 @@ function protectionOpenCount(counts) {
     return (counts.watching || 0) + (counts.pending || 0) + (counts.alert || 0);
 }
 
-// ----------------------------------------------------------------- rule cards
-// The rules are edited in the Security page's Settings cards (security.js)
-
 function renderProtection() {
     renderSecuritySettings();
     markProtectionDirty();
-    // The Overview shows which rules are on, and the countries the Countries rule watches
     renderSecurityOverview();
     renderSecurityCountries();
 }
 
-// Every country GeoIP can name, by its ISO 3166-1 code, named in English by the
-// browser itself. Unions, test codes and retired codes the browser also knows are left out.
 const PROTECTION_NOT_COUNTRIES = new Set(('EU EZ UN QO XA XB ZZ AC CP CQ DG EA IC TA '
     + 'AN BU CS DD DY FX NT SU TP YD YU ZR HV NH RH UK VD').split(' '));
 let protectionCountryList = null;
@@ -101,7 +85,6 @@ function protectionCountryName(code) {
     return known ? `${known.name} (${code})` : code;
 }
 
-// A country from the field: a pick from the list ("Indonesia (ID)"), a name, or a two-letter code
 function protectionCountryCode(value) {
     const text = String(value || '').trim();
     const picked = text.match(/\(([A-Za-z]{2})\)$/);
@@ -111,12 +94,9 @@ function protectionCountryCode(value) {
     return named ? named.code : '';
 }
 
-// A pick from the list is added at once, without pressing Add
 function protectionCountryPicked(field) {
     if (/\([A-Za-z]{2}\)$/.test(field.value.trim()) && addProtectionCountry(field.value)) field.value = '';
 }
-
-// ----------------------------------------------------------------- hits
 
 function protectionStatus(hit) {
     switch (hit.status) {
@@ -124,7 +104,6 @@ function protectionStatus(hit) {
         case 'pending': return uiTag(hit.error ? 'Not banned yet' : 'Banning', 'warn');
         case 'banned': return uiTag(hit.expires_at ? `Banned until ${formatTime(hit.expires_at)}` : 'Banned until removed', 'fail');
         case 'alert': return uiTag('Alert', 'fail');
-        // A watched catch that went quiet was never banned
         case 'expired': return uiTag(hit.mode === 'watch' ? 'No new activity' : 'Ban ended', '');
         case 'undone': return uiTag('Ban undone', '');
         case 'dismissed': return uiTag('Dismissed', '');
@@ -132,9 +111,6 @@ function protectionStatus(hit) {
     }
 }
 
-// ----------------------------------------------------------------- editing
-
-// Count the settings that differ from the stored rules, like the Settings page
 function protectionChangeCount() {
     if (!protectionRules || !protectionSaved) return 0;
     let n = 0;
@@ -192,7 +168,6 @@ function addProtectionCountry(value) {
     }
     if (!protectionRules.country.countries.includes(code)) protectionRules.country.countries.push(code);
     renderProtection();
-    // The field is drawn again: the next country can be typed right away
     const field = document.querySelector('#security-card-country input[name="code"]');
     if (field) field.focus();
     return true;
@@ -234,7 +209,6 @@ async function protectionHitAction(id, action, button, done) {
         if (done) showToast(done(data), 'success');
         refreshProtectionHits();
         if (action !== 'dismiss') {
-            // The blacklist changed: show it in the Overview and the Lists
             fail2banSettingsLoaded = false;
             loadFail2BanSettings();
         }

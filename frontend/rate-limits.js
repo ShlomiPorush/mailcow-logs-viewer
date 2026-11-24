@@ -1,20 +1,3 @@
-// =============================================================================
-// RATE LIMITS - who is hitting mailcow's sender rate limits, and the limits
-// =============================================================================
-// Classic script sharing the global scope; loaded after utils.js and app.js
-// in index.html.
-//
-// This is a view of the Mailbox Stats page, not a page of its own. The view
-// switcher lives in mailbox-stats.js. One scrolling page, three cards:
-// activity over time, the blocked senders (master-detail), and the configured
-// limits of every mailbox and domain in one table.
-//
-// Two things here are easy to confuse:
-//   the LIMIT is configuration - so many messages per time frame
-//   the COUNTER is what a blocked sender is stuck behind right now; releasing
-//   it lets them send again without changing their limit
-
-
 const RATE_LIMIT_FRAME_LABELS = {
     s: 'second',
     m: 'minute',
@@ -23,36 +6,22 @@ const RATE_LIMIT_FRAME_LABELS = {
 };
 
 
-// Edit, Cancel and Apply to filtered share one size so the action column
-// never changes width
 const RATE_LIMIT_ACTION_BUTTON = 'ui-btn ui-btn-sm';
-// The one thing a form on this page actually does
 const RATE_LIMIT_SAVE_BUTTON = 'ui-btn ui-btn-sm ui-btn-primary';
 
 let rateLimitWindowHours = 720;
 let rateLimitSenderSearch = '';
 let rateLimitConfigSearch = '';
-// 'all' | 'mailbox' | 'domain'
 let rateLimitConfigFilter = 'all';
-// Hide the mailboxes and domains that have no limit set
 let rateLimitHideUnlimited = false;
 let rateLimitEventsData = null;
 let rateLimitConfigData = null;
-// { kind: 'mailbox' | 'domain', name: string } while one row's form is open
 let rateLimitEditing = null;
-// The "Apply to filtered" panel: whether it is open and what was typed into
-// it, kept here so re-rendering the card never loses either
 let rateLimitBulkOpen = false;
 let rateLimitBulkValue = '';
 let rateLimitBulkFrame = 'h';
-// Address of the sender whose detail panel is open, kept across reloads
 let rateLimitSelectedSender = null;
-// One sender's full collected history, keyed by address:
-// { events: [...], total: n } once it is read, { failed: true } if the read
-// failed. Kept so stepping in and out of a sender does not fetch it again.
 let rateLimitSenderEvents = {};
-// The address whose history is in flight right now, so re-rendering the open
-// detail does not fire the same request twice
 let rateLimitSenderEventsInFlight = null;
 let rateLimitChart = null;
 
@@ -71,7 +40,6 @@ async function loadRateLimits() {
     rateLimitsGen++;
     rateLimitEditing = null;
     rateLimitBulkOpen = false;
-    // Fresh data means the cached histories are stale
     rateLimitSenderEvents = {};
     rateLimitSenderEventsInFlight = null;
     destroyRateLimitChart();
@@ -90,15 +58,12 @@ async function loadRateLimits() {
         }
 
         rateLimitEventsData = await eventsResponse.json();
-        // The server narrows a window longer than the history it keeps; follow it
         if (rateLimitEventsData.hours) rateLimitWindowHours = rateLimitEventsData.hours;
         rateLimitConfigData = await limitsResponse.json();
 
         loading.classList.add('hidden');
         content.classList.remove('hidden');
 
-        // The chart measures its container, so the content has to be visible
-        // before anything is drawn into it
         renderRateLimitActivityCard();
         renderRateLimitSendersCard();
         renderRateLimitConfigCard();
@@ -116,14 +81,8 @@ async function loadRateLimits() {
 }
 
 
-// Each load, edit, save and bulk apply starts a new generation: a refresh that
-// was asked before it is dropped, so it never draws what was there before a save
 let rateLimitsGen = 0;
 
-// The refresh, every minute: the events and the limits read again and drawn
-// again only when they changed. Nothing while a limit is open for editing, the
-// bulk panel is open, a field of the view has the focus or text is selected. A
-// first load that failed is tried again
 async function refreshRateLimits() {
     const content = document.getElementById('rate-limits-content');
     if (!content) return;
@@ -144,7 +103,6 @@ async function refreshRateLimits() {
         if (!eventsResponse.ok || !limitsResponse.ok) return;
         const events = await eventsResponse.json();
         const limits = await limitsResponse.json();
-        // Meanwhile the window changed, the view was loaded, edited or saved, or the user is working in it
         if (gen !== rateLimitsGen || hours !== rateLimitWindowHours || working()) return;
         const eventsChanged = JSON.stringify(events) !== JSON.stringify(rateLimitEventsData);
         const limitsChanged = JSON.stringify(limits) !== JSON.stringify(rateLimitConfigData);
@@ -152,7 +110,6 @@ async function refreshRateLimits() {
         rateLimitEventsData = events;
         rateLimitConfigData = limits;
         if (eventsChanged) {
-            // An open sender's history is read again with the new events
             rateLimitSenderEvents = {};
             rateLimitSenderEventsInFlight = null;
             destroyRateLimitChart();
@@ -169,7 +126,6 @@ async function changeRateLimitWindow(value) {
     const hours = parseInt(value, 10);
     if (!Number.isFinite(hours)) return;
     if (!(await rateLimitsConfirmDrop())) {
-        // Stay: the picker goes back to the window that is shown
         const select = document.getElementById('rate-limit-window');
         if (select) {
             select.value = String(rateLimitWindowHours);
@@ -188,7 +144,6 @@ function renderRateLimitBadge(limit) {
 }
 
 
-// The head of each card: a title, one line about it, and its tools
 function rateLimitCardHead(title, subtitle, tools = '') {
     return `
         <div class="ui-panel-head ui-rl-head">
@@ -198,21 +153,15 @@ function rateLimitCardHead(title, subtitle, tools = '') {
 }
 
 
-// Without the Read-Write key a counter cannot be reset: the button stays, disabled, and says why
 const RATE_LIMIT_RESET_LOCKED = `<button type="button" class="ui-btn ui-btn-sm" disabled onclick="event.stopPropagation()"
     title="Resetting a counter needs the Read-Write API key (MAILCOW_API_KEY_RW)">Reset counter</button>`;
 
-// Read-only notice above the configured limits - same banner Fail2ban
-// Settings shows when the Read-Write key is missing
 function renderRateLimitReadOnlyNotice() {
     const data = rateLimitConfigData || {};
-    // The key's note is for whoever may set limits
     if (data.rw_key_configured !== false || !userCan('mailboxes', 'write')) return '';
     return `<div class="ui-list-note">${uiLocked('Editing rate limits is locked', `Editing ${UI_RW_KEY_TEXT}`)}</div>`;
 }
 
-
-// ---- Card 1: rate limit activity --------------------------------------------
 
 function renderRateLimitActivityCard() {
     const container = document.getElementById('rate-limits-activity-card');
@@ -226,7 +175,6 @@ function renderRateLimitActivityCard() {
         : `${hits.toLocaleString()} blocked ${hits === 1 ? 'send' : 'sends'}`
             + ` from ${senders} ${senders === 1 ? 'sender' : 'senders'}`;
 
-    // Only the windows the kept history covers (Settings > Logs, Rate Limits Retention Days)
     const offered = data.windows || [24, 168, 720, 2160, 8760];
     const options = [
         { hours: 24, label: 'Last 24 hours' },
@@ -263,9 +211,6 @@ function renderRateLimitActivityCard() {
 }
 
 
-// An hour bucket is the UTC instant the hour starts, shown in the app's zone; a
-// day bucket is already a day in the app's zone, so it is labelled as it is.
-// Labels are written like every other date in the app: the day and month alone.
 function rateLimitBucketLabel(bucket, granularity) {
     if (!bucket) return '';
 
@@ -277,8 +222,6 @@ function rateLimitBucketLabel(bucket, granularity) {
 }
 
 
-// Short timestamp for narrow screens: the day and month and the time, no year,
-// no seconds, in the app's zone like formatTime in utils.js.
 function rateLimitShortTime(isoString) {
     if (!isoString) return '-';
     return `${formatDayMonth(isoString)}, ${formatClock(isoString)}`;
@@ -299,7 +242,6 @@ function renderRateLimitChart(buckets, granularity) {
 
     destroyRateLimitChart();
 
-    // Theme colours from the design tokens: muted text, hairline grid, red bars
     const token = (name, fallback) => getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
     const gridColor = token('--ui-line', 'rgba(0,0,0,0.1)');
     const textColor = token('--ui-muted', '#6B736E');
@@ -338,9 +280,6 @@ function renderRateLimitChart(buckets, granularity) {
 }
 
 
-// ---- Card 2: the blocked senders --------------------------------------------
-
-// Recency first: the sender stuck right now outranks last week's noise
 function rateLimitSenders() {
     const data = rateLimitEventsData || {};
     return (data.by_sender || []).slice()
@@ -353,7 +292,6 @@ function renderRateLimitSendersCard() {
     if (!container) return;
 
     const senders = rateLimitSenders();
-    // A sender that fell out of the window closes back to the table
     if (rateLimitSelectedSender && !senders.some(group => group.user === rateLimitSelectedSender)) {
         rateLimitSelectedSender = null;
     }
@@ -384,8 +322,6 @@ function renderRateLimitSendersCard() {
     if (!detailMode && senders.length && rateLimitSenderSearch) {
         filterRateLimitSenders(rateLimitSenderSearch);
     }
-    // The detail is painted at once from the rows /events already carried;
-    // the rest of that sender's history arrives after this
     if (detailMode) loadRateLimitSenderHistory(rateLimitSelectedSender);
 }
 
@@ -436,11 +372,8 @@ function renderRateLimitSendersTable(senders) {
 }
 
 
-// Clicking a row swaps the whole card body for that sender's detail view
 function selectRateLimitSender(user) {
     rateLimitSelectedSender = user;
-    // A read that failed last time is worth another try when the reader comes
-    // back to this sender
     const cached = rateLimitSenderEvents[user];
     if (cached && cached.failed) delete rateLimitSenderEvents[user];
     renderRateLimitSendersCard();
@@ -453,7 +386,6 @@ function backToRateLimitSenders() {
 }
 
 
-// Rows are hidden in place, so the search box never loses focus while typing
 function filterRateLimitSenders(query) {
     rateLimitSenderSearch = query || '';
     const card = document.getElementById('rate-limits-senders-card');
@@ -511,9 +443,6 @@ function renderRateLimitSenderDetail(group) {
 }
 
 
-// The refused messages of the open sender: the handful /events already carried
-// until the full history lands, then all of it. Only this block is repainted
-// when it does, so the panel above it never flickers.
 function renderRateLimitSenderEvents(group) {
     const cached = rateLimitSenderEvents[group.user];
     const loaded = !!(cached && cached.events);
@@ -523,14 +452,11 @@ function renderRateLimitSenderEvents(group) {
         return '<p class="ui-empty">No details were recorded for these hits</p>';
     }
 
-    // Before the history lands, the hit count from /events is the real total
     const total = loaded ? cached.total : (group.events || rows.length);
     const count = loaded && cached.total > rows.length
         ? `Showing ${rows.length.toLocaleString()} of ${cached.total.toLocaleString()}`
         : `${total.toLocaleString()} refused ${total === 1 ? 'message' : 'messages'}`;
 
-    // A quiet line rather than a spinner: the rows already on screen stay
-    // readable while the rest is on its way
     let note = '';
     if (total > rows.length) {
         if (cached && cached.failed) {
@@ -557,9 +483,6 @@ function renderRateLimitSenderEvents(group) {
 }
 
 
-// Everything this viewer collected about one sender, not just the rows the big
-// /events response carries. Read once per sender and kept until the page data
-// is reloaded.
 async function loadRateLimitSenderHistory(user) {
     if (!user || rateLimitSenderEvents[user] || rateLimitSenderEventsInFlight === user) return;
     rateLimitSenderEventsInFlight = user;
@@ -578,14 +501,11 @@ async function loadRateLimitSenderHistory(user) {
         };
     } catch (error) {
         console.error('Failed to load the full history of a blocked sender:', error);
-        // The rows already on screen stay; only the note changes
         rateLimitSenderEvents[user] = { failed: true };
     } finally {
         if (rateLimitSenderEventsInFlight === user) rateLimitSenderEventsInFlight = null;
     }
 
-    // The reader may have gone back, or opened another sender, while this was
-    // in flight - an answer nobody is looking at is dropped
     if (rateLimitSelectedSender !== user) return;
     refreshRateLimitSenderEvents(user);
 }
@@ -606,9 +526,6 @@ function renderRateLimitEventRow(event) {
     const subject = event.subject || '';
     const shortened = subject.length > 70 ? `${subject.slice(0, 70)}...` : subject;
 
-    // On a narrow screen every cell keeps its natural width and the table
-    // scrolls sideways inside its card. Squeezed columns that snap addresses
-    // in half are worse than a scroll.
     return `
         <tr>
             <td class="ui-nowrap" data-sort="${Date.parse(event.time) || ''}"><span class="ui-phone-only">${escapeHtml(rateLimitShortTime(event.time))}</span><span class="ui-phone-hide">${escapeHtml(formatTime(event.time))}</span></td>
@@ -647,8 +564,6 @@ async function resetRateLimitCounter(user, rlHash) {
         }
 
         showToast(`${user} can send again`, 'success');
-        // Update in place. A full reload would flash the loading screen and
-        // throw the reader back to the top of the page for a one-row change.
         const group = ((rateLimitEventsData || {}).by_sender || [])
             .find(entry => entry.user === user);
         if (group) group.last_reset = new Date().toISOString();
@@ -660,19 +575,13 @@ async function resetRateLimitCounter(user, rlHash) {
 }
 
 
-// ---- Card 3: the configured limits ------------------------------------------
-// Mailboxes and domains share one table. A domain limit caps all of its
-// mailboxes together, so seeing both side by side is the whole point.
-
 function renderRateLimitConfigCard() {
     const container = document.getElementById('rate-limits-config-card');
     if (!container) return;
 
     const data = rateLimitConfigData || {};
-    // Setting limits needs the Read-Write key and Take action on Mailboxes
     const canWrite = data.rw_key_configured !== false && userCan('mailboxes', 'write');
 
-    // Domains first: the broader cap explains the mailboxes underneath it
     const rows = (data.domains || []).map(domain => renderRateLimitConfigRow(
         'domain', domain.domain, domain.rl_value, domain.rl_frame, canWrite))
         .concat((data.mailboxes || []).map(mailbox => renderRateLimitConfigRow(
@@ -761,7 +670,6 @@ function filterRateLimitConfigRows(query) {
 }
 
 
-// Rows are hidden in place, so the search box never loses focus while typing
 function applyRateLimitConfigFilters() {
     const card = document.getElementById('rate-limits-config-card');
     if (!card) return;
@@ -782,14 +690,6 @@ function applyRateLimitConfigFilters() {
 }
 
 
-// ---- Apply one limit to everything the filter shows --------------------------
-// Set 100/m on every mailbox of one domain in a single action, instead of
-// opening 40 rows one after another. What gets changed is exactly what the
-// table shows: search plus the type chips, nothing hidden.
-
-// One match for the table's rows and for the bulk targets, so a bulk apply
-// writes exactly the rows shown; the targets are read from the data, which
-// stays right even while the table is being rebuilt
 function rateLimitConfigMatches(kind, name, value) {
     const q = rateLimitConfigSearch.trim().toLowerCase();
     const matchesName = !q || (name || '').toLowerCase().includes(q);
@@ -799,7 +699,6 @@ function rateLimitConfigMatches(kind, name, value) {
 }
 
 
-// The names the configured limits card currently shows, by kind
 function rateLimitFilteredTargets() {
     const data = rateLimitConfigData || {};
     return {
@@ -813,15 +712,11 @@ function rateLimitFilteredTargets() {
 }
 
 
-// "1 mailbox", "12 mailboxes" - used by the caption, the confirmation and the
-// toast, so the three never disagree
 function rateLimitCountLabel(count, singular, plural) {
     return `${count} ${count === 1 ? singular : plural}`;
 }
 
 
-// What the action covers, in words. A kind nobody selected is left out rather
-// than shown as "0 domains".
 function rateLimitBulkScope(mailboxes, domains) {
     const parts = [];
     if (mailboxes) parts.push(rateLimitCountLabel(mailboxes, 'mailbox', 'mailboxes'));
@@ -872,8 +767,6 @@ function renderRateLimitBulkPanel() {
 }
 
 
-// Typing in the search box never re-renders the card (it would lose focus), so
-// the panel's counts are refreshed in place whenever the filter changes
 function refreshRateLimitBulkPanel() {
     const card = document.getElementById('rate-limits-config-card');
     const caption = card && card.querySelector('[data-rl-bulk-caption]');
@@ -888,14 +781,11 @@ function refreshRateLimitBulkPanel() {
 }
 
 
-// A limit being edited (or a bulk value typed) is lost by opening another, by the
-// page loading again, or by leaving it
 uiUnsavedRegister('rate-limits', {
     count: () => {
         let n = 0;
         const value = document.getElementById('rate-limit-value');
         const frame = document.getElementById('rate-limit-frame');
-        // The open form counts even while a search or a filter hides its row
         if (rateLimitEditing && value && value.isConnected
             && (value.value !== value.defaultValue || (frame && frame.selectedIndex >= 0 && !frame.options[frame.selectedIndex].defaultSelected))) n++;
         const bulk = document.getElementById('rate-limit-bulk-value');
@@ -925,11 +815,8 @@ function setRateLimitBulkFrame(frame) {
 
 async function toggleRateLimitBulkPanel() {
     rateLimitsGen++;
-    // Opening the bulk form closes a limit being edited
     if (!rateLimitBulkOpen && rateLimitEditing && !(await rateLimitsConfirmDrop())) return;
     rateLimitBulkOpen = !rateLimitBulkOpen;
-    // One open form at a time: a row being edited and a bulk apply above it
-    // are two answers to the same question
     if (rateLimitBulkOpen) rateLimitEditing = null;
     renderRateLimitConfigCard();
 }
@@ -991,15 +878,12 @@ async function applyRateLimitBulk() {
         }
 
         const result = await response.json().catch(() => ({}));
-        // A name the server did not recognise keeps the limit it already had
         const skipped = (result.skipped || []).map(name => String(name).toLowerCase());
         const untouched = new Set(skipped);
         const applied = names => new Set(names.filter(name => !untouched.has(name.toLowerCase())));
         const mailboxes = applied(targets.mailboxes);
         const domains = applied(targets.domains);
 
-        // Update the rows in place instead of reloading the whole page - an
-        // apply should not flash the loading screen or lose scroll position
         const newValue = value === 0 ? null : value;
         const newFrame = value === 0 ? null : frame;
         const config = rateLimitConfigData || {};
@@ -1017,7 +901,6 @@ async function applyRateLimitBulk() {
         rateLimitBulkOpen = false;
         renderRateLimitConfigCard();
 
-        // A mailbox's limit also shows on its row in Blocked senders
         const senderNames = new Set(Array.from(mailboxes, name => name.toLowerCase()));
         let sendersChanged = false;
         ((rateLimitEventsData || {}).by_sender || []).forEach(group => {
@@ -1109,7 +992,6 @@ async function openRateLimitEdit(kind, name) {
     if (!(await rateLimitsConfirmDrop())) return;
     rateLimitsGen++;
     rateLimitEditing = { kind: kind, name: name };
-    // One open form at a time, in both directions
     rateLimitBulkOpen = false;
     renderRateLimitConfigCard();
 }
@@ -1121,7 +1003,6 @@ function closeRateLimitEdit() {
 }
 
 
-// One save at a time per mailbox or domain
 function saveRateLimitOnce(kind, name, button) {
     return uiOnce(button || `rate-limit:${kind}:${name}`, () => saveRateLimit(kind, name), button, 'Saving...');
 }
@@ -1182,8 +1063,6 @@ async function submitRateLimit(kind, name, value, frame) {
 
         rateLimitEditing = null;
 
-        // Update the row in place instead of reloading the whole page - a
-        // save should not flash the loading screen or lose scroll position
         const newValue = value === 0 ? null : value;
         const newFrame = value === 0 ? null : frame;
         const config = rateLimitConfigData || {};
@@ -1196,7 +1075,6 @@ async function submitRateLimit(kind, name, value, frame) {
         }
         renderRateLimitConfigCard();
 
-        // A mailbox's limit also shows on its row in Blocked senders
         if (kind === 'mailbox') {
             const group = ((rateLimitEventsData || {}).by_sender || [])
                 .find(entry => entry.user === name.toLowerCase());

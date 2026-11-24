@@ -1,22 +1,11 @@
-// =============================================================================
-// ALERT ACTIVITY - the history behind a security alert, in a window
-// =============================================================================
-// Classic script sharing the global scope; loaded after app.js. A volume spike
-// shows the mailbox's sent mail over time with its usual rate, and what it sent
-// around the alert (an SMTP block by abuse protection the same, with its limit);
-// an auth failure burst shows the username's failed logins and where they came from.
-// The chart's columns are buttons: a click picks one (its count, and Open in
-// Messages for its time); the chart zooms in time like the dashboard's
-// (uiTimeZoom), over the 15-minute counts the window already has.
-
-let alertActivity = null;          // /api/security-alerts/{id}/activity
-let alertActivityRange = '24h';    // 24h | 48h | 7d: the span shown, without a zoom
-let alertActivityZoom = null;      // { from, to } (ms) inside the data
-let alertActivityPick = null;      // a column's start (ms)
-let alertActivityGen = 0;          // the window opened last: an older answer is dropped
+let alertActivity = null;
+let alertActivityRange = '24h';
+let alertActivityZoom = null;
+let alertActivityPick = null;
+let alertActivityGen = 0;
 let alertActivityControl = null;
 let alertActivityZoomer = null;
-let alertActivityOverviewer = null;  // the strip under the chart (uiTimeOverview)
+let alertActivityOverviewer = null;
 
 async function openAlertActivity(alertId) {
     const modal = document.getElementById('alert-activity-modal');
@@ -33,7 +22,6 @@ async function openAlertActivity(alertId) {
     document.getElementById('alert-activity-dismiss')?.classList.add('hidden');
     const openSlot = document.getElementById('alert-activity-open');
     if (openSlot) openSlot.innerHTML = '';
-    // The footer shows once there is something in it (not while loading, nor after an error)
     document.getElementById('alert-activity-foot')?.classList.add('hidden');
     modal.classList.remove('hidden');
     try {
@@ -42,7 +30,6 @@ async function openAlertActivity(alertId) {
         const data = await response.json();
         if (gen !== alertActivityGen) return;
         alertActivity = data;
-        // Sent mail opens on its usual-rate period; failed logins on a day
         alertActivityRange = alertActivityIsSentMail(data.alert) ? '7d' : '24h';
         renderAlertActivity();
     } catch (error) {
@@ -59,8 +46,6 @@ function closeAlertActivity() {
     document.getElementById('alert-activity-modal').classList.add('hidden');
 }
 
-// A volume spike and an SMTP block by abuse protection both count the
-// mailbox's sent mail; an auth failure burst counts a username's failed logins
 function alertActivityIsSentMail(alert) {
     return alert.alert_type === 'volume_spike' || alert.alert_type === 'smtp_abuse_block';
 }
@@ -77,8 +62,6 @@ function pickAlertActivityColumn(t) {
     renderAlertActivity();
 }
 
-// The data's 15-minute counts, as spans of time: each from its start to the
-// next one's, the last up to where the data ends (now, for a recent alert)
 function alertActivityQuarters(data) {
     const quarter = data.bucket_minutes * 60000;
     const end = data.data_end ? Date.parse(data.data_end) : null;
@@ -88,33 +71,23 @@ function alertActivityQuarters(data) {
     });
 }
 
-// The span the range buttons show: the last hours of the data, from the first
-// quarter at or after their start, as the chart's columns start
 function alertActivityRangeSpan(data) {
     const q = alertActivityQuarters(data);
     if (!q.length) return null;
     const days = Math.max(1, Number(data.baseline_days) || 7);
     const hours = { '24h': 24, '48h': 48, '7d': 24 * days }[alertActivityRange];
     const to = q[q.length - 1].end;
-    // As before: the chosen hours and the two after the alert, from the end of the data
     const from = Math.max(q[0].start, to - (hours + 2) * 3600000);
     const quarter = data.bucket_minutes * 60000;
     return { from: Math.min(to, q[0].start + Math.ceil((from - q[0].start) / quarter) * quarter), to };
 }
 
-// The columns of a span: quarters of an hour up to two days, hours beyond
-// (several hours for a baseline longer than a week, so the bars stay visible).
-// An hour column starts where the app's zone shows a whole hour; on the night
-// the clocks go back both 02:00 start one, an hour apart; a skipped hour starts
-// none. Every zone is a whole number of quarters off UTC, so these hours fall on
-// the quarters' grid.
 function alertActivityColumns(data, span) {
     const keep = alertActivityQuarters(data).filter(q => q.start >= span.from && q.start < span.to);
     const quarterMinutes = data.bucket_minutes;
     if (span.to - span.from <= 48 * 3600000 || !keep.length) {
         return { cols: keep.map(q => ({ start: new Date(q.start), end: new Date(q.end), count: q.count })), minutes: quarterMinutes };
     }
-    // Whole days: the two hours after the alert do not make a week's columns longer
     const days = Math.floor((span.to - span.from) / 86400000);
     const stepHours = Math.max(1, Math.ceil(days / 7));
     const cols = [];
@@ -130,7 +103,6 @@ function alertActivityColumns(data, span) {
     return { cols, minutes: stepHours * 60 };
 }
 
-// A column's length, when it is not the usual one: "3 hours", "45 minutes"
 function alertActivitySpan(minutes) {
     return minutes % 60 ? uiCountLabel(minutes, 'minute', 'minutes') : uiCountLabel(minutes / 60, 'hour', 'hours');
 }
@@ -142,16 +114,11 @@ function alertActivityChart(data, span) {
     const { cols, minutes } = alertActivityColumns(data, span);
     if (!cols.length) return '<p class="ui-empty">No counts kept for this time.</p>';
     const at = new Date(a.created_at);
-    // An SMTP block whose window is not known (its abuse action is gone) marks no period
     const from = data.window_minutes ? new Date(at.getTime() - data.window_minutes * 60000) : null;
     const max = Math.max(4, ...cols.map(c => c.count));
     const top = Math.ceil(max / 4) * 4;
-    // A spike's usual rate, for the real length of each column (a clock change or
-    // the ends of the data make some longer or shorter); a burst or a block has
-    // no usual rate, only a threshold. It stays the alert's own rate, whatever is zoomed.
     const usualIn = c => (a.baseline_value || 0) * (c.end - c.start) / 3600000;
     const usual = spike ? (a.baseline_value || 0) * minutes / 60 : null;
-    // The date as the rest of the app writes it, on a 24-hour clock
     const fmt = d => formatTime(d, { seconds: false });
     const what = sent ? 'sent' : 'failed logins';
     const markAt = cols.findIndex(c => at >= c.start && at < c.end);
@@ -165,7 +132,6 @@ function alertActivityChart(data, span) {
             <div class="ui-aa-grid">${[top, top * .75, top * .5, top * .25, 0].map(v => `<i><span>${Math.round(v)}</span></i>`).join('')}</div>
             <div class="ui-aa-cols${alertActivityPick !== null ? ' has-pick' : ''}" role="group" aria-label="${sent ? 'Sent' : 'Failed logins'} per ${escapeHtml(per)}" data-zoom>${cols.map(c => {
                 const inAlert = from && c.end > from && c.start <= at;
-                // A column made shorter or longer by a clock change or the ends of the data says how long it is
                 const len = (c.end - c.start) / 60000;
                 const tip = `${fmt(c.start)}: ${c.count} ${what}${len !== minutes ? ` in ${alertActivitySpan(len)}` : ''}`;
                 const norm = usual !== null ? `<b class="ui-aa-norm" style="bottom:${Math.max(usualIn(c) / top * 100, .6)}%"></b>` : '';
@@ -190,31 +156,26 @@ function alertActivityChart(data, span) {
         </div>`;
 }
 
-// How far the chart zooms out and moves: all the data; at most down to an hour
 function alertActivityLimits(data) {
     const q = alertActivityQuarters(data);
     return q.length ? { from: q[0].start, to: q[q.length - 1].end, min: 3600000 } : { from: 0, to: 1, min: 1 };
 }
 
-// An instant on the data's quarters (the data's end, even inside a quarter, is one too)
 function alertActivitySnap(data) {
     const l = alertActivityLimits(data);
     const quarter = data.bucket_minutes * 60000;
     return t => {
         const q = Math.max(l.from, Math.min(l.to, l.from + Math.round((t - l.from) / quarter) * quarter));
-        // The nearer of the quarter's edge and the data's end
         return Math.abs(l.to - t) < Math.abs(q - t) ? l.to : q;
     };
 }
 
-// Show a span: snapped to the quarters (at least the shortest span); the pressed range's own span is no zoom
 function alertActivityShow(data, next) {
     const l = alertActivityLimits(data), snap = alertActivitySnap(data);
     let from = snap(next.from), to = snap(next.to);
     if (to - from < l.min) {
         to = Math.min(l.to, snap(from + l.min));
         if (to - from < l.min) {
-            // Back from the end to a quarter at least the shortest span before it
             const quarter = data.bucket_minutes * 60000;
             from = Math.max(l.from, l.from + Math.floor((to - l.min - l.from) / quarter) * quarter);
         }
@@ -233,7 +194,6 @@ function alertActivityStep(step) {
     alertActivityShow(data, uiTimeZoomStep(span, alertActivityLimits(data), step));
 }
 
-// The strip under the chart: all the data in small bars, a window over the span shown
 function alertActivityOverview(data, span) {
     if (alertActivityOverviewer) { alertActivityOverviewer.destroy(); alertActivityOverviewer = null; }
     const strip = document.querySelector('#alert-activity-content .ui-ov');
@@ -246,10 +206,8 @@ function alertActivityOverview(data, span) {
     const fmt = t => formatTime(t, { seconds: false });
     alertActivityOverviewer = uiTimeOverview(strip, {
         limits: () => l,
-        // Its edges where the chart's columns are
         span: () => span,
         snap: alertActivitySnap(data),
-        // One step is one bar of the strip, a big step a day
         step: (t, dir, big) => (big ? t + dir * 86400000
             : dir > 0 ? (edges.find(e => e > t + 1) ?? l.to) : ([...edges].reverse().find(e => e < t - 1) ?? l.from)),
         label: fmt,
@@ -263,7 +221,6 @@ function alertActivityList(title, rows, total, tone) {
         <span class="ui-aa-bar"><i style="width:${total ? r.count / total * 100 : 0}%;${tone ? `background:var(--ui-${tone(r.name)})` : ''}"></i></span><b>${Number(r.count).toLocaleString()}</b></div>`).join('')}</div>`;
 }
 
-// What to do about an alert, in its Show activity window
 function attentionAlertAdvice(a) {
     if (a.alert_type === 'volume_spike') return 'Review recent sent messages. If you do not recognize them, reset the mailbox password.';
     if (a.alert_type === 'auth_failure_burst') return 'Check mail apps for an old password. If the attempts are unfamiliar, reset the account password and consider blocking the source addresses.';
@@ -285,13 +242,11 @@ function renderAlertActivity() {
     const sent = alertActivityIsSentMail(a);
     const at = new Date(a.created_at);
     const around = data.around;
-    // Without a known window, "Around the alert" starts where the server says
     const lead = data.window_minutes ?? Math.round((at - new Date(around.from)) / 60000);
     const from = new Date(at.getTime() - lead * 60000);
     const before = data.buckets.filter(b => new Date(b.start) < from).reduce((s, b) => s + b.count, 0);
     const critical = a.severity === 'critical';
     document.getElementById('alert-activity-title').innerHTML = `<span class="ui-tag ${critical ? 'ui-tag-fail' : 'ui-tag-warn'}">${escapeHtml((a.severity || 'warning').toUpperCase())}</span> ${escapeHtml(a.subject || '')}`;
-    // Dismiss and the way on are in the footer, at the bottom of the window however far it scrolls
     const dismiss = document.getElementById('alert-activity-dismiss');
     if (dismiss) {
         dismiss.classList.toggle('hidden', !!a.acknowledged);
@@ -313,7 +268,6 @@ function renderAlertActivity() {
     ] : sent ? [
         [`Sent in the alert's ${data.window_minutes} minutes`, (a.metric_value || 0).toLocaleString(), true],
         ['Equivalent messages per hour', Math.round((a.metric_value || 0) * 60 / data.window_minutes).toLocaleString(), true],
-        // A block has no usual rate: its baseline value is the abuse protection limit
         spike ? [`Usual messages per hour (${data.baseline_days} days)`, (a.baseline_value || 0).toFixed(2)]
             : [`Message limit per ${data.window_minutes} minutes`, (a.baseline_value || 0).toLocaleString()],
         [`Sent in the ${data.baseline_days} days before`, before.toLocaleString()]
@@ -324,7 +278,6 @@ function renderAlertActivity() {
         [`Failed in the ${data.baseline_days} days before`, before.toLocaleString()]
     ];
     const span = alertActivityZoom || alertActivityRangeSpan(data) || { from: 0, to: 1 };
-    // The picked column, if it is still shown
     const cols = alertActivityColumns(data, span).cols;
     const picked = alertActivityPick === null ? null : cols.find(c => c.start.getTime() === alertActivityPick);
     if (!picked) alertActivityPick = null;
@@ -346,14 +299,12 @@ function renderAlertActivity() {
             : 'Many IPs trying one username point to a spread-out attack. One IP may be a single device with an old password.'}</p>
 `;
         alertActivityOverview(data, span); });
-    // The way on, in the footer
     document.getElementById('alert-activity-foot')?.classList.remove('hidden');
     const open = document.getElementById('alert-activity-open');
     if (open) uiRedrawKeepingFocus(open, () => {
         open.innerHTML = sent ? `<button type="button" class="ui-btn ui-btn-primary" onclick="openAlertActivityMessages()">${picked ? 'Open selected period in Messages' : 'Open in Messages'}</button>`
             : `<button type="button" class="ui-btn ui-btn-primary" onclick="closeAlertActivity(); openAlertSecurityEvents('${escapeJsArg(a.subject)}')">Open in Security</button>`;
     });
-    // Zoom by gesture over the columns (a preview stretches them; the end draws the span)
     const box = content.querySelector('.ui-aa-cols');
     const chart = content.querySelector('.ui-aa-chart');
     const band = content.querySelector('.ui-flow-band');
@@ -385,8 +336,6 @@ function renderAlertActivity() {
     }
 }
 
-// The mailbox's messages on the Messages page, in the picked column's time,
-// else around the alert (from its window before it to an hour after)
 function openAlertActivityMessages() {
     const data = alertActivity;
     if (!data) return;
@@ -394,9 +343,6 @@ function openAlertActivityMessages() {
     const span = alertActivityZoom || alertActivityRangeSpan(data);
     const picked = alertActivityPick === null || !span ? null : alertActivityColumns(data, span).cols.find(c => c.start.getTime() === alertActivityPick);
     const start = picked ? picked.start.toISOString() : data.around.from;
-    // The column's last microsecond (the database keeps microseconds; a column ends on a whole millisecond)
-    // The last column, cut at now (its quarter still running), ends at that exact
-    // moment; a whole column ends a microsecond before its end, as it is counted
     const lastBucket = data.buckets[data.buckets.length - 1];
     const atDataEnd = picked && data.data_end && lastBucket && lastBucket.partial
         && picked.end.getTime() === Date.parse(data.data_end);
@@ -406,7 +352,6 @@ function openAlertActivityMessages() {
     openMessagesRange({ start, endInclusive, user: a.subject || '' });
 }
 
-// The Security page's events for a username
 function openAlertSecurityEvents(username) {
     ['netfilter-filter-ip', 'netfilter-filter-action', 'netfilter-filter-country'].forEach(id => {
         const field = document.getElementById(id);

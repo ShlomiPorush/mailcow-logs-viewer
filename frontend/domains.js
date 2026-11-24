@@ -1,15 +1,4 @@
-// =============================================================================
-// DOMAINS - domain list, DNS validation (SPF/DKIM/DMARC checks)
-// =============================================================================
-// Split out of app.js (phase 5). Classic script sharing the global scope;
-// loaded after utils.js and app.js in index.html.
-
-// =============================================================================
-// DOMAINS TAB - Domains management with DNS validation
-// =============================================================================
-
 const DNS_CHECKS = [['SPF', 'spf'], ['DKIM', 'dkim'], ['DMARC', 'dmarc'], ['DNSSEC', 'dnssec'], ['DANE', 'tlsa'], ['MTA-STS', 'mta_sts']];
-// On a phone an open domain shows its DNS checks or its details, one tab at a time
 const domainTabs = {};
 const DNS_TAG = {
     success: ['OK', 'ok'],
@@ -17,10 +6,7 @@ const DNS_TAG = {
     error: ['Error', 'fail'],
 };
 
-// The answer the list shows, to tell whether a refresh brings anything new
 let domainsShownJson = null;
-// The list's last load, true once the list is shown: what opens a domain from another
-// page waits for it, and tells a list without the domain from one that did not load
 let domainsLoading = Promise.resolve(false);
 
 function loadDomains() {
@@ -69,7 +55,6 @@ async function loadDomainsNow() {
     }
 }
 
-// A domain has DNS issues when SPF, DKIM or DMARC reports an error or a warning
 function domainHasIssues(domain) {
     const dns = domain.dns_checks || {};
     return ['spf', 'dkim', 'dmarc'].some(key => dns[key] && (dns[key].status === 'error' || dns[key].status === 'warning'));
@@ -79,9 +64,6 @@ function domainRowId(domainName) {
     return `domain-${String(domainName).replace(/[^A-Za-z0-9_-]/g, '-')}`;
 }
 
-// The refresh, every five minutes: only what changed is drawn again. The search,
-// the issues filter, the open domains and the row in view stay as they are. A
-// first load that failed is tried again
 async function refreshDomains() {
     const content = document.getElementById('domains-content');
     if (!content || dnsCheckInProgress) return;
@@ -91,7 +73,6 @@ async function refreshDomains() {
     const data = await response.json();
     const json = JSON.stringify(data);
     const list = document.getElementById('domains-list');
-    // A DNS check redraws its row by itself; text selected in the list waits for the next refresh
     if (json === domainsShownJson || dnsCheckInProgress || (list && uiTextHeld(list))) return;
     domainsShownJson = json;
     const domains = data.domains || [];
@@ -104,13 +85,11 @@ async function refreshDomains() {
     filterDomains();
 }
 
-// The line under the title and the summary
 function renderDomainsHead(data) {
     const domains = data.domains || [];
     const dnsCheckInfo = document.getElementById('dns-check-info');
     if (dnsCheckInfo) {
         const lastCheck = data.last_dns_check ? formatTime(data.last_dns_check) : 'Never';
-        // When the DNS was last checked sits on a line under the page title
         const lastChecked = document.getElementById('domains-last-checked');
         if (lastChecked) {
             if (data.last_dns_check) uiAgo(lastChecked, data.last_dns_check, 'Updated ');
@@ -157,7 +136,6 @@ function renderDomains(container, data) {
         </div>
     `;
 
-    // Store domains data for filtering
     window.domainsData = domains;
     uiFilterBarSync();
 }
@@ -176,8 +154,6 @@ function renderDomainRows(domains, open = new Set()) {
         ${domains.map(domain => renderDomainAccordionRow(domain, open.has(domainRowId(domain.domain_name)))).join('')}`;
 }
 
-// What the user opened in the rows: domains, alias domains and the DNS
-// details, to open again when the rows are drawn again
 function domainsOpened(list) {
     const detailsKey = el => {
         const row = el.closest('[data-domain-row]');
@@ -194,7 +170,6 @@ function domainsOpened(list) {
     };
 }
 
-// Filter domains based on search input and issues checkbox
 function filterDomains() {
     const searchInput = document.getElementById('domain-search-input');
     const issuesFilter = document.getElementById('filter-issues-only');
@@ -218,14 +193,12 @@ function filterDomains() {
         const noResultsMessage = showIssuesOnly && searchTerm === ''
             ? 'No domains with DNS issues found'
             : `No domains found matching "${escapeHtml(searchTerm)}"`;
-        // As on Devices: the way back is right there
         domainsList.innerHTML = `
             <div class="ui-empty">
                 <p><b>${noResultsMessage}</b></p>
                 <p><button onclick="clearDomainFilters()" class="ui-btn ui-btn-sm">Clear filters</button></p>
             </div>`;
     } else {
-        // Open rows stay open, the row in view stays where it was, and the focus on its row
         const opened = domainsOpened(domainsList);
         uiKeepRowInView(domainsList, '[data-domain-row]', 'data-domain-row', () => uiKeepFocus(domainsList, 'data-domain-row', () => {
             domainsList.innerHTML = renderDomainRows(filteredDomains, opened.rows);
@@ -234,9 +207,6 @@ function filterDomains() {
     }
 }
 
-// On a phone a result in the list is an icon with its own shape (check, exclamation mark,
-// cross), so it reads without the colour and three fit a line; wider screens show the word.
-// The icon carries the name of the result for screen readers.
 const DNS_ICON = {
     ok: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
     warn: '<path d="M12 6v7.5"/><path d="M12 18h.01"/>',
@@ -276,7 +246,6 @@ function renderDomainAccordionRow(domain, open = false) {
     const dns = domain.dns_checks || {};
     const domainId = domainRowId(domain.domain_name);
     const issues = domainHasIssues(domain);
-    // On a phone a fact with a short note keeps it on the value's line
     const fact = (label, value, note) => `<div class="ui-md-fact${note ? ' ui-md-fact-inline' : ''}"><span>${label}</span><div>${escapeHtml(value)}</div>${note ? `<small class="ui-muted">${escapeHtml(note)}</small>` : ''}</div>`;
 
     return `
@@ -323,7 +292,6 @@ function domainShowTab(domainId, tab) {
     });
 }
 
-// Toggle domain details accordion
 function toggleDomainDetails(domainId) {
     const details = document.getElementById(`${domainId}-details`);
     const icon = document.getElementById(`${domainId}-icon-desktop`);
@@ -334,7 +302,6 @@ function toggleDomainDetails(domainId) {
     icon?.closest('.ui-row-chev')?.setAttribute('aria-expanded', String(opening));
 }
 
-// Label for an SPF checked_ips[].source value (per-check IP sources)
 function spfIpSourceLabel(source) {
     if (source === 'configured') return 'Configured';
     if (source === 'auto-detected') return 'Auto-detected WAN';
@@ -344,8 +311,6 @@ function spfIpSourceLabel(source) {
     return source || 'Unknown';
 }
 
-// Expandable list of the IPs validated against the SPF record.
-// Cached DNS checks from before this field existed lack checked_ips.
 function renderSpfCheckedIps(check) {
     const checkedIps = check.checked_ips;
     if (!Array.isArray(checkedIps) || checkedIps.length === 0) return '';
@@ -462,7 +427,6 @@ async function checkAllDomainsDNS() {
             showToast(`Checked ${result.domains_checked} domains`, 'success');
             setTimeout(() => loadDomains(), 1000);
         } else {
-            // Some domains could not be checked: the answer names them
             const why = (result.errors || []).join(' ') || uiApiErrorText(result, result.message || 'No reason was given');
             showToast(`Not every domain was checked: ${why}`, 'error');
         }
@@ -498,9 +462,7 @@ async function checkSingleDomainDNS(domainName) {
         if (result.status === 'success') {
             showToast(`DNS checked for ${domainName}`, 'success');
 
-            // Re-render only this domain's row, still open, with the new results
             const domainsResponse = await authenticatedFetch('/api/domains/all');
-            // The check itself is done: a list that cannot be read now leaves the row as it is
             const domainsData = domainsResponse.ok ? await domainsResponse.json() : {};
             const updatedDomain = (domainsData.domains || []).find(d => d.domain_name === domainName);
             const row = [...document.querySelectorAll('[data-domain-row]')].find(el => el.dataset.domainRow === domainName);

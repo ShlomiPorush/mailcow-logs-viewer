@@ -1,15 +1,7 @@
-// =============================================================================
-// NOTIFICATION CHANNELS - Settings > Notifications
-// =============================================================================
-// Manage where alerts are delivered. Multiple destinations can be configured;
-// each type only asks for the fields it actually needs (a Slack channel asks
-// for its webhook URL, Telegram for a bot token and chat ID, and so on).
-// =============================================================================
-
 let notificationChannels = [];
 let notificationChannelTypes = [];
-let notificationAlertTypes = [];  // the alert topics a channel can subscribe to
-let notificationEditing = null;   // channel being edited, or {} for a new one
+let notificationAlertTypes = [];
+let notificationEditing = null;
 
 const CHANNEL_ICONS = {
     slack: 'M14.5 10c-.83 0-1.5-.67-1.5-1.5v-5c0-.83.67-1.5 1.5-1.5s1.5.67 1.5 1.5v5c0 .83-.67 1.5-1.5 1.5z',
@@ -46,7 +38,6 @@ function _channelTypeLabel(typeId) {
     return t ? t.label : typeId;
 }
 
-/** Which alert topics this channel receives, for the channel list. */
 function _channelTopicsLabel(channel) {
     const selected = channel.alert_types || [];
     if (!selected.length || selected.length === notificationAlertTypes.length) {
@@ -109,7 +100,6 @@ function _renderChannelFields() {
     const cfg = notificationEditing.config || {};
     const fields = type.fields.map(f => {
         const value = cfg[f.key] !== undefined ? cfg[f.key] : (f.default || '');
-        // A field's hint, such as where to find a Telegram topic ID, under its box
         const hintId = `nc-field-${escapeHtml(f.key)}-hint`;
         return `
             <label for="nc-field-${escapeHtml(f.key)}">
@@ -123,7 +113,6 @@ function _renderChannelFields() {
 }
 
 function _renderAlertTypeChoices() {
-    // No stored selection means "everything", so show all ticked
     const selected = notificationEditing.alert_types && notificationEditing.alert_types.length
         ? notificationEditing.alert_types
         : notificationAlertTypes.map(t => t.id);
@@ -163,7 +152,6 @@ function renderNotificationChannelModal() {
                     <input type="checkbox" id="nc-enabled" ${notificationEditing.enabled !== false ? 'checked' : ''} class="ui-check">
                     Enabled
                 </label>`,
-        // The actions stay in sight below the form while it scrolls
         foot: `<button type="button" onclick="testNotificationChannelDraft()" class="ui-btn">Send test</button>
             <span class="ui-toolbar-gap"></span>
             <button type="button" onclick="closeNotificationChannelModal()" class="ui-btn">Cancel</button>
@@ -176,7 +164,7 @@ function renderNotificationChannelModal() {
 function changeNotificationChannelType(newType) {
     _collectChannelForm();
     notificationEditing.channel_type = newType;
-    notificationEditing.config = {};   // different service, different fields
+    notificationEditing.config = {};
     const fields = document.getElementById('nc-fields');
     if (fields) fields.innerHTML = _renderChannelFields();
 }
@@ -195,7 +183,6 @@ function _collectChannelForm() {
     return notificationEditing;
 }
 
-// Close, Cancel, Escape and Back ask before dropping typed changes; a save closes at once
 function closeNotificationChannelModal(saved = false) {
     const modal = document.getElementById('notification-channel-modal');
     const close = () => {
@@ -208,7 +195,6 @@ function closeNotificationChannelModal(saved = false) {
     } else uiCloseGuarded(modal, close);
 }
 
-// One save at a time: a double click does not add the destination twice
 function saveNotificationChannelOnce(event) {
     event.preventDefault();
     return uiOnce(event.submitter || 'notification-channel', () => saveNotificationChannel(event), event.submitter, 'Saving...');

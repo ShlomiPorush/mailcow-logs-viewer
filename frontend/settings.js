@@ -1,18 +1,6 @@
-// =============================================================================
-// SETTINGS PAGE - config editor, GeoIP/MaxMind, jobs, SMTP/IMAP connection tests
-// =============================================================================
-// Split out of app.js (phase 4). Classic script sharing the global scope;
-// loaded after utils.js and app.js in index.html.
-
-// =============================================================================
-// SETTINGS PAGE
-// =============================================================================
-
-// The open section; it has its own address (/settings/notifications). null: the first one
 let settingsTab = null;
 let settingsFirstTab = null;
 
-// Labels the key cannot spell well. Next to the other addresses, "Error Email" alone would not say whose errors
 const SETTINGS_LABEL_OVERRIDES = {
     mailcow_api_key: 'Read-only API key',
     mailcow_api_key_rw: 'Read-write API key',
@@ -125,7 +113,6 @@ const SETTINGS_LABEL_OVERRIDES = {
     dmarc_error_email: 'Report import error email',
     eas_devices_retention_days: 'Keep inactive devices (days)',
     tz: 'Time zone',
-    // Outbound: what the setting does, in words; the search shows these names
     suppression_enabled: 'Handle failed mail automatically',
     suppression_auto_detect: 'Read the mail logs for failures',
     suppression_rspamd_sync: 'Sync with Rspamd',
@@ -152,23 +139,14 @@ const SETTINGS_LABEL_OVERRIDES = {
 
 const SETTINGS_LOCK_ICON = '<svg width="12" height="12" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true"><path fill-rule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clip-rule="evenodd"></path></svg>';
 
-// Settings the API returns masked as ******** (same list as the backend)
 const SETTINGS_SENSITIVE_KEYS = ['mailcow_api_key', 'mailcow_api_key_rw', 'auth_password', 'oauth2_client_secret', 'smtp_password',
     'dmarc_imap_password', 'session_secret_key', 'maxmind_license_key', 'rspamd_password'];
 
-/**
- * Show a verification modal before enabling Basic Auth.
- * The user must type the username and password to confirm they know
- * the credentials. Returns {username, password} on confirm, or null on cancel.
- */
 function showBasicAuthVerifyModal() {
     return new Promise((resolve) => {
-        // Remove any existing modal
         const existing = document.getElementById('basic-auth-verify-modal');
         if (existing) existing.remove();
 
-        // X, Cancel, Escape and Back cancel; a click outside does nothing, since
-        // the fields hold what was typed
         const { backdrop: overlay } = uiDialog({
             id: 'basic-auth-verify-modal', title: 'Verify credentials', size: 'sm', backdropClass: 'ui-confirm',
             close: doCancel, bodyClass: 'ui-form-stack',
@@ -190,7 +168,6 @@ function showBasicAuthVerifyModal() {
         const cancelBtn = document.getElementById('verify-auth-cancel');
         const confirmBtn = document.getElementById('verify-auth-confirm');
 
-        // Focus username field
         setTimeout(() => usernameInput.focus(), 100);
 
         function cleanup() {
@@ -224,9 +201,6 @@ function showBasicAuthVerifyModal() {
         cancelBtn.addEventListener('click', doCancel);
         confirmBtn.addEventListener('click', doConfirm);
 
-        // Enter in a field confirms; on a button (X, Cancel) it presses that button.
-        // Escape cancels through the layers (router.js); a click outside does
-        // nothing, since the fields hold what was typed
         overlay.addEventListener('keydown', (e) => {
             if (e.key === 'Enter' && !e.target.closest('button')) {
                 e.preventDefault();
@@ -236,25 +210,17 @@ function showBasicAuthVerifyModal() {
     });
 }
 
-/**
- * Shows a confirmation modal when features are being disabled.
- * Lists the features and warns about permanent data deletion.
- * @param {string[]} featureIds - Array of feature IDs being newly disabled
- * @returns {Promise<boolean>} true if confirmed, false if cancelled
- */
 function showFeatureDisableConfirmModal(featureIds) {
     return new Promise((resolve) => {
         const existing = document.getElementById('feature-disable-confirm-modal');
         if (existing) existing.remove();
 
-        // Build feature list HTML
         const featureListHtml = featureIds.map(id => {
             const feat = TOGGLEABLE_FEATURES.find(f => f.id === id);
             return `<li><b>${escapeHtml(feat ? feat.label : id)}</b>${feat && feat.description ? ` <span class="ui-muted">${escapeHtml(feat.description)}</span>` : ''}</li>`;
         }).join('');
         const many = featureIds.length !== 1;
 
-        // A question: no X; Cancel, Escape, Back, a click outside and a pull down cancel
         const { backdrop: overlay } = uiDialog({
             id: 'feature-disable-confirm-modal', title: `Disable ${many ? featureIds.length + ' features' : 'feature'}?`,
             label: 'Disable features', size: 'sm', role: 'alertdialog', backdropClass: 'ui-confirm', bodyClass: 'ui-form-stack',
@@ -274,8 +240,6 @@ function showFeatureDisableConfirmModal(featureIds) {
         cancelBtn.addEventListener('click', () => { cleanup(); resolve(false); });
         confirmBtn.addEventListener('click', () => { cleanup(); resolve(true); });
 
-        // Enter confirms, but on Cancel it presses Cancel; Escape cancels through
-        // the layers (router.js)
         overlay.addEventListener('keydown', (e) => {
             if (e.key === 'Enter' && !e.target.closest('button')) { e.preventDefault(); cleanup(); resolve(true); }
         });
@@ -284,42 +248,33 @@ function showFeatureDisableConfirmModal(featureIds) {
             if (uiBackdropClick(e)) { cleanup(); resolve(false); }
         });
 
-        // Focus confirm button
         setTimeout(() => confirmBtn.focus(), 100);
     });
 }
 
-// The short line under a field: only what the name does not say and what must be known
-// before changing it (a consequence, a requirement, a value that has to be right)
 var SETTINGS_FIELD_DESCRIPTIONS = {
-    // mailcow
     mailcow_api_key: 'Needs read access to logs.',
     mailcow_api_key_rw: 'Optional. Needed for actions that change mailcow.',
     rspamd_password: 'Needed to view and edit Rspamd maps.',
     rspamd_url: 'Leave empty for most setups.',
     mailcow_api_verify_ssl: 'Turn off only for a trusted server with a self-signed certificate.',
 
-    // Fetch
     retention_days: 'Older mail logs are deleted automatically.',
     blacklist_emails: 'Separate addresses with commas.',
 
-    // Application
     app_title: 'Shown in the browser tab.',
     app_logo_url: 'Leave empty to use the project icon.',
     scheduler_workers: 'More jobs at once can speed up updates but use more database connections.',
     debug: 'Shows detailed errors. Use only for development or troubleshooting.',
 
-    // Blocklists
     blacklist_dns_servers: 'Use your own resolver. In mailcow: 172.22.1.254.',
     blacklist_source_server_ip: 'Turn off if your server sends only through a relay.',
     blacklist_source_manual_hosts: 'Separate hosts with commas.',
 
-    // Domains
     domain_spf_source_server_ip: 'Turn off if this IP does not send mail for your domains.',
     domain_spf_source_manual_hosts: "If a host is not allowed by a domain's SPF record, that domain shows an SPF error on the Domains page. Separate hosts with commas.",
     domain_spf_source_dmarc_history: 'Can cause false warnings.',
 
-    // Authentication
     auth_password: 'Required for Basic Auth.',
     auth_max_failure_clients: 'Tracks failed Basic Auth sign-ins by IP address. Lower values make it easier to evade limits by switching addresses.',
     oauth2_enabled: 'Uses an external sign-in provider.',
@@ -330,11 +285,9 @@ var SETTINGS_FIELD_DESCRIPTIONS = {
     session_expiry_hours: 'Counts from sign-in, even while the user is active. Shortening it signs out users already past the new limit.',
     session_max_entries: 'When full, new sign-ins must wait.',
 
-    // Agents
     agent_access_url: 'Changing this address stops every agent from working. Connect each agent again using the new address.',
     agent_access_max_days: 'Existing access keeps its end date. To change it, edit the agent in the list below.',
 
-    // SMTP
     smtp_port: '587 for STARTTLS, 465 for implicit TLS, 25 for plain.',
     smtp_use_tls: 'Keep on unless you use implicit TLS or a trusted local relay.',
     smtp_use_ssl: 'Port 465 uses implicit TLS even if this is off.',
@@ -342,27 +295,22 @@ var SETTINGS_FIELD_DESCRIPTIONS = {
     smtp_from: 'Required when sending without authentication. Otherwise, leave empty to use the SMTP username.',
     smtp_relay_mode: 'Use only with a trusted relay. Requires a From address.',
 
-    // Notifications
     admin_email: 'Receives system alerts and summaries. Separate addresses with commas.',
     blacklist_alert_email: 'Leave empty to use Admin email. Separate addresses with commas.',
     enable_weekly_summary: 'Emails the weekly report to Admin email.',
     dns_change_alerts_enabled: "Sends an alert when a domain's DNS records change.",
 
-    // Outgoing spam
     smtp_abuse_enabled: 'Needs a read-write API key.',
     smtp_abuse_threshold: 'Set this above your busiest normal sender.',
     smtp_abuse_revoke_app_passwords: 'Mail apps that use them lose access.',
     smtp_abuse_help_address: 'Leave empty to use Admin email.',
 
-    // Anomaly detection
     anomaly_detection_enabled: 'Sends alerts without blocking mailboxes or banning IPs.',
     anomaly_check_interval: 'Each check examines this period of recent activity.',
 
-    // DMARC & TLS
     dmarc_retention_days: 'Older DMARC and TLS reports are deleted automatically.',
     dmarc_allow_report_delete: 'Lets users with write access delete DMARC and TLS reports.',
 
-    // DMARC & TLS IMAP
     dmarc_imap_port: 'Use 993 for SSL/TLS. Port 143 sends the connection unencrypted and requires Use TLS to be off.',
     dmarc_imap_use_ssl: 'Without TLS, the IMAP password is sent unencrypted.',
     dmarc_imap_verify_ssl: 'Use Off only for a trusted server with a self-signed certificate. Automatic skips localhost, IP addresses and container names.',
@@ -370,13 +318,11 @@ var SETTINGS_FIELD_DESCRIPTIONS = {
     dmarc_imap_scan_all_unseen: 'Use a dedicated report mailbox. Emails without reports are marked as read, so other users could lose track of unread mail.',
     dmarc_error_email: 'Leave empty to use Admin email. Separate addresses with commas.',
 
-    // Logs
     raw_logs_retention_days: 'Older service logs are deleted daily.',
     rate_limits_retention_days: 'Cannot be shorter than service log retention.',
     eas_devices_retention_days: 'Set to 0 to keep inactive devices indefinitely.',
     raw_logs_services: 'Turning a service off hides it from Logs. Services marked Always collected are still collected for other pages.',
 
-    // Outbound and Quarantine
     suppression_enabled: 'Turning this off stops automatic blocks, mail deletion, and the removal of blocks when their time is up.',
     suppression_rspamd_sync: 'Syncs blocked addresses with Rspamd, which rejects new mail to them. Turning this off deletes the list of blocked addresses.',
     suppression_whitelist_domains: 'For example, example.com. Separate domains with commas.',
@@ -392,10 +338,7 @@ var SETTINGS_FIELD_DESCRIPTIONS = {
     quarantine_rules_log_retention_days: 'Older action history is deleted automatically.',
 };
 
-// The longer explanation behind a field's "i" (uiHelp): text or a list of paragraphs.
-// Only for fields that need one, and never the only place of a warning
 var SETTINGS_FIELD_HELP = {
-    // mailcow
     mailcow_api_key: [
         'Create the key in mailcow > System > Configuration > Access > Administrators > API.',
         'The key must be active, and its allowed IPs must include the address this app connects from.',
@@ -411,7 +354,6 @@ var SETTINGS_FIELD_HELP = {
         'On the same Docker network as mailcow: http://rspamd-mailcow:11334',
     ],
 
-    // Fetch
     fetch_interval: 'Fetches Postfix, Rspamd and Netfilter logs for Messages, Message linking and Security. Lower values update these pages more often but add load on mailcow.',
     fetch_count_postfix: 'The size of one page of logs. The app keeps fetching pages until it catches up.',
     fetch_count_rspamd: 'The size of one page of logs. The app keeps fetching pages until it catches up.',
@@ -420,19 +362,16 @@ var SETTINGS_FIELD_HELP = {
     retention_days: 'Recommended: 7 for most setups, 30 for compliance.',
     blacklist_emails: 'Mail to or from these addresses is not stored or shown in Messages. Useful for a BCC archive, for example.',
 
-    // Application
     scheduler_workers: [
         'Sets how many background jobs can run at the same time, from 1 to 64.',
         'Most background jobs share this limit, including log storage, Message linking, blocklist checks and report imports. With fewer workers, a slow report import can delay other jobs.',
     ],
 
-    // Blocklists
     blacklist_dns_servers: 'Spamhaus rejects queries from public resolvers such as Google, Cloudflare and Quad9. Separate resolvers with commas. Leave empty to use the container resolver.',
     blacklist_source_transports: 'Checks the public IPs of active mailcow transports. Each next hop is resolved to all its public IPv4 addresses, so relay pools with several addresses are covered.',
     blacklist_source_relayhosts: 'Checks the public IPs of active mailcow relayhosts (sender-dependent transports).',
     blacklist_source_manual_hosts: 'Accepts IP addresses and hostnames. A hostname covers its public IPv4 addresses, so enter IPv6 addresses directly. These are checked in addition to the sources above and can be hosts unrelated to this mailcow server.',
 
-    // Domains
     domain_spf_source_transports: "Checks the public IPs of active mailcow transports against each domain's SPF record. Turn on when mail leaves through transports whose IPs must be in your SPF records.",
     domain_spf_source_relayhosts: "Checks the public IPs of active mailcow relayhosts against each domain's SPF record.",
     domain_spf_source_manual_hosts: 'Accepts IP addresses and hostnames. A hostname covers its public IPv4 addresses, so enter IPv6 addresses directly. Do not add addresses that never send mail, such as an inbound-only MX.',
@@ -441,7 +380,6 @@ var SETTINGS_FIELD_HELP = {
         "With relaxed SPF alignment, an IP sending from a subdomain of an email service can pass without being in the domain's own SPF record. It then shows as a false warning.",
     ],
 
-    // Authentication
     auth_max_failure_clients: [
         'The app keeps a count of failed sign-ins for each IP address to slow down password guessing. IPv6 addresses in the same /64 network share one count.',
         'When the table is full, the address whose last failed sign-in is oldest is removed to make room. A full table does not stop new addresses from signing in.',
@@ -465,10 +403,8 @@ var SETTINGS_FIELD_HELP = {
     session_idle_enabled: 'Typing, clicking, scrolling with the wheel and touching count as activity. Pages that refresh by themselves do not. A minute before sign-out, the page asks whether you are still there.',
     session_max_entries: 'Counts active sessions per process. New sign-ins wait until a session expires or a user signs out. Existing sessions stay signed in.',
 
-    // Agents
     agent_access_url: 'The HTTPS address agents use to reach this app, without a path, such as https://logs.example.com.',
 
-    // SMTP
     smtp_verify_ssl: [
         'Checks the server certificate before the password is sent, so nobody in between can read it.',
         'Off: no check. Use only for a server with a self-signed certificate.',
@@ -476,29 +412,24 @@ var SETTINGS_FIELD_HELP = {
         'On: always checks.',
     ],
 
-    // Notifications
     dns_change_alerts_enabled: [
         'Covers SPF, DKIM, DMARC, TLSA, MTA-STS and TLS-RPT records, DNSSEC that stops validating, and a TLSA record that no longer matches the mail server certificate.',
         'The alert names the domain and shows the old and new value. A failed DNS lookup never counts as a change.',
     ],
 
-    // Outgoing spam
     smtp_abuse_enabled: 'Disables sending for a mailbox that goes over the limit. The mailbox can still receive mail. If SMTP is set up, the owner gets an email.',
     smtp_abuse_threshold: 'The most messages one mailbox may send in the period below. Above this, sending is disabled for that mailbox.',
     smtp_abuse_revoke_app_passwords: 'Recommended. A compromised mailbox usually sends through an app password, so deleting them cuts off the attacker.',
     smtp_abuse_unblock_grace_minutes: 'After you re-enable a mailbox, it is not blocked again for this long. Without this pause it would be blocked again within a minute, because its old messages are still being counted.',
     smtp_abuse_help_address: 'Shown in the email that tells the mailbox owner that sending was paused.',
 
-    // Anomaly detection
     anomaly_volume_multiplier: 'How far above its usual rate a mailbox must send before an alert. For example, 5 means five times its usual rate.',
     anomaly_volume_min_messages: 'A mailbox must send at least this many messages in the check period before a spike can alert. This avoids alerts on tiny numbers, such as 2 messages instead of the usual 0.',
     anomaly_auth_failure_threshold: 'Alerts when one username collects this many failed logins in the check period, which usually means password guessing.',
     anomaly_alert_cooldown_hours: 'After an alert, the same alert for the same mailbox or username stays quiet for this long. This prevents a flood of alerts during one incident.',
 
-    // DMARC & TLS
     dmarc_insights_pass_threshold: 'A stricter policy can be suggested at or above this rate. A higher rate gives more cautious advice.',
 
-    // DMARC & TLS IMAP
     dmarc_imap_enabled: 'Connects to the IMAP mailbox below on a schedule and imports the DMARC and TLS reports it finds. Use a mailbox that receives reports sent to the rua= addresses in your DMARC and TLS-RPT records.',
     dmarc_imap_port: 'SSL/TLS protects the connection from the start. STARTTLS, which upgrades an unencrypted connection to TLS, is not supported.',
     dmarc_imap_verify_ssl: [
@@ -514,7 +445,6 @@ var SETTINGS_FIELD_HELP = {
         'Useful when reports arrive with subjects in other languages. Emails without reports are never deleted.',
     ],
 
-    // Logs
     raw_logs_enabled: [
         'Collects raw logs from the mailcow services selected below for the Logs page.',
         'Dovecot logs are also collected for message details and Security. Ratelimited logs are collected while Rate Limits is enabled, and SOGo logs while Devices is enabled. These pages keep the logs they need when collection for the Logs page is off.',
@@ -523,7 +453,6 @@ var SETTINGS_FIELD_HELP = {
     raw_logs_fetch_count: 'Higher values catch more logs but add load on mailcow.',
     rate_limits_retention_days: 'Keeps the senders that hit a rate limit, for the Rate Limits page.',
 
-    // Outbound and Quarantine
     suppression_hard_bounce_action: [
         'If you choose deletion, the app deletes other mail to the failed address that is still waiting to be sent.',
         'The app deletes a message only if every address it goes to failed permanently in the same check. A message that also goes to any other address stays.',
@@ -581,8 +510,6 @@ var SETTINGS_FIELD_HELP = {
     quarantine_rules_interval: 'Lower values react faster to new quarantine items. Higher values add less load on mailcow.',
 };
 
-// Settings with a few short choices, shown as a segmented control (.ui-seg, as on the Security page).
-// A hidden input holds the value, so the form saves it like any other field
 const SETTINGS_SEGMENTED_OPTIONS = {
     smtp_verify_ssl: [['false', 'Off'], ['auto', 'Automatic'], ['true', 'On']],
     dmarc_imap_verify_ssl: [['false', 'Off'], ['auto', 'Automatic'], ['true', 'On']]
@@ -597,16 +524,6 @@ function settingsPickSegment(btn) {
     field.form && field.form.dispatchEvent(new Event('input', { bubbles: true }));
 }
 
-// Outbound: one choice per kind of delivery failure. The stored
-// settings and their ENV variables stay as they are: the radios only set the
-// hidden fields that the form saves. A temporary failure has three stored
-// settings behind its one choice: queue cleanup on (blocking its recipients
-// or not), or else the action. Reading the mail logs (suppression_auto_detect)
-// has no switch of its own: it is on exactly when a choice needs it, and a
-// choice that has no effect without it shows as what really happens.
-// A block reaches Rspamd only through Sync with Rspamd: while it is off, the
-// options that block are not available, and the one picked shows as its twin
-// that does not block, which is what the jobs do then.
 const SETTINGS_SOFT_BOUNCE_QUEUE = { value: 'queue', needs: 'rw sync',
     label: 'Delete mail still waiting to be sent after {minutes} minutes. Block new mail to those addresses.', hint: 'Checks run every 5 minutes.' };
 const SETTINGS_SOFT_BOUNCE_QUEUE_DELETE = { value: 'queue_delete', needs: 'rw',
@@ -616,10 +533,7 @@ const SETTINGS_CHOICE_NOTES = {
     'rw-queue': 'To delete waiting mail, add a read-write API key in Settings > mailcow > Connection.'
 };
 const SETTINGS_LOG_CHOICES = { hard: ['suppress', 'delete'], soft: ['count', 'suppress'] };
-// What a choice that blocks does while Sync with Rspamd is off
 const SETTINGS_SYNC_TWINS = { hard: { suppress: 'delete' }, soft: { queue: 'queue_delete', count: 'ignore', suppress: 'ignore' } };
-// Settings that do nothing while another switch is off: shown greyed out and
-// unclickable until it is on. Groups say it with needs:, single fields here.
 const SETTINGS_FIELD_NEEDS = {
     session_idle_timeout_minutes: 'session_idle_enabled',
     oauth2_provider_name: 'oauth2_enabled'
@@ -630,9 +544,7 @@ function settingsShowNeeds(root) {
         const row = root.querySelector('#edit-' + key)?.closest('.ui-set-field, .ui-set-bool, .ui-set-wide');
         if (row) row.dataset.needs = parent;
     });
-    // A choice's options say what they need on their own (settingsApplySync)
     root.querySelectorAll('[data-needs]:not(.ui-set-choice-opt)').forEach(el => {
-        // Every switch named must be on
         const parents = el.dataset.needs.split(' ').map(id => root.querySelector('#edit-' + id)).filter(Boolean);
         const off = parents.some(parent => !parent.checked);
         el.inert = off;
@@ -651,12 +563,10 @@ function settingsBounceChoice(kind, config, lockedKeys, defaults) {
     const queueOn = soft && config.queue_cleanup_enabled === true;
     const blockOn = config.queue_cleanup_block !== false;
     const needsLogs = value => SETTINGS_LOG_CHOICES[kind].includes(value);
-    // What happens today: an action that needs the logs does nothing while they are not read
     const picked = queueOn ? (blockOn ? 'queue' : 'queue_delete') : needsLogs(action) && !logsOn ? 'ignore' : action;
     const options = soft ? [SETTINGS_SOFT_BOUNCE_QUEUE, SETTINGS_SOFT_BOUNCE_QUEUE_DELETE, ...SETTINGS_FIELD_OPTIONS[actionKey]]
         : SETTINGS_FIELD_OPTIONS[actionKey];
     const isQueue = value => value === 'queue' || value === 'queue_delete';
-    // A value set by ENV rules out the options that would change it; the rest stay open
     const open = value => (soft
         ? (!locked('queue_cleanup_enabled') || isQueue(value) === queueOn)
             && (!isQueue(value) || !locked('queue_cleanup_block') || (value === 'queue') === blockOn)
@@ -665,7 +575,6 @@ function settingsBounceChoice(kind, config, lockedKeys, defaults) {
         && !(locked('suppression_auto_detect') && !logsOn && needsLogs(value));
     const number = key => '<input type="number" min="1" class="ui-input ui-set-choice-num" id="edit-' + key + '" name="' + key + '" value="' +
         escapeHtml(String(config[key] ?? '')) + '" aria-label="' + escapeHtml(settingsFieldLabel(key)) + '"' + (locked(key) ? ' disabled' : '') + '>';
-    // The minutes show in both queue options; the one stored field is hidden below them
     const minutes = '<input type="number" min="1" class="ui-input ui-set-choice-num" data-mirror="queue_cleanup_threshold_minutes" value="' +
         escapeHtml(String(config.queue_cleanup_threshold_minutes ?? '')) + '" aria-label="' + escapeHtml(settingsFieldLabel('queue_cleanup_threshold_minutes')) + '"' +
         (locked('queue_cleanup_threshold_minutes') ? ' disabled' : '') + ' oninput="settingsMirror(this)">';
@@ -690,7 +599,6 @@ function settingsBounceChoice(kind, config, lockedKeys, defaults) {
           escapeHtml(String(config.queue_cleanup_threshold_minutes ?? '')) + '"' + (locked('queue_cleanup_threshold_minutes') ? ' disabled' : '') + '>'
         : checkbox('suppression_auto_detect', logsOn);
     const lockedNames = keys.concat(soft ? ['suppression_auto_detect'] : []).filter(locked).map(key => key.toUpperCase());
-    // The defaults Reset returns to: every key of the choice that is not set by ENV
     const resetTo = Object.fromEntries(keys.filter(key => !locked(key) && defaults[key] !== undefined).map(key => [key, defaults[key]]));
     const differs = key => typeof resetTo[key] === 'boolean' ? config[key] !== resetTo[key]
         : typeof resetTo[key] === 'number' ? Number(config[key]) !== resetTo[key] : String(config[key] ?? '') !== String(resetTo[key] ?? '');
@@ -708,7 +616,6 @@ function settingsBounceChoice(kind, config, lockedKeys, defaults) {
         '</div>';
 }
 
-// The minutes typed in either queue option: the stored field and the other option follow
 function settingsMirror(input) {
     const key = input.dataset.mirror;
     const field = document.getElementById('edit-' + key);
@@ -716,7 +623,6 @@ function settingsMirror(input) {
     document.querySelectorAll('[data-mirror="' + key + '"]').forEach(other => { if (other !== input) other.value = input.value; });
 }
 
-// The minutes shown from the stored field (after Reset or a restore)
 function settingsShowMirrors() {
     document.querySelectorAll('[data-mirror]').forEach(input => {
         const field = document.getElementById('edit-' + input.dataset.mirror);
@@ -724,9 +630,6 @@ function settingsShowMirrors() {
     });
 }
 
-// The stored settings from the picked options of both choices. While the logs
-// are not read the actions do nothing, so they stay as saved: going back to
-// what the page loaded with leaves nothing to save
 function settingsSyncBounce() {
     const picked = kind => { const r = document.querySelector('input[name="choice-' + kind + '"]:checked'); return r ? r.value : ''; };
     const field = key => document.getElementById('edit-' + key);
@@ -746,7 +649,6 @@ function settingsSyncBounce() {
     settingsShowEffective();
 }
 
-// Reading the logs: on exactly when a picked option needs it (unless ENV sets it)
 function settingsSyncLogs() {
     const picked = kind => { const r = document.querySelector('input[name="choice-' + kind + '"]:checked'); return r ? r.value : ''; };
     const logs = SETTINGS_LOG_CHOICES.hard.includes(picked('hard')) || SETTINGS_LOG_CHOICES.soft.includes(picked('soft'));
@@ -755,9 +657,6 @@ function settingsSyncLogs() {
     return logs;
 }
 
-// Each choice shows what will really happen with the stored values: a value
-// set by ENV can make one choice act once the other turns reading the logs
-// on, and with Sync with Rspamd off a choice that blocks acts as its twin
 function settingsShowEffective() {
     const field = key => document.getElementById('edit-' + key);
     const logsField = field('suppression_auto_detect');
@@ -778,9 +677,6 @@ function settingsShowEffective() {
     if (softField) show('soft', queue && queue.checked ? effective('soft', block && !block.checked ? 'queue_delete' : 'queue') : effective('soft', softField.value));
 }
 
-// Sync with Rspamd turned off on the page: the options that block are not
-// available, and a picked one moves to its twin, saying so. Turned on again
-// before saving, the choices come back as they were.
 let settingsSyncSnapshot = null;
 const SETTINGS_SYNC_CARRIERS = ['suppression_hard_bounce_action', 'suppression_soft_bounce_action', 'queue_cleanup_enabled', 'queue_cleanup_block', 'suppression_auto_detect'];
 
@@ -788,7 +684,6 @@ function settingsApplySync(toggled) {
     const sync = document.getElementById('edit-suppression_rspamd_sync');
     if (!sync || !document.querySelector('.ui-set-choice')) return;
     const on = sync.checked;
-    // A page drawn again (after saving, or Reset) starts from what it shows
     if (!toggled) settingsSyncSnapshot = null;
     const field = key => document.getElementById('edit-' + key);
     const picked = kind => { const r = document.querySelector('input[name="choice-' + kind + '"]:checked'); return r ? r.value : ''; };
@@ -820,7 +715,6 @@ function settingsApplySync(toggled) {
         if (need) need.hidden = on;
     });
     settingsShowEffective();
-    // Each choice says what it changed to while the sync is off
     const minutes = (field('queue_cleanup_threshold_minutes') || {}).value || '';
     const notes = {
         delete: 'Sync with Rspamd is off. The choice changed to deleting waiting mail without blocking new mail.',
@@ -847,7 +741,6 @@ function settingsPickBounce(radio) {
     document.querySelectorAll('.ui-set-choice').forEach(settingsShowChoice);
 }
 
-// The whole card picks its option. The radio, its labels and the number field handle their own clicks
 function settingsPickCard(event, card) {
     if (event.target.closest('input, label')) return;
     const radio = card.querySelector('input[type="radio"]');
@@ -857,8 +750,6 @@ function settingsPickCard(event, card) {
     radio.dispatchEvent(new Event('change', { bubbles: true }));
 }
 
-// The picked option stands out and says what it still needs to work, and the
-// choice is marked Changed, with Reset, while any of its settings is not the default
 function settingsShowChoice(box) {
     const rw = box.dataset.rw === '1';
     box.querySelectorAll('.ui-set-choice-opt').forEach(opt => {
@@ -889,8 +780,6 @@ function settingsResetChoice(btn) {
         if (el.type === 'checkbox') el.checked = value === true;
         else el.value = String(value);
     });
-    // The choices show the defaults; reading the logs follows them. The actions
-    // keep their defaults: settingsSyncBounce would put a saved action back
     settingsShowMirrors();
     settingsShowEffective();
     settingsSyncLogs();
@@ -899,15 +788,7 @@ function settingsResetChoice(btn) {
     if (form) form.dispatchEvent(new Event('input', { bubbles: true }));
 }
 
-// ── Codes left alone ──
-// Each delivery failure choice has a list of status codes it leaves alone: no
-// block, no count, no queue deletion. The stored setting is a comma list in a
-// hidden field, so the save and Changed work as for any field; the chips and
-// the Add field only edit it.
 const SETTINGS_CODE_KEYS = { hard: 'suppression_hard_bounce_excluded_codes', soft: 'suppression_soft_bounce_excluded_codes' };
-// The enhanced status codes registered at IANA (RFC 3463 and the RFCs after
-// it), subject.detail with a plain name based on the registry's text. Codes that only report
-// success, and the deprecated X.6.10, are left out: no failure carries them.
 const SETTINGS_STATUS_CODES = [
     ['0.0', 'Unspecified failure'],
     ['1.0', 'Other email address problem'], ['1.1', 'Delivery address not accepted'], ['1.2', 'Delivery domain not accepted'],
@@ -939,20 +820,15 @@ const SETTINGS_STATUS_CODES = [
     ['7.27', 'Sender domain says it does not accept mail (null MX)'], ['7.28', 'Mail flood detected'], ['7.29', 'ARC validation failed'], ['7.30', 'REQUIRETLS support required']
 ];
 const SETTINGS_STATUS_CODE_NAMES = new Map(SETTINGS_STATUS_CODES);
-// Codes no registry lists, by the provider that sends them
 const SETTINGS_PROVIDER_CODE_NAMES = new Map([
     ['5.2.121', "Address reached its hourly limit for mail from one sender (Microsoft)"], ['5.2.122', "Address reached its hourly mail limit (Microsoft)"],
     ['5.4.8', 'MTA-STS validation failed (Microsoft)'], ['5.4.300', 'Message expired (Microsoft)']
 ]);
-// A whole subject: x stands for every detail, also codes no list has (Microsoft's 5.7.509)
 const SETTINGS_CODE_SUBJECT_NAMES = new Map([
     ['4', 'All connection and delivery path problems'], ['5', 'All problems with mail commands'],
     ['6', 'All problems with message contents'], ['7', 'All security problems and mail rules']
 ]);
 const SETTINGS_STANDARD_KEYS = { hard: 'suppression_hard_bounce_standard_codes', soft: 'suppression_soft_bounce_standard_codes' };
-// The standard codes, by subject: failures about the sender, the message, the
-// network or policy, which say nothing about the recipient's address. Kept
-// equal to STANDARD_CODES in backend/app/services/bounce_policy.py (a test compares them)
 const SETTINGS_STANDARD_CODES = {
     5: [
         ['Sender address', ['5.1.7', '5.1.8', '5.1.9']],
@@ -974,7 +850,6 @@ const SETTINGS_STANDARD_CODES = {
         ['Security and mail rules', ['4.7.x']]
     ]
 };
-// What the mail logs had in the last days, read once per Settings load: { days, permanent, temporary }
 let settingsCodesSeen = null;
 
 function settingsCodeName(code) {
@@ -983,19 +858,16 @@ function settingsCodeName(code) {
     return SETTINGS_STATUS_CODE_NAMES.get(code.slice(2)) || SETTINGS_PROVIDER_CODE_NAMES.get(code) || '';
 }
 
-// Whether a code is one of the standard codes of its class
 function settingsStandardCovers(code) {
     const [cls, subject] = String(code).split('.');
     return (SETTINGS_STANDARD_CODES[cls] || []).some(([, codes]) => codes.includes(code) || codes.includes(cls + '.' + subject + '.x'));
 }
 
-// The standard codes of a box are left alone now: its switch is on (or set on by ENV)
 function settingsStandardOn(box) {
     const toggle = document.getElementById('edit-' + SETTINGS_STANDARD_KEYS[box.dataset.codes]);
     return !!toggle && toggle.checked;
 }
 
-// The switch for the standard codes, with the list it leaves alone (read only)
 function settingsStandardCodes(kind, cls, config, lockedKeys, defaults) {
     const key = SETTINGS_STANDARD_KEYS[kind];
     if (config[key] === undefined) return '';
@@ -1006,7 +878,6 @@ function settingsStandardCodes(kind, cls, config, lockedKeys, defaults) {
         '<details class="ui-set-codes-std-list"><summary>View common mail problems</summary><div class="ui-set-codes-groups">' + groups + '</div></details></div>';
 }
 
-// A well-formed code of the class ('5' or '4') without leading zeros, or ''
 function settingsCodeOf(text, cls) {
     const match = String(text || '').trim().match(/^([45])\.(\d{1,3})\.(\d{1,3})$/);
     return match && match[1] === cls ? `${cls}.${Number(match[2])}.${Number(match[3])}` : '';
@@ -1023,14 +894,12 @@ function settingsBounceCodes(kind, config, lockedKeys, defaults) {
     const cls = kind === 'hard' ? '5' : '4';
     const id = 'codes-' + kind;
     const desc = SETTINGS_FIELD_DESCRIPTIONS[key];
-    // The registered codes in the shared picker (MP-4: searchable by code and meaning); a pick adds at once
     const picker = locked ? '' : uiPicker({
         id: 'settings-' + id, label: 'Failure codes', value: 'Choose a failure', field: true, labelledBy: 'label-' + id + '-also',
         search: 'Search codes', options: SETTINGS_STATUS_CODES.map(([code, name]) => ({
             label: `${cls}.${code} ${name}`, value: `${cls}.${code}`, onclick: `settingsPickCode('${kind}', '${cls}.${code}')`
         }))
     });
-    // Closed at first: its line says what is excluded now (settingsShowCodes)
     return '<div class="ui-set-field ui-set-wide ui-set-codes' + (locked ? ' is-locked' : '') + '" data-codes="' + kind + '" data-class="' + cls + '" data-default="' +
             escapeHtml(String(defaults[key] ?? '')) + '">' +
         '<details class="ui-collapse ui-set-codes-fold"><summary>' +
@@ -1044,7 +913,6 @@ function settingsBounceCodes(kind, config, lockedKeys, defaults) {
         settingsStandardCodes(kind, cls, config, lockedKeys, defaults) +
         '<span class="ui-label ui-set-codes-also" id="label-' + id + '-also">' + escapeHtml(settingsFieldLabel(key)) + '</span>' +
         '<div class="ui-chip-row" data-codes-list aria-labelledby="label-' + id + '-also"></div>' +
-        // A code the registry does not list (a provider's own, such as 5.7.509) is typed beside it
         (locked ? '' : '<div class="ui-sec-ladd ui-flush ui-set-codes-add">' + picker +
             '<span class="ui-set-codes-other"><input type="text" class="ui-input" id="' + id + '-other" data-search-focus autocomplete="off" spellcheck="false" maxlength="20"' +
                 ' placeholder="Or type a ' + cls + '.x.x code" aria-label="Or type a ' + cls + '.x.x code" oninput="settingsCodeTyped(this)"' +
@@ -1059,8 +927,6 @@ function settingsBounceCodes(kind, config, lockedKeys, defaults) {
         '</div>';
 }
 
-// The line on a closed Status code exceptions area. standard: the switch for the
-// failures unrelated to the recipient (null when the area has none); count: the codes added
 function settingsCodesSummary(standard, count) {
     const t = SETTINGS_CODES_SUMMARY;
     const text = standard ? (count === 0 ? t.standard : count === 1 ? t.standardOne : t.standardMore)
@@ -1068,7 +934,6 @@ function settingsCodesSummary(standard, count) {
     return text.replace('{count}', String(count));
 }
 
-// The chips, the codes seen in the logs that are not in the list yet, and Changed
 function settingsShowCodes(box) {
     const field = box.querySelector('input[type="hidden"]');
     if (!field) return;
@@ -1081,7 +946,6 @@ function settingsShowCodes(box) {
                 escapeHtml(code) + '" title="Remove">&times;</button>') + '</span>';
     };
     box.querySelector('[data-codes-list]').innerHTML = codes.length ? codes.map(chip).join('') : '<span class="ui-muted">You have not added any failures to ignore.</span>';
-    // A code the standard codes leave alone is not offered again while their switch is on
     const standard = settingsStandardOn(box);
     box.dataset.standard = String(standard);
     const covered = code => standard && settingsStandardCovers(code);
@@ -1109,12 +973,9 @@ function settingsShowCodes(box) {
         }).join('') + '</div>' : '';
     const changed = !locked && field.value !== box.dataset.default;
     box.classList.toggle('is-changed', changed);
-    // The list's own marker and Reset: the switch row inside has its own
     box.querySelectorAll(':scope > .ui-set-codes-fold > summary .ui-set-pill.is-changed, :scope > .is-reset').forEach(el => { el.hidden = !changed; });
-    // What the closed area leaves alone now
     const summary = box.querySelector('[data-codes-summary]');
     if (summary) {
-        // Counted as the server reads them: each well-formed code once (5.02.2 is 5.2.2)
         const effective = new Set(codes.map(code => settingsCodeOf(code, box.dataset.class)).filter(code => code && !covered(code)));
         summary.textContent = settingsCodesSummary(box.querySelector('[id^="edit-suppression_"][id$="_standard_codes"]') ? standard : null, effective.size);
     }
@@ -1129,14 +990,12 @@ function settingsSetCodes(box, codes) {
         return x[1] - y[1] || x[2] - y[2];
     });
     field.value = sorted.join(',');
-    // A code went in or out: an earlier "Enter a code" no longer applies
     const other = box.querySelector('.ui-set-codes-other input');
     if (other) settingsCodeTyped(other);
     settingsShowCodes(box);
     field.form && field.form.dispatchEvent(new Event('input', { bubbles: true }));
 }
 
-// A code typed in the Other field
 function settingsAddCode(el) {
     const box = el.closest('.ui-set-codes');
     const input = box.querySelector('.ui-set-codes-other input');
@@ -1163,7 +1022,6 @@ function settingsCodeTyped(input) {
     input.removeAttribute('aria-invalid');
 }
 
-// A pick from the picker's list
 function settingsPickCode(kind, code) {
     const box = document.querySelector('.ui-set-codes[data-codes="' + kind + '"]');
     if (box) settingsSetCodes(box, settingsCodeList(box.querySelector('input[type="hidden"]')).concat(code));
@@ -1178,7 +1036,6 @@ function settingsRemoveCode(btn) {
     const box = btn.closest('.ui-set-codes');
     const code = btn.dataset.code;
     settingsSetCodes(box, settingsCodeList(box.querySelector('input[type="hidden"]')).filter(c => c !== code));
-    // The focus stays in the list: on the next chip, else on the Add field
     const next = box.querySelector('[data-codes-list] button') || box.querySelector('.ui-picker-btn');
     if (next) next.focus();
 }
@@ -1188,7 +1045,6 @@ function settingsResetCodes(btn) {
     settingsSetCodes(box, String(box.dataset.default || '').split(/[\s,]+/).filter(Boolean));
 }
 
-// A list does nothing while its choice is Do nothing: shown dimmed, like a setting whose switch is off
 function settingsShowCodesNeeds() {
     document.querySelectorAll('.ui-set-codes').forEach(box => {
         const picked = document.querySelector('input[name="choice-' + box.dataset.codes + '"]:checked');
@@ -1203,7 +1059,6 @@ async function settingsLoadCodesSeen(content) {
     if (!boxes.length) return;
     try {
         const res = await authenticatedFetch('/api/suppressions/bounce-codes');
-        // Without it the lists work as before, only without suggestions
         if (!res.ok) return;
         settingsCodesSeen = await res.json();
     } catch (e) {
@@ -1212,29 +1067,20 @@ async function settingsLoadCodesSeen(content) {
     boxes.forEach(settingsShowCodes);
 }
 
-// ── The app's blocks in Rspamd when the sync goes off or on ──
-// The list is synced with Rspamd while Suppressions and "Sync with Rspamd" are
-// on. When the sync stops, or Suppressions is turned off with its list, the
-// user says what happens to the blocks already in Rspamd; when it starts
-// again, what is written there.
 const SETTINGS_RSPAMD_CONNECTION_KEYS = ['mailcow_url', 'mailcow_api_key_rw', 'rspamd_password', 'rspamd_url'];
 
 function settingsPlural(n, one, many) { return n === 1 ? one : many; }
 
-// A failed request in words (uiHttpErrorText), as a sentence: some messages go on after it
 function settingsErrorText(res, body) {
     return uiSentence(uiHttpErrorText(res.status, body));
 }
 
 async function settingsRspamdState() {
-    // The map is read even while the sync is off: the questions below need it
     const res = await authenticatedFetch('/api/suppressions/rspamd/state?check_map=true');
     if (!res.ok) throw new Error('Could not check the Rspamd blocks. Check the connection and try again.');
     return res.json();
 }
 
-// Returns null when the user cancels, else { action, feature_off } where action is
-// none, keep, remove (after the save), apply (after the save) or fresh (before it)
 async function settingsRspamdTransition(payload, data, newDisabled) {
     const locked = new Set(data.env_locked_keys || []);
     const before = data.editable_config || {};
@@ -1244,13 +1090,8 @@ async function settingsRspamdTransition(payload, data, newDisabled) {
     const wasOn = featureWasOn && before.suppression_rspamd_sync === true;
     const nowOn = featureOn && value('suppression_rspamd_sync') === true;
     const featureOff = featureWasOn && !featureOn;
-    // Suppressions turned on again with the sync: its list was deleted while it
-    // was off, and the blocks this app left in Rspamd are loaded back into it
-    // (a read only), so nothing here is applied or removed. With the sync off
-    // the app keeps no list, so there is nothing to load.
     if (!featureWasOn && featureOn) return { action: nowOn ? 'import' : 'none', feature_on: true };
     if (wasOn === nowOn && !featureOff) return { action: 'none' };
-    // Removing talks to the old connection, writing to the new one: never both in one save
     const connectionChanged = SETTINGS_RSPAMD_CONNECTION_KEYS.some(key => key in payload && !locked.has(key)
         && payload[key] !== '********' && String(payload[key] ?? '') !== String(before[key] ?? ''));
     if (connectionChanged) {
@@ -1263,10 +1104,7 @@ async function settingsRspamdTransition(payload, data, newDisabled) {
     const blocks = count => `${count} ${settingsPlural(count, 'block', 'blocks')}`;
 
     if (!nowOn || featureOff) {
-        // Going off: the list is deleted, like the list of a feature that is off
         if (n === 0) {
-            // Nothing of ours in Rspamd: only the list to confirm (turning
-            // Suppressions off has its own confirmation)
             const rows = state.list_count || 0;
             if (!featureOff && rows > 0) {
                 const ok = await showChoiceModal({
@@ -1295,14 +1133,9 @@ async function settingsRspamdTransition(payload, data, newDisabled) {
         return picked ? { action: picked, feature_off: featureOff, count: n } : null;
     }
 
-    // Coming back on: the list was deleted while the sync was off, and this
-    // app's blocks load back from Rspamd (a read only)
     const pending = state.pending_count;
     if (!pending) return { action: 'import' };
-    // Changes still wait only when deleting the list failed: what mailcow
-    // changed comes into the list first, then they are written
     if (!state.readable) {
-        // What is in Rspamd now cannot be checked: say so before anything is written there
         const why = state.reason_text || 'Rspamd cannot be reached.';
         const ok = await showChoiceModal({
             title: 'Turn on sync with Rspamd?',
@@ -1320,11 +1153,8 @@ async function settingsRspamdTransition(payload, data, newDisabled) {
     return picked ? { action: picked, count: pending } : null;
 }
 
-// After the save: carry out the choice. Returns the toast to show, [text, kind]
 async function settingsRspamdAfterSave(plan, saved) {
     if (plan.action === 'remove' && !plan.feature_off) {
-        // Bound to this save: refused once another save turned the sync on or off
-        // again. A save that did not turn it off (another window did first) has none
         const transition = saved && saved.rspamd_off_transition;
         if (!transition) return ["Another window already turned Sync with Rspamd off. No Rspamd blocks were removed by this save.", 'error'];
         const res = await authenticatedFetch('/api/suppressions/rspamd/clear', {
@@ -1341,7 +1171,6 @@ async function settingsRspamdAfterSave(plan, saved) {
     }
     if (plan.action === 'keep' && !plan.feature_off) return ['Sync with Rspamd is off. Existing Rspamd blocks were kept.', 'success'];
     if (plan.action === 'apply') {
-        // What changed in mailcow comes in first, then the list's waiting changes are written
         const res = await authenticatedFetch('/api/suppressions/sync?after_change=true', { method: 'POST' });
         const body = await res.json().catch(() => ({}));
         if (!res.ok) return [`Sync with Rspamd is on. Changes have not reached Rspamd yet.\n${settingsErrorText(res, body)}`, 'error'];
@@ -1357,7 +1186,6 @@ async function settingsRspamdAfterSave(plan, saved) {
         const body = await res.json().catch(() => ({}));
         if (!res.ok) return [`${what}. The app could not load its blocks from Rspamd yet.\n${settingsErrorText(res, body)}\nThe app will try again.`, 'error'];
         if (body.reason === 'no_password') return [`${what}. Add the Rspamd password in Settings > mailcow > Rspamd to load the blocks.`, 'error'];
-        // The count belongs to this request only when it did the load
         if (!body.loaded) return [`${what}.`, 'success'];
         return body.imported
             ? [`${what}. Loaded ${body.imported} ${settingsPlural(body.imported, 'block', 'blocks')} from Rspamd.`, 'success']
@@ -1367,7 +1195,6 @@ async function settingsRspamdAfterSave(plan, saved) {
     return null;
 }
 
-// Outbound: the heading of a Status code exceptions area, and the line on it while it is closed
 const SETTINGS_CODES_HEADING = 'Failures to ignore';
 const SETTINGS_CODES_SUMMARY = {
     standard: 'The app ignores problems like a full mailbox.',
@@ -1378,12 +1205,10 @@ const SETTINGS_CODES_SUMMARY = {
     more: 'The app ignores failures with {count} chosen codes.'
 };
 
-// Texts of the session signing key's Generate and of the Basic Auth password's Remove while it is off
 const SETTINGS_GENERATE_KEY = 'Generate';
 const SETTINGS_PASSWORD_REMOVE_OFF = 'Turn off Basic Auth to remove the password.';
 const SETTINGS_PASSWORD_REMOVE_ENV = 'AUTH_ENABLED in the environment keeps Basic Auth on. Remove it there to remove the password.';
 
-// Predefined options for settings fields (renders as dropdown instead of text input)
 const SETTINGS_FIELD_OPTIONS = {
     webhook_type: [
         { value: 'generic', label: 'Generic - JSON POST {title, message, ...}' },
@@ -1393,9 +1218,7 @@ const SETTINGS_FIELD_OPTIONS = {
         { value: 'ntfy', label: 'ntfy - topic URL' },
         { value: 'gotify', label: 'Gotify - /message?token=...' }
     ],
-    // The levels the backend accepts (config.py); anything else runs as WARNING
     log_level: ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'].map(level => ({ value: level, label: level })),
-    // How dates and times are written (utils.js)
     date_format: [
         { value: 'browser', label: 'Browser' },
         { value: 'DD/MM/YYYY', label: 'DD/MM/YYYY' },
@@ -1408,7 +1231,6 @@ const SETTINGS_FIELD_OPTIONS = {
         { value: '12h', label: '12-hour (1:05 PM)' },
         { value: 'browser', label: 'Browser' }
     ],
-    // The Outbound bounce choices (settingsBounceChoice): {count} is the number field
     suppression_hard_bounce_action: [
         { value: 'suppress', label: 'Block new mail to the failed address. Delete any mail to it still waiting to be sent.', needs: 'logs rw-queue sync' },
         { value: 'delete', label: 'Delete any mail to the failed address still waiting to be sent.', needs: 'logs rw-queue', hint: 'New mail to this address is still allowed.' },
@@ -1422,16 +1244,11 @@ const SETTINGS_FIELD_OPTIONS = {
     ]
 };
 
-// The log level that runs: the backend reads it in any letters and runs anything else as WARNING
 function settingsLogLevel(value) {
     const level = String(value || '').trim().toUpperCase();
     return SETTINGS_FIELD_OPTIONS.log_level.some(opt => opt.value === level) ? level : 'WARNING';
 }
 
-// Agents > App address for agents: the address to offer, which the person can
-// change. The OAuth2 callback names the app's public address when it is set;
-// otherwise the address this page is open at. Only an address the server
-// accepts (https, or http on this computer) is offered, else ''
 function settingsAgentUrlSuggestion(redirectUri, pageOrigin) {
     for (const candidate of [redirectUri, pageOrigin]) {
         let url;
@@ -1447,9 +1264,6 @@ function settingsAgentUrlSuggestion(redirectUri, pageOrigin) {
     return '';
 }
 
-// The suggestion shows in the empty field. With agent access on, it becomes the
-// field's value (an unsaved change) when the form opens and when the switch is
-// turned on; fill is false while typing, so a cleared field stays empty
 function settingsSuggestAgentUrl(root, fill) {
     const field = root && root.querySelector('#edit-agent_access_url');
     if (!field || field.disabled) return;
@@ -1463,9 +1277,6 @@ function settingsSuggestAgentUrl(root, fill) {
     }
 }
 
-// Agent access needs sign-in, so a person can approve each agent: with Basic
-// Auth and OAuth2 both off the switch is locked and says where to turn sign-in
-// on. Turning the last one off in this form also turns agent access off
 function settingsLockAgentAccess(root, signInChanged, signInElsewhere) {
     const toggle = root && root.querySelector('#edit-agent_access_enabled');
     const row = toggle && toggle.closest('.ui-set-bool');
@@ -1478,7 +1289,6 @@ function settingsLockAgentAccess(root, signInChanged, signInElsewhere) {
         toggle.checked = false;
         toggle.dispatchEvent(new Event('input', { bubbles: true }));
     }
-    // Only the switch is locked and dimmed: the note stays readable, also to a screen reader
     const main = row.querySelector('.ui-set-bool-main') || toggle;
     main.inert = !signIn;
     main.classList.toggle('is-off', !signIn);
@@ -1497,8 +1307,6 @@ function settingsLockAgentAccess(root, signInChanged, signInElsewhere) {
     }
 }
 
-// The IANA time zones this browser knows, UTC first; none where the browser
-// cannot list them (the field is then a text box)
 function settingsTimeZoneNames() {
     let names = [];
     try {
@@ -1511,8 +1319,6 @@ function settingsTimeZoneNames() {
 
 const SETTINGS_TZ_NOT_SET = 'Not set (UTC)';
 
-// How far a zone's clock is from UTC now (daylight saving included), as
-// "UTC+03:00"; '' for a name this browser does not know
 function settingsZoneOffset(name) {
     try {
         const part = new Intl.DateTimeFormat('en-US', { timeZone: name || 'UTC', timeZoneName: 'longOffset' })
@@ -1524,13 +1330,11 @@ function settingsZoneOffset(name) {
     }
 }
 
-// The picker's button: the zone's name, then its offset
 function settingsZoneButton(name) {
     const offset = settingsZoneOffset(name);
     return escapeHtml(name || SETTINGS_TZ_NOT_SET) + (offset ? ` <small class="ui-zone-offset">${offset}</small>` : '');
 }
 
-// The Time Zone picker writes its choice to the hidden field the form saves
 function settingsPickZone(option) {
     const field = document.getElementById('edit-tz');
     if (!field || field.disabled) return;
@@ -1539,8 +1343,6 @@ function settingsPickZone(option) {
     field.form && field.form.dispatchEvent(new Event('input', { bubbles: true }));
 }
 
-// The button and the chosen option follow the hidden field; the note about
-// the saved zone goes once another one is picked
 function settingsShowZone(field) {
     const host = field.parentElement.querySelector('.ui-picker');
     if (!host) return;
@@ -1559,8 +1361,6 @@ function settingsTimeZoneKnown(name) {
     }
 }
 
-// Edit form tabs (same order as env.example sections) with descriptions from env.example
-// Keys grouped logically within each tab
 var SETTINGS_EDIT_TABS = [
     {
         id: 'mailcow', label: 'mailcow', description: 'Connect this app to mailcow and Rspamd.', groups: [
@@ -1615,7 +1415,6 @@ var SETTINGS_EDIT_TABS = [
         ]
     },
     {
-        // Managed outside the form (users.js), so it has no fields of its own
         id: 'users', label: 'Users', description: 'Manage who can sign in and what each user can do.', groups: []
     },
     {
@@ -1671,7 +1470,7 @@ var SETTINGS_EDIT_TABS = [
     {
         id: 'maxmind', label: 'MaxMind', description: 'Set up GeoIP to show where IP addresses are located.', groups: [
             { label: 'Credentials', keys: ['maxmind_account_id', 'maxmind_license_key'] },
-            { label: 'Status', keys: [] }  // Status will be displayed separately, not as editable field
+            { label: 'Status', keys: [] }
         ]
     },
     {
@@ -1688,13 +1487,9 @@ var SETTINGS_EDIT_TABS = [
         ]
     },
     {
-        // Was spam_filter (Queue Management); the old address opens this one (router.js). Hidden while Suppressions is off
         id: 'outbound', label: 'Outbound', description: 'Choose what happens when outgoing mail cannot be delivered.', groups: [
-            // The sync belongs to the list, not to the automatic handling: a list kept by hand syncs too
             { label: 'Address blocking', keys: ['suppression_rspamd_sync'], intro: 'Requires the Rspamd password and a read-write API key in Settings > mailcow.' },
             { label: 'Automatic actions', keys: ['suppression_enabled'], intro: 'Deleted mail is gone for good. The app does not tell the person who sent it.' },
-            // Reading the logs is set by the choices (settingsSyncBounce)
-            // Each choice is followed by the codes it leaves alone (settingsBounceCodes)
             { label: 'Permanent delivery failure', choice: 'hard', needs: 'suppression_enabled',
                 keys: ['suppression_hard_bounce_action', 'suppression_auto_detect', 'suppression_hard_bounce_standard_codes', 'suppression_hard_bounce_excluded_codes'],
                 intro: 'The mail server has stopped trying to deliver this message to the failed address.' },
@@ -1702,7 +1497,6 @@ var SETTINGS_EDIT_TABS = [
                 keys: ['queue_cleanup_enabled', 'queue_cleanup_block', 'suppression_soft_bounce_action', 'queue_cleanup_threshold_minutes', 'suppression_soft_bounce_threshold',
                     'suppression_soft_bounce_standard_codes', 'suppression_soft_bounce_excluded_codes'],
                 intro: 'The mail server could not deliver the message yet. It keeps trying.' },
-            // A block reaches Rspamd only through the sync: without it nothing is blocked
             { label: 'Block duration', needs: 'suppression_enabled suppression_rspamd_sync', keys: ['suppression_base_expiry_days', 'suppression_max_expiry_days'] },
             { label: 'Domains to ignore', needs: 'suppression_enabled', keys: ['suppression_whitelist_domains'] }
         ]
@@ -1714,10 +1508,6 @@ var SETTINGS_EDIT_TABS = [
     }
 ];
 
-// Groups the Edit-configuration tabs into a vertical sidebar. Order here =
-// display order. A group with no visible tabs is omitted; any visible tab not
-// listed here falls into the last group automatically (so new tabs never
-// silently disappear).
 var SETTINGS_TAB_GROUPS = [
     { label: 'General', tabs: ['features', 'application'] },
     { label: 'mailcow', tabs: ['mailcow', 'fetch', 'logs'] },
@@ -1726,8 +1516,6 @@ var SETTINGS_TAB_GROUPS = [
     { label: 'Data', tabs: ['domains', 'dmarc', 'dmarc_imap', 'maxmind', 'blacklist', 'outbound', 'quarantine', 'devices', 'other'] }
 ];
 
-// A stored secret shows as Stored with Replace and Remove; the hidden field
-// keeps the mask, which the save leaves untouched
 function settingsReplaceSecret(btn) {
     const box = btn.closest('.ui-set-secret');
     if (!box) return;
@@ -1757,9 +1545,6 @@ function settingsRemoveSecret(btn) {
     hidden.form && hidden.form.dispatchEvent(new Event('input', { bubbles: true }));
 }
 
-// The Basic Auth password cannot be removed while Basic Auth is on, by its switch or by
-// AUTH_ENABLED in the environment (legacy): its Remove is off then, and a removal already
-// chosen is taken back
 function settingsLockPasswordRemove(root, legacyAuth) {
     const btn = root && root.querySelector('[data-needs-basic-off]');
     const basic = root && root.querySelector('#edit-basic_auth_enabled');
@@ -1777,7 +1562,6 @@ function settingsLockPasswordRemove(root, legacyAuth) {
     }
 }
 
-// Session signing key: a new random key, 32 bytes as hex, into a new-value field
 function settingsGenerateSecret(btn) {
     const field = btn.closest('.ui-set-field');
     const replace = field && field.querySelector('.ui-set-secret button');
@@ -1789,12 +1573,8 @@ function settingsGenerateSecret(btn) {
     input.focus();
 }
 
-// Raw log services other pages read (/api/settings/info), collected whatever is ticked
 let settingsRawLogsRequired = {};
 
-// A setting's label, spelled from its key with the acronyms in capitals (SSL, IMAP, TLS, etc.).
-// Settings for both DMARC and TLS reports drop the DMARC_ prefix of their key (IMAP Host, Retention Days);
-// the DMARC-only ones (Insights) keep it
 function settingsFieldLabel(key) {
     const labelKey = SETTINGS_LABEL_OVERRIDES[key] ? null
         : /^dmarc_(imap_|retention_days$|manual_upload_enabled$|allow_report_delete$)/.test(key) ? key.slice('dmarc_'.length) : key;
@@ -1807,13 +1587,11 @@ function settingsFieldLabel(key) {
         .replace(/\bDb\b/gi, 'DB').replace(/\bRw\b/g, '(read-write)').replace(/^Mailcow\b/, 'mailcow');
 }
 
-// Settings sections that belong to a feature: they are hidden while it is off
 const SETTINGS_TAB_FEATURE_MAP = {
     'domains': 'domains',
     'blacklist': 'blacklist',
     'dmarc': 'dmarc',
     'dmarc_imap': 'dmarc',
-    // Not 'logs': the raw logs other pages read are fetched and kept by its settings either way
     'outbound': 'suppressions',
     'quarantine': 'quarantine',
     'devices': 'devices'
@@ -1824,8 +1602,6 @@ function settingsTabOff(tabId) {
     return !!(feature && window.disabledFeatures && window.disabledFeatures.includes(feature));
 }
 
-// Every setting with its label and section, for the search in the top bar. It
-// comes from the sections above, so the Settings page need not be open
 function settingsSearchIndex() {
     const items = [];
     SETTINGS_EDIT_TABS.forEach(function (tab) {
@@ -1840,9 +1616,8 @@ function settingsSearchIndex() {
 }
 
 function renderSettingsEditField(key, value, sensitiveKeys, description, envLocked, defaultValue) {
-    const keyAttr = escapeHtml(key); // setting names go into ids, names and data attributes
+    const keyAttr = escapeHtml(key);
     const LOCK = SETTINGS_LOCK_ICON;
-    // Special renderer for disabled_features - checkboxes for feature toggles
     if (key === 'disabled_features') {
         const disabledSet = new Set(
             (value || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean)
@@ -1876,9 +1651,6 @@ function renderSettingsEditField(key, value, sensitiveKeys, description, envLock
         return html;
     }
 
-    // Special renderer for raw_logs_services: one row per service with a
-    // switch, like Features. A service another page reads says so on its row:
-    // it keeps coming in with the switch off, which the switch alone would hide.
     if (key === 'raw_logs_services') {
         const ALL_LOG_SERVICES = [
             { id: 'postfix', label: 'Postfix', description: 'Mail sent and received (MTA)' },
@@ -1920,16 +1692,12 @@ function renderSettingsEditField(key, value, sensitiveKeys, description, envLock
     const label = settingsFieldLabel(key);
     const descHtml = (description && description.trim()) ? '<p class="ui-set-desc">' + escapeHtml(description) + '</p>' : '';
     const help = SETTINGS_FIELD_HELP[key] ? uiHelp(label, SETTINGS_FIELD_HELP[key]) : '';
-    // The "i" sits beside the name, outside its label: a button does not belong in a label
     const fieldName = name => help ? '<div class="ui-set-name">' + name + help + '</div>' : name;
     const disabledAttr = envLocked ? 'disabled' : '';
     const envLockedHtml = '';
     const labelLockIcon = envLocked ? ' <span class="ui-set-pill" title="Set by an environment variable, change it there">' + LOCK + ' Set by ENV</span>' : '';
 
-    // Determine if changed from default
     const hasDefault = defaultValue !== null && defaultValue !== undefined;
-    // User-specific settings: show plain "Clear" instead of "Reset to default" since
-    // these are inherently unique per deployment (credentials, feature toggles, connection details)
     const USER_SPECIFIC_KEYS = new Set([
         'mailcow_url', 'mailcow_api_key', 'mailcow_api_key_rw',
         'basic_auth_enabled', 'auth_username', 'auth_password',
@@ -1947,16 +1715,13 @@ function renderSettingsEditField(key, value, sensitiveKeys, description, envLock
     ]);
     const isUserSpecific = USER_SPECIFIC_KEYS.has(key);
     const isChanged = hasDefault && !sensitive && !isUserSpecific && (function() {
-        // An empty time zone is UTC, the default
         if (key === 'tz') return (String(value || '').trim() || 'UTC') !== (String(defaultValue || '').trim() || 'UTC');
         if (isBool) return value !== defaultValue;
         if (isNum) return Number(value) !== Number(defaultValue);
         return String(value || '') !== String(defaultValue || '');
     })();
-    // A stored secret is not a changed setting: it gets a plain Clear and no marker
     const isSensitiveChanged = false;
 
-    // Clear/Reset button HTML (not shown for env-locked fields)
     let clearBtnHtml = '';
     if (!envLocked) {
         if (hasDefault && !isUserSpecific && (isChanged || isSensitiveChanged)) {
@@ -1969,8 +1734,6 @@ function renderSettingsEditField(key, value, sensitiveKeys, description, envLock
         }
     }
 
-    // IMAP folders: the chosen folders as rows, and a button that opens the folder
-    // picker (settingsChooseFolders). The hidden field carries the value into the save
     if (key === 'dmarc_imap_folder') {
         const raw = value === null || value === undefined ? '' : String(value);
         return '<div class="ui-set-field' + (envLocked ? ' is-locked' : '') + '">' + fieldName('<span class="ui-label" id="label-' + keyAttr + '">' + escapeHtml(label) + '</span>') +
@@ -1982,14 +1745,12 @@ function renderSettingsEditField(key, value, sensitiveKeys, description, envLock
             clearBtnHtml + '</div>';
     }
 
-    // A value that differs from its default is marked, so a changed setting stands out
     const changed = (isChanged || isSensitiveChanged) && !envLocked ? ' is-changed' : '';
     const changedPill = changed ? ' <span class="ui-set-pill is-changed" title="Differs from the default">Changed</span>' : '';
 
     const generateHtml = key === 'session_secret_key' && !envLocked
         ? '<div><button type="button" class="ui-btn ui-btn-sm" onclick="settingsGenerateSecret(this)">' + escapeHtml(SETTINGS_GENERATE_KEY) + '</button></div>' : '';
 
-    // A stored secret: say so, and offer Replace and Remove instead of a masked field
     if (sensitive && displayVal === '********') {
         return '<div class="ui-set-field' + (envLocked ? ' is-locked' : '') + '">' + fieldName('<label class="ui-label">' + escapeHtml(label) + labelLockIcon + '</label>') + descHtml +
             '<div class="ui-set-secret"><span class="ui-set-secret-state">' + (envLocked ? 'Stored in the environment' : 'Stored') + '</span>' +
@@ -2006,7 +1767,6 @@ function renderSettingsEditField(key, value, sensitiveKeys, description, envLock
         const buttons = segments.map(([v, text]) =>
             '<button type="button" data-value="' + escapeHtml(v) + '" aria-pressed="' + (v === current) + '" ' + disabledAttr +
             ' onclick="settingsPickSegment(this)">' + escapeHtml(text) + '</button>').join('');
-        // Changed marker and Reset as for every other field; Reset names the default option (Off)
         const defaultOption = segments.find(([v]) => v === String(defaultValue));
         const segClearHtml = clearBtnHtml && defaultOption
             ? clearBtnHtml.replace(/\(([^()]*)\)<\/button>$/, '(' + escapeHtml(defaultOption[1]) + ')</button>')
@@ -2019,7 +1779,6 @@ function renderSettingsEditField(key, value, sensitiveKeys, description, envLock
     }
 
     if (isBool) {
-        // The whole row toggles, like a Features row: the row is the label (so its text is phrasing content)
         const asSpan = html => html.replace(/^<p /, '<span ').replace(/<\/p>$/, '</span>');
         const boolName = escapeHtml(label) + labelLockIcon + (envLocked ? '' : (isChanged ? ' <span class="ui-set-pill is-changed" title="Differs from the default">Changed</span>' : ''));
         const boolBox = '<input type="checkbox" id="edit-' + keyAttr + '" name="' + keyAttr + '" ' + (displayVal ? 'checked' : '') + ' ' + disabledAttr + ' class="ui-check">';
@@ -2035,19 +1794,15 @@ function renderSettingsEditField(key, value, sensitiveKeys, description, envLock
     const zones = key === 'tz' ? settingsTimeZoneNames() : [];
     if (zones.length) {
         const current = String(displayVal).trim();
-        // A name the server or this browser does not know: the app runs in UTC until it is fixed
         const unknown = current !== '' && (!settingsTimeZoneKnown(current)
             || (typeof appTimezoneStatus !== 'undefined' && appTimezoneStatus.valid === false && appTimezoneStatus.configured === current));
         const names = current && !zones.includes(current) ? [current, ...zones] : zones;
-        // A long list, so a picker with a search (utils.js, uiPicker); the hidden field holds the value.
-        // Each zone shows its offset from UTC at its end
         const options = [{ value: '', label: SETTINGS_TZ_NOT_SET }, ...names.map(name => ({ value: name, label: name + (name === current && unknown ? ' (unknown)' : '') }))]
             .map(o => ({ ...o, hint: settingsZoneOffset(o.value) || undefined, selected: o.value === current, onclick: 'settingsPickZone(this)' }));
         const picker = uiPicker({
             id: 'settings-' + key, label, value: settingsZoneButton(current), options, search: 'Search time zones',
             field: true, labelledBy: 'label-' + keyAttr, disabled: envLocked
         });
-        // The description already says to pick the server's zone; only a name the app cannot use needs a word more
         const note = unknown
             ? '<small class="ui-text-warn" role="status" data-zone-note>' + escapeHtml(`"${current}" is not a known time zone, so the app uses UTC. `) +
                 (envLocked ? 'Fix TZ in the environment.' : 'Pick a time zone from the list.') + '</small>'
@@ -2058,11 +1813,9 @@ function renderSettingsEditField(key, value, sensitiveKeys, description, envLock
             note + clearBtnHtml + '</div>';
     }
 
-    // Dropdown for fields with predefined options
     const fieldOptions = SETTINGS_FIELD_OPTIONS[key];
     if (fieldOptions) {
         let optionsHtml = '';
-        // A stored level in other letters, or one the backend does not know, shows as what runs
         const current = key === 'log_level' ? settingsLogLevel(displayVal) : String(displayVal);
         fieldOptions.forEach(function(opt) {
             const selected = current === opt.value ? 'selected' : '';
@@ -2086,9 +1839,6 @@ function renderSettingsEditField(key, value, sensitiveKeys, description, envLock
         envLockedHtml + '</div>';
 }
 
-// Before a save: every changed field must hold a value it accepts (a number in a
-// number field, at least its minimum). The first one that does not is opened in
-// its section, marked, and says what is wrong under it; nothing is sent
 function settingsCheckFields(form, initialValues, fieldValue) {
     form.querySelectorAll('[aria-invalid="true"]').forEach(el => el.removeAttribute('aria-invalid'));
     form.querySelectorAll('.ui-set-invalid').forEach(el => el.remove());
@@ -2098,7 +1848,6 @@ function settingsCheckFields(form, initialValues, fieldValue) {
         if (name && initialValues.has(name) && initialValues.get(name) === fieldValue(el)) return false;
         return !el.checkValidity();
     });
-    // A value shown twice (a mirror of one setting) is named once, where it can be edited
     const usable = el => !el.closest('[inert]') && el.getClientRects().length > 0;
     const keyOf = el => el.name || el.dataset.mirror;
     const named = bad.filter((el, i) => {
@@ -2117,7 +1866,6 @@ function settingsCheckFields(form, initialValues, fieldValue) {
         note.id = `${el.id || el.name}-invalid`;
         note.textContent = el.validationMessage || 'This value is not valid.';
         el.setAttribute('aria-describedby', [el.getAttribute('aria-describedby'), note.id].filter(Boolean).join(' '));
-        // Under the field's line, not inside a sentence the field is part of
         const line = el.closest('.ui-set-choice-opt, .ui-set-field, .ui-set-bool, .ui-set-wide');
         if (line) line.appendChild(note);
         else el.insertAdjacentElement('afterend', note);
@@ -2127,14 +1875,13 @@ function settingsCheckFields(form, initialValues, fieldValue) {
         }, { once: true });
     });
     const first = bad[0];
-    // Its section opens first, so the field can take the focus
     const panel = first.closest('[id^="settings-tab-panel-"]');
     if (panel && panel.classList.contains('hidden')) {
         const tab = form.closest('#settings-content')?.querySelector(`.settings-edit-tab[data-tab="${panel.id.replace('settings-tab-panel-', '')}"]`);
         if (tab) tab.click();
     }
     for (let fold = first.closest('details:not([open])'); fold; fold = fold.parentElement.closest('details:not([open])')) fold.open = true;
-    first.focus({ preventScroll: true });   // Settings' own area scrolls, not the app frame (scrollIntoView can pan a phone's window)
+    first.focus({ preventScroll: true });
     { let area = first.parentElement; while (area && !(area.scrollHeight > area.clientHeight && /auto|scroll/.test(getComputedStyle(area).overflowY))) area = area.parentElement; if (area) area.scrollTop += first.getBoundingClientRect().top - area.getBoundingClientRect().top - area.clientHeight / 2; }
     const label = first.closest('.ui-set-field, .ui-set-bool, .ui-set-wide')?.querySelector('.ui-label');
     const name = label ? label.textContent.replace(/\s+/g, ' ').trim() : 'A field';
@@ -2155,7 +1902,6 @@ async function loadSettings() {
     content.classList.add('hidden');
 
     try {
-        // Load settings info first (most important)
         const settingsResponse = await authenticatedFetch('/api/settings/info');
 
         if (!settingsResponse.ok) {
@@ -2165,7 +1911,6 @@ async function loadSettings() {
         const data = await settingsResponse.json();
         settingsRawLogsRequired = data.raw_logs_required || {};
 
-        // Always fetch GET /api/settings so we have the UI-edit flag and editable_config (in case /info omits them or env just enabled)
         try {
             const editableRes = await authenticatedFetch('/api/settings');
             if (editableRes.ok) {
@@ -2181,7 +1926,6 @@ async function loadSettings() {
             console.warn('Could not load editable settings:', e);
         }
 
-        // Use cached version info if available to show page immediately
         if (versionInfoCache.app_version) {
             data.app_version = versionInfoCache.app_version;
         }
@@ -2189,14 +1933,12 @@ async function loadSettings() {
             data.version_info = versionInfoCache.version_info;
         }
 
-        // Render settings immediately with cached or default data
         renderSettings(content, data);
 
         loading.classList.add('hidden');
         content.classList.remove('hidden');
         showSettingsToastAfterReload();
 
-        // Load app info and version status in parallel (non-blocking)
         (async () => {
             try {
                 const [appInfoResponse, versionResponse] = await Promise.all([
@@ -2207,7 +1949,6 @@ async function loadSettings() {
                 const appInfo = appInfoResponse.ok ? await appInfoResponse.json() : null;
                 const versionInfo = versionResponse.ok ? await versionResponse.json() : null;
 
-                // Update cache
                 if (appInfo) {
                     versionInfoCache.app_version = appInfo.version;
                 }
@@ -2215,7 +1956,6 @@ async function loadSettings() {
                     versionInfoCache.version_info = versionInfo;
                 }
 
-                // Update UI with fresh data
                 if ((appInfo || versionInfo) && !uiUnsavedCount({ route: 'settings', reload: true })) {
                     const currentData = { ...data };
                     if (appInfo) {
@@ -2225,12 +1965,10 @@ async function loadSettings() {
                         currentData.version_info = versionInfo;
                     }
                     renderSettings(content, currentData);
-                    // A picker open meanwhile (Time Zone, codes left alone) keeps its search and the focus (MP-2)
                     uiPickerRefocus();
                 }
             } catch (error) {
                 console.error('Failed to load version info:', error);
-                // Page is already shown, so just log the error
             }
         })();
 
@@ -2246,9 +1984,7 @@ async function loadSettings() {
     }
 }
 
-// The latest version, its state and the update note, by id
 function renderLatestVersionState(versionInfo) {
-    // The server answers "unknown" when GitHub could not be reached
     if (versionInfo.latest_version === 'unknown') return `Not known ${uiTag('Check failed', 'warn')}`;
     const tag = versionInfo.update_available ? uiTag('Update available', 'ok')
         : versionInfo.latest_version ? uiTag('Up to date', 'info') : '';
@@ -2338,12 +2074,8 @@ function renderSettings(content, data) {
             const otherKeys = configKeys.filter(function (k) { return !allAssignedKeys.has(k); });
             const tabs = otherKeys.length ? SETTINGS_EDIT_TABS.concat([{ id: 'other', label: 'Other', groups: [{ label: 'Settings', keys: otherKeys }] }]) : SETTINGS_EDIT_TABS;
 
-            // Hide tabs for disabled features
             const filteredTabs = tabs.filter(function (tab) { return !settingsTabOff(tab.id); });
 
-            // A tab is shown only if it's feature-enabled (already in filteredTabs)
-            // AND has at least one editable key (maxmind is the exception - it
-            // shows status even with no editable keys).
             const tabById = {};
             filteredTabs.forEach(function (t) { tabById[t.id] = t; });
             const isTabVisible = function (tab) {
@@ -2355,8 +2087,6 @@ function renderSettings(content, data) {
             };
             const visibleIds = filteredTabs.filter(isTabVisible).map(function (t) { return t.id; });
 
-            // Group the visible tabs. Groups with none are dropped; any visible
-            // tab not assigned to a group is appended to the last group.
             const grouped = SETTINGS_TAB_GROUPS.map(function (g) {
                 return { label: g.label, tabs: g.tabs.filter(function (id) { return visibleIds.indexOf(id) !== -1; }) };
             });
@@ -2367,9 +2097,6 @@ function renderSettings(content, data) {
             }
             const firstVisibleId = visibleIds.length ? visibleIds[0] : null;
 
-            // Mobile: a single sticky category picker instead of the long list.
-            // It stays visible while scrolling, so switching category never
-            // means scrolling back to the top.
             let mobileNavHtml = '<div class="settings-mobile-nav">'
                 + '<label for="settings-tab-select" class="sr-only">Settings category</label>'
                 + '<select id="settings-tab-select" class="ui-select">';
@@ -2386,7 +2113,6 @@ function renderSettings(content, data) {
             });
             mobileNavHtml += '</select></div>';
 
-            // Desktop: grouped category sidebar (the search in the top bar finds a setting)
             let navHtml = '<nav class="settings-edit-nav" aria-label="Settings categories">';
             grouped.forEach(function (group) {
                 if (!group.tabs.length) return;
@@ -2394,7 +2120,6 @@ function renderSettings(content, data) {
                 group.tabs.forEach(function (id) {
                     const tab = tabById[id];
                     if (!tab) return;
-                    // The open category is marked with aria-current (styled in ui.css like the main navigation)
                     const active = id === firstVisibleId ? ' aria-current="true"' : '';
                     navHtml += '<button type="button" class="settings-edit-tab"' + active + ' data-tab="' + id + '">' + escapeHtml(tab.label) + '</button>';
                 });
@@ -2402,20 +2127,15 @@ function renderSettings(content, data) {
             });
             navHtml += '</nav>';
 
-            // Mobile picker sits above the layout so it can stick to the top;
-            // on desktop the sidebar sits beside the content.
             let tabsHtml = '';
             filteredTabs.forEach(function (tab, idx) {
                 const allKeysInTab = (tab.groups || []).flatMap(function (g) { return g.keys; });
                 const keysInTab = allKeysInTab.filter(function (k) { return data.editable_config[k] !== undefined; });
-                // Show tab if it has keys OR if it's maxmind tab (which shows status)
                 if (keysInTab.length === 0 && tab.id !== 'maxmind' && tab.id !== 'users') return;
-                // The visible panel is the one matching the active sidebar item
                 const hidden = ' hidden';
                 const desc = '<h2 class="ui-set-title">' + escapeHtml(tab.label) + '</h2>' + (tab.description ? '<p class="ui-set-tabdesc">' + escapeHtml(tab.description) + '</p>' : '');
                 tabsHtml += '<div id="settings-tab-panel-' + tab.id + '" class="settings-edit-panel' + hidden + '">' + desc;
 
-                // A small grid of facts at the top of a tab: SMTP, DMARC & TLS IMAP and MaxMind status
                 const statusBlock = function (facts) {
                     return '<section class="ui-panel ui-set-group"><h3 class="ui-set-group-title">Status</h3><div class="ui-md-ids ui-set-facts">'
                         + facts.map(function (f) { return '<div class="ui-md-fact"><span>' + f[0] + '</span><div class="ui-chip-row">' + f[1] + '</div></div>'; }).join('')
@@ -2423,7 +2143,6 @@ function renderSettings(content, data) {
                 };
                 const onOff = function (on, offTone) { return on ? uiTag('Enabled', 'ok') : uiTag('Disabled', offTone || ''); };
 
-                // The Mailcow tab says whether mailcow accepts the Read-Write key and Rspamd its password
                 if (tab.id === 'mailcow') {
                     tabsHtml += '<section class="ui-panel ui-set-group"><h3 class="ui-set-group-title">Status</h3><div class="ui-md-ids ui-set-facts">'
                         + Object.keys(CREDENTIAL_CHECKS).map(function (name) {
@@ -2432,7 +2151,6 @@ function renderSettings(content, data) {
                         + '</div></section>';
                 }
 
-                // Special handling for SMTP tab - add Global SMTP Configuration
                 if (tab.id === 'smtp' && data.smtp_configuration) {
                     const facts = [['Email delivery', onOff(data.smtp_configuration.enabled) + '<button type="button" onclick="testSmtpConnection()" class="ui-btn ui-btn-sm">Send test email</button>']];
                     if (data.smtp_configuration.enabled) {
@@ -2442,12 +2160,10 @@ function renderSettings(content, data) {
                     tabsHtml += statusBlock(facts);
                 }
 
-                // Notifications tab - channel manager (rendered by notifications.js)
                 if (tab.id === 'notifications') {
                     tabsHtml += '<section id="notification-channels-panel" class="ui-panel ui-set-channels"></section>';
                 }
 
-                // Special handling for the DMARC & TLS IMAP tab - add the report management facts
                 if (tab.id === 'dmarc_imap' && data.dmarc_configuration) {
                     const facts = [
                         ['Automatic report import', onOff(data.dmarc_configuration.imap_sync_enabled) + '<button type="button" onclick="testImapConnection()" class="ui-btn ui-btn-sm">Test IMAP connection</button>'],
@@ -2459,7 +2175,6 @@ function renderSettings(content, data) {
                     tabsHtml += statusBlock(facts);
                 }
 
-                // Special handling for MaxMind tab
                 if (tab.id === 'maxmind') {
                     const geoipCfg = data.geoip_configuration || {};
                     const dbs = geoipCfg.databases || {};
@@ -2478,8 +2193,6 @@ function renderSettings(content, data) {
                     ]);
                 }
 
-                // Groups are separated by a rule so a long tab reads as a few
-                // small sections instead of one dense wall of fields.
                 let renderedGroups = 0;
                 (tab.groups || []).forEach(function (group) {
                     const groupKeys = group.keys.filter(function (k) { return data.editable_config[k] !== undefined; });
@@ -2559,15 +2272,11 @@ function renderSettings(content, data) {
         loadAgentsPanel();
     }
 
-    // Edit configuration: form submit, Import from ENV, and tab switching
     if (data.settings_edit_via_ui_enabled && data.editable_config) {
-        // Notification destinations are managed outside the settings form
         if (typeof loadNotificationChannels === 'function') {
             loadNotificationChannels();
         }
 
-        // Switching is shared by the desktop sidebar and the mobile picker, so
-        // the two can never disagree about which category is open.
         const switchSettingsTab = function (tabId, scrollToTop) {
             settingsTab = tabId;
             if (typeof routerSyncSubpage === 'function') routerSyncSubpage('settings', tabId);
@@ -2581,7 +2290,6 @@ function renderSettings(content, data) {
             });
             const panel = content.querySelector('#settings-tab-panel-' + tabId);
             if (panel) panel.classList.remove('hidden');
-            // Parts of a section that live outside the form (Agents)
             content.querySelectorAll('[data-tab-extra]').forEach(function (extra) {
                 extra.classList.toggle('hidden', extra.getAttribute('data-tab-extra') !== tabId);
             });
@@ -2589,11 +2297,7 @@ function renderSettings(content, data) {
             const select = content.querySelector('#settings-tab-select');
             if (select && select.value !== tabId) select.value = tabId;
 
-            // A newly opened category starts at its top, not where the last one was scrolled to
             if (scrollToTop && window.matchMedia('(max-width: 1023px)').matches) {
-                // On mobile, bring the sticky picker back to the top of the viewport.
-                // Scroll the page's own area only: scrollIntoView also scrolled the
-                // app frame, which hid the top bar
                 const anchor = content.querySelector('.settings-mobile-nav');
                 let scroller = anchor && anchor.parentElement;
                 while (scroller && !/(auto|scroll)/.test(getComputedStyle(scroller).overflowY)) scroller = scroller.parentElement;
@@ -2602,7 +2306,6 @@ function renderSettings(content, data) {
                     if (target < scroller.scrollTop) scroller.scrollTo({ top: Math.max(0, target), behavior: 'smooth' });
                 }
             } else if (scrollToTop) {
-                // On a wide screen the categories scroll in their own column beside the sidebar
                 const column = content.querySelector('.settings-edit-content');
                 if (column && column.scrollTop > 0) column.scrollTo({ top: 0 });
             }
@@ -2614,7 +2317,6 @@ function renderSettings(content, data) {
             });
         });
 
-        // The section the address names (/settings/notifications), or the first one
         window.settingsShowTab = id => switchSettingsTab(id, false);
         const firstTabBtn = content.querySelector('.settings-edit-tab');
         settingsFirstTab = firstTabBtn ? firstTabBtn.getAttribute('data-tab') : null;
@@ -2634,7 +2336,6 @@ function renderSettings(content, data) {
             });
         }
 
-        // Clear/Reset button handlers
         content.querySelectorAll('.settings-clear-btn').forEach(function (btn) {
             btn.addEventListener('click', function () {
                 const key = btn.getAttribute('data-key');
@@ -2647,27 +2348,21 @@ function renderSettings(content, data) {
                     el.checked = defaultVal === 'true';
                 } else if (isSensitive) {
                     el.value = '';
-                    el.type = 'text'; // Show cleared field
+                    el.type = 'text';
                 } else {
                     el.value = defaultVal || '';
-                    // A segmented control shows the value with its pressed button
                     const seg = el.parentElement && el.parentElement.querySelector('.ui-seg');
                     if (seg) seg.querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', String(b.getAttribute('data-value') === el.value)));
-                    // So does the Time Zone picker
                     if (key === 'tz') settingsShowZone(el);
-                    // So do the IMAP folder rows
                     if (key === 'dmarc_imap_folder') settingsShowFolders(el);
                 }
-                // The field is back at its default, so it is no longer marked as changed
                 const parent = el.closest('.ui-set-bool, .ui-set-field');
                 if (parent) parent.classList.remove('is-changed');
                 el.classList.remove('is-changed');
-                // Remove the clear button itself
                 btn.remove();
             });
         });
 
-        // Raw Logs Services checkboxes - sync checked values to hidden input
         content.querySelectorAll('.raw-logs-service-cb').forEach(function(cb) {
             cb.addEventListener('change', function() {
                 const allCbs = content.querySelectorAll('.raw-logs-service-cb');
@@ -2683,12 +2378,9 @@ function renderSettings(content, data) {
         const form = content.querySelector('#settings-edit-form');
         const importBtn = content.querySelector('#settings-import-env-btn');
 
-        // Unsaved changes: compare every field with the value it loaded with. The
-        // bounce choices' radios (data-choice) only set other fields, so they are not counted
         const fieldValue = el => el.type === 'checkbox' ? String(el.checked) : el.value;
         const initialValues = new Map();
         if (form) form.querySelectorAll('[name]:not([data-choice])').forEach(el => initialValues.set(el.name, fieldValue(el)));
-        // The folder picker asks whether the IMAP connection has unsaved changes
         settingsFieldUnsaved = name => {
             const el = form && form.querySelector('[name="' + CSS.escape(name) + '"]');
             return !!el && initialValues.has(name) && initialValues.get(name) !== fieldValue(el);
@@ -2700,14 +2392,12 @@ function renderSettings(content, data) {
                 if (initialValues.has(el.name) && initialValues.get(el.name) !== fieldValue(el)) dirty.add(el.name);
             });
             uiSaveBarUpdate('settings-savebar', dirty.size);
-            // Mark the sections that hold a change
             content.querySelectorAll('.settings-edit-tab').forEach(tabBtn => {
                 const panel = content.querySelector('#settings-tab-panel-' + tabBtn.getAttribute('data-tab'));
                 const has = !!panel && [...panel.querySelectorAll('[name]')].some(el => dirty.has(el.name));
                 tabBtn.classList.toggle('has-changes', has);
             });
         };
-        // Leaving Settings drops what is not saved; moving between its sections keeps it
         uiUnsavedRegister('settings', {
             count: () => {
                 if (!form || !form.isConnected || !form.getClientRects().length) return 0;
@@ -2722,14 +2412,10 @@ function renderSettings(content, data) {
         if (form) {
             form.addEventListener('input', updateDirty);
             form.addEventListener('change', updateDirty);
-            // An Outbound choice says when it needs the read-write key, and
-            // whether it differs from the default, also after typing in its number fields
             const showChoices = () => content.querySelectorAll('.ui-set-choice').forEach(settingsShowChoice);
             showChoices();
             form.addEventListener('input', showChoices);
-            // The codes left alone: their chips, and dimmed while their choice is Do nothing
             content.querySelectorAll('.ui-set-codes').forEach(settingsShowCodes);
-            // A box follows its standard codes switch (Reset on its row: the clear buttons below)
             const followStandard = () => content.querySelectorAll('.ui-set-codes').forEach(box => {
                 if (String(settingsStandardOn(box)) !== box.dataset.standard) settingsShowCodes(box);
             });
@@ -2752,14 +2438,11 @@ function renderSettings(content, data) {
                 settingsLockPasswordRemove(content, data.legacy_auth_enabled);
             });
             form.addEventListener('input', () => settingsSuggestAgentUrl(content, false));
-            // Clearing and resetting change a field without an input event
             content.querySelectorAll('.settings-clear-btn').forEach(btn => btn.addEventListener('click', () => setTimeout(() => { updateDirty(); settingsShowNeeds(content); settingsLockPasswordRemove(content, data.legacy_auth_enabled); settingsSuggestAgentUrl(content, false); content.querySelectorAll('.ui-set-codes').forEach(settingsShowCodes); })));
         }
 
         if (form) {
-            // The fields are checked here, so a problem is named under its field (not in a browser bubble)
             form.noValidate = true;
-            // One save at a time: a second press while the first still asks or saves does nothing
             form.onsubmit = (e) => {
                 e.preventDefault();
                 return uiOnce('settings-save', () => settingsSubmit());
@@ -2775,21 +2458,17 @@ function renderSettings(content, data) {
                         payload[key] = el.checked;
                     } else {
                         const val = el.value;
-                        // For sensitive keys: skip only if still masked (unchanged), send empty string if cleared
                         if (sensitiveKeys.includes(key) && val === '********') continue;
                         if (typeof data.editable_config[key] === 'number') payload[key] = val === '' ? 0 : Number(val);
                         else payload[key] = val === '' ? '' : val;
                     }
                 }
 
-                // ── Basic Auth lockout prevention ──────────────────────────
-                // Detect if basic_auth_enabled is being turned ON
                 const wasBasicAuthEnabled = data.editable_config.basic_auth_enabled === true ||
                     (data.configuration && data.configuration.basic_auth_enabled === true);
                 const isEnablingBasicAuth = payload.basic_auth_enabled === true && !wasBasicAuthEnabled;
 
                 if (isEnablingBasicAuth) {
-                    // Check that password is set (not empty and not masked-unchanged)
                     const passwordEl = form.querySelector('[name="auth_password"]');
                     const passwordVal = passwordEl ? passwordEl.value : '';
                     if (!passwordVal || passwordVal === '********' && !data.editable_config.auth_password) {
@@ -2797,20 +2476,14 @@ function renderSettings(content, data) {
                         return;
                     }
 
-                    // Show verification modal and wait for user input
                     const verified = await showBasicAuthVerifyModal();
-                    if (!verified) return; // User cancelled
+                    if (!verified) return;
 
-                    // Add verification credentials to payload
                     payload.verify_username = verified.username;
                     payload.verify_password = verified.password;
                 }
-                // ──────────────────────────────────────────────────────────
 
-                // ── Feature disable confirmation ─────────────────────────
-                // Detect if any features are being newly disabled
                 const PURGEABLE_FEATURES = ['netfilter', 'domains', 'dmarc', 'mailbox-stats', 'logs', 'blacklist', 'suppressions', 'quarantine', 'devices'];
-                // Rate Limits has no purge call, but the save itself deletes its reset history
                 const CONFIRM_FEATURES = [...PURGEABLE_FEATURES, 'rate-limits'];
                 let newlyDisabledFeatures = [];
                 let featuresChanged = false;
@@ -2824,16 +2497,13 @@ function renderSettings(content, data) {
                     newlyDisabledFeatures = [...newDisabled].filter(f => !oldDisabled.has(f));
                     featuresChanged = newlyDisabledFeatures.length > 0 || [...oldDisabled].some(f => !newDisabled.has(f));
 
-                    // Show confirmation modal if any feature with stored data is being disabled
                     const confirmNewlyDisabled = newlyDisabledFeatures.filter(f => CONFIRM_FEATURES.includes(f));
                     if (confirmNewlyDisabled.length > 0) {
                         const confirmed = await showFeatureDisableConfirmModal(confirmNewlyDisabled);
-                        if (!confirmed) return; // User cancelled
+                        if (!confirmed) return;
                     }
                 }
-                // ──────────────────────────────────────────────────────────
 
-                // The app's Rspamd blocks when the sync goes off or on
                 const newDisabledSet = new Set('disabled_features' in payload
                     ? (payload.disabled_features || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean)
                     : (window.disabledFeatures || []).map(s => s.trim().toLowerCase()));
@@ -2860,18 +2530,14 @@ function renderSettings(content, data) {
                         throw await responseError(res);
                     }
                     const saved = await res.json().catch(() => ({}));
-                    // Saved: these values are the new start, so a reload asks nothing about them
                     form.querySelectorAll('[name]:not([data-choice])').forEach(el => initialValues.set(el.name, fieldValue(el)));
                     uiSaveBarBusy('settings-savebar', false);
-                    // A new or changed Read-Write key or Rspamd password is checked right away;
-                    // a failure is the answer to show, so it wins over a success
                     let checkToast = null;
                     for (const name of Object.keys(CREDENTIAL_CHECKS)) {
                         if (!saved[name + '_changed']) continue;
                         const toast = await validateCredential(name);
                         if (toast && !(checkToast && checkToast[1] === 'error')) checkToast = toast;
                     }
-                    // What happened to the app's Rspamd blocks is the answer to show for this save
                     let rspamdToast;
                     try {
                         rspamdToast = await settingsRspamdAfterSave(rspamdPlan, saved);
@@ -2879,8 +2545,6 @@ function renderSettings(content, data) {
                         rspamdToast = [`Settings saved, but Rspamd could not be reached: ${uiErrorText(rspamdErr)}`, 'error'];
                     }
                     if (rspamdToast && !(checkToast && checkToast[1] === 'error')) checkToast = rspamdToast;
-                    // The list of Suppressions (or a sync) turned off could not be deleted yet:
-                    // the sweep the save started tries again
                     if (saved.feature_data_errors && saved.feature_data_errors['suppressions']) {
                         const listText = 'The saved suppression list could not be deleted yet. It is tried again in a few minutes.';
                         checkToast = checkToast && checkToast[1] === 'error'
@@ -2891,12 +2555,8 @@ function renderSettings(content, data) {
                         showToast('Basic Auth enabled.', 'success');
                     }
                     
-                    // Detect if MaxMind credentials were changed - show setup modal
                     const _maxmindChanged = ('maxmind_account_id' in payload || 'maxmind_license_key' in payload);
                     const _maxmindHasValues = (payload.maxmind_license_key && payload.maxmind_license_key !== '' && payload.maxmind_license_key !== '********');
-                    // The rest of the app reads features, title, logo, sign-in and the mailcow
-                    // address once, when the page loads: a change to one of them reloads it.
-                    // Any other save refreshes Settings in place.
                     const shellChanged = SETTINGS_READ_AT_PAGE_LOAD.some(key =>
                         key in payload && String(payload[key] ?? '') !== String(data.editable_config[key] ?? ''));
                     const needsReload = featuresChanged || shellChanged;
@@ -2905,9 +2565,6 @@ function renderSettings(content, data) {
                         if (purgeableNewlyDisabled.length > 0) {
                             showToast(`Purging data for ${purgeableNewlyDisabled.length} disabled feature(s)...`, 'info');
                             for (const feature of purgeableNewlyDisabled) {
-                                // The suppression list goes with what was chosen for its Rspamd blocks.
-                                // Removing belongs to this save: one that did not turn Suppressions
-                                // off (another window did first) removes nothing
                                 const wanted = rspamdPlan.purge_rspamd || (rspamdPlan.action === 'remove' ? 'remove' : 'keep');
                                 const transition = saved.rspamd_off_transition || null;
                                 const notOurs = wanted === 'remove' && !transition;
@@ -2941,16 +2598,12 @@ function renderSettings(content, data) {
                             }
                         }
 
-                        // The credential check's answer is shown again after the reload
                         if (checkToast) {
-                            try { sessionStorage.setItem(SETTINGS_TOAST_AFTER_RELOAD, JSON.stringify(checkToast)); } catch (e) { /* private mode: the status tag still shows it */ }
+                            try { sessionStorage.setItem(SETTINGS_TOAST_AFTER_RELOAD, JSON.stringify(checkToast)); } catch (e) {}
                         }
                     }
 
                     if (_maxmindChanged && _maxmindHasValues) {
-                        // The form reloads now, so the save bar clears behind the window. On
-                        // close the window shows the new GeoIP status, or reloads the page when
-                        // the same save changed what the page reads at load.
                         showGeoIPSetupModal(needsReload);
                         await loadSettings();
                         return;
@@ -2992,10 +2645,7 @@ function renderSettings(content, data) {
     }
 }
 
-// reloadPage: reload the whole page on close instead of only Settings
 async function showGeoIPSetupModal(reloadPage = false) {
-    // X, Close, Escape, Back and a click outside close it once the setup is done;
-    // while it runs both buttons are off, so nothing stops it halfway
     const closeWhenDone = () => {
         const button = document.getElementById('geoip-setup-close-btn');
         if (button && !button.disabled) button.click();
@@ -3046,7 +2696,6 @@ async function showGeoIPSetupModal(reloadPage = false) {
     const closeBtn = document.getElementById('geoip-setup-close-btn');
     const closeX = dialog.querySelector('[data-dialog-x]');
     closeX.disabled = true;
-    // The setup is over (done or failed): the window can close
     const setupOver = () => { closeBtn.disabled = false; closeX.disabled = false; };
     closeBtn.addEventListener('click', async () => {
         overlay.remove();
@@ -3057,7 +2706,6 @@ async function showGeoIPSetupModal(reloadPage = false) {
         await loadSettings();
     });
     
-    // The step in progress: a request that fails shows its reason there
     let stepNow = 1;
     const setStepStatus = (step, status, detail) => {
         stepNow = step;
@@ -3080,13 +2728,11 @@ async function showGeoIPSetupModal(reloadPage = false) {
     };
     
     try {
-        // ── Step 1: Verify credentials are configured ──
         const credRes = await authenticatedFetch('/api/settings/geoip/status');
         if (!credRes.ok) throw await responseError(credRes);
         const credStatus = await credRes.json();
         
         if (credStatus.configured) {
-            // Validate the license key (stores result server-side for future page loads)
             const valLicRes = await authenticatedFetch('/api/settings/maxmind/validate', { method: 'POST' });
             const valLicData = valLicRes.ok ? await valLicRes.json() : null;
             
@@ -3105,7 +2751,6 @@ async function showGeoIPSetupModal(reloadPage = false) {
             return;
         }
         
-        // ── Step 2: Check/Download databases ──
         setStepStatus(2, 'running', 'Checking existing databases...');
         
         const statusRes = await authenticatedFetch('/api/settings/geoip/status');
@@ -3117,17 +2762,14 @@ async function showGeoIPSetupModal(reloadPage = false) {
         if (cityAvail && asnAvail) {
             setStepStatus(2, 'success', 'Databases installed');
         } else {
-            // Need to download
             setStepStatus(2, 'running', 'Downloading GeoIP databases...');
             const progressBar = document.getElementById('geoip-progress-bar');
             const progressFill = document.getElementById('geoip-progress-fill');
             progressBar.classList.remove('hidden');
             
-            // Start the download and wait for that run's own result
             let progress = 5;
             progressFill.style.width = progress + '%';
             const run = await geoipDownloadRun({ onTick: () => {
-                // Animate progress (fake but smooth)
                 progress = Math.min(90, progress + (90 - progress) * 0.08);
                 progressFill.style.width = progress + '%';
             } });
@@ -3140,13 +2782,10 @@ async function showGeoIPSetupModal(reloadPage = false) {
             if (downloadComplete === true) {
                 setStepStatus(2, 'success', 'Download job finished');
             } else {
-                // The bar ends in the state color meters use (app.js mailbox storage):
-                // red for a failed download, amber for one that did not finish in time
                 progressBar.classList.remove('ui-meter-info');
                 progressBar.classList.add(run.ok === null ? 'ui-warn' : 'ui-fail');
                 progressFill.style.width = '100%';
                 const errMsg = typeof downloadComplete === 'string' ? downloadComplete : 'The download did not finish in time. Check Status for progress.';
-                // Check if it's a credentials error
                 const isCredError = errMsg.toLowerCase().includes('401') || errMsg.toLowerCase().includes('unauthorized') || errMsg.toLowerCase().includes('invalid');
                 if (isCredError) {
                     setStepStatus(1, 'error', 'MaxMind rejected the download. Check your account ID and license key.');
@@ -3157,7 +2796,6 @@ async function showGeoIPSetupModal(reloadPage = false) {
             }
         }
         
-        // ── Step 3: Validate DB integrity ──
         setStepStatus(3, 'running', 'Checking the databases...');
         
         const valRes = await authenticatedFetch('/api/settings/geoip/validate', { method: 'POST' });
@@ -3179,7 +2817,6 @@ async function showGeoIPSetupModal(reloadPage = false) {
 }
 
 async function validateMaxMindLicense() {
-    // Show checking state on all MaxMind status badges
     const checkingHtml = `
         <span class="ui-tag ui-tag-info">
             <svg class="w-3 h-3 me-1 animate-spin" fill="none" viewBox="0 0 24 24">
@@ -3196,7 +2833,6 @@ async function validateMaxMindLicense() {
 
     try {
         const response = await authenticatedFetch('/api/settings/maxmind/validate', { method: 'POST' });
-        // A failed request: the tag stays short, the message says why
         const result = response.ok ? await response.json()
             : { configured: true, valid: false, error: 'Request failed', failure: uiHttpErrorText(response.status, await uiReadJson(response)) };
 
@@ -3222,8 +2858,6 @@ async function validateMaxMindLicense() {
     }
 }
 
-// The update_geoip job as GET /api/settings/geoip/status reports it, or null
-// (also when it did not answer within timeout ms)
 async function geoipJobState(timeout = 15000) {
     try {
         const res = await authenticatedFetch('/api/settings/geoip/status', { timeout });
@@ -3233,11 +2867,6 @@ async function geoipJobState(timeout = 15000) {
     }
 }
 
-// Start a GeoIP download and wait for the result of that run, not one left
-// from before: the job's last_run changes when a run starts (update_job_status
-// writes it on every change; the status gives it to the microsecond), and the
-// run ends in success or failed. Every request is bounded, and so is the wait.
-// Answers { started, ok: true | false | null (did not finish in time), error, status }
 async function geoipDownloadRun({ onStarted, onTick, every = 2000, limit = 3 * 60 * 1000, now = () => Date.now() } = {}) {
     const deadline = now() + limit;
     const left = () => Math.max(1, Math.min(15000, deadline - now()));
@@ -3246,15 +2875,12 @@ async function geoipDownloadRun({ onStarted, onTick, every = 2000, limit = 3 * 6
     try {
         res = await authenticatedFetch('/api/settings/geoip/download', { method: 'POST', timeout: left() });
     } catch (e) {
-        // No answer in time: the server may still have started the run, so watch for it
         res = null;
     }
     if (res && !res.ok) {
-        // The server's reason, or what its status means (a proxy's error page is not a credentials problem)
         return { started: false, ok: false, error: uiHttpErrorText(res.status, await uiReadJson(res)) };
     }
     if (onStarted) onStarted();
-    // Without the state before, only a run seen running counts
     let seenRun = !!before;
     for (let i = 0; now() < deadline; i++) {
         await new Promise(resolve => setTimeout(resolve, every));
@@ -3285,7 +2911,6 @@ async function repairGeoIPDatabase() {
     }
 
     try {
-        // Start a new download and wait for that run's own result
         const run = await geoipDownloadRun({ onStarted: () => showToast('GeoIP download check started...', 'info') });
         if (run.ok === null) {
             showToast('The repair is taking longer than expected. Check Status for progress.', 'warning');
@@ -3296,14 +2921,12 @@ async function repairGeoIPDatabase() {
         }
         if (!run.started) throw new Error(run.error);
 
-        // The databases as they are now: an older file can still be in use after a failed download
         const validateRes = await authenticatedFetch('/api/settings/geoip/validate', { method: 'POST' });
         const result = validateRes.ok ? await validateRes.json() : null;
         if (statusEl && result) {
             statusEl.innerHTML = renderGeoIPDbStatus({ db_valid: result.valid, databases: run.status && run.status.databases });
         }
         if (!run.ok) {
-            // The error says what to check; an older file that still checks out keeps working
             showToast(run.error + (result && result.valid ? ' Previously installed data is still in use.' : ''), 'error');
         } else if (result && result.valid) {
             showToast('GeoIP database check passed.', 'success');
@@ -3320,8 +2943,6 @@ async function repairGeoIPDatabase() {
     }
 }
 
-// Credentials checked against their server, changing nothing there. Each
-// failure says what it means and what to do about it.
 const CREDENTIAL_CHECKS = {
     mailcow_rw_key: {
         label: 'Read-write API key',
@@ -3367,22 +2988,18 @@ function credentialCheckedAt(status) {
     return status.checked_at ? 'Checked ' + escapeHtml(formatTime(status.checked_at)) : 'Not checked yet';
 }
 
-// Validate needs the credential; without it the button stays, disabled, and says so
 function credentialValidateButton(name, status) {
     return status && status.configured === false
         ? `<button type="button" class="ui-btn ui-btn-sm" disabled title="${escapeHtml(CREDENTIAL_CHECKS[name].missing)}">Validate</button>`
         : `<button type="button" onclick="validateCredential('${name}', true)" class="ui-btn ui-btn-sm">Validate</button>`;
 }
 
-// One fact: the status tag, Validate, and when it was last checked. The ids
-// carry a suffix because the read-only facts and the Mailcow tab both show it.
 function credentialCheckFact(name, status, suffix) {
     const id = 'credential-' + name + suffix;
     return `<div class="ui-chip-row"><span id="${id}-status">${renderCredentialStatus(name, status)}</span>${credentialValidateButton(name, status)}</div>`
         + `<span id="${id}-checked" class="ui-md-sub">${credentialCheckedAt(status)}</span>`;
 }
 
-// Run one check and show its result; returns the toast it calls for, and shows it when asked
 async function validateCredential(name, toastNow) {
     const check = CREDENTIAL_CHECKS[name];
     const show = (part, html) => ['', '-tab'].forEach(suffix => {
@@ -3395,12 +3012,10 @@ async function validateCredential(name, toastNow) {
         const response = await authenticatedFetch(check.endpoint, { method: 'POST' });
         result = response.ok ? await response.json() : { configured: true, valid: false, error: 'unexpected' };
     } catch (error) {
-        console.error('Failed to check the ' + check.label + ':', error); // nosemgrep: javascript.lang.security.audit.unsafe-formatstring.unsafe-formatstring
+        console.error('Failed to check the ' + check.label + ':', error);
         result = { configured: true, valid: false, error: 'connection' };
     }
     if (result.stale) {
-        // Changed while it was checked: this answer is about the old one, and
-        // the check of the new one says what holds now
         show('status', renderCredentialStatus(name, null));
         show('checked', 'Changed while it was checked. Validate again.');
         const toast = [`The ${check.label} changed while it was checked. Validate it again.`, 'info'];
@@ -3415,11 +3030,8 @@ async function validateCredential(name, toastNow) {
     return toast;
 }
 
-// Settings the rest of the app reads once, when the page loads (from /api/info; the
-// time zone is one of them); saving a change to one reloads the page so it takes effect everywhere
 const SETTINGS_READ_AT_PAGE_LOAD = ['app_title', 'app_logo_url', 'basic_auth_enabled', 'oauth2_enabled', 'mailcow_url', 'tz', 'date_format', 'time_format'];
 
-// A toast that has to outlive the reload after saving (a credential check)
 const SETTINGS_TOAST_AFTER_RELOAD = 'settingsToastAfterReload';
 
 function showSettingsToastAfterReload() {
@@ -3427,18 +3039,16 @@ function showSettingsToastAfterReload() {
     try {
         toast = JSON.parse(sessionStorage.getItem(SETTINGS_TOAST_AFTER_RELOAD) || 'null');
         sessionStorage.removeItem(SETTINGS_TOAST_AFTER_RELOAD);
-    } catch (e) { /* private mode or a bad value: nothing to show */ }
+    } catch (e) {}
     if (Array.isArray(toast)) showToast(String(toast[0]), toast[1] === 'success' ? 'success' : 'error');
 }
 
 function renderMaxMindStatus(status) {
-    // null/undefined = not checked yet (user must click 'Validate License')
     if (status === null || status === undefined) return uiTag('Not checked', '');
     if (!status.configured) return uiTag('Not configured', '');
     return status.valid ? uiTag('License valid', 'ok') : uiTag(status.error || 'Invalid', 'fail');
 }
 
-// Validate needs a MaxMind Account ID and License Key; without them the button stays, disabled, and says so
 function maxmindValidateButton(geoipConfig) {
     if (!geoipConfig) return '';
     return geoipConfig.enabled
@@ -3449,7 +3059,6 @@ function maxmindValidateButton(geoipConfig) {
 function renderGeoIPDbStatus(geoipConfig) {
     if (!geoipConfig) return '';
 
-    // Don't show DB status if MaxMind is not configured
     if (geoipConfig.enabled === false) return '';
 
     const dbValid = geoipConfig.db_valid;
@@ -3463,15 +3072,10 @@ function renderGeoIPDbStatus(geoipConfig) {
             </span>
         `;
     }
-    // null = not checked yet - could be downloading
     const dbs = geoipConfig.databases || {};
     const cityAvail = dbs.City && dbs.City.available;
     return cityAvail ? uiTag('Not checked', '') : uiTag('Not installed', 'warn');
 }
-
-// =============================================================================
-// TEST IMAP / SMTP
-// =============================================================================
 
 async function testSmtpConnection() {
     const run = showConnectionTestModal('SMTP connection test', 'Testing SMTP connection...');
@@ -3487,7 +3091,6 @@ async function testSmtpConnection() {
 
         const result = await response.json();
 
-        // Ensure logs is an array
         const logs = result.logs || ['No logs available'];
         updateConnectionTestModal(result.success ? 'success' : 'error', logs, run);
 
@@ -3513,7 +3116,6 @@ async function testImapConnection() {
 
         const result = await response.json();
 
-        // Ensure logs is an array
         const logs = result.logs || ['No logs available'];
         updateConnectionTestModal(result.success ? 'success' : 'error', logs, run);
 
@@ -3525,13 +3127,10 @@ async function testImapConnection() {
     }
 }
 
-// One test window at a time. Each opening is a new run: a reply that comes back
-// after its window was closed, or after another test opened, is dropped
 let connectionTestRun = 0;
 function showConnectionTestModal(title, message) {
     document.getElementById('connection-test-modal')?.remove();
     connectionTestRun += 1;
-    // Results only, nothing typed: a click outside closes it
     uiDialog({
         id: 'connection-test-modal', title, size: 'md', close: closeConnectionTestModal, backdropClose: closeConnectionTestModal,
         body: `<div id="connection-test-content">
@@ -3546,7 +3145,6 @@ function updateConnectionTestModal(status, logs, run) {
     const content = document.getElementById('connection-test-content');
     if (!content || (run !== undefined && run !== connectionTestRun)) return;
 
-    // Ensure logs is an array
     if (!Array.isArray(logs)) {
         logs = ['Error: Invalid response format'];
     }
@@ -3573,24 +3171,11 @@ function closeConnectionTestModal() {
     }
 }
 
-// =============================================================================
-// IMAP folders (dmarc_imap_folder): a JSON list, each item a folder name or
-// {"name": ..., "subfolders": true} (the folder and every folder below it, also
-// ones added later). Any other value is one folder name from before, used as
-// stored. The same rule as parse_setting in backend/app/services/imap_folders.py
-// =============================================================================
-
 const SETTINGS_FOLDER_ICON = '<svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linejoin="round" d="M3 6.5A1.5 1.5 0 0 1 4.5 5h4.6l2 2.2h8.4A1.5 1.5 0 0 1 21 8.7v9.8a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 18.5z"/></svg>';
 const SETTINGS_IMAP_CONNECTION_KEYS = ['dmarc_imap_host', 'dmarc_imap_port', 'dmarc_imap_use_ssl', 'dmarc_imap_verify_ssl', 'dmarc_imap_user', 'dmarc_imap_password'];
 
-// Whether a field differs from the value it loaded with; set when the settings form is built
 let settingsFieldUnsaved = () => false;
 
-// Folder names and the JSON value go into markup with uiEntityAttr (utils.js), not
-// escapeHtml: that one drops the backslash of \", which changes a name or breaks the JSON
-
-// { entries: [{ name, subfolders, item }] } for the list form (item: the stored
-// item, written back as it was while unchanged), { legacy: name } for one folder name
 function settingsParseFolders(value) {
     const text = typeof value === 'string' ? value : '';
     if (!text.trim()) return { legacy: 'INBOX' };
@@ -3613,7 +3198,6 @@ function settingsParseFolders(value) {
     return { entries };
 }
 
-// The rows of the field: one per chosen folder, or the one folder name from before
 function settingsFolderRows(value) {
     const parsed = settingsParseFolders(value);
     const list = parsed.entries || [{ name: parsed.legacy, subfolders: false }];
@@ -3628,8 +3212,6 @@ function settingsShowFolders(input) {
     if (rows) rows.innerHTML = settingsFolderRows(input.value);
 }
 
-// One picker at a time. Each opening is a new run, and closing ends it: a folder
-// list that comes back for a closed or reopened picker is dropped
 let settingsFoldersRun = 0;
 async function settingsChooseFolders() {
     const input = document.getElementById('edit-dmarc_imap_folder');
@@ -3651,7 +3233,6 @@ async function settingsChooseFolders() {
         foot.innerHTML = '<button type="button" class="ui-btn" data-folders-close>Close</button>';
         foot.querySelector('[data-folders-close]').addEventListener('click', close);
     };
-    // The folders come from the saved connection, so an unsaved one would show another mailbox
     if (SETTINGS_IMAP_CONNECTION_KEYS.some(name => settingsFieldUnsaved(name))) {
         say('Save the connection settings first, then choose folders.');
         return;
@@ -3681,10 +3262,8 @@ async function settingsChooseFolders() {
 function settingsFolderPicker(result, input, body, foot, close) {
     const folders = (Array.isArray(result.folders) ? result.folders : []).filter(f => f && typeof f.name === 'string' && f.name);
     const byName = new Map(folders.map(f => [f.name, f]));
-    // INBOX is one folder in any case (RFC 3501); every other name is matched exactly
     const inbox = folders.find(f => f.name.toUpperCase() === 'INBOX');
     const listed = name => byName.get(name) || (inbox && name.toUpperCase() === 'INBOX' ? inbox : null);
-    // A folder's parent: the listed folder whose name and its delimiter are the longest start of this name
     const parentOf = new Map();
     folders.forEach(f => {
         for (let i = f.name.length - 1; i > 0; i--) {
@@ -3707,15 +3286,12 @@ function settingsFolderPicker(result, input, body, foot, close) {
     });
     walk(roots, 0);
 
-    // The choice being made, by folder: { name, subfolders, item, folder, legacy }.
-    // A name the server does not list keeps its own name as key and is shown at the top
     const draft = new Map();
     const missing = [];
     const add = (name, subfolders, item, legacy) => {
         const folder = listed(name);
         const key = folder ? folder.name : name;
         if (draft.has(key)) {
-            // The same folder twice: one entry that keeps the subfolders if either had them
             const known = draft.get(key);
             if (subfolders && !known.subfolders) {
                 known.subfolders = true;
@@ -3727,14 +3303,10 @@ function settingsFolderPicker(result, input, body, foot, close) {
         draft.set(key, entry);
         if (!folder) missing.push({ key, entry });
     };
-    // The picker starts from the field's current value, so an unsaved earlier choice wins
     const parsed = settingsParseFolders(input.value);
     if (parsed.entries) {
         parsed.entries.forEach(e => add(e.name, e.subfolders, e.item, false));
     } else {
-        // A folder name from before is used as stored. The server matched the saved one;
-        // another (Clear sets INBOX) counts as found only when it is plain text,
-        // which reads the same before and after decoding
         const saved = result.legacy && result.legacy.value === input.value ? result.legacy : null;
         const match = saved ? (saved.name ? listed(saved.name) : null)
             : (/^[\x20-\x7e]+$/.test(parsed.legacy) && !parsed.legacy.includes('&') ? listed(parsed.legacy) : null);
@@ -3766,8 +3338,6 @@ function settingsFolderPicker(result, input, body, foot, close) {
             const pick = f.selectable !== false
                 ? '<label class="ui-set-tree-pick"><input type="checkbox" class="ui-check" data-pick="' + i + '"' + (own || cover ? ' checked' : '') + (cover ? ' disabled' : '') + '>' + SETTINGS_FOLDER_ICON + name + '</label>'
                 : '<span class="ui-set-tree-pick"><span class="ui-set-tree-gap"></span>' + SETTINGS_FOLDER_ICON + name + '</span>';
-            // Offered on folders that have subfolders now (as in the design), and kept on one
-            // already read with its subfolders, so that choice can still be turned off
             const subsBox = f.can_have_children && !cover && ((kids.get(f) || []).length > 0 || subs)
                 ? '<label class="ui-set-tree-subs' + (subs ? ' is-on' : '') + '"><input type="checkbox" class="ui-check" data-subs="' + i + '"' + (subs ? ' checked' : '') +
                     ' aria-label="' + uiEntityAttr(f.name) + ' with subfolders">With subfolders</label>'
@@ -3791,7 +3361,6 @@ function settingsFolderPicker(result, input, body, foot, close) {
     foot.querySelector('[data-folders-close]').addEventListener('click', close);
 
     const redraw = () => {
-        // The tree is drawn again on every change; the box that was used keeps the focus
         const active = document.activeElement && tree.contains(document.activeElement) ? document.activeElement : null;
         const focusKey = active ? ['pick', 'subs', 'missing'].map(k => active.dataset[k] !== undefined ? '[data-' + k + '="' + active.dataset[k] + '"]' : '').join('') : '';
         tree.innerHTML = treeHtml();
@@ -3820,13 +3389,11 @@ function settingsFolderPicker(result, input, body, foot, close) {
             const f = rows[Number(box.dataset.subs)].f;
             const own = draft.get(f.name);
             if (box.checked) {
-                // The subfolders are read through this folder now, so they are no longer named one by one
                 const below = f.name + (f.delimiter || '');
                 [...draft.keys()].forEach(key => { if (f.delimiter && key !== f.name && key.startsWith(below)) draft.delete(key); });
                 draft.set(f.name, own ? { ...own, subfolders: true, item: own.subfolders ? own.item : null }
                     : { name: f.name, subfolders: true, item: null, folder: f, legacy: false });
             } else if (own) {
-                // A folder that cannot be read itself is only there for its subfolders
                 if (f.selectable === false) draft.delete(f.name);
                 else draft.set(f.name, { ...own, subfolders: false, item: own.subfolders ? null : own.item });
             }
@@ -3836,7 +3403,6 @@ function settingsFolderPicker(result, input, body, foot, close) {
 
     apply.addEventListener('click', () => {
         if (apply.disabled) return;
-        // Names the server does not list first, as shown, then the server's order
         const order = [];
         missing.forEach(m => { if (draft.get(m.key) === m.entry) order.push(m.entry); });
         const seen = new Set();
@@ -3846,7 +3412,6 @@ function settingsFolderPicker(result, input, body, foot, close) {
         });
         if (!order.length) return;
         input.value = JSON.stringify(order.map(e => e.item !== null ? e.item : (e.subfolders ? { name: e.name, subfolders: true } : e.name)));
-        // The save bar counts it like a typed change
         input.dispatchEvent(new Event('change', { bubbles: true }));
         settingsShowFolders(input);
         close();

@@ -1,29 +1,18 @@
-// =============================================================================
-// DMARC & TLS-RPT - domains, a domain, its senders, a day of reports, upload,
-// IMAP sync and report management
-// =============================================================================
-// Classic script sharing the global scope; loaded after utils.js and app.js in
-// index.html. Every screen renders into #dmarc-view: all domains, a domain (mail
-// per day, the mail flow, its senders and TLS beside the to-do list and its
-// records), a sender, a day of DMARC reports and a day of TLS reports.
-
 let dmarcState = {
-    currentView: 'domains',      // domains | domain | report | source | tls
+    currentView: 'domains',
     currentDomain: null,
-    currentId: null,             // the open sender (its address) or day
-    breadcrumb: [],              // [{ label, action }] after the page's name
-    domains: null,               // /api/dmarc/domains
-    daily: [],                   // messages per day across the domains
-    insights: null,              // /api/dmarc/insights
-    domain: null                 // the open domain: { name, overview, groups, tls, insight }
+    currentId: null,
+    breadcrumb: [],
+    domains: null,
+    daily: [],
+    insights: null,
+    domain: null
 };
 
-// The page has no tabs any more; /dmarc/tls and the old tab links open the domains
 function dmarcOpenTab() {
     navigateTo('dmarc');
 }
 
-// Pass rates: green from 95%, amber from 80%, red below
 function dmarcTone(pct) {
     return pct >= 95 ? 'ok' : pct >= 80 ? 'warn' : 'fail';
 }
@@ -32,14 +21,10 @@ function dmarcPct(value) {
     return `${Math.round((Number(value) || 0) * 100) / 100}%`;
 }
 
-// A rate in its tone, or a muted "-" when there was nothing to measure: no messages
-// or no TLS sessions in the period is no data, not a failure (issue #412)
 function dmarcRate(pct, count) {
     return count ? `<span class="ui-text-${dmarcTone(pct)}">${dmarcPct(pct)}</span>` : '<span class="ui-muted">-</span>';
 }
 
-// A domain with reports that is not an active domain on this mailcow server (issue #412).
-// Nothing while the server's domains are not known (on_mailcow null).
 function dmarcNotOnServer(d) {
     if (!d || d.on_mailcow !== false) return '';
     return '<sup class="ui-dm-sup" title="This domain is not on this server.">Not on server</sup>';
@@ -49,8 +34,6 @@ function dmarcNum(value) {
     return (Number(value) || 0).toLocaleString();
 }
 
-// A report day from the server, already a day in the app's zone, named as it is:
-// its day and month, or in full with its weekday for a report's title
 function dmarcDay(date, long = false) {
     return long ? formatDayKey(date, { weekday: 'long' }) : formatDayKey(date, { year: false });
 }
@@ -59,7 +42,6 @@ function dmarcTag(tone, label, solid = false) {
     return `<span class="ui-dm-pill ui-dm-${tone}${solid ? ' is-solid' : ''}">${escapeHtml(label)}</span>`;
 }
 
-// timeout (the page's refresh): a read that has not answered by then has failed
 async function dmarcGet(url, timeout = 0) {
     const response = await authenticatedFetch(url, timeout ? { timeout } : {});
     if (!response.ok) throw await responseError(response);
@@ -76,7 +58,6 @@ function dmarcLoading(text) {
     if (view) view.innerHTML = `<div class="ui-loading" role="status"><div class="loading"></div><p>${escapeHtml(text)}</p></div>`;
 }
 
-// A view that could not load: Try again, and the page's refresh tries again too
 function dmarcFailed(error) {
     const view = dmarcView();
     dmarcShownHtml = null;
@@ -84,21 +65,14 @@ function dmarcFailed(error) {
     if (typeof pageRefreshRetry === 'function') pageRefreshRetry('dmarc');
 }
 
-// What the view shows, as drawn: a refresh that brings the same draws nothing
 let dmarcShownHtml = null;
 
-// Every load of a view, the user's or the refresh's, takes a number: only the
-// newest one draws, so an answer that comes late never replaces a newer one
 let dmarcLoadSeq = 0;
 
-// How a quiet read (the page's refresh) asks: with a time limit, and failing as
-// a whole when any part fails, so it never draws a view with a part missing
 function dmarcQuietRead(quiet) {
     return quiet ? { timeout: PAGE_REFRESH_TIMEOUT, strict: true } : { timeout: 0, strict: false };
 }
 
-// Draws a view. quiet (the refresh) draws only what changed and keeps the place:
-// the page's scroll, the calendar's scroll and its focused day
 function dmarcShow(html, quiet = false) {
     const view = dmarcView();
     if (!view) return false;
@@ -123,9 +97,6 @@ function dmarcShow(html, quiet = false) {
     return true;
 }
 
-// Whether the user is working in the page: a window of it is open, text in the
-// view is selected, or the focus is on something in the view other than a day
-// of the calendar (which a redraw gives back)
 function dmarcBusy() {
     const open = id => { const el = document.getElementById(id); return el && !el.classList.contains('hidden'); };
     if (['dmarc-record-modal', 'dmarc-reports-management-modal', 'dmarc-sync-history-modal'].some(open)) return true;
@@ -135,9 +106,6 @@ function dmarcBusy() {
     return uiTextHeld(view) || Boolean(active && view.contains(active) && !active.closest('.ui-dm-cal-day'));
 }
 
-// The open view read again from the server, not from what the page kept. quiet
-// (the page's refresh, every five minutes, also the age of the server's cache)
-// draws only what changed, and waits while the user works in the page
 async function dmarcReload(quiet = false) {
     if (quiet && dmarcBusy()) return;
     const s = dmarcState;
@@ -154,7 +122,6 @@ async function dmarcReload(quiet = false) {
     }
 }
 
-// The address of what is open; a load from the address itself does not add a step
 function dmarcPush(params) {
     if (typeof buildPath !== 'function') return;
     const path = buildPath('dmarc', params);
@@ -166,12 +133,7 @@ function dmarcReplace(params) {
     routerReplace({ route: 'dmarc', params }, buildPath('dmarc', params));
 }
 
-// =============================================================================
-// BREADCRUMBS
-// =============================================================================
-
 function updateDmarcBreadcrumb() {
-    // With the top bar the levels join its crumbs; on a phone this row shows them
     if (typeof setPageCrumbs === 'function') setPageCrumbs('dmarc', '', 'dmarcOpenTab()', dmarcState.breadcrumb);
     const container = document.getElementById('dmarc-breadcrumb');
     if (!container) return;
@@ -188,7 +150,6 @@ function updateDmarcBreadcrumb() {
             : `${separator}<button type="button" class="ui-crumb" onclick="${item.action}">${escapeHtml(item.label)}</button>`).join('')}`;
 }
 
-// The levels after the page's name, for each screen
 function setDmarcBreadcrumb(type, data = {}) {
     const domain = data.domain ? { label: data.domain, action: `loadDomainOverview('${escapeJsArg(data.domain)}')` } : null;
     switch (type) {
@@ -210,11 +171,6 @@ function setDmarcBreadcrumb(type, data = {}) {
     updateDmarcBreadcrumb();
 }
 
-// =============================================================================
-// LOADING AND ROUTES
-// =============================================================================
-
-// Whether reports can be uploaded, from the page's own area (View on DMARC & TLS is enough)
 async function loadDmarcSettings() {
     try {
         const response = await authenticatedFetch('/api/dmarc/reports/config');
@@ -230,11 +186,8 @@ async function loadDmarcSettings() {
     }
 }
 
-// The upload and sync controls: the settings and the mailbox status each time,
-// so a change in Settings shows without reloading the page
 function dmarcLoadControls() {
     const loads = [loadDmarcImapStatus(), loadDmarcSettings()];
-    // Manage Reports counts the reports: opened straight on a domain, read the list for it
     if (!dmarcState.domains) dmarcGet('/api/dmarc/domains').then(list => dmarcUpdateManageButton(list.domains || [])).catch(() => {});
     return Promise.all(loads).then(updateDmarcControls);
 }
@@ -251,13 +204,7 @@ async function loadDmarc() {
     await loadDmarcDomains();
 }
 
-/**
- * Open what the address names. /dmarc/tls and /dmarc/tls/<domain> are from when
- * TLS had its own tab: they open the domains and the domain.
- * @param {Object} params - { domain, type, id } or { tab: 'tls', domain, id }
- */
 async function handleDmarcRoute(params = {}) {
-    // Opened from the address (a link, Back, Refresh): read the domain afresh
     dmarcState.domain = null;
     if (params.tab === 'tls') {
         if (params.domain && params.id && params.id !== 'providers') return loadTLSReportDetails(params.domain, params.id, false);
@@ -267,14 +214,9 @@ async function handleDmarcRoute(params = {}) {
     if (!params.domain) return loadDmarc();
     if (params.type === 'report' && params.id) return loadReportDetails(params.domain, params.id, false);
     if (params.type === 'source' && params.id) return loadSourceDetails(params.domain, params.id, false);
-    // /dmarc/<domain>/sources, /reports and /tls were tabs of the domain
     if (params.type) dmarcReplace({ domain: params.domain });
     return loadDomainOverview(params.domain, false);
 }
-
-// =============================================================================
-// ALL DOMAINS
-// =============================================================================
 
 async function loadDmarcDomains({ quiet = false } = {}) {
     const seq = ++dmarcLoadSeq;
@@ -290,7 +232,6 @@ async function loadDmarcDomains({ quiet = false } = {}) {
         dmarcUpdateManageButton(dmarcState.domains);
         if (dmarcState.currentView === 'domains' && !(quiet && dmarcBusy())) renderDmarcHome(quiet);
     } catch (error) {
-        // A refresh that failed leaves the view as it was
         if (quiet || seq !== dmarcLoadSeq) return;
         console.error('Error loading DMARC domains:', error);
         if (dmarcState.currentView === 'domains') dmarcFailed(error);
@@ -301,7 +242,6 @@ function dmarcInsightFor(domain) {
     return ((dmarcState.insights || {}).insights || []).find(i => i.domain === domain) || null;
 }
 
-// What to do on every domain, the most important first
 function dmarcHomeTasks(domains) {
     const tasks = [];
     domains.forEach(d => {
@@ -335,7 +275,6 @@ function renderDmarcHome(quiet = false) {
     if (!view) return;
     const domains = dmarcState.domains || [];
     if (!domains.length) {
-        // Upload is offered only to whoever may take action on DMARC & TLS
         const upload = userCan('dmarc', 'write') ? ', or upload one with Upload Report' : '';
         dmarcShow(`<div class="ui-dm-card"><p class="ui-dm-empty">No reports yet. They arrive from the report mailbox${upload}.</p></div>`, quiet);
         return;
@@ -365,15 +304,6 @@ function renderDmarcHome(quiet = false) {
         </div><aside>${dmarcTodoCard(dmarcHomeTasks(domains), true)}</aside></div>`, quiet);
 }
 
-// =============================================================================
-// PIECES: the chart, the to-do list, the mail flow
-// =============================================================================
-
-// Messages (or TLS sessions) per day, passed on failed; a day opens its reports
-// A square per day over the reports kept (DMARC retention): weeks as columns from
-// Monday, colored by the day's DMARC pass rate, stronger with more mail; a day
-// without reports is only a border, a day before the retention is hatched (its
-// reports may be gone). One Tab stop: arrows move by day and week, Enter opens it.
 function dmarcCalendarCard(x) {
     const cal = x.calendar;
     if (!cal || !cal.from) return '';
@@ -382,12 +312,10 @@ function dmarcCalendarCard(x) {
     const dayNum = s => { const [y, m, d] = ymd(s); return Date.UTC(y, m - 1, d) / 86400000; };
     const dateOf = n => new Date(n * 86400000).toISOString().slice(0, 10);
     const first = dayNum(cal.from), last = dayNum(cal.to);
-    // Monday-first weeks: the first column begins on the Monday on or before the first day
     const lead = (new Date(first * 86400000).getUTCDay() + 6) % 7;
     const max = Math.max(1, ...(cal.days || []).map(d => d.total));
     const old = cal.maybe_incomplete_before ? dayNum(cal.maybe_incomplete_before) : -Infinity;
     const domain = escapeJsArg(x.name);
-    // The day as the app writes dates, from the date alone
     const dayWords = date => formatDayKey(date);
     const cells = [];
     for (let i = 0; i < lead; i++) cells.push('<span class="ui-dm-cal-pad" aria-hidden="true"></span>');
@@ -402,7 +330,6 @@ function dmarcCalendarCard(x) {
             aria-label="${escapeHtml(words + maybe)}" title="${escapeHtml(words + maybe)}"${d && d.total ? ` onclick="loadReportDetails('${domain}', '${date}')"` : ' aria-disabled="true"'}></button>`);
     }
     const span = last - first + 1;
-    // A day is a 24px target at least (its square drawn inside), bigger with few weeks; a year scrolls sideways
     const weeks = Math.ceil((lead + span) / 7);
     const size = weeks <= 16 ? 28 : 24;
     return `<div class="ui-dm-card"><header>Pass rate per day <span class="ui-muted">last ${span} days</span></header>
@@ -411,15 +338,12 @@ function dmarcCalendarCard(x) {
         <div class="ui-dm-legend ui-dm-cal-legend"><span><i class="is-ok"></i>98% or more</span><span><i class="is-warn"></i>90% to 98%</span><span><i class="is-fail"></i>Under 90%</span><span><i class="is-empty"></i>No reports</span>${old > first ? '<span><i class="is-old"></i>Before the retention</span>' : ''}</div></div></div>`;
 }
 
-// The calendar's one Tab stop is the day last focused, also by a click
 function dmarcCalendarStop(event) {
     const day = event.target.closest && event.target.closest('.ui-dm-cal-day');
     if (!day) return;
     event.currentTarget.querySelectorAll('.ui-dm-cal-day').forEach(d => { d.tabIndex = d === day ? 0 : -1; });
 }
 
-// The calendar's keys: one Tab stop (roving), arrows by day (up and down) and week (left and right);
-// time runs left to right in either text direction, like the charts
 function dmarcCalendarKey(event) {
     const days = [...event.currentTarget.querySelectorAll('.ui-dm-cal-day')];
     const at = days.indexOf(document.activeElement);
@@ -436,7 +360,6 @@ function dmarcCalendarKey(event) {
     days[next].focus();
 }
 
-// The calendar shows its newest weeks first on a narrow screen
 function dmarcCalendarToEnd() {
     document.querySelectorAll('.ui-dm-cal-scroll').forEach(box => { box.scrollLeft = box.scrollWidth; });
 }
@@ -474,10 +397,9 @@ function dmarcTodoCard(tasks, withDomain = false) {
         ${tasks.length > 8 ? `<p class="ui-dm-more">and ${tasks.length - 8} more</p>` : ''}</div>`;
 }
 
-// Your domain, the senders that sent as it, the receivers that reported it
 function dmarcFlow(x) {
     const groups = x.groups.slice(0, 8);
-    const receivers = Object.create(null); // keyed by reporter names from the reports
+    const receivers = Object.create(null);
     groups.forEach(g => g.reporters.forEach(r => {
         const e = receivers[r.org_name] || (receivers[r.org_name] = { name: r.org_name, count: 0, pass: 0, from: Object.create(null) });
         e.count += r.count; e.pass += r.dmarc_pass; e.from[g.key] = (e.from[g.key] || 0) + r.count;
@@ -500,10 +422,8 @@ function dmarcFlow(x) {
     </div><div class="ui-dm-legend ui-dm-flow-legend"><span><i class="is-ok"></i>95% or more pass</span><span><i class="is-warn"></i>80% or more</span><span><i class="is-fail"></i>Less</span><span>Line width is the volume</span></div>`;
 }
 
-// Lay the flow out for its width: three columns side by side, or down the page on a phone
 function drawDmarcFlow() {
     const el = document.getElementById('dmarc-flow');
-    // Watch the size even while the flow is hidden on a phone, to draw it on a wider screen
     if (el) watchDmarcFlowSize();
     if (!el || !el.offsetWidth) return;
     const svg = el.querySelector('svg');
@@ -552,7 +472,6 @@ function drawDmarcFlow() {
         + L.map(([gi, ri, width, tone]) => pos[1][gi] && pos[2][ri] ? curve(pos[1][gi], pos[2][ri], width, tone) : '').join('');
 }
 
-// The flow is laid out again when the window changes size
 let dmarcFlowResize = null;
 let dmarcFlowWatching = false;
 function watchDmarcFlowSize() {
@@ -564,13 +483,8 @@ function watchDmarcFlowSize() {
     });
 }
 
-// =============================================================================
-// A DOMAIN
-// =============================================================================
-
-// The senders of a domain, one per network (ASN); an address without one stands alone
 function dmarcGroups(sources) {
-    const groups = Object.create(null); // keyed by names from the reports
+    const groups = Object.create(null);
     sources.forEach(s => {
         const key = s.asn_org || s.source_ip;
         const g = groups[key] || (groups[key] = { key, name: s.asn_org || s.source_ip, ips: [], total: 0, pass: 0, spf: 0, dkim: 0, reporters: Object.create(null) });
@@ -588,8 +502,6 @@ function dmarcGroups(sources) {
     })).sort((a, b) => (a.passPct >= 50) - (b.passPct >= 50) || b.total - a.total);
 }
 
-// The open domain's data, read once and kept while it stays open. A quiet read
-// (read, from dmarcQuietRead) has a time limit and fails as a whole when a part fails
 async function dmarcLoadDomain(domain, read = dmarcQuietRead(false)) {
     if (dmarcState.domain && dmarcState.domain.name === domain) return dmarcState.domain;
     const enc = encodeURIComponent(domain);
@@ -641,7 +553,6 @@ function dmarcDomainTasks(x) {
 function dmarcRecordsCard(x) {
     const name = escapeJsArg(x.name);
     const policy = x.record.record ? String(x.record.policy || (x.record.settings || {}).policy || '').toLowerCase() : '';
-    // Without mail in the period the reports say nothing about SPF or DKIM
     const sent = x.groups.reduce((s, g) => s + g.total, 0);
     const noMail = ['No mail in the last 30 days', dmarcTag('mut', 'No data')];
     const rows = [
@@ -663,7 +574,6 @@ function dmarcSendersCard(x) {
             <td class="r ui-dm-hm">${dmarcRate(g.spfPct, g.total)}</td><td class="r ui-dm-hm">${dmarcRate(g.dkimPct, g.total)}</td><td class="r ui-dm-hm">${g.ips.length}</td></tr>`).join('')}</tbody></table></div>`;
 }
 
-// One row a day: how much mail, from how many senders, who reported it
 function dmarcDaysCard(x) {
     if (!x.days.length) return '';
     const name = escapeJsArg(x.name);
@@ -675,14 +585,13 @@ function dmarcDaysCard(x) {
             <td class="r">${dmarcRate(r.dmarc_pass_pct, r.total_messages)}</td></tr>`).join('')}</tbody></table></details>`;
 }
 
-// Whether mail to the domain arrived encrypted, from its TLS reports
 function dmarcTlsCard(x) {
     const days = (x.tls.data || []).slice().reverse();
     const name = escapeJsArg(x.name);
     if (!days.length) return `<div class="ui-dm-card"><header>Encryption of mail to you (TLS)</header><p class="ui-dm-empty">No TLS reports for ${escapeHtml(x.name)} in the last 30 days.
         <button type="button" class="ui-dm-link" onclick="openDmarcRecord('tls', '${name}')">See the TLS-RPT record</button></p></div>`;
     const totals = x.tls.totals || {};
-    const reporters = Object.create(null); // keyed by reporter names from the reports
+    const reporters = Object.create(null);
     days.forEach(d => (d.reports || []).forEach(r => {
         const e = reporters[r.organization_name] || (reporters[r.organization_name] = { name: r.organization_name, ok: 0, fail: 0 });
         e.ok += r.successful_sessions || 0; e.fail += r.failed_sessions || 0;
@@ -731,10 +640,6 @@ async function loadDomainOverview(domain, updateUrl = true, quiet = false) {
     }
 }
 
-// =============================================================================
-// THE RECORD WINDOWS
-// =============================================================================
-
 async function openDmarcRecord(kind, domain) {
     const modal = document.getElementById('dmarc-record-modal');
     const content = document.getElementById('dmarc-record-content');
@@ -759,9 +664,9 @@ function dmarcCopyBlock(text) {
     return `<div class="ui-dm-code"><span>${escapeHtml(text)}</span><button type="button" class="ui-btn ui-btn-sm" onclick="copyToClipboard('${escapeJsArg(text)}', event)">Copy</button></div>`;
 }
 
-// The domain shown in the record window, so a picked policy can be explained
+// The domain shown in the record window
 let dmarcRecordDomain = null;
-// How much a policy protects: None only reports, Quarantine sends to spam, Reject refuses
+// How much a policy protects
 const DMARC_POLICY_LEVEL = { none: ['fail', 'Monitoring'], quarantine: ['warn', 'Partial'], reject: ['ok', 'Enforced'] };
 
 function dmarcPolicyTag(policy) {
@@ -780,7 +685,6 @@ function dmarcCurrentPolicy(x) {
     return x.record.record ? String(x.record.policy || settings.policy || '').toLowerCase() : '';
 }
 
-// The published record with only p= changed, so its other tags stay; a new record when there is none
 function dmarcRecordWithPolicy(x, pick) {
     const record = String(x.record.record || '').trim();
     if (!record) return `v=DMARC1; p=${pick}; rua=mailto:dmarc@${x.name}`;
@@ -788,16 +692,13 @@ function dmarcRecordWithPolicy(x, pick) {
     return tag.test(record) ? record.replace(tag, `$1$2p$3${pick}`) : record.replace(/^v\s*=\s*DMARC1\s*;?/i, `v=DMARC1; p=${pick};`);
 }
 
-// What a policy would do for the domain, and the record that sets it
 function dmarcPolicyPlan(x, pick) {
     const current = dmarcCurrentPolicy(x);
     if (pick === current) return `<p class="ui-dm-note">${pick === 'reject' ? 'The strictest policy is in place.' : 'This is the policy in place.'}</p>`;
     const record = dmarcCopyBlock(`_dmarc.${x.name}  TXT  "${dmarcRecordWithPolicy(x, pick)}"`);
     if (pick === 'none') return `<p class="ui-dm-note">With p=none, mail that fails is delivered and only reported.</p>${record}`;
     if (!x.groups.length) return `<p class="ui-dm-note"><b class="ui-text-warn">No data.</b> No mail in the last 30 days, so the reports cannot tell yet.</p>${record}`;
-    // The policy acts on every message that failed DMARC, whoever sent it
     const failing = x.groups.reduce((s, g) => s + g.total - g.pass, 0);
-    // Senders that pass on most of their mail count as yours, and each must pass on 95% or more
     const yours = x.groups.filter(g => g.passPct >= 50);
     const verdict = !yours.length ? '<b class="ui-text-warn">Not yet.</b> No sender passes on most of its mail: set up SPF or DKIM first.'
         : yours.every(g => g.passPct >= 95) ? '<b class="ui-text-ok">Ready.</b> Every sender that passes, passes on 95% or more.'
@@ -806,7 +707,6 @@ function dmarcPolicyPlan(x, pick) {
         With p=${pick}, receivers would have ${pick === 'reject' ? 'refused' : 'sent to spam'} <b>${dmarcNum(failing)}</b> messages in the last 30 days: the ones that failed DMARC.</p>${record}`;
 }
 
-// The policies as a radio group; the next stricter one is picked first
 function dmarcPolicyChoice(x, pick) {
     const current = dmarcCurrentPolicy(x);
     return `<div class="ui-dm-pol" role="radiogroup" aria-label="Policy" onkeydown="dmarcPolicyKey(event)">${DMARC_POLICIES.map(([id, title, text]) => `
@@ -829,7 +729,6 @@ function dmarcPickPolicy(pick) {
     document.getElementById('dmarc-policy-plan').innerHTML = dmarcPolicyPlan(x, pick);
 }
 
-// Arrow keys move the pick, as in any radio group
 function dmarcPolicyKey(event) {
     const step = { ArrowDown: 1, ArrowRight: 1, ArrowUp: -1, ArrowLeft: -1 }[event.key];
     if (!step) return;
@@ -843,9 +742,7 @@ function dmarcDmarcRecord(x) {
     const settings = x.record.settings || {};
     const current = dmarcCurrentPolicy(x);
     const next = current === 'reject' ? 'reject' : current === 'quarantine' ? 'reject' : 'quarantine';
-    // The record says r or s
     const alignment = value => ({ r: 'relaxed', s: 'strict' })[value] || value || 'relaxed';
-    // Report URIs come from DNS: only mailto: becomes a link, anything else stays text
     const formatUriAsEmail = (uri) => {
         const text = String(uri).trim();
         if (!/^mailto:/i.test(text)) return escapeHtml(text);
@@ -865,8 +762,7 @@ function dmarcDmarcRecord(x) {
         ${dmarcPolicyChoice(x, next)}`;
 }
 
-// SPF or DKIM for the domain, from the reports: how much mail passed, and each
-// sender's share that passed, weakest first; a sender opens its details
+// SPF or DKIM for the domain
 function dmarcAuthRecord(x, kind) {
     const label = kind === 'spf' ? 'SPF' : 'DKIM';
     const sent = x.groups.reduce((s, g) => s + g.total, 0);
@@ -896,12 +792,6 @@ function dmarcTlsRecord(x) {
         ${user ? `<p class="ui-dm-note">The address is the mailbox this page reads, so the reports show up here.</p>` : '<p class="ui-dm-note">Send the reports to the mailbox this page reads, so they show up here.</p>'}`;
 }
 
-// =============================================================================
-// A SENDER, A DAY OF REPORTS, A DAY OF TLS
-// =============================================================================
-
-// On a phone a detail table is a list: the name and its count on one line, then the
-// details and the results as tags. Wide screens keep the table.
 function dmarcMRow({ title, count, sub = '', tags = '', note = '', action = '' }) {
     return `<div class="ui-dm-mrow${action ? ' is-go' : ''}"${action ? ` onclick="if (!uiRowHeld(event)) { ${action} }"` : ''}>
         <div class="ui-dm-mrow-top">${title}<span class="ui-dm-mrow-n">${count}</span></div>
@@ -1058,7 +948,6 @@ async function loadTLSReportDetails(domain, reportDate, updateUrl = true, quiet 
     }
 }
 
-// Manage Reports shows how many there are, and hides with none
 function dmarcUpdateManageButton(domains) {
     const manageBtn = document.getElementById('dmarc-manage-btn');
     if (!manageBtn) return;
@@ -1066,10 +955,6 @@ function dmarcUpdateManageButton(domains) {
     manageBtn.textContent = `Manage Reports (${totalReports})`;
     manageBtn.classList.toggle('hidden', totalReports === 0);
 }
-
-// =============================================================================
-// UPLOAD
-// =============================================================================
 
 async function uploadDmarcReport(event) {
     if (!uiMayAct('dmarc')) return;
@@ -1101,7 +986,6 @@ async function uploadDmarcReport(event) {
             const countLabel = result.report_type === 'tls-rpt' ? 'policies' : 'records';
             showToast(`${reportType} report uploaded: ${count} ${countLabel}`, 'success');
 
-            // Reload what the page shows, on either tab
             handleDmarcRoute(parseRoute().params);
         } else if (result.status === 'duplicate') {
             showToast(`${reportType} report already exists`, 'warning');
@@ -1114,10 +998,6 @@ async function uploadDmarcReport(event) {
 
     event.target.value = '';
 }
-
-// =============================================================================
-// IMAP
-// =============================================================================
 
 async function loadDmarcImapStatus() {
     try {
@@ -1141,7 +1021,6 @@ function updateDmarcControls() {
     const syncContainer = document.getElementById('dmarc-sync-container');
     const lastSyncInfo = document.getElementById('dmarc-last-sync-info');
 
-    // Upload Report: only when manual upload is turned on in Settings
     if (uploadBtn) {
         const allowed = dmarcConfiguration?.manual_upload_enabled === true;
         uploadBtn.classList.toggle('hidden', !allowed);
@@ -1149,7 +1028,6 @@ function updateDmarcControls() {
         if (input) input.disabled = !allowed;
     }
 
-    // Fetch reports: without IMAP set up the button stays, disabled, and the line under it says why
     const syncBtn = document.getElementById('dmarc-sync-btn');
     if (dmarcImapStatus && !dmarcImapStatus.enabled) {
         syncContainer.classList.remove('hidden');
@@ -1180,7 +1058,6 @@ function updateDmarcControls() {
     } else {
         syncContainer.classList.add('hidden');
     }
-    // On a phone the button and the last sync line sit by the title, outside the block
     const syncOff = syncContainer.classList.contains('hidden');
     if (syncBtn) syncBtn.classList.toggle('hidden', syncOff);
     lastSyncInfo.classList.toggle('hidden', syncOff);
@@ -1212,16 +1089,13 @@ async function triggerDmarcSync() {
         } else if (result.status === 'started') {
             showToast('Fetching reports from the mailbox', 'success');
 
-            // Immediate UI update to show "Running" state
             await loadDmarcImapStatus();
 
-            // Delayed update to catch the final result (success/fail)
             setTimeout(async () => {
                 await loadDmarcImapStatus();
                 await loadDmarcDomains();
-            }, 5000); // Increased to 5s to give the sync time to work
+            }, 5000);
         } else {
-            // An answer that neither started nor found one running: nothing was started
             throw new Error(uiApiErrorText(result, (result && result.message) || 'The server did not start it'));
         }
 
@@ -1288,18 +1162,9 @@ function closeDmarcSyncHistoryModal() {
     document.getElementById('dmarc-sync-history-modal').classList.add('hidden');
 }
 
-// =============================================================================
-// REPORTS MANAGEMENT
-// =============================================================================
-// This part runs in the pagination test with only document, authenticatedFetch,
-// escapeHtml, escapeJsArg, encodeURIComponent, setTimeout, clearTimeout, console,
-// showToast, showConfirmModal, uiLocked, dmarcState, dmarcGet,
-// dmarcUpdateManageButton, loadDmarcDomains, responseError and uiErrorText.
-
 const REPORTS_DEFAULT_SORT = { by: 'created_at', dir: 'desc' };
 const reportsManagementState = { page: 1, limit: 50, request: 0, search: '', searchTimer: null, busyTimer: null, sort: { ...REPORTS_DEFAULT_SORT }, domains: [], allowDelete: false, domainsRequest: 0 };
 
-// All reports is paged on the server, so its headers sort there (as on the Devices page)
 function reportsSortAttr(key) {
     const { sort } = reportsManagementState;
     return ` data-sort-key="${key}" aria-sort="${sort.by === key ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none'}"`;
@@ -1312,20 +1177,17 @@ function sortReportsManagement(key, dir) {
 
 async function showReportsManagementModal() {
     const modal = document.getElementById('dmarc-reports-management-modal');
-    // It has a search field, so a click outside does not close it; Close, Escape and Back do
     modal.classList.remove('hidden');
     clearTimeout(reportsManagementState.searchTimer);
     reportsManagementState.search = '';
     reportsManagementState.sort = { ...REPORTS_DEFAULT_SORT };
     document.getElementById('dmarc-reports-search').value = '';
-    // Opening is the one time the list shows a loading state
     document.getElementById('dmarc-reports-management-content').innerHTML = '<div class="ui-loading" role="status"><div class="loading"></div><p>Loading reports...</p></div>';
     document.getElementById('dmarc-reports-total').innerHTML = '';
     loadReportsDomains();
     await loadReportsManagementPage(1);
 }
 
-// The search filters All reports on the server by domain or reporter, from page 1
 function searchReportsManagement() {
     clearTimeout(reportsManagementState.searchTimer);
     reportsManagementState.searchTimer = setTimeout(() => {
@@ -1336,7 +1198,6 @@ function searchReportsManagement() {
     }, 300);
 }
 
-// Reports by domain: how many of each type a domain has, with Delete all
 async function loadReportsDomains() {
     const request = ++reportsManagementState.domainsRequest;
     const content = document.getElementById('dmarc-reports-domains');
@@ -1349,7 +1210,6 @@ async function loadReportsDomains() {
         const data = await response.json();
         if (request !== reportsManagementState.domainsRequest) return;
         reportsManagementState.domains = data.domains || [];
-        // Deleting needs the setting and Take action on DMARC & TLS
         reportsManagementState.allowDelete = !!data.allow_delete && userCan('dmarc', 'write');
         renderReportsDomains();
     } catch (error) {
@@ -1420,7 +1280,6 @@ async function deleteDomainReports(domain) {
     }
 }
 
-// After a deletion: the domains, the current page (the server clamps it), the Manage Reports count and the domains list
 async function refreshAfterReportDelete() {
     const loads = [];
     if (!document.getElementById('dmarc-reports-management-modal').classList.contains('hidden')) {
@@ -1436,9 +1295,6 @@ async function loadReportsManagementPage(page) {
     const request = ++reportsManagementState.request;
     const content = document.getElementById('dmarc-reports-management-content');
 
-    // The rows on screen stay until the answer replaces them (as loadDevices does), so
-    // a search, a sort or a page change never collapses the dialog. A slow answer
-    // only dims them a little, which changes no layout.
     content.setAttribute('aria-busy', 'true');
     clearTimeout(reportsManagementState.busyTimer);
     reportsManagementState.busyTimer = setTimeout(() => { content.style.opacity = '.6'; }, 200);
@@ -1502,7 +1358,6 @@ function renderReportsManagementTable(reports, allowDelete, { total, page, total
         ${pageButton('Next', page + 1, page === totalPages)}
         ${pageButton('Last', totalPages, page === totalPages)}
     </nav>` : '';
-    // Import Date is an instant, the period two epochs: all shown in the app's zone
     const dateTime = value => value ? formatTime(value, { seconds: false }) : '-';
     const day = ts => ts ? formatDay(ts * 1000) : '-';
     const cols = allowDelete

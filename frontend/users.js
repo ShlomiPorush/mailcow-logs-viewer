@@ -1,18 +1,5 @@
-// =============================================================================
-// USERS - Settings > Users
-// =============================================================================
-// Who may sign in, and what each may view and do (GET /api/users): the built-in
-// admin from .env, local users with a password, OAuth2 entries by email, and the
-// access everyone else who signs in with OAuth2 gets. The rows, the dialog and its
-// area table follow Settings > Agents (agents.js). Shown in the edit form's Users
-// section and in the read-only settings view, so it works either way.
-// =============================================================================
-
 let usersData = null;
-// Bumped by every load and every change made here: an answer read before a newer one
-// started (a refresh that overlaps a save) is dropped instead of drawing the old state
 let usersSeq = 0;
-// The section shows the error of a load that failed: the next answer draws, also an unchanged one
 let usersFailed = false;
 
 const USERS_ACCESS_LABELS = { admin: 'Admin', operator: 'Operator', viewer: 'Viewer', custom: 'Custom', none: 'No access' };
@@ -33,7 +20,6 @@ async function loadUsersPanel() {
         usersData = data;
         renderUsersPanel();
     } catch (e) {
-        // A newer load or change has drawn the section since: this failure is old news
         if (seq !== usersSeq) return;
         console.error('Users error:', e);
         usersFailed = true;
@@ -51,14 +37,11 @@ function usersAreaLabels() {
     return labels;
 }
 
-// What a level gives today, as the server resolves it (a preset covers a new area by itself)
 function usersPresetAreas(level) {
     const preset = (usersData.presets || []).find(p => p.id === level);
     return preset ? { ...(preset.areas || {}) } : {};
 }
 
-// What each level allows, in a few lines. Operator's actions are read from the areas
-// the server gives it, so the list stays true when an area is added
 function usersPresetLines(level) {
     const settingsLine = 'Cannot manage Settings, users, or AI agents';
     if (level === 'admin') return ['Views every page and takes every action', 'Manages Settings, users and AI agents'];
@@ -76,11 +59,6 @@ function usersPresetLines(level) {
     return lines;
 }
 
-// A local user's password: the server decides whether it can be set (backend services/passwords.py:
-// 8 to 256 characters, not one of the most common passwords), and the dialog asks it before Save
-// (POST /api/users/password-check). The meter shows how strong it is as guidance: an uppercase
-// letter, a lowercase letter, a number and a symbol (by Unicode category; a symbol is anything but
-// a letter or digit)
 const USERS_PASSWORD_SHORT = 'Use at least 8 characters.';
 const USERS_PASSWORD_LONG = 'Use at most 256 characters.';
 const USERS_PASSWORD_CHECKING = 'Checking the password. Try again in a moment.';
@@ -94,8 +72,6 @@ const USERS_PASSWORD_RULES = [
 ];
 const USERS_STRENGTH = ['', 'Weak', 'Fair', 'Good', 'Strong'];
 
-// What a password meets, and its strength: 0 empty; Weak (1) until every rule is met; then by
-// length, Fair (2) for 8 or 9 characters, Good (3) for 10 to 13, Strong (4) for 14 or more
 function usersPasswordCheck(password) {
     const text = String(password || '');
     const met = {};
@@ -106,15 +82,11 @@ function usersPasswordCheck(password) {
     return { met, level };
 }
 
-// The characters Generate draws from: letters and digits that cannot be taken for one another
-// (no 0 O o 1 l I), and a few symbols that are easy to type
 const USERS_PASSWORD_UPPER = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
 const USERS_PASSWORD_LOWER = 'abcdefghijkmnpqrstuvwxyz';
 const USERS_PASSWORD_DIGITS = '23456789';
 const USERS_PASSWORD_SYMBOLS = '!@#$%*-_';
 
-// A number from 0 to n - 1 from crypto.getRandomValues, each as likely: a draw from the top part
-// of the range that does not divide evenly by n is drawn again
 function usersRandomIndex(n) {
     const limit = Math.floor(0x100000000 / n) * n;
     const draw = new Uint32Array(1);
@@ -132,9 +104,6 @@ function usersShuffle(items) {
     return items;
 }
 
-// Mostly letters and digits, so it reads and types easily: an uppercase letter, a lowercase
-// letter and a digit at least, and about one symbol in 8 characters (one at least), never first
-// or last and never two side by side
 function usersGeneratePassword(length) {
     const pick = set => set[usersRandomIndex(set.length)];
     const symbols = Math.max(1, Math.floor(length / 8));
@@ -142,8 +111,6 @@ function usersGeneratePassword(length) {
     const body = [pick(USERS_PASSWORD_UPPER), pick(USERS_PASSWORD_LOWER), pick(USERS_PASSWORD_DIGITS)];
     while (body.length < length - symbols) body.push(pick(plain));
     usersShuffle(body);
-    // The symbols' places: between the first character and the last, none next to another (drawn
-    // again until so, which keeps every such choice as likely)
     let places;
     do {
         places = new Set(usersShuffle(Array.from({ length: length - 2 }, (_, i) => i + 1)).slice(0, symbols));
@@ -152,9 +119,6 @@ function usersGeneratePassword(length) {
     return Array.from({ length }, (_, i) => (places.has(i) ? pick(USERS_PASSWORD_SYMBOLS) : body[next++])).join('');
 }
 
-// Under the password field: Generate with its length and Copy, then the meter: four segments,
-// the strength in words and, when the server refuses the password, why (read out as they
-// change), and the requirements marked as met or not, for the eye and for a screen reader
 function usersPasswordMeterHtml(hidden) {
     return `<div class="ui-pw-tools">
         <button type="button" class="ui-btn ui-btn-sm" id="user-edit-pw-generate">Generate</button>
@@ -175,7 +139,6 @@ function usersPasswordMeterHtml(hidden) {
     </div>`;
 }
 
-// keepWhenEmpty: editing, where an empty field keeps the password, so the meter waits for typing
 function usersShowPasswordMeter(modal, password, keepWhenEmpty) {
     const meter = modal.querySelector('#user-edit-pw-meter');
     if (!meter) return;
@@ -193,7 +156,6 @@ function usersShowPasswordMeter(modal, password, keepWhenEmpty) {
     });
 }
 
-// A line under a field that says what is wrong with it ('' hides it)
 function usersShowProblem(modal, id, text) {
     const line = modal.querySelector(`#${id}`);
     if (!line) return;
@@ -201,11 +163,6 @@ function usersShowProblem(modal, id, text) {
     line.classList.toggle('hidden', !text);
 }
 
-// The server's answer on the password in the field: asked 300 ms after typing stops, and at once
-// after Generate or on Save. Only the answer for the latest value counts; while it is on its way
-// the password is not known to be fine. A check that fails (no connection, a server error, an
-// answer it cannot read) leaves it not known to be fine either: it says so, asks once more after
-// 3 seconds, and again on the next change or on Save
 let usersPwCheck = { seq: 0, value: '', answer: null, timer: null };
 
 function usersCheckPassword(modal, value, now, retry = true) {
@@ -221,17 +178,15 @@ function usersCheckPassword(modal, value, now, retry = true) {
             const response = await authenticatedFetch('/api/users/password-check', {
                 method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: value }) });
             const data = response.ok ? await response.json().catch(() => null) : null;
-            // 422: longer than the request takes (1024 characters), so far too long
             if (response.status === 422) answer = { ok: false, problem: USERS_PASSWORD_LONG };
             else if (data && typeof data.ok === 'boolean' && (data.ok || typeof data.problem === 'string')) {
                 answer = { ok: data.ok, problem: data.ok ? '' : data.problem };
             }
-        } catch (e) { /* not known: said below */ }
+        } catch (e) {}
         if (seq !== usersPwCheck.seq || !modal.isConnected) return;
         usersPwCheck.answer = answer;
         usersShowProblem(modal, 'user-edit-pw-problem', answer.problem);
         usersValidate(modal);
-        // One more try a little later, not a loop: after that, the next change or Save asks again
         if (answer.failed && retry) {
             usersPwCheck.timer = setTimeout(() => {
                 if (usersPwCheck.seq === seq && modal.isConnected) usersCheckPassword(modal, value, true, false);
@@ -243,9 +198,6 @@ function usersCheckPassword(modal, value, now, retry = true) {
     return Promise.resolve();
 }
 
-// A username or an email: only what is plainly missing or too long is stopped here, so the dialog
-// never refuses what the server takes; the server's rule decides the rest (users_store.py
-// username_problem, email_problem) and its answer shows in the dialog on Save
 const USERS_USERNAME_RULE = 'A username has 1 to 64 characters: letters, digits and . _ @ -';
 function usersUsernameProblem(value) {
     const name = String(value || '').trim();
@@ -253,16 +205,11 @@ function usersUsernameProblem(value) {
     return [...name].length > 64 ? USERS_USERNAME_RULE : '';
 }
 
-// field: the email input, whose own check (type=email) says when it is not an email address
 function usersEmailProblem(value, field) {
     if (!String(value || '').trim()) return 'Enter the email address.';
     return field && field.validity && field.validity.typeMismatch ? 'Enter one email address.' : '';
 }
 
-// Why Add or Save cannot go yet, or '' when it can: a username or email the server takes, a
-// password the server said is fine (adding: required; editing: only when one is typed), and View
-// for at least one area in Custom. The button looks disabled (aria-disabled) meanwhile and says
-// why when pressed; the server checks everything again on Save
 function usersFormProblem(modal) {
     const adding = !modal.dataset.version;
     const kind = modal.querySelector('#user-edit-kind-value').value;
@@ -286,15 +233,12 @@ function usersFormProblem(modal) {
 function usersValidate(modal) {
     const problem = usersFormProblem(modal);
     modal.querySelector('#user-edit-save')?.setAttribute('aria-disabled', String(!!problem));
-    // Copy only a password the server accepted, so what is copied is what can be saved
     const field = modal.querySelector('#user-edit-pass');
     const copy = modal.querySelector('#user-edit-pw-copy');
     if (field && copy) copy.disabled = !(field.value && usersPwCheck.value === field.value && usersPwCheck.answer && usersPwCheck.answer.ok);
     return problem;
 }
 
-// Generate fills the field as readable text (it shows again as dots once typed over), a new
-// length draws a new one, and Copy takes what the field holds once the server accepted it
 function usersWirePassword(modal, keepWhenEmpty) {
     const field = modal.querySelector('#user-edit-pass');
     if (!field) return;
@@ -327,8 +271,6 @@ function usersWirePassword(modal, keepWhenEmpty) {
     update(false);
 }
 
-// The username and email say what is wrong once the field is left, and stop saying it as soon
-// as it is right; any change rechecks whether Add or Save can go
 function usersWireForm(modal) {
     [['#user-edit-name', 'user-edit-name-problem', usersUsernameProblem], ['#user-edit-email', 'user-edit-email-problem', usersEmailProblem]]
         .forEach(([selector, id, problemOf]) => {
@@ -347,7 +289,6 @@ function usersPresetText(level) {
     return `<ul class="ui-users-preset">${usersPresetLines(level).map(line => `<li>${escapeHtml(line)}</li>`).join('')}</ul>`;
 }
 
-// Custom: each area by name, as an agent's access is shown (agents.js agentsAreaChips)
 function usersAreaChips(areas) {
     const labels = usersAreaLabels();
     const entries = Object.entries(areas || {});
@@ -372,19 +313,15 @@ function usersWhen(iso) {
     return iso ? uiTime(iso, formatTime(iso, { seconds: false })) : '<span class="ui-muted">never</span>';
 }
 
-// The OAuth2 provider by the name set for it in Authentication (plain text: escape it for HTML)
 function usersProvider() {
     const name = usersData && usersData.oauth2 && typeof usersData.oauth2.provider_name === 'string' ? usersData.oauth2.provider_name.trim() : '';
     return name || 'OAuth2';
 }
 
-// Who is looking (GET /api/users you): the built-in admin, a local user or an OAuth2 person,
-// with their entry or, without one, the access for everyone else (via_default)
 function usersYou() {
     return (usersData && usersData.you) || { kind: 'builtin', user_id: null, via_default: false, email: null };
 }
 
-// An email as the server compares it (trimmed, NFKC, lower case); the server's check is the rule
 function usersNormEmail(value) {
     return String(value || '').trim().normalize('NFKC').toLowerCase().trim();
 }
@@ -394,13 +331,11 @@ function usersIsYou(user) {
     return !!user && you.user_id != null && you.kind === user.kind && you.user_id === user.id;
 }
 
-// An access as what it allows: Admin, and area -> view or act ('none': nothing)
 function usersAccessOf(level, areas) {
     if (level === 'none') return { admin: false, areas: {} };
     return { admin: level === 'admin', areas: level === 'custom' ? (areas || {}) : usersPresetAreas(level) };
 }
 
-// The person's own access now, as the server said when the page loaded (utils.js appAccess)
 function usersAccessNow() {
     const areas = {};
     (usersData.areas || []).forEach(a => {
@@ -410,7 +345,6 @@ function usersAccessNow() {
     return { admin: userIsAdmin(), areas };
 }
 
-// What going from one access to another takes away, or null when nothing
 function usersLoss(before, after) {
     const lost = { admin: before.admin && !after.admin, views: [], acts: [] };
     (usersData.areas || []).forEach(a => {
@@ -431,14 +365,9 @@ function usersLossText(lost) {
     if (lost.admin) parts.push('Settings, Users and AI agents');
     if (lost.views.length) parts.push(usersAnd(lost.views));
     if (lost.acts.length) parts.push(`the actions you can take in ${usersAnd(lost.acts)}`);
-    // The parts already hold an "and" each: a comma before the last one keeps them apart
     return `you will lose ${parts.length > 1 ? `${parts.slice(0, -1).join(', ')}, and ${parts[parts.length - 1]}` : parts[0]}`;
 }
 
-// The question to ask before a change to one's own access ({ message, confirmText }), or null
-// when the change takes nothing away from the person making it.
-// change: { kind: 'default', value } | { kind: 'add', email, level, areas, disabled }
-//       | { kind: 'edit', user, level, areas, disabled } | { kind: 'delete', user }
 function usersSelfWarning(change) {
     const you = usersYou();
     const provider = usersProvider();
@@ -451,7 +380,6 @@ function usersSelfWarning(change) {
         return lost ? { message: `${start} Changing it to ${label(change.value)} changes your own access too: ${usersLossText(lost)}.`, confirmText: 'Change my access' } : null;
     }
     if (change.kind === 'add') {
-        // An OAuth2 entry for one's own email: from then on it is one's access
         if (you.kind !== 'oauth2' || !you.via_default || !you.email || usersNormEmail(change.email) !== you.email) return null;
         const own = 'This is your own email address.';
         if (change.disabled) return { message: `${own} Adding it with sign-in disabled signs you out at once.`, confirmText: 'Disable my sign-in' };
@@ -474,12 +402,10 @@ function usersSelfWarning(change) {
     return { message: `${own} ${local ? 'Changing its access signs you out at once, and' : 'Changing its access changes yours:'} ${usersLossText(lost)}.`, confirmText: 'Change my access' };
 }
 
-// The question for usersSelfWarning's answer; true to go on
 function usersAskSelf(warning) {
     return showConfirmModal({ title: 'Your own access', message: warning.message, confirmText: warning.confirmText, isDangerous: true, focusCancel: true });
 }
 
-// The admin from .env: always there while Basic Auth is on, changed in Authentication (or in .env)
 function usersBuiltinRow() {
     const builtin = usersData.builtin;
     const form = !!document.querySelector('[data-tab-extra="users"]');
@@ -515,7 +441,6 @@ function usersRow(user) {
         </div>`;
 }
 
-// Everyone else the provider signs in: one choice, applied at once
 function usersDefaultPanel() {
     const oauth2 = usersData.oauth2;
     if (!oauth2.enabled) return '';
@@ -538,12 +463,9 @@ function renderUsersPanel() {
     const panel = document.getElementById('users-panel');
     if (!panel || !usersData) return;
     usersFailed = false;
-    // Through the same drawing as the refresh, so what it remembers as shown stays true
     uiReplaceKeepingFocus(panel, usersPanelHtml());
 }
 
-// Read again with the Settings refresh (app.js): drawn again only when it changed, keeping the
-// focus and the scroll, and never while a dialog or a question of the section is open
 async function refreshUsersPanel() {
     const panel = document.getElementById('users-panel');
     const busy = () => !!document.querySelector('.ui-dialog-backdrop:not(.hidden)');
@@ -557,7 +479,6 @@ async function refreshUsersPanel() {
         usersData = data;
         renderUsersPanel();
     } catch (e) {
-        // The next refresh tries again
     }
 }
 
@@ -578,7 +499,6 @@ function usersPanelHtml() {
         ${usersDefaultPanel()}`;
 }
 
-// One change at a time: a second press would send the same version and be told "changed meanwhile"
 function setUsersDefaultOnce(value, button) {
     return uiOnce('users-default', () => setUsersDefault(value), button);
 }
@@ -586,11 +506,8 @@ async function setUsersDefault(value) {
     if (!uiMayAct('admin')) return;
     const oauth2 = usersData && usersData.oauth2;
     if (!oauth2 || oauth2.default_access === value) return;
-    // Signed in through the provider without an entry: this is the person's own access too
-    // Awaited only when there is a question, so a change without one starts at once
     const self = usersSelfWarning({ kind: 'default', value });
     if (self && !(await usersAskSelf(self))) return;
-    // A refresh on its way now may have read the old value: it is dropped
     usersSeq++;
     try {
         const response = await authenticatedFetch('/api/users/oauth2-default', {
@@ -601,19 +518,16 @@ async function setUsersDefault(value) {
         const body = await response.json().catch(() => ({}));
         if (!response.ok) {
             showToast(`Could not change the access: ${uiHttpErrorText(response.status, body)}`, 'error');
-            // Changed meanwhile: show it as it is now
             if (response.status === 409) loadUsersPanel();
             return;
         }
         showToast(value === 'none' ? 'Only users on the list can sign in now' : 'Access changed', 'success');
-        // Awaited, so a second change sends the new version and is not told "changed meanwhile"
         await loadUsersPanel();
     } catch (e) {
         showToast(`Could not change the access: ${uiErrorText(e)}`, 'error');
     }
 }
 
-// The ways a new user can sign in: each one that is on; with none on, both, for later
 function usersKinds() {
     const kinds = [];
     if (usersData.builtin.basic_auth_enabled) kinds.push('local');
@@ -621,8 +535,6 @@ function usersKinds() {
     return kinds.length ? kinds : ['local', 'oauth2'];
 }
 
-// Add or edit one user: whether they may sign in, how (on adding), and what they may do.
-// The area table is the Agents one and shows only for Custom, filled from the level before
 function editUser(userId) {
     if (!usersData) return;
     const user = userId == null ? null : (usersData.users || []).find(u => u.id === userId);
@@ -665,11 +577,8 @@ function editUser(userId) {
             <p class="ui-field-problem hidden" id="user-edit-email-problem" aria-live="polite"></p>
             <p class="ui-set-desc">The email address ${escapeHtml(usersProvider())} reports for this user.</p>
         </div>`;
-    // The two choices are kept as values too, as the Settings segmented fields keep theirs,
-    // so the unsaved-changes guard (uiGuardDialog) sees them
     const { backdrop: modal } = uiDialog({
         id: 'user-edit-modal', title: user ? `Edit ${name}` : 'Add user', titleId: 'user-edit-h', size: 'md', close: closeUserEditModal,
-        // The version of the user this dialog shows: a save after a change made meanwhile is refused
         dataset: { version: user ? String(user.row_version) : '' },
         bodyClass: 'ui-form ui-agent-edit',
         form: { id: 'user-edit-form', onsubmit: `saveUserOnce(event, ${user ? Number(user.id) : 'null'})` },
@@ -709,7 +618,6 @@ function editUser(userId) {
         press(button.parentElement, button);
         modal.querySelector('#user-edit-level-text').innerHTML = usersPresetText(chosen);
         grid.classList.toggle('hidden', chosen !== 'custom');
-        // Custom starts from what the level chosen before gave
         if (chosen === 'custom' && was !== 'custom') {
             const from = usersPresetAreas(was);
             grid.querySelectorAll('input[data-area]').forEach(input => {
@@ -724,7 +632,6 @@ function editUser(userId) {
         modal.querySelector('#user-edit-kind-value').value = button.dataset.kind;
         modal.querySelectorAll('[data-for]').forEach(el => el.classList.toggle('hidden', el.dataset.for !== button.dataset.kind));
     });
-    // Action includes View: ticking it ticks View, and clearing View clears it
     grid.addEventListener('change', event => {
         const changed = event.target;
         if (!changed.dataset || !changed.dataset.area) return;
@@ -732,9 +639,7 @@ function editUser(userId) {
         if (changed.dataset.kind === 'act' && changed.checked && other) other.checked = true;
         if (changed.dataset.kind === 'view' && !changed.checked && other) other.checked = false;
     });
-    // The password's strength while it is typed; editing shows it once something is typed
     usersWirePassword(modal, !!user);
-    // Add and Save look disabled until the form can be saved
     usersWireForm(modal);
     uiGuardDialog(modal);
 }
@@ -748,7 +653,6 @@ function closeUserEditModal(saved = false) {
     } else uiCloseGuarded(modal, close);
 }
 
-// One save at a time: a second press would answer "changed meanwhile" to the first
 function saveUserOnce(event, userId) {
     event.preventDefault();
     const button = event.submitter || document.getElementById('user-edit-save');
@@ -760,8 +664,6 @@ async function saveUser(event, userId) {
     const modal = document.getElementById('user-edit-modal');
     const error = document.getElementById('user-edit-error');
     const say = text => { error.textContent = text; error.classList.remove('hidden'); };
-    // A disabled-looking Add or Save says why; a password typed a moment ago, or one the check
-    // could not answer for, is asked about now
     let problem = usersFormProblem(modal);
     if (problem === USERS_PASSWORD_CHECKING || problem === USERS_PASSWORD_UNCHECKED) {
         await usersCheckPassword(modal, modal.querySelector('#user-edit-pass').value, true);
@@ -769,7 +671,6 @@ async function saveUser(event, userId) {
         problem = usersFormProblem(modal);
     }
     if (problem) return say(problem);
-    // Read after the wait: the form as it is now, the same form just checked
     const kind = modal.querySelector('#user-edit-kind-value').value;
     const level = modal.querySelector('#user-edit-level-value').value;
     const chosen = mode => [...modal.querySelectorAll(`#user-edit-grid input[data-kind="${mode}"]:checked`)].map(i => i.dataset.area);
@@ -790,8 +691,6 @@ async function saveUser(event, userId) {
         if (password) body.password = password;
     }
     Object.assign(body, { access: level, views: custom ? chosen('view') : [], acts: custom ? chosen('act') : [], disabled });
-    // One's own entry, or a new OAuth2 entry for one's own email: asked first when the change
-    // takes something away from oneself
     const areas = {};
     body.views.forEach(id => { areas[id] = 'view'; });
     body.acts.forEach(id => { areas[id] = 'act'; });
@@ -800,14 +699,12 @@ async function saveUser(event, userId) {
     const self = change && usersSelfWarning(change);
     if (self && !(await usersAskSelf(self))) return;
     try {
-        // A refresh on its way now may have read the state before this change: it is dropped
         usersSeq++;
         const response = await authenticatedFetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
         if (!response.ok) {
             const answer = await response.json().catch(() => ({}));
             const text = uiHttpErrorText(response.status, answer);
             if (userId != null && (response.status === 409 || response.status === 404)) {
-                // Changed or deleted meanwhile: show the list as it is now
                 closeUserEditModal(true);
                 showToast(`Could not save the user: ${text}`, 'error');
                 loadUsersPanel();
@@ -830,13 +727,11 @@ async function deleteUser(userId) {
     if (!user) return;
     const name = usersName(user);
     const oauth2 = usersData.oauth2;
-    // An OAuth2 entry gone leaves its person to the access for everyone else
     const message = user.kind !== 'oauth2' || !oauth2.enabled
         ? `Delete ${name}? They are signed out at once and can no longer sign in.`
         : oauth2.default_access === 'none'
             ? `Delete ${name}? They can no longer sign in, because users who are not on the list have no access.`
             : `Delete ${name}? They can still sign in with ${usersProvider()} and then get the access for everyone else (${USERS_ACCESS_LABELS[oauth2.default_access] || oauth2.default_access}). To block them, edit them and turn on Disable sign-in.`;
-    // One's own entry: what it means for oneself, in its place
     const self = usersSelfWarning({ kind: 'delete', user });
     const confirmed = await showConfirmModal({ title: 'Delete user', message: `${self ? self.message : message} This cannot be undone.`,
         confirmText: self ? self.confirmText : 'Delete', isDangerous: true, focusCancel: !!self });

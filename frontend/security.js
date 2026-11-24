@@ -1,37 +1,25 @@
-// =============================================================================
-// SECURITY PAGE - Overview
-// Every address that tried in the chosen period, or that a protection caught,
-// once, with what happened to it and why: to review (not banned: tagged with the
-// rule that caught it, if one did, or as allowlisted), banned (by Fail2ban, a rule
-// or the denylist), and the rules' history. Above it, which protections are on;
-// beside it, the countries and networks of the same addresses.
-// Classic script sharing the global scope; loaded after app.js, smtp-abuse.js
-// and protection.js, whose loaders call back into the functions here.
-// =============================================================================
-
-let securityOverview = null;     // /api/logs/netfilter/overview?hours=24
-let securityHits = [];           // the rules' open hits: watching, pending, banned, alert
-let securityHistory = null;      // closed hits, loaded when the History filter opens
+let securityOverview = null;
+let securityHits = [];
+let securityHistory = null;
 let securityFilter = 'review';
-let securityCountry = null;      // a country picked in the chart filters the list
-let securityNetwork = null;      // and so does a network picked in Networks with the most attempts
-let securityOpenRow = null;      // the address whose details are open
-let securityRawLog = {};         // ip -> log lines, or 'loading' / 'error'
-let securityPage = null;         // the loaded part of the chosen list: items, next cursor, real counts
+let securityCountry = null;
+let securityNetwork = null;
+let securityOpenRow = null;
+let securityRawLog = {};
+let securityPage = null;
 let securityPageError = null;
 let securityPageLoading = false;
-let securityPageSeq = 0;         // an answer for a list or country no longer chosen is dropped
+let securityPageSeq = 0;
 let securityRefreshTimer = null;
-let securityLastCounts = null;   // the counts shown while another list or country loads
-let securityToTop = false;       // a new list or country goes to its first row once it is drawn
+let securityLastCounts = null;
+let securityToTop = false;
 let securityMoreObserver = null;
-let securityDays = 1;            // the period the list (and the panels beside it) covers
-let securityCountries = null;    // the listed addresses by country, from /api/security/addresses
-let securityNetworks = null;     // and by network
-let fail2banLoadError = false;   // mailcow could not be asked about Fail2ban
-let securityStripOpen = false;   // on a phone the Protection row folds into one chip
+let securityDays = 1;
+let securityCountries = null;
+let securityNetworks = null;
+let fail2banLoadError = false;
+let securityStripOpen = false;
 
-// A phone: the list gets its own layout (one line per address, details in a sheet)
 const securityPhone = () => window.matchMedia('(max-width: 760px)').matches;
 
 const SECURITY_PAGE_SIZE = 50;
@@ -43,10 +31,7 @@ const SECURITY_RULE_NAMES = {
     subnet: 'Attacking networks', country: 'Countries', breach: 'Possible stolen password'
 };
 
-// ----------------------------------------------------------------- tabs
-
 let securityTab = 'overview';
-// The old addresses of the tabs that became Settings cards still open them
 const SECURITY_TAB_ALIASES = { protection: null, fail2ban: 'fail2ban', abuse: 'abuse' };
 
 function securityShowTab(tab) {
@@ -70,8 +55,6 @@ function securityShowTab(tab) {
     if (card) securityOpenCard(card);
 }
 
-// ----------------------------------------------------------------- loading
-
 async function loadSecurityOverview() {
     try {
         const res = await authenticatedFetch('/api/logs/netfilter/overview?hours=24');
@@ -86,7 +69,6 @@ async function loadSecurityOverview() {
     }
 }
 
-// The rules' open hits; the protection loader and the page timer call this
 async function loadProtectionOverview() {
     try {
         const res = await authenticatedFetch('/api/protection/hits?status=active&limit=500');
@@ -96,9 +78,8 @@ async function loadProtectionOverview() {
         if (securityFilter === 'history') loadSecurityHistory();
         refreshSecurityAddresses();
         renderSecurityOverview();
-        // The page's timer must not redraw a card or an address someone is typing
-        if (!securityListsTyping()) renderSecurityLists();   // which denylist entries a rule wrote
-        if (!securityEditing()) renderSecuritySettings();    // the rules' cards
+        if (!securityListsTyping()) renderSecurityLists();
+        if (!securityEditing()) renderSecuritySettings();
     } catch (error) {
         console.error('Failed to load the protection hits:', error);
     }
@@ -116,17 +97,13 @@ async function loadSecurityHistory() {
     renderSecurityOverview();
 }
 
-// ----------------------------------------------------------------- the addresses
-
 const securityBare = entry => fail2banBare(entry);
 
-// The country's flag, before its name; nothing when the code is unknown
 function securityFlag(code) {
     const url = code ? getFlagUrl(code, '16x12') : '';
     return url ? `<img class="ui-sec-flag" src="${url}" alt="" width="16" height="12" onerror="this.remove()">` : '';
 }
 
-// The code of a country the chart or the list named
 function securityCountryCode(name) {
     const row = securityCountries && securityCountries.data.find(r => r.country_name === name);
     if (row) return row.country_code;
@@ -135,20 +112,15 @@ function securityCountryCode(name) {
     const listed = securityPage && securityPage.items.find(a => a.country === name);
     return listed ? listed.countryCode : '';
 }
-// An address from the server, in the shape the rows are drawn from. The server
-// builds the lists (an address is banned, or it is to review) and counts them all.
 function securityFromServer(x) {
     return {
         ip: x.ip, state: x.state, tries: x.tries, attempts: x.attempts, users: x.users, services: x.services, hits: x.hits,
         country: x.country || '', countryCode: x.country_code || '', city: x.city || '', org: x.org || '', last: x.last_seen || '', f2b: x.f2b,
         listedAs: x.listed_as || '',
-        // A Fail2ban network ban: the network's own row, and the addresses banned through it
         networkSize: x.network_size || 0, networkRange: x.network_range || null, bannedThrough: x.banned_through || ''
     };
 }
 
-// The first page of the chosen list, or (more) the next one as the list scrolls.
-// limit lets a refresh reload as many rows as are already shown.
 async function loadSecurityAddresses(more = false, limit = SECURITY_PAGE_SIZE) {
     if (securityFilter === 'history') return;
     if (more && (!securityPage || !securityPage.next || securityPageLoading)) return;
@@ -172,7 +144,6 @@ async function loadSecurityAddresses(more = false, limit = SECURITY_PAGE_SIZE) {
         }
         securityPage = data;
         securityPageError = null;
-        // The panels count the same addresses, so they come with the list
         securityCountries = { data: data.countries || [], since: data.since };
         securityNetworks = { data: data.networks || [], since: data.since };
         renderSecurityCountries();
@@ -191,9 +162,6 @@ async function loadSecurityAddresses(more = false, limit = SECURITY_PAGE_SIZE) {
     }
 }
 
-// Read the list again, keeping as many rows as are shown. The page timer, Fail2ban
-// and the rules' loaders all call this; together they make one request (more,
-// 200 rows each, when more are shown).
 function refreshSecurityAddresses() {
     clearTimeout(securityRefreshTimer);
     securityRefreshTimer = setTimeout(() => {
@@ -203,8 +171,6 @@ function refreshSecurityAddresses() {
     }, 150);
 }
 
-// As many rows as are shown, past the 200 one request answers: read in turn,
-// and the list drawn once, when all have come
 async function reloadSecurityAddresses(shown) {
     if (securityFilter === 'history' || securityPageLoading) return;
     const seq = ++securityPageSeq;
@@ -240,11 +206,6 @@ async function reloadSecurityAddresses(shown) {
     if (seq === securityPageSeq) renderSecurityOverview();
 }
 
-// ----------------------------------------------------------------- what protects the server
-
-// Every protection and its state: 'on' when it acts (bans or blocks), 'watch' when it
-// only notes or alerts, 'off', or 'unknown'. The Overview's row and the dashboard's
-// Security card are drawn from it.
 function securityProtectionItems() {
     const rules = (typeof protectionSaved !== 'undefined' && protectionSaved) || (typeof protectionRules !== 'undefined' && protectionRules);
     const caps = typeof protectionCaps !== 'undefined' ? protectionCaps : {};
@@ -262,24 +223,20 @@ function securityProtectionItems() {
         const bans = r.mode === 'enforce' && caps.can_ban;
         return item(bans ? 'on' : 'watch', SECURITY_RULE_NAMES[key], bans ? 'bans' : 'watching', key);
     };
-    // Without the Read-Write key the check does not run, even when it is switched on
     const abuse = typeof smtpAbuseStatus !== 'undefined' && smtpAbuseStatus
         ? smtpAbuseStatus.enabled && !smtpAbuseStatus.rw_key_configured ? item('off', 'Outgoing spam', 'needs a read-write API key', 'abuse')
         : item(smtpAbuseStatus.enabled ? 'on' : 'off', 'Outgoing spam', '', 'abuse') : '';
     return [f2b, ...SECURITY_RULE_ORDER.map(rule), abuse].filter(Boolean);
 }
 
-// A protection that acts or only watches counts as on
 const securityProtectionOn = p => p.state === 'on' || p.state === 'watch';
 
-// The mark of a protection: a green tick when it acts, an eye when it only watches
 const SECURITY_EYE = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
     + '<path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"></path><circle cx="12" cy="12" r="3"></circle></svg>';
 function securityProtectionMark(state) {
     return state === 'on' ? '✓' : state === 'watch' ? SECURITY_EYE : state === 'unknown' ? '?' : '✕';
 }
 
-// One protection, with its mark and what it does; a click opens its settings card
 function securityProtectionButton({ state, name, note, key }, opener = 'securityOpenProtection') {
     const label = { on: 'On', watch: 'Watching only', unknown: 'Unknown' }[state] || 'Off';
     return `<button type="button" class="ui-prot-item is-${state}" onclick="${opener}('${key}')" title="${escapeHtml(`${name}: ${label}${note ? `, ${note}` : ''}`)}">
@@ -290,25 +247,19 @@ function securityProtections() {
     const protections = securityProtectionItems();
     const items = protections.map(p => securityProtectionButton(p));
     const on = protections.filter(securityProtectionOn).length;
-    // On a phone the row folds into one chip that opens the list
     const summary = `<button type="button" class="ui-prot-sum" aria-expanded="${securityStripOpen}" onclick="securityStripOpen = !securityStripOpen; renderSecurityOverview()">
         Protection <b>${on} of ${items.length} on</b></button>`;
     return `${summary}<span class="ui-prot-title">Protection</span>${items.join('')}`;
 }
 
-// ----------------------------------------------------------------- one row
-
 function securityRuleName(rule) {
     return SECURITY_RULE_NAMES[rule] || rule;
 }
 
-// One tag per rule that caught the address
 function securityRuleTags(hits) {
     return `<span class="ui-sec-tags">${[...new Set(hits.map(h => securityRuleName(h.rule)))].map(name => uiTag(name, 'warn')).join('')}</span>`;
 }
 
-// How long a rule's ban lasts, as its button says it: 1w, 30d, 12h, or permanently.
-// The rule's current setting decides when the ban is made; until the rules load, the catch's own.
 function securityBanLength(hit) {
     const rule = typeof protectionSaved !== 'undefined' && protectionSaved ? protectionSaved[hit.rule] : null;
     const hours = Number(rule && rule.ban_hours !== undefined ? rule.ban_hours : hit.ban_hours) || 0;
@@ -317,7 +268,6 @@ function securityBanLength(hit) {
     return { label, title: `Ban it for ${formatSeconds(hours * 3600)}; the ban is lifted then` };
 }
 
-// The tag, the sentence that says why, and what can be done
 function securityDescribe(a) {
     const rw = mailcowRwConfigured;
     const ipArg = escapeJsArg(a.ip);
@@ -348,18 +298,15 @@ function securityDescribe(a) {
         return {
             tag: `${uiTag('Banned', 'fail')}<span class="ui-sec-by">by ${escapeHtml(securityRuleName(hit.rule))}</span>`,
             why: `${escapeHtml(hit.reason || '')}. Banned ${formatAgo(hit.banned_at || hit.last_seen)}, <b>${hit.expires_at ? `until ${escapeHtml(formatTime(hit.expires_at))}` : 'until removed'}</b>.`,
-            // Lifting a ban the rules wrote takes it off mailcow's denylist: that needs the key
             acts: rw || !hit.owned ? undo : ''
         };
     }
     if (a.state === 'banned' && a.networkSize) {
-        // IPv6 networks are too large for a count that reads; an IPv4 size is a plain figure, without a thousands separator
         const size = a.ip.includes(':') ? 'Whole network' : `Whole network, ${Number(a.networkSize)} addresses`;
         const range = a.networkRange ? `Every IP from ${escapeHtml(a.networkRange[0])} to ${escapeHtml(a.networkRange[1])} is banned. ` : 'Every IP in this network is banned. ';
         return {
             tag: `${uiTag('Banned', 'fail')}<span class="ui-sec-by">by Fail2ban</span>${uiTag(size, 'warn')}`,
             why: `${range}<b>${a.f2b.banned_until ? `${escapeHtml(a.f2b.banned_until)} left` : 'Banned now'}</b>, then Fail2ban lets them try again.${a.f2b.queued_for_unban ? ' Unbanning...' : ''}`,
-            // Banning a whole network for good is not offered in one click
             acts: rw && !a.f2b.queued_for_unban ? `<button data-acts="security" ${B} onclick="unbanIP('${escapeJsArg(a.ip)}', this)" title="Unban ${escapeHtml(a.ip)}">Unban</button>` : ''
         };
     }
@@ -413,24 +360,20 @@ function securityDescribe(a) {
     };
 }
 
-// How many attempts an address made: its logged attempts in the list's period, or what the rules counted
 function securityAttempts(a) {
     const n = a.attempts || (a.hits || []).reduce((sum, h) => sum + (h.attempts || 0), 0);
     return n ? `<span class="ui-sec-attempts" title="Attempts ${securityWindowText()}">${uiCountLabel(n, 'attempt', 'attempts')}</span>` : '';
 }
 
-// The flag leads the row in a slot of its own, so every address starts at the same place
 function securityPlaceFlag(code, country) {
     return `<span class="ui-sec-pflag"${country ? ` title="${escapeHtml(country)}"` : ''}>${country ? securityFlag(code) : ''}</span>`;
 }
 
 function securityRow(a) {
     const d = securityDescribe(a);
-    // Its actions are Security's: without Take action there, none
     if (!userCan('security', 'write')) d.acts = '';
     const open = securityOpenRow === a.ip;
     const where = a.country || a.last ? `${a.country ? escapeHtml(a.country) : ''}${a.country && a.last ? ' · ' : ''}${a.last ? formatAgo(a.last) : ''}` : '';
-    // A network has no log lines of its own: its row does not open
     if (a.networkSize) {
         return `
         <div class="ui-sec-row is-static is-net">
@@ -453,7 +396,6 @@ function securityRow(a) {
         </div>`;
 }
 
-// On a phone an address opens in a sheet from the bottom, so the list stays where it was
 function renderSecuritySheet(addresses) {
     const a = securityPhone() && securityOpenRow && securityTab === 'overview' && addresses.find(x => x.ip === securityOpenRow);
     if (!a) {
@@ -475,7 +417,6 @@ function securityCloseSheet() {
     renderSecurityOverview();
 }
 
-// The summary of one address, then its raw log lines
 function securityDetail(a) {
     const lines = securityRawLog[a.ip];
     const hitsText = a.hits.map(h => `<div class="ui-sec-ev"><time title="${escapeHtml(formatTime(h.last_seen))}">${formatAgo(h.last_seen)}</time><span>${escapeHtml(securityRuleName(h.rule))}: ${escapeHtml(h.reason || '')}</span>${protectionStatus(h)}</div>`).join('');
@@ -483,7 +424,6 @@ function securityDetail(a) {
         : lines === 'error' ? '<p class="ui-text-fail">Could not load log entries. Reload this page to try again.</p>'
         : !lines || !lines.length ? '<p class="ui-muted">No stored log entries for this IP.</p>'
         : `<pre class="ui-sec-raw">${lines.map(e => `<span class="ui-muted">${escapeHtml(formatTime(e.time))}</span> <span class="ui-sec-act is-${escapeHtml(e.action || '')}">${escapeHtml((e.action || '').padEnd(7))}</span> ${escapeHtml(e.message || '')}`).join('\n')}</pre>`;
-    // An address outside the overview's busiest has its place in its own log lines
     const logged = Array.isArray(lines) ? lines.find(e => e.country_name || e.asn_org) : null;
     if (logged) a = { ...a, country: a.country || logged.country_name || '', countryCode: a.countryCode || logged.country_code || '', city: a.city || logged.city || '', org: a.org || logged.asn_org || '' };
     const fact = (label, value) => `<div class="ui-sec-kv"><span>${label}</span><span>${value}</span></div>`;
@@ -504,14 +444,11 @@ function securityDetail(a) {
         </div>`;
 }
 
-// A click on the row opens it; a click on a button, a link or copyable text inside does not
 function securityRowClick(event, ip) {
     if (event.target.closest('button, a, input, .copyable, .ui-ent, .ui-sec-detail') || uiRowHeld(event)) return;
     securityToggleRow(ip);
 }
 
-// Failed logins in the chosen period, as the list counts them. An address without
-// any there has the last 24 hours counted in its own log lines.
 function securityFailedText(a, lines) {
     const services = a.services.length ? ` <span class="ui-muted">(${escapeHtml(a.services.join(', '))})</span>` : '';
     if (a.tries) return `${Number(a.tries).toLocaleString()} ${securityWindowText()}${services}`;
@@ -537,20 +474,14 @@ async function securityToggleRow(ip) {
     renderSecurityOverview();
 }
 
-// The Events tab, filtered to one address
 function securityOpenEvents(ip) {
     securityShowTab('events');
     const field = document.getElementById('netfilter-filter-ip');
     if (field) field.value = ip;
-    netfilterExact = null;   // an entity card's whole values do not carry over (app.js)
+    netfilterExact = null;
     applyNetfilterFilters();
 }
 
-// The Events of one value, from an entity card ("Show security events"): an IP or
-// an account matched whole, or the accounts on a domain, over the card's period
-// (start, end: ISO instants; period: how the chip names it). Every other filter is
-// cleared, as the search's address row does (search.js gsOpenAddress). Resolves
-// to whether the Security page opened.
 async function openSecurityEventsFor({ ip = '', username = '', domain = '', start = '', end = '', period = '' } = {}) {
     ['netfilter-filter-action', 'netfilter-filter-country'].forEach(id => {
         const el = document.getElementById(id);
@@ -570,16 +501,12 @@ async function openSecurityEventsFor({ ip = '', username = '', domain = '', star
     return true;
 }
 
-// Someone is working in the Settings cards: an open card, unsaved changes, or the
-// focus in one of their fields
 function securityEditing() {
     const focus = document.activeElement;
     return securityCard !== null || securityChangeCount() > 0
         || !!(focus && focus.closest && focus.closest('#security-cards'));
 }
 
-// An address is being typed into a list's Add field. Only that holds the Lists back:
-// after a ban, an allow or a removal they are drawn again at once.
 function securityListsTyping() {
     return [...document.querySelectorAll('#security-lists .ui-sec-ladd input')].some(field => field.value.trim());
 }
@@ -595,9 +522,6 @@ function setSecurityFilter(key) {
     securityListToTop();
 }
 
-// A new list or country starts at its first row, not where the last one was scrolled to.
-// It is done again once the rows are drawn: while they load the content is short, and
-// the browser's scroll anchoring would carry the new rows down to where the old ones ended.
 function securityListToTop() {
     const box = document.getElementById('security-list');
     if (box) requestAnimationFrame(() => securityScrollTo(box, true));
@@ -641,7 +565,6 @@ function pickSecurityNetwork(name) {
     if (fromPicker) uiPickerFocusButton('security-network');
 }
 
-// The phone's network picker: the networks that try most, and All
 function securityNetworkPanel() {
     const rows = securityNetworks ? securityNetworks.data : null;
     return `<span class="ui-sec-cpanel-head"><b>Networks with the most attempts</b><span class="ui-muted">${escapeHtml(securityPeriodLabel())}</span></span>
@@ -670,8 +593,6 @@ function securityHistoryRows() {
         </div>`).join('');
 }
 
-// ----------------------------------------------------------------- render
-
 function renderSecurityOverview() {
     const strip = document.getElementById('security-protections');
     if (strip) {
@@ -681,7 +602,6 @@ function renderSecurityOverview() {
     const box = document.getElementById('security-list');
     if (!box) return;
 
-    // The page holds the chosen list for the chosen country and network; until it does, the last counts stay
     const page = securityPage && securityPage.list === securityFilter && (securityPage.country || null) === (securityCountry || null)
         && (securityPage.network || null) === (securityNetwork || null) ? securityPage : null;
     if (page) securityLastCounts = { counts: page.counts, review: page.all_counts.review };
@@ -701,7 +621,6 @@ function renderSecurityOverview() {
     const rwNote = !mailcowRwConfigured && securityFilter !== 'history' && userCan('security', 'write')
         ? `<div class="ui-list-note">${uiLocked('Ban controls are unavailable', `Changing Fail2ban from this list ${UI_RW_KEY_TEXT}`)}</div>` : '';
     const f2bDown = fail2banLoadError || (page && page.fail2ban_known === false);
-    // Unban all: Fail2ban's own bans; the rules' bans and the denylist stay
     const liftable = securityFilter === 'banned' && !f2bDown && mailcowRwConfigured && userCan('security', 'write') ? fail2banLiftable().length : 0;
     const unbanAll = liftable ? `<div class="ui-sec-bulk"><p><b>${uiCountLabel(liftable, 'ban', 'bans')} by Fail2ban.</b> Bans by the protection rules and the denylist are not changed.</p>
         <button type="button" data-acts="security" class="ui-btn ui-btn-sm" onclick="unbanAllFail2ban(this)">Unban all (${liftable.toLocaleString()})</button></div>` : '';
@@ -740,22 +659,18 @@ function renderSecurityOverview() {
         ${rwNote}${f2bNote}${unbanAll}
         <div class="ui-sec-list">${rows}</div>
         ${footer}`;
-    // The filters stick right under the tabs, which stick to the top on a phone
     const tabs = document.querySelector('.ui-se-tabs');
     if (tabs) box.style.setProperty('--ui-sec-stick', `${tabs.offsetHeight}px`);
     renderSecuritySheet(list);
-    // A picker open while the list redraws keeps the focus where it was
     uiPickerRefocus();
     securityWatchMore(!!(page && page.next && !securityPageError));
 }
 
-// The period as it really is: the logs may start after the chosen one
 function securityPeriodSince() {
     const since = securityPage && securityPage.days === securityDays ? securityPage.since : null;
     return since ? formatDay(since) : null;
 }
 
-// A period as the picker names it
 function securityDaysLabel(days) {
     return days === 1 ? 'Last 24 hours' : `Last ${days} days`;
 }
@@ -765,13 +680,11 @@ function securityPeriodLabel() {
     return since ? `Since ${since}` : securityDays === 1 ? 'Last 24 hours' : `${securityDays} days`;
 }
 
-// The time a row's counts cover
 function securityWindowText() {
     const since = securityPeriodSince();
     return since ? `since ${since}` : securityDays === 1 ? 'in the last 24 hours' : `in the last ${securityDays} days`;
 }
 
-// When the end of the list comes near, the next page is asked for
 function securityWatchMore(more) {
     if (securityMoreObserver) securityMoreObserver.disconnect();
     securityMoreObserver = null;
@@ -784,8 +697,6 @@ function securityWatchMore(more) {
     }, { rootMargin: '0px 0px 400px 0px' });
     securityMoreObserver.observe(sentinel);
 }
-
-// ----------------------------------------------------------------- where attacks come from
 
 function securityWatchedCountries() {
     return new Set(((typeof protectionSaved !== 'undefined' && protectionSaved && protectionSaved.country) || {}).countries || []);
@@ -806,7 +717,6 @@ function securityCountryBars() {
     }).join('');
 }
 
-// The phone's country picker: the countries, and All
 function securityCountryPanel() {
     const rows = securityCountries ? securityCountries.data : null;
     return `<span class="ui-sec-cpanel-head"><b>Attempts by country</b><span class="ui-muted">${escapeHtml(securityPeriodLabel())}</span></span>
@@ -840,10 +750,6 @@ function renderSecurityCountries() {
 }
 
 
-// =============================================================================
-// SECURITY PAGE - Lists: the allowlist and the denylist, one address per row
-// =============================================================================
-
 function renderSecurityLists() {
     const box = document.getElementById('security-lists');
     if (!box) return;
@@ -861,14 +767,12 @@ function renderSecurityLists() {
         box.innerHTML = '<div class="ui-loading" role="status"><div class="loading"></div><p>Loading...</p></div>';
         return;
     }
-    // Changing the lists needs the Read-Write key and Take action on Security; the key's note is for whoever may act
     const mayAct = userCan('security', 'write');
     const rw = mailcowRwConfigured && mayAct;
     const tried = ip => {
         const s = securityOverview && securityOverview.sources.find(src => src.ip === securityBare(ip));
         return s ? s.failed_logins : 0;
     };
-    // A ban a rule wrote is on the denylist too; it is lifted through the rule
     const ruleBans = new Map(securityHits.filter(h => h.status === 'banned' && h.owned).map(h => [h.ip, h]));
     const addForm = (list, placeholder) => rw ? `
         <form class="ui-sec-ladd" onsubmit="event.preventDefault(); securityAddToList('${list}', this.elements.ip.value, this)">
@@ -877,7 +781,6 @@ function renderSecurityLists() {
         </form>` : '';
     const row = (entry, note, action) => `
         <div class="ui-sec-lrow"><b class="ui-mono">${uiEntity('ip', entry, { mono: true })}</b><span class="ui-sec-why">${note}</span><span class="ui-sec-acts">${action}</span></div>`;
-    // A single IPv6 address an earlier version wrote as a /32 network covers all of it
     const legacyRow = (list, entry) => {
         const old = fail2banLegacy.find(l => l.list === list && l.entry === entry);
         if (!old) return '';
@@ -928,7 +831,6 @@ async function securityAddToList(list, value, form) {
     if (!ip) return;
     const button = form && form.querySelector('button');
     const done = list === 'whitelist' ? await allowIP(ip, button) : await banIP(ip, button);
-    // The field empties, so the list is drawn again with the new entry
     if (done && form) form.reset();
 }
 
@@ -952,8 +854,6 @@ async function securityRemoveFromList(list, entry, button) {
     }
 }
 
-// Replaces an entry an earlier version wrote as a /32 network with the single
-// address it was meant to be, in one edit of mailcow's list
 async function securityRepairListEntry(list, entry, button) {
     if (!uiMayAct('security')) return;
     const old = fail2banLegacy.find(l => l.list === list && l.entry === entry);
@@ -976,34 +876,25 @@ async function securityRepairListEntry(list, entry, button) {
         showToast(`Could not repair ${entry}: ${uiErrorText(error)}`, 'error');
         if (button) button.disabled = false;
     }
-    // The list is read again either way, so it shows what mailcow holds now
     fail2banSettingsLoaded = false;
     loadFail2BanSettings();
 }
 
-// =============================================================================
-// SECURITY PAGE - Settings: one card per protection, the same ones as the
-// Overview's Protection row. A closed card says in one sentence what the
-// protection does; an open card turns that sentence into fields.
-// =============================================================================
-
-let securityCard = null;          // the open card
-let securityF2bDraft = null;      // unsaved Fail2ban policy
-let securityAppSettings = null;   // GET /api/settings, for the outgoing spam settings
-let securityAbuseDraft = {};      // unsaved outgoing spam settings
+let securityCard = null;
+let securityF2bDraft = null;
+let securityAppSettings = null;
+let securityAbuseDraft = {};
 
 const SECURITY_CARDS = ['fail2ban', 'trap', 'unknown_accounts', 'repeat_offender', 'subnet', 'country', 'breach', 'abuse'];
 const SECURITY_ABUSE_KEYS = ['smtp_abuse_enabled', 'smtp_abuse_threshold', 'smtp_abuse_window_minutes',
     'smtp_abuse_unblock_grace_minutes', 'smtp_abuse_revoke_app_passwords', 'smtp_abuse_help_address'];
 const SECURITY_F2B_KEYS = ['max_attempts', 'retry_window', 'ban_time', 'ban_time_increment', 'max_ban_time', 'netban_ipv4', 'netban_ipv6'];
 
-// The app settings can be changed from here: editing is on and they were migrated from ENV
 function securityAppSettingsEditable() {
     return !!(securityAppSettings && securityAppSettings.settings_edit_via_ui_enabled && securityAppSettings.settings_migrated);
 }
 
 async function loadSecurityAppSettings() {
-    // The app settings are an admin's; anyone else reads Outgoing spam from its status
     if (!userIsAdmin()) {
         securityAppSettings = null;
         renderSecuritySettings();
@@ -1020,7 +911,6 @@ async function loadSecurityAppSettings() {
     renderSecuritySettings();
 }
 
-// The dashboard's Security card opens one of the two lists, or the protection settings
 function openSecurityList(key) {
     securityFilter = key;
     securityOpenRow = null;
@@ -1033,12 +923,10 @@ function openSecuritySettings() {
     navigateTo('netfilter', { sub: 'settings' });
 }
 
-// From the dashboard, straight to one protection's settings card
 function openSecurityProtection(key) {
     navigateTo('netfilter', { sub: 'settings' }).then(moved => { if (moved) securityOpenCard(key); });
 }
 
-// A protection in the Overview's row opens its own card
 function securityOpenProtection(key) {
     securityShowTab('settings');
     securityOpenCard(key);
@@ -1048,9 +936,6 @@ function securityOpenCard(key) {
     securityCard = key;
     renderSecuritySettings();
     if (!key) return;
-    // After the layout settles (the card that closed changed it), the card's top goes to
-    // the top of whatever scrolls it (the tab on a wide screen, the page on a phone),
-    // and it takes the focus so the keyboard starts there
     requestAnimationFrame(() => {
         const card = document.getElementById(`security-card-${key}`);
         if (!card) return;
@@ -1059,8 +944,6 @@ function securityOpenCard(key) {
     });
 }
 
-// Bring an element's top to the top of whatever scrolls it (the tab on a wide screen,
-// the page on a phone). onlyIfAbove: leave it when its top is already in view.
 function securityScrollTo(el, onlyIfAbove = false) {
     let scroller = el.parentElement;
     while (scroller && !(scroller.scrollHeight > scroller.clientHeight && /(auto|scroll)/.test(getComputedStyle(scroller).overflowY))) {
@@ -1069,15 +952,12 @@ function securityScrollTo(el, onlyIfAbove = false) {
     scroller = scroller || document.scrollingElement;
     if (!scroller) return;
     const view = scroller === document.scrollingElement ? 0 : scroller.getBoundingClientRect().top;
-    // On a phone the tabs stick to the top of the page and would cover the element's head
     const tabs = document.querySelector('.ui-se-tabs');
     const covered = tabs && scroller.contains(tabs) && getComputedStyle(tabs).position === 'sticky' ? tabs.offsetHeight : 0;
     const offset = el.getBoundingClientRect().top - view - covered - 10;
     if (onlyIfAbove && offset >= 0) return;
     scroller.scrollTop += offset;
 }
-
-// ----------------------------------------------------------------- unsaved changes, one save bar
 
 function securityF2bValues() {
     return { ...(fail2banPolicy || {}), ...(securityF2bDraft || {}) };
@@ -1091,7 +971,6 @@ function securityF2bChanges() {
 function securityAbuseValue(key) {
     if (key in securityAbuseDraft) return securityAbuseDraft[key];
     if (securityAppSettings) return securityAppSettings.configuration[key];
-    // Without the app settings (an admin's), what the Outgoing spam status says
     const field = { smtp_abuse_enabled: 'enabled', smtp_abuse_threshold: 'threshold', smtp_abuse_window_minutes: 'window_minutes',
         smtp_abuse_unblock_grace_minutes: 'unblock_grace_minutes', smtp_abuse_revoke_app_passwords: 'revoke_app_passwords' }[key];
     return field && typeof smtpAbuseStatus !== 'undefined' && smtpAbuseStatus ? smtpAbuseStatus[field] : undefined;
@@ -1107,7 +986,6 @@ function securityChangeCount() {
         + (smtpAbuseWhitelistDraft !== null ? 1 : 0);
 }
 
-// Security's changes stay while other pages are open; only leaving the app loses them
 uiUnsavedRegister('security', { count: () => securityChangeCount(), keeps: () => true });
 
 function securityUpdateSaveBar() {
@@ -1135,8 +1013,6 @@ function discardSecuritySettings() {
     securityUpdateSaveBar();
 }
 
-// Save what changed, group by group, and say in one message what was saved. A group
-// that fails says why in its own message and keeps its changes on screen.
 async function saveSecuritySettings() {
     uiSaveBarBusy('security-savebar', true);
     const saved = [];
@@ -1191,8 +1067,6 @@ async function saveSecurityAbuse() {
     }
 }
 
-// ----------------------------------------------------------------- the cards
-
 const securityNum = (value, onchange, min, max, label, width = 5, disabled = false) =>
     `<input type="number" class="ui-sec-in" style="width:${width + 2}ch" min="${min}"${max ? ` max="${max}"` : ''} value="${escapeHtml(String(value ?? ''))}"
         onchange="${onchange}" aria-label="${escapeHtml(label)}" ${disabled ? 'disabled' : ''}>`;
@@ -1210,7 +1084,6 @@ function securityBanSelect(rule, hours) {
         ${lengths.map(([v, text]) => `<option value="${v}" ${v === h ? 'selected' : ''}>${v === 0 ? 'until removed by hand' : `for ${escapeHtml(text)}`}</option>`).join('')}</select>`;
 }
 
-// What a rule does, as one sentence; with edit, its values are fields
 function securityRuleSentence(key, edit) {
     const r = protectionRules[key];
     const caps = protectionCaps;
@@ -1264,7 +1137,6 @@ function securityAbuseSentence(edit) {
         After you let it send again, wait ${n('smtp_abuse_unblock_grace_minutes', 0, 'Minutes before it can be stopped again', 4)} minutes before it can be stopped again.`;
 }
 
-// The parts of a card that only an open card shows
 function securityCardBody(key) {
     const caps = protectionCaps;
     const R = protectionRules;
@@ -1347,8 +1219,6 @@ function securityCardBody(key) {
 }
 
 function securityCardHtml(key) {
-    // Without Take action on Security a card shows what is set and does not open for editing;
-    // Outgoing spam opens for its list of stopped mailboxes, its settings stay an admin's
     const mayAct = userCan('security', 'write');
     const canOpen = mayAct || key === 'abuse';
     const open = canOpen && securityCard === key;
@@ -1379,7 +1249,6 @@ function securityCardHtml(key) {
         on = r.enabled && !needsGeo;
         toggle = securityToggle(name, on, needsGeo || !mayAct, `setProtectionRule('${key}', 'enabled', this.checked)`,
             needsGeo ? 'Needs MaxMind GeoIP' : !mayAct ? 'You do not have permission to change this' : '');
-        // The switch says on or off; the tag says what an enabled rule does
         status = needsGeo ? uiTag('Needs MaxMind GeoIP', '') : !r.enabled ? '' : key === 'breach' ? uiTag('Alerts', 'warn')
             : r.mode === 'enforce' && protectionCaps.can_ban ? uiTag('Bans', 'fail') : uiTag('Watching', 'warn');
         if (needsGeo) locked = uiLocked('Needs GeoIP', 'Set up MaxMind GeoIP in Settings > MaxMind to use this rule.');
@@ -1388,7 +1257,6 @@ function securityCardHtml(key) {
     return securityCardShell(key, name, open, `${status}${caught}`, toggle, locked, `<p class="ui-sec-sent">${sentence}</p>`, open ? securityCardBody(key) : '', on, canOpen);
 }
 
-// The On/Off switch of a card; a click on it does not open the card
 function securityToggle(name, on, disabled, action, why) {
     return `<label class="ui-sec-switch${on ? ' is-on' : ''}" onclick="event.stopPropagation()" title="${escapeHtml(disabled ? why : on ? `Turn ${name} off` : `Turn ${name} on`)}">
         <input type="checkbox" role="switch" ${on ? 'checked' : ''} ${disabled ? 'disabled' : ''} onchange="${action}" aria-label="${escapeHtml(name)}">
@@ -1402,7 +1270,6 @@ function securityCardShell(key, name, open, status, toggle, locked, sentence, bo
                 <span class="ui-sec-card-act">${open
                     ? `<button type="button" class="ui-btn ui-btn-sm" onclick="event.stopPropagation(); securityOpenCard(null)">Done</button>`
                     : !canOpen ? ''
-                    // Without Take action a card opens only to read (Outgoing spam's stopped mailboxes)
                     : userCan('security', 'write') ? `<button type="button" class="ui-btn ui-btn-sm" aria-label="Edit ${escapeHtml(name)}">Edit</button>`
                     : `<button type="button" class="ui-btn ui-btn-sm" aria-label="Open ${escapeHtml(name)}">Open</button>`}</span></div>
             ${locked}

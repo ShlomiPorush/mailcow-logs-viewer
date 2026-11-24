@@ -1,19 +1,3 @@
-// =============================================================================
-// SEARCH - the search in the top bar: pages, settings, background jobs,
-// messages, domains, mailboxes, suppressions and addresses, each in its own tab
-// with the first few under All
-// =============================================================================
-// Classic script sharing the global scope; loaded after the page scripts, whose
-// functions open what a result points to.
-//
-// The results are a grid: a row holds the result and, for an IP address, a
-// mailbox, a domain or a background job, the buttons that act on it (Card, Ban,
-// Allow, Run), shown on the active row and on hover. On a phone the buttons fold
-// into one "..." row menu. The field keeps the focus: Up and Down move the active
-// row, Enter opens it (an entity's card, a job on Status > Jobs), Right moves into
-// the row's buttons and Left or Escape back to the field.
-
-// area: what the signed-in person needs View on to search it (Settings is an admin's)
 const GS_CATEGORIES = [
     { id: 'pages', label: 'Pages' },
     { id: 'settings', label: 'Settings', area: 'admin' },
@@ -24,13 +8,10 @@ const GS_CATEGORIES = [
     { id: 'suppressions', label: 'Suppressions', feature: 'suppressions', area: 'outbound' },
     { id: 'addresses', label: 'IP addresses', feature: 'netfilter', area: 'security' }
 ];
-// Results a category's tab lists, and how many of them All shows
 const GS_LIMIT = 10;
 const GS_SUMMARY = 3;
-// The server is asked from this many characters; pages and settings answer from the first
 const GS_SERVER_FROM = 2;
 const GS_SHORT = 'Type one more character to search the messages, domains, mailboxes, suppressions, addresses and background jobs too.';
-// Words that list every background job
 const GS_JOB_WORDS = /^(run|run now|jobs?|background|background jobs?)$/;
 
 const GS_ICONS = {
@@ -43,10 +24,8 @@ const GS_ICONS = {
     addresses: '<path d="M12 3l8 3v6c0 4.5-3.4 8.3-8 9-4.6-.7-8-4.5-8-9V6z"/>',
     jobs: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>'
 };
-// The three dots of the Suppressions More button (index.html)
 const GS_DOTS = '<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.8"></circle><circle cx="12" cy="12" r="1.8"></circle><circle cx="19" cy="12" r="1.8"></circle></svg>';
 
-// The tabs of a page, read from its tab buttons so their names live in one place
 const GS_PAGE_TABS = {
     netfilter: 'security-tab-btn-',
     quarantine: 'quarantine-tab-btn-',
@@ -73,7 +52,6 @@ function gsEl(id) { return document.getElementById(id); }
 
 function gsOff(category) {
     if (category.area && !userCan(category.area)) return true;
-    // A setting result opens its field, which only the edit form has
     if (category.id === 'settings' && window.settingsEditable === false) return true;
     return !!(category.feature && window.disabledFeatures && window.disabledFeatures.includes(category.feature));
 }
@@ -82,7 +60,6 @@ function gsMatch(text, q) {
     return String(text || '').toLowerCase().includes(q);
 }
 
-// The query in a result, marked
 function gsMark(text, q) {
     const value = String(text || '');
     const at = q ? value.toLowerCase().indexOf(q) : -1;
@@ -94,8 +71,6 @@ function gsMark(text, q) {
 function gsVisible(el) {
     return !!el && el.style.display !== 'none' && !el.classList.contains('hidden') && !el.classList.contains('ui-no-view');
 }
-
-// ----------------------------------------------------------------- the indexes
 
 function gsSearchPages(q) {
     const items = [];
@@ -123,14 +98,11 @@ function gsSearchPages(q) {
 
 function gsSearchSettings(q) {
     if (typeof settingsSearchIndex !== 'function' || !userIsAdmin()) return [];
-    // Names that hold the text first, then the ones only their key holds
     const found = settingsSearchIndex().filter(s => gsMatch(s.label, q) || gsMatch(s.key, q));
     return [...found.filter(s => gsMatch(s.label, q)), ...found.filter(s => !gsMatch(s.label, q))]
         .map(s => ({ title: s.label, sub: 'Settings › ' + s.tabLabel + (gsMatch(s.label, q) ? '' : ' · ' + s.key),
             open: () => gsOpenSetting(s) }));
 }
-
-// ----------------------------------------------------------------- the server
 
 async function gsJson(url, signal) {
     const response = await authenticatedFetch(url, { signal });
@@ -145,11 +117,9 @@ async function gsSearchMessages(q, signal) {
         items: (data.data || []).map(m => ({
             title: m.subject || '(no subject)',
             sub: (m.sender || '') + ' → ' + (m.recipient || ''),
-            // "+2" when the message has more recipients, as in the Messages list
             subTag: renderRecipientMore(m),
             at: formatAgo(m.first_seen || m.last_seen),
             open: () => viewMessageDetails(m.correlation_key),
-            // A message opens over the search, which stays for the next one
             keep: 'message-modal'
         })),
         more: { label: 'Open in Messages', open: () => navigateToMessagesWithFilter({ email: q, filterType: 'search' }) }
@@ -157,7 +127,6 @@ async function gsSearchMessages(q, signal) {
 }
 
 async function gsSearchDomains(q, signal) {
-    // One list for the whole time the search is in use: it has no search of its own
     if (!gsDomains || Date.now() - gsDomainsAt > 60000) {
         gsDomains = (await gsJson('/api/domains/all', signal)).domains || [];
         gsDomainsAt = Date.now();
@@ -184,8 +153,6 @@ async function gsSearchMailboxes(q, signal) {
     };
 }
 
-// The app keeps a suppression list only while Sync with Rspamd is on: with it
-// off the category is not shown at all
 async function gsSearchSuppressions(q, signal) {
     if (gsListKept === null || Date.now() - gsListKeptAt > 60000) {
         gsListKept = (await gsJson('/api/suppressions/config', signal)).list_kept === true;
@@ -201,7 +168,6 @@ async function gsSearchSuppressions(q, signal) {
             title: shown(s.email),
             sub: [state(s), String(s.reason || '').replace('_', ' '), s.notes].filter(Boolean).join(' · '),
             at: formatAgo(s.created_at),
-            // By the value shown: a domain block opens by its domain, which the list finds
             open: () => gsOpenSuppressions(shown(s.email))
         })),
         more: { label: 'Open in Suppressions', open: () => gsOpenSuppressions(q) }
@@ -209,7 +175,6 @@ async function gsSearchSuppressions(q, signal) {
 }
 
 async function gsSearchAddresses(q, signal) {
-    // Only what can be part of an address: the list is read from the logs
     if (!/^[0-9a-f.:/]+$/i.test(q)) return { count: 0, items: [] };
     const url = list => `/api/security/addresses?list=${list}&q=${encodeURIComponent(q)}&limit=${GS_LIMIT}`;
     const [review, banned] = await Promise.all([gsJson(url('review'), signal), gsJson(url('banned'), signal)]);
@@ -220,15 +185,11 @@ async function gsSearchAddresses(q, signal) {
         const fields = {
             sub: [a.state === 'banned' ? 'Banned' : 'To review', a.country, uiCountLabel(a.attempts || 0, 'attempt', 'attempts')].filter(Boolean).join(' · '),
             at: formatAgo(a.last_seen),
-            // A banned network has no events of its own: it opens on the Banned list
             open: () => a.network_size ? gsOpenBannedNetwork() : gsOpenAddress(a.ip)
         };
-        // One address opens its card and has Ban and Allow; a network keeps its list
         return a.network_size ? { title: a.ip, ...fields } : gsEntityItem('ip', a.ip, fields);
     });
     let count = (counts.review || 0) + (counts.banned || 0);
-    // One valid address typed that the lists do not hold still gets its row: its
-    // card, Ban and Allow, and what the app keeps about it (read as its card reads it)
     const typed = q.trim();
     if (entityKindOf(typed) === 'ip' && !rows.some(a => String(a.ip).toLowerCase() === typed.toLowerCase())) {
         const { value, sub } = await gsTypedIp(typed, signal);
@@ -238,7 +199,6 @@ async function gsSearchAddresses(q, signal) {
     return { count, items };
 }
 
-// The sources of the IP card that hold activity, and how a count of each reads
 const GS_IP_ACTIVITY = [
     ['messages', s => s.count, 'message', 'messages'],
     ['security', s => s.events, 'security event', 'security events'],
@@ -247,21 +207,12 @@ const GS_IP_ACTIVITY = [
     ['dmarc', s => s.messages, 'DMARC message', 'DMARC messages'],
 ];
 
-// A typed address the lists do not hold, as its card has it (GET /api/entities/ip,
-// the card's own period): what it holds, or "No activity" only when every source
-// of activity was read and holds nothing. A source whose feature is off in
-// Settings (disabled) keeps no data, so it does not stand in the way; one that
-// failed or is missing, or a card that could not be read, says nothing either
-// way. The value comes back as
-// the server writes it (IPv6 compressed, an IPv4 mapped into IPv6 as IPv4)
 async function gsTypedIp(ip, signal) {
-    // The card's areas; without View on all of them nothing is read
     if (!userCanOpenEntity('ip')) return { value: ip, sub: 'Not in these results' };
     let data = null;
     try {
         data = await gsJson(`/api/entities/ip?value=${encodeURIComponent(ip)}`, signal);
     } catch (error) {
-        // An older search, cancelled: dropped with it
         if (error && error.name === 'AbortError') throw error;
     }
     const sources = (data && data.sources) || {};
@@ -277,10 +228,6 @@ async function gsTypedIp(ip, signal) {
     return { value, sub: 'Not in these results' };
 }
 
-// A row for an IP address, an email address (a mailbox) or a domain: Enter and a
-// click open its card. A value that is not one of its kind (as the server reads it,
-// entityKindOf in utils.js) keeps the way it opened before, without buttons.
-// title: what the row shows, when it is not the value (the address as typed)
 function gsEntityItem(kind, value, { sub = '', at = '', open = null, title = '' } = {}) {
     const text = String(value || '').trim();
     if (entityKindOf(text) !== kind || !userCanOpenEntity(kind)) return { title: title || text, sub, at, open: open || (() => {}) };
@@ -288,27 +235,19 @@ function gsEntityItem(kind, value, { sub = '', at = '', open = null, title = '' 
         open: () => openEntityCard(kind, text, { from: gsOpener() }) };
 }
 
-// What gets the focus back when a card or a question opened from the search closes:
-// the field (its rows are drawn again meanwhile). On a phone the search itself
 function gsOpener() {
     return gsPhone() ? null : gsEl('ui-gs-input');
 }
 
-// The jobs the Status page lists, in its order and with its names (app.js
-// statusJobCategories), that the server reports. Each of them is in the manual-run
-// map of POST /api/settings/jobs/{job}/run (a test holds the two together); a job
-// the server reports that is not among them is not offered
 function gsJobList() {
     if (!gsJobs || typeof statusJobCategories !== 'function') return [];
     return statusJobCategories(gsJobs).flatMap(c => c.jobs).filter(([, , job]) => job);
 }
 
-// Off as the Status page reads it (utils.js renderJobCard)
 function gsJobOff(job) {
     return job.status === 'disabled' || job.enabled === false || job.feature_disabled === true;
 }
 
-// "5 minutes" as "Every 5 minutes", "1 hour" as "Every hour"; a time of day stays as written
 function gsJobEvery(text) {
     if (!/^\d/.test(text)) return text;
     return 'Every ' + text.replace(/^1 (second|minute|hour|day)\b/, '$1');
@@ -331,7 +270,6 @@ function gsJobItem(name, key, job) {
 }
 
 async function gsSearchJobs(q, signal) {
-    // The Status page's own answer, read again after a while (and after a run)
     if (!gsJobs || Date.now() - gsJobsAt > 30000) {
         const data = await gsJson('/api/settings/info', signal);
         if (!data || data.error || !data.background_jobs) throw new Error('No jobs');
@@ -350,8 +288,6 @@ async function gsSearchJobs(q, signal) {
 const GS_REMOTE = { jobs: gsSearchJobs, messages: gsSearchMessages, domains: gsSearchDomains, mailboxes: gsSearchMailboxes,
     suppressions: gsSearchSuppressions, addresses: gsSearchAddresses };
 
-// The kind typed comes first: one IP address puts IP addresses first, a word for
-// the jobs (run, jobs) Background jobs, and so does a job's name when no page has it
 function gsLead(q) {
     if (!q) return null;
     if (entityKindOf(q) === 'ip') return 'addresses';
@@ -360,15 +296,12 @@ function gsLead(q) {
     return null;
 }
 
-// The kinds shown, in the order of their tabs and groups
 function gsCategories() {
     const list = GS_CATEGORIES.filter(c => !gsOff(c) && !gsResults[c.id]?.hidden);
     const at = list.findIndex(c => c.id === gsLead(gsQuery.toLowerCase()));
     if (at > 0) list.unshift(list.splice(at, 1)[0]);
     return list;
 }
-
-// ----------------------------------------------------------------- searching
 
 function gsRun(raw) {
     const q = raw.trim().toLowerCase();
@@ -397,7 +330,6 @@ function gsRun(raw) {
     }
     remote.forEach(c => { gsResults[c.id] = { loading: true, count: 0, items: [] }; });
     gsRender();
-    // The server is asked once typing pauses; an older search is cancelled
     gsTimer = setTimeout(() => {
         const controller = new AbortController();
         gsController = controller;
@@ -409,26 +341,18 @@ function gsRun(raw) {
     }, 200);
 }
 
-// ----------------------------------------------------------------- drawing
-
 function gsIcon(id) {
     return `<svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24" aria-hidden="true">${GS_ICONS[id]}</svg>`;
 }
 
-// ----------------------------------------------------------------- row actions
-
 const gsRw = () => typeof mailcowRwConfigured !== 'undefined' && !!mailcowRwConfigured;
 
-// What a row offers, as it stands now: an entity its card, one IP address Ban and
-// Allow too with the Read-Write key (without it they are not offered, as in the
-// card); a job Run, unless it is off; while it runs, Run is there but unavailable
 function gsActs(item) {
     if (item.entity) {
         const acts = [{ act: 'card' }];
         if (item.entity.kind === 'ip' && gsRw() && userCan('security', 'write')) acts.push({ act: 'ban' }, { act: 'allow' });
         return acts;
     }
-    // Running a job by hand is an admin's
     if (item.job && !item.job.off && userIsAdmin()) return [{ act: 'run', disabled: item.job.running }];
     return [];
 }
@@ -438,7 +362,6 @@ function gsActTitle(item, act) {
     const what = item.entity ? { ip: 'IP address', address: 'address', domain: 'domain' }[item.entity.kind] : '';
     return {
         card: `Open the card of this ${what}`,
-        // The titles of the card's Ban and Allow (entity-card.js entityCardActionsHtml)
         ban: `Put ${entry} on the Fail2ban denylist; it stays until removed`,
         allow: `Never ban ${entry}`,
         run: item.job && item.job.running ? 'Job is running' : 'Run this job now'
@@ -448,10 +371,6 @@ function gsActTitle(item, act) {
 const GS_ACT_LABELS = { card: 'Card', ban: 'Ban', allow: 'Allow', run: 'Run' };
 const GS_MENU_LABELS = { card: 'Open card', job: 'Open job', ban: 'Ban', allow: 'Allow', run: 'Run' };
 
-// The buttons at the row's end (Ban in red text, as on the Security list rows), and
-// for a phone one "..." button with the same in a row menu (the Suppressions More
-// menu, index.html). The menu leads with what a tap on the row does, and is left
-// out when that is all it would hold. Buttons are reached with the arrows, not Tab
 function gsActsHtml(index, item, acts) {
     if (!acts.length) return '';
     const value = item.title;
@@ -481,8 +400,6 @@ function gsCountText(result) {
     return Number(result.count).toLocaleString();
 }
 
-// The panel's three parts, made once: the grid keeps its id, which the field's
-// aria-controls names, while its rows are drawn again
 function gsPanelParts() {
     const panel = gsEl('ui-gs-panel');
     if (!panel) return null;
@@ -493,7 +410,7 @@ function gsPanelParts() {
     }
     return { panel, tabs: panel.querySelector('.ui-gs-tabs'), grid: gsEl('ui-gs-grid'), keys: panel.querySelector('.ui-gs-keys') };
 }
-let gsDrawn = '';   // the query and tab last drawn: a new one starts at the top
+let gsDrawn = '';
 
 function gsRender() {
     const parts = gsPanelParts();
@@ -509,7 +426,6 @@ function gsRender() {
         return;
     }
     const q = gsQuery.toLowerCase();
-    // A category that has nothing to search right now (no suppression list) is left out
     const categories = gsCategories();
     const loading = categories.some(c => gsResults[c.id]?.loading);
     const short = categories.some(c => gsResults[c.id]?.short);
@@ -523,7 +439,6 @@ function gsRender() {
             return tab(c.id, c.label, gsCountText(r), r && !r.loading && !r.count);
         }).join('');
 
-    // Every line of the results is a row of the grid: a note too
     const note = (cls, html) => `<p class="${cls}" role="row"><span role="gridcell">${html}</span></p>`;
     let body = '';
     if (gsTab === 'all') {
@@ -533,7 +448,6 @@ function gsRender() {
             body += `<div class="ui-gs-sec" role="row"><span role="gridcell">${escapeHtml(c.label)} · ${Number(r.count).toLocaleString()}</span>${r.count > GS_SUMMARY ? `<span role="gridcell"><button type="button" class="ui-link" data-gs-tab="${c.id}">See all</button></span>` : ''}</div>`
                 + r.items.slice(0, GS_SUMMARY).map(item => gsItem(c.id, item, q)).join('');
         });
-        // A place that could not be searched is not one where nothing was found
         const failed = categories.filter(c => gsResults[c.id] && gsResults[c.id].failed).map(c => c.label);
         const notSearched = failed.length ? `Could not search ${failed.join(', ')}. Try again in a moment.` : '';
         if (!body) body = note('ui-gs-empty', loading ? 'Searching…' : short ? GS_SHORT
@@ -555,11 +469,9 @@ function gsRender() {
         else if (!r.items.length) body = note('ui-gs-empty', `Nothing found for “${escapeHtml(gsQuery)}”`);
     }
     if (gsActive >= gsShown.length) gsActive = Math.max(0, gsShown.length - 1);
-    // Enter opens an entity's card and a job on Status > Jobs: the keys line says which
     const hint = (gsShown[gsActive] || {}).hint;
     const enter = hint === 'card' ? 'open card' : hint === 'job' ? 'open job' : 'open';
 
-    // A row's button that had the focus goes with the redraw: the keys stay in the search
     const inActs = !!(document.activeElement && panel.contains(document.activeElement) && document.activeElement.closest('.ui-gs-acts'));
     parts.tabs.innerHTML = tabs;
     grid.innerHTML = body;
@@ -571,13 +483,10 @@ function gsRender() {
     const active = panel.querySelector('.ui-gs-row.is-active > .ui-gs-item, .ui-gs-more.is-active');
     active?.closest('[role="row"]').scrollIntoView({ block: 'nearest' });
     if (inActs) gsToField();
-    // The field keeps the focus while Up and Down move: a screen reader reads the active result
     const input = gsEl('ui-gs-input');
     if (active && gsEl('ui-gs').classList.contains('is-open')) input.setAttribute('aria-activedescendant', active.id);
     else input.removeAttribute('aria-activedescendant');
 }
-
-// ----------------------------------------------------------------- opening and closing
 
 function gsPhone() {
     return window.matchMedia('(max-width: 760px)').matches;
@@ -586,7 +495,6 @@ function gsPhone() {
 function gsOpen() {
     const root = gsEl('ui-gs');
     if (!root) return;
-    // On a phone the search covers the screen, above the bar it is hidden in
     if (gsPhone() && root.parentElement !== document.body) {
         root.dataset.home = 'topbar';
         document.body.appendChild(root);
@@ -602,7 +510,6 @@ function gsClose(clear) {
     const root = gsEl('ui-gs');
     if (!root) return;
     const input = gsEl('ui-gs-input');
-    // The next search starts again from All
     if (clear) {
         input.value = '';
         gsTab = 'all';
@@ -619,8 +526,6 @@ function gsClose(clear) {
     if (document.activeElement === input) input.blur();
 }
 
-// item.keep names the dialog a result opens over the search (a message, a card),
-// which stays for the next one
 function gsChoose(index) {
     const item = gsShown[index];
     if (!item) return;
@@ -635,13 +540,10 @@ function gsChoose(index) {
                 if (!layer.classList.contains('hidden')) return;
                 watch.disconnect();
                 if (!gsEl('ui-gs').classList.contains('is-open')) return;
-                // It moved to another page (Show messages in a card): the search is done
-                // there, and the focus goes to that page, not back to the field
                 if (location.pathname + location.search !== page) {
                     if (typeof uiLayerReturn === 'function') uiLayerReturn(layer, null);
                     gsClose(true);
                 }
-                // Back from it, the keys work in the search again (not on a phone: no keyboard)
                 else if (!gsPhone()) input.focus({ preventScroll: true });
             });
             watch.observe(layer, { attributes: true, attributeFilter: ['class'] });
@@ -652,16 +554,14 @@ function gsChoose(index) {
     item.open();
 }
 
-// The field again, the caret at its end, while the search is open (not on a phone)
 function gsToField() {
     const input = gsEl('ui-gs-input');
     if (!input || !gsEl('ui-gs').classList.contains('is-open') || gsPhone()) return;
     input.focus({ preventScroll: true });
     const end = input.value.length;
-    try { input.setSelectionRange(end, end); } catch (e) { /* a field that has no caret */ }
+    try { input.setSelectionRange(end, end); } catch (e) {}
 }
 
-// A kind's results read again (after a ban or a run), the tab and the active row kept
 function gsRefresh(id) {
     const asked = gsQuery;
     const q = asked.toLowerCase();
@@ -672,19 +572,16 @@ function gsRefresh(id) {
         .catch(() => {});
 }
 
-// A row's button, or its item in the phone row menu
 async function gsAct(index, act, button) {
     const item = gsShown[index];
     if (!item) return;
     if (act === 'card' || act === 'job') return gsChoose(index);
     const offered = gsActs(item).find(a => a.act === act);
     if (!offered || offered.disabled) return;
-    // A menu item is not a button banIP can show its progress on
     const own = button && !button.closest('.ui-menu') ? button : null;
     const opener = gsOpener();
     if (opener && typeof uiLayerOpener === 'function') uiLayerOpener(opener);
     if (act === 'ban' || act === 'allow') {
-        // Their own confirmation, as on the Security list and in the card
         const done = await (act === 'ban' ? banIP : allowIP)(item.entity.value, own);
         if (done) await gsRefresh('addresses');
         gsToField();
@@ -693,17 +590,12 @@ async function gsAct(index, act, button) {
     if (act === 'run') return gsRunJob(item.job);
 }
 
-// What a job does, as the end of a sentence: the Status page's description
 function gsJobEffect(description) {
     const text = String(description || '').trim().replace(/\.$/, '');
     if (!text) return '';
-    // "Imports logs" reads "imports logs"; a name in capitals ("DNS") stays
     return /^[A-Z][a-z]/.test(text) ? text.charAt(0).toLowerCase() + text.slice(1) : text;
 }
 
-// Run asks first, naming the job and what it does; the run itself is the Status
-// page's (app.js runBackgroundJob), which says when the job is already running or
-// cannot run now. The row then shows the job as the server has it
 async function gsRunJob(job) {
     if (!job || job.off || job.running) return;
     const effect = gsJobEffect(job.description);
@@ -711,7 +603,6 @@ async function gsRunJob(job) {
         title: `Run ${job.name}`,
         message: `${job.name} runs once now, outside its schedule${effect ? `, and ${effect}` : ''}.`,
         confirmText: 'Run',
-        // What it does can write to mailcow: the question starts on Cancel
         focusCancel: true
     });
     if (ok) {
@@ -721,7 +612,6 @@ async function gsRunJob(job) {
     gsToField();
 }
 
-// A kind's tab starts on its first result, after the box that opens them all
 function gsSetTab(id) {
     gsTab = id;
     const r = gsResults[id];
@@ -730,12 +620,10 @@ function gsSetTab(id) {
 }
 
 function gsStepTab(step) {
-    // The same kinds as the tabs drawn, in their order: one with nothing to search is left out
     const ids = ['all', ...gsCategories().map(c => c.id)];
     gsSetTab(ids[(ids.indexOf(gsTab) + step + ids.length) % ids.length]);
 }
 
-// Wait for something a page draws after loading
 function gsWaitFor(find, timeout = 8000) {
     return new Promise(resolve => {
         const started = Date.now();
@@ -748,8 +636,6 @@ function gsWaitFor(find, timeout = 8000) {
     });
 }
 
-// A bar that stays at the top while scrolling (a page's tabs on a phone) can hide the
-// start of what was opened: scroll it out from under the bar
 function gsUncover(el) {
     const top = el.getBoundingClientRect();
     const hit = document.elementFromPoint(top.left + Math.min(top.width / 2, 40), Math.max(top.top, 0) + 2);
@@ -764,7 +650,6 @@ function gsUncover(el) {
     (scroller || document.scrollingElement).scrollBy(0, -gap);
 }
 
-// A field is brought to the middle; details (block 'start') from their top, below the bar
 function gsReveal(el, block = 'center') {
     if (!el) return;
     el.classList.add('ui-gs-target');
@@ -786,16 +671,12 @@ async function gsOpenSetting(setting) {
     const row = el => el.closest('.ui-set-field, .ui-set-bool, .ui-set-wide');
     const find = () => {
         const el = gsEl('edit-' + setting.key) || gsEl('setting-' + setting.key);
-        // A field in a closed area (Outbound's Status code exceptions) is reached by opening it
         for (let fold = el && el.closest('details:not([open])'); fold; fold = fold.parentElement.closest('details:not([open])')) fold.open = true;
-        // A value kept in a hidden field (the Time Zone picker, Features) is seen through its row
         const box = el && (el.type === 'hidden' || el.hidden) ? row(el) : el;
         return box && box.offsetParent ? el : null;
     };
     const show = el => {
         gsReveal(row(el) || el);
-        // A hidden field takes the focus through the control that sets it
-        // or the one its row names (data-search-focus), such as where a status code is typed
         const target = el.type !== 'hidden' && !el.hidden ? el : row(el)
             && (row(el).querySelector('[data-search-focus]:not([disabled])')
                 || row(el).querySelector('button:not([disabled]), select:not([disabled]), input:not([type="hidden"]):not([disabled])'));
@@ -804,7 +685,6 @@ async function gsOpenSetting(setting) {
     let field = await gsWaitFor(find);
     if (!field) return;
     show(field);
-    // The page is drawn again when the version check answers: find the field again
     const started = Date.now();
     const keep = () => {
         if (Date.now() - started > 4000) return;
@@ -827,7 +707,6 @@ async function gsOpenDomain(name) {
     gsReveal([...document.querySelectorAll('[data-domain-row]')].find(el => el.dataset.domainRow === name) || details, 'start');
 }
 
-// One mailbox opened, or the list searched for the text (username null)
 async function gsOpenMailbox(username, text) {
     const field = gsEl('mailbox-stats-search');
     if (field) field.value = username || text;
@@ -843,7 +722,6 @@ async function gsOpenMailbox(username, text) {
     gsReveal(content ? content.parentElement : null, 'start');
 }
 
-// Outbound > Suppressions, listing what the search found in every state
 async function gsOpenSuppressions(text) {
     const search = gsEl('suppression-search');
     if (search) search.value = text;
@@ -851,14 +729,12 @@ async function gsOpenSuppressions(text) {
     if (reason) reason.value = '';
     const active = gsEl('suppression-filter-active');
     if (active) active.value = '';
-    // The list keeps the filters it was last asked with: it reads them again from the fields
     suppressionQuery = null;
     const already = gsPageOpen('outbound') && outboundTab === 'suppressions';
     if (!(await navigateTo('outbound', { sub: 'suppressions' }))) return;
     if (already) loadSuppressions(1);
 }
 
-// Security > Banned with every country and network, since a network row has neither
 function gsOpenBannedNetwork() {
     securityCountry = null;
     securityNetwork = null;
@@ -866,7 +742,6 @@ function gsOpenBannedNetwork() {
     else openSecurityList('banned');
 }
 
-// The Security page's events for the address
 async function gsOpenAddress(ip) {
     ['netfilter-filter-username', 'netfilter-filter-action', 'netfilter-filter-country'].forEach(id => {
         const field = gsEl(id);
@@ -881,7 +756,6 @@ async function gsOpenAddress(ip) {
     if (already) applyNetfilterFilters();
 }
 
-// Status > Jobs, on the job's row: its group opened, every job shown
 async function gsOpenJob(key) {
     if (!(await navigateTo('status', { sub: 'jobs' }))) return;
     const find = () => [...document.querySelectorAll('#status-jobs .ui-jobrow[data-job]')].find(row => row.dataset.job === key) || null;
@@ -894,7 +768,6 @@ async function gsOpenJob(key) {
     let row = await gsWaitFor(find);
     if (!row) return;
     show(row);
-    // The page draws its jobs again once its own read answers: find the row again
     const started = Date.now();
     const keep = () => {
         if (Date.now() - started > 4000) return;
@@ -908,14 +781,11 @@ async function gsOpenJob(key) {
     setTimeout(keep, 150);
 }
 
-// The controls of a row's button cell that can be used here: the buttons on a
-// desktop, the "..." button on a phone (the CSS shows one or the other)
 function gsActControls(cell) {
     const all = [...cell.querySelectorAll(':scope > button')];
     return all.filter(b => !b.disabled && (gsPhone() ? b.classList.contains('ui-gs-dots') : !b.classList.contains('ui-gs-dots')));
 }
 
-// Right at the end of the field: into the active row's first button
 function gsIntoActs() {
     const input = gsEl('ui-gs-input');
     if (input.selectionStart !== input.value.length || input.selectionEnd !== input.value.length) return false;
@@ -926,15 +796,12 @@ function gsIntoActs() {
     return true;
 }
 
-// Between a row's buttons; back past the first one is the field again
 function gsStepAct(cell, from, step) {
     const controls = gsActControls(cell);
     const next = controls.indexOf(from) + step;
     if (next < 0) gsToField();
     else if (next < controls.length) controls[next].focus({ preventScroll: true });
 }
-
-// ----------------------------------------------------------------- wiring
 
 function initGlobalSearch() {
     const root = gsEl('ui-gs');
@@ -945,14 +812,8 @@ function initGlobalSearch() {
 
     input.addEventListener('focus', gsOpen);
     input.addEventListener('input', () => gsRun(input.value));
-    // The keys work from the field and from a tab or a result that has the focus:
-    // Up and Down move in the results, Left and Right on a tab switch the kind.
-    // Right from the end of the field goes into the active row's buttons, where Left
-    // and Right move between them; Left from the first one, or Escape, goes back
     root.addEventListener('keydown', event => {
-        // A row menu that is open keeps its own keys (Escape closes it)
         if (event.target.closest('.ui-menu')) return;
-        // While an input method composes a word, its keys are the word's, not the search's
         if (event.isComposing || event.keyCode === 229) return;
         const plain = !event.shiftKey && !event.ctrlKey && !event.metaKey && !event.altKey;
         const onTab = !!event.target.closest('[data-gs-tab]');
@@ -994,8 +855,6 @@ function initGlobalSearch() {
             gsClose(true);
         }
     });
-    // A click on a result or a tab keeps the focus in the field. On a phone a tab
-    // lets the keyboard go instead: the search is done, the results need the room
     const sheet = () => root.classList.contains('is-sheet');
     panel.addEventListener('mousedown', event => {
         if (event.target.closest('button, [data-gs-index]') && !sheet()) event.preventDefault();
@@ -1008,8 +867,6 @@ function initGlobalSearch() {
             else input.focus();
             return;
         }
-        // A row's button (or the item of its menu) acts and leaves the row; the "..."
-        // button only opens its menu
         const act = event.target.closest('[data-gs-act]');
         if (act) {
             if (act.dataset.gsAct !== 'menu') gsAct(Number(act.dataset.gsAt), act.dataset.gsAct, act);
@@ -1021,9 +878,7 @@ function initGlobalSearch() {
     gsEl('ui-gs-cancel')?.addEventListener('click', () => gsClose(true));
     gsEl('ui-gs-phone')?.addEventListener('click', () => { gsOpen(); input.focus(); });
 
-    // A click outside closes it; an empty field goes back to its narrow size
     document.addEventListener('mousedown', event => {
-        // A message opened from the search is a dialog over it: the search waits behind
         if (event.target.closest && event.target.closest('.ui-dialog-backdrop, .ui-sheet')) return;
         if (root.classList.contains('is-open') && !root.contains(event.target) && !root.classList.contains('is-sheet')) gsClose(false);
     });
@@ -1033,14 +888,11 @@ function initGlobalSearch() {
         }, 0);
     });
 
-    // "/" from anywhere that is not a field opens the search
     document.addEventListener('keydown', event => {
         if (event.key !== '/' || event.ctrlKey || event.metaKey || event.altKey) return;
         const target = event.target;
         if (target && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName))) return;
-        // Not over a dialog or a sheet; a docked panel (the message details beside Messages) is not over the page
         if ([...document.querySelectorAll('.ui-sheet, [role="dialog"], .modal')].some(el => el.getClientRects().length && !el.classList.contains('ui-docked'))) return;
-        // No top bar (Messages): the page's own search takes the key; with no field, the key is left alone
         const field = gsPhone() || input.getClientRects().length ? null : document.getElementById('messages-filter-search');
         if (!gsPhone() && !input.getClientRects().length && !(field && field.getClientRects().length)) return;
         event.preventDefault();

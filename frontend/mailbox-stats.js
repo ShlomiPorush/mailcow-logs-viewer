@@ -1,29 +1,11 @@
-// =============================================================================
-// MAILBOX STATISTICS - summary, per-mailbox accordion, date range picker
-// =============================================================================
-// Split out of app.js (phase 5). Classic script sharing the global scope;
-// loaded after utils.js and app.js in index.html.
-
-// =============================================================================
-// MAILBOX STATISTICS - REDESIGNED WITH MESSAGE COUNTS
-// =============================================================================
-
-// Cached mailbox stats data
 let mailboxStatsCache = {
     summary: null,
     mailboxes: null,
     domains: null,
     lastLoad: null,
-    expandedMailboxes: new Set(), // Track expanded accordion states
-    openAliases: new Set() // Aliases opened on a phone to show all their counts
+    expandedMailboxes: new Set(),
+    openAliases: new Set()
 };
-
-// =============================================================================
-// VIEW SWITCHER - Statistics | Rate Limits
-// =============================================================================
-// Rate Limits is a view of this page rather than a page of its own. The
-// switcher follows the page-tabs recipe in index.html; the code for the
-// view itself stays in rate-limits.js.
 
 let mailboxStatsView = 'statistics';
 
@@ -39,15 +21,12 @@ const MAILBOX_STATS_VIEW_HEADINGS = {
 };
 
 
-// Entry point for the page. Re-entering through the switcher keeps the active
-// view across navigation.
 function initMailboxStatsPage() {
     mailboxStatsSwitchView(mailboxStatsView);
 }
 
 
 function mailboxStatsSwitchView(view) {
-    // Leaving Rate Limits drops a limit being edited: ask first
     if (mailboxStatsView === 'rate-limits' && view !== 'rate-limits'
         && uiUnsavedCount({ route: 'mailbox-stats', params: { sub: view }, reload: true })) {
         uiConfirmLeave({ route: 'mailbox-stats', params: { sub: view }, reload: true }).then(ok => { if (ok) mailboxStatsSwitchView(view); });
@@ -55,19 +34,13 @@ function mailboxStatsSwitchView(view) {
     }
     const requested = view;
     const disabled = window.disabledFeatures || [];
-    // The feature can be turned off while the Rate Limits view is open
     if (view === 'rate-limits' && disabled.includes('rate-limits')) {
         view = 'statistics';
     }
-    // The mirror: Rate Limits does not depend on Mailbox Stats, so with
-    // Mailbox Stats off this page is the Rate Limits page and Statistics is
-    // not a view you can reach - including on first entry. The guard above
-    // runs first, so with both features off nothing bounces back here.
     if (view === 'statistics' && disabled.includes('mailbox-stats') && !disabled.includes('rate-limits')) {
         view = 'rate-limits';
     }
     mailboxStatsView = view;
-    // A view this page cannot show corrects the address instead of adding a Back step
     routerSyncSubpage('mailbox-stats', view, view !== requested);
 
     document.querySelectorAll('[id^="mailbox-stats-view-"]').forEach(btn => {
@@ -86,8 +59,6 @@ function mailboxStatsSwitchView(view) {
     const subtitle = document.getElementById('mailbox-stats-page-subtitle');
     if (subtitle) subtitle.textContent = headings.subtitle;
 
-    // The help button next to the title follows the view - each view opens
-    // its own doc. The last-update stamp belongs to Statistics only.
     const helpBtn = document.getElementById('mailbox-stats-help-btn');
     if (helpBtn) {
         const isRateLimits = view === 'rate-limits';
@@ -116,7 +87,6 @@ function mailboxStatsSwitchView(view) {
 async function loadMailboxStats() {
     console.log('Loading mailbox statistics...');
 
-    // Show loading state
     const loading = document.getElementById('mailbox-stats-loading');
     const content = document.getElementById('mailbox-stats-content');
 
@@ -124,7 +94,6 @@ async function loadMailboxStats() {
     if (content) content.classList.add('hidden');
 
     try {
-        // Load summary and domains in parallel
         const [summaryRes, domainsRes] = await Promise.all([
             authenticatedFetch(mailboxStatsSummaryUrl()),
             authenticatedFetch('/api/mailbox-stats/domains')
@@ -139,22 +108,17 @@ async function loadMailboxStats() {
         mailboxStatsCache.summary = summary;
         mailboxStatsCache.domains = domains.domains || [];
 
-        // Render summary cards
         renderMailboxStatsSummary(summary);
 
-        // Populate domain filter
         populateMailboxStatsDomainFilter(mailboxStatsCache.domains);
 
-        // Load all mailboxes
         await loadMailboxStatsList();
 
-        // Update last update time
         const lastUpdateEl = document.getElementById('mailbox-stats-last-update');
         if (lastUpdateEl && summary.last_update) {
             uiAgo(lastUpdateEl, summary.last_update, 'Updated ');
         }
 
-        // Show content, hide loading
         if (loading) loading.classList.add('hidden');
         if (content) content.classList.remove('hidden');
 
@@ -174,8 +138,6 @@ async function loadMailboxStats() {
     }
 }
 
-// The page's refresh: Statistics every five minutes (as often as the mailbox
-// statistics are fetched from mailcow), Rate Limits every minute
 function mailboxStatsRefreshEvery() {
     return mailboxStatsView === 'rate-limits' ? 60000 : 5 * 60 * 1000;
 }
@@ -184,10 +146,6 @@ function refreshMailboxStatsPage() {
     return mailboxStatsView === 'rate-limits' ? refreshRateLimits() : refreshMailboxStats();
 }
 
-// Statistics read again: the summary, and as many mailboxes as are shown (page
-// by page, as the list loaded them, while no next page may load), drawn again
-// only when something changed. Filters, sort, open mailboxes and aliases and the
-// mailbox in view stay. A first load that failed is tried again
 async function refreshMailboxStats() {
     const content = document.getElementById('mailbox-stats-content');
     const list = document.getElementById('mailbox-stats-list');
@@ -228,7 +186,6 @@ async function refreshMailboxStats() {
         mailboxStatsCache.activityBuckets = last.activity_buckets || [];
         const countEl = document.getElementById('mailbox-stats-count');
         if (countEl) countEl.textContent = uiCountLabel(last.total || 0, 'mailbox', 'mailboxes');
-        // The mailbox in view stays where it was, and the focus on its row
         uiKeepRowInView(list, '.ui-ms-row', 'data-ms-user', () => uiKeepFocus(list, 'data-ms-user', () =>
             renderMailboxStatsAccordion(mailboxes, pages, mailboxStatsTotalPages, last.total || 0)));
         drawn = true;
@@ -237,13 +194,11 @@ async function refreshMailboxStats() {
     } finally {
         if (seq === mailboxStatsSeq) {
             mailboxStatsLoading = false;
-            // The end of the list came into view meanwhile and found the list busy: watch it again
             if (!drawn) mailboxStatsWatchMore(mailboxStatsPage < mailboxStatsTotalPages);
         }
     }
 }
 
-// The summary's address for the period chosen
 function mailboxStatsSummaryUrl() {
     const dateRange = document.getElementById('mailbox-stats-date-range')?.value || '30days';
     const customStartDate = document.getElementById('mailbox-stats-start-date')?.value || '';
@@ -256,7 +211,6 @@ function mailboxStatsSummaryUrl() {
 }
 
 function renderMailboxStatsSummary(summary) {
-    // Update summary cards (new 4-card design: Sent, Received, Failed, Failure Rate)
     const sentEl = document.getElementById('mailbox-stats-sent');
     const receivedEl = document.getElementById('mailbox-stats-received');
     const failedEl = document.getElementById('mailbox-stats-failed');
@@ -267,7 +221,6 @@ function renderMailboxStatsSummary(summary) {
     if (failedEl) failedEl.textContent = (summary.sent_failed || 0).toLocaleString();
     if (failureRateEl) failureRateEl.textContent = `${summary.failure_rate || 0}%`;
 
-    // Update date labels based on selected range
     const dateRange = document.getElementById('mailbox-stats-date-range')?.value || '30days';
     let dateLabel;
 
@@ -294,13 +247,10 @@ function renderMailboxStatsSummary(summary) {
 function populateMailboxStatsDomainFilter(domains) {
     const select = document.getElementById('mailbox-stats-domain-filter');
     if (!select) return;
-    // The domain chosen stays chosen while it is in the list
     const picked = select.value;
 
-    // Clear existing options except "All Domains"
     select.innerHTML = '<option value="" data-short="All">All Domains</option>';
 
-    // Add domain options
     domains.forEach(d => {
         const option = document.createElement('option');
         option.value = d.domain;
@@ -313,14 +263,12 @@ function populateMailboxStatsDomainFilter(domains) {
     uiFilterBarSync();
 }
 
-// Current page for pagination
 let mailboxStatsPage = 1;
 let mailboxStatsTotalPages = 1;
 let mailboxStatsLoading = false;
-let mailboxStatsSeq = 0;          // an answer for filters no longer chosen is dropped
+let mailboxStatsSeq = 0;
 let mailboxStatsMoreObserver = null;
 
-// The list's address for one page of 50, with the filters and sort chosen
 function mailboxStatsListUrl(page) {
     const dateRange = document.getElementById('mailbox-stats-date-range')?.value || '30days';
     const customStartDate = document.getElementById('mailbox-stats-start-date')?.value || '';
@@ -335,7 +283,6 @@ function mailboxStatsListUrl(page) {
 
     let url = `/api/mailbox-stats/all?date_range=${dateRange}&sort_by=${sortBy}&sort_order=${sortOrder}&page=${page}&page_size=50`;
 
-    // Add custom date range parameters if using custom mode
     if (dateRange === 'custom' && customStartDate && customEndDate) {
         url += `&start_date=${encodeURIComponent(customStartDate)}&end_date=${encodeURIComponent(customEndDate)}`;
     }
@@ -348,7 +295,6 @@ function mailboxStatsListUrl(page) {
     return url;
 }
 
-// The first 50 mailboxes, or (page > 1) the next 50 as the list scrolls
 async function loadMailboxStatsList(page = 1) {
     uiFilterBarSync();
     if (page > 1 && (mailboxStatsLoading || page > mailboxStatsTotalPages)) return;
@@ -374,7 +320,6 @@ async function loadMailboxStatsList(page = 1) {
         mailboxStatsCache.activityUnit = data.activity_unit || 'day';
         mailboxStatsCache.activityBuckets = data.activity_buckets || [];
 
-        // Update count
         const countEl = document.getElementById('mailbox-stats-count');
         if (countEl) countEl.textContent = uiCountLabel(data.total || 0, 'mailbox', 'mailboxes');
 
@@ -387,7 +332,6 @@ async function loadMailboxStatsList(page = 1) {
     }
 }
 
-// When the end of the list comes near, the next page is asked for
 function mailboxStatsWatchMore(more) {
     if (mailboxStatsMoreObserver) mailboxStatsMoreObserver.disconnect();
     mailboxStatsMoreObserver = null;
@@ -401,15 +345,12 @@ function mailboxStatsWatchMore(more) {
     mailboxStatsMoreObserver.observe(sentinel);
 }
 
-// A count that opens Messages filtered on this address
 function mailboxStatLink(email, filter, value, label, tone) {
     const args = `{ email: '${escapeJsArg(email)}', filterType: 'search', ${filter} }`;
     return `<button type="button" class="ui-kpi ui-kpi-btn" onclick="event.stopPropagation(); navigateToMessagesWithFilter(${args})" title="Open these messages">
         <b class="${!value ? 'ui-zero' : tone ? `ui-${tone}` : ''}">${(value || 0).toLocaleString()}</b>${label}</button>`;
 }
 
-// The counts of a mailbox or an alias: its traffic, and what became of the mail it sent.
-// Each count opens its messages. Wide screens show them as one row of tiles.
 function mailboxCountGroups(email, c) {
     return `<div class="ui-kpis ui-ms-counts">
         <div class="ui-ms-group"><h5 class="ui-ms-group-h">Traffic</h5>
@@ -424,7 +365,6 @@ function mailboxCountGroups(email, c) {
     </div>`;
 }
 
-// On a phone an alias shows the counts it has; a tap opens all of them
 function toggleMailboxAlias(row, address) {
     const open = !row.classList.contains('is-open');
     row.classList.toggle('is-open', open);
@@ -433,13 +373,10 @@ function toggleMailboxAlias(row, address) {
     else mailboxStatsCache.openAliases.delete(address);
 }
 
-// What the mailbox may use, as a line of tags under its address
-// A shared mailbox (mailcow attribute shared "1"): people open it from their own mailbox
 function mailboxIsShared(mb) {
     return String((mb.attributes || {}).shared ?? '0').trim() === '1';
 }
 
-// Inactive; or active with its login disabled in mailcow (mail is still delivered); and Shared
 function mailboxStateTags(mb) {
     return (!mb.active ? uiTag('Inactive', 'fail')
         : mb.login_disabled ? '<span class="ui-tag ui-tag-warn" title="mailcow does not let it sign in. Mail is still delivered to it.">Login disabled</span>' : '')
@@ -448,7 +385,6 @@ function mailboxStateTags(mb) {
 
 function mailboxServices(mb) {
     const at = mb.attributes || {};
-    // Nobody signs in to a shared mailbox: no "last login never" on its services
     const shared = mailboxIsShared(mb);
     const services = [
         ['IMAP', at.imap_access === '1', shared ? undefined : mb.last_imap_login],
@@ -464,7 +400,6 @@ function mailboxServices(mb) {
     }).join('')}</span>`;
 }
 
-// The mailbox's messages over the range, sent and received together; a click opens the chart
 function mailboxSparkline(mb) {
     const act = mb.activity || { sent: [], received: [] };
     const totals = act.sent.map((s, i) => s + (act.received[i] || 0));
@@ -477,9 +412,6 @@ function mailboxSparkline(mb) {
         <svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-hidden="true">${n ? `<polygon points="0,${h} ${pts} ${w},${h}"></polygon><polyline points="${pts}"></polyline>` : ''}</svg></button>`;
 }
 
-// A day slot is a day in the app's zone, named as it is; an hour slot is the UTC
-// instant the hour starts, named in the app's zone (so the hour a daylight saving
-// change repeats shows twice, not as one)
 function mailboxActivityLabel(bucket, unit) {
     if (unit !== 'hour') return formatDayKey(bucket, { year: false, weekday: 'short' });
     return `${formatDayMonth(bucket, { weekday: 'short' })}, ${formatClock(bucket)}`;
@@ -526,16 +458,6 @@ function closeMailboxActivity() {
     document.getElementById('mailbox-activity-modal').classList.add('hidden');
 }
 
-// One mailbox's activity on Mailbox Stats, from anywhere (the entity card's
-// "Open mailbox"): by the mailbox's address as stored (an alias's mailbox is
-// resolved by the server, entity_summary._mailbox). It is fetched by that whole
-// address (username=), so it opens also when this page never loaded or would
-// put it on a later page. The page's period becomes the one given: preset
-// ('today', '7days', '30days', '90days') or the days from startDay to endDay
-// (YYYY-MM-DD); the search shows the mailbox, and inactive mailboxes and those
-// with no mail in the period are listed too. onMoved runs once the page is open,
-// before the activity opens. An answer that comes after another opening, or after
-// the user left the page, opens nothing. Resolves to whether the page opened.
 let openMailboxSeq = 0;
 async function openMailboxFor(address, { preset = '', startDay = '', endDay = '', onMoved = null } = {}) {
     const wanted = String(address || '').trim().toLowerCase();
@@ -556,13 +478,11 @@ async function openMailboxFor(address, { preset = '', startDay = '', endDay = ''
     if (domain) domain.value = '';
     const activeOnly = document.getElementById('mailbox-stats-active-only');
     if (activeOnly) activeOnly.checked = false;
-    // Hide Zero Activity would hide a mailbox with no mail in the period
     const hideZero = document.getElementById('mailbox-stats-hide-zero');
     if (hideZero) hideZero.checked = false;
     if (!(await navigateTo('mailbox-stats', { sub: 'statistics' }))) return false;
     if (typeof onMoved === 'function') onMoved();
     let data = null;
-    // The period and filters asked with: an answer for others is not this page's
     const asked = mailboxStatsListUrl(1);
     try {
         const response = await authenticatedFetch(`${asked}&username=${encodeURIComponent(wanted)}`);
@@ -570,7 +490,6 @@ async function openMailboxFor(address, { preset = '', startDay = '', endDay = ''
     } catch (e) {
         data = null;
     }
-    // Opened again since, the page left, or its view, period or filters changed: this answer opens nothing
     const page = document.getElementById('content-mailbox-stats');
     if (seq !== openMailboxSeq || (typeof currentTab !== 'undefined' && currentTab !== 'mailbox-stats')
         || (page && page.classList.contains('hidden')) || mailboxStatsView !== 'statistics'
@@ -585,7 +504,6 @@ async function openMailboxFor(address, { preset = '', startDay = '', endDay = ''
         showToast('This mailbox is not in Mailbox Stats yet. Its statistics are fetched from mailcow every few minutes.', 'warning');
         return true;
     }
-    // The dialog reads the mailbox and its time slots from the cache
     const cached = mailboxStatsCache.mailboxes || [];
     const at = cached.findIndex(m => m.username === mb.username);
     mailboxStatsCache.mailboxes = at < 0 ? [...cached, mb] : cached.map((m, i) => (i === at ? mb : m));
@@ -606,7 +524,6 @@ function renderMailboxStatsAccordion(mailboxes, page = 1, totalPages = 1, total 
     if (!container) return;
 
     if (mailboxes.length === 0) {
-        // As on Devices: with filters on, the way back is right there
         const bar = document.getElementById('mailbox-stats-search')?.closest('.ui-fbar');
         container.innerHTML = bar && uiFilterBarOn(bar) ? `
             <div class="ui-empty ui-panel">
@@ -653,7 +570,6 @@ function renderMailboxStatsAccordion(mailboxes, page = 1, totalPages = 1, total 
                         <div class="ui-md-fact"><span>Rate Limit</span><div>${escapeHtml(mailboxRateLimitLabel(mb))}</div></div>
                         ${mailboxIsShared(mb) ? '<div class="ui-md-fact"><span>Login</span><div>Shared mailbox, no login of its own</div></div>'
                             : lastLogin('IMAP', mb.last_imap_login) + lastLogin('POP3', mb.last_pop3_login) + lastLogin('SMTP', mb.last_smtp_login)
-                                // Only with a time: mailcow before 2026-11a does not report it, and "Never" would be false
                                 + (mb.last_sogo_login ? lastLogin('SOGo', mb.last_sogo_login) : '')}
                     </div>
 
@@ -702,7 +618,6 @@ function renderMailboxStatsAccordion(mailboxes, page = 1, totalPages = 1, total 
     }).join('')}
         </div>`;
 
-    // More load as the list scrolls; at the end, a line says all are shown
     if (page < totalPages) html += '<p id="mailbox-stats-more" class="ui-msg-more" aria-live="polite">Loading more...</p>';
     else if (totalPages > 1) html += `<p class="ui-msg-more">All ${uiCountLabel(total || mailboxes.length, 'mailbox', 'mailboxes')} shown</p>`;
 
@@ -732,12 +647,6 @@ function toggleMailboxAccordion(username) {
     }
 }
 
-// =============================================================================
-// DATE RANGE PICKER
-// =============================================================================
-
-// The period is a picker (utils.js, uiPicker); opening it fills the custom range
-// with the last 30 days when it is empty, days in the app's zone like the server reads them
 function mailboxStatsPeriodOpened(now = new Date()) {
     const today = zonedDateString(now);
     const startInput = document.getElementById('date-range-start');
@@ -752,22 +661,17 @@ function closeDateRangePicker() {
 
 function selectDatePreset(preset) {
     mailboxStatsShowPreset(preset);
-    // Close dropdown and reload data
     closeDateRangePicker();
     loadMailboxStats();
 }
 
-// The period set to a preset, without loading
 function mailboxStatsShowPreset(preset) {
-    // Update hidden input
     const hiddenInput = document.getElementById('mailbox-stats-date-range');
     if (hiddenInput) hiddenInput.value = preset;
 
-    // Clear custom date inputs
     document.getElementById('mailbox-stats-start-date').value = '';
     document.getElementById('mailbox-stats-end-date').value = '';
 
-    // Update label
     const labelMap = {
         'today': 'Today',
         '7days': 'Last 7 Days',
@@ -777,7 +681,6 @@ function mailboxStatsShowPreset(preset) {
     const label = document.getElementById('date-range-label');
     if (label) label.textContent = labelMap[preset] || preset;
 
-    // Update active state on buttons
     updateDatePresetButtons(preset);
 }
 
@@ -805,15 +708,12 @@ function applyCustomDateRange() {
         return;
     }
 
-    // Set to custom mode
     const hiddenInput = document.getElementById('mailbox-stats-date-range');
     if (hiddenInput) hiddenInput.value = 'custom';
 
-    // Store custom dates
     document.getElementById('mailbox-stats-start-date').value = startInput.value;
     document.getElementById('mailbox-stats-end-date').value = endInput.value;
 
-    // Update label with date range
     const label = document.getElementById('date-range-label');
     if (label) {
         const startFormatted = formatDayKey(startInput.value);
@@ -821,67 +721,53 @@ function applyCustomDateRange() {
         label.textContent = `${startFormatted} - ${endFormatted}`;
     }
 
-    // Clear active state on preset buttons (none active for custom)
     updateDatePresetButtons('custom');
 
-    // Close dropdown and reload data
     closeDateRangePicker();
     loadMailboxStats();
 }
 
 function applyMailboxStatsFilters() {
-    loadMailboxStatsList(1); // Reset to page 1 when filters change
+    loadMailboxStatsList(1);
 }
 
 function resetMailboxStatsFilters() {
-    // Reset search
     const searchEl = document.getElementById('mailbox-stats-search');
     if (searchEl) searchEl.value = '';
 
-    // Reset date range to 30 days
     const dateRangeEl = document.getElementById('mailbox-stats-date-range');
     if (dateRangeEl) dateRangeEl.value = '30days';
 
-    // Reset custom date inputs
     const startDateEl = document.getElementById('mailbox-stats-start-date');
     if (startDateEl) startDateEl.value = '';
     const endDateEl = document.getElementById('mailbox-stats-end-date');
     if (endDateEl) endDateEl.value = '';
 
-    // Reset date range label
     const labelEl = document.getElementById('date-range-label');
     if (labelEl) labelEl.textContent = 'Last 30 Days';
 
-    // Update preset buttons
     updateDatePresetButtons('30days');
 
-    // Reset the date picker inputs as well
     const startInput = document.getElementById('date-range-start');
     const endInput = document.getElementById('date-range-end');
     if (startInput) startInput.value = '';
     if (endInput) endInput.value = '';
 
-    // Reset domain filter
     const domainEl = document.getElementById('mailbox-stats-domain-filter');
     if (domainEl) domainEl.value = '';
 
-    // Reset sort
     const sortEl = document.getElementById('mailbox-stats-sort');
     if (sortEl) sortEl.value = 'sent_total-desc';
 
-    // Set active only to checked (default)
     const activeOnlyEl = document.getElementById('mailbox-stats-active-only');
     if (activeOnlyEl) activeOnlyEl.checked = true;
 
-    // Set hide zero to unchecked (default)
     const hideZeroEl = document.getElementById('mailbox-stats-hide-zero');
     if (hideZeroEl) hideZeroEl.checked = true;
 
-    // Reload everything
     loadMailboxStats();
 }
 
-// The mailbox list is paged on the server, so its column headers sort there
 function mailboxStatsSortAttr(key) {
     const [by, order] = (document.getElementById('mailbox-stats-sort')?.value || 'sent_total-desc').split('-');
     return ` aria-sort="${by === key ? (order === 'asc' ? 'ascending' : 'descending') : 'none'}"`;

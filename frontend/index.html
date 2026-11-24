@@ -6,7 +6,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, interactive-widget=resizes-content">
     <title>mailcow Logs Viewer</title>
 
-    <!-- App icons -->
     <link rel="icon" href="/static/assets/icons/favicon.ico" sizes="any">
     <link rel="icon" type="image/svg+xml" href="/static/assets/icons/app-icon.svg">
     <link rel="icon" type="image/png" sizes="32x32" href="/static/assets/icons/favicon-32x32.png">
@@ -14,16 +13,12 @@
     <link rel="apple-touch-icon" sizes="180x180" href="/static/assets/icons/apple-touch-icon.png">
     <meta name="theme-color" content="#0f172a">
 
-    <!-- A folded sidebar is set before the page draws, so it never flashes open -->
     <script>try { if (localStorage.getItem('navCollapsed') === '1') document.documentElement.classList.add('ui-nav-collapsed'); } catch (e) {}</script>
-    <!-- The .hidden rule the scripts rely on, before any stylesheet loads -->
     <style>.hidden{display:none}</style>
     <script src="/static/assets/libs/marked.min.js"></script>
     <script src="/static/assets/libs/purify.min.js?v="></script>
     <script src="/static/assets/libs/chart.umd.min.js?v="></script>
     <link rel="stylesheet" href="/static/assets/libs/github-markdown.min.css">
-    <!-- Utility classes still used by the markup, compiled once
-         (.github/scripts/build-utilities-css.sh); the design system comes last -->
     <link rel="stylesheet" href="/static/assets/css/utilities.css?v=">
     <link rel="stylesheet" href="/static/assets/css/ui.css?v=">
     <style>
@@ -32,7 +27,6 @@
             color: #3b82f6;
         }
 
-        /* Sub-tabs inside a page (DMARC, Mailbox Stats), in the v3 tokens */
         .modal-tab-sm {
             padding: 0.5rem 1rem;
             border-bottom: 2px solid transparent;
@@ -82,8 +76,6 @@
             -webkit-overflow-scrolling: touch;
         }
 
-        /* Slim, rounded scrollbars matching both themes instead of the
-           browser default */
         * {
             scrollbar-width: thin;
             scrollbar-color: rgb(156 163 175 / 0.6) transparent;
@@ -125,8 +117,6 @@
             background: transparent;
         }
 
-        /* Markdown styling for changelog */
-        /* GitHub markdown styling for changelog - override background colors */
         .update-changelog-content.markdown-body,
         #changelog-content.markdown-body {
             background-color: transparent !important;
@@ -138,25 +128,20 @@
             width: 100%;
         }
 
-        /* Override GitHub markdown CSS background colors */
         .markdown-body {
             background-color: transparent !important;
         }
 
-        /* Force text color in dark mode */
         .dark .update-changelog-content.markdown-body,
         .dark #changelog-content.markdown-body {
             color: rgb(243 244 246) !important;
-            /* gray-100 - white text in dark mode */
         }
 
         .dark .update-changelog-content.markdown-body *,
         .dark #changelog-content.markdown-body * {
             color: rgb(243 244 246) !important;
-            /* gray-100 - white text in dark mode */
         }
 
-        /* Links and callout titles keep their colour; the rule above made them plain text */
         .dark .update-changelog-content.markdown-body a,
         .dark #changelog-content.markdown-body a,
         .dark .update-changelog-content.markdown-body .markdown-alert-title,
@@ -186,7 +171,6 @@
         .dark #changelog-content.markdown-body h5,
         .dark #changelog-content.markdown-body h6 {
             color: rgb(243 244 246) !important;
-            /* gray-100 - white text in dark mode */
         }
 
         .dark .update-changelog-content.markdown-body p,
@@ -196,7 +180,6 @@
         .dark #changelog-content.markdown-body li,
         .dark #changelog-content.markdown-body span {
             color: rgb(243 244 246) !important;
-            /* gray-100 - white text in dark mode */
         }
 
         .update-changelog-content.markdown-body h1,
@@ -347,7 +330,6 @@
             border-color: #30363d;
         }
 
-        /* Click-to-copy styles */
         .copyable {
             display: inline-flex;
             align-items: center;
@@ -381,8 +363,6 @@
             opacity: 1;
         }
 
-        /* Mail content (subjects, rule values) reads in its own direction via
-           dir="auto" but stays aligned with its label in the LTR layout */
         [dir="auto"] {
             text-align: left;
         }
@@ -393,9 +373,7 @@
 </head>
 
 <body class="min-h-screen">
-    <!-- Main App Content -->
     <div id="app-content" class="ui-shell">
-        <!-- Phones: a slim top bar with the page name and the Needs attention bell -->
         <header class="ui-mtop">
             <a href="/" onclick="navigateTo('dashboard'); return false;" class="ui-mtop-home" aria-label="Dashboard" title="Dashboard">
                 <img id="mtop-logo" src="/static/assets/icons/app-icon.svg" alt="" class="ui-mtop-logo">
@@ -410,12 +388,9 @@
             </div>
         </header>
 
-        <!-- Wide screens: one bar on top with the app's name and the menu toggle, then the
-             page's title and its actions, moved up from the page while it is open (placeTopbar) -->
         <header id="ui-topbar" class="ui-topbar">
             <div id="ui-topbar-brand" class="ui-topbar-brand"></div>
             <div id="ui-topbar-title" class="ui-topbar-title"></div>
-            <!-- The search: pages, settings, messages, domains, mailboxes and addresses (search.js) -->
             <div id="ui-gs" class="ui-gs" role="search">
                 <div class="ui-gs-box">
                     <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-width="2" d="M21 21l-4.35-4.35M17 11a6 6 0 11-12 0 6 6 0 0112 0z"/></svg>
@@ -427,11 +402,9 @@
                 <div id="ui-gs-panel" class="ui-gs-panel"></div>
             </div>
             <div id="ui-topbar-actions" class="ui-topbar-actions"></div>
-            <!-- Needs attention from any page with this bar (app.js attnWindowOpen) -->
             <button type="button" id="ui-bell" class="ui-icon-btn ui-bell" aria-haspopup="dialog" aria-expanded="false" aria-label="Needs attention" title="Needs attention" onclick="attnWindowOpen(this)"><svg width="19" height="19" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.4-1.4A2 2 0 0118 14.2V11a6 6 0 00-4-5.66V5a2 2 0 10-4 0v.34A6 6 0 006 11v3.2a2 2 0 01-.6 1.4L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"></path></svg><span class="ui-bell-n is-none" aria-hidden="true"></span></button>
         </header>
 
-        <!-- Sidebar: brand, server card, navigation with counters, versions and tools -->
         <nav class="ui-sidenav" aria-label="Main">
             <a href="/" onclick="navigateTo('dashboard'); return false;" class="ui-brand">
                 <img id="app-logo" src="" alt="" class="hidden">
@@ -526,11 +499,9 @@
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"></path>
                             </svg></a>
                 </div>
-                    <!-- Container Logs Modal -->
             </footer>
         </nav>
 
-        <!-- Phone: bottom tab bar; "More" opens every page in a sheet -->
         <nav class="ui-tabbar" aria-label="Main">
             <button onclick="navigateToMobile('dashboard')" id="tabbar-dashboard" class="ui-tabbar-item" aria-current="page"><svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"> <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"> </path> </svg><span>Dashboard</span></button>
             <button onclick="navigateToMobile('messages')" id="tabbar-messages" class="ui-tabbar-item"><svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"> <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"> </path> </svg><span>Messages</span></button>
@@ -565,25 +536,19 @@
             </div>
             <div class="ui-nav-group" data-nav-group>
                 <button onclick="navigateToMobile('settings')" id="mobile-tab-settings" class="mobile-menu-item"><svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"> <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"> </path> <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path> </svg><span class="ui-nav-label">Settings</span></button>
-                <!-- The phone's way to the container log (the sidebar tools are hidden there) -->
                 <button onclick="closeMobileMenu(); loadContainerLogs()" id="mobile-container-logs" class="mobile-menu-item" data-acts="admin"><svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg><span class="ui-nav-label">Container log</span></button>
                 <a href="/docs" target="_blank" rel="noopener" onclick="closeMobileMenu()" id="mobile-api-docs-link" class="mobile-menu-item"><svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"></path></svg><span class="ui-nav-label">API reference</span></a>
                 <a href="https://shlomiporush.github.io/mailcow-logs-viewer/" target="_blank" rel="noopener noreferrer" onclick="closeMobileMenu()" id="mobile-docs-site-link" class="mobile-menu-item"><svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"></path></svg><span class="ui-nav-label">Documentation</span></a>
                 <button onclick="navigateToMobile('about')" id="mobile-tab-about" class="mobile-menu-item"><svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg><span class="ui-nav-label">About</span></button>
-                <!-- Sign out on a phone: in the sheet, away from the top bar's theme switch -->
                 <button onclick="closeMobileMenu(); handleLogout()" id="mobile-logout" class="mobile-menu-item ui-mobile-logout hidden"><svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path></svg><span class="ui-nav-label">Sign out</span></button>
             </div>
             </div>
         </div>
 
         <div class="ui-main">
-        <!-- Main Content -->
         <div class="ui-content">
 
-            <!-- Dashboard Tab -->
             <div id="content-dashboard" class="tab-content ui-page">
-                <!-- Shown on the Dashboard while no sign-in is configured (app.js loadAppInfo).
-                     Dismiss hides it for good in this browser, for setups where a reverse proxy signs users in. -->
                 <div id="auth-off-banner" class="ui-banner ui-banner-warn ui-auth-banner hidden" role="status">
                     <svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
                     <div><b>Authentication is off</b>
@@ -605,11 +570,9 @@
 
                 <div class="ui-dash-grid ui-scroll">
                     <div class="ui-col">
-                        <!-- Needs attention: server checks and the stored alerts (Security, Domains, DMARC &amp; TLS) -->
                         <section class="ui-panel" id="dashboard-attention-panel">
                             <div class="ui-panel-head">Needs attention <span id="dashboard-attention-count" class="ui-count"></span>
                                 <button type="button" id="dashboard-dismiss-all" onclick="acknowledgeAllSecurityAlertsOnce(this)" class="is-off ui-btn ui-btn-sm ui-head-actions" aria-label="Dismiss all alerts" data-acts="alerts">Dismiss all<span class="ui-attn-wide">&nbsp;alerts</span></button></div>
-                            <!-- As tall as its items up to a cap; past it they scroll inside -->
                             <div id="dashboard-attention-scroll" class="ui-attn-scroll" role="region" aria-label="Needs attention" tabindex="0">
                                 <div id="dashboard-attention"></div>
                                 <div id="dashboard-security-alerts" class="hidden"></div>
@@ -634,13 +597,11 @@
                     </div>
 
                     <div class="ui-col">
-                        <!-- Security: the Security page's two lists, and which protections are on -->
                         <section class="ui-panel" id="dashboard-security-panel">
                             <div class="ui-panel-head">Security
                                 <button type="button" class="ui-more" onclick="navigateTo('netfilter')">Open Security</button></div>
                             <div id="dashboard-security"><div class="ui-loading" role="status"><div class="loading"></div><p>Loading...</p></div></div>
                         </section>
-                        <!-- Server health: one card per area, each opens its Status tab -->
                         <section class="ui-panel" id="dashboard-health-panel">
                             <div class="ui-panel-head">Server health
                                 <button type="button" class="ui-more" onclick="openStatusTab('server')">Status</button></div>
@@ -661,10 +622,8 @@
                 </div>
             </div>
 
-            <!-- Messages Tab -->
             <div id="content-messages" class="tab-content hidden ui-page ui-msgs-page">
                 <div class="ui-msgs">
-                    <!-- Facets: outcome and direction with counts, time, the other filters -->
                     <aside class="ui-facets" aria-label="Filters">
                         <h1 class="ui-h1">Messages <button onclick="showHelpModal('Messages')" class="ui-icon-btn ui-help-btn" title="Help - Messages">
                                 <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -692,7 +651,6 @@
                                     </div>
                                     <button type="button" onclick="applyMessagesCustomDateRange()" class="ui-btn ui-btn-primary ui-btn-block">Apply</button>
                                 </div>
-                                <!-- Hidden inputs for state -->
                                 <input type="hidden" id="messages-date-range" value="">
                                 <input type="hidden" id="messages-start-date" value="">
                                 <input type="hidden" id="messages-end-date" value="">
@@ -701,7 +659,6 @@
                         <button onclick="exportCSV('messages')" class="ui-btn ui-btn-sm ui-fct-export" data-noid-hide>Export CSV</button>
                     </aside>
 
-                    <!-- The list -->
                     <section class="ui-msg-col" aria-label="All Messages">
                         <div class="ui-msg-searchbar">
                             <label class="ui-search"><svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-4.35-4.35M17 11a6 6 0 11-12 0 6 6 0 0112 0z"></path></svg>
@@ -714,7 +671,6 @@
                                 <input type="text" id="messages-filter-recipient" class="ui-input" placeholder="Recipient" aria-label="Recipient" onkeypress="if(event.key==='Enter') applyMessagesFilters()">
                                 <input type="text" id="messages-filter-user" class="ui-input" placeholder="Authenticated User" aria-label="Authenticated User" onkeypress="if(event.key==='Enter') applyMessagesFilters()">
                                 <input type="text" id="messages-filter-ip" class="ui-input" placeholder="Source IP" aria-label="Source IP" onkeypress="if(event.key==='Enter') applyMessagesFilters()">
-                                <!-- The facets set these; they stay the single source of the outcome and direction filter -->
                                 <div class="hidden">
                                 <select id="messages-filter-direction" class="ui-select" aria-label="Direction">
                                 <option value="">All Directions</option>
@@ -737,7 +693,6 @@
                                     <button onclick="clearMessagesFilters()" class="ui-btn ui-btn-sm">Clear</button>
                                 </div>
                             </div>
-                            <!-- Where the facets are hidden (below 1280px): outcome, direction and time as buttons that open their choices -->
                             <div id="messages-pickers" class="ui-msg-pickers">
                                 <span class="ui-popover-host ui-msg-range-host ui-picker" id="messages-status-host" data-picker="messages-status" data-noid-hide>
                                     <button type="button" id="messages-status-pick" class="ui-msg-range ui-picker-btn" aria-haspopup="listbox" aria-expanded="false" aria-controls="messages-status-panel"><span class="ui-picker-name">Outcome:</span> <span id="messages-status-value">All</span></button>
@@ -753,7 +708,6 @@
                                         <span id="messages-direction-options" class="ui-fct-list"></span>
                                     </span>
                                 </span>
-                                <!-- Time: the same presets as the facets, and a custom range -->
                                 <span class="ui-popover-host ui-msg-range-host ui-picker" id="messages-time-host" data-picker="messages-time" data-on-open="messagesTimePanelOpened">
                                     <button type="button" id="messages-time-pick" class="ui-msg-range ui-picker-btn" aria-haspopup="dialog" aria-expanded="false" aria-controls="messages-time-panel"><span class="ui-picker-name">Time:</span> <span id="messages-date-range-label">All Time</span></button>
                                     <span id="messages-time-panel" class="ui-popover ui-msg-time-panel ui-picker-panel hidden" role="dialog" aria-label="Time">
@@ -783,7 +737,6 @@
                         </div>
                     </section>
 
-                    <!-- Reading pane: message-details.js docks #message-modal here on wide screens -->
                     <div id="messages-reader" class="ui-reader">
                         <p class="ui-reader-empty">Select a message to see what happened to it.</p>
                     </div>
@@ -818,7 +771,6 @@
                 </div>
 
                 <div id="security-tab-events" class="ui-scroll ui-st-panel hidden" role="tabpanel">
-                <!-- Filters -->
                 <section class="ui-panel ui-filters ui-fbar">
                     <div class="ui-fbar-pickers">
                         <select id="netfilter-filter-action" class="ui-select" aria-label="Action" data-picker-label="Action" onchange="applyNetfilterFilters()">
@@ -867,10 +819,6 @@
                 </div>
             </div>
 
-            <!-- Queue Tab -->
-            <!-- Outbound: the mail waiting to leave (Queue, feature queue) and the
-                 recipients it is no longer sent to (Suppressions, feature suppressions).
-                 A tab whose feature is off is hidden; the page goes when both are off. -->
             <div id="content-outbound" class="tab-content hidden ui-page">
                 <div class="ui-page-head">
                     <div>
@@ -909,7 +857,6 @@
                 </section>
 
                 <div id="outbound-tab-suppressions" class="ui-sec-block ui-scroll hidden" role="tabpanel">
-                    <!-- Sync with Rspamd off: the app keeps no list, and only this note shows -->
                     <div id="suppression-off-note" class="hidden"></div>
                     <div id="suppression-stats" class="ui-kpis"></div>
 
@@ -923,12 +870,10 @@
                             <span class="ui-toolbar-gap"></span>
                             <button onclick="showAddSuppressionModal()" class="ui-btn ui-btn-primary" data-acts="outbound">Add Suppression</button>
                             <div class="ui-more-wrap">
-                                <!-- A popover menu like the row menus (uiMenu): a choice closes it -->
                                 <button id="suppression-more-btn" type="button" onclick="toggleSuppressionMoreMenu()" class="ui-btn" title="More" aria-label="More"
                                     aria-haspopup="menu" aria-controls="suppression-more-menu"><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.8"></circle><circle cx="12" cy="12" r="1.8"></circle><circle cx="19" cy="12" r="1.8"></circle></svg></button>
                                 <div id="suppression-more-menu" popover class="ui-menu" role="menu" onclick="if (event.target.closest('button')) this.hidePopover()">
                                     <button type="button" role="menuitem" onclick="exportSuppressions()">Export CSV</button>
-                                    <!-- The map the list is written to; gone while the Rspamd page is off -->
                                     <button type="button" role="menuitem" id="suppression-open-map" onclick="openRspamdMap('global_rcpt_blacklist.map')">Open in Rspamd</button>
                                     <button type="button" role="menuitem" onclick="document.getElementById('suppression-import-file').click()" data-acts="outbound">Import CSV</button>
                                 </div>
@@ -965,7 +910,6 @@
                 </div>
             </div>
 
-            <!-- Quarantine Tab -->
             <div id="content-quarantine" class="tab-content hidden ui-page">
                 <div class="ui-page-head">
                     <div>
@@ -977,7 +921,6 @@
                         <p class="ui-muted" id="quarantine-summary">Messages held by the spam filter, and the rules that handle them</p>
                     </div>
                 </div>
-                <!-- Both tabs always show; without the read-write key Auto-Rules shows a locked notice -->
                 <div id="quarantine-tabs" class="ui-tabs ui-page-tabs" role="tablist" aria-label="Quarantine sections">
                     <button type="button" class="modal-tab active" role="tab" aria-selected="true" id="quarantine-tab-btn-messages" onclick="quarantineShowTab('messages')">Messages</button>
                     <button type="button" class="modal-tab" role="tab" aria-selected="false" id="quarantine-tab-btn-rules" onclick="quarantineShowTab('rules')">Auto-Rules <span id="quarantine-tab-n-rules" class="ui-tab-n hidden"></span></button>
@@ -991,7 +934,6 @@
                     </div>
                 </section>
                 </div>
-                <!-- Auto-Rules tab (locked notice without the read-write key, showQuarantineRulesAccess) -->
                 <div class="ui-scroll hidden" id="quarantine-tab-rules" role="tabpanel">
                 <div id="quarantine-rules-locked" class="ui-list-note hidden"></div>
                 <section id="quarantine-rules-section" class="ui-panel hidden">
@@ -1035,7 +977,6 @@
                 </div>
             </div>
 
-            <!-- Rspamd: the maps that allow or block mail, incoming and outgoing (spam_filter.js) -->
             <div id="content-rspamd" class="tab-content hidden ui-page">
                 <div class="ui-page-head">
                     <div>
@@ -1054,7 +995,6 @@
                 </div>
             </div>
 
-            <!-- Status Tab -->
             <div id="content-status" class="tab-content hidden ui-page">
                 <div class="ui-page-head">
                     <div>
@@ -1068,7 +1008,6 @@
                     
                 </div>
 
-                <!-- Only what needs a decision, with the action next to it -->
                 <section class="ui-panel" id="status-attention-panel">
                     <div class="ui-panel-head">Needs attention <span id="status-attention-count" class="ui-count"></span></div>
                     <div id="status-attention"><div class="ui-loading" role="status"><div class="loading"></div><p>Loading...</p></div></div>
@@ -1128,7 +1067,6 @@
 
             </div>
 
-            <!-- Domains Tab -->
             <div id="content-domains" class="tab-content hidden ui-page">
                 <div class="ui-page-head">
                     <div>
@@ -1152,7 +1090,6 @@
                 <div id="domains-content" class="hidden ui-sec-block ui-scroll"></div>
             </div>
 
-            <!-- DMARC Tab -->
             <div id="content-dmarc" class="tab-content hidden ui-page">
                 <div class="ui-page-head">
                     <div>
@@ -1184,14 +1121,11 @@
                     </div>
                 </div>
 
-                <!-- Breadcrumb on a phone; with the top bar the crumbs are up there -->
                 <nav id="dmarc-breadcrumb" class="ui-crumbs ui-crumbs-local hidden" aria-label="Breadcrumb"></nav>
 
-                <!-- The open screen: all domains, a domain, a sender, a day of reports (dmarc.js) -->
                 <div id="dmarc-view" class="ui-scroll ui-dm"><div class="ui-loading" role="status"><div class="loading"></div><p>Loading...</p></div></div>
             </div>
 
-            <!-- Mailbox Stats Tab -->
             <div id="content-mailbox-stats" class="tab-content hidden ui-page">
                 <div class="ui-page-head">
                     <div>
@@ -1207,13 +1141,11 @@
                     </div>
                 </div>
 
-                <!-- View switcher: Statistics | Rate Limits -->
                 <div id="mailbox-stats-views" class="ui-tabs ui-page-tabs" role="tablist">
                     <button onclick="mailboxStatsSwitchView('statistics')" id="mailbox-stats-view-statistics" class="modal-tab active" role="tab" aria-selected="true">Statistics</button>
                     <button onclick="mailboxStatsSwitchView('rate-limits')" id="mailbox-stats-view-rate-limits" class="modal-tab" role="tab" aria-selected="false">Rate Limits</button>
                 </div>
 
-                <!-- Statistics view -->
                 <div id="mailbox-stats-statistics-view" class="ui-sec-block ui-scroll">
                     <div id="mailbox-stats-summary" class="ui-kpis">
                         <div class="ui-kpi"><b id="mailbox-stats-sent">-</b>Messages Sent<small id="mailbox-stats-date-label-sent" class="ui-kpi-note">Last 30 days</small></div>
@@ -1248,7 +1180,6 @@
                                 </div>
                                 <button type="button" onclick="applyCustomDateRange()" class="ui-btn ui-btn-primary">Apply Custom Range</button>
                                 </span>
-                                <!-- Hidden input for compatibility with existing code -->
                                 <input type="hidden" id="mailbox-stats-date-range" value="30days" data-filter-default="30days">
                                 <input type="hidden" id="mailbox-stats-start-date" value="">
                                 <input type="hidden" id="mailbox-stats-end-date" value="">
@@ -1256,7 +1187,6 @@
                             <select id="mailbox-stats-domain-filter" onchange="applyMailboxStatsFilters()" class="ui-select" aria-label="Domain" data-picker-label="Domain">
                                 <option value="" data-short="All">All Domains</option>
                             </select>
-                            <!-- The list's order (field-direction), set by its headers and its Sort button -->
                             <input type="hidden" id="mailbox-stats-sort" value="sent_total-desc">
                         </div>
                         <div id="mailbox-stats-more" class="ui-fbar-more">
@@ -1273,12 +1203,10 @@
                     </div>
                     </div>
                 </div>
-                <!-- Rate Limits view -->
                 <div id="mailbox-stats-rate-limits-view" class="hidden ui-scroll">
                     <div id="rate-limits-loading" class="ui-loading" role="status"><div class="loading"></div><p>Loading rate limits...</p></div>
                     <div id="rate-limits-content" class="hidden">
                         <div class="ui-sec-block">
-                            <!-- All three cards are rendered by rate-limits.js -->
                             <div id="rate-limits-activity-card"></div>
                             <div id="rate-limits-senders-card"></div>
                             <div id="rate-limits-config-card"></div>
@@ -1287,7 +1215,6 @@
                 </div>
             </div>
 
-            <!-- Logs Tab -->
             <div id="content-devices" class="tab-content hidden ui-page">
                 <div class="ui-page-head">
                     <div>
@@ -1340,7 +1267,6 @@
                     </div>
                 </div>
                 <div class="ui-logs ui-scroll">
-                    <!-- Service Sidebar -->
                     <aside class="ui-panel ui-logs-side" id="logs-side">
                         <button type="button" class="ui-logs-side-toggle" id="logs-side-toggle" aria-expanded="false" aria-controls="logs-service-list" onclick="toggleLogServices()">
                             <span>Service</span><b id="logs-side-current">-</b><small id="logs-side-count"></small>
@@ -1351,7 +1277,6 @@
                         </div>
                     </aside>
 
-                    <!-- Log Viewer Main Area -->
                     <section class="ui-logs-main">
                         <div class="ui-logs-bar">
                             <div class="ui-logs-row">
@@ -1391,7 +1316,6 @@
                                 </div>
                             </div>
 
-                            <!-- Date Range Row -->
                             <div class="ui-logs-row ui-logs-range">
                                 <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
                                 <span class="ui-muted">Range:</span>
@@ -1411,7 +1335,6 @@
                                 </div>
                             </div>
 
-                            <!-- Smart Filters (Postfix only) -->
                             <div id="logs-smart-filters" class="ui-logs-row ui-logs-quick hidden">
                                 <div class="ui-logs-quick-head">
                                     <span class="ui-muted">Quick Filters:</span>
@@ -1421,7 +1344,6 @@
                             </div>
                         </div>
 
-                        <!-- Terminal Log Output -->
                         <div id="logs-terminal" class="ui-logs-terminal">
                             <div id="logs-output" data-line-select=".log-line" style="font-size: 12px; word-wrap: break-word; white-space: pre-wrap;">
                                 <span class="text-gray-500">Connecting to log stream...</span>
@@ -1434,7 +1356,6 @@
                             </div>
                         </div>
 
-                        <!-- Status Bar -->
                         <div class="ui-logs-status" id="logs-status-bar">
                             <span class="ui-logs-conn">
                                 <span id="logs-ws-indicator" class="ui-mdot"></span>
@@ -1449,8 +1370,6 @@
                 </div>
             </div>
 
-            <!-- Settings Tab -->
-            <!-- About: the health of what this app connects to, its version and configuration -->
             <div id="content-about" class="tab-content hidden ui-page">
                 <div class="ui-page-head">
                     <div>
@@ -1477,19 +1396,14 @@
                     </div>
                 </div>
 
-                <!-- Loading State -->
                 <div id="settings-loading" class="ui-loading" role="status"><div class="loading"></div><p>Loading settings...</p></div>
 
-                <!-- Content -->
                 <div id="settings-content" class="hidden ui-settings ui-scroll" data-keep-scroll></div>
             </div>
 
-            <!-- A page the signed-in person may not view, opened by its address (app.js showNoAccessPage) -->
             <div id="content-no-access" class="tab-content hidden ui-page"></div>
         </div>
 
-        <!-- Message details: a dialog over any page, or docked as the reading
-             pane of the Messages page on wide screens (message-details.js) -->
         <div id="message-modal" class="hidden ui-dialog-backdrop" role="dialog" aria-label="Message Details">
             <div class="ui-dialog">
                 <div class="ui-dialog-head">
@@ -1501,8 +1415,6 @@
                     </button>
                 </div>
 
-                <!-- One scroll for the header, the tabs and the open tab: the tabs stay
-                     pinned, and no number of recipients can push the logs out of reach -->
                 <div id="message-modal-body" class="ui-dialog-body ui-md-body">
                     <div id="message-modal-header" class="ui-md-header"></div>
 
@@ -1520,9 +1432,6 @@
             </div>
         </div>
 
-        <!-- Entity card: what is stored about one IP address, email address or
-             domain, opened from any value that shows one (entity-card.js). The
-             frame of #message-modal: header, pinned tabs and the open tab in one scroll -->
         <div id="entity-card" class="hidden ui-dialog-backdrop" role="dialog" aria-labelledby="entity-card-title">
             <div class="ui-dialog">
                 <div class="ui-dialog-head">
@@ -1555,13 +1464,9 @@
                 </div>
             </div>
         </div>
-
-        <!-- Footer -->
         </div>
-    </div> <!-- Close app-content div -->
+    </div>
 
-    <!-- Container log dialog: in the body, so no sidebar stacking context can put page content above it.
-         The shared dialog frame (a sheet on a phone); inside, the log keeps its terminal look -->
     <div id="container-logs-modal" class="hidden ui-dialog-backdrop" role="dialog" aria-labelledby="container-logs-title"
         onclick="if (uiBackdropClick(event)) closeContainerLogsModal()">
         <div class="ui-dialog ui-log-dialog">
@@ -1575,7 +1480,6 @@
         </div>
     </div>
 
-    <!-- JavaScript -->
     <script src="/static/session-guard.js?v="></script>
     <script src="/static/utils.js?v="></script>
     <script src="/static/router.js?v="></script>
@@ -1601,7 +1505,6 @@
     <script src="/static/users.js?v="></script>
     <script src="/static/spam_filter.js?v="></script>
 
-    <!-- DMARC fetch history -->
     <div id="dmarc-sync-history-modal" class="hidden ui-dialog-backdrop" role="dialog" aria-label="Fetch history">
         <div class="ui-dialog ui-dialog-fit">
             <div class="ui-dialog-head">
@@ -1615,8 +1518,6 @@
         </div>
     </div>
 
-    <!-- DMARC Reports Management Modal -->
-    <!-- A security alert's history: what was sent or tried before and around it (alert-activity.js) -->
     <div id="alert-activity-modal" class="hidden ui-dialog-backdrop" role="dialog" aria-labelledby="alert-activity-title" onclick="if (uiBackdropClick(event)) closeAlertActivity()">
         <div class="ui-dialog ui-dialog-fit ui-aa-dialog">
             <div class="ui-dialog-head">
@@ -1624,7 +1525,6 @@
                 <button onclick="closeAlertActivity()" class="ui-icon-btn" title="Close" aria-label="Close"><svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg></button>
             </div>
             <div id="alert-activity-content" class="ui-dialog-body"></div>
-            <!-- The actions stay at the bottom of the window while its content scrolls -->
             <div class="ui-dialog-foot" id="alert-activity-foot">
                 <button type="button" id="alert-activity-dismiss" class="hidden ui-btn" title="Dismiss the alert" data-acts="security">Dismiss</button>
                 <span id="alert-activity-open" class="ui-aa-open"></span>
@@ -1666,7 +1566,6 @@
             </div>
         </div>
     </div>
-    <!-- A DMARC or TLS-RPT record: what is in DNS, what it means, what to publish -->
     <div id="dmarc-record-modal" class="hidden ui-dialog-backdrop" role="dialog" aria-labelledby="dmarc-record-title" onclick="if (uiBackdropClick(event)) closeDmarcRecordModal()">
         <div class="ui-dialog ui-dialog-fit ui-dm-dialog">
             <div class="ui-dialog-head">

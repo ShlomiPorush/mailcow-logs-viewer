@@ -1,9 +1,3 @@
-// =============================================================================
-// DEVICES - ActiveSync phones and tablets, recorded by the eas_devices job from
-// SOGo's access log (/api/devices). The list is paged on the server, so its
-// column headers sort there, like the suppression list.
-// =============================================================================
-
 let devicesPage = 1;
 let devicesSort = { by: 'last_seen', dir: 'desc' };
 let devicesRequest = 0;
@@ -31,11 +25,8 @@ function resetDevicesFilters() {
     loadDevices(1);
 }
 
-// The answer the list shows, to tell whether a refresh brings anything new
 let devicesShownJson = null;
 
-// quiet (the refresh, every minute): drawn again only when something changed,
-// and not while the type picker is in use or text in the list is selected
 async function loadDevices(page, { quiet = false } = {}) {
     devicesPage = page || devicesPage || 1;
     const request = ++devicesRequest;
@@ -52,7 +43,6 @@ async function loadDevices(page, { quiet = false } = {}) {
         const response = await authenticatedFetch(`/api/devices?${params}`, quiet ? { timeout: PAGE_REFRESH_TIMEOUT } : {});
         if (!response.ok) throw await responseError(response);
         const data = await response.json();
-        // A slower answer to an older filter must not replace a newer one
         if (request !== devicesRequest) return;
         const json = JSON.stringify(data);
         if (quiet && (json === devicesShownJson || document.activeElement === document.getElementById('devices-type-filter') || uiTextHeld(container))) return;
@@ -63,7 +53,6 @@ async function loadDevices(page, { quiet = false } = {}) {
     } catch (error) {
         if (request !== devicesRequest) return;
         console.error('Failed to load devices:', error);
-        // A refresh that failed leaves the list as it was
         if (quiet && devicesShownJson !== null) return;
         devicesShownJson = null;
         container.innerHTML = `<p class="ui-empty ui-text-fail">Could not load the devices: ${escapeHtml(uiSentence(uiErrorText(error)))} <button type="button" class="ui-link-row ui-link" onclick="loadDevices()">Try again</button></p>`;
@@ -80,7 +69,6 @@ function renderDevicesSummary(data) {
     }
 }
 
-// Keep the picked type even when the list of types changes under it
 function renderDevicesTypes(types, picked) {
     const select = document.getElementById('devices-type-filter');
     const all = [...new Set([...(types || []), ...(picked ? [picked] : [])])];
@@ -93,7 +81,6 @@ function renderDevicesTypes(types, picked) {
 function renderDevicesList(container, data) {
     const pager = document.getElementById('devices-pager');
     document.getElementById('devices-count').textContent = uiCountLabel(data.total, 'device', 'devices');
-    // The count sits by the search, as on Domains; the foot shows only to page through
     document.getElementById('devices-foot').classList.toggle('hidden', data.total_pages <= 1);
     pager.innerHTML = data.total_pages > 1 ? `
         <nav class="ui-pager" aria-label="Device pages">
@@ -115,7 +102,6 @@ function renderDevicesList(container, data) {
         return;
     }
 
-    // Locked, not hidden: say what the location needs instead of leaving it out
     const geoNote = data.geoip ? '' : `<div class="ui-list-note ui-flush">${uiLocked('Location needs GeoIP',
         'The country, city and network of each address come from the MaxMind GeoIP databases. Add the MaxMind keys in Settings → MaxMind.')}</div>`;
     const newAfter = Date.now() - data.thresholds.new_days * 86400000;
@@ -133,7 +119,6 @@ function deviceStatusTag(status) {
     return `<span class="ui-tag ui-tag-fail" title="SOGo answered HTTP ${Number(status)}">${label}</span>`;
 }
 
-// Flag, then "Country, City"; the network (ASN) in the tooltip
 function deviceLocation(d) {
     const place = [d.country_name, d.city].filter(Boolean).join(', ');
     if (!place) return '';
@@ -142,14 +127,12 @@ function deviceLocation(d) {
     return `<small${network ? ` title="${escapeHtml(network)}"` : ''}>${flag ? `<img class="ui-sec-flag" src="${flag}" alt="" width="16" height="12" onerror="this.remove()">` : ''}${escapeHtml(place)}</small>`;
 }
 
-// Why an app name is a recognition and not a fact
 const DEVICE_CLIENT_NOTE = {
     Gmail: 'Gmail, or another app built on the Android mail code: they name devices the same way',
 };
 
 function renderDeviceRow(d, newAfter, staleBefore) {
     const name = d.model || d.device_type || 'Unknown device';
-    // Outlook names its device "Outlook": no need to say it twice
     const client = d.client && d.client.toLowerCase() !== name.toLowerCase() ? d.client : '';
     const isNew = new Date(d.first_seen).getTime() >= newAfter;
     const isStale = new Date(d.last_seen).getTime() < staleBefore;
