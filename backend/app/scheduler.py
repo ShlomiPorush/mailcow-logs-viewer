@@ -71,49 +71,26 @@ def get_thread_pool_executor():
 
 def reschedule_interval_jobs():
     """
-    Reschedule jobs that use dynamic intervals (fetch_interval, correlation_check_interval, dmarc_imap_interval).
-    Call after reload_settings() so interval changes take effect without restart.
+    Bring the jobs in line with the settings after reload_settings(), without a
+    restart: a job whose gate came on is added, a changed interval takes effect.
+    A job is never removed: with its gate off it returns at once when it runs,
+    so two saves at once cannot leave a job of an enabled feature unregistered.
     """
     global _thread_pool_executor
     if not scheduler.running:
         return
     try:
-        # Reschedule fetch_logs
-        scheduler.add_job(
-            fetch_all_logs,
-            trigger=every(seconds=settings.fetch_interval),
-            id='fetch_logs',
-            name='Fetch mailcow Logs',
-            replace_existing=True,
-            max_instances=1
-        )
-        # Reschedule complete_correlations
-        scheduler.add_job(
-            complete_incomplete_correlations,
-            trigger=every(seconds=settings.correlation_check_interval),
-            id='complete_correlations',
-            name='Complete Correlations',
-            replace_existing=True,
-            max_instances=1
-        )
-        # Reschedule update_final_status
-        scheduler.add_job(
-            update_final_status_for_correlations,
-            trigger=every(seconds=settings.correlation_check_interval),
-            id='update_final_status',
-            name='Update Final Status',
-            replace_existing=True,
-            max_instances=1
-        )
-        # Reschedule DMARC IMAP sync if enabled
-        if settings.dmarc_imap_enabled:
-            scheduler.add_job(
-                dmarc_imap_sync_job,
-                every(seconds=settings.dmarc_imap_interval),
-                id='dmarc_imap_sync',
-                name='DMARC IMAP Sync',
-                replace_existing=True
-            )
+        for job in _scheduled_jobs():
+            registered = scheduler.get_job(job.id)
+            if registered is None:
+                if job.enabled():
+                    _add_scheduled_job(job)
+                    logger.info(f"[SCHEDULER] {job.name} started")
+                continue
+            trigger = job.trigger()
+            # Clock-time jobs move with the time zone, in apply_app_time_zone
+            if isinstance(trigger, IntervalTrigger) and trigger.interval != registered.trigger.interval:
+                scheduler.reschedule_job(job.id, trigger=trigger)
         # Update thread pool size if scheduler_workers changed
         new_workers = getattr(settings, 'scheduler_workers', 4)
         if _thread_pool_executor._max_workers != new_workers:
@@ -132,206 +109,12 @@ def reschedule_interval_jobs():
         except Exception as e:
             logger.warning(f"Failed to reschedule raw logs jobs: {e}")
 
-        # Reschedule suppression jobs based on current settings
-        _reschedule_suppression_jobs()
-        _reschedule_smtp_abuse_job()
-        _reschedule_anomaly_job()
-        _reschedule_dovecot_correlation_job()
-        _reschedule_geoip_job()
-        _reschedule_quarantine_rules_job()
-
         # A new time zone moves every clock-time job now, not at the next restart
         apply_app_time_zone()
 
     except Exception as e:
         logger.warning("Failed to reschedule interval jobs: %s", e)
 
-
-def _reschedule_smtp_abuse_job():
-    """Add or remove the SMTP abuse job when settings are reloaded."""
-    if not scheduler.running:
-        return
-    if settings.smtp_abuse_enabled and mailcow_api.has_rw_key:
-        scheduler.add_job(
-            smtp_abuse_job,
-            trigger=every(minutes=1),
-            id='smtp_abuse',
-            name='SMTP Abuse Protection',
-            replace_existing=True,
-            max_instances=1,
-            coalesce=True,
-        )
-        logger.info("   [SMTP ABUSE] Protection scheduled (every minute; threshold: %s/%s min)",
-                    settings.smtp_abuse_threshold, settings.smtp_abuse_window_minutes)
-    else:
-        try:
-            scheduler.remove_job('smtp_abuse')
-        except Exception:
-            pass
-
-
-def _reschedule_anomaly_job():
-    """Add or remove the anomaly detection job when settings are reloaded."""
-    if not scheduler.running:
-        return
-    if settings.anomaly_detection_enabled:
-        scheduler.add_job(
-            anomaly_detection_job,
-            trigger=every(minutes=settings.anomaly_check_interval),
-            id='anomaly_detection',
-            name='Anomaly Detection',
-            replace_existing=True,
-            max_instances=1,
-            coalesce=True,
-        )
-        logger.info("   [ANOMALY] Detection scheduled (every %s min)", settings.anomaly_check_interval)
-    else:
-        try:
-            scheduler.remove_job('anomaly_detection')
-        except Exception:
-            pass
-
-
-def _reschedule_geoip_job():
-    """Add or remove the weekly GeoIP update when the MaxMind license is saved or removed."""
-    if not scheduler.running:
-        return
-    if is_license_configured():
-        scheduler.add_job(
-            update_geoip_database,
-            trigger=clock_trigger('update_geoip'),
-            id='update_geoip',
-            name='Update GeoIP',
-            replace_existing=True
-        )
-    else:
-        try:
-            scheduler.remove_job('update_geoip')
-        except Exception:
-            pass
-
-
-def _reschedule_quarantine_rules_job():
-    """Add, move or remove the quarantine rules job when settings are reloaded
-    (interval, the Read-Write key and the Quarantine feature can all change)."""
-    if not scheduler.running:
-        return
-    if settings.is_feature_enabled('quarantine') and mailcow_api.has_rw_key:
-        scheduler.add_job(
-            process_quarantine_rules_job,
-            trigger=every(minutes=settings.quarantine_rules_interval),
-            id='process_quarantine_rules',
-            name='Process Quarantine Rules',
-            replace_existing=True,
-            max_instances=1
-        )
-    else:
-        try:
-            scheduler.remove_job('process_quarantine_rules')
-        except Exception:
-            pass
-
-
-def _reschedule_dovecot_correlation_job():
-    """
-    Add or remove the Dovecot correlation job when settings are reloaded - it
-    depends on raw log collection, which can be toggled from the settings UI.
-    """
-    if not scheduler.running:
-        return
-    if dovecot_correlation_available():
-        scheduler.add_job(
-            correlate_dovecot_logs,
-            trigger=every(seconds=60),
-            id='correlate_dovecot',
-            name='Correlate Dovecot Deliveries',
-            replace_existing=True,
-            max_instances=1,
-            coalesce=True,
-        )
-    else:
-        try:
-            scheduler.remove_job('correlate_dovecot')
-            logger.info("   [DOVECOT] Delivery correlation stopped - raw Dovecot logs no longer collected")
-        except Exception:
-            pass
-
-
-def _reschedule_suppression_jobs():
-    """Add or remove suppression-related jobs based on current settings."""
-    if not scheduler.running:
-        return
-
-    spam_enabled = settings.is_feature_enabled('suppressions') and settings.suppression_enabled
-
-    # detect_suppressions
-    if spam_enabled and settings.suppression_auto_detect:
-        scheduler.add_job(
-            detect_suppressions_job,
-            trigger=every(minutes=5),
-            id='detect_suppressions',
-            name='Detect Suppressions',
-            replace_existing=True,
-            max_instances=1
-        )
-        logger.info("   [SPAM] Suppression detection: scheduled (every 5 minutes)")
-    else:
-        try:
-            scheduler.remove_job('detect_suppressions')
-        except Exception:
-            pass
-
-    # sync_suppressions: keeps the list and the app's Rspamd blocks in step
-    # while "Sync with Rspamd" is on
-    if settings.is_feature_enabled('suppressions') and settings.suppression_rspamd_sync and settings.is_rspamd_configured:
-        scheduler.add_job(
-            sync_suppressions_to_rspamd_job,
-            trigger=every(minutes=10),
-            id='sync_suppressions',
-            name='Sync Suppressions to Rspamd',
-            replace_existing=True,
-            max_instances=1
-        )
-        logger.info("   [SPAM] Rspamd sync: scheduled (every 10 minutes)")
-    else:
-        try:
-            scheduler.remove_job('sync_suppressions')
-        except Exception:
-            pass
-
-    # expire_suppressions
-    if spam_enabled:
-        scheduler.add_job(
-            expire_suppressions_job,
-            trigger=every(hours=1),
-            id='expire_suppressions',
-            name='Expire Suppressions',
-            replace_existing=True,
-            max_instances=1
-        )
-        logger.info("   [SPAM] Expiry check: scheduled (every hour)")
-    else:
-        try:
-            scheduler.remove_job('expire_suppressions')
-        except Exception:
-            pass
-
-    # cleanup_deferred_queue
-    if spam_enabled and settings.queue_cleanup_enabled and mailcow_api.has_rw_key:
-        scheduler.add_job(
-            cleanup_deferred_queue_job,
-            trigger=every(minutes=5),
-            id='cleanup_deferred_queue',
-            name='Cleanup Deferred Queue',
-            replace_existing=True,
-            max_instances=1
-        )
-        logger.info("   [SPAM] Deferred queue cleanup: scheduled (every 5 minutes)")
-    else:
-        try:
-            scheduler.remove_job('cleanup_deferred_queue')
-        except Exception:
-            pass
 
 # Job execution tracking
 job_status = {
@@ -4337,13 +4120,13 @@ def run_feature_data_sweep_soon() -> None:
 
 # Jobs that read mailcow every few hours. One that failed because mailcow
 # could not answer runs again within minutes once it can, not hours later.
-# status key -> (scheduler job id, feature it belongs to or None, function)
+# status key -> (scheduler job id, feature it belongs to or None)
 RETRY_FAILED_MINUTES = 5
 _RETRY_TARGETS = {
-    'sync_local_domains': ('sync_local_domains', None, sync_local_domains),
-    'sync_transports': ('sync_transports', 'blacklist', sync_transports_job),
-    'dns_check': ('dns_check_background', 'domains', check_all_domains_dns_background),
-    'check_credentials': ('check_credentials', None, check_credentials_job),
+    'sync_local_domains': ('sync_local_domains', None),
+    'sync_transports': ('sync_transports', 'blacklist'),
+    'dns_check': ('dns_check_background', 'domains'),
+    'check_credentials': ('check_credentials', None),
 }
 
 
@@ -4358,7 +4141,7 @@ async def retry_failed_jobs():
         except Exception as e:
             logger.warning(f"[RETRY] Could not read the server IP: {e}")
 
-    for key, (job_id, feature, func) in _RETRY_TARGETS.items():
+    for key, (job_id, feature) in _RETRY_TARGETS.items():
         try:
             state = job_status.get(key) or {}
             if state.get('status') != 'failed' or not state.get('retryable'):
@@ -4366,17 +4149,149 @@ async def retry_failed_jobs():
             # Read now: a feature can be turned off after startup
             if feature and not settings.is_feature_enabled(feature):
                 continue
-            now = datetime.now(timezone.utc)
             if scheduler.get_job(job_id) is not None:
                 # Through the scheduler, so a run still going is not doubled
-                scheduler.modify_job(job_id, next_run_time=now)
-            else:
-                # Its feature was turned on after startup: no periodic job yet
-                scheduler.add_job(func, 'date', run_date=now, id=f'{key}_retry',
-                                  name=f'{key} (retry)', replace_existing=True)
-            logger.info(f"[RETRY] Running {key} again: {state.get('error')}")
+                scheduler.modify_job(job_id, next_run_time=datetime.now(timezone.utc))
+                logger.info(f"[RETRY] Running {key} again: {state.get('error')}")
         except Exception as e:
             logger.warning(f"[RETRY] Could not run {key} again: {e}")
+
+
+class ScheduledJob(NamedTuple):
+    id: str
+    name: str
+    func: Any
+    # Called at each registration: some intervals come from the settings
+    trigger: Any = None
+    # Registered while this returns True; None: always
+    gate: Any = None
+    # At start, the first run this long after it instead of one interval later
+    # (a startup run: its only run)
+    first_run: Optional[timedelta] = None
+
+    def enabled(self) -> bool:
+        return self.gate is None or self.gate()
+
+
+def _scheduled_jobs():
+    """Every periodic job. Built at each call, since some job functions are
+    defined further down."""
+    return (
+        ScheduledJob('fetch_logs', 'Fetch mailcow Logs', fetch_all_logs,
+                     lambda: every(seconds=settings.fetch_interval)),
+        # Features that are off keep no data; Suppressions on again loads its
+        # Rspamd blocks back
+        ScheduledJob('feature_data_sweep', 'Turned-Off Features', feature_data_sweep_job,
+                     lambda: every(minutes=FEATURE_DATA_SWEEP_MINUTES), first_run=timedelta(0)),
+        ScheduledJob('run_correlation', 'Correlate Logs', run_correlation, lambda: every(seconds=30)),
+        ScheduledJob('complete_correlations', 'Complete Correlations', complete_incomplete_correlations,
+                     lambda: every(seconds=settings.correlation_check_interval)),
+        ScheduledJob('expire_correlations', 'Expire Old Correlations', expire_old_correlations,
+                     lambda: every(seconds=60)),
+        # Late Postfix lines (e.g. status=sent) that arrive after the
+        # correlation was created
+        ScheduledJob('update_final_status', 'Update Final Status', update_final_status_for_correlations,
+                     lambda: every(seconds=settings.correlation_check_interval)),
+        # The Dovecot delivery outcome (Sieve discard, target folder, quota
+        # errors) of correlated messages - issue #65
+        ScheduledJob('correlate_dovecot', 'Correlate Dovecot Deliveries', correlate_dovecot_logs,
+                     lambda: every(seconds=60), dovecot_correlation_available),
+        ScheduledJob('trend_samples', 'Trend Samples', trend_samples_job,
+                     lambda: every(hours=1), first_run=timedelta(minutes=1)),
+        ScheduledJob('cleanup_logs', 'Cleanup Old Logs', cleanup_old_logs,
+                     lambda: clock_trigger('cleanup_logs')),
+        ScheduledJob('cleanup_dmarc_reports', 'Cleanup Old DMARC Reports', cleanup_old_dmarc_reports,
+                     lambda: clock_trigger('cleanup_dmarc_reports'),
+                     lambda: settings.is_feature_enabled('dmarc')),
+        ScheduledJob('check_app_version', 'Check App Version Updates', check_app_version_update,
+                     lambda: every(hours=6), first_run=timedelta(0)),
+        # The Read-Write key and the Rspamd password are checked soon after a
+        # start, without waiting for a click on Validate
+        ScheduledJob('check_credentials', 'Credential Checks', check_credentials_job,
+                     lambda: every(hours=CREDENTIAL_CHECK_HOURS), first_run=timedelta(seconds=30)),
+        ScheduledJob('smtp_abuse', 'SMTP Abuse Protection', smtp_abuse_job, lambda: every(minutes=1),
+                     lambda: settings.smtp_abuse_enabled and mailcow_api.has_rw_key),
+        ScheduledJob('anomaly_detection', 'Anomaly Detection', anomaly_detection_job,
+                     lambda: every(minutes=settings.anomaly_check_interval),
+                     lambda: settings.anomaly_detection_enabled),
+        ScheduledJob('dns_check_background', 'DNS Check (All Domains)', check_all_domains_dns_background,
+                     lambda: every(hours=6), lambda: settings.is_feature_enabled('domains')),
+        ScheduledJob('sync_local_domains', 'Sync Local Domains', sync_local_domains,
+                     lambda: every(hours=6), first_run=timedelta(0)),
+        # After mailcow comes back, the jobs that failed meanwhile and the
+        # server IP are read again within minutes (not shown on Status)
+        ScheduledJob('retry_failed_jobs', 'Retry Failed Jobs', retry_failed_jobs,
+                     lambda: every(minutes=RETRY_FAILED_MINUTES)),
+        ScheduledJob('update_geoip', 'Update GeoIP', update_geoip_database,
+                     lambda: clock_trigger('update_geoip'), is_license_configured),
+        ScheduledJob('dmarc_imap_sync', 'DMARC IMAP Sync', dmarc_imap_sync_job,
+                     lambda: every(seconds=settings.dmarc_imap_interval),
+                     lambda: settings.is_feature_enabled('dmarc') and settings.dmarc_imap_enabled),
+        ScheduledJob('mailbox_stats', 'Update Mailbox Statistics', update_mailbox_statistics,
+                     lambda: every(minutes=5), _mailbox_sync_needed),
+        # Aliases are shown by Mailbox Stats alone, so this one is not needed
+        # by Rate Limits
+        ScheduledJob('alias_stats', 'Update Alias Statistics', update_alias_statistics,
+                     lambda: every(minutes=5), lambda: settings.is_feature_enabled('mailbox-stats')),
+        ScheduledJob('eas_devices', 'Update ActiveSync Devices', update_eas_devices,
+                     lambda: every(minutes=1)),
+        ScheduledJob('cleanup_eas_devices', 'Cleanup ActiveSync Devices', cleanup_eas_devices,
+                     lambda: clock_trigger('cleanup_eas_devices')),
+        ScheduledJob('blacklist_check', 'IP Blacklist Check (Daily)', check_monitored_hosts_job,
+                     lambda: clock_trigger('blacklist_check'), lambda: settings.is_feature_enabled('blacklist')),
+        ScheduledJob('sync_transports', 'Sync Transports & Relayhosts', sync_transports_job,
+                     lambda: every(hours=6), lambda: settings.is_feature_enabled('blacklist')),
+        ScheduledJob('send_weekly_summary', 'Send Weekly Summary', send_weekly_summary_email_job,
+                     lambda: clock_trigger('send_weekly_summary')),
+        # Keeps the list and the app's Rspamd blocks in step while "Sync with
+        # Rspamd" is on
+        ScheduledJob('sync_suppressions', 'Sync Suppressions to Rspamd', sync_suppressions_to_rspamd_job,
+                     lambda: every(minutes=10), lambda: rspamd_sync_on() and settings.is_rspamd_configured),
+        ScheduledJob('detect_suppressions', 'Detect Suppressions', detect_suppressions_job,
+                     lambda: every(minutes=5), lambda: handling_on() and settings.suppression_auto_detect),
+        ScheduledJob('expire_suppressions', 'Expire Suppressions', expire_suppressions_job,
+                     lambda: every(hours=1), handling_on),
+        ScheduledJob('cleanup_deferred_queue', 'Cleanup Deferred Queue', cleanup_deferred_queue_job,
+                     lambda: every(minutes=5),
+                     lambda: handling_on() and settings.queue_cleanup_enabled and mailcow_api.has_rw_key),
+        ScheduledJob('process_quarantine_rules', 'Process Quarantine Rules', process_quarantine_rules_job,
+                     lambda: every(minutes=settings.quarantine_rules_interval),
+                     lambda: settings.is_feature_enabled('quarantine') and mailcow_api.has_rw_key),
+    )
+
+
+def _startup_runs():
+    """One run of a job soon after start, besides its schedule. Added at start only."""
+    blacklist_on = lambda: settings.is_feature_enabled('blacklist')
+    return (
+        # The server IP for the pages that show it (Settings, the blacklist
+        # summary), read once soon after startup instead of during it; the
+        # jobs that need it read it themselves
+        ScheduledJob('server_ip_startup', 'Server IP (Startup)', init_server_ip,
+                     first_run=timedelta(seconds=5)),
+        ScheduledJob('blacklist_check_startup', 'IP Blacklist Check (Startup)', check_monitored_hosts_job,
+                     gate=blacklist_on, first_run=timedelta(seconds=15)),
+        ScheduledJob('sync_transports_startup', 'Sync Transports & Relayhosts (Startup)', sync_transports_job,
+                     gate=blacklist_on, first_run=timedelta(seconds=30)),
+        ScheduledJob('dmarc_imap_sync_startup', 'DMARC IMAP Sync (Startup)', dmarc_imap_sync_job,
+                     gate=lambda: settings.is_feature_enabled('dmarc') and settings.dmarc_imap_run_on_startup,
+                     first_run=timedelta(seconds=30)),
+        ScheduledJob('mailbox_stats_startup', 'Mailbox Statistics (Startup)', update_mailbox_statistics,
+                     gate=_mailbox_sync_needed, first_run=timedelta(seconds=45)),
+        ScheduledJob('alias_stats_startup', 'Alias Statistics (Startup)', update_alias_statistics,
+                     gate=lambda: settings.is_feature_enabled('mailbox-stats'), first_run=timedelta(seconds=50)),
+        ScheduledJob('dns_check_startup', 'DNS Check (Startup)', check_all_domains_dns_background,
+                     gate=lambda: settings.is_feature_enabled('domains'), first_run=timedelta(seconds=60)),
+        ScheduledJob('geoip_startup', 'GeoIP Check (Startup)', update_geoip_database,
+                     gate=is_license_configured, first_run=timedelta(seconds=60)),
+    )
+
+
+def _add_scheduled_job(job: ScheduledJob, first_run_at: Optional[datetime] = None) -> None:
+    # next_run_time=None would add the job paused
+    first = {'next_run_time': first_run_at} if first_run_at else {}
+    scheduler.add_job(job.func, trigger=job.trigger(), id=job.id, name=job.name,
+                      replace_existing=True, max_instances=1, **first)
 
 
 def start_scheduler():
@@ -4387,458 +4302,14 @@ def start_scheduler():
 
         # Clock-time jobs run in the app's time zone (an unknown one is UTC)
         scheduler.timezone = app_tz()
-        
-        # Job 1: Fetch logs from API (every fetch_interval seconds)
-        scheduler.add_job(
-            fetch_all_logs,
-            trigger=every(seconds=settings.fetch_interval),
-            id='fetch_logs',
-            name='Fetch mailcow Logs',
-            replace_existing=True,
-            max_instances=1
-        )
-        
-        # Features that are off keep no data; Suppressions on again loads its
-        # Rspamd blocks back. First run right after startup.
-        scheduler.add_job(
-            feature_data_sweep_job,
-            trigger=every(minutes=FEATURE_DATA_SWEEP_MINUTES),
-            id='feature_data_sweep',
-            name='Turned-Off Features',
-            replace_existing=True,
-            max_instances=1,
-            next_run_time=datetime.now(timezone.utc)
-        )
 
-        # Job 2: Run correlation (every 30 seconds, after logs are imported)
-        scheduler.add_job(
-            run_correlation,
-            trigger=every(seconds=30),
-            id='run_correlation',
-            name='Correlate Logs',
-            replace_existing=True,
-            max_instances=1
-        )
-        
-        # Job 3: Complete incomplete correlations (every 2 minutes)
-        scheduler.add_job(
-            complete_incomplete_correlations,
-            trigger=every(seconds=settings.correlation_check_interval),
-            id='complete_correlations',
-            name='Complete Correlations',
-            replace_existing=True,
-            max_instances=1
-        )
-        
-        # Job 4: Expire old incomplete correlations (every 1 minute)
-        # This is separate to ensure old correlations get expired reliably
-        scheduler.add_job(
-            expire_old_correlations,
-            trigger=every(seconds=60),
-            id='expire_correlations',
-            name='Expire Old Correlations',
-            replace_existing=True,
-            max_instances=1
-        )
-        
-        # Job 5: Update final status for correlations (every correlation_check_interval)
-        # This handles late-arriving Postfix logs (e.g., status=sent) that arrive
-        # after the initial correlation was created
-        scheduler.add_job(
-            update_final_status_for_correlations,
-            trigger=every(seconds=settings.correlation_check_interval),
-            id='update_final_status',
-            name='Update Final Status',
-            replace_existing=True,
-            max_instances=1
-        )
-
-        # Job 5b: Attach the Dovecot delivery outcome (Sieve discard, target
-        # folder, quota errors) to correlated messages - issue #65
-        if dovecot_correlation_available():
-            scheduler.add_job(
-                correlate_dovecot_logs,
-                trigger=every(seconds=60),
-                id='correlate_dovecot',
-                name='Correlate Dovecot Deliveries',
-                replace_existing=True,
-                max_instances=1,
-                coalesce=True
-            )
-        else:
-            logger.info("   [DOVECOT] Delivery correlation inactive - needs raw log "
-                        "collection with the 'dovecot' service enabled")
-
-        # Hourly samples of the dashboard figures that show a trend, the first a minute after start
-        scheduler.add_job(
-            trend_samples_job,
-            trigger=every(hours=1),
-            id='trend_samples',
-            name='Trend Samples',
-            replace_existing=True,
-            max_instances=1,
-            next_run_time=datetime.now(timezone.utc) + timedelta(minutes=1)
-        )
-
-        # Job 6: Cleanup old logs (daily at 2 AM)
-        scheduler.add_job(
-            cleanup_old_logs,
-            trigger=clock_trigger('cleanup_logs'),
-            id='cleanup_logs',
-            name='Cleanup Old Logs',
-            replace_existing=True
-        )
-
-        # Job 6b: Cleanup old DMARC/TLS reports (daily at 2:15 AM)
-        if settings.is_feature_enabled('dmarc'):
-            scheduler.add_job(
-                cleanup_old_dmarc_reports,
-                trigger=clock_trigger('cleanup_dmarc_reports'),
-                id='cleanup_dmarc_reports',
-                name='Cleanup Old DMARC Reports',
-                replace_existing=True
-            )
-        else:
-            logger.info("   [FEATURE] DMARC feature disabled - skipping DMARC cleanup job")
-        
-        # Job 7: Check app version updates (every 6 hours, starting immediately)
-        scheduler.add_job(
-            check_app_version_update,
-            trigger=every(hours=6),
-            id='check_app_version',
-            name='Check App Version Updates',
-            replace_existing=True,
-            max_instances=1,
-            next_run_time=datetime.now(timezone.utc)
-        )
-
-        # The Read-Write key and the Rspamd password are checked soon after a
-        # start, without waiting for a click on Validate
-        scheduler.add_job(
-            check_credentials_job,
-            trigger=every(hours=CREDENTIAL_CHECK_HOURS),
-            id='check_credentials',
-            name='Credential Checks',
-            replace_existing=True,
-            max_instances=1,
-            next_run_time=datetime.now(timezone.utc) + timedelta(seconds=30)
-        )
-        
-        # Job 7c: SMTP abuse protection (enforcement - needs a RW API key)
-        if settings.smtp_abuse_enabled and mailcow_api.has_rw_key:
-            scheduler.add_job(
-                smtp_abuse_job,
-                trigger=every(minutes=1),
-                id='smtp_abuse',
-                name='SMTP Abuse Protection',
-                replace_existing=True,
-                max_instances=1,
-                coalesce=True
-            )
-            logger.info("   [SMTP ABUSE] Protection: every minute (threshold: %s msgs / %s min)",
-                        settings.smtp_abuse_threshold, settings.smtp_abuse_window_minutes)
-        elif settings.smtp_abuse_enabled:
-            logger.warning("   [SMTP ABUSE] Enabled but MAILCOW_API_KEY_RW is missing - protection inactive")
-        else:
-            logger.info("   [SMTP ABUSE] Protection disabled")
-
-        # Job 7b: Anomaly detection (compromised mailbox / auth attack)
-        if settings.anomaly_detection_enabled:
-            scheduler.add_job(
-                anomaly_detection_job,
-                trigger=every(minutes=settings.anomaly_check_interval),
-                id='anomaly_detection',
-                name='Anomaly Detection',
-                replace_existing=True,
-                max_instances=1,
-                coalesce=True
-            )
-        else:
-            logger.info("   [FEATURE] Anomaly detection disabled - skipping job")
-
-        # Job 8: DNS Check
-        if settings.is_feature_enabled('domains'):
-            scheduler.add_job(
-                check_all_domains_dns_background,
-                trigger=every(hours=6),
-                id='dns_check_background',
-                name='DNS Check (All Domains)',
-                replace_existing=True,
-                max_instances=1
-            )
-            
-            # Job 8b: Initial DNS check on startup
-            scheduler.add_job(
-                check_all_domains_dns_background,
-                'date',
-                run_date=datetime.now(timezone.utc) + timedelta(seconds=60),
-                id='dns_check_startup',
-                name='DNS Check (Startup)'
-            )
-        else:
-            logger.info("   [FEATURE] Domains feature disabled - skipping DNS check jobs")
-
-        # Job 9: Sync local domains (every 6 hours)
-        scheduler.add_job(
-            sync_local_domains,
-            every(hours=6),
-            id='sync_local_domains',
-            name='Sync Local Domains',
-            replace_existing=True,
-            max_instances=1,
-            next_run_time=datetime.now(timezone.utc)
-        )
-
-        # The server IP for the pages that show it (Settings, the blacklist
-        # summary), read once soon after startup instead of during it; the
-        # jobs that need it read it themselves
-        scheduler.add_job(
-            init_server_ip,
-            'date',
-            run_date=datetime.now(timezone.utc) + timedelta(seconds=5),
-            id='server_ip_startup',
-            name='Server IP (Startup)'
-        )
-
-        # After mailcow comes back, the jobs that failed meanwhile and the
-        # server IP are read again within minutes (not shown on Status)
-        scheduler.add_job(
-            retry_failed_jobs,
-            trigger=every(minutes=RETRY_FAILED_MINUTES),
-            id='retry_failed_jobs',
-            name='Retry Failed Jobs',
-            replace_existing=True,
-            max_instances=1
-        )
-
-        # Job 11: Update GeoIP database (weekly, Sunday at 3 AM)
-        # Only runs if MaxMind license key is configured
-        if is_license_configured():
-            scheduler.add_job(
-                update_geoip_database,
-                trigger=clock_trigger('update_geoip'),
-                id='update_geoip',
-                name='Update GeoIP',
-                replace_existing=True
-            )
-            
-            # Run initial check on startup (after 60 seconds to let everything settle)
-            scheduler.add_job(
-                update_geoip_database,
-                'date',
-                run_date=datetime.now(timezone.utc) + timedelta(seconds=60),
-                id='geoip_startup',
-                name='GeoIP Check (Startup)'
-            )
-            logger.info("   [GEOIP] Initial GeoIP check scheduled (60 seconds after startup)")
-        else:
-            logger.info("   [GEOIP] MaxMind license key not configured, GeoIP features disabled")
-
-        # Job 12: DMARC IMAP Sync - runs at configured interval (default: hourly)
-        if settings.is_feature_enabled('dmarc') and settings.dmarc_imap_enabled:
-            scheduler.add_job(
-                dmarc_imap_sync_job,
-                every(seconds=settings.dmarc_imap_interval),
-                id='dmarc_imap_sync',
-                name='DMARC IMAP Sync',
-                replace_existing=True
-            )
-            logger.info(f"Scheduled DMARC IMAP sync job (interval: {settings.dmarc_imap_interval}s)")
-        
-        # Run once on startup if configured
-        if settings.is_feature_enabled('dmarc') and settings.dmarc_imap_run_on_startup:
-            scheduler.add_job(
-                dmarc_imap_sync_job,
-                'date',
-                run_date=datetime.now(timezone.utc) + timedelta(seconds=30),
-                id='dmarc_imap_sync_startup',
-                name='DMARC IMAP Sync (Startup)'
-            )
-            logger.info("Scheduled initial DMARC IMAP sync on startup")
-
-        # Job 13: Mailbox Statistics (every 5 minutes)
-        # Rate Limits reads the configured mailbox limits out of the table this
-        # job fills, so it runs while either feature is enabled.
-        if _mailbox_sync_needed():
-            scheduler.add_job(
-                update_mailbox_statistics,
-                every(minutes=5),
-                id='mailbox_stats',
-                name='Update Mailbox Statistics',
-                replace_existing=True,
-                max_instances=1
-            )
-
-            # Run once on startup (after 45 seconds)
-            scheduler.add_job(
-                update_mailbox_statistics,
-                'date',
-                run_date=datetime.now(timezone.utc) + timedelta(seconds=45),
-                id='mailbox_stats_startup',
-                name='Mailbox Statistics (Startup)'
-            )
-            logger.info("Scheduled mailbox statistics job (interval: 5 minutes)")
-        else:
-            logger.info("   [FEATURE] Mailbox Stats and Rate Limits both disabled - skipping mailbox stats job")
-
-        # Job 14: Alias Statistics (every 5 minutes)
-        # Aliases are shown by Mailbox Stats alone, so this one stays gated on
-        # that feature only.
-        if settings.is_feature_enabled('mailbox-stats'):
-            scheduler.add_job(
-                update_alias_statistics,
-                every(minutes=5),
-                id='alias_stats',
-                name='Update Alias Statistics',
-                replace_existing=True,
-                max_instances=1
-            )
-
-            # Run once on startup (after 50 seconds)
-            scheduler.add_job(
-                update_alias_statistics,
-                'date',
-                run_date=datetime.now(timezone.utc) + timedelta(seconds=50),
-                id='alias_stats_startup',
-                name='Alias Statistics (Startup)'
-            )
-            logger.info("Scheduled alias statistics job (interval: 5 minutes)")
-        else:
-            logger.info("   [FEATURE] Mailbox Stats feature disabled - skipping alias stats job")
-
-        # ActiveSync devices: every minute, plus a daily cleanup. Both check
-        # the feature themselves, so they are always registered.
-        scheduler.add_job(
-            update_eas_devices,
-            every(minutes=1),
-            id='eas_devices',
-            name='Update ActiveSync Devices',
-            replace_existing=True,
-            max_instances=1
-        )
-        scheduler.add_job(
-            cleanup_eas_devices,
-            trigger=clock_trigger('cleanup_eas_devices'),
-            id='cleanup_eas_devices',
-            name='Cleanup ActiveSync Devices',
-            replace_existing=True,
-            max_instances=1
-        )
-
-        # Job 15: Blacklist Check (daily at 5 AM)
-        if settings.is_feature_enabled('blacklist'):
-            scheduler.add_job(
-                check_monitored_hosts_job,
-                trigger=clock_trigger('blacklist_check'),
-                id='blacklist_check',
-                name='IP Blacklist Check (Daily)',
-                replace_existing=True,
-                max_instances=1
-            )
-            
-            # Run check on startup (after 15 seconds)
-            scheduler.add_job(
-                check_monitored_hosts_job,
-                'date',
-                run_date=datetime.now(timezone.utc) + timedelta(seconds=15),
-                id='blacklist_check_startup',
-                name='IP Blacklist Check (Startup)'
-            )
-        else:
-            logger.info("   [FEATURE] IP Blacklist feature disabled - skipping blacklist check jobs")
-
-
-        # Job 14: Sync Transports (every 6 hours) - feeds blacklist monitoring
-        if settings.is_feature_enabled('blacklist'):
-            scheduler.add_job(
-                sync_transports_job,
-                trigger=every(hours=6),
-                id='sync_transports',
-                name='Sync Transports & Relayhosts',
-                replace_existing=True
-            )
-
-            # Run sync on startup (after 30 seconds)
-            scheduler.add_job(
-                sync_transports_job,
-                'date',
-                run_date=datetime.now(timezone.utc) + timedelta(seconds=30),
-                id='sync_transports_startup',
-                name='Sync Transports & Relayhosts (Startup)'
-            )
-
-        # Job 15: Weekly Summary Email (Every Monday at 9:00 AM)
-        scheduler.add_job(
-            send_weekly_summary_email_job,
-            trigger=clock_trigger('send_weekly_summary'),
-            id='send_weekly_summary',
-            name='Send Weekly Summary',
-            replace_existing=True
-        )
-
-        # Keeps the list and the app's Rspamd blocks in step every 10 minutes
-        # while "Sync with Rspamd" is on
-        if settings.is_feature_enabled('suppressions') and settings.suppression_rspamd_sync and settings.is_rspamd_configured:
-            scheduler.add_job(
-                sync_suppressions_to_rspamd_job,
-                trigger=every(minutes=10),
-                id='sync_suppressions',
-                name='Sync Suppressions to Rspamd',
-                replace_existing=True,
-                max_instances=1
-            )
-
-        # Job 16: Spam Suppression (if enabled)
-        if settings.is_feature_enabled('suppressions') and settings.suppression_enabled:
-            # Detect bounces from postfix logs every 5 minutes, while a choice needs the logs
-            if settings.suppression_auto_detect:
-                scheduler.add_job(
-                    detect_suppressions_job,
-                    trigger=every(minutes=5),
-                    id='detect_suppressions',
-                    name='Detect Suppressions',
-                    replace_existing=True,
-                    max_instances=1
-                )
-            
-            # Expire old suppressions every hour
-            scheduler.add_job(
-                expire_suppressions_job,
-                trigger=every(hours=1),
-                id='expire_suppressions',
-                name='Expire Suppressions',
-                replace_existing=True,
-                max_instances=1
-            )
-            
-            logger.info("   [SPAM] Suppression detection: every 5 minutes")
-            if settings.suppression_rspamd_sync and settings.is_rspamd_configured:
-                logger.info("   [SPAM] Rspamd sync: every 10 minutes")
-            logger.info("   [SPAM] Expiry check: every hour")
-            
-            # Deferred queue cleanup (requires RW key)
-            if settings.queue_cleanup_enabled and mailcow_api.has_rw_key:
-                scheduler.add_job(
-                    cleanup_deferred_queue_job,
-                    trigger=every(minutes=5),
-                    id='cleanup_deferred_queue',
-                    name='Cleanup Deferred Queue',
-                    replace_existing=True,
-                    max_instances=1
-                )
-                logger.info(f"   [SPAM] Deferred queue cleanup: every 5 minutes (threshold: {settings.queue_cleanup_threshold_minutes}m)")
-
-        # Quarantine Auto-Rules
-        if settings.is_feature_enabled('quarantine') and mailcow_api.has_rw_key:
-            scheduler.add_job(
-                process_quarantine_rules_job,
-                trigger=every(minutes=settings.quarantine_rules_interval),
-                id='process_quarantine_rules',
-                name='Process Quarantine Rules',
-                replace_existing=True,
-                max_instances=1
-            )
-            logger.info(f"   [QUARANTINE] Auto-rules: every {settings.quarantine_rules_interval} minutes")
+        now = datetime.now(timezone.utc)
+        for job in _scheduled_jobs():
+            if job.enabled():
+                _add_scheduled_job(job, now + job.first_run if job.first_run is not None else None)
+        for run in _startup_runs():
+            if run.enabled():
+                scheduler.add_job(run.func, 'date', run_date=now + run.first_run, id=run.id, name=run.name)
 
         scheduler.start()
 

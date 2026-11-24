@@ -119,18 +119,6 @@ def test_a_job_of_a_feature_turned_off_does_not_run_again(jobs, features, key, f
     assert _retried(jobs) == [TARGETS[key]]
 
 
-def test_a_job_not_registered_gets_a_one_off_run_and_the_others_still_run(jobs):
-    jobs.registered.discard('sync_transports')   # Blacklist turned on after startup
-    for key in TARGETS:
-        _failed(key)
-    run(scheduler.retry_failed_jobs())
-    assert _retried(jobs) == sorted(v for k, v in TARGETS.items() if k != 'sync_transports')
-    jobs.add_job.assert_called_once()
-    call = jobs.add_job.call_args
-    assert call.args[0] is scheduler.sync_transports_job and call.args[1] == 'date'
-    assert call.kwargs['id'] == 'sync_transports_retry' and call.kwargs['replace_existing'] is True
-
-
 def test_one_target_that_breaks_does_not_stop_the_others(jobs):
     for key in TARGETS:
         _failed(key)
