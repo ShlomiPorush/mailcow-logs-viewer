@@ -3,11 +3,6 @@ name: Build and Publish Docker Image
 on:
   push:
     tags: [ 'v*.*.*' ]
-    paths:
-      - 'backend/**'
-      - 'frontend/**'
-      - 'Dockerfile'
-      - '.github/workflows/docker-publish.yml'
 
 env:
   GH_REGISTRY: ghcr.io
