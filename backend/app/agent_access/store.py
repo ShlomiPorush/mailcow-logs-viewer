@@ -74,11 +74,11 @@ def pkce_matches(verifier: Optional[str], challenge: str) -> bool:
 
 
 # ── Sign-in fingerprint ────────────────────────────────────────────────────
-# The settings that decide who can sign in, as in routers/settings.py
-# (_SESSION_BOUND_SETTING_KEYS; a test keeps the two lists equal). A change to
-# any of them, from the Settings page or from ENV and a restart, disconnects
-# every agent for good: the last fingerprint is stored, so changing a value
-# back does not bring the grants back.
+# The settings that decide who can sign in. A change to any of them ends every
+# session issued before it (routers/settings.py), so rotating a password evicts
+# a stolen cookie. A change, from the Settings page or from ENV and a restart,
+# also disconnects every agent for good: the last fingerprint is stored, so
+# changing a value back does not bring the grants back.
 SIGN_IN_KEYS = (
     "basic_auth_enabled", "auth_username", "auth_password",
     "oauth2_enabled", "oauth2_issuer_url", "oauth2_authorization_url", "oauth2_token_url",

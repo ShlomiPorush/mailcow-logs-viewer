@@ -199,11 +199,6 @@ def test_people_only_routes_are_never_offered():
             assert scopes.excluded_reason(method, path)
 
 
-def test_sign_in_keys_match_the_session_bound_settings():
-    from app.routers.settings import _SESSION_BOUND_SETTING_KEYS
-    assert tuple(store.SIGN_IN_KEYS) == tuple(_SESSION_BOUND_SETTING_KEYS)
-
-
 def _sign_in_state(monkeypatch, *, agents=False, basic=False, oauth=False, legacy=False, locked=()):
     from app.routers import settings as settings_router
     for key, value in (("agent_access_enabled", agents), ("basic_auth_enabled", basic),

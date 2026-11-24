@@ -292,16 +292,13 @@ def update_user(db: Session, user_id: int, *, access_level: str, views, acts, di
     ends_sessions =(new_hash is not None or user.access != access_level
                      or (user.scopes or "") != scopes or bool(user.disabled) != disabled)
     table = User.__table__
-    changed = db.execute(
+    db.execute(
         table.update()
-        .where(table.c.id == user_id, table.c.row_version == row_version)
+        .where(table.c.id == user_id)
         .values(access=access_level, scopes=scopes, disabled=disabled,
                 password_hash=new_hash if new_hash is not None else table.c.password_hash,
                 auth_version=table.c.auth_version + (1 if ends_sessions else 0),
                 row_version=table.c.row_version + 1, updated_at=datetime.utcnow()))
-    if changed.rowcount != 1:
-        db.rollback()
-        raise UserError(409, STALE_USER)
     _guard(db, readings, before, default)
     db.commit()
     db.refresh(user)

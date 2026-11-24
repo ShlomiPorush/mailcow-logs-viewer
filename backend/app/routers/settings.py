@@ -20,6 +20,7 @@ from ..models import PostfixLog, RspamdLog, NetfilterLog, MessageCorrelation
 from ..services.bounce_policy import cleanup_blocks
 from ..services import excluded_addresses, written_recipients
 from ..agent_access.scopes import READ
+from ..agent_access.store import SIGN_IN_KEYS as _SESSION_BOUND_SETTING_KEYS
 from ..user_access import DEFAULT_ACCESS_KEY, DEFAULT_VERSION_KEY, caller_may, job_error
 from ..services import users_store
 from ..config import settings, EDITABLE_SETTING_KEYS, FEATURE_IDS, reload_settings, Settings
@@ -378,15 +379,6 @@ def _validate_time_zone(allowed: Dict[str, Any], db: Session) -> None:
             del allowed["tz"]
         return
     raise HTTPException(status_code=400, detail=f"Unknown time zone: {zone}. Select a time zone from the list.")
-
-
-# Settings that decide who can sign in. A change to any of them ends every
-# session issued before it, so rotating a password evicts a stolen cookie.
-_SESSION_BOUND_SETTING_KEYS = (
-    "basic_auth_enabled", "auth_username", "auth_password",
-    "oauth2_enabled", "oauth2_issuer_url", "oauth2_authorization_url", "oauth2_token_url",
-    "oauth2_userinfo_url", "oauth2_client_id", "oauth2_client_secret", "session_secret_key",
-)
 
 
 # The settings that decide whether an admin can still sign in (services/users_store.py)
