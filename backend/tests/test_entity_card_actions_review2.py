@@ -185,7 +185,6 @@ def test_a_run_that_skipped_for_a_single_address_check_leaves_the_status_as_it_w
         return scheduler.JOB_SKIPPED
 
     monkeypatch.setattr(scheduler, 'check_monitored_hosts_job', job)
-    monkeypatch.setattr(scheduler, 'blacklist_check_holder', lambda: holder)
     res = api.post("/api/settings/jobs/blacklist_check/run")
     assert res.status_code == 200, res.text
     if restored:
@@ -206,7 +205,9 @@ def scan(monkeypatch):
     ran = []
 
     async def run(force, send_notification):
-        ran.append(scheduler.blacklist_check_holder())
+        # 'full': it runs holding the lock, as the pending full scan
+        held = scheduler.blacklist_check_lock().locked() and scheduler._blacklist_full_scan_pending
+        ran.append('full' if held else None)
 
     monkeypatch.setattr(scheduler, '_run_check_monitored_hosts', run)
     return ran
@@ -214,21 +215,30 @@ def scan(monkeypatch):
 
 def test_the_scan_waits_for_a_single_address_check_and_then_runs(scan):
     async def main():
-        async with scheduler.blacklist_check_hold('host'):
+        async with scheduler.blacklist_check_lock():
             job = asyncio.create_task(scheduler.check_monitored_hosts_job())
             await asyncio.sleep(0.8)
             assert scan == [] and not job.done(), "it waits while the address is checked"
         result = await asyncio.wait_for(job, 5)
         assert result != scheduler.JOB_SKIPPED
         assert scan == ['full']
-        assert scheduler.blacklist_check_holder() is None
+        assert scheduler.blacklist_check_admits()
     asyncio.run(main())
 
 
-def test_the_scan_skips_while_another_full_scan_runs(scan):
+def test_the_scan_skips_while_another_full_scan_runs(scan, monkeypatch):
     async def main():
-        async with scheduler.blacklist_check_hold('full'):
-            result = await asyncio.wait_for(scheduler.check_monitored_hosts_job(), 2)
+        release = asyncio.Event()
+
+        async def running(force, send_notification):
+            await release.wait()
+
+        monkeypatch.setattr(scheduler, '_run_check_monitored_hosts', running)
+        first = asyncio.create_task(scheduler.check_monitored_hosts_job())
+        await asyncio.sleep(0.05)
+        result = await asyncio.wait_for(scheduler.check_monitored_hosts_job(), 2)
+        release.set()
+        await asyncio.wait_for(first, 2)
         assert result == scheduler.JOB_SKIPPED
         assert scan == []
     asyncio.run(main())
@@ -238,8 +248,9 @@ def test_the_wait_for_a_single_address_check_is_bounded(scan, monkeypatch):
     monkeypatch.setattr(scheduler, 'BLACKLIST_HOST_WAIT_SECONDS', 0.6)
 
     async def main():
-        async with scheduler.blacklist_check_hold('host'):
+        async with scheduler.blacklist_check_lock():
             result = await asyncio.wait_for(scheduler.check_monitored_hosts_job(), 5)
         assert result == scheduler.JOB_SKIPPED
         assert scan == []
+        assert scheduler.blacklist_check_admits(), "a scan that gave up admits checks again"
     asyncio.run(main())

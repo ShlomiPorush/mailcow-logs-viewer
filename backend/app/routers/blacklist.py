@@ -101,7 +101,7 @@ async def check_blacklists(
     Get IP blacklist check results for a specific host
     """
     target_ip = host
-    from ..scheduler import blacklist_check_admits, blacklist_check_hold
+    from ..scheduler import blacklist_check_admits, blacklist_check_lock
 
     # One check at a time, whoever starts it (the schedule, Status, an entity
     # card): checks share the progress and the batch state, so another one
@@ -135,7 +135,7 @@ async def check_blacklists(
     try:
         if not blacklist_check_admits():   # taken while the host name resolved
             return {"status": "busy", "message": BUSY_TEXT}
-        async with blacklist_check_hold("host"):
+        async with blacklist_check_lock():
             results = await get_blacklist_check_results(force=force, ip=target_ip)
         return results
     except Exception as e:

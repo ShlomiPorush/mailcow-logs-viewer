@@ -5,7 +5,6 @@ import logging
 import asyncio
 import hashlib
 import threading
-from contextlib import asynccontextmanager
 import re
 import httpx
 import ipaddress
@@ -156,14 +155,12 @@ _blacklist_last_listed_actionable_count = 0
 _blacklist_check_lock = asyncio.Lock()
 
 
-# What holds the lock: 'full' (the job: every monitored address) or 'host' (one
-# address checked from the API, routers/blacklist.py), None while it is free
-_blacklist_check_holder = None
 # How long the job waits for a single address check to end (one address is quick)
 BLACKLIST_HOST_WAIT_SECONDS = 300
-# Full checks waiting for the lock: while one waits, no new single address check
-# starts (blacklist_check_admits), so a stream of them cannot keep the scan out
-_blacklist_full_waiting = 0
+# Set while a full check (every monitored address) waits for the lock or runs:
+# no new single address check starts meanwhile (blacklist_check_admits), so a
+# stream of them cannot keep the scan out
+_blacklist_full_scan_pending = False
 
 
 def blacklist_check_lock() -> asyncio.Lock:
@@ -172,32 +169,10 @@ def blacklist_check_lock() -> asyncio.Lock:
     return _blacklist_check_lock
 
 
-def blacklist_check_holder():
-    """'full', 'host' or None: which kind of check holds the lock."""
-    return _blacklist_check_holder if _blacklist_check_lock.locked() else None
-
-
-def blacklist_full_scan_waiting() -> bool:
-    """Whether a full check waits for the lock (a single address check holds it)."""
-    return _blacklist_full_waiting > 0
-
-
 def blacklist_check_admits() -> bool:
     """Whether a new check may start now: the lock is free and no full check
     waits for it (one waiting goes first)."""
-    return not blacklist_check_lock().locked() and not blacklist_full_scan_waiting()
-
-
-@asynccontextmanager
-async def blacklist_check_hold(kind: str):
-    """Hold the blocklist check lock for one kind of check ('full' or 'host')."""
-    global _blacklist_check_holder
-    async with _blacklist_check_lock:
-        _blacklist_check_holder = kind
-        try:
-            yield
-        finally:
-            _blacklist_check_holder = None
+    return not blacklist_check_lock().locked() and not _blacklist_full_scan_pending
 
 
 # Returned by a job that skipped because another run of it holds its lock; that
@@ -2083,30 +2058,27 @@ async def check_monitored_hosts_job(force: bool = False, send_notification: bool
     # API). Overlapping runs corrupt the shared batch/progress state and the
     # listed-count used for cleared/improved notifications - never overlap.
     # A single address checked from the API is short: the job waits for it rather
-    # than lose the day's scan and its alerts; only another full scan skips it
-    # It waits in the lock's own queue, registered, so no new single address
-    # check starts meanwhile (blacklist_check_admits); a full check already
-    # running or already waiting makes this one skip
-    global _blacklist_check_holder, _blacklist_full_waiting
-    if _blacklist_full_waiting or (_blacklist_check_lock.locked() and blacklist_check_holder() != 'host'):
+    # than lose the day's scan and its alerts, in the lock's own queue; a full
+    # check already running or already waiting makes this one skip
+    global _blacklist_full_scan_pending
+    if _blacklist_full_scan_pending:
         logger.info("[BLACKLIST] Check already in progress, skipping this trigger")
         return JOB_SKIPPED
     if _blacklist_check_lock.locked():
         logger.info("[BLACKLIST] A single address check is running, waiting for it")
-    _blacklist_full_waiting += 1
+    _blacklist_full_scan_pending = True
     try:
-        await asyncio.wait_for(_blacklist_check_lock.acquire(), timeout=BLACKLIST_HOST_WAIT_SECONDS)
-    except asyncio.TimeoutError:
-        logger.warning("[BLACKLIST] A single address check still runs, skipping this trigger")
-        return JOB_SKIPPED
+        try:
+            await asyncio.wait_for(_blacklist_check_lock.acquire(), timeout=BLACKLIST_HOST_WAIT_SECONDS)
+        except asyncio.TimeoutError:
+            logger.warning("[BLACKLIST] A single address check still runs, skipping this trigger")
+            return JOB_SKIPPED
+        try:
+            await _run_check_monitored_hosts(force, send_notification)
+        finally:
+            _blacklist_check_lock.release()
     finally:
-        _blacklist_full_waiting -= 1
-    _blacklist_check_holder = 'full'
-    try:
-        await _run_check_monitored_hosts(force, send_notification)
-    finally:
-        _blacklist_check_holder = None
-        _blacklist_check_lock.release()
+        _blacklist_full_scan_pending = False
 
 
 def _load_blacklist_hosts_worker():

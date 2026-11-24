@@ -30,11 +30,13 @@ BUSY = {"status": "busy", "message": "A blocklist check is already running. Try 
 def scan(monkeypatch):
     monkeypatch.setattr(settings._inner, 'disabled_features', '')
     monkeypatch.setattr(scheduler, '_blacklist_check_lock', asyncio.Lock())
-    monkeypatch.setattr(scheduler, '_blacklist_full_waiting', 0, raising=False)
+    monkeypatch.setattr(scheduler, '_blacklist_full_scan_pending', False)
     ran = []
 
     async def run(force, send_notification):
-        ran.append(scheduler.blacklist_check_holder())
+        # 'full': it runs holding the lock, as the pending full scan
+        held = scheduler.blacklist_check_lock().locked() and scheduler._blacklist_full_scan_pending
+        ran.append('full' if held else None)
 
     monkeypatch.setattr(scheduler, '_run_check_monitored_hosts', run)
     return ran
@@ -42,10 +44,10 @@ def scan(monkeypatch):
 
 def test_a_waiting_scan_goes_before_a_new_single_address_check(scan):
     async def main():
-        async with scheduler.blacklist_check_hold('host'):
+        async with scheduler.blacklist_check_lock():
             job = asyncio.create_task(scheduler.check_monitored_hosts_job())
             await asyncio.sleep(0.05)
-            assert scheduler.blacklist_full_scan_waiting(), "registered as waiting"
+            assert scheduler._blacklist_full_scan_pending, "registered as waiting"
             assert not scheduler.blacklist_check_admits()
         # The first address check ended; a new one arrives before the scan runs
         assert not scheduler.blacklist_check_admits(), "a new address check would answer busy"
@@ -59,19 +61,53 @@ def test_a_waiting_scan_goes_before_a_new_single_address_check(scan):
 def test_the_scan_waits_in_the_queue_without_polling(scan):
     """It is woken when the address check ends, not half a second later."""
     async def main():
-        hold = scheduler.blacklist_check_hold('host')
-        await hold.__aenter__()
+        lock = scheduler.blacklist_check_lock()
+        await lock.acquire()
         job = asyncio.create_task(scheduler.check_monitored_hosts_job())
         await asyncio.sleep(0.05)
-        await hold.__aexit__(None, None, None)
+        lock.release()
         await asyncio.wait_for(job, 0.2)
         assert scan == ['full']
     asyncio.run(main())
 
 
+@pytest.mark.parametrize("end", ["failure", "cancellation"])
+def test_a_scan_that_ends_early_admits_checks_again(scan, monkeypatch, end):
+    async def main():
+        async def broken(force, send_notification):
+            if end == "failure":
+                raise RuntimeError("example failure")
+            await asyncio.sleep(10)
+
+        monkeypatch.setattr(scheduler, '_run_check_monitored_hosts', broken)
+        job = asyncio.create_task(scheduler.check_monitored_hosts_job())
+        await asyncio.sleep(0.05)
+        if end == "cancellation":
+            assert not scheduler.blacklist_check_admits()
+            job.cancel()
+        with pytest.raises((RuntimeError, asyncio.CancelledError)):
+            await job
+        assert scheduler.blacklist_check_admits()
+    asyncio.run(main())
+
+
+def test_a_scan_cancelled_while_it_waits_admits_checks_again(scan):
+    async def main():
+        async with scheduler.blacklist_check_lock():
+            job = asyncio.create_task(scheduler.check_monitored_hosts_job())
+            await asyncio.sleep(0.05)
+            job.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await job
+            assert not scheduler._blacklist_full_scan_pending
+        assert scheduler.blacklist_check_admits()
+        assert scan == []
+    asyncio.run(main())
+
+
 def test_a_second_scan_skips_while_one_waits(scan):
     async def main():
-        async with scheduler.blacklist_check_hold('host'):
+        async with scheduler.blacklist_check_lock():
             first = asyncio.create_task(scheduler.check_monitored_hosts_job())
             await asyncio.sleep(0.05)
             assert await asyncio.wait_for(scheduler.check_monitored_hosts_job(), 1) == scheduler.JOB_SKIPPED
@@ -87,7 +123,7 @@ def test_a_new_address_check_answers_busy_while_a_scan_waits(monkeypatch):
     for key in ('auth_enabled', 'basic_auth_enabled', 'oauth2_enabled'):
         monkeypatch.setattr(settings._inner, key, False)
     monkeypatch.setattr(settings._inner, 'disabled_features', '')
-    monkeypatch.setattr(scheduler, '_blacklist_full_waiting', 1, raising=False)   # the lock itself is free
+    monkeypatch.setattr(scheduler, '_blacklist_full_scan_pending', True)   # the lock itself is free
     started = []
 
     async def results(**kwargs):
@@ -181,7 +217,7 @@ def test_a_scan_started_beside_a_manual_run_keeps_its_status(statuses, monkeypat
     to it; the scan's status is never overwritten or put back while it runs."""
     monkeypatch.setattr(settings._inner, 'disabled_features', '')
     monkeypatch.setattr(scheduler, '_blacklist_check_lock', asyncio.Lock())
-    monkeypatch.setattr(scheduler, '_blacklist_full_waiting', 0)
+    monkeypatch.setattr(scheduler, '_blacklist_full_scan_pending', False)
     statuses['blacklist_check'] = {'last_run': datetime(2026, 10, 27, 6, 0), 'status': 'success', 'error': None, 'retryable': False}
     seen = {}
 
