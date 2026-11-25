@@ -1,14 +1,3 @@
-"""Second review of the entity card actions:
-
-- Messages exact_ip: the IP matched whole while every other filter still
-  matches a part (a sender added to an IP card's list), in the list, the facet
-  counts, the new-mail count and the CSV export. The generic exact still works.
-- A manual Run of the blocklist job while a single address check holds the
-  check's lock is refused before the job is marked running; a run that skips
-  because such a check took the lock meanwhile leaves the status as it was.
-- The scheduled scan waits for a single address check (bounded) instead of
-  losing the day's scan; it skips only for another full scan.
-"""
 import asyncio
 import csv
 import io
@@ -31,7 +20,6 @@ IP, SIMILAR_IP = "192.0.2.4", "192.0.2.45"
 AT = datetime(2020, 5, 10, 12, 0, 0)
 RANGE = {"start_date": "2020-05-01", "end_date": "2020-05-20"}
 
-# name: (sender, recipient, ip)
 MESSAGES = {
     "dom-billing": (f"billing@{DOMAIN}", f"to@{OUT}", None),
     "dom-other": (f"other@{DOMAIN}", f"to@{OUT}", None),
@@ -60,8 +48,6 @@ def api(monkeypatch):
     from app.main import app
     return TestClient(app)
 
-
-# ---------------------------------------------------------------- Messages exact_ip
 
 def _cleanup():
     from app.database import get_db_context
@@ -103,14 +89,10 @@ def _names(rows):
 
 
 CASES = [
-    # A domain card's list with a partial sender added: billing matches billing@<domain>
     ({"domain": DOMAIN, "sender": "billing"}, ["dom-billing"]),
-    # An IP card's: the IP whole (not 192.0.2.45), the sender a part
     ({"ip": IP, "exact_ip": "true", "sender": "billing"}, ["ip-billing"]),
     ({"ip": IP, "exact_ip": "true"}, ["ip-billing", "ip-other"]),
-    # Without it, the IP is a part as always
     ({"ip": IP, "sender": "billing"}, ["ip-billing", "similar-billing"]),
-    # The generic exact still makes every filter whole (L1's API)
     ({"ip": IP, "exact": "true", "sender": "billing"}, []),
 ]
 
@@ -139,8 +121,6 @@ def test_exact_ip_is_documented(api):
         names = [p["name"] for p in schema["paths"][path]["get"]["parameters"]]
         assert "exact_ip" in names, path
 
-
-# ---------------------------------------------------------------- the manual Run of the blocklist job
 
 @pytest.fixture()
 def statuses():
@@ -172,32 +152,25 @@ def test_run_while_a_single_address_check_holds_the_lock_is_refused(api, statuse
     assert statuses['blacklist_check'] == before, "not marked running"
 
 
-@pytest.mark.parametrize("holder,restored", [("host", True), (None, True), ("full", False)])  # full: it wrote its status
+@pytest.mark.parametrize("holder,restored", [("host", True), (None, True), ("full", False)])
 def test_a_run_that_skipped_for_a_single_address_check_leaves_the_status_as_it_was(api, statuses, monkeypatch, holder, restored):
-    """The check of one address took the lock after the Run was accepted: the
-    job skips, and no run of the job is there to set its status."""
     before = {'last_run': datetime(2026, 10, 27, 6, 0), 'status': 'success', 'error': None}
     statuses['blacklist_check'] = dict(before)
 
     async def job(**kwargs):
         if holder == 'full':
-            scheduler.update_job_status('blacklist_check', 'running')   # the full check that holds the job
+            scheduler.update_job_status('blacklist_check', 'running')
         return scheduler.JOB_SKIPPED
 
     monkeypatch.setattr(scheduler, 'check_monitored_hosts_job', job)
-    monkeypatch.setattr(scheduler, 'blacklist_check_holder', lambda: holder)
     res = api.post("/api/settings/jobs/blacklist_check/run")
     assert res.status_code == 200, res.text
     if restored:
         assert statuses['blacklist_check'] == before
-        # and the next Run is not refused as "already running"
         assert api.post("/api/settings/jobs/blacklist_check/run").status_code == 200
     else:
-        # A full scan holds the job: it sets the status when it ends
         assert statuses['blacklist_check']['status'] == 'running'
 
-
-# ---------------------------------------------------------------- the scheduled scan and a single address check
 
 @pytest.fixture()
 def scan(monkeypatch):
@@ -206,7 +179,8 @@ def scan(monkeypatch):
     ran = []
 
     async def run(force, send_notification):
-        ran.append(scheduler.blacklist_check_holder())
+        held = scheduler.blacklist_check_lock().locked() and scheduler._blacklist_full_scan_pending
+        ran.append('full' if held else None)
 
     monkeypatch.setattr(scheduler, '_run_check_monitored_hosts', run)
     return ran
@@ -214,21 +188,30 @@ def scan(monkeypatch):
 
 def test_the_scan_waits_for_a_single_address_check_and_then_runs(scan):
     async def main():
-        async with scheduler.blacklist_check_hold('host'):
+        async with scheduler.blacklist_check_lock():
             job = asyncio.create_task(scheduler.check_monitored_hosts_job())
             await asyncio.sleep(0.8)
             assert scan == [] and not job.done(), "it waits while the address is checked"
         result = await asyncio.wait_for(job, 5)
         assert result != scheduler.JOB_SKIPPED
         assert scan == ['full']
-        assert scheduler.blacklist_check_holder() is None
+        assert scheduler.blacklist_check_admits()
     asyncio.run(main())
 
 
-def test_the_scan_skips_while_another_full_scan_runs(scan):
+def test_the_scan_skips_while_another_full_scan_runs(scan, monkeypatch):
     async def main():
-        async with scheduler.blacklist_check_hold('full'):
-            result = await asyncio.wait_for(scheduler.check_monitored_hosts_job(), 2)
+        release = asyncio.Event()
+
+        async def running(force, send_notification):
+            await release.wait()
+
+        monkeypatch.setattr(scheduler, '_run_check_monitored_hosts', running)
+        first = asyncio.create_task(scheduler.check_monitored_hosts_job())
+        await asyncio.sleep(0.05)
+        result = await asyncio.wait_for(scheduler.check_monitored_hosts_job(), 2)
+        release.set()
+        await asyncio.wait_for(first, 2)
         assert result == scheduler.JOB_SKIPPED
         assert scan == []
     asyncio.run(main())
@@ -238,8 +221,9 @@ def test_the_wait_for_a_single_address_check_is_bounded(scan, monkeypatch):
     monkeypatch.setattr(scheduler, 'BLACKLIST_HOST_WAIT_SECONDS', 0.6)
 
     async def main():
-        async with scheduler.blacklist_check_hold('host'):
+        async with scheduler.blacklist_check_lock():
             result = await asyncio.wait_for(scheduler.check_monitored_hosts_job(), 5)
         assert result == scheduler.JOB_SKIPPED
         assert scan == []
+        assert scheduler.blacklist_check_admits(), "a scan that gave up admits checks again"
     asyncio.run(main())

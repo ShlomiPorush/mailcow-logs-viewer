@@ -1,13 +1,3 @@
-"""State-changing requests and the live log WebSocket must come from the app's own pages.
-
-Authentication is off by default, so the only thing that kept a web page on
-another site from driving the API through the operator's browser (a text/plain
-form POST to a mailcow write route, or a WebSocket to the live log stream) was
-nothing. The API also answered every origin with a credentialed CORS policy.
-
-The guard compares host[:port] only: behind the documented TLS reverse proxy
-the app sees plain HTTP while the browser sends an https Origin.
-"""
 import base64
 import secrets
 
@@ -21,8 +11,6 @@ from app.config import Settings, settings
 from app.main import app
 
 APP = "http://logs.example.test"
-# POST /api/auth/session answers 400 with Basic Auth off: reaching the route
-# (400) and being stopped in front of it (403) are easy to tell apart.
 WRITE = "/api/auth/session"
 
 
@@ -70,7 +58,7 @@ def test_cross_site_text_plain_form_cannot_reach_a_mailcow_write(monkeypatch):
     {"Origin": APP},
     {"Origin": "HTTP://Logs.Example.Test"},
     {"Referer": APP + "/settings"},
-    {},  # curl and other API clients send neither header
+    {},
 ])
 def test_same_origin_and_headerless_writes_pass(headers):
     assert client().post(WRITE, headers=headers).status_code == 400
@@ -87,7 +75,6 @@ def test_reads_are_not_affected():
 
 
 def test_https_origin_behind_tls_proxy_passes():
-    """The proxy terminates TLS: the app sees http, the browser sends https."""
     response = client(**{"X-Forwarded-Proto": "https"}).post(WRITE, headers={"Origin": "https://logs.example.test"})
     assert response.status_code == 400
 
@@ -102,7 +89,6 @@ def test_ports_and_address_literals(base_url, origin):
 
 
 def test_ipv6_address_literal():
-    # The test client cannot take an IPv6 base URL; send the Host header a browser would
     response = client().post(WRITE, headers={"Host": "[2001:db8::10]:8080", "Origin": "http://[2001:db8::10]:8080"})
     assert response.status_code == 400
     response = client().post(WRITE, headers={"Host": "[2001:db8::10]:8080", "Origin": "http://[2001:db8::11]:8080"})
@@ -123,7 +109,6 @@ def test_guard_applies_with_authentication_on(monkeypatch):
     signed_in = client()
     header = {"Authorization": "Basic " + base64.b64encode(f"admin:{password}".encode()).decode()}
     assert signed_in.post(WRITE, headers={**header, "Origin": APP}).status_code == 200
-    # Valid credentials and a valid session cookie do not make a cross-site write acceptable
     assert signed_in.post(WRITE, headers={**header, "Origin": "https://evil.invalid"}).status_code == 403
     assert signed_in.post(WRITE, headers={"Origin": "https://evil.invalid"}).status_code == 403
 
@@ -134,14 +119,11 @@ def test_websocket_from_another_site_is_rejected():
             ws.receive_json()
 
 
-# The test client always opens WebSockets to ws://testserver
 @pytest.mark.parametrize("headers", [{"Origin": "https://testserver"}, {"Origin": "http://testserver"}, {}])
 def test_websocket_from_the_app_connects(headers):
     with client().websocket_connect("/ws/raw-logs", headers=headers) as ws:
         assert ws.receive_json()["type"] == "connected"
 
-
-# CORS: the SPA is same-origin, so no cross-origin policy by default
 
 def test_no_cors_headers_by_default():
     response = client().get("/api/info", headers={"Origin": "http://web.example.test"})

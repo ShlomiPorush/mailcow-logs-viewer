@@ -1,15 +1,3 @@
-// Every change the page can send is covered by the signed-in person's access
-// (issue #544). The server checks each call anyway; this keeps the page from
-// offering a control the server would refuse. For every fetch with a method other
-// than GET in frontend/*.js, the function that sends it is listed in WRITES with
-// the area it acts in, and that area is the one the backend gives the route
-// (agent_access/scopes.py POLICY, user_access.py HUMAN_ENTRIES). Such a function
-// starts with uiMayAct('<area>') (utils.js), and every inline control that calls it
-// carries data-acts="<area>" (ui.css hides it while the person may not act there).
-// 'alerts' is a call shared by several areas (scopes.py ALTERNATIVES): Take action in
-// any one of them (utils.js ALERT_AREAS); a control for one alert also names its own area.
-// A call that changes nothing, or a page only an admin reaches, is listed below
-// with the reason. A new write call without a decision fails here.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
@@ -19,7 +7,6 @@ const { test } = require('node:test');
 const ROOT = path.join(__dirname, '../..');
 const FRONTEND = path.join(ROOT, 'frontend');
 
-// file function -> the area it takes action in ('admin' for an admin's own)
 const WRITES = {
     'app.js unbanIP': 'security',
     'app.js unbanAllFail2ban': 'security',
@@ -69,7 +56,6 @@ const WRITES = {
     'users.js deleteUser': 'admin',
 };
 
-// The routes of a call whose address is not written out in the call
 const DYNAMIC = {
     'app.js quarantineAction': ['POST /api/quarantine/release', 'POST /api/quarantine/delete',
         'POST /api/quarantine/learnham', 'POST /api/quarantine/learnspam'],
@@ -82,7 +68,6 @@ const DYNAMIC = {
     'users.js saveUser': ['POST /api/users', 'PUT /api/users/{user_id}'],
 };
 
-// Sent with POST but changing nothing, or allowed to anyone signed in
 const NOT_ACTIONS = {
     'app.js handleLogout': 'signing out works whatever the access',
     'session-guard.js sessionGuardSignOut': 'signing out works whatever the access',
@@ -92,7 +77,6 @@ const NOT_ACTIONS = {
     'users.js usersCheckPassword': 'checks a new password and stores nothing: POST /api/users/password-check, for admins like the dialog',
 };
 
-// Files whose page only an admin reaches; the menu leaves it out for anyone else
 const ADMIN_PAGES = {
     'settings.js': 'the Settings page',
     'notifications.js': 'Settings > Notifications',
@@ -100,14 +84,11 @@ const ADMIN_PAGES = {
     'authorize.js': 'the agent approval page, which the server opens to admins only',
 };
 
-// ------------------------------------------------------------------ the backend's areas
-
 function backendRoutes() {
     const scopes = fs.readFileSync(path.join(ROOT, 'backend/app/agent_access/scopes.py'), 'utf8');
     const human = fs.readFileSync(path.join(ROOT, 'backend/app/user_access.py'), 'utf8');
     const routes = [];
     const add = (method, route, need) => routes.push({ method, route, need, re: routeRe(route) });
-    // Where people differ from agents: an area's write, or the admin
     for (const m of human.matchAll(/\("(GET|POST|PUT|DELETE) (\/[^"]+)", (_ADMIN|Need\(AREAS, \(\("(\w+)", policy\.(WRITE|READ)\),\)\))\)/g)) {
         add(m[1], m[2], m[3] === '_ADMIN' ? 'admin' : `${m[4]}:${m[5] === 'WRITE' ? 'write' : 'read'}`);
     }
@@ -117,7 +98,6 @@ function backendRoutes() {
             add(r[1], r[2], area === 'settings' ? 'admin' : `${area}:${block[3] === 'WRITE' ? 'write' : 'read'}`);
         }
     }
-    // Excluded from agents: settings changes, credential checks, test sends and job runs are an admin's
     for (const m of scopes.matchAll(/\("(GET|POST|PUT|DELETE)", "(\/api\/[^"]+)"\):/g)) add(m[1], m[2], 'admin');
     return routes;
 }
@@ -126,16 +106,12 @@ function routeRe(route) {
     return new RegExp('^' + route.replace(/[.?+*()[\]\\^$|]/g, '\\$&').replace(/\{[^}]*\}/g, '\\{\\}') + '$');
 }
 
-// /api/users and /api/agents are an admin's, whatever the method
 function needOf(routes, method, url) {
     if (/^\/api\/(users|agents)(\/|$)/.test(url)) return 'admin';
     const found = routes.find(r => r.method === method && r.re.test(url));
     return found ? found.need : null;
 }
 
-// ------------------------------------------------------------------ the frontend's calls
-
-// The top-level function each offset belongs to (null outside any)
 function functionAt(text) {
     const lines = text.split('\n');
     const owner = [];
@@ -151,7 +127,6 @@ function functionAt(text) {
 
 const lineOf = (text, offset) => text.slice(0, offset).split('\n').length;
 
-// A template's ${...} parts written as {}, and the query left out
 function urlShape(literal) {
     let out = '';
     for (let i = 0; i < literal.length; i++) {
@@ -169,7 +144,6 @@ function urlShape(literal) {
     return out.split('?')[0];
 }
 
-// Every fetch with a method other than GET: { file, fn, line, methods, url }
 function writeCalls(dir) {
     const calls = [];
     for (const file of fs.readdirSync(dir).filter(f => f.endsWith('.js')).sort()) {
@@ -178,10 +152,10 @@ function writeCalls(dir) {
         for (const m of text.matchAll(/\bmethod\s*:\s*([^,}\n]+)|\{\s*method\s*,|,\s*method\s*,/g)) {
             const value = m[1] ? m[1].trim() : 'variable';
             const methods = [...value.matchAll(/['"`](POST|PUT|DELETE|PATCH)['"`]/g)].map(x => x[1]);
-            if (m[1] && !methods.length) continue;      // GET, or not a request
+            if (m[1] && !methods.length) continue;
             const before = text.slice(Math.max(0, m.index - 600), m.index);
             const at = before.toLowerCase().lastIndexOf('fetch(');
-            if (at === -1) continue;                     // a method key that is not a request
+            if (at === -1) continue;
             const literal = before.slice(at + 6).match(/^\s*(['"`])((?:\\.|(?!\1)[^\\])*)\1/);
             calls.push({ file, fn: owner(m.index), line: lineOf(text, m.index), methods: methods.length ? methods : ['POST', 'PUT', 'DELETE'],
                 url: literal ? urlShape(literal[2]) : null });
@@ -190,7 +164,6 @@ function writeCalls(dir) {
     return calls;
 }
 
-// The end of the tag that starts at `start`: the first > outside quotes and ${...}
 function tagEnd(text, start) {
     let depth = 0, quote = false;
     for (let i = start + 1; i < text.length; i++) {
@@ -204,7 +177,6 @@ function tagEnd(text, start) {
     return text.length;
 }
 
-// Every inline handler that calls one of these functions, with its whole tag
 function handlerTags(dir, names) {
     const found = [];
     const files = [...fs.readdirSync(dir).filter(f => f.endsWith('.js')).sort(), 'index.html'];
@@ -221,8 +193,6 @@ function handlerTags(dir, names) {
     return found;
 }
 
-// ------------------------------------------------------------------ the check
-
 function check(dir = FRONTEND) {
     const problems = [];
     const routes = backendRoutes();
@@ -238,12 +208,10 @@ function check(dir = FRONTEND) {
             continue;
         }
         seen.add(key);
-        // The area agrees with the backend's for every route the call can reach
         const asked = DYNAMIC[key] ? DYNAMIC[key].map(r => r.replace(/\{[^}]*\}/g, '{}').split(' ')) : call.url ? call.methods.map(m => [m, call.url]) : null;
         if (!asked) { problems.push(`${where}: its address is not written out; list its routes in DYNAMIC`); continue; }
         const needs = asked.map(([method, url]) => needOf(routes, method, url)).filter(Boolean);
         if (!needs.length) problems.push(`${where}: no backend route matches ${asked.map(a => a.join(' ')).join(', ')}`);
-        // A check on the way (View, like a map's validation before its save) is not the change itself
         for (const need of new Set(needs.filter(n => !/:read$/.test(n) && n !== 'any:read'))) {
             const expected = need === 'admin' ? 'admin' : need.endsWith(':write') ? need.split(':')[0] : null;
             if (expected !== area) problems.push(`${where}: listed as ${area}, the backend wants ${need}`);
@@ -252,7 +220,6 @@ function check(dir = FRONTEND) {
     for (const key of Object.keys({ ...WRITES, ...NOT_ACTIONS })) {
         if (!seen.has(key)) problems.push(`${key} is listed but sends no change any more`);
     }
-    // Each listed function checks the access first
     const sources = {};
     for (const key of Object.keys(WRITES)) {
         const [file, fn] = key.split(' ');
@@ -264,8 +231,6 @@ function check(dir = FRONTEND) {
         const request = body.search(/fetch\(/);
         if (guard === -1 || (request !== -1 && guard > request)) problems.push(`${key} does not start with uiMayAct('${WRITES[key]}')`);
     }
-    // Each control that calls one carries its area
-    // A control may call the one-press wrapper (uiOnce in utils.js) of a listed function: the same area
     const names = new Map(Object.entries(WRITES).flatMap(([key, area]) => [[key.split(' ')[1], area], [`${key.split(' ')[1]}Once`, area]]));
     for (const { file, line, name, tag } of handlerTags(dir, new Set(names.keys()))) {
         const acts = (tag.match(/\sdata-acts="([^"]*)"/) || [])[1] || '';
@@ -306,11 +271,9 @@ test('Take action in any one alert area is enough for the alert controls, and on
     assert.equal(can(['security:read', 'domains:read', 'dmarc:read', 'outbound:write'], 'alerts'), false);
     assert.equal(can(['domains:read'], 'alerts', 'read'), true);
     assert.equal(can(['domains:write'], 'security'), false);
-    // The class that hides an 'alerts' control is set from the same check
     assert.match(fs.readFileSync(path.join(FRONTEND, 'assets/css/ui.css'), 'utf8'), /\.ui-no-act-alerts \[data-acts~="alerts"\]/);
 });
 
-// A copy of the frontend with one file changed, to show the check catches it
 function checkWith(file, edit) {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'write-access-'));
     try {

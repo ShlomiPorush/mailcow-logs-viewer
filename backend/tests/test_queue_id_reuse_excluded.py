@@ -1,18 +1,3 @@
-"""A message of an excluded address never takes the next message on its queue id with it.
-
-Postfix reuses a queue id once the message that had it left the queue, which
-qmgr logs as "removed". The excluded-address rules (BLACKLIST_EMAILS), the
-block evidence and the written recipient read every line of a queue id
-within a day as one message: the next message on the id, an hour later, was
-deleted, never stored, hidden, or copied into another message's evidence.
-Now a "removed" between two lines makes them two messages; without one,
-the rules stay as they were.
-
-Postfix logs whole seconds and the order of lines inside one is unknown, so
-a "removed" in the later line's own second proves nothing. Times here are
-whole seconds, as stored ones always are. Dummy data only, against the test
-PostgreSQL.
-"""
 import uuid
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
@@ -33,17 +18,13 @@ B_START = BASE + timedelta(hours=1)
 SECOND = timedelta(seconds=1)
 
 
-# ---------- the rule ----------
-
 def test_a_removed_tells_two_times_apart_by_whole_seconds():
     from app.services.excluded_addresses import same_message, separated
     t = datetime(2026, 10, 20, 9, 0, 0)
     removed = [t + 2 * SECOND]
     assert separated(t, t + 3 * SECOND, removed)
     assert separated(t + 3 * SECOND, t, removed)
-    # Delivered and removed in one second, the next message later
     assert separated(t + 2 * SECOND, t + 3 * SECOND, removed)
-    # In the later time's own second the next message may already have started
     assert not separated(t, t + 2 * SECOND, removed)
     assert not separated(t + 2 * SECOND, t + 2 * SECOND, removed)
     assert not same_message(t, t + 3 * SECOND, removed)
@@ -52,8 +33,6 @@ def test_a_removed_tells_two_times_apart_by_whole_seconds():
 
 
 def test_the_span_deleted_is_exactly_the_times_of_the_same_message():
-    """Deletion goes by a time span per listed line (message_span); it must
-    hold exactly what same_message() says, also for times between seconds."""
     from app.services.excluded_addresses import message_span, same_message
     t = datetime(2026, 10, 20, 9, 0, 5, 300000)
     for removed in ([], [t - 3 * SECOND], [t], [t + 2 * SECOND], [t - 3 * SECOND, t + 2 * SECOND],
@@ -66,8 +45,6 @@ def test_the_span_deleted_is_exactly_the_times_of_the_same_message():
 
 
 def test_forgetting_keeps_where_a_listed_message_ended_while_it_is_remembered():
-    """A listed line seen again keeps its message remembered; where that
-    message ended must stay known as long, or its neighbour would be taken."""
     from app.services import excluded_addresses as ex
     queue, t = f'MEM{uuid.uuid4().hex[:8].upper()}', datetime(2026, 10, 20, 9, 0, 0)
     ex.remember_listed_queue(queue, t)
@@ -78,8 +55,6 @@ def test_forgetting_keeps_where_a_listed_message_ended_while_it_is_remembered():
     ex.forget_old_queues(datetime.utcnow())
     assert ex.remembered_removed(queue) == [t + SECOND]
     assert not ex.queue_was_listed(queue, t + timedelta(hours=1))
-    # A "removed" no remembered listed time is within a day of is not kept:
-    # the memory of a queue id listed again and again does not grow
     ex.remember_removed(queue, t - timedelta(days=3))
     ex._last_forget = None
     ex.forget_old_queues(datetime.utcnow())
@@ -88,8 +63,6 @@ def test_forgetting_keeps_where_a_listed_message_ended_while_it_is_remembered():
         ex._listed_queues.pop(queue, None)
         ex._removed_queues.pop(queue, None)
 
-
-# ---------- data ----------
 
 def _postgres_available() -> bool:
     try:
@@ -140,7 +113,6 @@ def env(monkeypatch):
 
 
 def _message(queue, start, rcpt, removed=True, one_second=False, status='sent'):
-    """One message as Postfix logs it: (time, program, text)."""
     step = timedelta(0) if one_second else SECOND
     lines = [
         (start, 'postfix/smtpd', f'{queue}: client=mail.example.test[192.0.2.10]'),
@@ -215,8 +187,6 @@ def _client():
     return TestClient(app)
 
 
-# ---------- the Postfix ingest ----------
-
 def _orders(queue):
     a, b = _message(queue, A_START, LISTED), _message(queue, B_START, NORMAL)
     a_lines, a_removed = a[:-1], a[-1:]
@@ -238,7 +208,6 @@ def test_the_ingest_stores_the_next_message_on_a_listed_messages_queue_id(env, o
 
 
 def test_a_listed_message_without_removed_still_takes_the_queue_id_for_a_day(env):
-    """Nothing proves two messages: as before, nothing of the queue id is stored."""
     env.listed()
     queue = _queue()
     _ingest(_message(queue, A_START, LISTED, removed=False), _message(queue, B_START, NORMAL))
@@ -246,8 +215,6 @@ def test_a_listed_message_without_removed_still_takes_the_queue_id_for_a_day(env
 
 
 def test_a_message_logged_in_one_second_is_one_message(env):
-    """Received, delivered and removed in one second, as a fast local delivery
-    is: every line of it is the listed message's, the next one is not."""
     env.listed()
     queue = _queue()
     _ingest(_message(queue, A_START, LISTED, one_second=True),
@@ -256,9 +223,6 @@ def test_a_message_logged_in_one_second_is_one_message(env):
 
 
 def test_the_next_messages_lines_in_the_removed_second_are_treated_as_before(env):
-    """The next message started in the second the listed one was removed: its
-    lines of that second cannot be told from the listed message's and are not
-    stored, as before; its later lines are."""
     env.listed()
     queue = _queue()
     a = _message(queue, A_START, LISTED)
@@ -269,10 +233,6 @@ def test_the_next_messages_lines_in_the_removed_second_are_treated_as_before(env
 
 
 def test_the_rspamd_ingest_deletes_only_between_postfix_pages(env):
-    """The Rspamd ingest lists a message while a Postfix page is being stored:
-    its deletion waits for the page, so it never reads where a message ends
-    before the page commits the "removed" that ends it (the next message
-    would be deleted), and the page never reads the memory half way through."""
     import threading
     from app import scheduler
     queue = _queue()
@@ -296,9 +256,6 @@ def test_the_rspamd_ingest_deletes_only_between_postfix_pages(env):
 
 
 def test_an_rspamd_page_whose_deletion_failed_is_stored_again_as_new(env, monkeypatch):
-    """The page is one transaction: when deleting an excluded message fails,
-    its other entries are not kept either, so the next try stores them as
-    new and the paging goes on to the pages behind it."""
     from app import scheduler
     monkeypatch.setattr(scheduler, 'seen_rspamd', set())
     env.listed()
@@ -323,8 +280,6 @@ def test_an_rspamd_page_whose_deletion_failed_is_stored_again_as_new(env, monkey
 
 
 def test_a_line_committed_while_a_listed_message_is_deleted_goes_with_it(env, monkeypatch):
-    """The Postfix ingest commits a line of the listed message after the
-    deletion read what it needs: it is deleted too, as the time is what counts."""
     from app.database import get_db_context
     from app.services import excluded_addresses
     queue = _queue()
@@ -346,14 +301,12 @@ def test_a_line_committed_while_a_listed_message_is_deleted_goes_with_it(env, mo
     assert _stored(queue) == []
 
 
-# ---------- the cleanup and the Rspamd ingest ----------
-
 def test_the_cleanup_keeps_the_next_message_on_a_listed_messages_queue_id(env):
     from app.services import excluded_addresses
     from app.database import get_db_context
     queue = _queue()
     _store(_message(queue, A_START, LISTED) + _message(queue, B_START, NORMAL))
-    key_a = _correlation(queue, A_START, NORMAL)  # an alias: only its Postfix line names the address
+    key_a = _correlation(queue, A_START, NORMAL)
     key_b = _correlation(queue, B_START, NORMAL)
     env.listed()
     with get_db_context() as db:
@@ -379,9 +332,6 @@ def test_the_rspamd_ingest_keeps_the_next_message_on_a_listed_messages_queue_id(
 
 
 def test_the_cleanup_keeps_a_delivery_whose_excluded_written_address_its_own_lines_do_not_name(env):
-    """The written address can have come from another message's line (the old
-    one-day window). With its own lines stored and none naming the address,
-    the delivery stays (still hidden); without stored lines it goes, as before."""
     from app.services import excluded_addresses
     from app.database import get_db_context
     queue, gone = _queue(), _queue()
@@ -394,8 +344,6 @@ def test_the_cleanup_keeps_a_delivery_whose_excluded_written_address_its_own_lin
     assert _keys() == {kept}
     assert _client().get(f'/api/message/{kept}/details').status_code == 404
 
-
-# ---------- readers, before the cleanup ----------
 
 def test_every_reader_shows_the_next_message_and_hides_the_listed_one(env):
     queue = _queue()
@@ -414,10 +362,8 @@ def test_every_reader_shows_the_next_message_and_hides_the_listed_one(env):
 
     export = client.get('/api/export/postfix/csv', params={'search': queue}).text
     assert NORMAL in export and LISTED not in export
-    assert f'{queue}.{A_START:%H%M%S}' not in export  # the listed message's own Message-ID line
+    assert f'{queue}.{A_START:%H%M%S}' not in export
 
-    # Both SQL filters, line by line: the listed message's lines that name no
-    # address are hidden with it, the next message's are not
     from app.database import get_db_context
     from app.models import PostfixLog
     from app.services import excluded_addresses
@@ -440,9 +386,6 @@ def test_every_reader_shows_the_next_message_and_hides_the_listed_one(env):
 
 
 def test_without_removed_the_details_hide_both_as_the_list_does(env):
-    """Nothing proves two messages, so the list hides the queue id's lines
-    within a day of the listed one; the details decide on the same lines
-    (not on the lines they show), so they agree."""
     queue = _queue()
     _store(_message(queue, A_START, LISTED, removed=False) + _message(queue, B_START, NORMAL))
     key_b = _correlation(queue, B_START, NORMAL)
@@ -451,8 +394,6 @@ def test_without_removed_the_details_hide_both_as_the_list_does(env):
     assert client.get('/api/logs/postfix', params={'queue_id': queue}).json()['total'] == 0
     assert client.get(f'/api/message/{key_b}/details').status_code == 404
 
-
-# ---------- block evidence and the written recipient ----------
 
 def test_block_evidence_holds_no_line_of_the_message_before(env):
     from app.database import get_db_context
@@ -479,7 +420,6 @@ def test_the_written_address_is_not_read_after_the_messages_removed(env):
     a = _message(queue, A_START, NORMAL)
     _store(a + [(B_START, 'postfix/smtp', f'{queue}: to=<Dana.Lee@gmail.test>, relay=mx.example.test[192.0.2.30]:25, '
                                           f'delay=1, delays=0.1/0/0/0.9, dsn=2.0.0, status=sent (250 ok)')])
-    # The next message's delivery has no correlation yet: the one stored is the only owner
     _correlation(queue, A_START, NORMAL)
     with get_db_context() as db:
         lines = delivery_lines(db, SimpleNamespace(first_seen=A_START, created_at=A_START, queue_id=queue,

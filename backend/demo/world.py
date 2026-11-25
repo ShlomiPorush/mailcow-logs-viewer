@@ -1,12 +1,3 @@
-"""
-The fictional mail server the demo shows.
-
-Everything here is invented: domains are reserved example names (RFC 2606)
-or under the .test TLD, and every IP address is from the documentation
-ranges (RFC 5737: 192.0.2.0/24, 198.51.100.0/24, 203.0.113.0/24; RFC 3849:
-2001:db8::/32). Times are relative to the moment the world is built, so a
-freshly reset demo always looks current.
-"""
 import time
 
 GiB = 1024 ** 3
@@ -16,7 +7,6 @@ SERVER_IPV4 = "203.0.113.10"
 SERVER_IPV6 = "2001:db8::10"
 MAIL_HOST = "mail.example.com"
 
-# Hosted domains. example.net is an alias domain of example.com.
 DOMAINS = [
     {"domain": "example.com", "active": 1, "max_mboxes": 50, "max_aliases": 400, "max_quota": 200 * GiB,
      "created": "2023-03-14 09:12:00", "backupmx": 0},
@@ -32,7 +22,6 @@ ALIAS_DOMAINS = [
     {"alias_domain": "example.net", "target_domain": "example.com", "active": 1},
 ]
 
-# (local part, domain, display name, quota GiB, used MiB, messages, rate limit per hour or None)
 MAILBOXES = [
     ("alice", "example.com", "Alice Moreau", 10, 3480, 12840, 200),
     ("bob", "example.com", "Bob Tanaka", 10, 1210, 5320, None),
@@ -49,7 +38,6 @@ MAILBOXES = [
     ("support", "shop.test", "Shop Support", 5, 960, 4150, None),
 ]
 
-# Accounts without SMTP access or disabled, so badges vary
 INACTIVE_MAILBOXES = {"ivan@example.org"}
 NO_POP3 = {"alice@example.com", "bob@example.com", "carol@example.com", "grace@example.org"}
 
@@ -66,7 +54,6 @@ ALIASES = [
 ]
 CATCH_ALL = ("@shop.test", "support@shop.test")
 
-# Partners and senders on the internet the demo server talks to
 REMOTE_DOMAINS = ["partner.test", "supplier.test", "customer-mail.test", "bank.test",
                   "travel.test", "news.test", "cloud-tools.test", "university.test"]
 SPAM_DOMAINS = ["bulk-offers.test", "prize-center.test", "secure-login.test", "cheap-meds.test"]
@@ -77,9 +64,6 @@ SPAM_IPS = ["203.0.113.66", "203.0.113.77", "203.0.113.88", "203.0.113.99"]
 ATTACKER_IPS = ["203.0.113.5", "203.0.113.45", "198.51.100.200", "192.0.2.150", "192.0.2.201"]
 CLIENT_IPS = ["192.0.2.10", "192.0.2.11", "198.51.100.12", "198.51.100.13"]
 
-# ActiveSync phones and tablets: (mailbox, device id, device type, share of
-# hours with a request, addresses it connects from). heidi's phone keeps the
-# old password after a change, so its recent requests fail.
 EAS_DEVICES = [
     ("alice@example.com", "ApplF2C8A1D94B7E", "iPhone", 0.9, ["192.0.2.10", "198.51.100.13"]),
     ("alice@example.com", "ApplDMPXK2LZ9B1E", "iPad", 0.3, ["192.0.2.10"]),
@@ -96,7 +80,6 @@ CONTAINERS = ["acme", "clamd", "dockerapi", "dovecot", "memcached", "mysql", "ne
 
 MAILCOW_VERSION = "2026-08"
 
-# Deterministic, obviously fake key material (not a real RSA key)
 DKIM_KEY = "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAdemoDEMOdemoDEMOdemoDEMOdemoDEMOdemoDEMOdemoKEY0AQAB"
 
 RSPAMD_MAPS = [
@@ -169,7 +152,6 @@ def build_mailboxes(now=None):
         quota = quota_gib * GiB
         used = used_mib * MiB
         active = 0 if username in INACTIVE_MAILBOXES else 1
-        # Staggered, recent logins; service accounts never log in over IMAP
         service_account = local in ("noreply", "billing", "orders")
         last_imap = 0 if service_account or not active else now - (i * 1370 + 600)
         last_smtp = 0 if not active else now - (i * 911 + 120)
@@ -187,7 +169,6 @@ def build_mailboxes(now=None):
             "last_imap_login": last_imap,
             "last_pop3_login": 0,
             "last_smtp_login": last_smtp,
-            # Webmail or a phone through SOGo for every other person
             "last_sogo_login": 0 if service_account or not active or i % 2 else now - (i * 2113 + 900),
             "spam_aliases": 1 if local in ("alice", "grace") else 0,
             "rl": {"value": str(rl), "frame": "h"} if rl else False,
@@ -214,9 +195,6 @@ def build_aliases():
 
 
 def build_queue(now=None):
-    # Recipients are outside the generated traffic's address pool: a bounce in
-    # the history would otherwise suppress them, and the suppression cleanup
-    # would delete these queue items before a visitor sees them.
     now = int(now or time.time())
     return [
         {"queue_name": "deferred", "queue_id": "4Qd7Kx2Lm9", "arrival_time": now - 5 * 3600,

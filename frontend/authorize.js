@@ -1,13 +1,3 @@
-// =============================================================================
-// CONNECT AN AGENT - the consent page (/oauth/consent)
-// =============================================================================
-// An AI agent opened this page to ask for access. The signed-in person sees
-// who is asking, picks View and Act per area and the period, then allows or
-// denies; either way the browser goes back to the agent with the answer.
-// Everything the agent sent (its name, its address) is set as text, never
-// as markup.
-// =============================================================================
-
 const consentRequestId = new URLSearchParams(window.location.search).get('request') || '';
 let consentDays = null;
 
@@ -27,7 +17,7 @@ async function consentErrorText(response, fallback) {
     try {
         const body = await response.json();
         if (body && typeof body.detail === 'string') return body.detail;
-    } catch (e) { /* not JSON */ }
+    } catch (e) {}
     return fallback;
 }
 
@@ -90,7 +80,6 @@ function consentRenderAreas(areas, preselected) {
     host.addEventListener('change', consentBoxChanged);
 }
 
-// Act includes View: ticking Act ticks View, and clearing View clears Act
 function consentBoxChanged(event) {
     const box = event.target;
     if (!box.dataset || !box.dataset.area) return;
@@ -139,7 +128,6 @@ function consentPickPeriod(button) {
     });
 }
 
-// Arrow keys move between the periods, as in any radio group
 function consentPeriodKeys(event) {
     const keys = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 };
     if (!(event.key in keys)) return;
@@ -192,20 +180,13 @@ function consentRender(data) {
     consentEl('consent-loading').classList.add('hidden');
     consentEl('consent-form').classList.remove('hidden');
     consentShowActWarning();
-    // The page opens at its top, where the person checks who asks and the code.
-    // Nothing takes focus: Allow is chosen on purpose, never by a stray Enter
+    // Focus on Allow would let a stray Enter approve the agent
     window.scrollTo(0, 0);
 }
 
-// The session ended (or there is none): to the login page, which says why when
-// a limit ended it (session-guard.js), and back to this request after signing in
 async function consentToLogin(response) {
     const here = window.location.pathname + window.location.search;
-    if (typeof sessionGuardLoginPath === 'function') {
-        window.location.replace(sessionGuardLoginPath(await sessionGuardReasonOf(response), here));
-    } else {
-        window.location.replace('/login?next=' + encodeURIComponent(here));
-    }
+    window.location.replace(sessionGuardLoginPath(await sessionGuardReasonOf(response), here));
 }
 
 async function consentAnswer(allow) {
@@ -251,7 +232,6 @@ async function consentAnswer(allow) {
         consentEl('consent-form').classList.add('hidden');
         consentEl('consent-done-title').textContent = allow ? 'Access allowed' : 'Access denied';
         consentEl('consent-done').classList.remove('hidden');
-        // An agent that connects with a code collects the answer itself: nothing to go back to here
         if (body.redirect) window.location.replace(body.redirect);
     } catch (e) {
         consentEl('consent-form-error-text').textContent = 'Could not save your choice. Check your connection and try again.';

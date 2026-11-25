@@ -1,8 +1,3 @@
-"""
-The demo's example agents: Settings > Agents shows them with their activity
-and lets visitors edit and disconnect them, while no agent can connect,
-since the demo has no sign-in.
-"""
 from pathlib import Path
 
 import pytest
@@ -43,7 +38,6 @@ def _wipe():
 
 @pytest.fixture
 def demo_agents(monkeypatch):
-    """Sign-in and agent access off, as in the demo image, with the example agents seeded."""
     if not _postgres_available():
         pytest.skip('PostgreSQL not available')
     from app.database import init_db
@@ -71,7 +65,6 @@ def test_the_examples_show_in_settings_but_cannot_be_used(demo_agents):
     assert [agents[n]["state"] for n in ("Claude Code", "Codex", "Cursor")] == ["connected", "connected", "disconnected"]
     with get_db_context() as db:
         assert db.query(AgentToken).count() == 0
-    # No agent can ask to connect: everything agents use answers 404 while agent access is off
     assert demo_agents.post("/oauth/device", data={"client_id": "mailcow-logs-cli"}).status_code == 404
     assert demo_agents.get("/api/messages", headers={"Authorization": "Bearer x"}).status_code == 401
 

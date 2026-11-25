@@ -1,10 +1,3 @@
-// A page opened by its own address (a link, a bookmark, a reload) opens at once
-// in a real DOM (jsdom), with the real index.html and every script it loads: it
-// does not wait for the checks that read mailcow or GitHub, which take their
-// whole timeout when mailcow cannot be reached. jsdom is installed by CI outside
-// the repository; set A11Y_MODULES to its node_modules:
-//   npm install --no-save --prefix /tmp/a11y jsdom axe-core
-//   A11Y_MODULES=/tmp/a11y/node_modules node --test .github/tests/deep-link.a11y.cjs
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -16,8 +9,6 @@ const { JSDOM, VirtualConsole } = require(path.join(modules, 'jsdom'));
 const frontend = path.join(__dirname, '../../frontend');
 const read = name => fs.readFileSync(path.join(frontend, name), 'utf8');
 
-// The page as served. jsdom loads no external file, so its script tags stay
-// inert; the app's own scripts (not the vendored libraries) run in its order
 const html = read('index.html');
 const scripts = [...new JSDOM(html).window.document.querySelectorAll('script[src]')]
     .map(el => new URL(el.getAttribute('src'), 'http://localhost').pathname)
@@ -28,10 +19,6 @@ const INFO = { app_title: 'mailcow Logs Viewer', version: '3.0.0', auth_enabled:
     settings_edit_via_ui_enabled: true, timezone: 'UTC' };
 const answer = body => ({ ok: true, status: 200, headers: { get: () => null }, json: async () => body, clone() { return this; } });
 
-// Sign-in and /api/info answer at once. The mailcow connection and app version
-// checks answer only when the test releases them (every request to one of them
-// at once); every other request never does. jsdom fires DOMContentLoaded itself
-// once the scripts below have run.
 function boot(address) {
     const dom = new JSDOM(html, { runScripts: 'dangerously', pretendToBeVisual: true,
         url: `http://localhost${address}`, virtualConsole: new VirtualConsole() });
@@ -84,7 +71,6 @@ test('a Settings tab opened by its address loads Settings while mailcow does not
     }
 });
 
-// Every page, every tab of a page with tabs, and the addresses of pages that moved
 function addresses() {
     const p = boot('/');
     try {
@@ -117,7 +103,6 @@ test('every page and tab opened by its address opens while mailcow and GitHub do
         const p = boot(path);
         try {
             const want = canonical ? canonical.route : route;
-            // The old Security addresses open the card of the Settings tab they became
             const aliases = want === 'netfilter' ? p.w.eval('SECURITY_TAB_ALIASES') : {};
             const wantSub = canonical ? canonical.params.sub : (sub in aliases ? 'settings' : sub);
             const ok = await until(() => p.w.eval('currentTab') === want && shown(p.w).join() === `content-${want}`);

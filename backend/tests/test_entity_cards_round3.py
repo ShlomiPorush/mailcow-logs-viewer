@@ -1,6 +1,3 @@
-"""The entity card, fourth round: an IPv4-compatible IPv6 address in the
-dotted form glibc writes, and one snapshot for a source that pages through
-address candidates. Builds on the rows of test_entity_cards (March 2020)."""
 from datetime import datetime, timedelta
 
 import pytest
@@ -9,7 +6,7 @@ from test_entity_cards import AT, IP, MARK, RANGE, _card, client  # noqa: F401
 
 from app.services import entity_summary, entity_values
 
-COMPAT = "::203.0.113.4"          # ::cb00:7104 as glibc's inet_ntop writes it
+COMPAT = "::203.0.113.4"
 SNAP_DOMAIN = f"snap{MARK}.example"
 V6 = "2001:db8::1"
 
@@ -34,7 +31,6 @@ def round3(client):  # noqa: F811
                              begin_date=_epoch(AT - timedelta(days=1)), end_date=_epoch(AT), created_at=AT)
         db.add(report)
         db.flush()
-        # Three other IPv6 texts and one spelling of 2001:db8::1 the closed set does not hold
         for n in (1, 2, 3):
             db.add(DMARCRecord(dmarc_report_id=report.id, source_ip=f"2001:0000::{n}", count=100, spf_result="pass"))
         db.add(DMARCRecord(dmarc_report_id=report.id, source_ip="2001:0db8::1", count=9, spf_result="pass"))
@@ -43,8 +39,6 @@ def round3(client):  # noqa: F811
     client.report_id = report_id
     yield client
 
-
-# ---------------------------------------------------------------- R9 IPv4-compatible
 
 @pytest.mark.parametrize("typed", ["::cb00:7104", "::203.0.113.4", "0:0:0:0:0:0:cb00:7104"])
 def test_ipv4_compatible_address_in_glibc_form_is_found(round3, typed):
@@ -64,11 +58,7 @@ def test_ipv4_compatible_address_is_not_the_ipv4_address(round3):
     assert "::ffff:203.0.113.4" not in entity_values.ip_spellings("::cb00:7104")
 
 
-# ---------------------------------------------------------------- R10 one snapshot
-
 def test_a_commit_between_candidate_pages_does_not_change_the_count(round3, monkeypatch):
-    """A report imported while the card pages through the address candidates
-    is not half counted: the source reads one snapshot."""
     from app.database import get_db_context
     from app.models import DMARCRecord
     monkeypatch.setattr(entity_summary, "IP_TEXTS_CHUNK", 2, raising=False)
@@ -76,9 +66,8 @@ def test_a_commit_between_candidate_pages_does_not_change_the_count(round3, monk
     state = {"inserted": False}
 
     def same_ip_then_import(stored, ip):
-        if not state["inserted"] and str(stored).startswith("2001:0000::"):   # a page of this DMARC source
+        if not state["inserted"] and str(stored).startswith("2001:0000::"):
             state["inserted"] = True
-            # Another session commits two records of the address while the first page is read
             with get_db_context() as other:
                 other.add(DMARCRecord(dmarc_report_id=round3.report_id, source_ip=V6, count=5, spf_result="pass"))
                 other.add(DMARCRecord(dmarc_report_id=round3.report_id, source_ip="2001:DB8:0::1", count=7,
@@ -90,8 +79,6 @@ def test_a_commit_between_candidate_pages_does_not_change_the_count(round3, monk
     dmarc = _card(round3, "ip", V6)["sources"]["dmarc"]
     assert state["inserted"]
     assert dmarc["state"] == "ok"
-    # What the snapshot held when the source started: only the record of 9
     assert dmarc["messages"] == 9 and dmarc["reports"] == 1
     assert [r["count"] for r in dmarc["records"]] == [9]
-    # The next card sees the new records
     assert _card(round3, "ip", V6)["sources"]["dmarc"]["messages"] == 21

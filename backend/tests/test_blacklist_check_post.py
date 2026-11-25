@@ -1,10 +1,3 @@
-"""A blacklist check runs only from a POST sent by the app's own pages.
-
-The check was a GET, and the origin guard only inspects POST, PUT, PATCH and
-DELETE. Authentication is off by default and the session cookie is SameSite
-Lax, so a link or image on another site could start the all-hosts check, and
-with it the blacklist alert to every configured recipient.
-"""
 from unittest.mock import AsyncMock
 
 import pytest

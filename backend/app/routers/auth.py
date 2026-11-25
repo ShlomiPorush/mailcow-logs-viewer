@@ -1,7 +1,3 @@
-"""
-OAuth2/OIDC Authentication Router
-Handles OAuth2 login flow, callbacks, logout, and status
-"""
 import base64
 import binascii
 import hashlib
@@ -47,28 +43,14 @@ router = APIRouter()
 
 
 def _admitted_generation(request: Request) -> int:
-    """auth_generation() when the middleware admitted this request (auth.py).
-
-    A request the middleware did not see gets no session at all, rather than
-    one that skips the check.
-    """
     generation = getattr(request.state, "auth_generation", None)
     if not isinstance(generation, int):
         raise SessionRevokedError("The request was not admitted by the sign-in middleware")
     return generation
 
 
-# A login must be completed within ten minutes.
 OAUTH_STATE_TTL = 600
 OAUTH_COOKIE_PREFIX = "oauth_state_"
-# Starting a login keeps nothing on the server, so unauthenticated clients
-# cannot fill a shared store and block everyone's login. The state is
-# "<expiry>.<HMAC>", signed over a random nonce that only the starting
-# browser holds (in an HttpOnly cookie), the expiry and the return page.
-# Callbacks are single-use: a consumed state is remembered until it expires.
-# The application runs one worker, so this in-process record is complete.
-# At the size limit the oldest entry is dropped; replaying it would still need
-# the browser's cookie, and the provider accepts each authorization code once.
 MAX_CONSUMED_OAUTH_STATES = 65536
 _consumed_states: "OrderedDict[str, int]" = OrderedDict()
 _STATE_RE = re.compile(r"(\d{1,12})\.([A-Za-z0-9_-]{43})")
@@ -85,45 +67,26 @@ def _state_signature(nonce: str, expires: str, return_to: str) -> str:
 
 
 def _pkce_verifier(nonce: str) -> str:
-    """The PKCE code_verifier (RFC 7636) for the login started with this cookie nonce.
-
-    Derived from the session secret, so the callback can recompute it without
-    server-side storage, and it never appears in the state, the cookie or the
-    authorization URL. 43 base64url characters, the minimum RFC 7636 allows.
-    """
     message = "\n".join(("oauth-pkce", nonce)).encode("utf-8")
     return _b64(hmac.new(get_session_secret_key().encode("utf-8"), message, hashlib.sha256).digest())
 
 
 def _pkce_challenge(verifier: str) -> str:
-    """The S256 code_challenge for a code_verifier."""
     return _b64(hashlib.sha256(verifier.encode("ascii")).digest())
 
 
 def _new_browser_value(return_to: str) -> str:
-    """The browser cookie value: a fresh random nonce plus the page to return to.
-
-    It carries no secret; only the state sent to the provider is signed.
-    """
     return f"{secrets.token_urlsafe(32)}.{_b64(return_to.encode('utf-8'))}"
 
 
 def _signed_state(browser_value: str) -> str:
-    """The state sent to the provider, signed over the cookie's nonce and return page."""
     nonce, _, encoded = browser_value.partition(".")
     return_to = base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4)).decode("utf-8")
     expires = str(int(time.time()) + OAUTH_STATE_TTL)
     return f"{expires}.{_state_signature(nonce, expires, return_to)}"
 
 
-def _new_oauth_flow(return_to: str) -> tuple[str, str]:
-    """A signed state for the provider and the matching value for the browser cookie."""
-    browser_value = _new_browser_value(return_to)
-    return _signed_state(browser_value), browser_value
-
-
 def _verify_oauth_flow(state: Optional[str], cookie_value: str) -> Optional[str]:
-    """The page to return to when state and cookie belong together and are current, else None."""
     match = _STATE_RE.fullmatch(state or "")
     nonce, _, encoded = (cookie_value or "").partition(".")
     if not match or not _NONCE_RE.fullmatch(nonce) or len(encoded) > 4096:
@@ -141,7 +104,6 @@ def _verify_oauth_flow(state: Optional[str], cookie_value: str) -> Optional[str]
 
 
 def _cleanup_oauth_states() -> None:
-    """Forget used states that have expired (they can no longer pass verification)."""
     now = time.time()
     for state, expires in list(_consumed_states.items()):
         if expires <= now:
@@ -149,7 +111,6 @@ def _cleanup_oauth_states() -> None:
 
 
 def _consume_oauth_state(state: str) -> bool:
-    """Record a state as used; False when it was used before."""
     now = time.time()
     while _consumed_states:
         oldest, expires = next(iter(_consumed_states.items()))
@@ -214,14 +175,12 @@ def create_basic_auth_session(request: Request):
         return _new_session(request, {"username": username or settings.auth_username, "auth_method": "basic"},
                             {"kind": "builtin"})
 
-    # Not the built-in admin: a local user, checked outside the failure counters' lock
     try:
         user = users_store.verify_sign_in(username, password)
     except users_store.SignInBusy:
         raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=users_store.BUSY,
                             headers={"Retry-After": "1"})
     except Exception as e:
-        # Not counted as a failure: an outage must not lock the client out
         logger.error(f"Could not check a local user's sign-in: {e}")
         raise _sign_in_unavailable()
     if user is None:
@@ -234,7 +193,6 @@ def create_basic_auth_session(request: Request):
         logger.error(f"Could not check a local user's sign-in: {e}")
         raise _sign_in_unavailable()
     if version != user["auth_version"]:
-        # Changed by an admin while the password was checked
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=_SIGN_IN_CHANGED)
     response = _new_session(request, {"username": user["username"], "auth_method": "basic"},
                             {"kind": "local", "user_id": user["user_id"], "auth_version": version})
@@ -254,8 +212,6 @@ def _new_session(request: Request, user_info: dict, principal: dict) -> JSONResp
     try:
         session_id = create_session(user_info, generation=_admitted_generation(request), principal=principal)
     except SessionRevokedError:
-        # Sign-in changed after this login was let in, e.g. a new password:
-        # a session now would outlive the change
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=_SIGN_IN_CHANGED)
     except SessionCapacityError:
         raise HTTPException(
@@ -297,7 +253,6 @@ async def oauth2_login(request: Request, next: Optional[str] = None):
         )
     
     try:
-        # Initialize client (perform discovery if needed)
         await oauth2_client.initialize()
 
         browser_value = _new_browser_value(safe_return_path(next))
@@ -307,9 +262,6 @@ async def oauth2_login(request: Request, next: Optional[str] = None):
             state, code_challenge=_pkce_challenge(_pkce_verifier(nonce)),
         )
         response = RedirectResponse(url=auth_url)
-        # A separate cookie per flow permits concurrent logins in different tabs.
-        # Lax allows the provider's top-level GET callback; no Domain scopes it
-        # to this host. Follow the existing session cookie's HTTPS policy.
         response.set_cookie(
             key=OAUTH_COOKIE_PREFIX + state, value=browser_value,
             max_age=OAUTH_STATE_TTL, httponly=True,
@@ -352,8 +304,6 @@ async def oauth2_callback(
     
     browser_value = request.cookies.get(OAUTH_COOKIE_PREFIX + state, "") if state else ""
     return_to = _verify_oauth_flow(state, browser_value)
-    # Consume before any await, including on provider errors or missing codes.
-    # A callback from another browser must not consume the owner's state.
     if return_to is None or not _consume_oauth_state(state):
         logger.warning("Invalid, expired, reused or unbound state in OAuth2 callback")
         return RedirectResponse(url="/login?error=invalid_state", status_code=302)
@@ -367,8 +317,6 @@ async def oauth2_callback(
         return _oauth_redirect("/login?error=missing_code", state, request)
     
     try:
-        # Exchange code for token
-        # The cookie's nonce was verified with the state above
         code_verifier = _pkce_verifier(browser_value.partition(".")[0])
         token_data = await oauth2_client.exchange_code_for_token(code, code_verifier=code_verifier)
         access_token = token_data.get('access_token')
@@ -377,11 +325,8 @@ async def oauth2_callback(
             logger.error("No access token in token response")
             return _oauth_redirect("/login?error=no_token", state, request)
         
-        # Get user information
         user_info = await oauth2_client.get_user_info(access_token)
 
-        # The person's access, before any session exists: an entry that is
-        # disabled, or a default of no access, signs nobody in
         principal = user_access.oauth2_ref(user_info)
         try:
             await run_in_threadpool(user_access.still_resolves, principal)
@@ -389,13 +334,10 @@ async def oauth2_callback(
             logger.warning("OAuth2 login refused: this person has no access to the app")
             return _oauth_redirect("/login?error=no_access", state, request)
 
-        # Create session, unless sign-in changed since the callback was let in
         session_id = create_session(user_info, generation=_admitted_generation(request), principal=principal)
         
-        # Create response with redirect
         response = _oauth_redirect(return_to, state, request)
         
-        # Set session cookie
         set_session_cookie(response, session_id, request)
         
         logger.info(f"OAuth2 login successful for user: {user_info.get('email', 'unknown')}")
@@ -440,7 +382,6 @@ def oauth2_logout(request: Request):
 
 @router.get("/auth/logout", include_in_schema=False)
 def oauth2_logout_get():
-    """Explicit 405: without this route the SPA catch-all would answer GET with the page."""
     raise HTTPException(
         status_code=status.HTTP_405_METHOD_NOT_ALLOWED,
         detail="Log out with POST",
@@ -479,7 +420,6 @@ def auth_status(request: Request):
     Returns current user info if authenticated, and for a session cookie how
     long the session has left. Reading it never counts as activity.
     """
-    # Who is asking and what they may do (user_access.py); everything while sign-in is off
     principal = getattr(request.state, "principal", None)
     who = {
         "user_name": principal.name if principal is not None and settings.is_authentication_enabled else None,
@@ -487,7 +427,6 @@ def auth_status(request: Request):
         "scopes": [s for s in all_scopes() if principal is not None
                    and (principal.is_admin or s in principal.scopes)],
     }
-    # Session cookie (OAuth2 login, or Basic Auth exchanged for a session)
     session_data = get_session_from_request(request)
     limits = session_limits(request) if session_data else None
     if session_data and limits is not None:
@@ -500,16 +439,13 @@ def auth_status(request: Request):
             **who,
         }
 
-    # Check Basic Auth (if enabled)
     if settings.is_basic_auth_enabled:
         authorization = request.headers.get("Authorization", "")
         if authorization.startswith("Basic "):
-            # Basic Auth is present, but we don't return user info for Basic Auth
-            # The middleware handles validation
             return {
                 "authenticated": True,
                 "auth_type": "basic",
-                "user": None,  # Basic Auth doesn't provide user info
+                "user": None,
                 "session": None,
                 **who,
             }

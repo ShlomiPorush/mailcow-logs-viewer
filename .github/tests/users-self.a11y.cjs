@@ -1,10 +1,3 @@
-// Settings > Users knows who is looking (GET /api/users you) and asks before a change that takes
-// something away from that person's own access: their own row has a You tag; editing their own
-// user to less access, disabling it or deleting it, and changing the access for everyone else
-// while they get it themselves (an OAuth2 sign-in without an entry), and adding an OAuth2 entry
-// for one's own email with less access or sign-in disabled, each ask first, in plain
-// words, and send nothing on Cancel. A change that takes nothing away asks nothing.
-// Set A11Y_MODULES to jsdom's node_modules to run it locally (see layers.a11y.cjs).
 const assert = require('node:assert/strict');
 const { randomBytes } = require('node:crypto');
 const fs = require('node:fs');
@@ -46,13 +39,11 @@ function page({ you, status, defaultAccess = 'admin' }) {
     [read('utils.js'), read('users.js')].forEach(run);
     const sent = [];
     w.authenticatedFetch = async (url, options) => {
-        // The password check stores nothing: answered, not counted as sent
         if (url === '/api/users/password-check') return { ok: true, status: 200, json: async () => ({ ok: true, problem: null }) };
         sent.push({ url, method: options && options.method, body: options && options.body ? JSON.parse(options.body) : null });
         return { ok: true, status: 200, json: async () => ({ default_access: 'viewer', version: 2 }) };
     };
     w.loadUsersPanel = () => {};
-    // app.js draws the panel through this; here it only needs to draw
     w.uiReplaceKeepingFocus = (box, html) => { box.innerHTML = html; };
     const data = {
         areas: AREAS, presets: Object.entries(PRESETS).map(([id, areas]) => ({ id, label: id, areas: id === 'custom' ? {} : areas })),
@@ -63,7 +54,6 @@ function page({ you, status, defaultAccess = 'admin' }) {
     };
     run(`setAppAccess(${JSON.stringify({ authenticated: true, ...status })}); usersData = ${JSON.stringify(data)}; renderUsersPanel();`);
     const $ = sel => w.document.querySelector(sel);
-    // The question shown, if any, answered with Cancel or its own button
     const asked = () => $('#app-confirm-modal') && { text: $('#app-confirm-modal .ui-confirm-text').textContent, ok: $('#app-confirm-ok').textContent };
     const answer = async ok => { $(ok ? '#app-confirm-ok' : '#app-confirm-cancel').click(); await new Promise(r => setTimeout(r, 0)); };
     const tick = () => new Promise(r => setTimeout(r, 0));
@@ -106,7 +96,6 @@ test('making oneself a Viewer asks first, says what is lost, and Cancel sends no
 });
 
 test('a change that takes nothing away from oneself asks nothing', async () => {
-    // Only an admin edits users: staying Admin (here, a new password) takes nothing away
     const p = page({ you: { kind: 'local', user_id: 2, via_default: false }, status: ADMIN });
     p.w.editUser(2);
     p.$('#user-edit-pass').value = randomBytes(16).toString('hex');
@@ -114,7 +103,6 @@ test('a change that takes nothing away from oneself asks nothing', async () => {
     assert.equal(p.asked(), null);
     assert.equal(p.sent.length, 1);
     assert.equal(p.sent[0].body.access, 'admin');
-    // Someone else's user: no question either
     const q = page({ you: { kind: 'local', user_id: 2, via_default: false }, status: ADMIN });
     q.w.editUser(3);
     q.$('#user-edit-disabled').checked = true;
@@ -192,7 +180,6 @@ test('adding an OAuth2 entry for one\'s own email with less access, or disabled,
         p.$('#user-edit-disabled').checked = disabled;
         return p.w.saveUser({ preventDefault() {} }, null);
     };
-    // Compared as the server compares: spaces, case
     const saving = add(' Dave@Example.COM ', 'viewer', false);
     await p.tick();
     assert.deepEqual(p.asked(), {
@@ -211,7 +198,6 @@ test('adding an OAuth2 entry for one\'s own email with less access, or disabled,
     await disabling;
     assert.equal(p.sent.length, 1);
     assert.equal(p.sent[0].body.email, 'dave@example.com');
-    // Someone else's email, or one's own as Admin: no question
     for (const [email, level] of [['erin@example.com', 'viewer'], ['dave@example.com', 'admin']]) {
         const q = page({ you, status: { ...ADMIN, user_name: 'dave@example.com' } });
         q.w.editUser(null);

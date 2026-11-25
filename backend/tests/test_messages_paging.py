@@ -1,7 +1,3 @@
-"""Messages pages: addresses hidden with Blacklist Emails are left out by the
-query, so a page is never empty while messages follow and the total counts
-only what can be shown; the next page starts after the last message shown (a
-cursor), so a message removed in between skips nothing."""
 import uuid
 from datetime import datetime, timedelta
 
@@ -45,7 +41,6 @@ def client(monkeypatch):
     cleanup()
     now = datetime.utcnow().replace(microsecond=0)
     with get_db_context() as db:
-        # The newest five go to the hidden address; ten shown ones follow
         for minute in range(15):
             db.add(MessageCorrelation(correlation_key=uuid.uuid4().hex, sender=SENDER,
                                       recipient=HIDDEN if minute < 5 else f'r{minute}@example.org',
@@ -92,7 +87,6 @@ def test_a_message_removed_between_pages_skips_nothing(client):
     from app.models import MessageCorrelation
     first = _page(client, 'order=asc&limit=4')
     assert _subjects(first) == ['m14', 'm13', 'm12', 'm11']
-    # Retention removes the oldest one shown before the next page is asked for
     with get_db_context() as db:
         db.query(MessageCorrelation).filter(MessageCorrelation.subject == f'm14 {MARK}').delete(synchronize_session=False)
         db.commit()
@@ -172,7 +166,6 @@ def test_the_delivery_that_stands_for_a_message_is_the_earliest_by_the_list_time
     now = datetime.utcnow().replace(microsecond=0)
     mid = f'<two-legs-{MARK}@example.com>'
     with get_db_context() as db:
-        # Stored 30 seconds into the list with no first-seen time, delivered again later
         db.add(MessageCorrelation(correlation_key=uuid.uuid4().hex, sender=SENDER, recipient='a@example.org', message_id=mid,
                                   direction='outbound', subject=f'legA {MARK}', final_status='delivered',
                                   first_seen=None, last_seen=now, created_at=now - timedelta(seconds=330)))

@@ -1,12 +1,3 @@
-"""
-The entity card: what the app stores about one IP address, email address or
-domain, opened from any page (services/entity_summary.py).
-
-The value is a query parameter (an address may hold '/' or '%'); it is read
-by services/entity_values.py, and a value that is not one IP, address or
-domain answers 422 with what to change. Not offered to AI agents
-(agent_access/scopes.py EXCLUDED).
-"""
 import logging
 from typing import Optional
 
@@ -25,7 +16,6 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-# How long the card waits for mailcow's Fail2ban lists before it shows them as unknown
 FAIL2BAN_WAIT_SECONDS = 5
 
 _VALUE_MAX = 1024
@@ -50,8 +40,6 @@ def _range(start_date, end_date):
 
 
 def _read_fail2ban():
-    """mailcow's Fail2ban answer, or None when it does not answer in time. Runs
-    the client on the event loop from this worker thread."""
     async def read():
         with anyio.move_on_after(FAIL2BAN_WAIT_SECONDS):
             return await mailcow_api.get_fail2ban()

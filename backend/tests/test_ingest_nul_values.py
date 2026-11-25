@@ -1,13 +1,3 @@
-"""One value the database refuses must not cost the rest of a page.
-
-Mail log lines and quarantine items carry text that whoever sends the mail
-chooses. PostgreSQL cannot store NUL in a text or JSON column, and each page
-of Postfix, Rspamd, Netfilter and raw log lines, and each run's quarantine
-rule history, was committed at once: one such value rolled back every row
-with it, and the same page failed again on every cycle. NUL is now dropped
-before anything reads the entry, and a row the database still refuses is
-skipped alone.
-"""
 import asyncio
 import secrets
 import random
@@ -25,7 +15,6 @@ from app import raw_logs_worker, scheduler
 from app.config import settings
 
 MARK = uuid.uuid4().hex[:8]
-# Times of their own, so the duplicate checks by time see only this run's rows
 BASE = 1_500_000_000 + random.randrange(10_000_000)
 
 
@@ -74,8 +63,6 @@ def _rows(model, column):
 
 
 def _forget_the_page(monkeypatch):
-    """A later cycle: the in-memory duplicate caches are gone, only the
-    stored rows tell that the lines are known."""
     monkeypatch.setattr(scheduler, 'seen_postfix', set())
     monkeypatch.setattr(scheduler, 'seen_rspamd', set())
     monkeypatch.setattr(scheduler, 'seen_netfilter', set())
@@ -157,7 +144,6 @@ def test_raw_log_page_with_nul_keeps_every_line_and_stores_it_once(env):
     logs = [{'time': str(BASE + i), 'program': service, 'message': f'{MARK} line {i}'} for i in range(3)]
     logs.insert(1, {'time': str(BASE + 7), 'program': service, 'message': f'{MARK} line \x00 7',
                     'key\x00': ['v\x00']})
-    # The same line twice, the second time with a NUL that cleaning removes
     logs.append({'time': str(BASE + 0), 'program': service, 'message': f'{MARK} line \x000'})
 
     async def fetch(method, *args, **kwargs):
@@ -176,26 +162,20 @@ def test_raw_log_page_with_nul_keeps_every_line_and_stores_it_once(env):
     assert len(_rows(RawServiceLog, RawServiceLog.raw_data['message'].astext)) == 4
 
 
-# ---- a row the database still refuses is skipped alone ----
-
 def test_a_refused_rspamd_entry_is_skipped_without_its_page(env):
     from app.models import RspamdLog
-    # size is an INTEGER column: PostgreSQL refuses this value for the row alone
     logs = [_rspamd_entry(0), _rspamd_entry(1, size=2 ** 40), _rspamd_entry(2)]
 
     new, _, _ = scheduler._store_rspamd_page(logs)
 
     stored = sorted(r.message_id for r in _rows(RspamdLog, RspamdLog.message_id))
     assert stored == [f'0-{MARK}@example.com', f'2-{MARK}@example.com']
-    # It was new: paging must not stop as if the page were all duplicates
     assert new == 3
 
 
 def test_a_postfix_line_too_long_for_its_index_is_skipped_without_its_page(env):
     import secrets
     from app.models import PostfixLog
-    # The duplicate key indexes the whole line: PostgreSQL refuses an index
-    # entry over about 2.7 kB, and random text does not compress below it
     logs = [{'time': str(BASE + i), 'program': 'postfix/cleanup', 'priority': 'info',
              'message': f'ABC{i}{MARK[:4].upper()}: message-id=<{i}-{MARK}@example.com>'} for i in range(2)]
     logs.insert(1, {'time': str(BASE + 8), 'program': 'postfix/smtpd', 'priority': 'info',
@@ -213,7 +193,6 @@ def test_a_refused_entry_does_not_stop_paging_before_the_lines_behind_it(env, mo
     stored_before = [_rspamd_entry(0), _rspamd_entry(1)]
     scheduler._store_rspamd_page(stored_before)
     _forget_the_page(monkeypatch)
-    # Newest first: page 1 holds the refused entry beside known ones, page 2 new ones
     pages = stored_before + [_rspamd_entry(2, size=2 ** 40)] + [_rspamd_entry(i) for i in (3, 4, 5)]
 
     async def page(page_size, offset):
@@ -231,8 +210,6 @@ def test_a_refused_entry_does_not_stop_paging_before_the_lines_behind_it(env, mo
 
 
 def test_a_failure_that_is_not_the_rows_own_still_fails_the_page():
-    """A lost connection or a broken constraint fails every row alike: the
-    page is not committed and is read again next cycle."""
     from sqlalchemy.exc import DataError, IntegrityError, OperationalError
     from app.services.db_values import is_row_error, _is_refused_row
 
@@ -259,7 +236,6 @@ def test_a_failure_that_is_not_the_rows_own_is_raised(env):
     from sqlalchemy.exc import IntegrityError
     with SessionLocal() as db:
         with pytest.raises(IntegrityError):
-            # rule_id is NOT NULL: a constraint, not a value of this row alone
             add_rows(db, QuarantineRuleLog, [
                 dict(rule_id=1, action='release', quarantine_id=MARK),
                 dict(rule_id=None, action='release', quarantine_id=MARK),
@@ -267,8 +243,6 @@ def test_a_failure_that_is_not_the_rows_own_is_raised(env):
         db.rollback()
         assert db.query(QuarantineRuleLog).filter(QuarantineRuleLog.quarantine_id == MARK).count() == 0
 
-
-# ---- quarantine rule history after an action mailcow already did ----
 
 @pytest.fixture()
 def quarantine(monkeypatch):

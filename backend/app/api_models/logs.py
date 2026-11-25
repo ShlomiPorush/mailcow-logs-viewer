@@ -1,4 +1,3 @@
-"""What the log, Security, Fail2ban, queue and quarantine calls return (routers/logs.py)."""
 from typing import Any, Dict, List, Optional, Union
 
 from pydantic import ConfigDict, Field
@@ -15,8 +14,6 @@ class Page(Fixed):
     limit: int
     pages: int
 
-
-# ---------------------------------------------------------------- Postfix
 
 class PostfixQueueRow(Fixed):
     """One queue: its lines combined, the latest status and time."""
@@ -75,8 +72,6 @@ class PostfixByQueueResponse(Fixed):
     logs: List[PostfixLine]
 
 
-# ---------------------------------------------------------------- Rspamd
-
 class RspamdRow(Fixed):
     id: int
     time: Optional[str] = Field(description=TIME)
@@ -101,8 +96,6 @@ class RspamdLogsResponse(Page):
     """Rspamd scans, newest first."""
     data: List[RspamdRow]
 
-
-# ---------------------------------------------------------------- Netfilter
 
 class NetfilterCountry(Fixed):
     code: str
@@ -196,8 +189,6 @@ class NetfilterOverviewResponse(Fixed):
     latest: List[OverviewLogin] = Field(description="The 20 latest failed logins")
 
 
-# ---------------------------------------------------------------- Security page lists
-
 class ProtectionCatch(Fixed):
     """A protection rule's catch."""
     id: int
@@ -279,8 +270,6 @@ class SecurityAddressesResponse(Fixed):
     fail2ban_known: bool = Field(description="mailcow answered: the allowlist and denylist are known")
 
 
-# ---------------------------------------------------------------- Fail2ban
-
 class LegacyEntry(Fixed):
     list: str = Field(description="whitelist or blacklist")
     entry: str = Field(description="The entry as written, such as 2001:db8::1/32")
@@ -329,8 +318,6 @@ class GeoIpResponse(Fixed):
     asn_org: Optional[str] = Field(None)
 
 
-# ---------------------------------------------------------------- queue and quarantine
-
 class QueueResponse(Fixed):
     """mailcow's mail queue, newest first."""
     total: int
@@ -350,11 +337,8 @@ class QuarantineDetails(Fixed):
     model_config = ConfigDict(extra="allow")
 
 
-# mailcow's view may also answer an empty list or null, passed on as they are
 QuarantineDetailsResponse = Optional[Union[QuarantineDetails, List[Any]]]
 
-
-# ---------------------------------------------------------------- the compact message form
 
 class CompactRspamd(Fixed):
     score: Optional[float]

@@ -1,9 +1,3 @@
-"""Every route a person can reach has a rule (user_access.py).
-
-A route without one is refused at run time; this test names it first, so a
-new route cannot open up, or close, without a decision. It also fails on a
-rule for a route that is gone and on a rule given twice.
-"""
 import starlette.staticfiles as sf
 _orig_init = sf.StaticFiles.__init__
 sf.StaticFiles.__init__ = lambda s, *a, **k: _orig_init(s, *a, **{**k, "check_dir": False})
@@ -48,7 +42,6 @@ def test_the_check_names_a_route_without_a_rule_whatever_its_kind():
     probe.add_api_route("/api/probe-get", endpoint, methods=["GET"])
     probe.add_api_route("/api/probe-head", endpoint, methods=["HEAD"])
     probe.add_api_websocket_route("/ws/probe", socket)
-    # A HEAD route of a GET route that has a rule is covered by that rule
     probe.add_api_route("/api/messages", endpoint, methods=["HEAD"])
     found = _missing(probe)
     assert ("GET", "/api/probe-get") in found and ("HEAD", "/api/probe-head") in found
@@ -79,7 +72,6 @@ def test_approving_an_agent_is_for_admins():
     for method, path in (("GET", "/api/agents/consent/{request_id}"), ("POST", "/api/agents/consent/{request_id}"),
                          ("PUT", "/api/agents/{grant_id}"), ("DELETE", "/api/agents")):
         assert user_access.need_for(method, path).kind == user_access.ADMIN_ONLY
-    # An agent asking for a code is not a person approving it
     assert user_access.need_for("POST", "/oauth/device").kind == user_access.PUBLIC
 
 
@@ -103,7 +95,6 @@ def test_people_follow_the_agent_policys_areas_elsewhere():
             continue
         need = user_access.need_for(method, path)
         if rule.area in scopes.ALTERNATIVES:
-            # A call shared by several areas: its kind in at least one of them
             assert need.kind == user_access.ANY_AREA, (method, path)
             assert need.areas == tuple((a, rule.kind) for a in scopes.ALTERNATIVES[rule.area]), (method, path)
             continue

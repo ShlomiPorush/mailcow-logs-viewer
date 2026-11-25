@@ -1,7 +1,3 @@
-"""
-A Read-Write key that mailcow refuses fails at once, without retries, and the
-page is told what to fix instead of "Internal server error" (issue #384).
-"""
 import asyncio
 import secrets
 
@@ -16,7 +12,6 @@ from app.routers import logs, rate_limits
 
 @pytest.fixture
 def mailcow(monkeypatch):
-    """The shared client, answering every request with the status in ``answer``."""
     from app.mailcow_api import mailcow_api
     answer = {"status": 200}
     requests = []
@@ -44,7 +39,6 @@ def test_a_refused_key_is_not_retried(mailcow, status, code):
 
 
 def test_a_500_is_not_retried_either(mailcow):
-    """mailcow received the write and may have made it (tests/test_mailcow_write_retry.py)."""
     from app.mailcow_api import MailcowWriteUnknownError, mailcow_api
     answer, requests = mailcow
     answer["status"] = 500
@@ -84,7 +78,7 @@ def test_unban_says_the_key_was_rejected(mailcow, monkeypatch):
     answer, _ = mailcow
     answer["status"] = 401
 
-    async def banned():  # the read-only key still reads the ban
+    async def banned():
         return {"active_bans": [{"network": "192.0.2.1/32", "ip": "192.0.2.1"}]}
 
     monkeypatch.setattr(mailcow_api, "get_fail2ban", banned)

@@ -1,17 +1,6 @@
-// =============================================================================
-// AGENTS - Settings > Agents
-// =============================================================================
-// AI agents (Claude Code, Codex, any MCP client) that a signed-in person
-// connected through the consent page: how to connect one, which are
-// connected, what each may do and did, and Disconnect. Shown in the edit form's
-// Agents section and in the read-only settings view, so it works either way.
-// =============================================================================
-
 let agentsData = null;
 const agentsOpenActivity = new Set();
 
-// What is missing, or '' when the field right above already shows it. Without
-// the edit form, only the variable can say it
 function agentsProblemText(problem) {
     const form = !!document.querySelector('[data-tab-extra="agents"]');
     switch (problem) {
@@ -52,7 +41,6 @@ function agentsAreaChips(areas) {
     (agentsData.areas || []).forEach(a => { labels[a.id] = a.label; });
     const entries = Object.entries(areas || {});
     if (!entries.length) return '<span class="ui-muted">No access</span>';
-    // Actions first, each by name; views by name too, unless they cover every other area
     const acts = entries.filter(([, mode]) => mode === 'act');
     const views = entries.filter(([, mode]) => mode !== 'act');
     const chips = acts.map(([id]) => uiTag(`${labels[id] || id}: Take action`, 'warn'));
@@ -71,8 +59,6 @@ function agentsWhen(iso) {
 function agentsIdentity(agent) {
     const declared = agent.declared_name && agent.declared_name !== agent.name
         ? ` <span class="ui-muted">(Agent name: ${escapeHtml(agent.declared_name)})</span>` : '';
-    // Where an MCP client's details came from (its metadata document); the approval
-    // page already said whose word the name is, so nothing more here
     const who = agent.publisher
         ? `<span title="${escapeHtml(`Details from ${agent.publisher}`)}">${uiTag(agent.publisher, 'info')}</span>`
         : '';
@@ -101,8 +87,6 @@ function agentsRow(agent) {
         </div>`;
 }
 
-// How an agent connects, one tab per kind of agent (as in n8n-ops): agents that
-// run commands get one sentence and approve with a code; MCP clients add the address
 let agentsTab = 'skill';
 
 function agentsConnectHelp() {
@@ -148,7 +132,6 @@ function renderAgentsPanel() {
     const connected = agents.filter(a => a.state === 'connected');
     const problem = agentsData.live ? '' : agentsProblemText(agentsData.problem);
     const intro = agentsData.live ? agentsConnectHelp() : problem ? uiLocked('Agents cannot connect', problem, '') : '';
-    // Two parts: how to connect an agent, and the agents that were allowed
     const connect = intro ? `
         <section class="ui-panel ui-set-channels" aria-labelledby="agents-connect-h">
             <div class="ui-list-head"><h4 class="ui-md-h" id="agents-connect-h">Connect an agent</h4></div>
@@ -183,7 +166,6 @@ function agentsActivityRow(row) {
             : row.event === 'grant_changed' ? `Access changed${(/^by ([^:]+):/.exec(row.detail || '') || [])[1] ? ` by ${/^by ([^:]+):/.exec(row.detail)[1]}` : ''}`
             : row.event);
     const tone = row.outcome === 'ok' ? 'ok' : row.outcome === 'accepted' ? 'info' : row.outcome ? 'fail' : '';
-    // A call that got no answer in time (504) may still be running: its outcome is unknown
     const unknown = row.outcome === 'accepted' && row.http_status === 504;
     const result = row.outcome === 'ok' ? 'Succeeded' : unknown ? 'Outcome unknown' : row.outcome === 'accepted' ? 'Accepted' : 'Failed';
     const outcome = row.event === 'denied' ? uiTag('Denied', 'fail')
@@ -212,8 +194,6 @@ async function loadAgentActivity(grantId) {
     }
 }
 
-// Edit: the areas a connected agent may view or take action in, and optionally a
-// new end. The same table as the approval page; applies from the agent's next request.
 function editAgentAccess(grantId) {
     const agent = (agentsData?.agents || []).find(a => a.id === grantId && a.state === 'connected');
     if (!agent) return;
@@ -231,8 +211,6 @@ function editAgentAccess(grantId) {
     const ends = (agentsData.periods || []).map(p => `<option value="${Number(p.days)}">In ${escapeHtml(p.label)}</option>`).join('');
     const { backdrop: modal } = uiDialog({
         id: 'agent-edit-modal', title: 'Edit access', titleId: 'agent-edit-h', size: 'md', close: closeAgentEditModal,
-        // The version of the access this dialog shows: saving it after the list
-        // reloaded meanwhile must not pass for an edit of the newer access
         dataset: { version: agent.version || '' },
         bodyClass: 'ui-form ui-agent-edit',
         form: { id: 'agent-edit-form', onsubmit: `saveAgentAccessOnce(event, ${Number(agent.id)})` },
@@ -252,7 +230,6 @@ function editAgentAccess(grantId) {
             <button type="button" onclick="closeAgentEditModal()" class="ui-btn">Cancel</button>
             <button type="submit" form="agent-edit-form" class="ui-btn ui-btn-primary">Save</button>`,
     });
-    // Take action includes View: ticking it ticks View, and clearing View clears it
     modal.querySelector('.ui-consent-areas').addEventListener('change', event => {
         const changed = event.target;
         if (!changed.dataset || !changed.dataset.area) return;
@@ -272,7 +249,6 @@ function closeAgentEditModal(saved = false) {
     } else uiCloseGuarded(modal, close);
 }
 
-// One save at a time: a second press would answer "changed meanwhile" to the first
 function saveAgentAccessOnce(event, grantId) {
     event.preventDefault();
     return uiOnce(event.submitter || 'agent-access', () => saveAgentAccess(event, grantId), event.submitter, 'Saving...');
@@ -297,7 +273,6 @@ async function saveAgentAccess(event, grantId) {
             const body = await response.json().catch(() => ({}));
             const text = uiHttpErrorText(response.status, body);
             if (response.status === 409 || response.status === 404) {
-                // Changed or disconnected meanwhile: show the list as it is now
                 closeAgentEditModal(true);
                 showToast(`Could not save the change: ${text}`, 'error');
                 loadAgentsPanel();

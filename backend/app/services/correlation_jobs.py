@@ -1,16 +1,12 @@
-"""Message correlation lifecycle and late-delivery reconciliation.
-
-The scheduler supplies session factories, clocks, current policy values and
-status callbacks. This module owns synchronous correlation work only; it does
-not initialize schedulers, create executors or import request handlers.
-"""
 import logging
-from datetime import timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from sqlalchemy import case, desc, or_
 from sqlalchemy.orm import Session
 
+from ..config import settings
+from ..database import get_db_context
 from ..models import MessageCorrelation, PostfixLog, RspamdLog
 from ..correlation import (
     build_correlation_key,
@@ -28,28 +24,20 @@ from ..correlation import (
     split_queue_occurrences,
 )
 from . import written_recipients
+from .excluded_addresses import is_listed
+from .job_status import update_job_status
 
 logger = logging.getLogger(__name__)
 
 
-# The statuses a correlation never moves away from once it has them.
-# 'discarded' is terminal in the same sense: Dovecot already dropped the
-# message via Sieve, and a later Postfix 'sent' line must not resurrect it.
 TERMINAL_FINAL_STATUSES = ('delivered', 'bounced', 'rejected', 'discarded', 'expired')
 
-# The push path additionally refuses to touch a spam verdict. routers/stats.py
-# counts final_status 'spam' as blocked mail, and a late delivery line would
-# otherwise overwrite it and quietly deflate that number.
 PUSH_SKIP_FINAL_STATUSES = TERMINAL_FINAL_STATUSES + ('spam',)
 
-# Postfix gives up on a queue after maximal_queue_lifetime (5 days by default),
-# so a genuine retry cannot arrive later than that. A queue id that matches an
-# older correlation is far more likely to be a reused short id.
 LATE_STATUS_MAX_CORRELATION_AGE = timedelta(days=5)
 
 
-def run_correlation(*, get_db_context, is_blacklisted, correlate):
-    """Create message correlations with a session owned by the worker."""
+def run_correlation():
     try:
         with get_db_context() as db:
             uncorrelated_rspamd = db.query(RspamdLog).filter(
@@ -67,7 +55,7 @@ def run_correlation(*, get_db_context, is_blacklisted, correlate):
 
             for rspamd_log in uncorrelated_rspamd:
                 try:
-                    if is_blacklisted(rspamd_log.sender_smtp):
+                    if is_listed(rspamd_log.sender_smtp):
                         rspamd_log.correlation_key = "BLACKLISTED"
                         db.commit()
                         skipped_blacklist += 1
@@ -75,13 +63,13 @@ def run_correlation(*, get_db_context, is_blacklisted, correlate):
 
                     if rspamd_log.recipients_smtp:
                         recipients = rspamd_log.recipients_smtp
-                        if any(is_blacklisted(r) for r in recipients):
+                        if any(is_listed(r) for r in recipients):
                             rspamd_log.correlation_key = "BLACKLISTED"
                             db.commit()
                             skipped_blacklist += 1
                             continue
 
-                    result = correlate(db, rspamd_log)
+                    result = correlate_single_message(db, rspamd_log)
                     if result:
                         correlated_count += 1
                 except Exception as e:
@@ -98,25 +86,11 @@ def run_correlation(*, get_db_context, is_blacklisted, correlate):
         logger.error(f"[ERROR] Correlation job error: {e}")
 
 
-def correlate_single_message(db: Session, rspamd_log: RspamdLog, *, clock) -> Optional[MessageCorrelation]:
-    """
-    Correlate a single Rspamd log with Postfix logs.
-
-    Steps:
-    1. Find Postfix logs with the same message_id and split them into queue
-       chains - each chain is a delivery leg of its own (issue #36)
-    2. Give every leg a correlation, so a forward or any other re-submission
-       never overwrites the delivery it came from
-    3. Attach this Rspamd verdict to the leg nearest to it in time: every
-       re-submission passes Rspamd separately, seconds from its own chain
-    4. With no Postfix log yet, keep one queue-less correlation that adopts
-       the first chain to arrive
-    """
+def correlate_single_message(db: Session, rspamd_log: RspamdLog) -> Optional[MessageCorrelation]:
     message_id = rspamd_log.message_id
     if not message_id:
         return None
 
-    # Steps 1-3: one correlation per queue chain
     postfix_with_msgid = db.query(PostfixLog).filter(
         PostfixLog.message_id == message_id
     ).all()
@@ -127,10 +101,6 @@ def correlate_single_message(db: Session, rspamd_log: RspamdLog, *, clock) -> Op
         correlation = None
 
         for queue_id in chains:
-            # The whole chain, including the lines that do not repeat the
-            # Message-ID (Postfix only logs it once per queue id), of this
-            # message only: Postfix reuses queue ids, and another message's
-            # lines would lend this one their time, status and lines
             occurrence = own_occurrence(db, queue_id, message_id, near=rspamd_log.time)
             if occurrence is None:
                 logger.warning(f"Queue {queue_id} holds Message-ID {message_id[:40]}... more than once - not linked")
@@ -154,7 +124,6 @@ def correlate_single_message(db: Session, rspamd_log: RspamdLog, *, clock) -> Op
             )
         return correlation
 
-    # Step 4: no queue chain known yet - reuse the waiting correlation
     existing = find_stub_leg(db, message_id)
     if not existing:
         legs = find_legs(db, message_id)
@@ -164,7 +133,7 @@ def correlate_single_message(db: Session, rspamd_log: RspamdLog, *, clock) -> Op
         rspamd_log.correlation_key = existing.correlation_key
         if not existing.rspamd_log_id:
             existing.rspamd_log_id = rspamd_log.id
-            existing.last_seen = clock.now(timezone.utc)
+            existing.last_seen = datetime.now(timezone.utc)
         db.commit()
         return existing
 
@@ -172,86 +141,51 @@ def correlate_single_message(db: Session, rspamd_log: RspamdLog, *, clock) -> Op
     if not correlation_key:
         return None
 
-    # Get recipient
     recipients = rspamd_log.recipients_smtp or []
     first_recipient = recipients[0] if recipients else None
 
-    # Without Postfix logs the Rspamd action is the only verdict there is
     final_status = None
     if rspamd_log.action == 'reject':
         final_status = 'rejected'
     elif rspamd_log.is_spam:
         final_status = 'spam'
 
-    # Get earliest timestamp (ensure timezone-aware)
-    now = clock.now(timezone.utc)
+    now = datetime.now(timezone.utc)
     first_seen = rspamd_log.time
     if first_seen and first_seen.tzinfo is None:
         first_seen = first_seen.replace(tzinfo=timezone.utc)
     if not first_seen:
         first_seen = now
 
-    try:
-        # Create correlation
-        correlation = MessageCorrelation(
-            correlation_key=correlation_key,
-            message_id=message_id,
-            queue_id=None,
-            sender=rspamd_log.sender_smtp,
-            recipient=first_recipient,
-            subject=rspamd_log.subject,
-            direction=rspamd_log.direction,
-            final_status=final_status,
-            rspamd_log_id=rspamd_log.id,
-            postfix_log_ids=[],
-            first_seen=first_seen,
-            last_seen=now,
-            is_complete=False
-        )
+    correlation = MessageCorrelation(
+        correlation_key=correlation_key,
+        message_id=message_id,
+        queue_id=None,
+        sender=rspamd_log.sender_smtp,
+        recipient=first_recipient,
+        subject=rspamd_log.subject,
+        direction=rspamd_log.direction,
+        final_status=final_status,
+        rspamd_log_id=rspamd_log.id,
+        postfix_log_ids=[],
+        first_seen=first_seen,
+        last_seen=now,
+        is_complete=False
+    )
+    db.add(correlation)
+    rspamd_log.correlation_key = correlation_key
+    db.commit()
 
-        db.add(correlation)
-        db.flush()  # Try to insert - will fail if the key was just taken
-
-        # Update rspamd log with correlation key
-        rspamd_log.correlation_key = correlation_key
-
-        db.commit()
-
-        logger.debug(f"Created correlation for {message_id[:40]}... (no Postfix logs yet)")
-        return correlation
-
-    except Exception as e:
-        # Handle race condition - another process created the correlation
-        db.rollback()
-
-        # Try to find and return the existing one
-        existing = find_stub_leg(db, message_id)
-        if not existing:
-            legs = find_legs(db, message_id)
-            existing = legs[0] if legs else None
-
-        if existing:
-            rspamd_log.correlation_key = existing.correlation_key
-            db.commit()
-            return existing
-
-        # Re-raise if it's a different error
-        raise
+    logger.debug(f"Created correlation for {message_id[:40]}... (no Postfix logs yet)")
+    return correlation
 
 
-def complete_incomplete_correlations(*, get_db_context, update_job_status, max_age_minutes: int, clock):
-    """
-    Complete correlations that are missing Postfix logs.
-
-    This handles the case where rspamd was processed before postfix logs arrived.
-    """
+def complete_incomplete_correlations():
     update_job_status('complete_correlations', 'running')
     try:
         with get_db_context() as db:
-            # Find incomplete correlations (have message_id but missing queue_id or postfix logs)
-            # Use naive datetime for comparison since DB stores naive UTC
-            cutoff_time = clock.utcnow() - timedelta(
-                minutes=max_age_minutes
+            cutoff_time = datetime.utcnow() - timedelta(
+                minutes=settings.max_correlation_age_minutes
             )
 
             incomplete = db.query(MessageCorrelation).filter(
@@ -269,10 +203,6 @@ def complete_incomplete_correlations(*, get_db_context, update_job_status, max_a
 
             for correlation in incomplete:
                 try:
-                    # A leg that already owns a queue chain completes from that
-                    # chain and no other; only a queue-less correlation may
-                    # adopt one, and then only a chain no other leg of the same
-                    # message has claimed (issue #36).
                     queue_id = correlation.queue_id
 
                     if not queue_id:
@@ -294,27 +224,21 @@ def complete_incomplete_correlations(*, get_db_context, update_job_status, max_a
                     if not queue_id:
                         continue
 
-                    # This message's lines of the queue id, not those of
-                    # another message that used the id before or after it
                     occurrence = own_occurrence(
                         db, queue_id, correlation.message_id, near=correlation.first_seen)
                     if occurrence is None:
                         continue
                     all_postfix = occurrence.lines
 
-                    # Update correlation
                     correlation.queue_id = queue_id
                     correlation.postfix_log_ids = [plog.id for plog in all_postfix]
                     correlation.is_complete = True
-                    correlation.last_seen = clock.now(timezone.utc)
+                    correlation.last_seen = datetime.now(timezone.utc)
                     times = [naive_utc(plog.time) for plog in all_postfix if plog.time]
                     if times and (correlation.first_seen is None
                                   or min(times) < naive_utc(correlation.first_seen)):
                         correlation.first_seen = min(times)
 
-                    # Update final status. A 'discarded' verdict from Dovecot is kept:
-                    # Postfix logs status=sent for a message Sieve then drops,
-                    # so only a real bounce/reject may override it (issue #65).
                     for plog in all_postfix:
                         if plog.status:
                             if plog.status in ['bounced', 'rejected']:
@@ -325,7 +249,6 @@ def complete_incomplete_correlations(*, get_db_context, update_job_status, max_a
                             elif plog.status == 'sent' and not correlation.final_status and correlation.dovecot_status != 'discarded':
                                 correlation.final_status = 'delivered'
 
-                    # Update correlation key in Postfix logs
                     for plog in all_postfix:
                         plog.correlation_key = correlation.correlation_key
 
@@ -338,10 +261,6 @@ def complete_incomplete_correlations(*, get_db_context, update_job_status, max_a
 
             db.commit()
 
-            # Linked to their Postfix lines: the addresses Rspamd recorded
-            # normalized get the ones the sender wrote. Only after the link is
-            # committed: a delivery line stored meanwhile by the ingest is seen
-            # here, or the ingest sees the link (record_for_queues)
             if sum(written_recipients.record(db, correlation) for correlation in completed):
                 db.commit()
 
@@ -355,29 +274,14 @@ def complete_incomplete_correlations(*, get_db_context, update_job_status, max_a
         update_job_status('complete_correlations', 'failed', str(e))
 
 
-def expire_old_correlations(*, get_db_context, update_job_status, max_age_minutes: int, clock):
-    """
-    SEPARATE JOB: Mark old incomplete correlations as "expired".
-
-    This runs independently to ensure old incomplete correlations get expired even if
-    the complete_incomplete_correlations job has issues.
-
-    Only marks incomplete correlations (is_complete == False) as expired.
-    Complete correlations with non-final statuses (None, 'deferred', etc.) are left as-is,
-    as they may have legitimate statuses that don't need to be changed.
-
-    Uses clock.utcnow() (naive) to match the naive datetime in created_at.
-    """
+def expire_old_correlations():
     update_job_status('expire_correlations', 'running')
     try:
         with get_db_context() as db:
-            # Use naive datetime for comparison (DB stores naive UTC)
-            old_cutoff = clock.utcnow() - timedelta(
-                minutes=max_age_minutes
+            old_cutoff = datetime.utcnow() - timedelta(
+                minutes=settings.max_correlation_age_minutes
             )
 
-            # Update in the database without loading every matching correlation.
-            # Preserve a Dovecot discard while completing its tracking work.
             completed_count = db.query(MessageCorrelation).filter(
                 MessageCorrelation.is_complete == False,
                 MessageCorrelation.created_at < old_cutoff
@@ -394,7 +298,7 @@ def expire_old_correlations(*, get_db_context, update_job_status, max_age_minute
             db.commit()
 
             if completed_count > 0:
-                logger.info(f"[EXPIRED] Completed tracking for {completed_count} old correlations (older than {max_age_minutes}min), preserving discard outcomes")
+                logger.info(f"[EXPIRED] Completed tracking for {completed_count} old correlations (older than {settings.max_correlation_age_minutes}min), preserving discard outcomes")
 
             update_job_status('expire_correlations', 'success')
 
@@ -403,26 +307,8 @@ def expire_old_correlations(*, get_db_context, update_job_status, max_age_minute
         update_job_status('expire_correlations', 'failed', str(e))
 
 
-def recompute_correlation_from_postfix(db: Session, correlation: MessageCorrelation, *, clock,
+def recompute_correlation_from_postfix(db: Session, correlation: MessageCorrelation,
                                        occurrences=None) -> bool:
-    """Re-derive final_status and postfix_log_ids for one correlation from its
-    own Postfix lines. Returns True when something was written.
-
-    Postfix reuses queue ids, so the lines of the queue id are first cut into
-    messages (correlation.split_queue_occurrences) and only this message's
-    are read. A correlation found holding another message's lines is
-    re-derived from its own lines alone, with the other correlations of the
-    queue id (correlation.settle_queue). Otherwise the status moves on from
-    the stored one. occurrences: the queue id's occurrences when the caller
-    already split them.
-
-    Does not commit; the caller owns the transaction.
-    """
-    # Without this guard a correlation with no queue_id turns the filter below into
-    # "queue_id IS NULL", which matches the majority of postfix_logs (617,987 of
-    # 1,122,822 rows on a real instance) and would stamp one correlation_key across
-    # all of them. The poller avoids it with a filter; the helper must not rely on
-    # every future caller remembering that.
     if not correlation.queue_id:
         return False
 
@@ -433,44 +319,33 @@ def recompute_correlation_from_postfix(db: Session, correlation: MessageCorrelat
     if own is None:
         return False
 
-    # Lines of another message linked or stamped to this one: settle the
-    # whole queue id (an unknown key is an older version's and is just
-    # replaced below)
     stored = {i for i in (correlation.postfix_log_ids or []) if isinstance(i, int)}
     foreign = {line.id for o in occurrences for line in o.lines + o.boundary if line.id} - own.ids
     if stored & foreign or any(line.correlation_key not in (None, correlation.correlation_key)
                                for line in own.lines):
         correlations = db.query(MessageCorrelation).filter(
             MessageCorrelation.queue_id == correlation.queue_id).all()
-        if correlation in settle_queue(db, correlations, occurrences, clock.now(timezone.utc)):
+        if correlation in settle_queue(db, correlations, occurrences, datetime.now(timezone.utc)):
             return True
 
     all_postfix = own.lines
 
-    # Determine best final status from this message's Postfix logs
-    # Priority: bounced > rejected > sent (delivered) > deferred
     new_final_status = correlation.final_status
 
     for plog in all_postfix:
         if plog.status:
             if plog.status in ['bounced', 'rejected']:
                 new_final_status = plog.status
-                break  # Highest priority, stop here
+                break
             elif plog.status == 'sent':
-                # 'sent' (delivered) is better than 'deferred' or None
                 if new_final_status not in ['bounced', 'rejected', 'delivered']:
                     new_final_status = 'delivered'
             elif plog.status == 'deferred' and new_final_status not in ['bounced', 'rejected', 'delivered']:
                 new_final_status = 'deferred'
 
-    # A Sieve discard is invisible from Postfix's side: Dovecot answers 2xx and
-    # then drops the message, so Postfix truthfully logs status=sent. Keep the
-    # Dovecot verdict in that case (issue #65). A genuine bounce or reject means
-    # the delivery itself failed and must still win.
     if correlation.dovecot_status == 'discarded' and new_final_status == 'delivered':
         new_final_status = 'discarded'
 
-    # Add any Postfix logs this correlation does not know about yet
     current_ids = list(correlation.postfix_log_ids or [])
     ids_added = 0
     for plog in all_postfix:
@@ -481,7 +356,6 @@ def recompute_correlation_from_postfix(db: Session, correlation: MessageCorrelat
     if ids_added > 0:
         correlation.postfix_log_ids = current_ids
 
-    # Point every Postfix log of this message at the correlation
     for plog in all_postfix:
         if not plog.correlation_key or plog.correlation_key != correlation.correlation_key:
             plog.correlation_key = correlation.correlation_key
@@ -489,7 +363,7 @@ def recompute_correlation_from_postfix(db: Session, correlation: MessageCorrelat
     if (new_final_status and new_final_status != correlation.final_status) or ids_added > 0:
         old_status = correlation.final_status
         correlation.final_status = new_final_status
-        correlation.last_seen = clock.now(timezone.utc)
+        correlation.last_seen = datetime.now(timezone.utc)
         logger.debug(
             f"Recomputed correlation {correlation.id} from queue {correlation.queue_id}: "
             f"{old_status} -> {new_final_status}, {ids_added} log ids added"
@@ -499,36 +373,15 @@ def recompute_correlation_from_postfix(db: Session, correlation: MessageCorrelat
     return False
 
 
-def refresh_correlations_for_queue_ids(db: Session, queue_ids, *, recompute, clock) -> tuple:
-    """Re-derive the correlations behind the given Postfix queue ids.
-
-    Called right after a page of Postfix logs is stored, with the queue id of
-    every line stored, so the work follows the log lines that actually arrived
-    instead of re-polling every open correlation on a timer. That is what lets
-    a delivery which succeeds long after the correlation age window still be
-    recorded.
-
-    Postfix reuses queue ids. The lines of each queue id are cut into messages
-    once (correlation.split_queue_occurrences) and every correlation reads
-    only its own message's lines. A line that arrives can show that a
-    correlation holds another message's lines; that correlation is re-derived
-    from its own lines whatever its status (correlation.settle_queue). The
-    others move on as before: a final status is kept; a correlation whose
-    lines cannot be told from another one's is not touched; and one older than
-    Postfix's queue lifetime is left alone unless its Message-ID line names
-    its lines.
-
-    Returns (updated, skipped). Does not commit; the caller owns the transaction.
-    """
+def refresh_correlations_for_queue_ids(db: Session, queue_ids) -> tuple:
     queue_ids = [q for q in set(queue_ids or []) if q]
     if not queue_ids:
         return (0, 0)
 
     updated = 0
     skipped = 0
-    horizon = clock.utcnow() - LATE_STATUS_MAX_CORRELATION_AGE
+    horizon = datetime.utcnow() - LATE_STATUS_MAX_CORRELATION_AGE
 
-    # Chunked so a large page cannot build an unbounded IN clause
     for start in range(0, len(queue_ids), 500):
         chunk = queue_ids[start:start + 500]
         rows = db.query(MessageCorrelation).filter(
@@ -541,7 +394,6 @@ def refresh_correlations_for_queue_ids(db: Session, queue_ids, *, recompute, clo
         if not by_queue:
             continue
 
-        # The lines of every queue id that has a correlation, in one query
         lines = {}
         for line in db.query(PostfixLog).filter(PostfixLog.queue_id.in_(list(by_queue))).all():
             lines.setdefault(line.queue_id, []).append(line)
@@ -551,7 +403,7 @@ def refresh_correlations_for_queue_ids(db: Session, queue_ids, *, recompute, clo
             if not occurrences:
                 continue
 
-            repaired = settle_queue(db, correlations, occurrences, clock.now(timezone.utc))
+            repaired = settle_queue(db, correlations, occurrences, datetime.now(timezone.utc))
             updated += len(repaired)
             owned = owners_of_queue(correlations, occurrences)
 
@@ -561,9 +413,6 @@ def refresh_correlations_for_queue_ids(db: Session, queue_ids, *, recompute, clo
                 occurrence = owned.get(correlation.id)
                 identified = identified_by_message_id(occurrence, correlation.message_id)
 
-                # Which message the lines are cannot be told (or another
-                # correlation's Message-ID is in them too): guessing would
-                # rewrite an unrelated message's status
                 if occurrence is None:
                     skipped += 1
                     logger.warning(
@@ -579,40 +428,20 @@ def refresh_correlations_for_queue_ids(db: Session, queue_ids, *, recompute, clo
                     skipped += 1
                     continue
 
-                if recompute(db, correlation, occurrences=occurrences):
+                if recompute_correlation_from_postfix(db, correlation, occurrences=occurrences):
                     updated += 1
 
     return (updated, skipped)
 
 
-def update_final_status_for_correlations(*, get_db_context, update_job_status, max_age_minutes: int, recompute, clock):
-    """
-    Background job to update final_status for correlations that don't have one yet.
-
-    This handles the case where Postfix logs (especially status=sent) arrive after
-    the initial correlation was created. The job:
-    1. Finds correlations without a definitive final_status
-    2. Only checks correlations within Max Correlation Age
-    3. Looks for new Postfix logs that may have arrived
-    4. Updates final_status, postfix_log_ids, and correlation_key
-
-    This runs independently from correlation creation to ensure we catch
-    late-arriving Postfix logs.
-    """
+def update_final_status_for_correlations():
     update_job_status('update_final_status', 'running')
     try:
         with get_db_context() as db:
-            # Only check correlations within Max Correlation Age
-            cutoff_time = clock.utcnow() - timedelta(
-                minutes=max_age_minutes
+            cutoff_time = datetime.utcnow() - timedelta(
+                minutes=settings.max_correlation_age_minutes
             )
 
-            # Find correlations that:
-            # 1. Are within the correlation age limit
-            # 2. Have a queue_id (so we can check Postfix logs)
-            # 3. Don't have a definitive final_status yet
-            #    We exclude 'delivered', 'bounced', 'rejected', 'expired' as these are final
-            #    We check None, 'deferred', 'spam', and other non-final statuses
             correlations_to_check = db.query(MessageCorrelation).filter(
                 MessageCorrelation.created_at >= cutoff_time,
                 MessageCorrelation.queue_id.isnot(None),
@@ -620,7 +449,7 @@ def update_final_status_for_correlations(*, get_db_context, update_job_status, m
                     MessageCorrelation.final_status.is_(None),
                     MessageCorrelation.final_status.notin_(TERMINAL_FINAL_STATUSES)
                 )
-            ).limit(500).all()  # Increased from 100 to 500
+            ).limit(500).all()
 
             if not correlations_to_check:
                 update_job_status('update_final_status', 'success')
@@ -630,7 +459,7 @@ def update_final_status_for_correlations(*, get_db_context, update_job_status, m
 
             for correlation in correlations_to_check:
                 try:
-                    if recompute(db, correlation):
+                    if recompute_correlation_from_postfix(db, correlation):
                         updated_count += 1
                 except Exception as e:
                     logger.warning(f"Failed to update final_status for correlation {correlation.id}: {e}")

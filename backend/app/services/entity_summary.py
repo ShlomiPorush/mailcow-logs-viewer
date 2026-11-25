@@ -1,25 +1,3 @@
-"""What the app stores about one IP address, email address or domain, for the
-entity card (routers/entities.py).
-
-Every source matches the value exactly, never as a part: an address in any
-case (ann@example.com never finds joann@example.com), an IP as written
-canonically (203.0.113.4 never finds 203.0.113.45), a domain as the part
-after the last '@'. Values come normalized by services/entity_values.py.
-
-Each source answers on its own: {"state": "ok", ...} with its figures, or
-{"state": "disabled"} when its feature is off (or the value is not shown,
-such as an excluded address in Messages), or {"state": "error"} when it could
-not be read. A source that is off or failed is never reported as zero. The
-lists are bounded (ITEMS each, TIMELINE merged); the counts are real.
-
-Messages are counted as messages, not deliveries: the deliveries of one
-Message-ID count once, as in the Messages list. Excluded addresses are left
-out of every message count and list, as Messages leaves them out. Security
-counts every Netfilter line as an event and the rule matches (failed
-attempts) separately. The timeline shows only what is stored: messages,
-security events and bans, protection catches and when a device was first or
-last seen.
-"""
 import ipaddress
 import logging
 import re
@@ -43,11 +21,10 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_DAYS = 7
 MAX_DAYS = 90
-ITEMS = 50          # rows of each source's list
-TIMELINE = 100      # rows of the merged timeline
-DMARC_DOMAINS = 20  # domains in an IP's DMARC breakdown
+ITEMS = 50
+TIMELINE = 100
+DMARC_DOMAINS = 20
 
-# The feature each source belongs to, and how a person names it
 _FEATURE_NAMES = {
     "netfilter": "Security", "devices": "Devices", "dmarc": "DMARC & TLS", "blacklist": "IP blocklists",
     "suppressions": "Suppressions", "mailbox-stats": "Mailboxes", "domains": "Domains",
@@ -56,8 +33,6 @@ _BAN_ACTIONS = ("ban", "banned")
 
 
 class _Answer(Exception):
-    """A source's fixed answer for the card. The card shows its reason, never
-    the exception's own text, so no error detail can reach the response."""
 
     def __init__(self, reason: str):
         super().__init__(reason)
@@ -65,19 +40,19 @@ class _Answer(Exception):
 
 
 class Unavailable(_Answer):
-    """A source that cannot answer for a reason a person can act on."""
+    pass
 
 
 class Off(_Answer):
-    """A source that is not set up (its reason says what is missing): disabled, not failed."""
+    pass
 
 
-# ---------------------------------------------------------------- range
+class TurnedOff(Off):
+    pass
+
 
 def resolve_range(start: Optional[datetime], end: Optional[datetime],
                   now: Optional[datetime] = None) -> Tuple[datetime, datetime]:
-    """The range as naive UTC: the last DEFAULT_DAYS days unless given, at most
-    MAX_DAYS long. Raises entity_values.InvalidValue with what to change."""
     now = now or datetime.utcnow()
     end = utc_naive(end) if end is not None else now
     start = utc_naive(start) if start is not None else end - timedelta(days=DEFAULT_DAYS)
@@ -98,20 +73,9 @@ def _from_epoch(value: Optional[int]) -> Optional[str]:
     return iso(datetime.fromtimestamp(int(value), tz=timezone.utc))
 
 
-# ---------------------------------------------------------------- sources
-
 def _run(db: Session, feature: Optional[str], what: str, read: Callable[[], dict], snapshot: bool = False) -> dict:
-    """One source's answer: disabled while its feature is off, error when it fails.
-
-    With snapshot the source reads in one REPEATABLE READ transaction of its
-    own (as routers/security_alerts.py does): the address candidates it pages
-    through (_ip_value_match) and the counts built on them see the same rows,
-    even while an import commits. The card only reads, so ending the read
-    transaction before and after it loses nothing; the other sources keep
-    the default isolation (the connection's level is reset when it goes back
-    to the pool)."""
     if feature and not settings.is_feature_enabled(feature):
-        return {"state": "disabled", "reason": f"The {_FEATURE_NAMES[feature]} feature is turned off."}
+        return {"state": "disabled", "disabled": True, "reason": f"The {_FEATURE_NAMES[feature]} feature is turned off."}
     try:
         if snapshot:
             _rollback(db)
@@ -121,6 +85,8 @@ def _run(db: Session, feature: Optional[str], what: str, read: Callable[[], dict
         finally:
             if snapshot:
                 _rollback(db)
+    except TurnedOff as e:
+        return {"state": "disabled", "disabled": True, "reason": e.reason}
     except Off as e:
         return {"state": "disabled", "reason": e.reason}
     except Unavailable as e:
@@ -133,7 +99,6 @@ def _run(db: Session, feature: Optional[str], what: str, read: Callable[[], dict
 
 
 def _rollback(db: Session) -> None:
-    # A failed statement leaves the transaction aborted; the next source needs it clean
     try:
         db.rollback()
     except Exception:  # pragma: no cover
@@ -141,50 +106,26 @@ def _rollback(db: Session) -> None:
 
 
 def _like_suffix(column, domain: str):
-    """The column's part after its last '@' is the domain (in any case). The
-    domain has no '@', so ending with '@<domain>' says exactly that."""
     escaped = domain.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
     return func.lower(column).like(f"%@{escaped}", escape="\\")
 
 
 def domain_match(column, domain: str):
-    """The column holds an address on the domain (normalized): the part after its
-    last @ is the domain, in any case and in each form of an IDN. Also used by
-    the Messages and Security events filters, so a list shows what a card counts."""
     return or_(*[_like_suffix(column, form) for form in entity_values.domain_forms(domain)])
 
 
 _domain_match = domain_match
 
 
-# ---------------------------------------------------------------- IP by value
-# How each stored address column is matched (ip is canonical, from entity_values):
-# - always: an indexed IN over entity_values.ip_spellings(ip), a closed set (the
-#   canonical form, the IPv4-mapped IPv6 spellings of an IPv4 address, IPv6
-#   compressed and exploded in both cases). The writers store text as they got it
-#   (Rspamd's history for rspamd_logs.ip), so the common spellings are all there.
-# - rspamd_logs.ip and netfilter_logs.ip (the big tables) use only that set.
-# - every other column (eas_devices.last_ip, protection_hits.ip, dmarc_records.source_ip,
-#   blacklist_checks.server_ip, monitored_hosts.hostname) may hold any spelling, a
-#   network, a host name or, for DMARC rows stored before validation (#330),
-#   anything. PostgreSQL has no safe cast for such text, so _ip_value_match also
-#   pages through every distinct candidate text of a bounded set and compares
-#   them with ipaddress. Past IP_TEXTS_CEILING candidates the source fails rather
-#   than answer with a count that may miss some.
 IP_TEXTS_CHUNK = 5000
 IP_TEXTS_CEILING = 200000
 
 
 def _ip_spellings_match(column, ip: str):
-    """An indexed condition: column holds one of the closed set of spellings of ip."""
     return column.in_(entity_values.ip_spellings(ip))
 
 
 def _ip_value_match(texts_query, column, ip: str):
-    """A condition: column holds ip by value. texts_query selects the rows of
-    the bounded set to look in. Candidates are texts that can be another
-    spelling of ip: any IPv6 text for an IPv6 address, one with ffff (an
-    IPv4-mapped address) for an IPv4 address. Raises Unavailable past the ceiling."""
     spellings = entity_values.ip_spellings(ip)
     candidate = column.like("%:%") if ipaddress.ip_address(ip).version == 6 else column.ilike("%ffff%")
     found, read, last = set(spellings), 0, None
@@ -203,8 +144,6 @@ def _ip_value_match(texts_query, column, ip: str):
     return column.in_(sorted(found))
 
 
-# ---------------------------------------------------------------- messages
-
 def _message_group_key():
     from ..routers.messages import message_group_key
     return message_group_key()
@@ -216,18 +155,12 @@ def _message_sort_time():
 
 
 def _count_messages(db: Session, condition, *parts) -> List[int]:
-    """Messages, not deliveries, among the deliveries matching condition, and
-    among those matching each of parts too. One message per group key: the
-    number the Messages list gets by keeping each message's first delivery,
-    counted in one pass."""
     key = _message_group_key()
     counts = [func.count(distinct(key))] + [func.count(distinct(key)).filter(part) for part in parts]
     return [int(n or 0) for n in db.query(*counts).select_from(MessageCorrelation).filter(condition).one()]
 
 
 def _latest_messages(db: Session, condition, limit: int = ITEMS) -> List[dict]:
-    """The newest messages matching condition, one row per message: its
-    earliest matching delivery, as the Messages list shows it."""
     legs = db.query(
         MessageCorrelation.id.label("leg_id"),
         _message_sort_time().label("sort_time"),
@@ -251,7 +184,7 @@ def _in_range(start: datetime, end: datetime):
 
 def _messages_of_ip(db: Session, ip: str, start: datetime, end: datetime) -> dict:
     scanned_from = MessageCorrelation.rspamd_log_id.in_(
-        select(RspamdLog.id).where(_ip_spellings_match(RspamdLog.ip, ip)))  # see "IP by value"
+        select(RspamdLog.id).where(_ip_spellings_match(RspamdLog.ip, ip)))
     condition = and_(_in_range(start, end), scanned_from)
     count, = _count_messages(db, condition)
     return {"count": count, "items": _latest_messages(db, condition)}
@@ -269,8 +202,6 @@ def _address_columns(address: str):
             or_(func.lower(MessageCorrelation.recipient).in_(forms),
                 written_recipients.any_value(MessageCorrelation.written_recipients, lambda v: func.lower(v).in_(forms))))
 
-
-# ---------------------------------------------------------------- security (Netfilter)
 
 def _security(db: Session, condition, start: datetime, end: datetime, with_ips: bool) -> dict:
     window = and_(NetfilterLog.time >= start, NetfilterLog.time <= end, condition)
@@ -298,11 +229,8 @@ def _security(db: Session, condition, start: datetime, end: datetime, with_ips: 
 
 
 def _netfilter_username(match):
-    """Netfilter lines naming an account: the user name a client tried."""
     return and_(NetfilterLog.username.isnot(None), match)
 
-
-# ---------------------------------------------------------------- Fail2ban lists
 
 def _lists(ip: str, read_fail2ban: Callable[[], Optional[dict]]) -> dict:
     f2b = read_fail2ban()
@@ -327,10 +255,7 @@ def _lists(ip: str, read_fail2ban: Callable[[], Optional[dict]]) -> dict:
     }
 
 
-# ---------------------------------------------------------------- protection catches
-
 def _usernames_match(match_value):
-    """Catches whose user names hold one matching match_value(element)."""
     column = ProtectionHit.usernames
     array = case((func.jsonb_typeof(column) == "array", column), else_=cast(literal("[]"), JSONB))
     names = func.jsonb_array_elements_text(array).table_valued("value").alias("names")
@@ -338,13 +263,11 @@ def _usernames_match(match_value):
 
 
 def _protection_window(start: datetime, end: datetime):
-    """Open catches always; closed ones when they overlap the range."""
     return or_(ProtectionHit.status.in_(protection_rules.OPEN_STATUSES),
                and_(ProtectionHit.last_seen >= start, ProtectionHit.first_seen <= end))
 
 
 def _protection_of_ip(db: Session, ip: str, start: datetime, end: datetime) -> dict:
-    # A catch's address is a log's text (or a network, for the subnet rule): by value
     window = _protection_window(start, end)
     return _protection(db, _ip_value_match(db.query(ProtectionHit).filter(window), ProtectionHit.ip, ip), start, end)
 
@@ -360,14 +283,11 @@ def _protection(db: Session, condition, start: datetime, end: datetime) -> dict:
     return {"count": total, "open": open_count, "items": [{**protection_rules.hit_dict(h), "_at": h.first_seen} for h in rows]}
 
 
-# ---------------------------------------------------------------- devices
-
 def _device_window(start: datetime, end: datetime):
     return and_(EasDevice.last_seen >= start, EasDevice.first_seen <= end)
 
 
 def _devices_of_ip(db: Session, ip: str, start: datetime, end: datetime) -> dict:
-    # Written canonically, but the table is small: matched by value all the same
     window = _device_window(start, end)
     return _devices(db, _ip_value_match(db.query(EasDevice).filter(window), EasDevice.last_ip, ip), start, end)
 
@@ -383,8 +303,6 @@ def _devices(db: Session, condition, start: datetime, end: datetime) -> dict:
     } for d in rows]}
 
 
-# ---------------------------------------------------------------- DMARC
-
 def _passed(condition):
     return func.coalesce(func.sum(case((condition, DMARCRecord.count), else_=0)), 0)
 
@@ -394,14 +312,10 @@ def _report_overlaps(start: datetime, end: datetime):
 
 
 def _report_domain():
-    """A report's domain as one key: lower case, without a trailing dot, as
-    normalize_domain() writes the domain asked for (reporters write either)."""
     return func.rtrim(func.lower(DMARCReport.domain), ".")
 
 
 def _dmarc_of_ip(db: Session, ip: str, start: datetime, end: datetime) -> dict:
-    """The aggregate DMARC records that name the IP as a source, for every
-    domain: who reported it, for which period, and when the report came in."""
     in_range = db.query(DMARCRecord).join(DMARCReport, DMARCRecord.dmarc_report_id == DMARCReport.id).filter(
         _report_overlaps(start, end))
     where = and_(_ip_value_match(in_range, DMARCRecord.source_ip, ip), _report_overlaps(start, end))
@@ -449,11 +363,7 @@ def _dmarc_of_domain(db: Session, domain: str, start: datetime, end: datetime) -
     }
 
 
-# ---------------------------------------------------------------- RBL and place
-
 def _rbl(db: Session, ip: str) -> dict:
-    """The last stored blocklist check of the IP, or checked false. Never a DNS
-    lookup: "Check now" is POST /api/blacklist/check."""
     from .blacklist_service import apply_ignored_lists
     from .ignore_lists import IGNORED_BLOCKLISTS_KEY, load_ignored
     hosts = db.query(MonitoredHost).filter(MonitoredHost.active == True)  # noqa: E712
@@ -482,8 +392,6 @@ def _geo(ip: str) -> dict:
     return {key: found.get(key) for key in ("country_code", "country_name", "city", "asn", "asn_org")}
 
 
-# ---------------------------------------------------------------- address and domain facts
-
 def _suppression_dict(row: Optional[SpamSuppression]) -> Optional[dict]:
     if row is None:
         return None
@@ -492,19 +400,7 @@ def _suppression_dict(row: Optional[SpamSuppression]) -> Optional[dict]:
             "bounce_count": row.bounce_count}
 
 
-# A suppression row holds the value of a line of the Rspamd regexp map
-# (routers/suppressions.py). The card recognises the forms the app stores, by
-# equality, and never runs a stored pattern:
-# - an address: the address in lower case (automatic blocks, the Add form), or
-#   /^address$/i escaped (the pattern wizard, and lines read back from Rspamd);
-# - a domain: /^.+@domain$/i (the Add form), /^.+@(.+\.)?domain$/i (the pattern
-#   wizard, subdomains too), the older unanchored /.+@domain/i, with or without
-#   the i flag, or the bare domain of a row of type domain (the API and the CSV
-#   import take one).
-# The dots are escaped, and a hyphen too when Python's re.escape wrote the value.
-
 def _js_escape(text: str) -> str:
-    """escapeRegex of the frontend (utils.js)."""
     return re.sub(r"[.*+?^${}()|\[\]\\]", lambda m: "\\" + m.group(0), text)
 
 
@@ -547,12 +443,10 @@ def _domain_entry(db: Session, domain: str) -> Optional[dict]:
 
 
 def _suppressions(db: Session, read: Callable[[], dict]) -> dict:
-    """The suppression list's answer, while the app keeps the list: with "Sync
-    with Rspamd" off it keeps none, and while its blocks are loaded back from
-    Rspamd it is not complete. Either way the card says so, never "no entry"."""
-    from ..routers.suppressions import import_pending, rspamd_sync_on
+    from ..routers.suppressions import import_pending
+    from .bounce_policy import rspamd_sync_on
     if not rspamd_sync_on():
-        raise Off("Sync with Rspamd is off, so the app keeps no suppression list.")
+        raise TurnedOff("Sync with Rspamd is off, so the app keeps no suppression list.")
     if import_pending(db):
         raise Off("The suppression list is being loaded back from Rspamd. Try again in a few minutes.")
     return read()
@@ -562,8 +456,6 @@ def _mailbox(db: Session, address: str) -> dict:
     forms = entity_values.address_forms(address)
     box = db.query(MailboxStatistics).filter(func.lower(MailboxStatistics.username).in_(forms)).first()
     alias = db.query(AliasStatistics).filter(func.lower(AliasStatistics.alias_address).in_(forms)).first()
-    # The mailbox an alias delivers to, only when it is a mailbox here: primary_mailbox
-    # is the alias's first target as mailcow lists it, which may be an outside address
     target = None
     if alias is not None and alias.primary_mailbox:
         target = db.query(MailboxStatistics.username).filter(
@@ -601,13 +493,10 @@ def _dns(db: Session, domain: str) -> dict:
 
 
 def _hosted(domain: str) -> Optional[bool]:
-    """Whether the domain is on this mailcow, or None while the list is not loaded."""
     if not cached_domains_known():
         return None
     return any(is_hosted_domain(form) for form in entity_values.domain_forms(domain))
 
-
-# ---------------------------------------------------------------- timeline
 
 _KIND_ORDER = {"message": 0, "security": 1, "ban": 2, "unban": 3, "protection": 4,
                "device_first_seen": 5, "device_last_seen": 6}
@@ -616,10 +505,6 @@ _LABELS = {"message": "Message", "security": "Security event", "ban": "Banned", 
            "device_last_seen": "Device last seen"}
 
 def _timeline(sources: Dict[str, dict], start: datetime, end: datetime, device_first_seen: bool) -> dict:
-    """The sources' newest rows in one list, newest first. A source that is
-    off or failed adds nothing and is named in left_out. Only events whose own
-    time is in the range: a device seen before and after it, or a catch opened
-    before it, is in its source's list (it is current) but not in the timeline."""
     items, truncated, left_out = [], False, []
     for name in ("messages", "security", "protection", "devices"):
         source = sources.get(name)
@@ -639,7 +524,7 @@ def _timeline(sources: Dict[str, dict], start: datetime, end: datetime, device_f
             elif name == "security":
                 kind = ("security" if row["rule_id"] is not None else "ban" if row["action"] in _BAN_ACTIONS
                         else "unban" if row["action"] == "unban" else None)
-                if kind:  # the "N more attempts" and list lines that follow are not events of their own
+                if kind:
                     items.append({"_at": row["_at"], "time": row["time"], "kind": kind, "ip": row["ip"], "username": row["username"],
                                   "service": row["service"]})
             elif name == "protection":
@@ -652,8 +537,6 @@ def _timeline(sources: Dict[str, dict], start: datetime, end: datetime, device_f
                         continue
                     items.append({"_at": raw, "time": at, "kind": kind, "username": row["username"],
                                   "device_id": row["device_id"], "device_type": row["device_type"], "ip": row["last_ip"]})
-    # By the stored times (naive UTC, to the microsecond), not the answer's
-    # text, which drops the fraction of a second
     items = [i for i in items if i["_at"] is not None and start <= i["_at"] <= end]
     items.sort(key=lambda i: (i["_at"], -_KIND_ORDER[i["kind"]]), reverse=True)
     if len(items) > TIMELINE:
@@ -665,7 +548,6 @@ def _timeline(sources: Dict[str, dict], start: datetime, end: datetime, device_f
 
 
 def _without_private_keys(sources: Dict[str, dict]) -> Dict[str, dict]:
-    """The sources as answered: their rows lose the stored times kept for the timeline."""
     for source in sources.values():
         for row in source.get("items") or []:
             for key in [k for k in row if k.startswith("_")]:
@@ -673,19 +555,14 @@ def _without_private_keys(sources: Dict[str, dict]) -> Dict[str, dict]:
     return sources
 
 
-# ---------------------------------------------------------------- the three cards
-
 def _range_dict(start: datetime, end: datetime) -> dict:
     return {"start": iso(start), "end": iso(end)}
 
 
 def ip_summary(db: Session, ip: str, start: datetime, end: datetime,
                read_fail2ban: Callable[[], Optional[dict]]) -> dict:
-    """Everything stored about one IP (normalized). read_fail2ban returns
-    mailcow's Fail2ban answer, or None when mailcow did not answer."""
     sources = {
         "messages": _run(db, None, "the messages", lambda: _messages_of_ip(db, ip, start, end)),
-        # The closed set of spellings, see "IP by value"
         "security": _run(db, "netfilter", "the security events",
                          lambda: _security(db, _ip_spellings_match(NetfilterLog.ip, ip), start, end, with_ips=False)),
         "lists": _run(db, "netfilter", "the Fail2ban lists", lambda: _lists(ip, read_fail2ban)),
@@ -696,19 +573,14 @@ def ip_summary(db: Session, ip: str, start: datetime, end: datetime,
         "rbl": _run(db, "blacklist", "the blocklist check", lambda: _rbl(db, ip), snapshot=True),
         "geo": _run(db, None, "the place of the address", lambda: _geo(ip)),
     }
-    # Only the device's last address is stored: an IP card says when it was last seen from there
     timeline = _timeline(sources, start, end, device_first_seen=False)
     return {"kind": "ip", "value": ip, "display": ip, "range": _range_dict(start, end),
             "sources": _without_private_keys(sources), "timeline": timeline}
 
 
 def address_summary(db: Session, address: str, display: str, start: datetime, end: datetime) -> dict:
-    """Everything stored about one email address or mailbox (normalized)."""
     forms = entity_values.address_forms(address)
     domain = entity_values.address_domain(address)
-    # Each source shows what its own page shows. Messages leaves an excluded
-    # address out, as the Messages page does; Security, Protection, Devices and
-    # Suppressions list it, as their pages do (owner decision, review R2).
     excluded = any(excluded_addresses.is_listed(form) for form in forms)
     if excluded:
         messages = {"state": "disabled",
@@ -734,7 +606,6 @@ def address_summary(db: Session, address: str, display: str, start: datetime, en
 
 
 def domain_summary(db: Session, domain: str, start: datetime, end: datetime) -> dict:
-    """What is stored about one domain (normalized): its mail, accounts and reports."""
     forms = entity_values.domain_forms(domain)
     sources = {
         "messages": _run(db, None, "the messages", lambda: _messages_of(

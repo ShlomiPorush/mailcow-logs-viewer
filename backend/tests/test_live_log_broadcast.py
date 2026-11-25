@@ -1,4 +1,3 @@
-"""Exercise slow-client isolation and subscription changes without network IO."""
 import asyncio
 import json
 from app.routers import raw_logs

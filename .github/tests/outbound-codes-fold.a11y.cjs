@@ -1,7 +1,3 @@
-// Settings > Outbound in a real DOM (jsdom): a Failures to ignore area starts closed,
-// and its line counts each code once, the way the server reads it (5.02.2 is 5.2.2),
-// leaving out codes the built-in exceptions already cover while they are on.
-// Set A11Y_MODULES to jsdom's node_modules to run it locally (see layers.a11y.cjs).
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -46,7 +42,6 @@ test('each code counts once, as the server reads it', () => {
 
 test('a code the built-in exceptions cover does not count while they are on', () => {
     const { w } = area('', true);
-    // A code the built-in list covers, in the form a person may have typed in the environment
     const covered = ['5.2.2', '5.7.1', '5.4.1', '5.3.4'].find(code => w.settingsStandardCovers(code));
     assert.ok(covered, 'a built-in code to test with');
     const padded = covered.replace(/\.(\d)$/, '.0$1');

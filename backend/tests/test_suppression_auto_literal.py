@@ -1,11 +1,3 @@
-"""Automatic suppressions are always written to Rspamd as exact addresses.
-
-global_rcpt_blacklist.map is a regexp map, and the formatter trusted any
-stored value shaped /body/flags as a regex. The bounce scan and the
-deferred-queue cleanup store recipients taken from Postfix logs and the mail
-queue, so a recipient such as /.*|x@y.test/i became a map line matching every
-recipient on the server. Only entries an administrator added may be regex.
-"""
 import asyncio
 import secrets
 import re
@@ -25,16 +17,12 @@ WHOLE_DOMAIN = f'/.*@partner{MARK}.test/i'
 
 
 def _rspamd_match(map_line: str, recipient: str) -> bool:
-    """Rspamd's regexp multimap: an unanchored search of the slash-delimited body."""
     m = re.match(r'^/(.*)/(i?)$', map_line)
     body, flags = (m.group(1), m.group(2)) if m else (map_line, '')
     return re.search(body, recipient, re.IGNORECASE if 'i' in flags else 0) is not None
 
 
-# ---- formatter ----
-
 def test_trusted_regex_is_anchored_as_a_whole():
-    """^ and $ must hold across alternation: ^(?:a|b)$, not ^a|b$."""
     from app.routers.suppressions import format_suppression_map_entry
     line = format_suppression_map_entry(r'/a@example\.com|b@example\.com/i', allow_regex=True)
     assert _rspamd_match(line, 'a@example.com')
@@ -49,8 +37,6 @@ def test_untrusted_regex_shape_is_written_as_a_literal():
     assert _rspamd_match(line, EVERYONE)
     assert not _rspamd_match(line, 'someone@unrelated.example.com')
 
-
-# ---- the sync, through the real database ----
 
 def _postgres_available() -> bool:
     try:
@@ -137,8 +123,6 @@ def test_auto_row_shaped_like_a_regex_never_reaches_rspamd_as_one(env, monkeypat
 
 
 def test_existing_auto_regex_line_is_rewritten_on_the_next_sync(env, monkeypatch):
-    """Upgrade path: a map already holding the dangerous line written by the
-    old code is corrected by the next sync, with no operator action."""
     from app.database import get_db_context
     from app.models import SpamSuppression
     from app.routers import suppressions as sup
@@ -184,8 +168,6 @@ def test_manual_domain_regex_still_works(env, monkeypatch):
     assert not _rspamd_match(line, f'anyone@{domain}.evil.test')
 
 
-# ---- the auto paths refuse such recipients ----
-
 def test_bounce_scan_does_not_suppress_a_recipient_with_a_slash_in_the_domain(env, monkeypatch):
     from app import scheduler
     from app.config import settings
@@ -229,7 +211,5 @@ def test_deferred_cleanup_does_not_suppress_a_recipient_with_a_slash_in_the_doma
                         lambda recipients, uncovered=None: captured.extend(recipients) or len(recipients))
 
     asyncio.run(scheduler.cleanup_deferred_queue_job())
-    # A recipient that cannot be read keeps the whole message in the queue:
-    # nothing is blocked or deleted for it
     assert captured == []
     scheduler.mailcow_api.delete_queue.assert_not_awaited()

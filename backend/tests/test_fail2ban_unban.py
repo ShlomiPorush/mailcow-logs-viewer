@@ -1,11 +1,3 @@
-"""Fail2ban Unban, and the external firewall switch, the way mailcow takes them.
-
-mailcow has no delete/fail2ban endpoint: an unban is edit/fail2ban with the
-networks as items and action "unban". mailcow's netfilter keys a ban by the
-network it banned (the address with netban_ipv4 or netban_ipv6) and skips an
-unban of any other key, while the API answers success either way. And mailcow
-turns "manage external" off on any full edit that leaves it out. A list entry is
-a network: 198.51.100.7 and 198.51.100.7/32 are the same entry."""
 import asyncio
 
 import pytest
@@ -30,7 +22,6 @@ def _ban(network):
 
 @pytest.fixture()
 def mailcow(monkeypatch):
-    """A mailcow with the given Fail2ban answer; records every Read-Write call."""
     state = {'f2b': {'netban_ipv4': 32, 'netban_ipv6': 128, 'blacklist': '', 'whitelist': '', 'active_bans': []},
              'calls': []}
 
@@ -57,11 +48,9 @@ def test_unban_is_the_edit_mailcow_takes(mailcow):
 
 
 def test_unban_lifts_the_network_fail2ban_banned(mailcow):
-    # netban_ipv4 24 and netban_ipv6 64: Fail2ban banned the networks around the addresses
     mailcow['f2b'].update(netban_ipv4=24, netban_ipv6=64,
                           active_bans=[_ban('198.51.100.0/24'), _ban('2001:db8:0:7::/64')])
     client = _client()
-    # The Events list sends the address that tried, the Security page the ban's own address
     for ip in ('198.51.100.7/32', '198.51.100.0/32', '2001:db8:0:7::9/128'):
         res = client.post('/api/fail2ban/unban', json={'ip': ip}).json()
         assert res['status'] == 'success', res
@@ -105,7 +94,6 @@ def test_an_edit_keeps_the_external_firewall_switch(monkeypatch):
     monkeypatch.setattr(mailcow_api, 'get_fail2ban', fake_get)
     monkeypatch.setattr(mailcow_api, '_make_rw_request', fake_rw)
     asyncio.run(mailcow_api.edit_fail2ban({'ban_time': '3600'}))
-    # A caller that sets it keeps its own value
     asyncio.run(mailcow_api.edit_fail2ban({'ban_time': '3600', 'manage_external': '0'}))
     assert sent[0]['attr'] == {'ban_time': '3600', 'manage_external': '1'}
     assert sent[1]['attr'] == {'ban_time': '3600', 'manage_external': '0'}
@@ -126,7 +114,6 @@ def test_an_address_already_on_a_list_is_not_added_again(mailcow, listed, added)
 
 
 def test_the_answers_call_the_lists_denylist_and_allowlist(mailcow):
-    """Every screen calls them the denylist and the allowlist, so the answers do too."""
     client = _client()
     answers = [client.post('/api/fail2ban/ban', json={'ip': '198.51.100.7/32'}).json()['msg']]
     mailcow['f2b']['blacklist'] = '198.51.100.7/32'

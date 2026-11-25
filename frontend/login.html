@@ -5,7 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, interactive-widget=resizes-content">
     <title>Login - mailcow Logs Viewer</title>
     
-    <!-- App icons -->
     <link rel="icon" href="/static/assets/icons/favicon.ico" sizes="any">
     <link rel="icon" type="image/svg+xml" href="/static/assets/icons/app-icon.svg">
     <link rel="icon" type="image/png" sizes="32x32" href="/static/assets/icons/favicon-32x32.png">
@@ -14,8 +13,8 @@
     <meta name="theme-color" content="#0f172a">
     
     <style>.hidden{display:none}</style>
-    <link rel="stylesheet" href="/static/assets/css/utilities.css?v=3">
-    <link rel="stylesheet" href="/static/assets/css/ui.css?v=34">
+    <link rel="stylesheet" href="/static/assets/css/utilities.css?v=">
+    <link rel="stylesheet" href="/static/assets/css/ui.css?v=">
     <style>
         .loading {
             border: 3px solid var(--ui-line);
@@ -40,12 +39,10 @@
             <p class="ui-muted">Please enter your credentials to continue</p>
         </div>
         
-        <!-- Why the last session ended (?reason=), above both sign-in methods -->
         <div id="login-notice" class="hidden ui-banner ui-banner-warn ui-login-notice" role="status">
             <span id="login-notice-text"></span>
         </div>
 
-        <!-- OAuth2 Login Section -->
         <div id="oauth2-section" class="hidden ui-login-oauth">
             <button 
                 type="button"
@@ -60,7 +57,6 @@
             </button>
         </div>
         
-        <!-- OR Separator (only shown when both OAuth2 and Basic Auth are available) -->
         <div id="auth-separator" class="hidden ui-login-or">
             <div class="ui-login-or-rule">
                 <div class="ui-login-or-line"></div>
@@ -70,7 +66,6 @@
             </div>
         </div>
         
-        <!-- Basic Auth Login Form -->
         <form id="login-form" onsubmit="handleLogin(event)" class="ui-login-form">
             <div id="login-error" class="hidden ui-banner ui-banner-fail" role="alert">
                 <span id="login-error-text"></span>
@@ -131,7 +126,6 @@
     </div>
 
     <script>
-        // Initialize dark mode
         function initDarkMode() {
             const theme = localStorage.getItem('theme');
             const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
@@ -143,13 +137,8 @@
             }
         }
         
-        // Initialize dark mode immediately
         initDarkMode();
 
-        // The page asked for before signing in (?next=), checked the same way as
-        // the server's safe_return_path: only a local path, never another site.
-        // What is returned is rebuilt from the parsed address on this site's
-        // origin, never the value as given.
         function safeReturnPath(value) {
             if (!value || value.length > 2048 || !value.startsWith('/') || value.startsWith('//')
                 || /[\\\x00-\x1f\x7f]/.test(value)) return '/';
@@ -161,20 +150,13 @@
             }
             if (url.origin !== window.location.origin) return '/';
             if (url.pathname === '/login' || /^\/(login|api|static)\//.test(url.pathname)) return '/';
-            // Checked again as rebuilt: removing dot segments turns /.//host into
-            // //host, which the browser reads as another site
             const path = url.pathname + url.search + url.hash;
             if (path.startsWith('//') || path.includes('\\')) return '/';
             return path;
         }
         const returnTo = safeReturnPath(new URLSearchParams(window.location.search).get('next'));
         
-        // The credentials are used once, here, to obtain a session cookie.
-        // Nothing about them is kept in the browser: the cookie the backend
-        // sets is HttpOnly, so no script on the page (or injected into it) can
-        // read it, and there is no password in sessionStorage to steal.
-        // Basic credentials as RFC 7617 sends them: UTF-8, then Base64 (btoa alone throws on a
-        // character outside Latin-1 and garbles the rest)
+        // btoa() alone throws on a password outside Latin-1
         function basicCredentials(username, password) {
             const bytes = new TextEncoder().encode(`${username}:${password}`);
             let binary = '';
@@ -204,10 +186,8 @@
             const submitText = document.getElementById('login-submit-text');
             const submitLoading = document.getElementById('login-submit-loading');
             
-            // Hide error
             if (errorDiv) errorDiv.classList.add('hidden');
             
-            // Show loading
             if (submitText) submitText.classList.add('hidden');
             if (submitLoading) submitLoading.classList.remove('hidden');
             if (submitBtn) submitBtn.disabled = true;
@@ -215,7 +195,6 @@
             try {
                 const response = await startSession(username, password);
                 if (response.ok) {
-                    // Success - redirect to main app using replace to avoid loop
                     window.location.replace(returnTo);
                 } else {
                     const message = response.status === 429
@@ -232,7 +211,6 @@
                     throw error;
                 }
             } catch (error) {
-                // Show error (always show user-friendly message for failed login)
                 if (errorDiv) {
                     errorDiv.classList.remove('hidden');
                     if (errorText) {
@@ -241,18 +219,15 @@
                     }
                 }
                 
-                // Clear password field
                 const passwordField = document.getElementById('login-password');
                 if (passwordField) passwordField.value = '';
             } finally {
-                // Hide loading
                 if (submitText) submitText.classList.remove('hidden');
                 if (submitLoading) submitLoading.classList.add('hidden');
                 if (submitBtn) submitBtn.disabled = false;
             }
         }
 
-        // The password in plain text while the button is pressed
         function togglePasswordShown() {
             const field = document.getElementById('login-password');
             const button = document.getElementById('login-show-password');
@@ -263,8 +238,6 @@
             field.focus();
         }
 
-        // A note under the password while Caps Lock is on. Only key and mouse
-        // events know the key's state; leaving the field hides the note
         function showCapsLock(event) {
             if (typeof event.getModifierState !== 'function') return;
             document.getElementById('login-caps').classList.toggle('hidden', !event.getModifierState('CapsLock'));
@@ -276,12 +249,10 @@
             field.addEventListener('blur', () => document.getElementById('login-caps').classList.add('hidden'));
         })();
 
-        // OAuth2 login handler
         function handleOAuth2Login() {
             window.location.href = '/api/auth/login' + (returnTo !== '/' ? `?next=${encodeURIComponent(returnTo)}` : '');
         }
         
-        // Check for OAuth2 callback errors
         function checkForErrors() {
             const urlParams = new URLSearchParams(window.location.search);
             const error = urlParams.get('error');
@@ -319,14 +290,10 @@
                     errorText.textContent = errorMessage;
                     errorDiv.classList.remove('hidden');
                 }
-                // Clean up URL
                 window.history.replaceState({}, document.title, window.location.pathname);
             }
         }
         
-        // Why the last session ended (?reason=, from session-guard.js and the
-        // server). Only known reasons are shown, never the value as given; the
-        // reason leaves the address, ?next= stays
         function showSignOutReason() {
             const urlParams = new URLSearchParams(window.location.search);
             if (!urlParams.has('reason')) return;
@@ -351,29 +318,23 @@
             window.history.replaceState({}, document.title, window.location.pathname + (rest ? `?${rest}` : ''));
         }
 
-        // Load app title and configure login options on page load
         document.addEventListener('DOMContentLoaded', async () => {
-            // Check for errors first
             showSignOutReason();
             checkForErrors();
             
-            // First check if authentication is enabled
             try {
                 const infoResponse = await fetch('/api/info');
                 if (infoResponse.ok) {
                     const infoData = await infoResponse.json();
-                    // If authentication is disabled, redirect to main app
                     if (!infoData.auth_enabled) {
                         window.location.replace(returnTo);
                         return;
                     }
                 }
             } catch (e) {
-                // If we can't check, assume auth is enabled for safety
                 console.warn('Could not check auth status, assuming enabled');
             }
             
-            // Check authentication provider info
             let oauth2Enabled = false;
             let basicAuthEnabled = false;
             
@@ -384,21 +345,18 @@
                     oauth2Enabled = providerData.oauth2_enabled || false;
                     basicAuthEnabled = providerData.basic_auth_enabled || false;
                     
-                    // Show OAuth2 section if enabled
                     if (oauth2Enabled) {
                         const oauth2Section = document.getElementById('oauth2-section');
                         if (oauth2Section) {
                             oauth2Section.classList.remove('hidden');
                         }
                         
-                        // Update provider name
                         const providerNameEl = document.getElementById('oauth2-provider-name');
                         if (providerNameEl && providerData.provider_name) {
                             providerNameEl.textContent = providerData.provider_name;
                         }
                     }
                     
-                    // Hide Basic Auth form if not enabled
                     if (!basicAuthEnabled) {
                         const loginForm = document.getElementById('login-form');
                         if (loginForm) {
@@ -408,11 +366,9 @@
                 }
             } catch (e) {
                 console.warn('Could not fetch authentication provider info:', e);
-                // Fallback: assume Basic Auth is available if we can't check
                 basicAuthEnabled = true;
             }
             
-            // Show OR separator only if both OAuth2 and Basic Auth are available
             if (oauth2Enabled && basicAuthEnabled) {
                 const separator = document.getElementById('auth-separator');
                 if (separator) {
@@ -420,7 +376,6 @@
                 }
             }
             
-            // Already signed in? Both login methods end up with a session cookie.
             try {
                 const statusResponse = await fetch('/api/auth/status', { credentials: 'include' });
                 if (statusResponse.ok) {
@@ -431,10 +386,8 @@
                     }
                 }
             } catch (e) {
-                // Not authenticated, continue
             }
             
-            // Load app branding
             try {
                 const response = await fetch('/api/info');
                 if (response.ok) {
@@ -451,7 +404,6 @@
                     }
                 }
             } catch (e) {
-                // Ignore errors
             }
         });
     </script>

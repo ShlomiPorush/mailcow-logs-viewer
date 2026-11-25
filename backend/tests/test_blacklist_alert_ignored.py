@@ -1,9 +1,3 @@
-"""The blacklist alert counts only hosts listed on a blacklist that alerts.
-
-A host listed only on a list the user hid, or on UCEPROTECT Level 2/3 (never
-alerted on), does not trigger the alert - but it used to be counted in the
-subject ("2 hosts are on a blacklist") and listed in the body.
-"""
 import asyncio
 
 from app import scheduler

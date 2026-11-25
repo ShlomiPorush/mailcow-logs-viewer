@@ -1,19 +1,3 @@
-"""Stage the repository's Markdown docs for the MkDocs site.
-
-The Markdown files stay where they are: the app fetches documentation/HelpDocs
-from GitHub raw on main at runtime, and the README links into documentation/.
-This script copies them into website/.stage (the MkDocs docs_dir) and rewrites
-relative links so they resolve inside the site. A link to a repository file
-that is not part of the site (docker-compose.yml, env.example) points to the
-file on GitHub. A link to a file that does not exist fails the build.
-
-The site's look comes from the app itself: the fonts and design tokens are
-taken from frontend/assets/css/ui.css at build time (see theme()), so the
-two cannot drift apart.
-
-Usage: python website/stage.py
-"""
-
 import posixpath
 import re
 import shutil
@@ -29,8 +13,6 @@ EXCLUDE = {"documentation/UI_Behavior_Catalog.md"}
 
 LINK = re.compile(r"(\]\()([^)\s]+)(\))")
 
-# GitHub callouts ("> [!NOTE]"), which GitHub and the app's help render as
-# boxes, become Material admonitions
 CALLOUT = re.compile(r"^> \[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\][ \t]*\n((?:>.*(?:\n|$))*)", re.M)
 CALLOUT_KIND = {"NOTE": "note", "TIP": "tip", "IMPORTANT": 'info "Important"',
                 "WARNING": "warning", "CAUTION": 'danger "Caution"'}
@@ -46,7 +28,6 @@ def callouts(text):
 
 
 def pages():
-    """Map each published source file (repo-relative) to its staged path."""
     mapping = {"README.md": "index.md", "CHANGELOG.md": "changelog.md"}
     for path in sorted((REPO / "documentation").rglob("*.md")):
         rel = path.relative_to(REPO).as_posix()
@@ -84,11 +65,6 @@ def rewrite(source, text, mapping, errors):
 
 
 def theme():
-    """Copy the app's fonts and icons, and its tokens as Material color schemes.
-
-    ui.css puts the light tokens on :root and the dark ones on .dark (the class
-    the app's theme toggle sets); Material switches with data-md-color-scheme.
-    """
     ui_css = (REPO / "frontend" / "assets" / "css" / "ui.css").read_text(encoding="utf-8")
     fonts = re.search(r"/\* -+ Fonts -+ \*/(.*?)/\* -+ Tokens -+ \*/", ui_css, re.S)
     tokens = re.search(r"/\* -+ Tokens -+ \*/(.*?)/\* -+ Base -+ \*/", ui_css, re.S)

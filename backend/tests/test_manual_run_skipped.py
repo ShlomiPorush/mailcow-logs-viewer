@@ -1,12 +1,3 @@
-"""Status > Run of a job that another run already holds leaves its status alone.
-
-A manual run is accepted while the job is idle, and its background task starts
-a moment later. When another run takes the job's lock in between (Fetch
-reports or the schedule for the DMARC import, the Blacklist page or the
-schedule for the blacklist check), the manual run skips. The job is still
-running then, and the run that holds it sets the outcome when it ends; the
-manual run used to mark it a success at once.
-"""
 import asyncio
 import threading
 from unittest.mock import MagicMock
@@ -49,22 +40,18 @@ def test_a_manual_import_that_meets_another_import_leaves_the_status_to_it(featu
     monkeypatch.setattr(dmarc_imap_service, "SessionLocal", lambda: MagicMock())
     scheduler.update_job_status('dmarc_imap_sync', 'idle')
 
-    # Status accepts the Run while no import runs
     tasks = BackgroundTasks()
     assert asyncio.run(settings_router.trigger_job('dmarc_imap_sync', tasks))['status'] == 'started'
 
-    # The scheduled import takes the lock before the manual run's task starts
     owner = threading.Thread(target=lambda: asyncio.run(scheduler.dmarc_imap_sync_job()))
     owner.start()
     try:
         assert started.wait(5)
         asyncio.run(tasks())
-        # The scheduled import still runs, so the job is not done yet
         assert scheduler.job_status['dmarc_imap_sync']['status'] == 'running'
     finally:
         release.set()
         owner.join(5)
-    # The import that ran sets the outcome, and only one import read the mailbox
     assert scheduler.job_status['dmarc_imap_sync']['status'] == 'failed'
     assert scheduler.job_status['dmarc_imap_sync']['error'] == 'IMAP login failed'
     assert calls == ['auto']
@@ -83,9 +70,9 @@ def test_a_manual_blacklist_check_that_meets_another_check_leaves_the_status_to_
     async def main():
         tasks = BackgroundTasks()
         assert (await settings_router.trigger_job('blacklist_check', tasks))['status'] == 'started'
-        # A full check (the Blacklist page's or the schedule's) holds the lock; it sets the status
-        async with scheduler.blacklist_check_hold('full'):
-            scheduler.update_job_status('blacklist_check', 'running')   # as the full check does
+        monkeypatch.setattr(scheduler, "_blacklist_full_scan_pending", True)
+        async with scheduler.blacklist_check_lock():
+            scheduler.update_job_status('blacklist_check', 'running')
             await tasks()
             return scheduler.job_status['blacklist_check']['status']
 

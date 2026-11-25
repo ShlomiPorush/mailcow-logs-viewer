@@ -1,5 +1,3 @@
-// The search in the top bar finds a Fail2ban network ban by its network and
-// opens it on Security > Banned, with no country or network filter hiding it.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -46,7 +44,6 @@ test('a network ban is found by its network and opens the Banned list with every
         found.items[0].open();
         assert.equal(vm.runInContext('securityCountry', context), null);
         assert.equal(vm.runInContext('securityNetwork', context), null);
-        // Already open: the list is asked again; otherwise the page opens on it
         assert.deepEqual(calls, [open ? ['setSecurityFilter', 'banned'] : ['openSecurityList', 'banned']]);
     }
 });

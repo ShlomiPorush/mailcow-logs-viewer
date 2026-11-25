@@ -1,8 +1,3 @@
-// What a form says back, in a real DOM (jsdom): a value that cannot be sent is
-// named under its field (uiFieldProblem, as Settings does), a domain typed as
-// @example.com or example.com. becomes the same pattern as example.com, the
-// Outgoing spam whitelist takes addresses apart by commas too, and removing a
-// whitelisted mailbox asks first.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -61,7 +56,6 @@ test('a rule without a name says so under the name field, takes the focus there 
     assert.equal(name.getAttribute('aria-invalid'), 'true');
     assert.match(name.getAttribute('aria-describedby'), /qrule-name-invalid/);
     assert.equal(w.document.activeElement, name);
-    // Typing clears it; the save then goes
     name.value = 'Newsletter';
     name.dispatchEvent(new w.Event('input', { bubbles: true }));
     assert.equal(w.document.getElementById('qrule-name-invalid'), null);
@@ -93,11 +87,9 @@ test('*.example.com is refused under the field: only the domain itself is blocke
     assert.equal(await addDomain(w, '*.example.com'), null);
     assert.equal(w.document.getElementById('new-suppression-email-invalid').textContent,
         'Enter the domain without "*." - only that domain is blocked, not its subdomains.');
-    // Other input that is not a hostname keeps its own words
     const other = page();
     assert.equal(await addDomain(other, 'exa mple.com'), null);
     assert.equal(other.document.getElementById('new-suppression-email-invalid').textContent, 'Enter a plain domain name, for example example.com');
-    // An empty field says what to enter
     const empty = page();
     assert.equal(await addDomain(empty, ''), null);
     assert.equal(empty.document.getElementById('new-suppression-email-invalid').textContent, 'Enter a domain name.');

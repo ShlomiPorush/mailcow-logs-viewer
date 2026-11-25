@@ -1,4 +1,3 @@
-"""Small in-memory rate limits per client address, and request body limits."""
 import threading
 import time
 from collections import OrderedDict, deque
@@ -10,8 +9,6 @@ MAX_KEYS = 10000
 
 
 class Window:
-    """At most `limit` events per `seconds` for each key."""
-
     def __init__(self, limit: int, seconds: int):
         self.limit = limit
         self.seconds = seconds
@@ -33,7 +30,6 @@ class Window:
             return len(self._recent(key, time.monotonic())) >= self.limit
 
     def hit(self, key: str) -> bool:
-        """Count an event; False when the key was already at its limit (not counted)."""
         with self._lock:
             now = time.monotonic()
             events = self._recent(key, now)
@@ -55,7 +51,6 @@ class Window:
 
 
 async def read_body(request: Request, limit: int) -> bytes:
-    """The request body, refusing it as soon as it passes `limit` bytes (chunked bodies too)."""
     length = request.headers.get("content-length")
     if length and length.isdigit() and int(length) > limit:
         raise HTTPException(status_code=413, detail="The request is too large.")

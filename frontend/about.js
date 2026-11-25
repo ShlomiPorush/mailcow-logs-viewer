@@ -1,9 +1,3 @@
-// =============================================================================
-// ABOUT - this app: whether what it connects to works, its version and its
-// configuration. Moved out of Settings, which keeps only what can be edited.
-// Classic script sharing the global scope; loaded after utils.js, app.js and settings.js.
-// =============================================================================
-
 async function loadAbout() {
     const box = document.getElementById('about-content');
     if (!box) return;
@@ -39,8 +33,6 @@ async function loadAbout() {
     wireVersionPanel(box, appVersion, versionInfo);
 }
 
-// One card per thing the app depends on: is it set up, does it work, and where to fix it.
-// The database comes first: without it nothing else works.
 function aboutHealthCards(info, mailcow, rw, health) {
     const card = (label, tone, value, detail, actions) => `
         <div class="ui-st-card ui-about-card">
@@ -72,7 +64,6 @@ function aboutHealthCards(info, mailcow, rw, health) {
                 : mailcow.connected ? `Logs are read from ${mono(config.mailcow_url)}.`
                     : `No new logs until ${mono(config.mailcow_url)} can be reached.`, settingsBtn('mailcow')));
 
-    // A saved key or password, with the last check of it (Credential Checks runs it by itself)
     const checked = (name, status, works) => {
         if (!status || !status.configured) return { tone: 'ok', value: 'Configured', detail: `${works} It has not been checked yet.` };
         if (status.valid) return { tone: 'ok', value: 'Accepted', detail: works };
@@ -116,7 +107,6 @@ function aboutHealthCards(info, mailcow, rw, health) {
         config.rspamd_configured ? rspamdCheck.detail
             : 'Add the Rspamd password to see the Rspamd maps and sync the suppression list.', settingsBtn('mailcow')));
 
-    // Basic Auth names its user, OAuth2 its provider
     const methods = [
         config.basic_auth_enabled ? `Basic Auth${config.auth_username ? ` (${escapeHtml(config.auth_username)})` : ''}` : '',
         config.oauth2_enabled ? `OAuth2${config.oauth2_provider_name ? ` (${escapeHtml(config.oauth2_provider_name)})` : ''}` : '',
@@ -157,7 +147,6 @@ function aboutConfigurationPanel(config, app = null) {
         </section>`;
 }
 
-// The zone every time in the app follows, and why it is UTC when none or an unknown one is set
 function aboutTimeZone(config, app) {
     const zone = (app && app.timezone) || config.timezone || 'UTC';
     if (app && app.timezone_valid === false) {
@@ -167,7 +156,6 @@ function aboutTimeZone(config, app) {
     return escapeHtml(zone);
 }
 
-// The version number opens its changelog; Check Now asks GitHub again
 function wireVersionPanel(content, appVersion, versionInfo) {
     const currentVersionText = document.getElementById('current-version-text');
     if (currentVersionText) {

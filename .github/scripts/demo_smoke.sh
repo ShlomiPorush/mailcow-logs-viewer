@@ -1,12 +1,4 @@
 #!/usr/bin/env bash
-# Boot the demo image against PostgreSQL with nothing but database settings
-# (the image carries everything else) and prove it runs cut off from the
-# network: healthy, SPA served, the network guard active in the live process,
-# pages fed by the fictional mailcow and internet, a week of history on every
-# page, writes that stick, every background job run, not one outbound
-# attempt left for the guard, and a reset that drops visitor changes.
-#
-# Usage: demo_smoke.sh <demo image tag>
 set -euo pipefail
 
 IMAGE="${1:?usage: demo_smoke.sh <demo image tag>}"
@@ -38,13 +30,11 @@ docker run -d --name "${DB}" --network "${NET}" \
     -e POSTGRES_USER -e POSTGRES_PASSWORD -e POSTGRES_DB \
     postgres:16-alpine >/dev/null
 for i in $(seq 1 30); do
-    # Over TCP: during initialisation the server listens on its socket only
     if docker exec "${DB}" pg_isready -h 127.0.0.1 -U demo -q 2>/dev/null; then break; fi
     sleep 1
     [ "$i" -eq 30 ] && fail "PostgreSQL did not become ready"
 done
 
-# Extra arguments are passed to docker run (-e ...)
 start_app() {
     docker run -d --name "${APP}" --network "${NET}" -p "${PORT}:8080" \
         -e POSTGRES_HOST="${DB}" \
@@ -77,8 +67,6 @@ step "SPA is served without a login, with the demo notice"
 for route in / /dashboard /messages /settings; do
     code=$(curl -s -o /dev/null -w '%{http_code}' "${BASE}${route}")
     [ "${code}" = "200" ] || fail "GET ${route} returned ${code}"
-    # Read the whole page first: grep -q stops early, and under pipefail
-    # curl's broken pipe would fail the check even when the notice is there
     page=$(curl -s "${BASE}${route}")
     case "${page}" in *'class="demo-banner"'*) ;; *) fail "GET ${route} has no demo notice" ;; esac
 done
@@ -92,8 +80,6 @@ grep -q -- "--loop asyncio" <<< "${cmdline}" \
     || fail "uvicorn is not running on the asyncio loop (uvloop bypasses the guard)"
 
 step "mailcow answers from the fictional server"
-# Evaluated inside the container so the host needs nothing beyond docker and curl.
-# Usage: check <path> <python expression over `d`> <description>
 check() {
     docker exec "${APP}" python3 -c "
 import json, sys, urllib.request
@@ -134,8 +120,6 @@ grep -q '"status": *"success"' <<< "${result}" || fail "quarantine release did n
 check /api/quarantine "all(str(i['id']) != '${before}' for i in d['data'])" "the released item left the quarantine"
 
 step "Visitors cannot lock others out or change the demo's own limits"
-# Enabling Basic Auth with a valid confirmation would lock every other
-# visitor out; in the demo the setting is fixed by the image
 lock_password="$(openssl rand -hex 16)"
 curl -s -o /dev/null -X PUT -H 'Content-Type: application/json' \
     -d "{\"basic_auth_enabled\": true, \"auth_username\": \"admin\", \"auth_password\": \"${lock_password}\", \"verify_username\": \"admin\", \"verify_password\": \"${lock_password}\"}" \
@@ -163,8 +147,6 @@ jobs=$(docker exec "${APP}" python3 -c 'import json,urllib.request; print(" ".jo
 [ -n "${jobs}" ] || fail "/api/settings/info returned no background_jobs"
 n=0
 for job in ${jobs}; do
-    # One address per job: this loop is a test harness, not a visitor, and
-    # would otherwise run into the per-visitor write cap
     n=$((n + 1))
     code=$(curl -s -o /dev/null -w '%{http_code}' -H "CF-Connecting-IP: 192.0.2.${n}" -X POST "${BASE}/api/settings/jobs/${job}/run")
     case "${code}" in 200|409) ;; *) fail "job runner rejected ${job} (${code})" ;; esac
@@ -182,7 +164,6 @@ if docker logs "${APP}" 2>&1 | grep -E "(TypeError|AttributeError|NameError|KeyE
 fi
 
 step "Live traffic keeps arriving"
-# The trickle adds lines every minute and the regular fetch job imports them
 for i in $(seq 1 60); do
     [ "$(postfix_rows)" -gt "${rows_at_start}" ] && break
     sleep 3
@@ -191,7 +172,6 @@ done
 echo "  ok: ${rows_at_start} -> $(postfix_rows) Postfix lines"
 
 step "Every outbound path was answered by a fake"
-# The guard is the last line of defence: in a correct demo nothing reaches it.
 logs=$(docker logs "${APP}" 2>&1)
 if grep -q "Fake mailcow has no answer" <<< "${logs}"; then
     echo "${logs}" | grep "Fake mailcow has no answer" | sort | uniq -c
@@ -208,7 +188,6 @@ if grep -q "Traceback (most recent call last)" <<< "${logs}"; then
 fi
 
 step "The nightly reset drops visitor changes and rebuilds the demo"
-# The same reset as the daily one at DEMO_RESET_TIME, brought forward so the test does not wait
 docker rm -f "${APP}" >/dev/null
 start_app -e DEMO_RESET_AFTER_SECONDS=45
 wait_healthy

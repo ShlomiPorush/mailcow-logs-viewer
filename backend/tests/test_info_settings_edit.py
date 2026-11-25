@@ -1,8 +1,3 @@
-"""
-/api/info tells a signed-in browser whether settings can be edited from the
-UI. The search in the top bar leaves out its Settings results while editing
-is off: they open fields that only the edit form has.
-"""
 import secrets
 
 import pytest

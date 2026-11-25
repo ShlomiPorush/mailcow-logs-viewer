@@ -1,22 +1,3 @@
-"""The dashboard figures, and the hourly samples of those with a trend.
-
-One function per figure, used by the card's own endpoint and, for a figure with
-a trend, by the hourly collector, so a trend's last point is what the card
-showed at that moment.
-Each returns {value, of, valid, as_of, ...}: valid is False when its source
-did not answer (mailcow unreachable, Fail2ban unknown, no fresh blocklist
-check, the database failing), and then no sample is written: the trend shows
-a gap, never a made-up zero.
-
-The samples (metric_snapshots, one per figure and hour, kept KEEP_DAYS days)
-of a feature that is off are neither written nor served, and are deleted
-when it is switched off (feature_data.purge_feature). A switch and a write
-are serialized by one transaction-level advisory lock: the purge takes it,
-bumps that feature's epoch and deletes; the collector notes the epochs when
-its run starts and, under the lock, writes a feature's samples only if the
-feature is on and its epoch is unchanged. So nothing lands after a delete,
-and an off-and-on during a run drops that run's samples.
-"""
 import asyncio
 import logging
 import re
@@ -33,14 +14,12 @@ from ..config import settings
 
 logger = logging.getLogger(__name__)
 
-# The trends, by name, and the feature each belongs to (None: always on)
 METRICS: Dict[str, Optional[str]] = {
     'storage_used': None,
     'security_review': 'netfilter',
     'security_banned': 'netfilter',
 }
 KEEP_DAYS = 90
-# One source may take this long before its sample of the hour is left out
 SOURCE_TIMEOUT = 30
 _LOCK_KEY = 0x4D4C5602
 
@@ -59,22 +38,14 @@ def bump_feature_epoch(feature: str) -> None:
 
 
 class SamplesBusy(Exception):
-    """The samples' lock was not had in time: nothing was changed."""
+    pass
 
 
-# How long a save of the feature list waits for a write or purge of the samples
 SWITCH_WAIT = '10s'
 
 
 @contextmanager
 def feature_switch_guard(needed: bool = True):
-    """Held across a settings save: the samples' lock (session level, on a connection
-    of its own), taken before anything is saved, so a save that cannot have it
-    changes nothing (SamplesBusy). Inside it, note() moves the epoch of every
-    feature with a trend that the save switched (on or off), so a sample read
-    before the switch is not written after it, also when the feature goes off and
-    on again before its data is deleted. A save that does not touch the feature
-    list (needed false) switches nothing and takes no lock."""
     if not needed:
         yield lambda: None
         return
@@ -82,7 +53,6 @@ def feature_switch_guard(needed: bool = True):
     conn = engine.connect()
     try:
         try:
-            # The wait is bounded for this transaction only; the lock outlives it
             conn.execute(text(f"SET LOCAL lock_timeout = '{SWITCH_WAIT}'"))
             conn.execute(text('SELECT pg_advisory_lock(:key)'), {'key': _LOCK_KEY})
             conn.commit()
@@ -102,16 +72,14 @@ def feature_switch_guard(needed: bool = True):
                 conn.execute(text('SELECT pg_advisory_unlock(:key)'), {'key': _LOCK_KEY})
                 conn.commit()
             except Exception as e:
-                # Never back to the pool holding the lock: closing the connection ends it
                 logger.warning(f"Trend samples' lock released by closing its connection ({e})")
+                # Returning this connection to the pool can leave the session lock held.
                 conn.invalidate()
     finally:
         conn.close()
 
 
 def note_feature_switches(off_before, off_after) -> None:
-    """The epochs of the features switched between two states (tests, and saves that
-    already hold the guard)."""
     for feature in {f for f in set(METRICS.values()) if f and ((f in off_before) != (f in off_after))}:
         bump_feature_epoch(feature)
 
@@ -121,7 +89,6 @@ def features_off() -> set:
 
 
 def lock_metric_rows(db: Session) -> None:
-    """Held to the end of the transaction: a purge and a collector's write never interleave."""
     db.execute(text('SELECT pg_advisory_xact_lock(:key)'), {'key': _LOCK_KEY})
 
 
@@ -143,7 +110,6 @@ def parse_percent(value) -> Optional[float]:
 
 
 async def storage_figure() -> dict:
-    """Mail storage: mailcow's used percent of the vmail volume, with its words."""
     from ..mailcow_api import mailcow_api
     try:
         vmail = await mailcow_api.get_status_vmail()
@@ -160,7 +126,6 @@ async def storage_figure() -> dict:
 
 
 def linking_figure(db: Session) -> dict:
-    """Message linking: the share of linked messages that are complete (not expired)."""
     from ..models import MessageCorrelation
     try:
         total = db.query(func.count(MessageCorrelation.id)).scalar() or 0
@@ -183,8 +148,6 @@ def linking_figure(db: Session) -> dict:
 
 
 def blocklists_figure(summary: dict) -> dict:
-    """Blocklists: the monitored addresses listed, of all of them (as the card counts),
-    known only with a fresh check that is not an error."""
     hosts = summary.get('hosts') or []
     listed = sum(1 for h in hosts if h.get('status') == 'listed')
     valid = bool(summary.get('has_data')) and summary.get('status') in ('listed', 'clean')
@@ -192,8 +155,6 @@ def blocklists_figure(summary: dict) -> dict:
 
 
 def security_figures(addresses, fail2ban_known: bool) -> dict:
-    """To review and Banned now, as the dashboard counts them; known only when
-    Fail2ban answered (without it bans and lists are unknown)."""
     review = sum(1 for a in addresses if a.get('list') == 'review')
     banned = sum(1 for a in addresses if a.get('list') == 'banned')
     now = _now()
@@ -204,9 +165,6 @@ def security_figures(addresses, fail2ban_known: bool) -> dict:
 
 
 def _in_session(fn, budget: float = None):
-    """In a session of its own whose statements together stop at the source's time
-    budget: each one may take only what is left of it (a wait_for on a thread does
-    not stop the thread's query)."""
     from sqlalchemy import event
     from ..database import get_db_context
     budget = SOURCE_TIMEOUT - 5 if budget is None else budget
@@ -228,7 +186,6 @@ def _in_session(fn, budget: float = None):
 
 
 async def collect_figures() -> Dict[str, dict]:
-    """Every figure that is on and whose source answered, each source in its own time budget."""
     points: Dict[str, dict] = {}
 
     async def bounded(work, label):
@@ -257,15 +214,12 @@ def slot_of(moment: datetime) -> datetime:
 
 
 def write_points(points: Dict[str, dict], epochs: Dict[str, int], slot: datetime) -> int:
-    """Write the hour's samples under the lock (a feature switched off, or off and on,
-    since the run began writes nothing), and drop samples older than KEEP_DAYS."""
     from sqlalchemy.dialects.postgresql import insert
     from ..database import get_db_context
     from ..models import MetricSnapshot
     written = 0
     with get_db_context() as db:
         try:
-            # A purge holding the lock longer than this: the hour is a gap, the job is no failure
             db.execute(text("SET LOCAL lock_timeout = '10s'"))
             db.execute(text("SET LOCAL statement_timeout = '30s'"))
             lock_metric_rows(db)
@@ -282,14 +236,11 @@ def write_points(points: Dict[str, dict], epochs: Dict[str, int], slot: datetime
                 index_elements=['name', 'slot'], set_={'value': row['value'], 'of': row['of'], 'as_of': row['as_of']}))
             written += 1
         db.query(MetricSnapshot).filter(MetricSnapshot.slot < _now() - timedelta(days=KEEP_DAYS)).delete(synchronize_session=False)
-        # A figure that no longer has a trend keeps no samples
-        db.query(MetricSnapshot).filter(MetricSnapshot.name.notin_(list(METRICS))).delete(synchronize_session=False)
         db.commit()
     return written
 
 
 async def run_trend_samples() -> int:
-    """One hourly run: the epochs as it starts, the figures, then the write."""
     epochs = {f: feature_epoch(f) for f in set(METRICS.values()) if f}
     slot = slot_of(_now())
     points = await collect_figures()
@@ -297,7 +248,6 @@ async def run_trend_samples() -> int:
 
 
 def purge_feature_metrics(db: Session, feature: str) -> int:
-    """For feature_data.purge_feature, inside its transaction: the feature's samples go."""
     from ..models import MetricSnapshot
     names = [name for name, f in METRICS.items() if f == feature]
     if not names:

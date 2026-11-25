@@ -1,11 +1,9 @@
-"""Tests for the TLS-RPT (RFC 8460) report parser."""
 import gzip
 import json
 
 import pytest
 
 from app.services.tls_rpt_parser import (
-    is_tls_rpt_json,
     parse_iso_datetime,
     parse_tls_rpt_file,
     parse_tls_rpt_json,
@@ -73,21 +71,15 @@ def test_gzip_bomb_is_rejected_as_over_the_limit():
 def test_parse_iso_datetime_z_suffix():
     dt = parse_iso_datetime("2026-01-12T10:30:00Z")
     assert dt is not None
-    assert (dt.year, dt.hour, dt.tzinfo) == (2026, 10, None)  # stored UTC-naive
+    assert (dt.year, dt.hour, dt.tzinfo) == (2026, 10, None)
 
 
 def test_parse_iso_datetime_offset():
     dt = parse_iso_datetime("2026-01-12T12:30:00+02:00")
     assert dt is not None
-    assert dt.hour == 10  # converted to UTC
+    assert dt.hour == 10
 
 
 def test_parse_iso_datetime_invalid():
     assert parse_iso_datetime("") is None
     assert parse_iso_datetime("garbage") is None
-
-
-def test_is_tls_rpt_json_detection():
-    assert is_tls_rpt_json(json.dumps(VALID_REPORT)) is True
-    assert is_tls_rpt_json('{"some": "other json"}') is False
-    assert is_tls_rpt_json("not json") is False

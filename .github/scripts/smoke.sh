@@ -1,14 +1,4 @@
 #!/usr/bin/env bash
-# Boot the built image against a real PostgreSQL and prove the application
-# actually works: health, SPA, static assets, Alembic head, and the manual
-# job runner accepting every job the Status page lists.
-#
-# Usage: smoke.sh <image tag>
-#        UI_SMOKE=1 smoke.sh <image tag>   also seed fake data and run a headless
-#                                          browser pass over every page (ui_smoke.py)
-# Runs in CI (ubuntu runner) and locally (Git Bash / WSL) against any image.
-# CI does not set UI_SMOKE; the browser pass is a manual tool for large UI
-# changes such as a redesign (see documentation/UI_Behavior_Catalog.md).
 set -euo pipefail
 
 IMAGE="${1:?usage: smoke.sh <image tag>}"
@@ -44,17 +34,11 @@ docker run -d --name "${DB}" --network "${NET}" \
     -e POSTGRES_USER -e POSTGRES_PASSWORD -e POSTGRES_DB \
     postgres:16-alpine >/dev/null
 for i in $(seq 1 30); do
-    # Over TCP: during initialisation the server listens on its socket only
     if docker exec "${DB}" pg_isready -h 127.0.0.1 -U ci -q 2>/dev/null; then break; fi
     sleep 1
     [ "$i" -eq 30 ] && fail "PostgreSQL did not become ready"
 done
 
-# Start the application; extra arguments are passed to docker run (-e ...).
-# mailcow is unreachable on purpose: nothing in this smoke test needs it, and
-# every job must cope with an unreachable one without crashing.
-# The container runs read-only like the shipped docker-compose.yml: only /tmp
-# and /app/data (a tmpfs here, standing in for the data volume) are writable.
 start_app() {
     docker run -d --name "${APP}" --network "${NET}" -p "${PORT}:8080" \
         --read-only --tmpfs /tmp:size=64m --tmpfs /app/data \
@@ -112,7 +96,6 @@ if docker logs "${APP}" 2>&1 | grep -q "Traceback (most recent call last)"; then
 fi
 
 step "Manual job runner accepts every job the Status page lists"
-# Parsed inside the container so the host needs nothing beyond docker and curl
 jobs=$(docker exec "${APP}" python3 -c 'import json,urllib.request; print(" ".join(json.load(urllib.request.urlopen("http://localhost:8080/api/settings/info"))["background_jobs"].keys()))')
 [ -n "${jobs}" ] || fail "/api/settings/info returned no background_jobs"
 bad=""
@@ -129,8 +112,6 @@ done
 echo "${count} jobs accepted"
 
 step "Jobs finish without crashing the process"
-# Wait until no job reports 'running' (each one retries the unreachable
-# mailcow a few times first), capped so a hung job cannot stall CI forever.
 running=""
 for i in $(seq 1 90); do
     running=$(docker exec "${APP}" python3 -c 'import json,urllib.request; j=json.load(urllib.request.urlopen("http://localhost:8080/api/settings/info"))["background_jobs"]; print(" ".join(k for k,v in j.items() if v.get("status")=="running"))')
@@ -140,8 +121,6 @@ done
 if [ -n "${running}" ]; then echo "still running after 180s: ${running}"; fi
 [ "$(docker inspect -f '{{.State.Running}}' "${APP}")" = "true" ] || fail "application exited while running jobs"
 curl -fsS "${BASE}/api/health" | grep -q '"status": *"healthy"' || fail "health degraded after running jobs"
-# A job that fails because mailcow is unreachable is expected here; a job that
-# raises TypeError/AttributeError/NameError is a programming error (#81).
 if docker logs "${APP}" 2>&1 | grep -E "(TypeError|AttributeError|NameError|ImportError):" ; then
     fail "a job raised a programming error (see log lines above)"
 fi
@@ -153,20 +132,17 @@ fi
 
 if [ "${UI_SMOKE:-0}" = "1" ]; then
     step "Seed fake data for the browser pass"
-    # Through the app's own models, so detail views (message details, DMARC
-    # domains, blocklist results) have something to render.
     MSYS_NO_PATHCONV=1 docker exec -i -w /app "${APP}" python - < "$(dirname "$0")/smoke_seed.py" \
         || fail "seeding the smoke database failed"
 
-    # Headless Chromium from the pinned Playwright image; the Python package is
-    # pinned to the same release so it uses the browsers the image ships.
-    # jsonschema checks every API answer against /openapi.json.
     PW_VERSION="1.56.0"
     PW_IMAGE="mcr.microsoft.com/playwright/python:v${PW_VERSION}-noble"
     SCRIPTS="$(cd "$(dirname "$0")" && (pwd -W 2>/dev/null || pwd))"
+    TESTS="$(cd "$(dirname "$0")/../../backend/tests" && (pwd -W 2>/dev/null || pwd))"
     browser_pass() {
         MSYS_NO_PATHCONV=1 docker run --rm --network "${NET}" --ipc=host \
-            -v "${SCRIPTS}:/scripts:ro" "${PW_IMAGE}" \
+            -v "${SCRIPTS}/ui_smoke.py:/scripts/ui_smoke.py:ro" \
+            -v "${TESTS}/contract_rules.py:/scripts/contract_rules.py:ro" "${PW_IMAGE}" \
             sh -c "pip install -q --disable-pip-version-check --root-user-action=ignore --break-system-packages playwright==${PW_VERSION} jsonschema==4.26.0 \
                    && python /scripts/ui_smoke.py http://${APP}:8080" \
             || fail "browser pass ($1) found problems (see FAIL lines above)"
@@ -175,11 +151,6 @@ if [ "${UI_SMOKE:-0}" = "1" ]; then
     step "Browser pass over every page (all features on, settings editable)"
     browser_pass "open"
 
-    # The same data with every feature turned off and settings read-only, so the
-    # "is disabled" pages, hidden tabs and read-only Settings render at least once
-    # (see "Gated and conditional states" in documentation/UI_Behavior_Catalog.md).
-    # spam-filter is the old name of suppressions and rspamd together: it
-    # must still turn both off.
     step "Browser pass over every page (every feature off, settings read-only)"
     docker rm -f "${APP}" >/dev/null
     start_app -e SETTINGS_EDIT_VIA_UI_ENABLED=false \

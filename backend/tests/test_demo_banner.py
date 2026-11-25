@@ -1,6 +1,3 @@
-"""
-The demo notice: added once to every HTML page, nothing else touched.
-"""
 import asyncio
 
 from demo.banner import DemoBannerMiddleware, inject
@@ -68,7 +65,6 @@ def test_a_notice_replaces_the_whole_text_escaped_and_short():
 
 
 def test_the_authentication_warning_is_hidden_in_the_demo():
-    # The demo has no sign-in on purpose; the id is the app's own banner
     from pathlib import Path
     index = Path(__file__).resolve().parents[2] / "frontend" / "index.html"
     assert 'id="auth-off-banner"' in index.read_text(encoding="utf-8")

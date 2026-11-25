@@ -1,6 +1,6 @@
-"""GeoIP: the validate endpoint reports each database on its own, and the
-weekly update job exists once a license is entered in Settings.
-"""
+import asyncio
+
+import pytest
 import starlette.staticfiles as sf
 _orig_init = sf.StaticFiles.__init__
 sf.StaticFiles.__init__ = lambda s, *a, **k: _orig_init(s, *a, **{**k, 'check_dir': False})
@@ -14,8 +14,7 @@ from app.services import geoip_service  # noqa: E402
 
 
 def test_validate_reports_a_missing_asn_database(monkeypatch):
-    # City answers the test lookups, the ASN database cannot be read
-    monkeypatch.setattr(geoip_service, '_geoip_db_valid', None)  # restored afterwards
+    monkeypatch.setattr(geoip_service, '_geoip_db_valid', None)
     monkeypatch.setattr(settings_router, 'get_geoip_status', lambda: {'City': {'available': True}})
     state = {}
 
@@ -52,10 +51,8 @@ class _FakeScheduler:
     def add_job(self, func, trigger=None, id=None, **kwargs):
         self.jobs[id] = (func, trigger)
 
-    def remove_job(self, job_id):
-        if job_id not in self.jobs:
-            raise LookupError(job_id)
-        del self.jobs[job_id]
+    def get_job(self, job_id):
+        return self.jobs.get(job_id)
 
 
 def test_saving_a_license_schedules_the_weekly_update(monkeypatch):
@@ -70,7 +67,8 @@ def test_saving_a_license_schedules_the_weekly_update(monkeypatch):
     assert 'sun' in str(trigger) and "hour='3'" in str(trigger)
 
 
-def test_removing_the_license_removes_the_weekly_update(monkeypatch):
+def test_removing_the_license_leaves_the_weekly_update_doing_nothing(monkeypatch):
+    from app.services import geoip_downloader
     fake = _FakeScheduler()
     fake.jobs['update_geoip'] = (scheduler.update_geoip_database, None)
     monkeypatch.setattr(scheduler, 'scheduler', fake)
@@ -78,4 +76,12 @@ def test_removing_the_license_removes_the_weekly_update(monkeypatch):
 
     scheduler.reschedule_interval_jobs()
 
-    assert 'update_geoip' not in fake.jobs
+    assert 'update_geoip' in fake.jobs
+    monkeypatch.setattr(geoip_downloader, 'is_license_configured', lambda: False)
+    monkeypatch.setattr(geoip_downloader, 'update_geoip_database_if_needed',
+                        lambda: pytest.fail("downloaded without a license"))
+    saved = dict(scheduler.job_status['update_geoip'])
+    try:
+        assert asyncio.run(scheduler.update_geoip_database()) == scheduler.JOB_STATUS_SET
+    finally:
+        scheduler.job_status['update_geoip'] = saved

@@ -1,5 +1,3 @@
-// The browser is in New York and the app's zone is Europe/Berlin: a day on the
-// Messages page is a day in the app's zone, never the browser's (nor UTC's)
 process.env.TZ = 'America/New_York';
 
 const assert = require('node:assert/strict');
@@ -11,7 +9,6 @@ const { test } = require('node:test');
 const source = fs.readFileSync(path.join(__dirname, '../../frontend/app.js'), 'utf8');
 const utils = fs.readFileSync(path.join(__dirname, '../../frontend/utils.js'), 'utf8');
 const zoneHelpers = utils.slice(utils.indexOf('function appTz()'), utils.indexOf('function formatSeconds('));
-// A top-level function of app.js, by name, up to its closing brace
 const extract = name => {
     const start = source.search(new RegExp(`^(async )?function ${name}\\(`, 'm'));
     assert.ok(start >= 0, `${name} must be present`);
@@ -24,25 +21,25 @@ function harness(filters, appTimezone = 'Europe/Berlin') {
     const calls = { urls: [], rendered: 0, applied: 0, toasts: [], navigated: [], newShown: 0, showNew: [], facets: 0, loaded: [] };
     let context;
     context = vm.createContext({
-        __edge: true,   // the list shows the edge where new mail lands
-        __newCount: 0,   // what /api/messages/new answers
+        __edge: true,
+        __newCount: 0,
         messagesAtNewEdge: () => context.__edge,
         messagesNew: { watermark: 41, count: 0 },
         renderMessagesNew: () => { calls.newShown++; },
         messagesShowNew: options => { calls.showNew.push(options); },
         MESSAGES_ROLLING_PRESETS: ['today', '7days', '30days', '90days'],
-        messagesExact: null,   // no entity card set whole values
+        messagesExact: null,
         URLSearchParams,
         appTimezone,
         currentFilters: { messages: filters },
         currentPage: { messages: 1 },
-        lastDataCache: { messages: { data: [{ correlation_key: 'shown' }], total: 1 } },   // a list is shown
-        __held: false,   // text in the list is selected
+        lastDataCache: { messages: { data: [{ correlation_key: 'shown' }], total: 1 } },
+        __held: false,
         uiTextHeld: () => context.__held,
         uiKeepFocus: (container, key, draw) => draw(),
         PAGE_REFRESH_TIMEOUT: 20000,
         loadMessages: options => { calls.loaded.push(options); },
-        dashFlow: { data: null, pick: null, zoom: null },   // the dashboard's mail flow
+        dashFlow: { data: null, pick: null, zoom: null },
         document: { getElementById: element },
         authenticatedFetch: async url => {
             calls.urls.push(url);
@@ -55,17 +52,21 @@ function harness(filters, appTimezone = 'Europe/Berlin') {
         setMessagesDatePresetActive() {},
         toggleMessagesTimePanel() {},
         applyMessagesFilters: () => { calls.applied++; },
-        navigateTo: (...args) => calls.navigated.push(args),
+        navigateTo: (...args) => {
+            calls.navigated.push(args);
+            if (context.messagesOpening) context.messagesOpening();
+            return Promise.resolve(true);
+        },
         console: { log() {} },
-        messagesOrder: 'desc',   // the list's order as it opens: newest first
-        messagesGen: 0,   // the list's load generation (an older answer is dropped)
-        messagesPaging: { loading: false, page: 1 },   // the first page shown, no next page on its way
-        messagesFullLoad: false,   // no full load on its way
+        messagesOrder: 'desc',
+        messagesGen: 0,
+        messagesPaging: { loading: false, page: 1 },
+        messagesFullLoad: false,
         messagesRefreshing: false,
-        messagesFetch: url => context.authenticatedFetch(url),   // the list's requests, as the page makes them
+        messagesFetch: url => context.authenticatedFetch(url),
         messagesNewGeneration: () => ++context.messagesGen,
         loadMessageFacets: () => { calls.facets++; },
-        messagesNoId: false,   // the whole list, not the messages without a Message-ID
+        messagesNoId: false,
         refreshMessagesNoId: () => {},
         leaveMessagesWithoutId: () => {},
     });
@@ -84,6 +85,8 @@ function harness(filters, appTimezone = 'Europe/Berlin') {
         extract('messagesShowRange'),
         extract('mailFlowHour'),
         extract('mailFlowSpan'),
+        extract('setMessagesFilters'),
+        extract('openMessagesWith'),
         extract('openMessagesRange'),
         extract('openMailFlowHourMessages'),
     ].join('\n'), context);
@@ -160,7 +163,6 @@ test('oldest first, at the end of the whole list the new mail is taken in quietl
     await h.run('smartRefreshMessages()');
     assert.equal(query(h.calls.urls[0]).pathname, '/api/messages/new');
     assert.deepEqual(JSON.parse(JSON.stringify(h.calls.showNew)), [{ quiet: true }]);
-    // Further up, it is offered instead
     const away = harness({});
     away.run("messagesOrder = 'asc'; messagesPaging.cursor = null");
     away.context.__edge = false;
@@ -171,14 +173,11 @@ test('oldest first, at the end of the whole list the new mail is taken in quietl
 });
 
 test('a time preset reads its period up to now at every request', async () => {
-    // Chosen yesterday: Today is now today, up to now
     const h = harness({ date_range: 'today', start_date: '2026-10-23T22:00:00.000Z', end_date: '2026-10-24T09:00:00.000Z' });
     await h.run('smartRefreshMessages()');
     const params = query(h.calls.urls[0]).searchParams;
     assert.equal(params.get('start_date'), h.run('messagesPresetStart("today")'));
-    // Up to now: no end at all, so nothing stored meanwhile falls outside it
     assert.equal(params.get('end_date'), null);
-    // A custom range stays as it was chosen
     const fixed = harness({ date_range: 'custom', start_date: '2026-10-13T07:00:00.000Z', end_date: '2026-10-14T06:59:59.999Z' });
     fixed.context.__edge = false;
     await fixed.run('smartRefreshMessages()');
@@ -202,7 +201,6 @@ test('a one-day custom range is that whole day', () => {
     h.element('messages-date-range-start').value = '2026-10-13';
     h.element('messages-date-range-end').value = '2026-10-13';
     h.run('applyMessagesCustomDateRange()');
-    // Read back in the app's zone: from 00:00 to 23:59 on the 13th
     const start = h.context.zonedParts(h.element('messages-start-date').value);
     const end = h.context.zonedParts(h.element('messages-end-date').value);
     assert.equal(start.day, 13);
@@ -228,7 +226,6 @@ test('a one-day range on a daylight saving change is 23 or 25 hours long', () =>
 
 test('Today starts at midnight in the app time zone', () => {
     const h = harness({});
-    // 02:30 UTC on 2026-10-25 is 03:30 in Berlin, still the 24th in New York
     h.context.__now = new Date('2026-10-25T02:30:00Z');
     h.run("selectMessagesDatePreset('today', __now)");
     assert.equal(h.element('messages-start-date').value, '2026-10-24T22:00:00.000Z');
@@ -238,13 +235,10 @@ test('Today starts at midnight in the app time zone', () => {
 
 test('Last 7, 30 and 90 Days are that many times 24 hours back, like Mailbox Stats, across a daylight saving change', () => {
     const h = harness({});
-    // 14:00 CEST on 2026-03-29: 7 x 24 hours back is 13:00 CET on 2026-03-22, the
-    // same window the server counts for Mailbox Stats and the Dashboard
     h.context.__now = new Date('2026-03-29T12:00:00Z');
     h.run("selectMessagesDatePreset('7days', __now)");
     assert.equal(h.element('messages-start-date').value, '2026-03-22T12:00:00.000Z');
     assert.equal(h.element('messages-end-date').value, '2026-03-29T12:00:00.000Z');
-    // Back over the end of summer time, too
     h.context.__now = new Date('2026-11-01T12:00:00Z');
     assert.equal(h.run("messagesPresetStart('7days', __now)"), '2026-10-25T12:00:00.000Z');
     assert.equal(h.run("messagesPresetStart('30days', __now)"), '2026-10-02T12:00:00.000Z');
@@ -257,9 +251,7 @@ test('Last 7, 30 and 90 Days are that many times 24 hours back, like Mailbox Sta
 test('the Dashboard hour opens Messages on that hour, with its day in the app zone', () => {
     for (const zone of ['UTC', 'Europe/Berlin']) {
         const h = harness({}, zone);
-        // 23:00 UTC on 2026-10-24 (01:00 on the 25th in Berlin, 19:00 on the 24th in New York)
         const t = Date.parse('2026-10-24T23:00:00Z');
-        // The bar as /api/stats/flow sends it: its start and its last microsecond
         h.run(`dashFlow.data = { buckets: [{ start: '2026-10-24T23:00:00.000000Z', end_inclusive: '2026-10-24T23:59:59.999999Z' }] };
             dashFlow.pick = ${t}; openMailFlowHourMessages()`);
         const day = zone === 'UTC' ? '2026-10-24' : '2026-10-25';
@@ -269,7 +261,6 @@ test('the Dashboard hour opens Messages on that hour, with its day in the app zo
             `${h.run(`formatDay(Date.parse('${day}T12:00:00Z'))`)}, ${zone === 'UTC' ? '23:00 to 00:00' : '01:00 to 02:00'}`, zone);
         assert.equal(h.element('messages-start-date').value, '2026-10-24T23:00:00.000000Z');
         assert.equal(h.element('messages-end-date').value, '2026-10-24T23:59:59.999999Z');
-        // Apply on the filled day covers the hour
         h.run('applyMessagesCustomDateRange()');
         assert.ok(Date.parse(h.element('messages-start-date').value) <= t, zone);
         assert.ok(Date.parse(h.element('messages-end-date').value) >= t + 3600000 - 1, zone);
@@ -284,7 +275,6 @@ test('the Dashboard chart with no bar picked opens Messages on the span shown', 
     assert.equal(h.element('messages-end-date').value, '2026-10-21T09:59:59.999999Z');
     assert.equal(h.element('messages-date-range-label').textContent, `${h.run("formatDay(Date.parse('2026-10-21T12:00:00Z'))")}, 06:00 to 12:00`);
     assert.deepEqual(h.calls.navigated, [['messages']]);
-    // Not zoomed and nothing picked: the whole period shown
     const plain = harness({}, 'UTC');
     plain.run(`dashFlow.data = { buckets: [], from: '2026-10-20T12:00:00.000000Z', to_inclusive: '2026-10-21T11:59:59.999999Z' }; openMailFlowHourMessages()`);
     assert.equal(plain.element('messages-start-date').value, '2026-10-20T12:00:00.000000Z');
@@ -309,7 +299,6 @@ test('the counts beside the list are read on every refresh, also when the list d
     await h.run('smartRefreshMessages()');
     assert.equal(h.calls.rendered, 0);
     assert.equal(h.calls.facets, 1);
-    // Nothing new matched up to 77: later counts start from there
     assert.equal(h.run('messagesNew.watermark'), 77);
 });
 

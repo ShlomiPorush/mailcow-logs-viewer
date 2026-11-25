@@ -1,10 +1,3 @@
-"""
-Bounces and other mail without a report in the DMARC mailbox (#417).
-
-mailcow sends its own DMARC reports from the address that often also receives
-them, so undeliverable reports come back to that mailbox. They are skipped:
-not failed, no error email, never deleted, and a returned report is not imported.
-"""
 import base64
 import gzip
 from types import SimpleNamespace
@@ -17,7 +10,6 @@ from tests.test_report_raw_copy import dmarc_xml, tls_json, _recording_db
 
 REPORT_XML_GZ = base64.b64encode(gzip.compress(dmarc_xml(report_id="own-outgoing").encode())).decode()
 
-# A report this server sent, as a bounce returns it
 ORIGINAL_REPORT = f"""From: "DMARC Aggregate Report" <dmarc-report@example.com>
 To: dmarc@receiver.example.net
 Subject: Report Domain: receiver.example.net Submitter: example.com Report-ID: own-outgoing
@@ -37,7 +29,6 @@ Content-Disposition: attachment; filename="example.com!receiver.example.net!1700
 --inner--
 """
 
-# Standard delivery status notification (RFC 3464) with the full original attached
 DSN = f"""Return-Path: <>
 From: Mail Delivery Subsystem <mailer-daemon@receiver.example.net>
 To: dmarc-report@example.com
@@ -65,7 +56,6 @@ Content-Type: message/rfc822
 --outer--
 """.encode()
 
-# Non-standard bounce as sent by aliyun.com: multipart/mixed, Chinese subject, original as a file
 ALIYUN_BOUNCE = f"""Return-Path: <>
 From: <postmaster@aliyun.com>
 To: <dmarc-report@example.com>
@@ -129,8 +119,6 @@ Content-Disposition: attachment; filename="broken.xml.gz"
 
 
 class FakeImap:
-    """Answers UID SEARCH/FETCH/STORE like an IMAP server holding the given mails."""
-
     def __init__(self, mails):
         self.mails = {str(uid).encode(): raw for uid, raw in mails.items()}
         self.seen = set()

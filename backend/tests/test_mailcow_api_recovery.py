@@ -1,12 +1,3 @@
-"""The mailcow client recovers when mailcow refuses or drops it.
-
-On DEV mailcow dropped the connections, and from then on every call of the
-running app got 403 for over half an hour, while a new process with the same
-key got 200. Nothing a call leaves behind may decide the next one: mailcow's
-session cookie is not kept, and a client mailcow refused or dropped is
-replaced. And when mailcow keeps failing, Fail2ban's answer is None, so the
-Security page loads without it instead of failing.
-"""
 import asyncio
 
 import httpx
@@ -21,7 +12,6 @@ from app import mailcow_api as mod  # noqa: E402
 
 @pytest.fixture()
 def server(monkeypatch):
-    """A fake mailcow; `answer` decides each response, `clients` counts the clients made."""
     state = {"answer": lambda request: httpx.Response(200, json=[{"ok": True}]), "clients": 0, "requests": []}
 
     def handler(request):
@@ -37,7 +27,6 @@ def server(monkeypatch):
             super().__init__(*args, **kwargs)
 
     monkeypatch.setattr(mod.httpx, "AsyncClient", FakeClient)
-    # No waiting between the three tries
     monkeypatch.setattr(mod.MailcowAPI._make_request.retry, "wait", lambda *a, **k: 0)
     return state
 
@@ -77,7 +66,6 @@ def test_a_refused_client_is_replaced_before_the_next_try(server):
         return data
 
     assert asyncio.run(scenario()) == [{"ok": True}]
-    # The 403 retired the first client; the retry came on a new one
     assert server["clients"] == 2
 
 
@@ -122,6 +110,5 @@ def test_fail2ban_answers_none_when_mailcow_fails_every_try(server):
         finally:
             await api.aclose()
 
-    # So the Security page loads without Fail2ban instead of failing
     assert asyncio.run(scenario()) is None
     assert len(server["requests"]) == 3

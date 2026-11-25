@@ -1,8 +1,3 @@
-"""
-Reports arrive from outside, so their domain fields must be plain domain
-names before they are stored; and the feature list saved from Settings
-accepts only known features.
-"""
 import json
 
 import pytest

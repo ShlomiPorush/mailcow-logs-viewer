@@ -1,6 +1,4 @@
 #!/bin/sh
-# Runs mailcow-logs: with Node 20+ when it is installed, otherwise with what the computer has (PowerShell on Windows,
-# sh, curl and awk elsewhere). Every version keeps the same connection, so it does not matter which one runs.
 here=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd -P)
 case "$(uname -s)" in MINGW* | MSYS* | CYGWIN*) windows=1 ;; *) windows=0 ;; esac
 

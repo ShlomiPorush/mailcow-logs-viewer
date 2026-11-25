@@ -1,10 +1,3 @@
-// Queue and Quarantine refresh by themselves: rows the user checked stay checked
-// through a redraw (and the selection bar says so), a row that left the list
-// leaves the selection, nothing is redrawn while an action of the list runs, and
-// an answer older than the one drawn is dropped. Runs in a real DOM (jsdom),
-// installed by CI outside the repository; set A11Y_MODULES to its node_modules:
-//   npm install --no-save --prefix /tmp/a11y jsdom axe-core
-//   A11Y_MODULES=/tmp/a11y/node_modules node --test .github/tests/list-refresh.a11y.cjs
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -104,7 +97,6 @@ test('a Quarantine answer older than the one drawn is dropped', async () => {
     const p = page();
     p.w.served['/api/quarantine'] = { data: [held(1), held(2)], total: 2 };
     await p.w.loadQuarantine();
-    // A refresh still on its way when the reload after a release answers
     let late;
     p.w.served['/api/quarantine'] = () => new Promise(resolve => { late = () => resolve({ data: [held(1), held(2)], total: 2 }); });
     const refresh = p.w.smartRefreshQuarantine();

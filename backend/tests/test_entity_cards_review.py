@@ -1,9 +1,3 @@
-"""The entity card, second round: suppression entries in the forms the app
-stores, DMARC domains in any case or with a trailing dot, IPv6 addresses
-matched by value, a timeline that keeps to its range, the suppression list
-while it is not kept, and the sources that are not filtered by excluded
-addresses. Builds on the rows of test_entity_cards (the same March 2020 range).
-"""
 from datetime import datetime, timedelta
 
 import pytest
@@ -12,11 +6,11 @@ from test_entity_cards import AT, DOMAIN, HIDDEN, IP, MARK, RANGE, _card, client
 
 from app.config import settings
 
-SUPP = f"s{MARK}.example"           # stored as the Add form writes a domain: /^.+@s<mark>\.example$/i
-LEGACY = f"l-{MARK}.example"        # the older unanchored form: /.+@l-<mark>\.example/i
-WIZARD = f"w{MARK}.example"         # the pattern wizard's domain form, with subdomains
-NEAR = f"n{MARK}.example"           # only similar domains have entries
-BARE = f"b{MARK}.example"           # a bare domain row (the API and CSV import take one)
+SUPP = f"s{MARK}.example"
+LEGACY = f"l-{MARK}.example"
+WIZARD = f"w{MARK}.example"
+NEAR = f"n{MARK}.example"
+BARE = f"b{MARK}.example"
 BOB, CAROL = f"bob@{SUPP}", f"carol@{SUPP}"
 DMARC_MIXED = f"dm{MARK}.example"
 IP6 = "2001:db8::1"
@@ -60,7 +54,6 @@ def review(client, monkeypatch):  # noqa: F811
         ):
             db.add(SpamSuppression(email=email, type=kind, reason="manual", source=source, active=True, created_at=AT))
 
-        # DMARC: one domain stored in two spellings
         for domain, n in ((f"DM{MARK}.Example.", 2), (DMARC_MIXED, 3)):
             report = DMARCReport(report_id=f"{MARK}-mixed-{n}", domain=domain, org_name="Reporter Example",
                                  begin_date=_epoch(AT - timedelta(days=1)), end_date=_epoch(AT), created_at=AT)
@@ -68,7 +61,6 @@ def review(client, monkeypatch):  # noqa: F811
             db.flush()
             db.add(DMARCRecord(dmarc_report_id=report.id, source_ip=IP, count=n, spf_result="pass", dkim_result="fail"))
 
-        # IPv6: the app's own writers store it canonically; the others as they got it
         scan = RspamdLog(time=AT, ip=IP6, correlation_key=f"{MARK}-v6")
         db.add(scan)
         db.flush()
@@ -91,10 +83,8 @@ def review(client, monkeypatch):  # noqa: F811
                               error_count=0, timeout_count=0, status=f"clean-{MARK}"[:20], checked_at=AT, results=[]))
         db.add(MonitoredHost(hostname="2001:DB8:0::1", source=f"test {MARK}", active=True))
 
-        # A device first seen in January and last seen in October: neither is in March
         db.add(EasDevice(username=OLD_DEVICE_USER, device_id=f"{MARK}old", device_type="iPad", last_ip=IP,
                          first_seen=datetime(2020, 1, 5), last_seen=datetime(2020, 10, 5)))
-        # The excluded address is still named by Security and Protection
         db.add(NetfilterLog(time=AT, ip="198.51.100.99", rule_id=3, username=HIDDEN,
                             message=f"198.51.100.99 matched rule id 3 (SASL) {MARK}"))
         db.commit()
@@ -104,8 +94,6 @@ def review(client, monkeypatch):  # noqa: F811
         db.query(MonitoredHost).filter(MonitoredHost.source == f"test {MARK}").delete(synchronize_session=False)
         db.commit()
 
-
-# ---------------------------------------------------------------- R1 suppression entries
 
 @pytest.mark.parametrize("domain,stored", [
     (SUPP, f"/^.+@s{MARK}\\.example$/i"),
@@ -134,18 +122,12 @@ def test_a_similar_address_is_not_the_entry(review):
     assert suppression["entry"] is None
 
 
-# ---------------------------------------------------------------- R2 what excluded addresses hide
-
 def test_excluded_address_hides_messages_only(review):
-    """The card follows the page each source comes from: Messages leaves an
-    excluded address out, Security, Protection, Devices and Suppressions do not."""
     s = _card(review, "address", HIDDEN)["sources"]
     assert s["messages"]["state"] == "disabled" and "excluded" in s["messages"]["reason"]
     assert s["security"]["state"] == "ok" and s["security"]["rule_matches"] == 1
     assert s["security"]["items"][0]["username"] == HIDDEN
 
-
-# ---------------------------------------------------------------- R3 DMARC domain spelling
 
 def test_dmarc_domain_in_any_case_or_with_a_trailing_dot_is_one_domain(review):
     by_domain = _card(review, "ip", IP)["sources"]["dmarc"]["by_domain"]
@@ -155,8 +137,6 @@ def test_dmarc_domain_in_any_case_or_with_a_trailing_dot_is_one_domain(review):
     dmarc = _card(review, "domain", DMARC_MIXED)["sources"]["dmarc"]
     assert dmarc["reports"] == 4 and dmarc["messages"] == 15
 
-
-# ---------------------------------------------------------------- R4 IPv6 by value
 
 def test_ip_card_reads_ipv6_in_any_form(review):
     card = _card(review, "ip", "2001:DB8:0:0::1")
@@ -171,15 +151,12 @@ def test_ip_card_reads_ipv6_in_any_form(review):
 
 
 def test_netfilter_exact_ip_reads_any_spelling_of_the_address(review):
-    """The Events list and its export compare the typed address in the canonical form Netfilter lines store."""
     params = {"ip": "2001:DB8:0:0::1", "exact_ip": "true", **RANGE}
     listed = review.get("/api/logs/netfilter", params=params).json()
     assert [row["message"] for row in listed["data"]] == [f"{IP6} matched rule id 3 (SASL) {MARK}"]
     exported = review.get("/api/export/netfilter/csv", params=params)
     assert exported.status_code == 200 and exported.text.count(MARK) == 1
 
-
-# ---------------------------------------------------------------- R5 timeline range
 
 def test_timeline_keeps_only_events_inside_the_range(review):
     card = _card(review, "address", OLD_DEVICE_USER)
@@ -189,14 +166,12 @@ def test_timeline_keeps_only_events_inside_the_range(review):
         assert "2020-03-01T00:00:00Z" <= item["time"] <= "2020-03-20T23:59:59Z", item
 
 
-# ---------------------------------------------------------------- R7 suppression list not kept
-
 def test_suppressions_disabled_while_rspamd_sync_is_off(review, monkeypatch):
     monkeypatch.setattr(settings._inner, 'suppression_rspamd_sync', False)
     for kind, value in (("address", BOB), ("domain", SUPP)):
         source = _card(review, kind, value)["sources"]["suppression"]
         assert source["state"] == "disabled" and "Sync with Rspamd" in source["reason"], source
-        assert set(source) == {"state", "reason"}
+        assert set(source) == {"state", "disabled", "reason"}
 
 
 def test_suppressions_disabled_while_the_list_is_loaded_back(review):
@@ -208,3 +183,25 @@ def test_suppressions_disabled_while_the_list_is_loaded_back(review):
         db.commit()
     source = _card(review, "address", BOB)["sources"]["suppression"]
     assert source["state"] == "disabled" and "loaded" in source["reason"], source
+
+
+def test_only_a_source_a_setting_turned_off_offers_settings(review, monkeypatch):
+    from app.database import get_db_context
+    from app.models import SystemSetting
+    from app.services import entity_summary
+    from app.services.feature_data import SPAM_IMPORT_PENDING_KEY, SPAM_IMPORT_RESTORE
+    monkeypatch.setattr(settings._inner, 'disabled_features', 'dmarc')
+    monkeypatch.setattr(entity_summary.geoip_service, 'is_geoip_available', lambda: False)
+    ip = _card(review, "ip", IP)["sources"]
+    assert ip["dmarc"]["disabled"] is True
+    assert ip["geo"]["state"] == "disabled" and "disabled" not in ip["geo"]
+    hidden = _card(review, "address", HIDDEN)["sources"]["messages"]
+    assert hidden["state"] == "disabled" and "disabled" not in hidden
+    monkeypatch.setattr(settings._inner, 'suppression_rspamd_sync', False)
+    assert _card(review, "address", BOB)["sources"]["suppression"]["disabled"] is True
+    monkeypatch.setattr(settings._inner, 'suppression_rspamd_sync', True)
+    with get_db_context() as db:
+        db.add(SystemSetting(key=SPAM_IMPORT_PENDING_KEY, value=SPAM_IMPORT_RESTORE))
+        db.commit()
+    loading = _card(review, "address", BOB)["sources"]["suppression"]
+    assert loading["state"] == "disabled" and "disabled" not in loading

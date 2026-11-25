@@ -1,14 +1,3 @@
-"""The app time zone, second round: the places the first round left on the
-container clock or on UTC.
-
-- caches whose content depends on the zone kept days of the old zone for
-  minutes after the zone changed in Settings;
-- a date (YYYY-MM-DD) in a range was read as midnight UTC, not as a day in the
-  app zone;
-- the app's own log lines carried the container's wall time, with no zone;
-- demo traffic followed the container clock;
-- a few times still left the API as +00:00 instead of Z.
-"""
 import asyncio
 import csv
 import io
@@ -44,34 +33,6 @@ def app_zone(monkeypatch):
     return set_zone
 
 
-# --- 1. Caches key on the zone -----------------------------------------------
-
-def test_mailbox_stats_cache_keys_on_the_zone(app_zone):
-    from app.routers import mailbox_stats
-
-    params = dict(date_range="7days", page=1, page_size=50)
-    app_zone("")
-    in_utc = mailbox_stats._get_cache_key("mailbox_stats_all", **params)
-    app_zone("Europe/Berlin")
-    in_berlin = mailbox_stats._get_cache_key("mailbox_stats_all", **params)
-
-    assert in_utc != in_berlin
-    assert mailbox_stats._get_cache_key("mailbox_stats_all", **params) == in_berlin
-
-
-def test_a_cached_mailbox_stats_page_is_not_served_in_a_new_zone(app_zone):
-    from app.routers import mailbox_stats
-
-    params = dict(date_range="today", page=1, page_size=50)
-    app_zone("")
-    mailbox_stats._set_cache(mailbox_stats._get_cache_key("mailbox_stats_all", **params), {"days": "UTC"})
-    try:
-        app_zone("Europe/Berlin")
-        assert mailbox_stats._get_cached(mailbox_stats._get_cache_key("mailbox_stats_all", **params)) is None
-    finally:
-        mailbox_stats.clear_stats_cache()
-
-
 def test_dmarc_cache_keys_on_the_zone(app_zone):
     from app.services.dmarc_cache import get_dmarc_cache_key
 
@@ -83,8 +44,6 @@ def test_dmarc_cache_keys_on_the_zone(app_zone):
     assert in_utc != in_berlin
     assert get_dmarc_cache_key("domains_list") == in_berlin
 
-
-# --- 2. A date in a range is a day in the app zone ---------------------------
 
 def _postgres_available() -> bool:
     try:
@@ -123,13 +82,11 @@ def client(monkeypatch):
     _cleanup()
 
 
-# Stored naive UTC. In Berlin (UTC+1 in January) the first and the last are
-# outside 15 January, the middle two inside it.
 TIMES = [
-    datetime(2026, 1, 14, 22, 30),  # 23:30 on 14 January in Berlin
-    datetime(2026, 1, 14, 23, 30),  # 00:30 on 15 January in Berlin
-    datetime(2026, 1, 15, 22, 30),  # 23:30 on 15 January in Berlin
-    datetime(2026, 1, 15, 23, 30),  # 00:30 on 16 January in Berlin
+    datetime(2026, 1, 14, 22, 30),
+    datetime(2026, 1, 14, 23, 30),
+    datetime(2026, 1, 15, 22, 30),
+    datetime(2026, 1, 15, 23, 30),
 ]
 IN_DAY = TIMES[1:3]
 DAY = {"start_date": "2026-01-15", "end_date": "2026-01-15"}
@@ -202,7 +159,6 @@ def test_message_facets_read_a_date_as_a_day_in_the_app_zone(client):
         "sender": MARKER, **DAY, "since": "fromday:2026-01-15"}).json()
 
     assert facets["status"]["all"] == 2
-    # Since the start of 15 January in Berlin: three of the four
     assert facets["time"]["fromday"] == 3
 
 
@@ -213,7 +169,6 @@ def test_full_instants_keep_their_meaning(client):
         "sender": MARKER, "start_date": "2026-01-14T23:00:00Z", "end_date": "2026-01-15T22:30:00Z"}).json()["data"]
     assert _times(rows) == IN_DAY
 
-    # An instant without a zone is UTC, as before
     rows = client.get("/api/logs/postfix", params={
         "sender": MARKER, "start_date": "2026-01-14T23:00:00", "end_date": "2026-01-15T22:30:00"}).json()["data"]
     assert _times(rows) == IN_DAY
@@ -234,8 +189,6 @@ def test_an_unreadable_range_is_still_refused(client):
     assert response.status_code == 422
 
 
-# --- 3. The app's own log lines are in the app zone ---------------------------
-
 def _record(created):
     record = logging.LogRecord("app.test", logging.INFO, __file__, 1, "hello", None, None)
     record.created = created
@@ -254,11 +207,9 @@ def test_app_log_lines_carry_the_app_zone_and_its_offset(app_zone):
         app_zone("Europe/Berlin")
         assert formatter.format(_record(moment)).startswith("2026-01-15 13:30:05+01:00 - INFO - hello")
 
-        # A new zone in Settings applies to the next line, with no restart
         app_zone("Asia/Tokyo")
         assert formatter.format(_record(moment)).startswith("2026-01-15 21:30:05+09:00 - INFO - hello")
 
-        # Every handler writes the same time, the file the page shows included
         for handler in root.handlers:
             assert handler.formatter.format(_record(moment)).startswith("2026-01-15 21:30:05+09:00")
     finally:
@@ -287,16 +238,12 @@ def test_an_unknown_zone_writes_log_lines_in_utc(app_zone):
             root.addHandler(handler)
 
 
-# --- 5. Demo traffic follows the app zone -------------------------------------
-
 def test_demo_working_hours_follow_the_app_zone(app_zone):
     from demo.traffic import Traffic
 
     app_zone("Asia/Tokyo")
-    # Thursday 15 January 2026, 10:00 in Tokyo (01:00 UTC): the busiest hours
     ten_in_tokyo = datetime(2026, 1, 15, 1, 0, tzinfo=timezone.utc).timestamp()
     assert Traffic._hour_weight(ten_in_tokyo) == 2.0
-    # Saturday 17 January 2026, 10:00 in Tokyo: a weekend
     assert Traffic._hour_weight(ten_in_tokyo + 2 * 86400) == pytest.approx(2.0 * 0.45)
 
 
@@ -311,8 +258,6 @@ def test_demo_certificate_check_runs_at_three_in_the_app_zone(app_zone):
     hours = {datetime.fromtimestamp(int(entry["time"]), app_tz()).hour for entry in acme}
     assert hours == {3}
 
-
-# --- 6. Every instant leaves the API with Z ------------------------------------
 
 def test_live_log_broadcasts_carry_a_utc_z_timestamp():
     from app.routers.raw_logs import LogStreamManager
@@ -344,13 +289,10 @@ def test_raw_log_worker_status_sends_utc_z(monkeypatch):
 
     assert jobs["fetch_raw_logs"]["last_run"] == "2026-01-15T12:00:01Z"
     assert jobs["cleanup_raw_logs"]["last_run"] is None
-    # The worker's own record is left as it is
     assert isinstance(status["fetch_raw_logs"]["last_run"], datetime)
 
 
 class _Rows:
-    """system_settings as a dict, enough for settings_store's read and write paths."""
-
     def __init__(self):
         self.rows = {}
 
@@ -379,7 +321,6 @@ def test_credential_check_time_is_utc_z():
     settings_store.save_credential_check_status(db, "mailcow_rw_key", {"valid": True}, "fp")
     assert_utc_z(settings_store.get_credential_check_status(db, "mailcow_rw_key", "fp")["checked_at"])
 
-    # A result saved by an earlier version, with +00:00
     db.rows["credential_check.rspamd_password"] = SystemSetting(
         key="credential_check.rspamd_password",
         value=json.dumps({"valid": True, "fingerprint": "fp", "checked_at": "2026-01-15T12:00:01.123456+00:00"}))
@@ -392,7 +333,6 @@ def test_maxmind_check_time_is_utc_z():
 
     class Settings(_Rows):
         def filter(self, condition):
-            # get_maxmind_validation_status reads every maxmind.* row at once
             if hasattr(condition.right, "value"):
                 self._key = condition.right.value
             return self

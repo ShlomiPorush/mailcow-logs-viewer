@@ -1,10 +1,3 @@
-// A touch swipe of a Needs attention alert row (utils.js uiSwipeDown, rows from app.js
-// attentionAlertRows) presses its X: past the distance the alert is dismissed through the
-// X's own path (acknowledgeSecurityAlertOnce), a shorter swipe slides back, an up or down
-// move is left to scrolling, and only rows with a shown, enabled X move. Runs in a real
-// DOM (jsdom), installed by CI outside the repository; set A11Y_MODULES to its node_modules:
-//   npm install --no-save --prefix /tmp/a11y jsdom axe-core
-//   A11Y_MODULES=/tmp/a11y/node_modules node --test .github/tests/attention-swipe.a11y.cjs
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -32,7 +25,6 @@ function page({ still = false } = {}) {
         w.document.head.appendChild(script);
     };
     [read('utils.js'), read('router.js'), read('app.js')].forEach(run);
-    // The dismiss itself: the X's Once wrapper stays real, the request is reduced to a list
     w.dismissed = [];
     w.fail = false;
     run(`acknowledgeSecurityAlert = async id => { window.dismissed.push(id); await null;
@@ -112,7 +104,6 @@ test('only a touch swipe of a row with a shown, enabled X moves; a check does no
     assert.equal(row(w, 1).style.transform, '', 'busy: the X is off');
     await flush();
     assert.deepEqual(w.dismissed, []);
-    // A check (a blocklist listing, a new version) has no X and no swipe
     w.eval(`attention.checks.items.blocklist = [{ tone: 'fail', title: 'Listed', detail: 'd', action: 'Check listing', onclick: 'void 0' }]`);
     w.document.getElementById('list').innerHTML = w.attentionCheckRows('dashboard');
     const check = w.document.querySelector('#list .ui-alert');

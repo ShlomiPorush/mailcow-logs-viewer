@@ -4,8 +4,6 @@ const path = require('node:path');
 const vm = require('node:vm');
 const { test } = require('node:test');
 
-// The page scripts share one global scope, so a function declared twice is
-// silently replaced by the later one, in the same file or in another script
 const frontend = path.join(__dirname, '../../frontend');
 const html = fs.readFileSync(path.join(frontend, 'index.html'), 'utf8');
 const scripts = [...html.matchAll(/<script src="\/static\/([\w-]+\.js)[^"]*"><\/script>/g)].map(m => m[1]);
@@ -26,7 +24,6 @@ test('no two page scripts declare the same top-level function', () => {
 
 test('the All domains table shows each domain\'s DMARC policy', () => {
     const source = fs.readFileSync(path.join(frontend, 'dmarc.js'), 'utf8');
-    // The helper the DMARC policy column calls, run with every declaration in the file, in order
     const helper = source.match(/data-label="DMARC policy">\$\{(\w+)\(d\)\}/)[1];
     const declarations = [...source.matchAll(/^function dmarc\w*PolicyTag\([\s\S]*?^}\n/gm)].map(m => m[0]);
     const context = vm.createContext({ dmarcTag: (tone, text) => `${tone}:${text}` });

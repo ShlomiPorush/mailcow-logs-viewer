@@ -1,7 +1,3 @@
-"""The time of the last full DNS check (the 6-hourly job or Check all) stays
-put when one domain is checked again on its own. Each test runs in a schema
-of its own on the CI PostgreSQL."""
-import asyncio
 import uuid
 from contextlib import contextmanager
 
@@ -38,7 +34,7 @@ def _session():
 
 
 def _save(db, name, full):
-    asyncio.run(domains.save_dns_check_to_db(db, name, DNS, is_full_check=full))
+    domains.save_dns_check_to_db(db, name, DNS, is_full_check=full)
 
 
 def test_checking_the_only_domain_again_keeps_the_last_full_check(monkeypatch):

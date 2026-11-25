@@ -1,6 +1,3 @@
-"""GET /api/docs/{doc_name}: the help page as Markdown, 404 for a page that does
-not exist (here or on GitHub), 503 when GitHub cannot be reached. The contract
-check (conftest.py) holds each answer to /openapi.json."""
 import httpx
 import pytest
 

@@ -1,9 +1,3 @@
-"""Logging out changes state, so it only answers POST.
-
-GET /api/auth/logout used to end the session, which let any page (an <img>
-or a link on another site) sign the operator out. POST is covered by the
-same-origin guard, which rejects a cross-site request before it runs.
-"""
 import base64
 import secrets
 

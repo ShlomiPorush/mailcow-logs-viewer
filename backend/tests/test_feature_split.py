@@ -1,7 +1,3 @@
-"""Spam Filter's one switch became two: Suppressions (Outbound) and Rspamd
-(the maps, a page of its own). The old name spam-filter, in ENV, in a stored value or in
-a save, still means both, so a switch that was off never turns on by itself.
-"""
 from types import SimpleNamespace
 
 import pytest
@@ -59,8 +55,6 @@ def test_the_settings_form_shows_the_features_an_old_name_stands_for(monkeypatch
 
 
 def _save(monkeypatch, body, stored=None):
-    """update_settings with the DB replaced by a dict; returns what was stored
-    and the transitions the save named."""
     import app.services.settings_store as ss
     from app.routers import settings as rs
     from app import config as cfg
@@ -107,8 +101,6 @@ def test_a_save_rejects_a_name_no_switch_has(monkeypatch):
 
 
 def test_an_old_stored_value_rewritten_to_its_new_names_is_no_transition(monkeypatch):
-    """The form of a stored spam-filter shows both switches off; saving it
-    unchanged stores the new names and changes nothing for the list."""
     data, seen, _, state = _save(monkeypatch, {'disabled_features': 'suppressions,rspamd'},
                                  stored={'disabled_features': 'spam-filter'})
     assert data['disabled_features'] == 'suppressions,rspamd'
@@ -117,7 +109,6 @@ def test_an_old_stored_value_rewritten_to_its_new_names_is_no_transition(monkeyp
 
 
 def test_turning_the_maps_on_leaves_the_list_alone(monkeypatch):
-    """Maps on, Suppressions still off: not a switch of the list."""
     data, seen, _, state = _save(monkeypatch, {'disabled_features': 'suppressions'},
                                  stored={'disabled_features': 'spam-filter'})
     assert state == (False, True)
@@ -131,7 +122,6 @@ def test_turning_the_maps_off_leaves_the_list_alone(monkeypatch):
 
 
 def test_the_old_name_is_read_only_where_it_is_accepted():
-    """A leftover 'spam-filter' would ask for a switch nobody has."""
     import pathlib
     import re
     root = pathlib.Path(__file__).resolve().parents[1] / 'app'
@@ -140,5 +130,4 @@ def test_the_old_name_is_read_only_where_it_is_accepted():
         uses = re.findall(r"""['"]spam-filter['"]""", path.read_text(encoding='utf-8'))
         if uses:
             found[path.relative_to(root).as_posix()] = len(uses)
-    # The alias table, and the old name the purge endpoint still takes
     assert found == {'config.py': 1, 'routers/settings.py': 1}

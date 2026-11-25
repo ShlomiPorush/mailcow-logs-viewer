@@ -1,10 +1,3 @@
-"""Alerts that used to go only by email or a channel are kept for Needs attention.
-
-DNS changes, DMARC & TLS report import errors, and the protection rules'
-possible stolen passwords and failed bans are stored as alerts with a short
-line, each in its own session. Storing is best effort: a failure is logged and
-the notification and the job go on. The email keeps the details.
-"""
 import asyncio
 import contextlib
 from types import SimpleNamespace
@@ -19,7 +12,6 @@ DOMAIN = 'alerts-writers.example.com'
 
 @pytest.fixture
 def recorded(monkeypatch):
-    """The alerts stored, as record() was called; nothing reaches a database."""
     calls = []
 
     def record(alert_type, severity, title, detail, subject=None, metric_value=None):
@@ -32,20 +24,16 @@ def recorded(monkeypatch):
 
 @contextlib.contextmanager
 def _commit_fails():
-    """A session whose commit fails, as get_db_context does it: the error comes out."""
     session = Mock()
     yield session
     raise RuntimeError('database is gone')
 
-
-# ---------- the short lines ----------
 
 @pytest.mark.parametrize('types, line', [
     (['SPF'], 'SPF changed.'),
     (['SPF', 'DKIM'], 'SPF and DKIM changed.'),
     (['SPF', 'DKIM', 'DMARC'], 'SPF, DKIM and 1 more changed.'),
     (['SPF', 'DKIM', 'DMARC', 'TLSA (DANE)', 'MTA-STS', 'TLS-RPT'], 'SPF, DKIM and 4 more changed.'),
-    # Each kind once, in the order found; TLSA (DANE) and DANE are different changes
     (['DKIM', 'DKIM', 'SPF'], 'DKIM and SPF changed.'),
     (['TLSA (DANE)', 'DANE'], 'TLSA (DANE) and DANE changed.'),
     (['DNSSEC'], 'DNSSEC changed.'),
@@ -85,7 +73,6 @@ def test_a_dmarc_import_alert_counts_the_emails(recorded, n, line):
     ([], '198.51.100.7'),
     (None, '198.51.100.7'),
     (['', '  '], '198.51.100.7'),
-    # A hit can collect several accounts: the first in order, always the same one
     (['zed@example.com', 'ann@example.com'], 'ann@example.com'),
 ])
 def test_a_possible_stolen_password_names_its_account_else_its_address(recorded, usernames, subject):
@@ -98,7 +85,6 @@ def test_a_possible_stolen_password_names_its_account_else_its_address(recorded,
 
 @pytest.mark.parametrize('targets, line', [
     (['198.51.100.7'], 'Could not ban 1 address or network.'),
-    # Two rules caught one address: it counts once; a network is a target too
     (['198.51.100.7', '198.51.100.7', '198.51.100.0/24'], 'Could not ban 2 addresses or networks.'),
 ])
 def test_failed_bans_count_each_address_or_network_once(recorded, targets, line):
@@ -128,7 +114,6 @@ def test_a_long_subject_keeps_the_title_in_its_column_and_is_never_cut(monkeypat
     assert stored_alerts.record_dns_change(long_domain, [{'type': 'SPF'}])
     [row] = added
     assert len(row.title) == 255 and row.title.endswith('...')
-    # A cut domain would name another one: it is left out instead
     assert row.subject is None
     short = 'b' * 240 + '.example.com'
     stored_alerts.record_dns_change(short, [{'type': 'SPF'}])
@@ -147,10 +132,8 @@ def test_every_type_has_one_area():
     assert stored_alerts.types_in(['domains']) == ['dns_change']
     assert stored_alerts.types_in(['dmarc']) == ['dmarc_import_failed']
     for name in stored_alerts.ALERT_AREAS:
-        assert len(name) <= 40   # models.SecurityAlert.alert_type
+        assert len(name) <= 40
 
-
-# ---------- DNS changes ----------
 
 def test_a_dns_change_is_stored_and_still_mailed_when_storing_fails(monkeypatch):
     from app.routers import domains
@@ -179,11 +162,9 @@ def test_a_dns_check_that_could_not_be_saved_stores_no_alert(monkeypatch, record
     db.query.return_value.filter.return_value.first.return_value = None
     db.commit.side_effect = RuntimeError('database is gone')
     with pytest.raises(RuntimeError):
-        asyncio.run(domains.save_dns_check_to_db(db, DOMAIN, {'spf': {'status': 'success', 'record': 'b'}}))
+        domains.save_dns_check_to_db(db, DOMAIN, {'spf': {'status': 'success', 'record': 'b'}})
     assert recorded == []
 
-
-# ---------- DMARC & TLS import errors ----------
 
 FAILED = [{'email_id': '7', 'message_id': '<m@example.com>', 'subject': 'Report', 'error': 'Not a report'}]
 
@@ -194,7 +175,6 @@ def test_an_import_error_is_stored_even_with_no_email_or_channel_set_up(monkeypa
     monkeypatch.setattr(dmarc_notifications, 'any_channel_configured', lambda: False)
     sent = []
     monkeypatch.setattr(dmarc_notifications, 'notify', lambda *a, **kw: sent.append(a))
-    # Nothing was sent: the answer still says so
     assert dmarc_notifications.send_dmarc_error_notification(FAILED, 5) is False
     assert sent == [] and [a.alert_type for a in recorded] == ['dmarc_import_failed']
     assert dmarc_notifications.send_dmarc_error_notification([], 6) is True
@@ -219,7 +199,6 @@ def test_an_import_that_fails_stores_one_alert_and_the_job_adds_none(monkeypatch
     from tests.test_dmarc_imap_bounces import FakeImap, _SyncRecord
     delivered = []
     monkeypatch.setattr(dmarc_notifications, 'get_notification_email', lambda configured: 'admin@example.com')
-    # The email does not arrive: the import still counts the failures as reported
     monkeypatch.setattr(dmarc_notifications, 'notify', lambda *a, **kw: delivered.append(1) or {'email': False, 'channels_sent': 0})
     service = imap_module.DMARCImapService()
     service.connection = FakeImap({})
@@ -250,8 +229,6 @@ def test_an_import_that_fails_stores_one_alert_and_the_job_adds_none(monkeypatch
     assert len(recorded) == 1 and len(delivered) == 1
 
 
-# ---------- the protection rules ----------
-
 def _breach(ip='198.51.100.7', usernames=('info@example.com',)):
     from app.scheduler import BreachFound
     return BreachFound(41, ip, 'breach', f'{usernames[0] if usernames else ip} logged in after 3 failed tries', tuple(usernames))
@@ -259,7 +236,6 @@ def _breach(ip='198.51.100.7', usernames=('info@example.com',)):
 
 @pytest.fixture
 def protection_run(monkeypatch):
-    """The protection job with its parts replaced: what it stores, sends and says, in order."""
     from app import scheduler
     from app.services import protection_rules
     events, statuses, sent = [], [], []
@@ -300,7 +276,6 @@ def test_a_possible_stolen_password_is_stored_before_the_bans_and_kept_when_they
     assert protection_run.events == [('store', 'protection_breach'), ('enforce',)]
     [row] = protection_run.stored
     assert (row.alert_type, row.subject, row.severity) == ('protection_breach', 'info@example.com', 'critical')
-    # The notification still goes, and the run is marked failed
     [(banned, failed, alerts)] = protection_run.sent
     assert alerts == [('198.51.100.7', 'breach', 'info@example.com logged in after 3 failed tries')]
     assert protection_run.statuses[-1] == 'failed'
@@ -339,8 +314,6 @@ def test_a_breach_alert_that_cannot_be_stored_is_still_sent(protection_run, monk
     assert len(protection_run.sent) == 1 and protection_run.statuses[-1] == 'success'
 
 
-# ---------- with the database ----------
-
 def test_a_read_failure_names_each_pending_ban_with_its_notify_setting(db):
     from test_protection_enforce import _enforce, _trap_hit
     from test_protection_rules import TRAP_IP
@@ -374,4 +347,4 @@ def test_the_evaluation_hands_out_the_breachs_account_as_plain_values(db):
     assert stored_alerts.breach_subject(found.ip, found.usernames) == f'info@{RULES_DOMAIN}'
 
 
-from test_protection_rules import db  # noqa: E402,F401  (a fixture)
+from test_protection_rules import db  # noqa: E402,F401

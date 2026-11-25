@@ -1,11 +1,3 @@
-// The mailcow connection indicator in the sidebar is read again with the
-// sidebar counters (every five minutes, and when the browser tab is shown
-// again), before them, as at load: an open page shows mailcow back without a
-// reload. It was read once, at load, so a page opened during an outage said
-// "Not connected to mailcow" until it was reloaded. In a real DOM (jsdom), with
-// the real index.html and its scripts; set A11Y_MODULES to jsdom's node_modules:
-//   npm install --no-save --prefix /tmp/a11y jsdom axe-core
-//   A11Y_MODULES=/tmp/a11y/node_modules node --test .github/tests/connection-indicator.a11y.cjs
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -28,9 +20,6 @@ const INFO = { app_title: 'mailcow Logs Viewer', version: '3.0.0', auth_enabled:
 const answer = body => ({ ok: true, status: 200, headers: { get: () => null }, json: async () => body, clone() { return this; } });
 const CONNECTION = '/api/status/mailcow-connection';
 
-// Sign-in and /api/info answer at once. Each connection check answers when the
-// test releases it (connection[n] for the n-th request); every other request
-// never answers.
 function boot(address) {
     const dom = new JSDOM(html, { runScripts: 'dangerously', pretendToBeVisual: true,
         url: `http://localhost${address}`, virtualConsole: new VirtualConsole() });
@@ -51,12 +40,9 @@ function boot(address) {
         script.textContent = read(name);
         w.document.body.appendChild(script);
     }
-    // Needs attention asks for the connection too, on its own cadence: left out,
-    // so every request counted here is the indicator's
     w.startAttention = () => {};
     const count = target => asked.filter(u => u === target).length;
     const indicator = () => w.document.getElementById('mailcow-connection-indicator');
-    // Five minutes later: the counters are due again
     const later = () => w.eval('navCountersAt = Date.now() - NAV_COUNTERS_EVERY');
     return { w, asked, connection, count, indicator, later, close: () => w.close() };
 }
@@ -67,7 +53,6 @@ async function until(check) {
     return check();
 }
 
-// Opened, the connection check answered, and the counters read once
 async function loaded(p, connected) {
     assert.ok(await until(() => p.connection.length === 1), `asked: ${p.asked.join(', ')}`);
     p.connection[0]({ connected });
@@ -81,7 +66,6 @@ test('the first load checks the connection once', async () => {
         await settle();
         assert.equal(p.count(CONNECTION), 1);
         assert.equal(p.indicator().title, 'Connected to mailcow');
-        // A tick before the counters are due asks nothing
         p.w.navCountersTick();
         await settle();
         assert.equal(p.count(CONNECTION), 1);
@@ -99,7 +83,6 @@ test('the counters tick reads the connection again first, and the indicator show
         p.later();
         p.w.navCountersTick();
         assert.ok(await until(() => p.connection.length === 2), 'the tick did not check the connection');
-        // The counters wait for it, and a tick meanwhile does not ask again
         p.w.navCountersTick();
         await settle();
         assert.equal(p.count(CONNECTION), 2);
@@ -140,7 +123,6 @@ test('a check still pending after five minutes is not asked again until it answe
         p.later();
         p.w.navCountersTick();
         assert.ok(await until(() => p.connection.length === 2));
-        // Five more minutes and the check has not answered (a stalled connection)
         p.later();
         p.w.navCountersTick();
         await settle();

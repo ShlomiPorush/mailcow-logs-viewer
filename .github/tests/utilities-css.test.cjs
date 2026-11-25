@@ -1,7 +1,3 @@
-// The Tailwind utilities are compiled once into frontend/assets/css/utilities.css
-// (.github/scripts/build-utilities-css.sh) instead of by a browser runtime. A
-// class name assembled at runtime, like bg-${color}-100, is invisible to that
-// build and must be listed in the safelist of .github/tailwind/tailwind.config.cjs.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -11,7 +7,6 @@ const ROOT = path.join(__dirname, '..', '..');
 const FRONTEND = path.join(ROOT, 'frontend');
 const config = require(path.join(ROOT, '.github', 'tailwind', 'tailwind.config.cjs'));
 const safelist = new Set(config.safelist);
-// The colours the scripts pass into those templates (see app.js)
 const RUNTIME_COLOURS = ['gray', 'green', 'red', 'yellow', 'orange'];
 
 function scripts() {
@@ -23,7 +18,7 @@ test('no page loads the Tailwind browser runtime', () => {
         const html = fs.readFileSync(path.join(FRONTEND, page), 'utf8');
         assert.ok(!/tailwindcss(\.min)?\.js/.test(html), `${page} still loads the Tailwind runtime`);
         assert.ok(!/tailwind\.config\s*=/.test(html), `${page} still configures the Tailwind runtime`);
-        assert.match(html, /\/static\/assets\/css\/utilities\.css\?v=\d+/, `${page} does not load utilities.css`);
+        assert.match(html, /\/static\/assets\/css\/utilities\.css\?v=/, `${page} does not load utilities.css`);
     }
     assert.ok(!fs.existsSync(path.join(FRONTEND, 'assets', 'libs', 'tailwindcss.min.js')));
 });

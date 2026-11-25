@@ -1,4 +1,3 @@
-"""Manual suppression persistence must not block other requests."""
 import asyncio
 import threading
 from contextlib import contextmanager

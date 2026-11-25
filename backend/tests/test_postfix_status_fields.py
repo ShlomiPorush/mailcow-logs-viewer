@@ -1,18 +1,3 @@
-"""The delivery outcome of a Postfix line comes only from its result fields.
-
-parse_postfix_message used to search the whole line for ``status=`` and
-``dsn=``. An smtpd NOQUEUE reject line has neither field, but it carries the
-client-chosen envelope sender and HELO name, so an unauthenticated SMTP client
-sending ``MAIL FROM:<status=bounced.dsn=5.1.1@...>`` produced a stored
-"hard bounce" for any recipient - and, with suppression enabled, an automatic
-block of that recipient in Rspamd.
-
-It also took the Message-ID from the reply text inside ``status=(...)``. On
-mailcow every Dovecot LMTP reply quotes the recipient
-(``250 2.0.0 <rcpt> <session> Saved``), so each local delivery was stored
-with the mailbox address as its Message-ID, and an inbound message with
-``Message-ID: <mailbox>`` was stitched to every earlier delivery to it.
-"""
 import asyncio
 import uuid
 from datetime import datetime, timedelta
@@ -27,8 +12,6 @@ from app.correlation import parse_postfix_message
 
 MARKER = 'status-fields.invalid'
 
-
-# ---- parser: forged status/dsn in client-controlled fields ----
 
 FORGED_FROM = ('NOQUEUE: reject: RCPT from unknown[192.0.2.10]: 554 5.7.1 <ceo@partner.test>: '
                'Relay access denied; from=<status=bounced.dsn=5.1.1@sender.invalid> '
@@ -64,8 +47,6 @@ def test_status_words_in_the_remote_reply_do_not_override_the_real_result():
     assert parsed['status'] == 'sent'
     assert parsed['dsn'] == '2.0.0'
 
-
-# ---- parser: genuine delivery-agent lines keep working ----
 
 @pytest.mark.parametrize('line, status, dsn, recipient, relay, delay', [
     ('A1B2C3D4E5: to=<user@example.net>, relay=mx.example.net[192.0.2.20]:25, delay=1.4, '
@@ -120,8 +101,6 @@ def test_qmgr_expired_line_keeps_its_status():
     assert parsed['sender'] == 'user@example.com'
 
 
-# ---- parser: Message-ID only from the cleanup line ----
-
 def test_lmtp_reply_address_is_not_taken_as_the_message_id():
     line = ('A1B2C3D4E5: to=<alice@example.com>, relay=dovecot[192.0.2.250]:24, delay=0.1, '
             'delays=0.05/0/0/0.05, dsn=2.0.0, status=sent '
@@ -139,8 +118,6 @@ def test_cleanup_line_still_sets_the_message_id():
     assert parse_postfix_message('A1B2C3D4E5: message-id=<abc.123@example.com>')['message_id'] \
         == 'abc.123@example.com'
 
-
-# ---- database: the bounce scan ignores smtpd NOQUEUE rejects ----
 
 def _postgres_available() -> bool:
     try:
@@ -177,8 +154,6 @@ def _cleanup():
 
 
 def test_forged_noqueue_bounce_creates_no_suppression(db_env, monkeypatch):
-    """The reproduced attack: the line goes through the real ingest and the
-    real detection job. Only the genuine bounce may become a suppression."""
     from app import scheduler
     from app.config import settings
     from app.database import get_db_context
@@ -219,7 +194,6 @@ def test_forged_noqueue_bounce_creates_no_suppression(db_env, monkeypatch):
 
 
 def test_bounce_scan_skips_rows_without_queue_id_or_delivery_program(db_env, monkeypatch):
-    """Rows stored by an older parser with a forged status must not be acted on either."""
     from app import scheduler
     from app.config import settings
     from app.database import get_db_context
@@ -246,8 +220,6 @@ def test_bounce_scan_skips_rows_without_queue_id_or_delivery_program(db_env, mon
             SpamSuppression.email.like(f'%{MARKER}%')).all()}
     assert emails == {f'smtp@{MARKER}'}
 
-
-# ---- database: a Message-ID equal to a mailbox is not stitched to its deliveries ----
 
 def test_message_id_equal_to_a_mailbox_does_not_hijack_its_deliveries(db_env, monkeypatch):
     from app import scheduler
@@ -289,7 +261,7 @@ def test_message_id_equal_to_a_mailbox_does_not_hijack_its_deliveries(db_env, mo
                            action='no action', is_spam=False, direction='inbound', user='unknown')
         db.add(rspamd)
         db.commit()
-        scheduler.correlate_single_message(db, rspamd)
+        scheduler.correlation_jobs.correlate_single_message(db, rspamd)
         db.commit()
 
         legs = db.query(MessageCorrelation).filter(MessageCorrelation.message_id == victim).all()

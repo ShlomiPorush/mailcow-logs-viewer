@@ -1,6 +1,3 @@
-// The keyboard's place is always visible (ui.css): the app's focus ring applies
-// everywhere at zero specificity, and the menu items keep a ring of their own
-// instead of only a faint tint.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -32,7 +29,6 @@ test('menu and flyout items show the ring when the keyboard is on them', () => {
 });
 
 test('hovering a menu or flyout item does not take the keyboard ring away', () => {
-    // The hover rules come later in the file with outline: none; they must skip a focused item
     assert.match(css, /\.ui-menu button:hover:not\(:focus-visible\) \{[^}]*outline: none/);
     assert.match(css, /\.ui-fly-item:hover:not\(:focus-visible\) \{[^}]*outline: none/);
     assert.doesNotMatch(css, /\.ui-menu button:hover \{/);

@@ -1,4 +1,3 @@
-"""Container status database work must not block either HTTP entry point."""
 import asyncio
 import threading
 from contextlib import contextmanager

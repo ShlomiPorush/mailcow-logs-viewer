@@ -1,14 +1,3 @@
-// The actions in the top-bar search (search.js) in a real DOM (jsdom) over the
-// whole page (index.html with its scripts): a result row for an IP address has
-// Card, Ban and Allow, a mailbox and a domain Card, a background job Run; one
-// valid IP that matches nothing still gets its row; a network, a list or text that
-// is not one IP gets no Ban or Allow; Ban and Allow go through their confirmation
-// and are not offered without the Read-Write key; Run asks first, names the job and
-// what it does, and keeps the checks for a job that is off or already running;
-// Enter opens a card or a job, Right goes into the row's buttons, Left and Escape
-// back; on a phone a "..." row menu holds the same. The results are a grid that
-// axe accepts.
-//   A11Y_MODULES=/tmp/a11y/node_modules node --test .github/tests/search-actions.a11y.cjs
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -20,25 +9,21 @@ const axeSource = fs.readFileSync(path.join(modules, 'axe-core', 'axe.min.js'), 
 
 const frontend = path.join(__dirname, '../../frontend');
 const read = name => fs.readFileSync(path.join(frontend, name), 'utf8');
-// The page as index.html has it, without its scripts; parsed, not cut with a
-// regex, so CodeQL sees no HTML sanitizing
+// A regex here brings back CodeQL's incomplete HTML sanitizing alert.
 const PAGE = new JSDOM(read('index.html')).window.document;
 PAGE.querySelectorAll('script').forEach(el => el.remove());
 const BODY = PAGE.body.innerHTML;
 const SCRIPTS = [...read('index.html').matchAll(/src="\/static\/([a-z_-]+\.js)/g)].map(m => m[1]).filter(name => name !== 'session-guard.js');
 
 const ago = minutes => new Date(Date.now() - minutes * 60000).toISOString();
-// The server's background_jobs (GET /api/settings/info), as many states as the search tells apart
 const JOBS = {
     dmarc_imap_sync: { interval: '3600 seconds (60 minutes)', description: 'Imports DMARC and TLS reports from an IMAP mailbox', status: 'success', last_run: ago(12) },
     blacklist_check: { interval: '6 hours', description: 'Checks monitored hosts against DNS blacklists', status: 'running', last_run: ago(180) },
     mailbox_stats: { interval: 'Disabled (feature off)', description: 'Fetches mailbox statistics from mailcow API', status: 'disabled', feature_disabled: true },
     fetch_logs: { interval: '60 seconds', description: 'Imports logs from mailcow API', status: 'success', last_run: ago(1) },
-    // Reported by the server, unknown to the page (not in the manual-run map): never offered
     mystery_job: { interval: '1 hour', description: 'Does a mystery thing', status: 'success', last_run: ago(5) },
 };
 
-// The server: each request is kept; reply(url, method, body) answers it
 const STUBS = `
     window.requests = [];
     window.navs = [];
@@ -75,8 +60,6 @@ function page({ phone = false } = {}) {
     return w;
 }
 
-// GET /api/entities/ip as the card reads it: every source read, nothing in them,
-// over the default 7 days (sources: what to change)
 const RANGE = { start: '2026-10-21T12:00:00Z', end: '2026-10-28T12:00:00Z' };
 function ipEntity(value, sources = {}) {
     const ok = extra => ({ state: 'ok', reason: null, ...extra });
@@ -88,7 +71,6 @@ function ipEntity(value, sources = {}) {
         timeline: { items: [], truncated: false, left_out: [] } };
 }
 
-// The answers of a mailcow with one address on the review list and a few mailboxes, domains and jobs
 function server({ addresses = [{ ip: '203.0.113.45', state: 'review', country: 'Netherlands', attempts: 38, last_seen: ago(24) }], jobs = JOBS,
     entity = value => ipEntity(value) } = {}) {
     return (url, method) => {
@@ -149,8 +131,6 @@ async function answer(w, ok) {
 }
 const toast = w => ($(w, '#toast-notification') || { textContent: '' }).textContent.replace(/\s+/g, ' ').trim();
 
-// --------------------------------------------------------------- what each row offers
-
 test('each kind of row offers its buttons: IP Card, Ban and Allow, mailbox and domain Card, job Run', async () => {
     const w = page();
     await search(w, '203.0.113.45');
@@ -159,9 +139,7 @@ test('each kind of row offers its buttons: IP Card, Ban and Allow, mailbox and d
     assert.ok(ip.querySelector('[data-gs-act="ban"]').classList.contains('ui-btn-danger'), 'Ban in red text, as on the Security rows');
     assert.equal(ip.querySelector('[data-gs-act="ban"]').getAttribute('aria-label'), 'Ban 203.0.113.45');
     assert.equal(ip.querySelector('[data-gs-act="ban"]').title, 'Put 203.0.113.45/32 on the Fail2ban denylist; it stays until removed');
-    // Reached with the arrows, not with Tab (Tab switches the kind)
     assert.ok([...ip.querySelectorAll('.ui-gs-acts > button')].every(b => b.tabIndex === -1));
-    // No value in a handler: the row's index says which result
     assert.doesNotMatch($(w, '#ui-gs-panel').innerHTML, /onclick="[^"]*203\.0\.113\.45/);
     assert.equal(groups(w)[0], 'IP addresses · 1', 'the kind typed comes first');
     assert.ok(ip.classList.contains('is-active'), 'its row is the active one');
@@ -187,7 +165,6 @@ test('Background jobs is a kind of its own: name, last run and schedule, first f
     const sub = title => rowOf(w, title).querySelector('.ui-gs-item small').textContent;
     assert.equal(sub('DMARC & TLS IMAP Import'), 'Last run 12 min ago, finished · Every 3600 seconds (60 minutes)');
     assert.equal(sub('Fetch Logs'), 'Last run 1 min ago, finished · Every 60 seconds');
-    // The tab lists them all, in the Status page's order
     w.gsSetTab('jobs');
     await settle(w);
     assert.deepEqual(Array.from(rows(w), titleOf), ['Fetch Logs', 'Mailbox Statistics', 'DMARC & TLS IMAP Import', 'IP Blacklist Check (All Hosts)']);
@@ -205,8 +182,6 @@ test('a job the page does not know (not in the manual-run map) is not offered', 
     assert.ok(!rows(w).some(r => /mystery/i.test(r.textContent)));
 });
 
-// --------------------------------------------------------------- the values typed
-
 test('one valid IP that matches nothing gets one row with its buttons, and what its card holds', async () => {
     const w = page();
     w.reply = server({ addresses: [] });
@@ -215,10 +190,8 @@ test('one valid IP that matches nothing gets one row with its buttons, and what 
     const row = rowOf(w, '198.51.100.200');
     assert.equal(row.querySelector('.ui-gs-item small').textContent, 'No activity in the last 7 days');
     assert.deepEqual(buttons(row), ['Card', 'Ban', 'Allow']);
-    // An IPv6 address too
     await search(w, '2001:db8::7');
     assert.deepEqual(buttons(rowOf(w, '2001:db8::7')), ['Card', 'Ban', 'Allow']);
-    // A longer address that holds the typed one does not stand for it
     w.reply = server({ addresses: [{ ip: '198.51.100.20', state: 'review', attempts: 2, last_seen: ago(3) }] });
     await search(w, '198.51.100.2');
     assert.deepEqual(rows(w).filter(r => r.closest('#ui-gs-panel')).map(titleOf).slice(0, 2), ['198.51.100.2', '198.51.100.20']);
@@ -239,8 +212,6 @@ test('a network, a range, a list or text that is not one IP gets no Ban or Allow
         assert.equal(w.document.querySelector('#ui-gs-panel [data-gs-act="allow"]'), null, `${typed} offers Allow`);
     }
 });
-
-// --------------------------------------------------------------- Ban and Allow
 
 test('Ban and Allow ask first: Cancel writes nothing, the answer posts the single address', async () => {
     const w = page();
@@ -279,16 +250,12 @@ test('without the Read-Write key Ban and Allow are not offered, on a desktop and
         await search(w, '203.0.113.45');
         const row = rowOf(w, '203.0.113.45');
         assert.deepEqual(buttons(row), ['Card']);
-        // On a phone the row's tap opens the card: a menu with only that is left out
         assert.equal(row.querySelector('.ui-gs-dots'), null);
-        // And no handler bans by another way
         w.gsAct(0, 'ban', null);
         await settle(w);
         assert.equal(confirmShown(w), null);
     }
 });
-
-// --------------------------------------------------------------- Run
 
 test('Run asks first, naming the job and what it does; Cancel runs nothing, the answer runs it', async () => {
     const w = page();
@@ -316,20 +283,17 @@ test('a running job has Run unavailable, a job that is off has none, and the ser
     const running = rowOf(w, 'IP Blacklist Check (All Hosts)');
     assert.deepEqual(buttons(running), ['Run (unavailable)']);
     assert.equal(running.querySelector('[data-gs-act="run"]').title, 'Job is running');
-    // Even when asked to, it does not ask or post
     w.gsAct(Number(running.dataset.gsIndex), 'run', null);
     await settle(w);
     assert.equal(confirmShown(w), null);
     assert.deepEqual(buttons(rowOf(w, 'Mailbox Statistics')), [], 'a job that is off has no Run');
 
-    // Started meanwhile by its schedule: the server says so after the answer
     w.reply = (url, method) => (url.includes('/api/settings/jobs/') && method === 'POST'
         ? { __status: 409, detail: 'Job fetch_logs is already running' } : server()(url, method));
     rowOf(w, 'Fetch Logs').querySelector('[data-gs-act="run"]').click();
     await answer(w, true);
     assert.match(toast(w), /Job "Fetch Logs" is already running/);
 
-    // Turned off meanwhile: the server's reason
     w.reply = (url, method) => (url.includes('/api/settings/jobs/') && method === 'POST'
         ? { __status: 409, detail: 'The job cannot run. Its feature is turned off.' } : server()(url, method));
     rowOf(w, 'Fetch Logs').querySelector('[data-gs-act="run"]').click();
@@ -352,8 +316,6 @@ test('the run itself needs no button, and the Status page button still shows it 
     assert.equal(button.disabled, false);
     assert.equal(button.textContent, 'Run');
 });
-
-// --------------------------------------------------------------- keyboard
 
 test('Enter opens the card of an entity row and a job on Status > Jobs', async () => {
     const w = page();
@@ -386,10 +348,8 @@ test('Right from the end of the field goes into the buttons, Left and Escape com
     const w = page();
     await search(w, '203.0.113.45');
     const field = input(w);
-    // Back in the field the results are drawn again: the row is read each time
     const act = name => rowOf(w, '203.0.113.45').querySelector(`[data-gs-act="${name}"]`);
 
-    // The caret inside the text moves as usual
     field.setSelectionRange(3, 3);
     key(w, field, 'ArrowRight');
     assert.equal(w.document.activeElement, field);
@@ -413,14 +373,12 @@ test('Right from the end of the field goes into the buttons, Left and Escape com
     key(w, w.document.activeElement, 'ArrowLeft');
     assert.equal(w.document.activeElement, field, 'Left past the first button is the field');
 
-    // Enter on a button is that button
     key(w, field, 'ArrowRight');
     key(w, w.document.activeElement, 'ArrowRight');
     assert.equal(w.document.activeElement, act('ban'));
     w.document.activeElement.click();
     await answer(w, false);
 
-    // Tab keeps switching the kind
     const tab = $(w, '#ui-gs-panel .ui-gs-tab.is-on').dataset.gsTab;
     key(w, field, 'Tab');
     assert.notEqual($(w, '#ui-gs-panel .ui-gs-tab.is-on').dataset.gsTab, tab);
@@ -435,8 +393,6 @@ test('a running job leaves Right in the field: nothing there to use', async () =
     assert.equal(w.document.activeElement, field);
 });
 
-// --------------------------------------------------------------- phone
-
 test('on a phone a tap opens the row and one "..." button opens its row menu', async () => {
     const w = page({ phone: true });
     w.eval('openEntityCard = (kind, value) => window.cards.push([kind, value])');
@@ -449,27 +405,21 @@ test('on a phone a tap opens the row and one "..." button opens its row menu', a
     const menu = w.document.getElementById(dots.getAttribute('popovertarget'));
     assert.ok(menu && menu.classList.contains('ui-menu') && menu.hasAttribute('popover') && menu.getAttribute('role') === 'menu', 'the row menu is a popover');
     assert.deepEqual(menuItems(row), ['Open card', 'Ban (red)', 'Allow']);
-    // The "..." button opens only its menu
     dots.click();
     await settle(w);
     assert.equal(w.cards.length, 0);
-    // Ban from the menu asks first as well
     menu.querySelector('[data-gs-act="ban"]').click();
     await answer(w, true);
     assert.deepEqual(JSON.parse(asked(w, '/api/fail2ban/ban', 'POST')[0].body), { ip: '203.0.113.45/32' });
-    // A tap on the row opens the card
     rowOf(w, '203.0.113.45').querySelector('.ui-gs-item').click();
     await settle(w);
     assert.deepEqual(JSON.parse(JSON.stringify(w.cards)), [['ip', '203.0.113.45']]);
 
-    // A job row: Open job and Run; a mailbox row has no menu (its tap is all it offers)
     await search(w, 'imap import');
     assert.deepEqual(menuItems(rowOf(w, 'DMARC & TLS IMAP Import')), ['Open job', 'Run']);
     await search(w, 'j.doe');
     assert.equal(rowOf(w, 'j.doe@example.net').querySelector('.ui-gs-dots'), null);
 });
-
-// --------------------------------------------------------------- the card over the search
 
 test('a card opened from the search: closed, the field again; moved to a page from it, the search closes', async () => {
     const w = page();
@@ -494,8 +444,6 @@ test('a card opened from the search: closed, the field again; moved to a page fr
     assert.ok(!$(w, '#ui-gs').classList.contains('is-open'), 'the search is done once a page opened from the card');
 });
 
-// --------------------------------------------------------------- accessibility
-
 test('the results are a grid axe accepts, with buttons in their rows', async () => {
     for (const phone of [false, true]) {
         const w = page({ phone });
@@ -511,10 +459,6 @@ test('the results are a grid axe accepts, with buttons in their rows', async () 
     }
 });
 
-// --------------------------------------------------------------- review fixes
-
-// A key as a browser presses it on the focused element: Enter clicks a button on
-// keydown unless the keydown was cancelled; a held key repeats keydown with repeat set
 function press(w, keyName, { repeat = false } = {}) {
     const el = w.document.activeElement;
     const ok = el.dispatchEvent(new w.KeyboardEvent('keydown', { key: keyName, repeat, bubbles: true, cancelable: true }));
@@ -525,8 +469,6 @@ function release(w, keyName) {
     const ok = el.dispatchEvent(new w.KeyboardEvent('keyup', { key: keyName, bubbles: true, cancelable: true }));
     if (ok && keyName === ' ' && el.tagName === 'BUTTON' && !el.disabled) el.click();
 }
-// Enter held down on a control: the press, repeats before and after the question
-// takes the focus (it does after 100 ms), then the release
 async function holdEnter(w) {
     press(w, 'Enter');
     await settle(w, 2);
@@ -549,7 +491,6 @@ test('S1: Enter held on Ban, Allow or Run in the search opens the question and n
         assert.ok(confirmShown(w), `${act}: the question is open`);
         assert.equal(asked(w, '/api/fail2ban/', 'POST').length, 0, `${act}: nothing was written`);
         assert.equal(w.document.activeElement.id, 'app-confirm-cancel', `${act}: the question starts on Cancel`);
-        // A new press on Cancel answers it: Cancel
         press(w, 'Enter');
         await settle(w, 12);
         assert.equal(confirmShown(w), null);
@@ -565,7 +506,6 @@ test('S1: Enter held on Ban, Allow or Run in the search opens the question and n
     assert.ok(confirmShown(w), 'Run: the question is open');
     assert.equal(asked(w, '/api/settings/jobs/', 'POST').length, 0, 'Run: nothing ran');
     assert.equal(w.document.activeElement.id, 'app-confirm-cancel');
-    // A deliberate press on Run still runs it
     $(w, '#app-confirm-ok').focus();
     press(w, 'Enter');
     await settle(w, 12);
@@ -592,7 +532,6 @@ test('S1: any question ignores a held key; one that does not write still starts 
     let answered = null;
     w.showConfirmModal({ title: 'Delete Message', message: 'Delete this message from the queue?', confirmText: 'Delete', isDangerous: true })
         .then(result => { answered = result; });
-    // The key that went down before the question
     w.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Enter' }));
     await wait(w, 160);
     assert.equal(w.document.activeElement.id, 'app-confirm-ok', 'the default is unchanged');
@@ -613,18 +552,15 @@ test('S3: a typed address the lists do not hold says what its card holds, read e
     assert.deepEqual(Array.from(entityAsks, r => r.url), ['/api/entities/ip?value=198.51.100.200'], 'one request, the value only (the card\'s own period)');
     assert.equal(rowOf(w, '198.51.100.200').querySelector('small').textContent, 'No activity in the last 7 days');
 
-    // Activity kept for it: the counts, not "nothing"
     w.reply = server({ addresses: [], entity: v => ipEntity(v, {
         messages: { state: 'ok', count: 2, items: [] }, security: { state: 'ok', events: 3, rule_matches: 3, bans: 0, unbans: 0, items: [] } }) });
     await search(w, '198.51.100.201');
     assert.equal(rowOf(w, '198.51.100.201').querySelector('small').textContent, '2 messages · 3 security events in the last 7 days');
 
-    // A source turned off in Settings keeps no data: it does not stand in the way
     w.reply = server({ addresses: [], entity: v => ipEntity(v, { dmarc: { state: 'disabled', reason: 'DMARC is turned off in Settings.' } }) });
     await search(w, '198.51.100.203');
     assert.equal(rowOf(w, '198.51.100.203').querySelector('small').textContent, 'No activity in the last 7 days');
 
-    // A source that failed or is missing, or a card that could not be read, claims nothing
     const without = (card, name) => { delete card.sources[name]; return card; };
     for (const entity of [v => ipEntity(v, { dmarc: { state: 'error', reason: 'The query failed.' } }),
         v => ipEntity(v, { messages: { state: 'error', reason: 'The query failed.' } }),
@@ -637,7 +573,6 @@ test('S3: a typed address the lists do not hold says what its card holds, read e
         assert.deepEqual(buttons(row), ['Card', 'Ban', 'Allow'], 'the buttons stay');
     }
 
-    // The value as the server writes it is what Ban sends; the row shows what was typed
     w.reply = server({ addresses: [], entity: () => ipEntity('198.51.100.7') });
     await search(w, '::ffff:198.51.100.7');
     rowOf(w, '::ffff:198.51.100.7').querySelector('[data-gs-act="ban"]').click();
@@ -662,7 +597,6 @@ test('S3: the card is asked once typing pauses, and an older ask is cancelled', 
     await wait(w, 260);
     await settle(w);
     assert.deepEqual(held.map(h => h.url), ['/api/entities/ip?value=198.51.100.201'], 'only the value typed last');
-    // Typed on: the ask on its way is cancelled and its late answer is dropped
     field.value = '198.51.100.9';
     field.dispatchEvent(new w.Event('input', { bubbles: true }));
     await wait(w, 260);
@@ -708,16 +642,12 @@ test('S5: while an input method composes, and with a modifier, Right stays in th
         key(w, field, 'ArrowRight', { [mod]: true });
         assert.equal(w.document.activeElement, field, mod);
     }
-    // Enter that ends a composition opens nothing
     key(w, field, 'Enter', { isComposing: true });
     await settle(w);
     assert.equal(w.cards.length, 0);
-    // A plain Right still goes in
     key(w, field, 'ArrowRight');
     assert.equal(w.document.activeElement.dataset.gsAct, 'card');
 });
-
-// --------------------------------------------------------------- review round 2
 
 test('S6: a question that writes to mailcow is on Cancel at once, so a new Enter in its first moments cancels', async () => {
     const asks = [
@@ -731,7 +661,6 @@ test('S6: a question that writes to mailcow is on Cancel at once, so a new Enter
         const w = page();
         await settle(w, 2);
         open(w);
-        // Before the 100 ms the main button used to wait for, after the layers placed the focus
         await wait(w, 40);
         assert.ok(confirmShown(w), `${name}: asked`);
         assert.equal(w.document.activeElement.id, 'app-confirm-cancel', `${name}: on Cancel`);
@@ -759,11 +688,9 @@ test('S7: a second question closes the first through its own close: it settles, 
     $(w, '#app-confirm-cancel').click();
     await settle(w);
     assert.equal(second, false);
-    // Neither question's focus timer fires once it is gone
     focused.length = 0;
     await wait(w, 160);
     assert.deepEqual(Array.from(focused).filter(id => id === 'app-confirm-ok'), []);
-    // And no guard is left: a held Enter reaches the page again
     const seen = [];
     w.document.addEventListener('keydown', e => seen.push(e.defaultPrevented));
     w.document.body.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Enter', repeat: true, bubbles: true, cancelable: true }));
@@ -783,10 +710,8 @@ test('a search the server could not run is not "nothing found": the panel names 
 test('"/" on a page without the top bar (Messages) goes to the page\'s own search, even with the details docked beside it', async () => {
     const w = page();
     await settle(w, 2);
-    // Messages: the top bar and its search are hidden, the message details are docked
     $(w, '#ui-topbar').classList.add('hidden');
     for (let el = $(w, '#messages-filter-search'); el; el = el.parentElement) el.classList.remove('hidden');
-    // Without the stylesheet, the sheets and dialogs CSS keeps hidden count as shown: hide them
     w.document.querySelectorAll('.ui-sheet, [role="dialog"], .modal').forEach(el => el.classList.add('hidden'));
     const docked = w.document.createElement('div');
     docked.setAttribute('role', 'dialog');
@@ -797,7 +722,6 @@ test('"/" on a page without the top bar (Messages) goes to the page\'s own searc
     w.document.body.dispatchEvent(key);
     assert.equal(w.document.activeElement.id, 'messages-filter-search');
     assert.equal(key.defaultPrevented, true);
-    // A real dialog over the page keeps the key
     docked.classList.remove('ui-docked');
     w.document.body.focus();
     const again = new w.KeyboardEvent('keydown', { key: '/', bubbles: true, cancelable: true });

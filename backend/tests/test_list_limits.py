@@ -1,9 +1,3 @@
-"""List routes take a bounded page size, so one call cannot load a whole table.
-
-The bound is 500, like GET /api/messages, and the largest size the app's
-own pages ask for (DMARC sources) still works. A page below 1 is refused
-instead of reaching the database as a negative offset.
-"""
 import pytest
 
 import starlette.staticfiles as sf

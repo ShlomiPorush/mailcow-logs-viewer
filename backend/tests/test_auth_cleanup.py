@@ -1,4 +1,3 @@
-"""Expired authentication records are reclaimed without touching live records."""
 import asyncio
 from collections import deque
 from app import auth, session

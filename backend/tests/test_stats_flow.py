@@ -1,7 +1,3 @@
-"""The dashboard's mail flow (/api/stats/flow): bars cut at the app time zone's
-own edges, through clock changes and in zones half or a quarter of an hour off
-UTC; each message counted once in the range, hidden addresses left out, the
-bars adding up to the totals; periods of 24, 28 and 30 bars; bad ranges refused."""
 import uuid
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -26,10 +22,10 @@ def test_hours_skip_the_hour_that_does_not_exist_and_repeat_the_one_that_comes_t
     berlin = ZoneInfo('Europe/Berlin')
     spring = bucket_edges(_utc('2026-03-28T23:00'), _utc('2026-03-29T03:00'), 'hour', berlin)
     local = [e.astimezone(berlin).strftime('%H:%M') for e in spring]
-    assert local == ['00:00', '01:00', '03:00', '04:00']   # 02:00 never happens
+    assert local == ['00:00', '01:00', '03:00', '04:00']
     autumn = bucket_edges(_utc('2026-10-24T23:00'), _utc('2026-10-25T03:00'), 'hour', berlin)
     local = [e.astimezone(berlin).strftime('%H:%M') for e in autumn]
-    assert local == ['01:00', '02:00', '02:00', '03:00']   # 02:00 twice, an hour apart
+    assert local == ['01:00', '02:00', '02:00', '03:00']
     assert autumn[2] - autumn[1] == timedelta(hours=1)
 
 
@@ -57,10 +53,8 @@ def test_a_day_whose_midnight_does_not_exist_starts_at_its_first_moment():
     days = bucket_edges(_utc('2025-09-05T12:00'), _utc('2025-09-08T12:00'), 'day', santiago)
     starts = [e.astimezone(santiago) for e in days]
     assert [s.date().isoformat() for s in starts] == ['2025-09-05', '2025-09-06', '2025-09-07', '2025-09-08']
-    assert starts[2].strftime('%H:%M') == '01:00'   # the clocks skip from 00:00 to 01:00 that night
+    assert starts[2].strftime('%H:%M') == '01:00'
 
-
-# ---------- counting, against the database ----------
 
 MARK = uuid.uuid4().hex[:8]
 SENDER = f'flow-{MARK}@example.com'
@@ -117,7 +111,7 @@ def test_a_message_counts_once_hidden_addresses_not_and_the_bars_add_up(client):
     base = datetime(2025, 1, 10, 10, 0)
     mid = f'<two-{MARK}@example.com>'
     _add('first', base + timedelta(minutes=10), mid)
-    _add('again', base + timedelta(hours=1, minutes=10), mid, recipient='other@example.org')   # same message, next hour
+    _add('again', base + timedelta(hours=1, minutes=10), mid, recipient='other@example.org')
     _add('alone', base + timedelta(hours=1, minutes=20), status='bounced')
     _add('hidden', base + timedelta(minutes=30), recipient=HIDDEN)
     response = _flow(f'from={base.isoformat()}Z&to={(base + timedelta(hours=3)).isoformat()}Z&bucket=hour')
@@ -125,7 +119,7 @@ def test_a_message_counts_once_hidden_addresses_not_and_the_bars_add_up(client):
     data = response.json()
     bars = data['buckets']
     assert [b['start'] for b in bars] == ['2025-01-10T10:00:00.000000Z', '2025-01-10T11:00:00.000000Z', '2025-01-10T12:00:00.000000Z']
-    assert [b['messages'] for b in bars] == [1, 1, 0]          # the two deliveries of one message: once, in its first bar
+    assert [b['messages'] for b in bars] == [1, 1, 0]
     assert [b['deliveries'] for b in bars] == [1, 2, 0]
     assert [b['blocked'] for b in bars] == [0, 1, 0]
     assert data['totals']['messages'] == 2 and data['totals']['deliveries'] == 3
@@ -154,7 +148,6 @@ def test_bad_ranges_are_refused(client):
     assert _flow('').status_code == 422
     assert _flow('period=1y').status_code == 422
     assert _flow('from=2030-01-02T00:00:00Z&to=2030-01-01T00:00:00Z&bucket=hour').status_code == 422
-    # Longer than 62 days, all in the past: refused for its length, not for the future
     assert _flow('from=2025-01-01T00:00:00Z&to=2025-03-05T00:00:00Z&bucket=day').status_code == 422
     assert _flow('from=2025-01-01T00:00:00Z&to=2025-03-03T00:00:00Z&bucket=day').status_code == 200
     assert _flow('from=yesterday&to=2030-01-01T00:00:00Z&bucket=hour').status_code == 422
@@ -165,15 +158,11 @@ def test_a_range_snaps_to_the_nearest_bars_at_least_one(client):
     def span(a, b):
         data = _flow(f'from=2025-01-10T{a}Z&to=2025-01-10T{b}Z&bucket=hour').json()
         return data['from'], data['to'], len(data['buckets'])
-    # A pinch from 10:45 to 12:15 shows 11:00 to 12:00, not 10:00 to 13:00
     assert span('10:45:00', '12:15:00') == ('2025-01-10T11:00:00.000000Z', '2025-01-10T12:00:00.000000Z', 1)
-    # Less than half a bar still shows the bar it is in
     assert span('10:10:00', '10:20:00') == ('2025-01-10T10:00:00.000000Z', '2025-01-10T11:00:00.000000Z', 1)
-    # Whole bars stay as they are
     assert span('08:00:00', '11:00:00') == ('2025-01-10T08:00:00.000000Z', '2025-01-10T11:00:00.000000Z', 3)
 
 
 def test_a_range_shorter_than_a_bar_shows_the_bar_it_is_in(client):
-    # 10:40 to 10:50 rounds both ends to 11:00: it shows 10:00 to 11:00, not the hour after
     data = _flow('from=2025-01-10T10:40:00Z&to=2025-01-10T10:50:00Z&bucket=hour').json()
     assert (data['from'], data['to'], len(data['buckets'])) == ('2025-01-10T10:00:00.000000Z', '2025-01-10T11:00:00.000000Z', 1)

@@ -1,14 +1,3 @@
-// Every popup comes from the shared builders, so all of them look and behave
-// alike on a desktop and on a phone (UI_Behavior_Catalog.md, "Shared dialogs and
-// notices"): a dialog from uiDialog (utils.js), a sheet from uiSheetShow, a
-// drop-down from uiPicker, a row menu from uiMenu, a notice from showToast.
-// Dialogs that live in index.html must have the same frame: a head with a title
-// and an X. This test fails when a floating layer is made any other way: markup
-// or classes of a dialog, sheet, menu or panel outside those builders, a
-// <dialog> or popover element, fixed positioning set in JavaScript or with a
-// utility class, a CSS rule that floats a new class, or the browser's own
-// alert(), confirm() or prompt(). A layer that must differ is listed below with
-// the reason, like the More sheet and the phone search.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
@@ -17,7 +6,6 @@ const { test } = require('node:test');
 
 const FRONTEND = path.join(__dirname, '../../frontend');
 
-// The functions that may build a floating layer, and the classes they build
 const BUILDERS = {
     'utils.js': {
         uiDialog: 'every dialog built in JavaScript',
@@ -32,15 +20,12 @@ const BUILDERS = {
         attnWindowOpen: 'Needs attention: a window anchored under the bell on a wide screen, a sheet on a phone (NL-19)',
         showNavFlyout: "the sidebar's flyout of a page's tabs on hover (NL-8)",
     },
-    // It also runs on pages without utils.js (agent consent, API reference, device
-    // code), so it copies the frame of uiDialog and showToast instead of calling them
     'session-guard.js': {
         sessionGuardAsk: '"Are you still there?" before sign-out for inactivity, the frame of uiDialog',
         sessionGuardNotice: 'the longest-session notice, the frame of showToast',
     },
 };
 
-// Elements in index.html that float without being a shared dialog
 const STATIC_LAYERS = {
     'mobile-menu': 'the phone More sheet above the tab bar (NL-9)',
     'messages-date-range-dropdown': 'Messages custom range, a picker panel that opens in place in the facets',
@@ -51,7 +36,6 @@ const STATIC_LAYERS = {
     'suppression-more-menu': 'Suppressions More menu on the popover layer (uiMenu markup)',
 };
 
-// CSS rules that may float above the page, and why
 const FLOATING_CSS = {
     '.ui-dialog-backdrop': 'every dialog',
     '.ui-sheet': 'sheets',
@@ -69,11 +53,9 @@ const FLOATING_CSS = {
     '.ui-savebar': 'the save bar, part of the page',
 };
 
-// Classes of a floating layer's frame: only its builder writes them
 const FRAME_CLASSES = ['ui-dialog-backdrop', 'ui-dialog', 'ui-sheet', 'ui-sheet-panel', 'ui-menu', 'ui-menu-panel',
     'ui-popover', 'ui-attn-win', 'ui-fly', 'ui-toast', 'mobile-menu'];
 
-// Each block from open to the first close after it, cut out (an unclosed one stays)
 function dropBlocks(text, open, close) {
     let out = '';
     let from = 0;
@@ -86,12 +68,10 @@ function dropBlocks(text, open, close) {
     }
 }
 
-// Comments say anything; strings and code are what count
 function stripComments(text) {
     return dropBlocks(dropBlocks(text, '<!--', '-->'), '/*', '*/')
         .split('\n').map(line => {
             if (/^\s*\/\//.test(line)) return '';
-            // A trailing comment, where the quotes before it are closed
             for (let i = line.indexOf('//'); i !== -1; i = line.indexOf('//', i + 2)) {
                 const before = line.slice(0, i);
                 if (!/[\s;,){}]$/.test(before)) continue;
@@ -102,7 +82,6 @@ function stripComments(text) {
         }).join('\n');
 }
 
-// The top-level function each line belongs to (null outside any)
 function functionAt(text) {
     const lines = text.split('\n');
     const owner = [];
@@ -122,7 +101,6 @@ function frameClassesIn(classText) {
     return classText.split(/\s+/).filter(c => FRAME_CLASSES.includes(c));
 }
 
-// What makes a floating layer, found in a JavaScript file
 function layerMarks(text) {
     const marks = [];
     const add = (re, what) => { for (const m of text.matchAll(re)) marks.push({ at: m.index, what: what(m) }); };
@@ -142,7 +120,6 @@ function layerMarks(text) {
     return marks.filter(m => m.what);
 }
 
-// Where the element that opens at `start` closes (same tag name, counting nesting)
 function elementEnd(html, start, tag) {
     const re = new RegExp(`<${tag}\\b[^>]*>|</${tag}\\s*>`, 'gi');
     re.lastIndex = start;
@@ -167,12 +144,10 @@ function check(dir = FRONTEND) {
             if (fn && BUILDERS[name] && BUILDERS[name][fn]) continue;
             problems.push(`${name}:${lineOf(text, mark.at)} ${mark.what} in ${fn || 'top-level code'}: build it with uiDialog, uiSheetShow, uiPicker or uiMenu`);
         }
-        // The browser's own dialogs look like none of ours and block the page
         for (const m of text.replace(/'(?:\\.|[^'\\\n])*'|"(?:\\.|[^"\\\n])*"/g, "''")
             .matchAll(/(^|[^.\w$])(?:window\.)?(alert|confirm|prompt)\s*\(/g)) {
             problems.push(`${name}:${lineOf(text, m.index)} ${m[2]}(): use showConfirmModal, showChoiceModal or showToast`);
         }
-        // A dialog says how wide it is, and has an X unless it is a question
         {
             for (const m of text.matchAll(/\buiDialog\(\{/g)) {
                 let depth = 0, end = m.index + m[0].length - 1;
@@ -190,7 +165,6 @@ function check(dir = FRONTEND) {
         }
     }
 
-    // index.html: dialogs keep the shared frame; other floating elements are listed
     const html = read('index.html');
     for (const m of html.matchAll(/<([a-zA-Z]+)\b([^<>]*)>/g)) {
         const attrs = m[2];
@@ -202,7 +176,6 @@ function check(dir = FRONTEND) {
         const where = `index.html:${lineOf(html, m.index)}${id ? ` #${id}` : ''}`;
         if (m[1].toLowerCase() === 'dialog') { problems.push(`${where} <dialog>: use the shared dialog frame`); continue; }
         if (classes.includes('ui-dialog-backdrop')) {
-            // Only this dialog: up to the end of its own element, then up to its body
             const own = html.slice(m.index, elementEnd(html, m.index, m[1]));
             const body = own.indexOf('ui-dialog-body');
             const frame = body === -1 ? own : own.slice(0, body);
@@ -214,7 +187,6 @@ function check(dir = FRONTEND) {
             continue;
         }
         if (classes.includes('ui-dialog') || STATIC_LAYERS[id] || classes.includes('mobile-menu')) continue;
-        // The More sheet's content panel sits inside #mobile-menu
         if (role && /mobile-menu-content/.test(attrs)) continue;
         if (classes.length || role || popover || fixed) {
             problems.push(`${where} floating element outside the shared builders (${[...classes, role && 'role dialog', popover && 'popover', fixed && 'fixed'].filter(Boolean).join(', ')}): ` +
@@ -222,10 +194,6 @@ function check(dir = FRONTEND) {
         }
     }
 
-    // CSS: what floats above the page is one of the shared layers
-    // Read per element styled: the first class (or id) of the last compound of each
-    // selector, across all its rules and states, so a position in one rule and a
-    // z-index in another (.x and .x.is-open, .x:hover, .page .x) count together
     const css = fs.readFileSync(path.join(dir, 'assets/css/ui.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
     const styled = new Map();
     for (const m of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
@@ -270,7 +238,6 @@ test('the listed exceptions still exist', () => {
     }
 });
 
-// A copy of the frontend with one file changed, to show the check catches it
 function checkWith(file, text) {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'popups-'));
     try {

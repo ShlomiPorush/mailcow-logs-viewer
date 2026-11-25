@@ -1,11 +1,3 @@
-"""Several people with their own access (issue #544).
-
-Local users sign in on the login form; OAuth2 entries give an email its own
-access instead of the OAuth2 default. Every request is checked against the
-person's access as the database says now, so a change applies to the next
-request. Without any user and without a stored default, everyone who signs
-in is an admin, as before.
-"""
 import asyncio
 import base64
 import logging
@@ -38,7 +30,6 @@ from app.services import oauth2_client as oauth2_module  # noqa: E402
 from app.services import users_store  # noqa: E402
 
 ADMIN_NAME = "admin"
-# New for each run
 ADMIN_PASSWORD = secrets.token_hex(16)
 PASSWORD = secrets.token_hex(16)
 NEW_PASSWORD = secrets.token_hex(16)
@@ -69,7 +60,6 @@ def people(app_schema, monkeypatch):
     monkeypatch.setattr(inner, "auth_password", ADMIN_PASSWORD)
     monkeypatch.setattr(inner, "raw_logs_services", "postfix")
     monkeypatch.setattr(raw_logs, "log_stream_manager", raw_logs.LogStreamManager())
-    # The guards read the sign-in settings as saved; here they are the test's settings
     monkeypatch.setattr(users_store, "build_settings", lambda db: settings._inner)
     _wipe()
     session_module._session_store.clear()
@@ -111,7 +101,6 @@ def _sign_in(name="alice", password=PASSWORD, expect=200):
 
 
 def _oauth2_client(email, verified=None):
-    """A browser with an OAuth2 session, as the callback makes it."""
     user_info = {"email": email, "sub": "42"}
     if verified is not None:
         user_info["email_verified"] = verified
@@ -133,8 +122,6 @@ def _change(admin, row, **change):
     return admin.put(f"/api/users/{row['id']}", json=body)
 
 
-# ── Upgrade safety ─────────────────────────────────────────────────────────
-
 def test_without_users_or_a_stored_default_everyone_signed_in_is_an_admin(people, monkeypatch):
     monkeypatch.setattr(settings._inner, "oauth2_enabled", True)
     for client in (_admin(), _oauth2_client("someone@example.com"), _oauth2_client("other@example.com", False)):
@@ -150,8 +137,6 @@ def test_sign_in_off_is_the_built_in_admin(people, monkeypatch):
     assert client.get("/api/users").status_code == 200
     assert client.get("/api/auth/status").json()["is_admin"] is True
 
-
-# ── Local users sign in ────────────────────────────────────────────────────
 
 def test_a_local_user_signs_in_on_the_login_form(people):
     admin = _admin()
@@ -205,7 +190,6 @@ def test_at_most_two_password_checks_run_at_once(people):
         r = _client().post("/api/auth/session", headers=_basic("alice", PASSWORD))
         assert r.status_code == 429
         assert r.json()["detail"] == "Too many sign-in attempts at once. Try again in a moment."
-        # The built-in admin needs no hash
         assert _client().post("/api/auth/session", headers=_basic(ADMIN_NAME, ADMIN_PASSWORD)).status_code == 200
     finally:
         users_store.SIGN_IN_HASHES.release()
@@ -256,8 +240,6 @@ def test_a_change_while_the_password_is_checked_gets_no_session(people, monkeypa
     assert "session_id" not in client.cookies
 
 
-# ── Usernames ──────────────────────────────────────────────────────────────
-
 @pytest.mark.parametrize("name", ["", "a" * 65, "with space", "colon:name", "tab\tname", "émile"])
 def test_a_username_outside_the_allowed_characters_is_refused(people, name):
     r = _admin().post("/api/users", json={"kind": "local", "username": name, "password": PASSWORD, "access": "viewer"})
@@ -286,7 +268,7 @@ def test_8_characters_of_any_kind_are_enough_and_sign_in(people, kind):
     def draw():
         return "".join(secrets.choice(kind) for _ in range(8))
     password = draw()
-    while passwords.is_common(password):   # 8 digits can be a common one
+    while passwords.is_common(password):
         password = draw()
     admin = _admin()
     _add(admin, "alice", password=password)
@@ -327,7 +309,6 @@ def test_a_password_reset_follows_the_same_rule(people, password, detail):
     row = _add(admin, "alice")
     r = _change(admin, row, password=password)
     assert r.status_code == 422 and r.json()["detail"] == detail
-    # The old password still works
     _sign_in("alice", PASSWORD)
 
 
@@ -338,8 +319,6 @@ def test_a_local_user_cannot_take_the_built_in_admins_name(people):
 
 @pytest.fixture
 def refused_saves_only(monkeypatch):
-    """Settings saves through the real route, for saves that must be refused: one that got
-    through would reload the settings every other test relies on, so it fails instead."""
     from app.routers import settings as settings_router
 
     def must_not_save(*args):
@@ -367,7 +346,6 @@ def test_after_the_environment_renamed_the_admin_the_built_in_admin_wins(people,
         main.log_user_name_conflicts()
     assert "'alice' has the built-in admin's username" in caplog.text
     assert _user(_admin_as("alice"), row["id"])["name_conflict"] is True
-    # The local user's session ends and it cannot sign in; the password is the built-in admin's
     assert signed_in.get("/api/messages").status_code == 401
     _sign_in("alice", PASSWORD, expect=401)
     _sign_in("alice", ADMIN_PASSWORD)
@@ -379,8 +357,6 @@ def _admin_as(name):
     return client
 
 
-# ── What each person may do ────────────────────────────────────────────────
-
 READS = {
     "status": ("GET", "/api/settings/health", {}),
     "messages": ("GET", "/api/messages", {}),
@@ -391,7 +367,6 @@ READS = {
     "mailboxes": ("GET", "/api/devices", {}),
     "logs": ("GET", "/api/raw-logs/services", {}),
 }
-# Sent so that a request let through stops at validation (422) before doing anything
 WRITES = {
     "outbound": ("POST", "/api/suppressions", {"json": {}}),
     "outbound-import": ("POST", "/api/suppressions/import", {}),
@@ -412,7 +387,6 @@ ADMIN_ONLY = [
     ("GET", "/api/notifications/channels", {}),
     ("PUT", "/api/users/not-a-number", {"json": {}}),
 ]
-# The alert list answers each person with the alerts of the areas they may view
 ANYONE = [("GET", "/api/rw-status", {}), ("GET", "/api/auth/status", {}), ("GET", "/api/auth/verify", {}),
           ("GET", "/api/security-alerts", {})]
 
@@ -422,7 +396,6 @@ def _call(client, method, path, kwargs):
 
 
 def _allowed(response):
-    """Whether the access check let the request through; a route may still refuse on its own (a feature off)."""
     assert response.status_code not in (401, 503), response.text
     return not (response.status_code == 403 and response.json() == {"detail": user_access.NOT_PERMITTED})
 
@@ -501,7 +474,6 @@ def test_an_entity_card_needs_view_on_every_area_it_reads(people, card, areas):
     admin = _admin()
     _add(admin, "every", access="custom", views=areas)
     every = _sign_in("every")
-    # An unreadable value: let through, the card itself answers 422 without reading anything
     assert every.get(f"/api/entities/{card}", params={"value": "?"}).status_code == 422
     for missing in areas:
         name = "no-" + missing
@@ -543,7 +515,6 @@ def test_caller_may_answers_for_people_and_agents(monkeypatch):
     nobody = SimpleNamespace(scope={}, state=SimpleNamespace())
     for key in ("auth_enabled", "basic_auth_enabled", "oauth2_enabled"):
         monkeypatch.setattr(settings._inner, key, False)
-    # Sign-in off: the built-in admin; on, a request nobody was resolved for gets nothing
     assert user_access.caller_may(nobody, "messages", "read")
     monkeypatch.setattr(settings._inner, "basic_auth_enabled", True)
     assert not user_access.caller_may(nobody, "messages", "read")
@@ -587,8 +558,6 @@ def _sign_in_as_viewer():
     return _sign_in()
 
 
-# ── A change applies to the next request ───────────────────────────────────
-
 def _ended(response):
     assert response.status_code == 401
     assert response.json()["reason"] == "access_changed" and response.headers["x-session-end"] == "access_changed"
@@ -606,7 +575,6 @@ def test_a_change_ends_the_users_sessions(people, change):
 
 
 def test_a_change_applies_even_to_a_session_the_store_still_holds(people, monkeypatch):
-    """Ending sessions actively is a convenience; the per-request check alone refuses them."""
     admin = _admin()
     row = _add(admin)
     client = _sign_in()
@@ -628,7 +596,6 @@ def test_signing_out_works_after_the_access_ended(people, monkeypatch):
     admin = _admin()
     row = _add(admin)
     client = _sign_in()
-    # The session is still in the store, but no longer gives access
     monkeypatch.setattr(users_store, "_end_local_sessions", lambda user_id, below=None: None)
     assert _change(admin, row, disabled=True).status_code == 200
     r = client.post("/api/auth/logout", follow_redirects=False)
@@ -650,8 +617,6 @@ def test_kind_name_and_email_cannot_be_changed(people):
     assert _change(admin, row, username="mallory").status_code == 422
     assert _change(admin, row, kind="oauth2").status_code == 422
 
-
-# ── OAuth2 ─────────────────────────────────────────────────────────────────
 
 @pytest.fixture
 def oauth2(people, monkeypatch):
@@ -700,7 +665,6 @@ def test_a_default_of_no_access_refuses_people_without_an_entry(oauth2):
     dave = _oauth2_client("dave@example.com")
     assert dave.get("/api/messages").status_code == 200
     _set_default(admin, "none")
-    # Applies to the sessions already open
     _ended(dave.get("/api/messages"))
     assert _oauth2_client("carol@example.com").get("/api/messages").status_code == 200
 
@@ -715,7 +679,6 @@ def test_changing_the_default_applies_to_open_sessions(oauth2):
 
 
 def test_a_provider_cannot_claim_a_basic_sign_in(oauth2):
-    """The session's person comes from the callback, never from what the provider sent."""
     admin = _admin()
     _set_default(admin, "viewer")
     user_info = {"email": "eve@example.com", "auth_method": "basic"}
@@ -773,7 +736,6 @@ def test_a_refused_oauth2_login_gets_no_session_and_takes_no_slot(provider, monk
     r = _callback(refused)
     assert r.status_code == 302 and r.headers["location"] == "/login?error=no_access"
     assert "session_id" not in refused.cookies and not session_module._session_store
-    # The one slot is still free for someone with access
     provider["email"] = "carol@example.com"
     from app.database import get_db_context
     with get_db_context() as db:
@@ -799,8 +761,6 @@ def test_an_oauth2_login_stores_the_normalized_email(provider):
     record = next(iter(session_module._session_store.values()))
     assert record["principal"] == {"kind": "oauth2", "email": "dave@example.com", "unverified": True}
 
-
-# ── Versions and the last admin ────────────────────────────────────────────
 
 def test_an_edit_on_an_older_copy_is_refused(people):
     admin = _admin()
@@ -841,7 +801,6 @@ def test_the_last_admin_cannot_be_demoted_in_oauth2_only_mode(oauth2, monkeypatc
     assert carol.delete(f"/api/users/{row['id']}").status_code == 409
     assert _change(carol, row, disabled=True).status_code == 409
     version = carol.get("/api/users").json()["oauth2"]["version"]
-    # A default of Admin is an admin who can sign in
     assert carol.put("/api/users/oauth2-default", json={"value": "admin", "version": version}).status_code == 200
     assert _change(carol, row, access="operator").status_code == 200
     dave = _oauth2_client("dave@example.com")
@@ -858,7 +817,6 @@ def test_two_demotions_at_once_leave_one_admin(oauth2, monkeypatch):
     real = users_store.usable_admins
 
     def slow(db, sign_in, default):
-        # Without the lock both would count two admins before either commits
         count = real(db, sign_in, default)
         time.sleep(0.3)
         return count
@@ -896,7 +854,6 @@ def test_a_settings_save_that_would_leave_no_admin_is_refused(oauth2):
             users_store.check_sign_in_settings(db, settings, {"basic_auth_enabled": False})
     assert refused.value.status == 409 and refused.value.detail == users_store.NO_ADMIN_LEFT
     with get_db_context() as db:
-        # A new password keeps the built-in admin
         users_store.check_sign_in_settings(db, settings, {"auth_password": secrets.token_hex(16)})
         with pytest.raises(users_store.UserError):
             users_store.check_sign_in_settings(db, settings, {"auth_password": ""})
@@ -911,7 +868,6 @@ def test_the_settings_save_runs_the_sign_in_check_under_the_lock(people, refused
         raise users_store.UserError(409, users_store.NO_ADMIN_LEFT)
 
     monkeypatch.setattr(settings_router.users_store, "check_sign_in_settings", refuse)
-    # OAuth2 is turned on with its secret, which the save requires
     monkeypatch.setenv("OAUTH2_CLIENT_SECRET", secrets.token_hex(16))
     admin = _admin()
     r = admin.put("/api/settings", json={"oauth2_enabled": True, "app_title": "Mail"})
@@ -923,7 +879,6 @@ def test_only_a_save_that_changes_who_can_sign_in_needs_the_check():
     from app.routers.settings import _changes_admin_sign_in
     before = SimpleNamespace(basic_auth_enabled=True, auth_username="admin", auth_password=secrets.token_hex(16),
                              oauth2_enabled=False)
-    # The form sends every key on each save
     assert not _changes_admin_sign_in({"basic_auth_enabled": True, "auth_username": "admin", "app_title": "x",
                                        "oauth2_client_id": "changed"}, before)
     assert _changes_admin_sign_in({"basic_auth_enabled": False}, before)
@@ -954,8 +909,6 @@ def test_a_local_admin_counts_only_while_basic_auth_is_on(people):
         assert users_store.usable_admins(db, off, "viewer") == 0
 
 
-# ── The users list ─────────────────────────────────────────────────────────
-
 def test_the_list_says_what_each_preset_and_user_gets(people):
     admin = _admin()
     _add(admin, "alice", "operator")
@@ -979,14 +932,11 @@ def test_agents_never_reach_the_users_api():
             assert scopes.excluded_reason(method, path)
 
 
-# ── Live Logs ──────────────────────────────────────────────────────────────
-
 def test_a_token_whose_person_lost_view_for_logs_opens_no_stream(people):
     admin = _admin()
     row = _add(admin, access="custom", views=("logs", "messages"))
     client = _sign_in()
     token = client.get("/api/raw-logs/ws-token").json()["token"]
-    # An OAuth2 default or an entry can take Logs away without ending the session
     from sqlalchemy import text
     from app.database import get_db_context
     with get_db_context() as db:
@@ -1013,7 +963,6 @@ def test_an_open_stream_closes_when_its_person_loses_view_for_logs(oauth2, monke
         assert ws.receive_json()["type"] == "connected"
         ws.portal.call(raw_logs.log_stream_manager.broadcast, "postfix", [{"message": "before"}])
         assert ws.receive_json()["entries"] == [{"message": "before"}]
-        # An entry's change keeps the session; only the stream's access goes
         assert _change(admin, _user(admin, row["id"]), views=["messages"], acts=[]).status_code == 200
         ws.portal.call(raw_logs.log_stream_manager.broadcast, "postfix", [{"message": "after"}])
         with pytest.raises(WebSocketDisconnect) as closed:
@@ -1057,8 +1006,6 @@ def test_a_stream_checks_access_at_most_every_few_seconds():
     assert calls == [1]
 
 
-# ── The action log ─────────────────────────────────────────────────────────
-
 class _Lines(logging.Handler):
     def __init__(self):
         super().__init__()
@@ -1090,8 +1037,6 @@ def test_each_change_a_person_asks_for_is_logged_whatever_the_log_level(people):
     assert not any("/api/messages" in line for line in lines.lines)
 
 
-# ── Turning sign-in on, and the saved sign-in under the lock ───────────────
-
 def _sign_in_off():
     return settings._inner.model_copy(update={"basic_auth_enabled": False, "oauth2_enabled": False,
                                               "auth_enabled": False})
@@ -1099,7 +1044,6 @@ def _sign_in_off():
 
 @pytest.mark.parametrize("default", ["none", "viewer"])
 def test_turning_oauth2_on_from_sign_in_off_needs_an_admin(people, default):
-    """With sign-in off everyone is an admin, so turning it on must leave one who can sign in."""
     from app.database import get_db_context
     _store_default(default)
     with get_db_context() as db:
@@ -1125,7 +1069,6 @@ def test_turning_basic_auth_on_with_a_password_from_sign_in_off_passes(people):
 
 
 def test_a_user_write_counts_the_saved_sign_in_not_the_one_in_memory(oauth2, monkeypatch):
-    """A Settings save turned Basic Auth off and committed; the shared settings are not reloaded yet."""
     admin = _admin()
     row = _add(admin, "carol@example.com", "admin", kind="oauth2")
     _set_default(admin, "viewer")
@@ -1144,8 +1087,6 @@ def test_a_local_user_cannot_take_the_saved_admin_name(people, monkeypatch):
     assert r.status_code == 409
 
 
-# ── A sign-in that read the new version keeps its session ──────────────────
-
 def test_a_sign_in_after_a_password_reset_keeps_its_session(people, monkeypatch):
     admin = _admin()
     row = _add(admin)
@@ -1154,7 +1095,6 @@ def test_a_sign_in_after_a_password_reset_keeps_its_session(people, monkeypatch)
     late = {}
 
     def sign_in_meanwhile(user_id, below=None):
-        # Between the commit and ending the old sessions, the user signs in with the new password
         late["client"] = _sign_in("alice", NEW_PASSWORD)
         real(user_id, below)
 
@@ -1176,8 +1116,6 @@ def test_ending_sessions_below_a_version_keeps_newer_ones(people):
     assert session_module.get_session(newer) is None
 
 
-# ── Sign-in during a database outage ───────────────────────────────────────
-
 def test_a_database_failure_while_checking_a_local_user_is_503_and_not_counted(people, monkeypatch):
     def broken(username, password):
         raise RuntimeError("database down")
@@ -1190,8 +1128,6 @@ def test_a_database_failure_while_checking_a_local_user_is_503_and_not_counted(p
     assert not auth_module._auth_failures
     _admin()
 
-
-# ── Public routes count a session only while it gives access ───────────────
 
 def test_info_details_end_with_the_persons_access(oauth2):
     admin = _admin()
@@ -1211,11 +1147,8 @@ def test_activity_ends_with_the_persons_access(oauth2):
     _ended(dave.post("/api/auth/activity"))
 
 
-# ── Answers that hold another area's data ──────────────────────────────────
-
 @pytest.fixture
 def stored():
-    """Rows a test adds, deleted afterwards (children first)."""
     from app.database import get_db_context
     added = []
 
@@ -1358,11 +1291,7 @@ def test_settings_info_keeps_settings_and_accounts_for_admins(people, monkeypatc
     assert full["configuration"]["auth_username"] == ADMIN_NAME
 
 
-# ── Round 2: saved and in-force sign-in, IMAP account, job errors, OAuth2 streams ──
-
 def test_an_admin_counts_only_when_usable_both_as_saved_and_in_force(oauth2, monkeypatch):
-    """A save turned Basic Auth on with a password and committed, but its reload failed: Basic is
-    still off in force, so the built-in admin cannot sign in and does not count."""
     from app.database import get_db_context
     monkeypatch.setattr(settings._inner, "basic_auth_enabled", False)
     _store_default("none")
@@ -1442,7 +1371,6 @@ def test_a_disabled_oauth2_entry_is_refused_on_its_next_request_and_its_stream_c
     with stream.websocket_connect(f"/ws/raw-logs?token={token}", headers={"Origin": APP}) as ws:
         assert ws.receive_json()["type"] == "connected"
         assert _change(admin, row, disabled=True).status_code == 200
-        # Nothing ends the sessions at once; each is refused when it is next used
         assert len(session_module._session_store) == 3
         ws.portal.call(raw_logs.log_stream_manager.broadcast, "postfix", [{"message": "after"}])
         with pytest.raises(WebSocketDisconnect) as closed:
@@ -1451,11 +1379,7 @@ def test_a_disabled_oauth2_entry_is_refused_on_its_next_request_and_its_stream_c
     _ended(carol.get("/api/messages"))
 
 
-# ── Round 3: each sign-in reading checked on its own ───────────────────────
-
 def test_a_demotion_needs_an_admin_under_the_reading_in_force(oauth2, monkeypatch):
-    """A save switched to Basic with a password and OAuth2 off, but its reload failed: OAuth2 is
-    still the only sign-in in force, so its last admin cannot be demoted."""
     from app.database import get_db_context
     monkeypatch.setattr(settings._inner, "basic_auth_enabled", False)
     _store_default("none")
@@ -1493,8 +1417,6 @@ def test_a_demotion_with_another_admin_under_both_readings_passes(oauth2, monkey
 
 
 def test_a_settings_save_counts_the_reading_in_force_before_it(oauth2, monkeypatch):
-    """In force: OAuth2 only with an admin entry; as saved: Basic without a password, so no admin there.
-    A save that keeps that leaves nobody who can sign in, whatever the saved reading had before."""
     from app.database import get_db_context
     monkeypatch.setattr(settings._inner, "basic_auth_enabled", False)
     _store_default("none")
@@ -1518,12 +1440,9 @@ def test_the_users_answer_says_who_asked(oauth2, monkeypatch):
     assert _sign_in("alice").get("/api/users").json()["you"] == {"kind": "local", "user_id": alice["id"], "via_default": False,
                                                                  "email": None}
     carol = _add(admin, "carol@example.com", access="admin", kind="oauth2")
-    # Matched as the sign-in matches: the provider's email, normalized
     assert _oauth2_client(" Carol@Example.com ").get("/api/users").json()["you"] == {
         "kind": "oauth2", "user_id": carol["id"], "via_default": False, "email": "carol@example.com"}
-    # No entry: the access for everyone else (Admin here), with the email an entry for it would match
     assert _oauth2_client(" Dave@Example.com ").get("/api/users").json()["you"] == {
         "kind": "oauth2", "user_id": None, "via_default": True, "email": "dave@example.com"}
-    # An email the provider did not verify matches no entry, so none is named
     assert _oauth2_client("carol@example.com", verified=False).get("/api/users").json()["you"] == {
         "kind": "oauth2", "user_id": None, "via_default": True, "email": None}

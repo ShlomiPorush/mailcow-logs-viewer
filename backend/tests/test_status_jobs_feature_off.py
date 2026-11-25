@@ -1,10 +1,3 @@
-"""Status, Jobs: a job of a feature that is switched off says so.
-
-Protection Rules belongs to the Security feature. With Security off it was
-the only job without the feature_disabled flag, so the Status page showed a
-plain "off" tag with a generic hint instead of "feature off" like the others.
-The suppression sync now also reports the Read-Write key it needs.
-"""
 import secrets
 
 import pytest
@@ -58,7 +51,6 @@ def test_protection_rules_runs_with_security_on(jobs, monkeypatch):
 
 
 def test_suppression_sync_without_the_rw_key_still_reads(jobs, monkeypatch):
-    # It reads the app's Rspamd blocks into the list; it writes only with the key
     monkeypatch.setattr(type(settings_router.mailcow_api), 'has_rw_key', property(lambda self: False))
     monkeypatch.setattr(settings._inner, 'disabled_features', '')
     monkeypatch.setattr(settings._inner, 'suppression_enabled', False)

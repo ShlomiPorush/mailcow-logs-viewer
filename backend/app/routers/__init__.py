@@ -1,3 +1,0 @@
-"""
-Routers package initialization
-"""

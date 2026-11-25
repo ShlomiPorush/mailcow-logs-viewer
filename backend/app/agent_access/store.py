@@ -1,10 +1,3 @@
-"""Grants, codes, tokens and the activity log, in the database.
-
-Every function takes a SQLAlchemy session and runs synchronously; async callers
-use run_in_threadpool. Codes and tokens are stored only as SHA-256 hashes. A
-code or refresh token changes state under a row lock (SELECT ... FOR UPDATE),
-so two concurrent requests can never both use it.
-"""
 import base64
 import functools
 import hashlib
@@ -41,14 +34,12 @@ REFRESH_PREFIX = "mlvr_"
 CLIENT_PREFIX = "mlvc_"
 DEVICE_PREFIX = "mlvd_"
 
-# Agents that connect with a code (RFC 8628): the skill's script
 DEVICE_CLIENT_ID = "mailcow-logs-cli"
 DEVICE_SECONDS = 600
 DEVICE_INTERVAL = 5
-DEVICE_COLLECT_GRACE = timedelta(minutes=5)   # an approved code can still be collected this long after it expires
+DEVICE_COLLECT_GRACE = timedelta(minutes=5)
 DEVICE_KEPT_HOURS = 24
 MAX_OPEN_DEVICE_REQUESTS = 100
-# Consonants only (base-20 as in RFC 8628 6.1): no vowels, so no words, and nothing to confuse
 USER_CODE_ALPHABET = "BCDFGHJKLMNPQRSTVWXZ"
 
 
@@ -65,7 +56,6 @@ def new_secret(prefix: str) -> str:
 
 
 def pkce_matches(verifier: Optional[str], challenge: str) -> bool:
-    """RFC 7636 S256: BASE64URL(SHA256(verifier)) == challenge."""
     if not verifier or not (43 <= len(verifier) <= 128):
         return False
     digest = hashlib.sha256(verifier.encode("ascii", "replace")).digest()
@@ -73,12 +63,6 @@ def pkce_matches(verifier: Optional[str], challenge: str) -> bool:
     return secrets.compare_digest(expected, challenge)
 
 
-# ── Sign-in fingerprint ────────────────────────────────────────────────────
-# The settings that decide who can sign in, as in routers/settings.py
-# (_SESSION_BOUND_SETTING_KEYS; a test keeps the two lists equal). A change to
-# any of them, from the Settings page or from ENV and a restart, disconnects
-# every agent for good: the last fingerprint is stored, so changing a value
-# back does not bring the grants back.
 SIGN_IN_KEYS = (
     "basic_auth_enabled", "auth_username", "auth_password",
     "oauth2_enabled", "oauth2_issuer_url", "oauth2_authorization_url", "oauth2_token_url",
@@ -88,13 +72,11 @@ _SECRET_KEYS = frozenset({"auth_password", "oauth2_client_secret", "session_secr
 _FINGERPRINT_KEY = "agent_access_sign_in_fingerprint"
 _fingerprint_lock = threading.Lock()
 _known_fingerprint: Optional[str] = None
-# Called with no arguments when every grant was revoked (drops consents in memory)
 on_disconnect_all: List[Callable[[], None]] = []
 
 
 @functools.lru_cache(maxsize=16)
 def _stretched(value: str) -> str:
-    """A slow one-way hash of a secret, so the stored fingerprint never holds it."""
     return hashlib.pbkdf2_hmac("sha256", value.encode("utf-8"), b"mlv-agent-access", 100_000).hex()
 
 
@@ -110,11 +92,6 @@ def sign_in_fingerprint() -> str:
 
 
 def check_sign_in_unchanged(db: Session) -> bool:
-    """Compare sign-in settings with the stored fingerprint; disconnect all agents on a change.
-
-    Returns True when nothing changed. The first call on a fresh database
-    stores the fingerprint and disconnects nothing.
-    """
     global _known_fingerprint
     current = sign_in_fingerprint()
     if current == _known_fingerprint:
@@ -147,7 +124,6 @@ def check_sign_in_unchanged(db: Session) -> bool:
 
 
 def sign_in_stamp(db: Session) -> str:
-    """The stored sign-in fingerprint, after checking it is current; a code carries it from the consent."""
     check_sign_in_unchanged(db)
     row = db.query(SystemSetting).filter(SystemSetting.key == _FINGERPRINT_KEY).first()
     value = row.value if row else ""
@@ -156,17 +132,9 @@ def sign_in_stamp(db: Session) -> str:
 
 
 def _hold_sign_in(db: Session) -> str:
-    """Share-lock the stored fingerprint for this transaction and return it.
-
-    A sign-in change takes the same row for update before it disconnects
-    everyone, so a grant made while this lock is held is either finished
-    before the change (and then disconnected by it) or refused after it.
-    """
     row = db.query(SystemSetting).filter(SystemSetting.key == _FINGERPRINT_KEY).with_for_update(read=True).first()
     return row.value if row else ""
 
-
-# ── Activity log ───────────────────────────────────────────────────────────
 
 def audit(db: Session, event: str, grant: Optional["GrantInfo"] = None, *, grant_id: Optional[int] = None,
           agent_name: Optional[str] = None, tool: Optional[str] = None, method: Optional[str] = None,
@@ -183,14 +151,7 @@ def audit(db: Session, event: str, grant: Optional["GrantInfo"] = None, *, grant
         db.commit()
 
 
-# ── Clients registered with DCR ────────────────────────────────────────────
-
 def register_client(db: Session, name: str, redirect_uris: List[str], ip: str) -> Optional[AgentClient]:
-    """Store a DCR client; None when the table is full of clients that cannot be evicted.
-
-    A full table never blocks onboarding for long: the oldest client that has
-    no grant, no live code and is older than a few minutes makes room.
-    """
     unused = db.query(AgentClient).filter(
         ~AgentClient.client_id.in_(select(AgentGrant.client_id).where(AgentGrant.revoked_at.is_(None)))
     )
@@ -216,8 +177,6 @@ def get_client(db: Session, client_id: str) -> Optional[AgentClient]:
     return db.query(AgentClient).filter(AgentClient.client_id == client_id).first()
 
 
-# ── Grants ─────────────────────────────────────────────────────────────────
-
 @dataclass(frozen=True)
 class GrantInfo:
     id: int
@@ -226,8 +185,8 @@ class GrantInfo:
     scopes: FrozenSet[str]
     expires_at: datetime
     publisher: Optional[str]
-    token_hash: Optional[str] = None   # the access token the request came with
-    resource: str = ""                 # what its tokens are for: the MCP server or the REST API
+    token_hash: Optional[str] = None
+    resource: str = ""
 
 
 def _info(grant: AgentGrant, access_hash: Optional[str] = None) -> GrantInfo:
@@ -251,15 +210,10 @@ def _revoke(db: Session, grant: AgentGrant, reason: str) -> bool:
     return True
 
 
-# Lock order everywhere: the sign-in fingerprint, then a code, then grants (by
-# id), then their tokens. A token is only ever locked after its grant.
-
 def _revoke_all(db: Session, reason: str) -> int:
     grants = db.query(AgentGrant).filter(AgentGrant.revoked_at.is_(None)) \
         .order_by(AgentGrant.id).with_for_update().all()
     count = sum(1 for g in grants if _revoke(db, g, reason))
-    # Codes not exchanged yet end too: an MCP app's authorization code, and a
-    # code waiting for a person or approved and not collected yet
     db.query(AgentCode).filter(AgentCode.used_at.is_(None)).delete(synchronize_session=False)
     db.query(AgentDeviceRequest).filter(AgentDeviceRequest.state.in_(("pending", "approved"))) \
         .update({"state": "expired"}, synchronize_session=False)
@@ -276,18 +230,11 @@ def revoke_grant(db: Session, grant_id: int, reason: str = "disconnected") -> bo
 
 
 class GrantChanged(Exception):
-    """The grant changed since the copy an edit was made on."""
+    pass
 
 
 def change_grant(db: Session, grant_id: int, *, scopes: str, days: Optional[float], changed_by: Optional[str],
                  version: Optional[str] = None) -> bool:
-    """A person changes what a connected agent may do, and optionally sets a new end
-    counted from now. Tokens are checked against the grant on every call, so the
-    change applies from the agent's next call; its refresh tokens follow a new end.
-
-    `version` (grant_version of the copy the edit was made on) must still match:
-    otherwise GrantChanged, so an older window never undoes a newer change.
-    """
     grant = db.query(AgentGrant).filter(AgentGrant.id == grant_id).with_for_update().first()
     if not _grant_active(grant):
         db.rollback()
@@ -299,8 +246,6 @@ def change_grant(db: Session, grant_id: int, *, scopes: str, days: Optional[floa
     grant.scopes = scopes
     if days is not None:
         grant.expires_at = now() + timedelta(days=float(days))
-        # Spent refresh tokens too: they are kept until the grant ends, so a reused
-        # one is still caught (refresh_reused) for the whole new period
         db.query(AgentToken).filter(AgentToken.grant_id == grant.id, AgentToken.kind == "refresh") \
             .update({"expires_at": grant.expires_at}, synchronize_session=False)
         db.query(AgentToken).filter(AgentToken.grant_id == grant.id, AgentToken.kind == "access",
@@ -316,9 +261,6 @@ def change_grant(db: Session, grant_id: int, *, scopes: str, days: Optional[floa
 
 
 def revoke_all(db: Session, reason: str = "disconnected") -> int:
-    # The sign-in fingerprint row, exclusively: a code being collected or
-    # exchanged holds it shared, so it finishes before this (and is then
-    # disconnected here) or starts after it (and finds its request ended)
     check_sign_in_unchanged(db)
     db.query(SystemSetting).filter(SystemSetting.key == _FINGERPRINT_KEY).with_for_update().first()
     count = _revoke_all(db, reason)
@@ -343,8 +285,6 @@ def _issue_tokens(db: Session, grant: AgentGrant) -> Dict[str, Any]:
     }
 
 
-# ── Codes ──────────────────────────────────────────────────────────────────
-
 def create_code(db: Session, *, client_id: str, redirect_uri: str, code_challenge: str, resource: str,
                 details: Dict[str, Any]) -> str:
     code = secrets.token_urlsafe(32)
@@ -356,8 +296,6 @@ def create_code(db: Session, *, client_id: str, redirect_uri: str, code_challeng
 
 
 class TokenError(Exception):
-    """An OAuth error for the token endpoint (RFC 6749 5.2)."""
-
     def __init__(self, error: str, description: str):
         super().__init__(description)
         self.error = error
@@ -366,16 +304,6 @@ class TokenError(Exception):
 
 def exchange_code(db: Session, *, code: str, client_id: str, redirect_uri: str, verifier: str,
                   resource: Optional[str]) -> Dict[str, Any]:
-    """Turn a code into the grant and its first tokens, once.
-
-    A code presented again with every binding right (client, redirect address
-    and PKCE verifier) means it leaked: the grant it made is disconnected. A
-    code presented with a wrong binding is refused and stays usable, so a
-    leaked code without its verifier cannot be used to disconnect anyone.
-
-    The grant is made under a share lock on the sign-in fingerprint, and only
-    when sign-in has not changed since the person approved it.
-    """
     check_sign_in_unchanged(db)
     sign_in = _hold_sign_in(db)
     row = db.query(AgentCode).filter(AgentCode.code_hash == token_hash(code or "")).with_for_update().first()
@@ -422,22 +350,12 @@ def exchange_code(db: Session, *, code: str, client_id: str, redirect_uri: str, 
 
 def refresh_tokens(db: Session, *, refresh_token: str, client_id: str, scope: Optional[str],
                    resource: Optional[str]) -> Dict[str, Any]:
-    """Exchange a refresh token for a new pair; the old one is spent.
-
-    A spent refresh token presented again by its own client means it leaked:
-    the grant is disconnected. Spent tokens are kept until the grant ends, so
-    this works for the whole period. A scope parameter is ignored: the new
-    tokens always carry exactly what the person granted (RFC 6749 allows a
-    different scope than asked when the answer says so), so a client that
-    repeats the scope it first asked for is never refused and never gets more.
-    """
     wanted = token_hash(refresh_token or "")
     found = db.query(AgentToken.grant_id).filter(AgentToken.token_hash == wanted,
                                                  AgentToken.kind == "refresh").first()
     if found is None:
         db.rollback()
         raise TokenError("invalid_grant", "The refresh token is not valid.")
-    # The grant first, then its token (the lock order above)
     grant = db.query(AgentGrant).filter(AgentGrant.id == found.grant_id).with_for_update().first()
     row = db.query(AgentToken).filter(AgentToken.token_hash == wanted, AgentToken.kind == "refresh") \
         .with_for_update().first()
@@ -456,7 +374,6 @@ def refresh_tokens(db: Session, *, refresh_token: str, client_id: str, scope: Op
         db.rollback()
         raise TokenError("invalid_target", "The resource is not this server.")
     row.rotated_at = now()
-    # Spent access tokens of this grant end with the refresh
     db.query(AgentToken).filter(AgentToken.grant_id == grant.id, AgentToken.kind == "access") \
         .delete(synchronize_session=False)
     tokens = _issue_tokens(db, grant)
@@ -465,7 +382,6 @@ def refresh_tokens(db: Session, *, refresh_token: str, client_id: str, scope: Op
 
 
 def revoke_token(db: Session, token: str, client_id: str) -> None:
-    """RFC 7009: revoking either token of a grant disconnects the grant."""
     row = db.query(AgentToken).filter(AgentToken.token_hash == token_hash(token or "")).first()
     if row is None or row.client_id != client_id:
         db.rollback()
@@ -477,11 +393,6 @@ def revoke_token(db: Session, token: str, client_id: str) -> None:
 
 
 def validate_access_token(db: Session, token: str, resource: str) -> Optional[GrantInfo]:
-    """The grant behind a bearer token, or None when it is not good for `resource` now.
-
-    `resource` is where the token was presented (live.resource() at /mcp,
-    live.api_resource() at /api): a token is good only where it was issued for.
-    """
     if not token or not token.startswith(ACCESS_PREFIX) or len(token) > 100:
         return None
     check_sign_in_unchanged(db)
@@ -499,9 +410,6 @@ def validate_access_token(db: Session, token: str, resource: str) -> Optional[Gr
 
 
 def grant_scopes_now(db: Session, info: GrantInfo) -> Optional[FrozenSet[str]]:
-    """The grant's scopes as they are now, or None when it may no longer act
-    (the same checks as grant_still_active). A person may have changed them
-    while the request waited for its body or a slot."""
     if not grant_still_active(db, info):
         return None
     grant = db.query(AgentGrant).filter(AgentGrant.id == info.id).first()
@@ -511,18 +419,11 @@ def grant_scopes_now(db: Session, info: GrantInfo) -> Optional[FrozenSet[str]]:
 
 
 def grant_version(grant: AgentGrant) -> str:
-    """Stands for what a grant allows and until when: an edit made on an older
-    copy (another window, another person) is refused instead of undoing a newer one."""
     raw = f"{grant.scopes}|{grant.expires_at.isoformat()}"
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
 
 
 def grant_still_active(db: Session, info: GrantInfo) -> bool:
-    """Checked again right before a route runs: a request may wait for its body or a slot.
-
-    The access token it came with must still be valid too, so a slow request
-    cannot outlive its token's hour or a refresh that replaced it.
-    """
     check_sign_in_unchanged(db)
     grant = db.query(AgentGrant).filter(AgentGrant.id == info.id).first()
     token = db.query(AgentToken).filter(AgentToken.token_hash == (info.token_hash or ""),
@@ -534,19 +435,11 @@ def grant_still_active(db: Session, info: GrantInfo) -> bool:
     return active
 
 
-# ── Agents that connect with a code (RFC 8628) ─────────────────────────────
-# The agent asks and gets a secret device code (stored hashed) and a short user
-# code. A person opens the approval page on any device, compares the user code
-# and answers; the agent polls with its device code and collects its tokens
-# once. Every change of state happens under the request's row lock, after the
-# sign-in fingerprint (the lock order above).
-
 class UnknownDeviceCode(TokenError):
-    """A device code this server never issued (counted against the caller's address)."""
+    pass
 
 
 def normalize_user_code(value: Any) -> Optional[str]:
-    """The 8 letters of a user code as typed (any case, with or without the dash), or None."""
     letters = "".join(c for c in str(value or "")[:32].upper() if not c.isspace() and c != "-")
     if len(letters) != 8 or any(c not in USER_CODE_ALPHABET for c in letters):
         return None
@@ -564,7 +457,6 @@ def _open_requests(db: Session):
 
 def create_device_request(db: Session, *, client_id: str, label: str, requested: str,
                           resource: str) -> Optional[Tuple[str, str]]:
-    """(device code, user code) for a new request; None when too many are open."""
     if _open_requests(db).count() >= MAX_OPEN_DEVICE_REQUESTS:
         db.rollback()
         return None
@@ -587,7 +479,6 @@ def create_device_request(db: Session, *, client_id: str, label: str, requested:
 
 
 def find_device_request(db: Session, user_code: Any) -> Optional[Dict[str, Any]]:
-    """The pending request a person may answer for this user code, or None."""
     code = normalize_user_code(user_code)
     row = None
     if code:
@@ -603,7 +494,6 @@ def find_device_request(db: Session, user_code: Any) -> Optional[Dict[str, Any]]
 
 
 def answer_device_request(db: Session, request_id: int, *, approve: bool, details: Optional[Dict[str, Any]]) -> bool:
-    """A person's answer; False when the request is no longer open (a second answer changes nothing)."""
     check_sign_in_unchanged(db)
     sign_in = _hold_sign_in(db)
     row = db.query(AgentDeviceRequest).filter(AgentDeviceRequest.id == request_id).with_for_update().first()
@@ -611,7 +501,6 @@ def answer_device_request(db: Session, request_id: int, *, approve: bool, detail
         db.rollback()
         return False
     if approve and (details or {}).get("sign_in") != sign_in:
-        # Sign-in changed since the page opened: nothing is approved under the old settings
         row.state = "expired"
         db.commit()
         return False
@@ -623,7 +512,6 @@ def answer_device_request(db: Session, request_id: int, *, approve: bool, detail
 
 
 def redeem_device_code(db: Session, *, device_code: str, client_id: str) -> Dict[str, Any]:
-    """The agent's poll: tokens once a person approved, else the RFC 8628 error for where it stands."""
     check_sign_in_unchanged(db)
     sign_in = _hold_sign_in(db)
     row = None
@@ -659,7 +547,6 @@ def redeem_device_code(db: Session, *, device_code: str, client_id: str) -> Dict
             row.state = "expired"
         db.commit()
         raise TokenError("expired_token", "This request has ended. Connect again.")
-    # The period counts from the approval and is a fixed end
     ends = (row.answered_at or t) + timedelta(days=float(d["days"]))
     grant = AgentGrant(
         client_id=client_id, client_kind="device", display_name=d["display_name"], declared_name=row.label,
@@ -678,10 +565,7 @@ def redeem_device_code(db: Session, *, device_code: str, client_id: str) -> Dict
     return tokens
 
 
-# ── Management ─────────────────────────────────────────────────────────────
-
 def list_grants(db: Session) -> List[AgentGrant]:
-    """Connected agents first, then those that ended in the last 30 days."""
     since = now() - timedelta(days=ENDED_GRANTS_KEPT_DAYS)
     rows = db.query(AgentGrant).filter(or_(
         AgentGrant.revoked_at.is_(None) & (AgentGrant.expires_at > since),
@@ -700,7 +584,6 @@ def activity(db: Session, grant_id: int, limit: int = 50) -> List[AgentAudit]:
 
 
 def cleanup(db: Session) -> None:
-    """Delete what is no longer needed: old codes, ended tokens and grants, old activity, unused clients."""
     t = now()
     db.query(AgentDeviceRequest).filter(AgentDeviceRequest.created_at < t - timedelta(hours=DEVICE_KEPT_HOURS)) \
         .delete(synchronize_session=False)

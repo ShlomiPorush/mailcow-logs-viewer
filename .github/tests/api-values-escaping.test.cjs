@@ -1,8 +1,3 @@
-// Values that come from the API (mail logs, DMARC reports, mailcow data) must
-// stay text when a page renders them. Each case feeds a markup payload or a
-// value that tries to leave a JS string, and checks the markup and the inline
-// handlers the way a browser reads them: entities decoded first, then the
-// handler run as JS.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -13,7 +8,6 @@ const frontend = path.join(__dirname, '../../frontend');
 const PAYLOAD = '<img src=x onerror=alert(1)>';
 const BREAKOUT = "x');window.injected=1;('";
 
-// Any DOM access returns another inert stub, so a file's top-level code runs
 function stub() {
     const fn = function () { return proxy; };
     const proxy = new Proxy(fn, {
@@ -34,7 +28,6 @@ function load(files, extra = {}) {
     return context;
 }
 
-// app.js reads the viewport at load; a desktop window, inert otherwise
 function appWindow() {
     const base = stub();
     return new Proxy({}, { get: (_, key) => key === 'matchMedia' ? () => ({ matches: false, addEventListener() {} }) : base[key] });
@@ -48,15 +41,14 @@ function decodeEntities(value) {
     });
 }
 
-// Run every onclick in ``html`` in a sandbox that records the calls it makes
 function runHandlers(html, functions) {
     const calls = [];
-    const sandbox = { window: {}, setTimeout() {}, event: {}, uiRowHeld: () => false };   // a plain click on a row
+    const sandbox = { window: {}, setTimeout() {}, event: {}, uiRowHeld: () => false };
     for (const name of functions) sandbox[name] = (...args) => calls.push([name, ...args]);
     vm.createContext(sandbox);
     const handlers = [...html.matchAll(/onclick=(["'])(.*?)\1/g)].map(m => decodeEntities(m[2]));
     for (const handler of handlers) {
-        try { vm.runInContext(handler, sandbox); } catch { /* a broken handler is also contained */ }
+        try { vm.runInContext(handler, sandbox); } catch { }
     }
     return { calls, injected: sandbox.window.injected || sandbox.injected };
 }
@@ -74,9 +66,7 @@ test('a domain row keeps the domain and its counts as text and opens itself', ()
     assert.equal(injected, undefined);
     const toggle = calls.find(c => c[0] === 'toggleDomainDetails');
     assert.ok(toggle, 'the row toggles its details');
-    // The toggle names the element the row actually rendered
     assert.ok(html.includes(`id="${toggle[1]}-details"`));
-    // An ordinary domain keeps the id it always had
     assert.equal(context.domainRowId('mail.example.com'), 'domain-mail-example-com');
 });
 

@@ -1,4 +1,3 @@
-"""The documented reporting API must be reachable through the real application."""
 import secrets
 from unittest.mock import AsyncMock
 

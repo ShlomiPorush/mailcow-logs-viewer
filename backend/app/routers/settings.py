@@ -1,7 +1,3 @@
-"""
-API endpoints for settings and system information
-Shows configuration, last import times, and background job status
-"""
 import asyncio
 import logging
 import os
@@ -20,6 +16,7 @@ from ..models import PostfixLog, RspamdLog, NetfilterLog, MessageCorrelation
 from ..services.bounce_policy import cleanup_blocks
 from ..services import excluded_addresses, written_recipients
 from ..agent_access.scopes import READ
+from ..agent_access.store import SIGN_IN_KEYS as _SESSION_BOUND_SETTING_KEYS
 from ..user_access import DEFAULT_ACCESS_KEY, DEFAULT_VERSION_KEY, caller_may, job_error
 from ..services import users_store
 from ..config import settings, EDITABLE_SETTING_KEYS, FEATURE_IDS, reload_settings, Settings
@@ -48,11 +45,6 @@ router = APIRouter()
 
 
 def _job_off_reason(key: str):
-    """Why a background job does not run, and the Settings section that changes it.
-
-    A job of a feature switched off is not covered: the feature itself says so.
-    Returns (reason, settings section) or None while the job can run.
-    """
     rw = mailcow_api.has_rw_key
     checks = {
         'dmarc_imap_sync': [(not settings.dmarc_imap_enabled, 'IMAP import of DMARC and TLS reports is not set up', 'dmarc_imap')],
@@ -60,10 +52,8 @@ def _job_off_reason(key: str):
         'check_credentials': [(not rw and not settings.is_rspamd_configured,
                                'Needs the Read-Write API key or the Rspamd password', 'mailcow')],
         'send_weekly_summary': [(not settings.enable_weekly_summary, 'The weekly summary is turned off', 'notifications')],
-        # Worded as the Outbound settings name them
         'detect_suppressions': [(not settings.suppression_enabled, '"Handle failed mail automatically" is off', 'outbound'),
                                 (not settings.suppression_auto_detect, 'No choice under Outbound needs the mail logs', 'outbound')],
-        # It reads the app's Rspamd blocks; it writes them only with the Read-Write key
         'sync_suppressions': [(not settings.suppression_rspamd_sync, '"Sync with Rspamd" is off', 'outbound'),
                               (not settings.is_rspamd_configured, 'Needs the Rspamd password', 'mailcow')],
         'expire_suppressions': [(not settings.suppression_enabled, '"Handle failed mail automatically" is off', 'outbound')],
@@ -81,7 +71,6 @@ def _job_off_reason(key: str):
     return None
 
 
-# The feature each job belongs to; while it is off the job does nothing
 _JOB_FEATURES = {
     'cleanup_dmarc_reports': 'dmarc', 'dmarc_imap_sync': 'dmarc',
     'dns_check': 'domains',
@@ -96,9 +85,7 @@ _JOB_FEATURES = {
 
 
 def _job_cannot_run(key: str):
-    """Why a manual run of a job would do nothing, or None while it can run."""
     if key == 'mailbox_stats':
-        # The mailbox sync also feeds Rate Limits
         return None if _mailbox_sync_needed() else 'Mailbox Stats and Rate Limits are both turned off'
     feature = _JOB_FEATURES.get(key)
     if feature and not settings.is_feature_enabled(feature):
@@ -108,7 +95,6 @@ def _job_cannot_run(key: str):
 
 
 def _get_raw_logs_job_status(job_key: str, field: str, enabled: bool):
-    """Get raw logs job status from the separate worker module."""
     if not enabled:
         if field == 'status':
             return 'disabled'
@@ -128,20 +114,16 @@ def _get_raw_logs_job_status(job_key: str, field: str, enabled: bool):
             return 'unknown'
         return None
 
-# Keys whose values are masked in GET /api/settings (never returned in plain text)
 _SENSITIVE_SETTING_KEYS = frozenset({
     "mailcow_api_key", "mailcow_api_key_rw", "auth_password", "oauth2_client_secret", "smtp_password",
     "dmarc_imap_password", "session_secret_key", "maxmind_license_key", "rspamd_password",
-    "webhook_url",  # may embed bot tokens (Telegram/Gotify/Slack)
+    "webhook_url",
 })
 MASK_PLACEHOLDER = "********"
 
-# A stored secret is only sent to the server it was entered for. Changing one of
-# these settings while keeping the masked secret would hand it to the new server,
-# so such a save has to carry the secret again.
 _SECRET_BINDINGS = {
     "smtp_password": ("smtp_host", "smtp_port", "smtp_use_tls", "smtp_use_ssl", "smtp_user"),
-    "rspamd_password": ("rspamd_url", "mailcow_url"),  # empty rspamd_url: reached through mailcow
+    "rspamd_password": ("rspamd_url", "mailcow_url"),
     "dmarc_imap_password": ("dmarc_imap_host", "dmarc_imap_port", "dmarc_imap_use_ssl", "dmarc_imap_user"),
     "oauth2_client_secret": ("oauth2_issuer_url", "oauth2_authorization_url", "oauth2_token_url",
                              "oauth2_userinfo_url", "oauth2_use_oidc_discovery"),
@@ -159,13 +141,6 @@ _SECRET_LABELS = {
 
 
 def _comparable_setting(key: str, value: Any) -> Any:
-    """A setting value as the form and the effective settings both spell it.
-
-    The Settings page posts '' for an unset field and numbers may arrive as
-    strings, so None == '', 587 == '587', and a trailing slash or surrounding
-    blanks do not count as a change. Booleans compare as the stored settings
-    read them back (settings_store.parse_bool).
-    """
     from ..services.settings_store import _get_effective_type
     if _get_effective_type(_get_field_annotations().get(key, str)) is bool:
         return parse_bool(value) is True
@@ -175,11 +150,6 @@ def _comparable_setting(key: str, value: Any) -> Any:
 
 
 def _normalize_booleans(allowed: Dict[str, Any]) -> None:
-    """Turn every posted on/off setting into True or False, as the stored
-    settings will read it back, so a check made on the posted value and the
-    setting that takes effect never disagree ("on" once passed the secret
-    check as on and loaded as off). Empty means off, as it loads; a value that
-    is neither is refused."""
     from ..services.settings_store import _get_effective_type
     annotations = _get_field_annotations()
     for key, value in list(allowed.items()):
@@ -192,20 +162,14 @@ def _normalize_booleans(allowed: Dict[str, Any]) -> None:
 
 
 def _reject_moved_secrets(allowed: Dict[str, Any]) -> None:
-    """Refuse to keep a stored secret when the server it is sent to changes.
-
-    Runs before the mask placeholder is stripped: a secret that is absent or
-    still masked is the stored one. ENV-set settings are skipped, because the
-    database value posted for them is ignored anyway.
-    """
     env_locked = get_env_locked_keys()
     reenter, from_env = [], []
     for secret, endpoints in _SECRET_BINDINGS.items():
         if not str(getattr(settings, secret, None) or "").strip():
-            continue  # nothing stored, nothing to hand over
+            continue
         posted = allowed.get(secret, MASK_PLACEHOLDER)
         if posted != MASK_PLACEHOLDER and secret not in env_locked:
-            continue  # the secret is entered (or cleared) together with the change
+            continue
         moved = [k for k in endpoints
                  if k in allowed and k not in env_locked
                  and _comparable_setting(k, allowed[k]) != _comparable_setting(k, getattr(settings, k, None))]
@@ -225,7 +189,6 @@ def _reject_moved_secrets(allowed: Dict[str, Any]) -> None:
             f"Enter the {names} again: a stored secret is only sent to the server it was entered for."))
 
 
-# Settings that take one or more email addresses
 _ADDRESS_LIST_LABELS = {
     "admin_email": "Admin email",
     "blacklist_alert_email": "Blocklist alert email",
@@ -234,8 +197,6 @@ _ADDRESS_LIST_LABELS = {
 
 
 def _normalize_address_lists(allowed: Dict[str, Any]) -> None:
-    """Refuse an entry that is not an email address, and store the addresses
-    separated by ', ' however they were typed."""
     from ..services.smtp_service import invalid_addresses, split_addresses
     for key, label in _ADDRESS_LIST_LABELS.items():
         if key not in allowed or not str(allowed[key] or "").strip():
@@ -249,9 +210,6 @@ def _normalize_address_lists(allowed: Dict[str, Any]) -> None:
 
 
 def _validate_bounce_actions(allowed: Dict[str, Any]) -> None:
-    """Refuse an Outbound action nobody knows: the jobs would block or
-    delete nothing for it. The value in effect sent back as it is never blocks
-    saving the other settings (the page posts every key)."""
     from ..services.bounce_policy import HARD_ACTIONS, SOFT_ACTIONS
     for key, known in (('suppression_hard_bounce_action', HARD_ACTIONS), ('suppression_soft_bounce_action', SOFT_ACTIONS)):
         if key not in allowed:
@@ -266,9 +224,6 @@ def _validate_bounce_actions(allowed: Dict[str, Any]) -> None:
 
 
 def _normalize_bounce_codes(allowed: Dict[str, Any]) -> None:
-    """Refuse a code left alone that is not a code of its kind (a 4.x.x among
-    the permanent failures, say), and store each list in one form. The value in
-    effect sent back as it is never blocks saving the other settings."""
     from ..services.bounce_policy import EXCLUDED_CODES_KEYS, normalize_codes
     labels = {'5': 'Permanent delivery failure', '4': 'Temporary delivery failure'}
     for kind, key in EXCLUDED_CODES_KEYS.items():
@@ -285,14 +240,8 @@ def _normalize_bounce_codes(allowed: Dict[str, Any]) -> None:
 
 
 def _validate_agent_access(allowed: Dict[str, Any], current: Optional[Settings] = None) -> None:
-    """Refuse a save that turns agent access on, or sign-in off under it: a
-    person must sign in to approve each agent. A state that was already like
-    this (set in .env) never blocks saving the other settings. `current` is the
-    state before the save; the shared settings when not given."""
     current = settings if current is None else current
     locked = get_env_locked_keys()
-    # Saved as the stored settings read them back, so the check and the
-    # setting that takes effect never disagree
     _normalize_booleans(allowed)
 
     def on(key: str, after: bool) -> bool:
@@ -309,7 +258,6 @@ def _validate_agent_access(allowed: Dict[str, Any], current: Optional[Settings] 
 
 
 def _whole_number(value: Any) -> int:
-    """A whole number sent as a number or as its digits; anything else raises ValueError."""
     if isinstance(value, bool):
         raise ValueError("Not a number")
     if isinstance(value, int):
@@ -320,11 +268,6 @@ def _whole_number(value: Any) -> int:
 
 
 def _validate_session_limits(allowed: Dict[str, Any]) -> None:
-    """Save the session limits as whole numbers, as the stored settings are
-    read back (5.0 would be read as nothing and fall back to the default).
-    The longest session is at least an hour, without an upper bound; sign-out
-    after inactivity takes 5 to 1440 minutes. The value in effect sent back
-    as it is always saves (the page posts every key)."""
     for key, low, high in (("session_expiry_hours", 1, None), ("session_idle_timeout_minutes", 5, 1440)):
         if key not in allowed:
             continue
@@ -340,8 +283,6 @@ def _validate_session_limits(allowed: Dict[str, Any]) -> None:
 
 
 def _validate_display_formats(allowed: Dict[str, Any]) -> None:
-    """Refuse a date or time format nobody knows. The value in effect sent back
-    as it is never blocks saving the other settings (the page posts every key)."""
     for key, known in (('date_format', DATE_FORMATS), ('time_format', TIME_FORMATS)):
         if key not in allowed:
             continue
@@ -356,15 +297,6 @@ def _validate_display_formats(allowed: Dict[str, Any]) -> None:
 
 
 def _validate_time_zone(allowed: Dict[str, Any], db: Session) -> None:
-    """Refuse a time zone name nobody knows, such as Europe/Berlinn ('' is UTC),
-    also while TZ in the environment locks the field: the stored value becomes
-    the zone the day TZ leaves the environment.
-
-    The page posts every key on each save, so a value that is not a new choice
-    never blocks saving the other settings: the stored value sent back as it
-    is, or the one in effect. An unknown name that only echoes TZ from the
-    environment is not stored.
-    """
     if "tz" not in allowed:
         return
     zone = allowed["tz"] = str(allowed["tz"] or "").strip()
@@ -380,16 +312,6 @@ def _validate_time_zone(allowed: Dict[str, Any], db: Session) -> None:
     raise HTTPException(status_code=400, detail=f"Unknown time zone: {zone}. Select a time zone from the list.")
 
 
-# Settings that decide who can sign in. A change to any of them ends every
-# session issued before it, so rotating a password evicts a stolen cookie.
-_SESSION_BOUND_SETTING_KEYS = (
-    "basic_auth_enabled", "auth_username", "auth_password",
-    "oauth2_enabled", "oauth2_issuer_url", "oauth2_authorization_url", "oauth2_token_url",
-    "oauth2_userinfo_url", "oauth2_client_id", "oauth2_client_secret", "session_secret_key",
-)
-
-
-# The settings that decide whether an admin can still sign in (services/users_store.py)
 _ADMIN_SIGN_IN_KEYS = ("basic_auth_enabled", "auth_username", "auth_password", "oauth2_enabled")
 
 
@@ -399,16 +321,12 @@ def _changes_admin_sign_in(allowed: Dict[str, Any], before: Settings) -> bool:
 
 
 def _session_bound_values(source: Settings) -> tuple:
-    """The sign-in values of the settings given: built from the database for
-    the save, never the shared settings, which a reload elsewhere may have
-    replaced with older values."""
     if source is None:
         raise ValueError("The sign-in values need the settings they come from")
     return tuple(getattr(source, key, None) for key in _SESSION_BOUND_SETTING_KEYS)
 
 
 def _effective_config_for_editable(settings_obj: Settings) -> Dict[str, Any]:
-    """Build dict of editable keys -> value (secrets masked) for API response."""
     out = {}
     for key in EDITABLE_SETTING_KEYS:
         if not hasattr(settings_obj, key):
@@ -417,7 +335,6 @@ def _effective_config_for_editable(settings_obj: Settings) -> Dict[str, Any]:
         if key in _SENSITIVE_SETTING_KEYS:
             out[key] = MASK_PLACEHOLDER if (val is not None and str(val).strip() != "") else ""
         elif key == "disabled_features":
-            # The switches show the features an old name stands for
             out[key] = ",".join(normalize_disabled_features(val))
         else:
             out[key] = val
@@ -425,8 +342,6 @@ def _effective_config_for_editable(settings_obj: Settings) -> Dict[str, Any]:
 
 
 def _get_field_defaults() -> Dict[str, Any]:
-    """Extract default values from the Settings model for editable keys.
-    Returns None for required fields (no default)."""
     from pydantic_core import PydanticUndefined
     defaults = {}
     for key in EDITABLE_SETTING_KEYS:
@@ -434,9 +349,9 @@ def _get_field_defaults() -> Dict[str, Any]:
         if field_info is None:
             continue
         if field_info.default is PydanticUndefined:
-            defaults[key] = None  # Required field, no default
+            defaults[key] = None
         elif key in _SENSITIVE_SETTING_KEYS:
-            defaults[key] = ""  # Don't expose actual default for sensitive keys
+            defaults[key] = ""
         else:
             defaults[key] = field_info.default
     return defaults
@@ -457,13 +372,11 @@ def get_settings_info(request: Request = None, db: Session = Depends(get_db)):
     """
     with_settings = caller_may(request, "settings", READ)
     try:
-        # Get last import times
         last_postfix = db.query(func.max(PostfixLog.created_at)).scalar()
         last_rspamd = db.query(func.max(RspamdLog.created_at)).scalar()
         last_netfilter = db.query(func.max(NetfilterLog.created_at)).scalar()
         last_correlation = db.query(func.max(MessageCorrelation.updated_at)).scalar()
         
-        # Completion statistics: the Message linking figure (its trend samples the same function)
         from ..services.figures import linking_figure
         linking = linking_figure(db)
         total_correlations = linking['total']
@@ -471,8 +384,6 @@ def get_settings_info(request: Request = None, db: Session = Depends(get_db)):
         incomplete_correlations = linking['incomplete']
         expired_correlations = linking['expired']
         
-        # Count correlations without definitive final_status (for update_final_status job)
-        # Only count correlations within Max Correlation Age (older ones should be expired)
         status_cutoff_time = datetime.utcnow() - timedelta(
             minutes=settings.max_correlation_age_minutes
         )
@@ -485,19 +396,14 @@ def get_settings_info(request: Request = None, db: Session = Depends(get_db)):
             )
         ).scalar()
         
-        # Get total counts
         total_postfix = db.query(func.count(PostfixLog.id)).scalar()
         total_rspamd = db.query(func.count(RspamdLog.id)).scalar()
         total_netfilter = db.query(func.count(NetfilterLog.id)).scalar()
         
-        # Get oldest entries
         oldest_postfix = db.query(func.min(PostfixLog.time)).scalar()
         oldest_rspamd = db.query(func.min(RspamdLog.time)).scalar()
         oldest_netfilter = db.query(func.min(NetfilterLog.time)).scalar()
         
-        # Get recent incomplete correlations (for monitoring). They name
-        # senders and recipients: an agent or a person gets them only with
-        # View for Messages, and nobody gets an excluded address's
         recent_incomplete = []
         if caller_may(request, "messages", READ):
             recent_incomplete = db.query(MessageCorrelation).filter(
@@ -507,7 +413,6 @@ def get_settings_info(request: Request = None, db: Session = Depends(get_db)):
         
         jobs_status = get_job_status()
 
-        # "16.4 (Debian 16.4-1.pgdg120+1)" -> "16.4"
         server_version = db.execute(text("SHOW server_version")).scalar() or ''
         database_version = server_version.split()[0] if server_version else None
 
@@ -542,7 +447,7 @@ def get_settings_info(request: Request = None, db: Session = Depends(get_db)):
                 "oauth2_enabled": settings.is_oauth2_enabled,
                 "auth_username": settings.auth_username if settings.is_basic_auth_enabled and with_settings else None,
                 "oauth2_provider_name": settings.oauth2_provider_name if settings.is_oauth2_enabled else None,
-                "maxmind_status": get_maxmind_validation_status(db),  # Last validated result from DB, or None if never checked
+                "maxmind_status": get_maxmind_validation_status(db),
                 "mailcow_rw_key_status": _credential_status(db, "mailcow_rw_key"),
                 "rspamd_password_status": _credential_status(db, "rspamd_password"),
             },
@@ -881,24 +786,19 @@ def get_settings_info(request: Request = None, db: Session = Depends(get_db)):
                 for corr in recent_incomplete
             ]
         }
-        # A job that cannot run says why, and where to change it
         for key, job in result.get("background_jobs", {}).items():
             if "error" in job:
                 job["error"] = job_error(request, job["error"])
             off = None if job.get("feature_disabled") else _job_off_reason(key)
             if off:
                 job["disabled_reason"], job["settings_section"] = off
-            # A clock-time job that runs: its time as parts, for the page to write
             if key in CLOCK_JOBS and job.get("schedule") == clock_schedule(key):
                 job["clock"] = clock_parts(key)
-        # Raw log services other pages read, collected whatever the Logs page settings are
         result["raw_logs_required"] = settings.raw_logs_required
-        # When UI editing is enabled, include full editable config and migration status
         if settings.edit_settings_via_ui_enabled and with_settings:
             result["editable_config"] = _effective_config_for_editable(settings)
             result["default_config"] = _get_field_defaults()
             result["settings_migrated"] = has_config_overrides_in_db(db)
-            # The form locks what Basic Auth needs also when /api/settings is not read
             result["legacy_auth_enabled"] = bool(settings.auth_enabled)
         return result
         
@@ -924,7 +824,6 @@ def get_editable_settings(db: Session = Depends(get_db)):
     """
     if settings.edit_settings_via_ui_enabled:
         reload_settings(db)
-    # Keys where ENV is explicitly set - these are locked (ENV wins over DB).
     env_locked = sorted(get_env_locked_keys()) if settings.edit_settings_via_ui_enabled else []
     return {
         "settings_edit_via_ui_enabled": settings.edit_settings_via_ui_enabled,
@@ -932,7 +831,6 @@ def get_editable_settings(db: Session = Depends(get_db)):
         "configuration": _effective_config_for_editable(settings),
         "default_config": _get_field_defaults(),
         "env_locked_keys": env_locked,
-        # The old AUTH_ENABLED turns Basic Auth on without a field in the form
         "legacy_auth_enabled": bool(settings.auth_enabled),
     }
 
@@ -949,12 +847,10 @@ def update_settings(body: Dict[str, Any], request: Request = None, response: Res
     import secrets as _secrets
     if not settings.edit_settings_via_ui_enabled:
         raise HTTPException(status_code=403, detail="Settings editing is off. Set SETTINGS_EDIT_VIA_UI_ENABLED=true in the environment to enable it.")
-    # Changed only under Users, with its own version, so a form opened before a change cannot undo it
     if any(key in body for key in ("oauth2_default_access", DEFAULT_ACCESS_KEY, DEFAULT_VERSION_KEY)):
         raise HTTPException(status_code=400, detail="The OAuth2 default access is changed under Users, not in Settings.")
     allowed = {k: v for k, v in body.items() if k in EDITABLE_SETTING_KEYS}
     if "disabled_features" in allowed:
-        # An old name is saved as the features it stands for
         features = normalize_disabled_features(str(allowed["disabled_features"] or ""))
         if any(f not in FEATURE_IDS for f in features):
             raise HTTPException(status_code=400, detail="disabled_features accepts only known feature names.")
@@ -968,8 +864,6 @@ def update_settings(body: Dict[str, Any], request: Request = None, response: Res
     _normalize_bounce_codes(allowed)
     _validate_agent_access(allowed)
     _validate_session_limits(allowed)
-    # For sensitive keys, mask placeholder means "do not change" - omit from payload
-    # Empty string means "clear this value" and should be kept
     for sk in _SENSITIVE_SETTING_KEYS:
         if sk in allowed and isinstance(allowed[sk], str) and allowed[sk] == MASK_PLACEHOLDER:
             del allowed[sk]
@@ -977,15 +871,11 @@ def update_settings(body: Dict[str, Any], request: Request = None, response: Res
         reload_settings(db)
         return {"settings_edit_via_ui_enabled": True, "settings_migrated": True, "configuration": _effective_config_for_editable(settings)}
 
-    # ── Basic Auth lockout prevention ──────────────────────────────────
-    # When basic_auth_enabled is being turned ON, validate credentials
-    # to ensure the user won't be locked out.
     _enabling_basic_auth = (
         allowed.get("basic_auth_enabled") is True
         and not settings.is_basic_auth_enabled
     )
     if _enabling_basic_auth:
-        # Determine effective password: explicit value in payload, or current setting
         _eff_password = allowed.get("auth_password", settings.auth_password or "")
         _eff_username = allowed.get("auth_username", settings.auth_username or "admin")
         if not _eff_password or not str(_eff_password).strip():
@@ -993,7 +883,6 @@ def update_settings(body: Dict[str, Any], request: Request = None, response: Res
                 status_code=400,
                 detail="Set a password before enabling Basic Auth."
             )
-        # Require verification credentials from the user
         _verify_user = body.get("verify_username", "")
         _verify_pass = body.get("verify_password", "")
         if not _verify_user or not _verify_pass:
@@ -1016,7 +905,6 @@ def update_settings(body: Dict[str, Any], request: Request = None, response: Res
             )
         logger.info("Basic Auth credential verification passed - enabling authentication")
 
-    # Prevent clearing the password while Basic Auth is (or will be) enabled
     _basic_auth_active = (
         allowed.get("basic_auth_enabled", settings.is_basic_auth_enabled) is True
     )
@@ -1029,21 +917,18 @@ def update_settings(body: Dict[str, Any], request: Request = None, response: Res
             status_code=400,
             detail="Cannot clear the password while Basic Auth is enabled. Disable Basic Auth first, or set a new password."
         )
-    # ──────────────────────────────────────────────────────────────────
 
     try:
-        # Validate by building a Settings copy with current + updates
         current = settings.model_dump()
         for k, v in allowed.items():
             current[k] = v
-        # Coerce None to valid types (UI sends null for empty; Settings expects str/int/bool)
         annotations = _get_field_annotations()
         for k, v in list(current.items()):
             if v is not None or k not in annotations:
                 continue
             ann = annotations[k]
             if getattr(ann, "__args__", None) and type(None) in getattr(ann, "__args__", ()):
-                continue  # Optional: None is valid
+                continue
             effective = getattr(ann, "__args__", None)
             if effective:
                 effective = [a for a in ann.__args__ if a is not type(None)]
@@ -1072,9 +957,6 @@ def update_settings(body: Dict[str, Any], request: Request = None, response: Res
     prev_credentials = {name: check["fingerprint"]() for name, check in _CREDENTIAL_CHECKS.items()}
     operator_session = get_session_from_request(request) if request is not None else None
     from ..services.feature_data import spam_list_kept
-    # One save at a time from the state it starts from to its transition token:
-    # two saves at once must not each take the list for kept and one leave its
-    # token over the other's
     from ..services.figures import SamplesBusy, feature_switch_guard
     try:
         guard = feature_switch_guard(needed="disabled_features" in allowed)
@@ -1082,21 +964,15 @@ def update_settings(body: Dict[str, Any], request: Request = None, response: Res
     except SamplesBusy:
         raise HTTPException(status_code=503, detail="The settings could not be saved right now. Nothing was changed. Try again in a moment.")
     try:
-        # No reload elsewhere between reading the settings before this save
-        # and putting the saved ones in force (config.settings_reload_lock)
         with _LIST_TRANSITION_LOCK, settings_reload_lock:
-            # Again against the settings as saved now, read here and not from the
-            # shared settings, which a request elsewhere may reload with older values
             before = build_settings(db)
             _validate_agent_access(allowed, before)
-            # The app would not start again with the settings this save puts in force
             locked = get_env_locked_keys()
             problem = sign_in_problem(before.model_copy(
                 update={k: v for k, v in allowed.items() if k not in locked}))
             if problem:
                 raise HTTPException(status_code=400, detail=problem)
             if _changes_admin_sign_in(allowed, before):
-                # Under the users' lock until the save below commits (services/users_store.py)
                 try:
                     users_store.check_sign_in_settings(db, before, allowed)
                 except users_store.UserError as e:
@@ -1105,45 +981,31 @@ def update_settings(body: Dict[str, Any], request: Request = None, response: Res
             list_was_kept, switches_before = spam_list_kept(), _spam_list_switches()
             save_config_overrides_to_db(db, allowed)
             saved = reload_settings(db)
-            # A feature with a trend switched by this save: samples read before it are dropped
             note_trend_switches()
             rspamd_off_transition = _record_list_transition(
                 db, list_was_kept, spam_list_kept(), switched=_spam_list_switches() != switches_before)
     finally:
         guard.__exit__(None, None, None)
-    # The OAuth2 client takes the new provider before the new sessions begin: a
-    # login let in after the revocation below must not finish with the old one
     oauth2_client.reload_config()
     if _session_bound_values(saved) != prev_sign_in:
-        # Keep the operator who saved signed in: the same session under a new key,
-        # in the same step as the revocation (session.py). Only when this save's
-        # revocation is the one change since the request was let in, and only while
-        # the session is still valid; a later revocation ends it too.
         admitted = getattr(getattr(request, "state", None), "auth_generation", None)
         keep = operator_session if (operator_session and saved.is_authentication_enabled
                                     and response is not None and isinstance(admitted, int)) else None
         kept = revoke_all_sessions_keeping(keep, admitted)[1]
-        # Connected agents end with the sessions, for good (agent_access/store.py).
-        # Should this fail, every agent request repeats the check before it runs.
         try:
             from ..agent_access.store import check_sign_in_unchanged
             check_sign_in_unchanged(db)
         except Exception as e:
             logger.error(f"Could not disconnect agents after the sign-in change: {e}")
-        # The cookie only for a kept session still alive (another change may have ended it meanwhile)
         if kept and get_session(kept) is not None:
             set_session_cookie(response, kept, request)
         elif keep is not None:
             logger.info("The operator who saved signs in again")
-    # A feature switched off here should drop its data now, not at the next restart;
-    # the sweep then takes Security's temporary bans out, or loads the Suppressions feature's blocks back
     feature_data_errors = cleanup_disabled_feature_data(db)
     run_feature_data_sweep_soon()
     mailcow_api.reload_config()
     reschedule_interval_jobs()
 
-    # A transports/relayhosts source that was just switched on should populate
-    # the monitored list now, not at the next 6-hour sync
     new_sync_sources = (settings.blacklist_source_transports, settings.blacklist_source_relayhosts)
     if (settings.is_feature_enabled('blacklist')
             and any(new and not old for old, new in zip(prev_sync_sources, new_sync_sources))):
@@ -1159,14 +1021,11 @@ def update_settings(body: Dict[str, Any], request: Request = None, response: Res
         except Exception as e:
             logger.warning(f"Could not trigger immediate transports sync: {e}")
 
-    # Invalidate MaxMind license cache when credentials change
     if 'maxmind_license_key' in allowed or 'maxmind_account_id' in allowed:
         clear_maxmind_validation_status(db)
     
-    # The page checks a new or changed Read-Write key or Rspamd password right after saving
     changed = {f"{name}_changed": check["configured"]() and prev_credentials[name] != check["fingerprint"]()
                for name, check in _CREDENTIAL_CHECKS.items()}
-    # A failed deletion is tried again by the sweep the save just started
     errors = {"feature_data_errors": feature_data_errors} if feature_data_errors else {}
     return {"settings_edit_via_ui_enabled": True, "settings_migrated": True, "configuration": _effective_config_for_editable(settings),
             "rspamd_off_transition": rspamd_off_transition, **errors, **changed}
@@ -1176,17 +1035,10 @@ _LIST_TRANSITION_LOCK = threading.Lock()
 
 
 def _spam_list_switches():
-    """The two switches the list is kept by: Suppressions and Sync with Rspamd."""
     return settings.is_feature_enabled('suppressions'), bool(settings.suppression_rspamd_sync)
 
 
 def _record_list_transition(db: Session, was_kept: bool, now_kept: bool, switched: bool = False) -> Optional[str]:
-    """This save turned Suppressions or Sync with Rspamd off (the list stopped
-    being kept, or Suppressions went off while the sync already was): a new
-    token names this save, and a Remove of the app's Rspamd blocks asked with
-    it is refused once a later save turned the list on or off again. A save
-    that changed neither switch gets none: the Remove it asked belongs to
-    another save. Returns the token, or None."""
     import secrets
     from ..models import SystemSetting
     from ..services.feature_data import _set_key
@@ -1203,7 +1055,6 @@ def _record_list_transition(db: Session, was_kept: bool, now_kept: bool, switche
     return token
 
 
-# Feature -> tables, shared with the cleanup of features that are off
 from ..services.feature_data import FEATURE_TABLES as _FEATURE_TABLES  # noqa: E402
 
 
@@ -1220,7 +1071,6 @@ def purge_feature_data(body: Dict[str, Any], db: Session = Depends(get_db)):
         raise HTTPException(status_code=403, detail="Settings editing is off. Enable SETTINGS_EDIT_VIA_UI_ENABLED in the environment.")
 
     feature = body.get("feature", "").strip().lower()
-    # The old name of the suppression list's switch; the maps have no data here
     if feature == 'spam-filter':
         feature = 'suppressions'
     if feature not in _FEATURE_TABLES:
@@ -1242,10 +1092,6 @@ def purge_feature_data(body: Dict[str, Any], db: Session = Depends(get_db)):
     def still_off():
         return not settings.is_feature_enabled(feature)
 
-    # The map lock is held until the list is gone: a sync waiting for it would
-    # otherwise write the list back between the removal and the delete. With
-    # "remove", the list goes only after mailcow confirmed the blocks are gone.
-    # Turned on again meanwhile, nothing is removed or deleted.
     try:
         with map_write_lock():
             if not still_off():
@@ -1259,7 +1105,6 @@ def purge_feature_data(body: Dict[str, Any], db: Session = Depends(get_db)):
 
 
 def _purge_tables(feature: str, db: Session, still_off=None):
-    """Empty the tables and keys of a feature that is off (services/feature_data.py)."""
     from ..services.feature_data import purge_feature
     try:
         deleted = purge_feature(db, feature, still_off=still_off)
@@ -1282,9 +1127,6 @@ def import_settings_from_env(db: Session = Depends(get_db)):
     """
     if not settings.edit_settings_via_ui_enabled:
         raise HTTPException(status_code=403, detail="Settings editing is off. Set SETTINGS_EDIT_VIA_UI_ENABLED=true in the environment to enable it.")
-    # The effective config (defaults + ENV + DB) read, saved and reloaded with no
-    # reload or save elsewhere in between: values read before another save and
-    # written after it would put its old password back
     with _LIST_TRANSITION_LOCK, settings_reload_lock:
         current = build_settings(db)
         overrides = {key: getattr(current, key) for key in EDITABLE_SETTING_KEYS if hasattr(current, key)}
@@ -1302,9 +1144,7 @@ def import_settings_from_env(db: Session = Depends(get_db)):
     }
 
 
-# NOTE: these are plain `def` on purpose - FastAPI runs sync endpoints in a
-# threadpool, so the blocking smtplib/imaplib connection tests (10-30s timeouts)
-# don't freeze the shared event loop.
+# async def here would block the event loop for the whole 10-30 s connection test.
 @router.post("/settings/test/smtp", responses=documented(m.ConnectionTest, description="The test's outcome and its steps; a failed test is still 200"))
 def test_smtp():
     """Test SMTP connection with detailed logging"""
@@ -1329,12 +1169,10 @@ def get_health_detailed(db: Session = Depends(get_db)):
     """
     from datetime import timedelta
     try:
-        # Check database response time
         start_time = datetime.now(timezone.utc)
         db.execute(text("SELECT 1"))
         db_response_time = (datetime.now(timezone.utc) - start_time).total_seconds() * 1000
         
-        # Get recent activity (last 5 minutes)
         five_mins_ago = datetime.now(timezone.utc) - timedelta(minutes=5)
         
         recent_postfix = db.query(func.count(PostfixLog.id)).filter(
@@ -1374,9 +1212,6 @@ def get_health_detailed(db: Session = Depends(get_db)):
         }
 
 async def validate_maxmind_license() -> Dict[str, Any]:
-    """Validate MaxMind license key against MaxMind's API.
-    Called on-demand only (user clicks 'Validate License' or before GeoIP download).
-    """
     license_key = settings.maxmind_license_key
     
     if not license_key:
@@ -1405,14 +1240,12 @@ async def validate_maxmind_license() -> Dict[str, Any]:
 
 
 def _persist_maxmind_validation_worker(result: Dict[str, Any]) -> None:
-    """Create, use, and close the persistence session in the same worker."""
     with get_db_context() as db:
         save_maxmind_validation_status(db, result)
 
 
 
 def _precise_utc(value):
-    """An ISO UTC time with microseconds, or None."""
     if not value:
         return None
     if value.tzinfo is None:
@@ -1434,7 +1267,6 @@ def get_geoip_detailed_status():
         'ASN': {'available': False, 'age_days': -1, 'size_mb': 0, 'last_modified': None}
     }
     
-    # Get the update_geoip job status
     jobs_status = get_job_status()
     geoip_job = jobs_status.get('update_geoip', {})
     
@@ -1444,7 +1276,6 @@ def get_geoip_detailed_status():
         "databases": geoip_status,
         "job_status": geoip_job.get('status', 'idle'),
         "job_error": geoip_job.get('error'),
-        # To the microsecond: Setup and Repair tell their own run from an earlier one by it
         "job_last_run": _precise_utc(geoip_job.get('last_run')),
     }
 
@@ -1461,7 +1292,6 @@ def trigger_geoip_download(background_tasks: BackgroundTasks):
     
     logger.info("Manual GeoIP download triggered from setup modal")
     from ..scheduler import update_geoip_database
-    # Async background tasks run on the application loop, like the scheduled job
     background_tasks.add_task(update_geoip_database)
     return {"status": "started", "message": "GeoIP download started in background"}
 
@@ -1478,9 +1308,6 @@ async def validate_maxmind_license_endpoint():
     return result
 
 
-# Credentials checked against the server they belong to, changing nothing there.
-# The fingerprint covers the address and the secret, so a stored result is
-# dropped as soon as either changes, through the UI or the environment.
 _CREDENTIAL_CHECKS = {
     "mailcow_rw_key": {
         "configured": lambda: mailcow_api.has_rw_key,
@@ -1496,7 +1323,6 @@ _CREDENTIAL_CHECKS = {
 
 
 def _credential_status(db: Session, name: str) -> Optional[Dict[str, Any]]:
-    """Last check of a credential for its current address and secret; None if not checked yet."""
     check = _CREDENTIAL_CHECKS[name]
     if not check["configured"]():
         return {"configured": False, "valid": False, "error": None}
@@ -1514,15 +1340,10 @@ async def _validate_credential(name: str) -> Dict[str, Any]:
     result = await check["check"]()
     current = await asyncio.to_thread(_persist_if_current, name, result, fingerprint)
     if not current:
-        # The key or password changed while this check ran: its answer is about
-        # the old one, and is not kept over the check of the new one
         return {**result, "stale": True}
     return result
 
 
-# A check's result is saved only while its key or password is still the one
-# saved; the comparison and the save are one step, so a later check of a new
-# key is never written over
 _CREDENTIAL_SAVE_LOCK = threading.Lock()
 
 
@@ -1563,7 +1384,6 @@ def validate_geoip_db():
     """
     from ..services.geoip_service import validate_geoip_database, reload_geoip_readers, get_geoip_db_valid
     
-    # Ensure readers are loaded
     geoip_status = get_geoip_status()
     if not geoip_status.get('City', {}).get('available'):
         return {
@@ -1573,9 +1393,7 @@ def validate_geoip_db():
             "error": "The City database is missing. Download the GeoIP databases again."
         }
     
-    # Reload readers to pick up any new files
     reload_geoip_readers()
-    # The test lookups once more, for the result of each database
     checked = validate_geoip_database()
 
     return {
@@ -1586,15 +1404,7 @@ def validate_geoip_db():
     }
 
 
-# =============================================================================
-# MANUAL JOB TRIGGER
-# =============================================================================
-
 def _restore_job_status(status_key: str, previous: dict, mark: dict) -> None:
-    """A job's status back to what it was before a manual run that did nothing,
-    only while it is still that run's mark (the very object it wrote): a run of
-    the job that wrote its own status since (a full check that started and
-    ended meanwhile) keeps it."""
     statuses = get_job_status()
     if statuses.get(status_key) is not mark:
         return
@@ -1629,7 +1439,6 @@ async def trigger_job(job_name: str, background_tasks: BackgroundTasks):
     - fetch_raw_logs: Fetch raw logs from mailcow services
     - cleanup_raw_logs: Remove raw logs older than retention period
     """
-    # Import job functions here to avoid circular imports
     from ..scheduler import (
         fetch_all_logs,
         complete_incomplete_correlations,
@@ -1664,9 +1473,6 @@ async def trigger_job(job_name: str, background_tasks: BackgroundTasks):
     )
     from ..raw_logs_worker import fetch_raw_service_logs, cleanup_raw_service_logs
     
-    # Map job names to (status_key, function, self_managing_status)
-    # self_managing_status=True means the function updates its own status tracking
-    # (raw log jobs use their own raw_logs_job_status dict)
     job_mapping = {
         'fetch_logs': ('fetch_logs', fetch_all_logs, False),
         'complete_correlations': ('complete_correlations', complete_incomplete_correlations, False),
@@ -1705,14 +1511,12 @@ async def trigger_job(job_name: str, background_tasks: BackgroundTasks):
     if job_name not in job_mapping:
         raise HTTPException(status_code=404, detail=f"Unknown job: {job_name}")
 
-    # A job that cannot run would return at once and be marked a success
     reason = _job_cannot_run(job_name)
     if reason:
         raise HTTPException(status_code=409, detail=f"The job cannot run. {reason}.")
 
     status_key, job_func, self_managing = job_mapping[job_name]
     
-    # Check if job is already running - check both main and raw logs status
     if self_managing:
         from ..raw_logs_worker import get_raw_logs_job_status
         current_status = get_raw_logs_job_status().get(status_key, {})
@@ -1720,38 +1524,24 @@ async def trigger_job(job_name: str, background_tasks: BackgroundTasks):
         current_status = get_job_status().get(status_key, {})
     if current_status.get('status') == 'running':
         raise HTTPException(status_code=409, detail=f"Job {job_name} is already running")
-    # A blocklist check started elsewhere (an entity card's Check now) holds the
-    # job's lock without its status: refused here, before the job is marked running
     if job_name == 'blacklist_check':
         from ..scheduler import blacklist_check_admits
         if not blacklist_check_admits():
             raise HTTPException(status_code=409, detail="A blocklist check is already running. Try again when it is done.")
     previous = dict(current_status)
 
-    # Mark job as running immediately (only for non-self-managing jobs)
-    # This run's mark, the entry it wrote (not read back: a full check on the
-    # event loop may write its own in between): a status written since by
-    # another run is not this run's to undo
     mark = None
     if not self_managing:
         mark = update_job_status(status_key, 'running')
 
-    # Run job in background. An async wrapper runs on the application loop,
-    # the same loop APScheduler uses, so the job shares its asyncio locks and
-    # HTTP clients with the scheduled runs (a private loop broke the locks).
     async def run_job_wrapper():
         try:
             if asyncio.iscoroutinefunction(job_func):
                 result = await job_func()
             else:
                 result = await run_in_threadpool(job_func)
-            # Self-managing jobs update their own status internally, and a run
-            # that skipped leaves it to the run that holds the job
             if not self_managing and result not in (JOB_SKIPPED, JOB_STATUS_SET):
                 update_job_status(status_key, 'success')
-            # ... unless nothing that sets it holds the job: a blocklist check of
-            # one address (taken since the check above) leaves the status as it
-            # was, while the status is still this run's mark
             elif not self_managing and result == JOB_SKIPPED and job_name == 'blacklist_check':
                 _restore_job_status(status_key, previous, mark)
         except Exception as e:

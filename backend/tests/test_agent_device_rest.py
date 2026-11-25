@@ -1,12 +1,3 @@
-"""Agents that run commands (the skill): connect with a code, then call /api with a bearer token.
-
-The agent asks for a code (RFC 8628) without a session; a signed-in person
-opens the link on any device, compares the code and approves; the agent
-collects its tokens once and calls /api under the same policy as MCP calls.
-A bearer on /api is always an agent's request: a bad one never falls back to
-a cookie or to sign-in being off. Tokens work only where they were issued
-(the REST API or the MCP server).
-"""
 import secrets
 from datetime import datetime, timedelta
 
@@ -15,7 +6,7 @@ import pytest
 from app.agent_access import oauth, scopes, store
 from app.config import settings
 
-from test_agent_access import (  # noqa: F401  (live_agents is a fixture)
+from test_agent_access import (  # noqa: F401
     APP_URL, BASIC, PASSWORD, _client, _connect, _mcp, _request_id, _signed_in, live_agents,
 )
 
@@ -71,8 +62,6 @@ def _rewind(field, **values):
         db.query(AgentDeviceRequest).update(values, synchronize_session=False)
 
 
-# ── Asking for a code ──────────────────────────────────────────────────────
-
 def test_asking_for_a_code_needs_no_session_and_gives_a_short_code(live_agents):
     d = _device()
     assert d["verification_uri"] == APP_URL + "/oauth/device"
@@ -81,7 +70,6 @@ def test_asking_for_a_code_needs_no_session_and_gives_a_short_code(live_agents):
     code = d["user_code"]
     assert len(code) == 9 and code[4] == "-" and all(c in store.USER_CODE_ALPHABET for c in code.replace("-", ""))
     assert d["device_code"].startswith("mlvd_")
-    # The script's own name, shown as its word; anything but plain text is dropped
     from app.database import get_db_context
     from app.models import AgentDeviceRequest
     _device(label="<b>Claude</b>")
@@ -104,8 +92,6 @@ def test_asking_for_codes_is_limited_per_address(live_agents):
     assert _ask().status_code == 429
 
 
-# ── The approval link ──────────────────────────────────────────────────────
-
 def test_the_link_sends_a_signed_out_browser_to_sign_in_and_back(live_agents):
     d = _device()
     r = _client().get("/oauth/device", params={"user_code": d["user_code"]}, follow_redirects=False)
@@ -122,7 +108,6 @@ def test_the_approval_page_shows_the_code_and_the_agents_own_name(live_agents):
     assert page["client"]["user_code"] == d["user_code"]
     assert page["client"]["kind"] == "device" and page["client"]["declared_name"] == "Claude Code on DESK"
     assert page["client"]["redirect_uri"] is None
-    # The request belongs to the session that opened it
     assert _signed_in().get(f"/api/agents/consent/{request_id}").status_code == 404
 
 
@@ -130,15 +115,13 @@ def test_a_wrong_code_is_refused_and_guesses_are_limited(live_agents):
     browser = _signed_in()
     r = browser.get("/oauth/device", params={"user_code": "BBBB-BBBB"}, follow_redirects=False)
     assert r.status_code == 404 and "not valid or has expired" in r.text
-    assert browser.get("/oauth/device").status_code == 200   # the field to type it
+    assert browser.get("/oauth/device").status_code == 200
     for _ in range(oauth.code_lookups.limit - 1):
         browser.get("/oauth/device", params={"user_code": "CCCC-CCCC"}, follow_redirects=False)
     d = _device()
     r = browser.get("/oauth/device", params={"user_code": d["user_code"]}, follow_redirects=False)
     assert r.status_code == 429
 
-
-# ── Collecting the tokens ──────────────────────────────────────────────────
 
 def test_the_agent_waits_then_collects_its_tokens_once(live_agents):
     agent = _client()
@@ -167,7 +150,6 @@ def test_a_denied_request_tells_the_agent_and_a_second_answer_changes_nothing(li
     d = _device(agent)
     browser = _answer(d["user_code"], allow=False)
     assert _poll(agent, d["device_code"]).json()["error"] == "access_denied"
-    # The code no longer opens anything
     r = browser.get("/oauth/device", params={"user_code": d["user_code"]}, follow_redirects=False)
     assert r.status_code == 404
 
@@ -208,11 +190,8 @@ def test_polling_does_not_use_the_token_budget(live_agents):
     d = _device(agent)
     for _ in range(oauth.token_requests.limit + 5):
         assert _poll(agent, d["device_code"]).status_code == 400
-    # Refresh and code exchanges of other agents behind this address still work
     assert oauth.token_requests.full("testclient") is False
 
-
-# ── Calling the API ────────────────────────────────────────────────────────
 
 def test_a_read_in_an_allowed_area_runs_and_is_logged(live_agents):
     agent, browser, tokens = _connect_with_code(views=("security",))
@@ -225,13 +204,10 @@ def test_a_read_in_an_allowed_area_runs_and_is_logged(live_agents):
 def test_a_view_grant_does_not_allow_actions(live_agents):
     agent, _, tokens = _connect_with_code(views=("security", "domains"))
     token = tokens["access_token"]
-    # A write without Take action
     r = _api(agent, token, "POST", "/api/security-alerts/acknowledge-all")
     assert r.status_code == 403 and r.json()["error"] == "forbidden"
-    # A DNS check starts probes, so it is an action, not part of View
     r = _api(agent, token, "POST", "/api/domains/example.com/check-dns")
     assert r.status_code == 403 and "Take action" in r.json()["message"]
-    # An area that was not allowed at all
     r = _api(agent, token, "GET", "/api/messages")
     assert r.status_code == 403
 
@@ -343,7 +319,6 @@ def test_disconnect_all_and_collecting_a_code_at_once_leave_nothing_connected(li
         [t.start() for t in threads]
         [t.join() for t in threads]
         assert not errors, errors
-        # Either the code was collected first and then disconnected, or it found its request ended
         with get_db_context() as db:
             assert db.query(AgentGrant).filter(AgentGrant.revoked_at.is_(None)).count() == 0
 
@@ -376,7 +351,6 @@ def test_a_bearer_is_refused_while_agent_access_is_not_live(live_agents, monkeyp
     agent, _, tokens = _connect_with_code()
     monkeypatch.setattr(settings._inner, "agent_access_enabled", False)
     assert _api(agent, tokens["access_token"], "GET", "/api/security-alerts").status_code == 401
-    # Sign-in off makes the app open to everyone, but never to a bearer
     monkeypatch.setattr(settings._inner, "basic_auth_enabled", False)
     assert _api(agent, tokens["access_token"], "GET", "/api/security-alerts").status_code == 401
 
@@ -386,7 +360,6 @@ def test_tokens_work_only_where_they_were_issued(live_agents):
     _, mcp_client_id, mcp_tokens = _connect()
     assert _mcp(_client(), rest_tokens["access_token"], "ping").status_code == 401
     assert _api(agent, mcp_tokens["access_token"], "GET", "/api/security-alerts").status_code == 401
-    # Also after a refresh, which never moves a grant to the other place
     r = agent.post("/oauth/token", data={"grant_type": "refresh_token", "client_id": CLIENT,
                                          "refresh_token": rest_tokens["refresh_token"], "resource": APP_URL + "/mcp"})
     assert r.json()["error"] == "invalid_target"
@@ -421,7 +394,6 @@ def test_a_person_changes_what_a_connected_agent_may_do(live_agents):
     token = tokens["access_token"]
     agent_id = browser.get("/api/agents").json()["agents"][0]["id"]
     assert _api(agent, token, "GET", "/api/messages").status_code == 403
-    # Take action away from Security, add View of Messages: applies to the next request
     r = browser.put(f"/api/agents/{agent_id}", json={"views": ["security", "messages"], "acts": []})
     assert r.status_code == 200, r.text
     assert _api(agent, token, "GET", "/api/messages").status_code == 200
@@ -459,7 +431,6 @@ def test_a_call_waiting_while_its_access_is_narrowed_runs_under_the_new_access(l
     finally:
         db.close()
     agent_id = browser.get("/api/agents").json()["agents"][0]["id"]
-    # Take action is taken away while the call waits for its body or a slot
     assert browser.put(f"/api/agents/{agent_id}", json={"views": ["security"], "acts": []}).status_code == 200
 
     async def run():
@@ -474,9 +445,7 @@ def test_an_edit_made_on_an_older_copy_is_refused(live_agents):
     _, browser, _ = _connect_with_code(views=("security",), acts=("security",))
     row = browser.get("/api/agents").json()["agents"][0]
     old = row["version"]
-    # Another window takes Take action away
     assert browser.put(f"/api/agents/{row['id']}", json={"views": ["security"], "version": old}).status_code == 200
-    # This window still shows the old access and changes something else
     r = browser.put(f"/api/agents/{row['id']}", json={"views": ["security", "messages"], "acts": ["security"],
                                                       "version": old})
     assert r.status_code == 409 and "while you were editing" in r.json()["detail"]
@@ -496,7 +465,6 @@ def test_a_longer_end_keeps_catching_a_reused_refresh_token(live_agents):
         end = db.query(AgentGrant).filter(AgentGrant.id == agent_id).one().expires_at
         assert {t.expires_at for t in db.query(AgentToken).filter(AgentToken.grant_id == agent_id,
                                                                   AgentToken.kind == "refresh")} == {end}
-    # The spent token, presented again, still ends the connection
     r = agent.post("/oauth/token", data={"grant_type": "refresh_token", "client_id": CLIENT, "refresh_token": first})
     assert r.json()["error"] == "invalid_grant"
     assert browser.get("/api/agents").json()["agents"][0]["end_reason"] == "refresh_reused"
@@ -529,8 +497,6 @@ def test_revoking_ends_the_connection_and_settings_say_how_it_connected(live_age
     assert _api(agent, tokens["access_token"], "GET", "/api/security-alerts").status_code == 401
     assert browser.get("/api/agents").json()["agents"][0]["end_reason"] == "revoked_by_agent"
 
-
-# ── The skill ──────────────────────────────────────────────────────────────
 
 def test_the_skill_is_served_with_this_apps_address(live_agents):
     client = _client()

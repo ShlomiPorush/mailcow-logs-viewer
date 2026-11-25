@@ -1,4 +1,3 @@
-"""Expiry uses a worker and a bulk update without changing status semantics."""
 import asyncio
 import threading
 import uuid
@@ -12,6 +11,7 @@ from sqlalchemy import create_engine, event, text
 from sqlalchemy.orm import Session
 
 from app import scheduler
+from app.services import job_status as job_status_store
 from app.config import settings
 from app.database import Base, engine
 from app.models import SpamSuppression
@@ -42,7 +42,8 @@ def test_expiry_leaves_event_loop_responsive(monkeypatch):
             threads.append(threading.get_ident())
             finished.set()
     monkeypatch.setattr(scheduler, "get_db_context", session)
-    monkeypatch.setattr(scheduler, "job_status", {})
+    monkeypatch.setattr(job_status_store, "job_status", {})
+    monkeypatch.setattr(scheduler, "job_status", job_status_store.job_status)
     async def run():
         loop_thread = threading.get_ident()
         task = asyncio.create_task(scheduler.expire_suppressions_job())
@@ -64,7 +65,8 @@ def test_expiry_reports_database_failure(monkeypatch):
         raise RuntimeError("fixture database failure")
         yield
     monkeypatch.setattr(scheduler, "get_db_context", session)
-    monkeypatch.setattr(scheduler, "job_status", {})
+    monkeypatch.setattr(job_status_store, "job_status", {})
+    monkeypatch.setattr(scheduler, "job_status", job_status_store.job_status)
     asyncio.run(scheduler.expire_suppressions_job())
     assert scheduler.job_status["expire_suppressions"]["status"] == "failed"
     assert scheduler.job_status["expire_suppressions"]["error"] == "fixture database failure"
@@ -92,7 +94,8 @@ def test_expiry_boundaries_and_bulk_query(monkeypatch, extra_rows):
             yield db
     monkeypatch.setattr(scheduler, "datetime", Clock)
     monkeypatch.setattr(scheduler, "get_db_context", session)
-    monkeypatch.setattr(scheduler, "job_status", {})
+    monkeypatch.setattr(job_status_store, "job_status", {})
+    monkeypatch.setattr(scheduler, "job_status", job_status_store.job_status)
     statements = []
     def capture(conn, cursor, statement, parameters, context, executemany):
         statements.append(statement)
@@ -124,11 +127,9 @@ def test_expiry_boundaries_and_bulk_query(monkeypatch, extra_rows):
                 active, synced, stamp = expected[row.email]
                 assert (row.active, row.synced_to_rspamd, row.expires_at) == (active, synced, stamp)
                 assert row.notes == "Preserve this text"
-        # The row lock first (services/suppression_rows_lock), then one bulk update
         assert len(statements) == 2
         assert "pg_advisory_xact_lock" in statements[0]
         assert statements[1].lstrip().upper().startswith("UPDATE ")
-        # Repeated expiry is harmless and still succeeds.
         asyncio.run(scheduler.expire_suppressions_job())
         assert scheduler.job_status["expire_suppressions"]["status"] == "success"
     finally:
@@ -145,7 +146,8 @@ def test_disabled_expiry_does_not_access_database(monkeypatch, feature, enabled)
     monkeypatch.setattr(settings._inner, "suppression_enabled", enabled)
     session = Mock(side_effect=AssertionError("disabled job accessed database"))
     monkeypatch.setattr(scheduler, "get_db_context", session)
-    monkeypatch.setattr(scheduler, "job_status", {})
+    monkeypatch.setattr(job_status_store, "job_status", {})
+    monkeypatch.setattr(scheduler, "job_status", job_status_store.job_status)
     asyncio.run(scheduler.expire_suppressions_job())
     session.assert_not_called()
     assert scheduler.job_status == {}

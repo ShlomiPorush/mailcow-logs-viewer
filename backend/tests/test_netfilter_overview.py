@@ -1,7 +1,3 @@
-"""Security page: attempts grouped by source address, and Fail2ban Allow.
-
-An attempt is a line where netfilter matched a rule; the "N more attempts"
-line that follows it must not count again."""
 import uuid
 from datetime import datetime, timedelta
 
@@ -83,7 +79,6 @@ def test_attempts_are_grouped_by_address(client):
     assert by_ip[IP_A]['usernames'] == ['admin@example.com']
     assert by_ip[IP_A]['last_action'] is None
 
-    # Older than 24 hours does not count; the ban is the last action
     assert by_ip[IP_B]['attempts'] == 1
     assert by_ip[IP_B]['failed_logins'] == 0
     assert by_ip[IP_B]['services'] == ['SMTP probe']
@@ -132,7 +127,6 @@ def test_allow_adds_to_the_whitelist_and_keeps_the_rest(client, monkeypatch):
 
 
 def test_attempts_are_counted_by_network(client):
-    """The networks attempts come from: only matched-rule lines count, as on the overview."""
     asn, org = f'AS{uuid.uuid4().int % 10**9}', 'Example Hosting'
     line = lambda ip: f'{ip} matched rule id 3 (warning: unknown[{ip}]: SASL LOGIN authentication failed: x)'
     for ip in (IP_A, IP_A, IP_B):
@@ -142,13 +136,12 @@ def test_attempts_are_counted_by_network(client):
     rows = {r['asn']: r for r in client.get('/api/logs/netfilter/stats/by-network?days=7').json()['data']}
     assert rows[asn] == {'asn': asn, 'asn_org': org, 'attempts': 3, 'addresses': 2}
 
-    # The overview carries where each address is
     source = {s['ip']: s for s in client.get('/api/logs/netfilter/overview').json()['sources']}[IP_A]
     assert source['city'] == 'Exampleton' and source['asn_org'] == org
 
 
 def test_an_exact_ip_does_not_match_a_longer_one(client):
-    longer = IP_A + '0'  # 198.51.100.230 contains 198.51.100.23
+    longer = IP_A + '0'
     _add(IP_A, f'{IP_A} matched rule id 3 (x)', rule_id=3)
     _add(longer, f'{longer} matched rule id 3 (x)', rule_id=3)
     loose = {r['ip'] for r in client.get('/api/logs/netfilter', params={'ip': IP_A}).json()['data']}
@@ -173,7 +166,6 @@ def test_remove_takes_an_address_off_a_list_and_keeps_the_rest(client, monkeypat
     monkeypatch.setattr(mailcow_api, 'get_fail2ban', fake_get)
     monkeypatch.setattr(mailcow_api, 'edit_fail2ban', fake_edit)
 
-    # 203.0.113.9 and 203.0.113.9/32 are the same entry
     res = client.post('/api/fail2ban/remove', json={'ip': '203.0.113.9', 'list': 'blacklist'})
     assert res.json()['status'] == 'success'
     assert saved['blacklist'] == '203.0.113.10'
@@ -184,7 +176,6 @@ def test_remove_takes_an_address_off_a_list_and_keeps_the_rest(client, monkeypat
     res = client.post('/api/fail2ban/remove', json={'ip': '192.0.2.0/24', 'list': 'whitelist'})
     assert saved['whitelist'] == '192.0.2.1' and saved['blacklist'] == '203.0.113.9/32,203.0.113.10'
 
-    # Not on the list: nothing is written
     saved.clear()
     res = client.post('/api/fail2ban/remove', json={'ip': '198.51.100.99', 'list': 'blacklist'})
     assert 'not in' in res.json()['msg'] and saved == {}
@@ -211,7 +202,6 @@ def test_the_policy_keeps_the_lists_read_right_before_writing(client, monkeypatc
     policy = {'ban_time': 3600, 'max_ban_time': 604800, 'ban_time_increment': False, 'max_attempts': 5,
               'retry_window': 900, 'netban_ipv4': 24, 'netban_ipv6': 64}
 
-    # A rule added an address after the page loaded: it is still there after the save
     lists['blacklist'] = '203.0.113.9/32\n198.51.100.7/32'
     res = client.post('/api/fail2ban/policy', json=policy)
     assert res.json()['status'] == 'success'
@@ -227,13 +217,10 @@ def test_the_policy_keeps_the_lists_read_right_before_writing(client, monkeypatc
 
 
 async def _banned():
-    """mailcow's Fail2ban answer with 198.51.100.7 banned on its own."""
     return {'active_bans': [{'network': '198.51.100.7/32', 'ip': '198.51.100.7'}]}
 
 
 def test_unban_is_the_edit_mailcow_takes(client, monkeypatch):
-    """mailcow has no delete/fail2ban; an unban is edit/fail2ban with action unban
-    and the networks as items, which mailcow handles before touching any setting."""
     from app.mailcow_api import mailcow_api
     calls = []
 
@@ -260,7 +247,6 @@ def test_an_unban_mailcow_refuses_says_so(client, monkeypatch):
 
 
 def test_every_full_edit_keeps_the_external_firewall_switch(client, monkeypatch):
-    """mailcow turns manage_external off on an edit that leaves it out."""
     from app.mailcow_api import mailcow_api
     from app.services.protection_rules import fail2ban_attrs
     saved = []
@@ -283,6 +269,5 @@ def test_every_full_edit_keeps_the_external_firewall_switch(client, monkeypatch)
     client.post('/api/fail2ban/policy', json={'ban_time': 1800, 'max_ban_time': 86400, 'ban_time_increment': True,
                                               'max_attempts': 8, 'retry_window': 600, 'netban_ipv4': 32, 'netban_ipv6': 128})
     assert len(saved) == 4 and all(attrs['manage_external'] == '1' for attrs in saved)
-    # The protection rules' writes too
     assert fail2ban_attrs(current, [], [])['manage_external'] == '1'
     assert fail2ban_attrs({**current, 'manage_external': 0}, [], [])['manage_external'] == '0'

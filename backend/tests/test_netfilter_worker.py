@@ -1,4 +1,3 @@
-"""Netfilter network I/O stays async while database work runs in a worker."""
 import asyncio
 import threading
 from contextlib import contextmanager
@@ -101,7 +100,6 @@ def test_overlapping_batches_preserve_data_and_deduplication(monkeypatch):
     try:
         Base.metadata.create_all(isolated, tables=[NetfilterLog.__table__])
         asyncio.run(run())
-        # Also prove deduplication from persisted rows after an empty memory cache.
         scheduler.seen_netfilter.clear()
         asyncio.run(scheduler.fetch_and_store_netfilter())
         with session() as db:

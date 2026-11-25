@@ -1,4 +1,3 @@
-"""Reject oversized form fields before upload handlers process untrusted input."""
 from unittest.mock import Mock
 import threading
 import tempfile
@@ -49,8 +48,6 @@ def test_oversized_text_part_is_rejected_before_handler(client, path, filename):
 ])
 @pytest.mark.no_contract(reason="stubs the upload workers with a partial answer")
 def test_text_part_limit_does_not_reject_normal_file_uploads(client, path, filename):
-    # Files above the spool threshold remain supported; the field cap must not
-    # accidentally impose a 1 MiB limit on uploaded files.
     response = client.post(path, files={
         "file": (filename, b"email\n" + b"\n" * (1024 * 1024 + 1)),
     })

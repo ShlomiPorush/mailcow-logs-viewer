@@ -1,10 +1,3 @@
-"""The Security page's lists come from the server, with real counts.
-
-An address is banned or it is not: To review holds what a rule caught and what
-only failed to log in, Banned what a rule or Fail2ban banned. The counts cover
-every address (for the country, when one is chosen), not only a loaded page, and
-the pages follow a cursor so none repeats or skips an address.
-"""
 import uuid
 from datetime import datetime, timedelta
 
@@ -168,7 +161,6 @@ def test_a_search_keeps_the_addresses_that_contain_it_and_counts_only_those(clie
     _hit(IPS[5], 'banned')
     everything = _get(client, list='review')
     assert everything['counts'] == {'review': 5, 'banned': 1}
-    # 192.0.2.1 is in 192.0.2.10 to 192.0.2.14 and in 192.0.2.15
     page = _get(client, list='review', q='192.0.2.1')
     assert page['counts'] == {'review': 5, 'banned': 1}
     page = _get(client, list='review', q='2.12')
@@ -188,7 +180,7 @@ def test_the_pages_neither_repeat_nor_skip_an_address(client):
         after = page['next']
         if not after:
             break
-    assert seen == IPS[:9]  # newest first: IPS[0] was seen a minute ago
+    assert seen == IPS[:9]
 
 
 def test_an_address_that_leaves_the_list_does_not_shift_the_next_page(client, fail2ban):
@@ -196,7 +188,6 @@ def test_an_address_that_leaves_the_list_does_not_shift_the_next_page(client, fa
         _failed(ip, minutes_ago=n + 1)
     first = _get(client, list='review', limit=3)
     assert _ips(first) == IPS[:3]
-    # The first address is banned meanwhile: the next page still starts after the third
     fail2ban['answer']['active_bans'] = [{'ip': IPS[0], 'network': f'{IPS[0]}/32', 'banned_until': '1h'}]
     second = _get(client, list='review', limit=3, after=first['next'])
     assert _ips(second) == IPS[3:6]
@@ -256,7 +247,6 @@ def test_the_period_lists_every_address_that_tried_in_it(client, fail2ban):
     _failed(IPS[0])
     _failed(IPS[1], minutes_ago=3 * 24 * 60)
     with get_db_context() as db:
-        # A probe is an attempt, though not a failed login
         db.add(NetfilterLog(time=datetime.utcnow() - timedelta(hours=2), priority=MARKER, ip=IPS[2], rule_id=1,
                             action='warning', country_name=COUNTRY, country_code='TL',
                             message=f'{IPS[2]} matched rule id 1 (warning: non-SMTP command from unknown[{IPS[2]}])'))
@@ -282,7 +272,6 @@ def test_the_panels_count_the_rows_a_click_shows(client, fail2ban):
         db.commit()
     page = _get(client, list='review')
     country = next(c for c in page['countries'] if c['country_name'] == COUNTRY)
-    # The watched address has no log line; the rule's count is its attempts
     assert (country['addresses'], country['attempts'], country['review'], country['banned']) == (3, 5, 5, 0)
     assert page['counts']['review'] + page['counts']['banned'] == country['addresses']
     network = next(n for n in page['networks'] if n['asn_org'] == 'Test Network')
@@ -292,15 +281,12 @@ def test_the_panels_count_the_rows_a_click_shows(client, fail2ban):
 
 
 def test_a_network_ban_is_its_own_row_and_its_attackers_are_banned_through_it(client, fail2ban):
-    """mailcow's netban bans the whole network around an attacker (here a /20):
-    the row is named by that network, not by its first address."""
     attacker, other = IPS[0], IPS[1]
     _failed(attacker, times=3)
     _failed(other)
     fail2ban['answer']['active_bans'] = [
         {'ip': '192.0.0.0', 'network': '192.0.0.0/20', 'banned_until': '24m', 'queued_for_unban': 0},
     ]
-    # Every country: the network itself has none
     banned = _get(client, list='banned', country='')
     by_ip = {a['ip']: a for a in banned['items']}
     assert '192.0.0.0' not in by_ip
@@ -335,11 +321,9 @@ def test_unbanning_a_network_lifts_that_ban_and_not_a_wider_one():
     bans = [{'network': '198.51.100.0/24'}, {'network': '198.51.96.0/20'}, {'network': '198.51.100.7/32'}]
     assert _bans_covering('198.51.100.0/24', bans) == ['198.51.100.0/24']
     assert _bans_covering('198.51.96.0/20', bans) == ['198.51.96.0/20']
-    # A single address is lifted from every ban that holds it, as before
     assert _bans_covering('198.51.100.7', bans) == ['198.51.100.0/24', '198.51.96.0/20', '198.51.100.7/32']
 
 
 def test_a_network_whose_ban_ended_lifts_nothing_wider():
-    """The /24 row was shown, its ban ended meanwhile: Unban must not lift the /20 around it."""
     from app.routers.logs import _bans_covering
     assert _bans_covering('198.51.100.0/24', [{'network': '198.51.96.0/20'}]) == []

@@ -1,4 +1,3 @@
-"""Compatibility contracts for framework and validation dependency upgrades."""
 import base64
 import secrets
 from unittest.mock import Mock
@@ -26,7 +25,6 @@ def test_environment_still_overrides_database_settings(monkeypatch):
     assert effective.auth_password == env_password
     assert effective.is_basic_auth_enabled is True
     assert effective.app_title == "Test viewer"
-    # Revalidation is also used by the settings editing API.
     assert Settings.model_validate(effective.model_dump()).auth_password == env_password
 
 

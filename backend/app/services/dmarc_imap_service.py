@@ -1,7 +1,3 @@
-"""
-DMARC & TLS-RPT IMAP Service
-Automatically fetches and processes DMARC and TLS-RPT reports from email inbox
-"""
 import logging
 import imaplib
 import email
@@ -31,22 +27,11 @@ from ..services.db_values import is_row_error, strip_nul
 
 logger = logging.getLogger(__name__)
 
-# Anyone can mail the report address, and a message is read whole into memory,
-# with each attachment decoded, before any report limit applies. Larger
-# messages are not downloaded. Real report emails are far below 1 MB; this
-# still fits a report at the 10 MB compressed limit after base64 encoding.
 MAX_REPORT_EMAIL_BYTES = 20 * 1024 * 1024
 _MB = 1024 * 1024
 
 
 def _decode_subject(raw_subject: str) -> str:
-    """Decode an RFC 2047 encoded email subject to plain text.
-    
-    Handles encoded headers like:
-    - =?iso-2022-jp?B?...?=  (Japanese)
-    - =?utf-8?Q?...?=        (UTF-8 quoted-printable)
-    - Plain ASCII subjects    (returned as-is)
-    """
     if not raw_subject:
         return ''
     try:
@@ -62,29 +47,19 @@ def _decode_subject(raw_subject: str) -> str:
         return raw_subject
 
 
-# What one failure entry keeps of a header or an error text
 _FAILURE_TEXT_CHARS = 1000
 _DETAILS_NOT_STORED = "The details of this email could not be stored"
 
 
 def _plain_text(value, limit: int = _FAILURE_TEXT_CHARS) -> Optional[str]:
-    """A header or error text as plain text a JSON column can store.
-
-    The sender chooses the headers and file names of a report email. A header
-    with raw 8-bit bytes comes back as a Header object, a file name can
-    decode to NUL, and either one used to fail the commit that stores the
-    import's failure entries. None stays None."""
     if value is None:
         return None
-    # str() of a Header shows bytes it cannot decode as U+FFFD; encoding with
-    # 'replace' drops lone surrogates, which JSONB refuses like NUL
+    # Without it, a lone surrogate reaches JSONB, which refuses it.
     text = str(value).encode('utf-8', 'replace').decode('utf-8')
     return strip_nul(text)[:limit]
 
 
 def _is_value_error(error: Exception) -> bool:
-    """Whether a commit failed for the values it held: the database refused
-    one, or one could not be written as JSON."""
     return is_row_error(error) or isinstance(getattr(error, 'orig', None), (TypeError, ValueError))
 
 
@@ -94,7 +69,6 @@ def _record_counts(sync_record: DMARCSync, counts: Dict):
 
 
 def _header_text(msg, name: str) -> str:
-    """A header of the email as bounded plain text, the subject decoded."""
     value = msg.get(name)
     if value is None:
         return 'unknown'
@@ -103,10 +77,8 @@ def _header_text(msg, name: str) -> str:
 
 
 class DMARCImapService:
-    """Service to fetch DMARC reports from IMAP inbox"""
     
     def __init__(self):
-        # One snapshot for the whole run: a save during it cannot mix two accounts
         current = settings_snapshot()
         self.host = current.dmarc_imap_host
         self.port = current.dmarc_imap_port
@@ -119,12 +91,9 @@ class DMARCImapService:
         self.scan_all_unseen = current.dmarc_imap_scan_all_unseen
         self.batch_size = current.dmarc_imap_batch_size
         self.connection = None
-        # Whether the server can expunge one message (RFC 4315), from its
-        # capabilities after login
         self.uidplus = False
 
     def connect(self) -> bool:
-        """Connect to IMAP server"""
         try:
             if not self.host or not self.port:
                 raise ValueError(f"IMAP server configuration incomplete: host={self.host}, port={self.port}")
@@ -136,8 +105,6 @@ class DMARCImapService:
                 self.connection = imaplib.IMAP4(self.host, self.port, timeout=30)
 
             self.connection.login(self.user, self.password)
-            # imaplib keeps the capabilities from before login, and servers add
-            # some (such as UIDPLUS) only after it
             status, data = self.connection.capability()
             self.uidplus = status == 'OK' and bool(data) and b'UIDPLUS' in (data[0] or b'').upper().split()
             logger.info(f"Successfully connected to IMAP server {self.host}:{self.port}")
@@ -152,12 +119,10 @@ class DMARCImapService:
             error_msg = f"Failed to connect to IMAP server {self.host}:{self.port}: {hint or e}"
             logger.error(error_msg)
             if hint:
-                # The sync stores this message, so it has to name the setting to change
                 raise ConnectionError(error_msg) from e
             raise
     
     def disconnect(self):
-        """Disconnect from IMAP server"""
         if self.connection:
             try:
                 self.connection.logout()
@@ -166,8 +131,6 @@ class DMARCImapService:
                 logger.error(f"Error disconnecting from IMAP: {e}")
     
     def select_folder(self, folder: Optional[str] = None) -> bool:
-        """Select a folder: as SELECT gets it (a stored single name as stored,
-        a listed one quoted). Default: the stored single folder."""
         folder = self.folder if folder is None else folder
         try:
             status, messages = self.connection.select(folder)
@@ -179,29 +142,15 @@ class DMARCImapService:
             return True
 
         except imaplib.IMAP4.readonly:
-            # A read-only folder (imaplib raises it as a kind of abort): the
-            # import cannot mark or delete there, so it is skipped like a missing one
             logger.error(f"Folder {folder} is read-only")
             return False
         except imaplib.IMAP4.abort:
-            # The connection is gone: not a folder problem
             raise
         except Exception as e:
             logger.error(f"Error selecting folder: {e}")
             return False
     
     def search_report_emails(self) -> List[bytes]:
-        """
-        Search for DMARC and TLS-RPT report emails.
-        
-        Phase 1 (always): Search by known subject keywords (fast path).
-        Phase 2 (when scan_all_unseen=True): Search all remaining UNSEEN
-        emails to catch reports with non-English subjects.
-        
-        Returns list of email UIDs. A search the server refuses raises: it is
-        not an empty folder.
-        """
-        # Phase 1: Subject-based search (covers most DMARC/TLS-RPT providers)
         search_criteria = '(UNSEEN (OR (SUBJECT "Report Domain:") (OR (SUBJECT "DMARC") (OR (SUBJECT "Report-ID:") (OR (SUBJECT "TLS-RPT") (SUBJECT "TLS Report"))))))'
 
         status, messages = self.connection.uid('SEARCH', None, search_criteria)
@@ -212,8 +161,6 @@ class DMARCImapService:
         email_ids = (messages[0] or b'').split()
         logger.info(f"[Phase 1] Found {len(email_ids)} subject-matched DMARC/TLS-RPT emails")
 
-        # Phase 2: Scan all remaining UNSEEN emails (opt-in, in every folder read)
-        # This catches reports from providers that use non-English subjects
         if self.scan_all_unseen:
             subject_matched_set = set(email_ids)
 
@@ -231,18 +178,9 @@ class DMARCImapService:
         return email_ids
     
     def search_dmarc_emails(self) -> List[bytes]:
-        """Alias for backward compatibility"""
         return self.search_report_emails()
     
     def is_bounce(self, msg: EmailMessage) -> bool:
-        """
-        Detect a delivery status notification (RFC 3464).
-
-        The report mailbox is often also the address that mailcow sends its
-        own DMARC reports from, so bounces of those reports land here. A bounce
-        may carry the original outgoing report, which must not be imported.
-        TLS-RPT mail is also multipart/report, but with report-type=tlsrpt.
-        """
         if msg.get_content_type() == 'multipart/report':
             if str(msg.get_param('report-type', '')).lower() == 'delivery-status':
                 return True
@@ -252,30 +190,17 @@ class DMARCImapService:
         )
 
     def extract_attachments(self, msg: EmailMessage, include_json: bool = False) -> List[Tuple[str, bytes]]:
-        """
-        Extract compressed attachments from email
-        
-        Args:
-            msg: Email message
-            include_json: If True, also extract JSON files (for TLS-RPT)
-        
-        Returns list of (filename, content) tuples
-        """
         attachments = []
         
         try:
             for part in msg.walk():
-                # Try to get filename from Content-Disposition header
                 filename = part.get_filename()
                 
-                # If no filename, try to get from Content-Type 'name' parameter
                 if not filename:
                     content_type = part.get_content_type()
-                    # Check if this is a potential attachment by content type
                     if content_type in ['application/gzip', 'application/x-gzip', 'application/zip', 
                                         'application/x-zip-compressed', 'text/xml', 'application/xml',
                                         'application/json', 'application/octet-stream']:
-                        # Try to get name from content-type params
                         params = part.get_params()
                         if params:
                             for key, value in params:
@@ -288,8 +213,6 @@ class DMARCImapService:
                 
                 filename_lower = filename.lower()
                 
-                # Support DMARC files: .xml.gz, .zip, .xml
-                # Support TLS-RPT files: .json, .json.gz
                 valid_extensions = ['.xml.gz', '.zip', '.xml']
                 if include_json:
                     valid_extensions.extend(['.json', '.json.gz'])
@@ -306,7 +229,6 @@ class DMARCImapService:
             logger.error(f"Error extracting attachments: {e}")
         
         if not attachments:
-            # Log all parts for debugging
             logger.debug(f"No attachments found. Email parts:")
             for i, part in enumerate(msg.walk()):
                 ct = part.get_content_type()
@@ -316,7 +238,6 @@ class DMARCImapService:
         return attachments
     
     def _fetch_size(self, email_id: str) -> Optional[int]:
-        """The message size the server reports (RFC822.SIZE), or None if it gives none."""
         status, data = self.connection.uid('FETCH', email_id, '(RFC822.SIZE)')
         if status != 'OK':
             return None
@@ -328,7 +249,6 @@ class DMARCImapService:
         return None
 
     def _fetch_headers(self, email_id: str) -> EmailMessage:
-        """Message-ID and Subject only, without downloading the message or marking it read."""
         status, data = self.connection.uid('FETCH', email_id, '(BODY.PEEK[HEADER.FIELDS (MESSAGE-ID SUBJECT)])')
         for item in (data if status == 'OK' else None) or []:
             if isinstance(item, tuple) and isinstance(item[1], bytes):
@@ -336,19 +256,6 @@ class DMARCImapService:
         return email.message_from_bytes(b'')
 
     def process_email(self, email_id: str, db: SessionLocal) -> Dict:
-        """
-        Process a single DMARC or TLS-RPT email
-        
-        Returns dict with:
-        - success: bool
-        - reports_created: int
-        - reports_duplicate: int
-        - error: str or None
-        - report_type: 'dmarc', 'tls-rpt' or 'mixed'
-        - skipped: why the email is not a report (bounce or no report attached), or None
-        - keep: True when a report in it shares its report ID with another stored
-          report: the email stays in the mailbox even when it was imported
-        """
         result = {
             'success': False,
             'reports_created': 0,
@@ -372,14 +279,12 @@ class DMARCImapService:
                                    f"so it was not downloaded")
                 return result
 
-            # Fetch email (email_id is already a string)
             status, msg_data = self.connection.uid('FETCH', email_id, '(BODY.PEEK[])')
             
             if status != 'OK':
                 result['error'] = f"Failed to fetch email {email_id}"
                 return result
             
-            # Parse email
             msg = email.message_from_bytes(msg_data[0][1])
             result['message_id'] = _header_text(msg, 'message-id')
             result['subject'] = _header_text(msg, 'subject')
@@ -397,21 +302,10 @@ class DMARCImapService:
             return result
 
     def report_attachments(self, msg: EmailMessage) -> List[Tuple[str, bytes, str]]:
-        """Every report file of the email as (filename, content, 'dmarc' or 'tls-rpt').
-
-        Each file is classified on its own, so an email that carries a DMARC and
-        a TLS-RPT report has both read before it can count as imported.
-        """
         return [(filename, content, report_kind(filename, content))
                 for filename, content in self.extract_attachments(msg, include_json=True)]
 
     def _process_reports(self, msg: EmailMessage, db: SessionLocal, result: Dict) -> Dict:
-        """Import the reports of one email, all or nothing for the limits.
-
-        The email counts as imported (and may be deleted) only when every report
-        in it was stored or was already stored with the same content. Reports
-        are committed here, before the caller marks or deletes the email.
-        """
         attachments = self.report_attachments(msg)
         if not attachments:
             result['skipped'] = 'no report attached'
@@ -424,7 +318,6 @@ class DMARCImapService:
                                f"{MAX_REPORT_ATTACHMENTS_PER_EMAIL} allowed, so nothing from it was imported.")
             return result
 
-        # Read every report before storing any, so an email over a limit stores nothing
         budget = ReportBudget()
         prepared = []
         attachment_errors = []
@@ -448,12 +341,11 @@ class DMARCImapService:
         created = duplicate = 0
         keep = False
         try:
-            # One order for the report ID locks, whatever the order of the files
+            # Unsorted, two imports that lock the same report IDs in another order can deadlock
             for filename, report in sorted(prepared, key=lambda item: (item[1].kind, item[1].report_id)):
                 try:
                     status, _ = store_report(db, report)
                 except ReportNotStored as e:
-                    # The report's own savepoint is rolled back; the others stay
                     attachment_errors.append(f"Error processing {filename}: {e}")
                     logger.error(f"Error processing {filename}: {e}")
                     continue
@@ -461,7 +353,6 @@ class DMARCImapService:
                     duplicate += 1
                 else:
                     created += 1
-                    # Another report has its report ID: keep the email for a look
                     keep = keep or status == 'conflict'
             db.commit()
         except Exception as e:
@@ -485,16 +376,10 @@ class DMARCImapService:
             raise RuntimeError(f"The IMAP server refused to set {flag} on email {email_id}")
 
     def mark_as_processed(self, email_id: str):
-        """Mark the email as read, so the next search leaves it out. Raises when
-        the server refuses: the import must not take the same email again."""
         self._store(email_id, '\\Seen')
         logger.debug(f"Marked email {email_id} as seen")
 
     def delete_email(self, email_id: str):
-        """Delete this one email. A plain EXPUNGE would also remove every other
-        email of the folder that a mail client marked as deleted, so the email
-        is removed with UID EXPUNGE (RFC 4315); a server without it gets the
-        email marked as deleted and read, for a mail client to remove."""
         self._store(email_id, '\\Deleted')
         if self.uidplus:
             status, _ = self.connection.uid('EXPUNGE', email_id)
@@ -506,20 +391,6 @@ class DMARCImapService:
             logger.debug(f"Marked email {email_id} as deleted; the server cannot remove single emails")
     
     def sync_reports(self, sync_type: str = 'auto') -> Dict:
-        """
-        Main sync function with batch processing
-
-        Processes emails in batches to prevent memory issues with large mailboxes.
-        After each batch, emails are deleted/marked and the search is re-run
-        to get the next batch of unprocessed emails.
-
-        Each email's counts and failure entry are committed before the email
-        is marked or deleted, so a failure is stored before its email leaves
-        the import. The failures are reported once, also when the import
-        itself fails; the result then says 'notified'.
-
-        Returns statistics about the sync operation
-        """
         sync_record = DMARCSync(
             sync_type=sync_type,
             started_at=datetime.now(timezone.utc),
@@ -528,7 +399,6 @@ class DMARCImapService:
 
         db = SessionLocal()
         batch_size = self.batch_size
-        # Kept here, not only on the record: a rollback resets the record
         counts = {'emails_found': 0, 'emails_processed': 0, 'reports_created': 0,
                   'reports_duplicate': 0, 'reports_failed': 0}
         failed_emails = []
@@ -539,13 +409,11 @@ class DMARCImapService:
             db.commit()
             db.refresh(sync_record)
 
-            # Connect to IMAP
             self.connect()
             if self.delete_after and not self.uidplus:
                 logger.info("The IMAP server cannot remove single emails (no UIDPLUS): imported "
                             "emails are marked as deleted and read, for a mail client to remove")
 
-            # The folders to read; a single stored folder is used as stored
             targets, missing, empty, unreadable = folder_targets(self.connection, self.folder)
             problems = []
             if missing:
@@ -561,7 +429,6 @@ class DMARCImapService:
                     continue
                 self._sync_folder(db, sync_record, target.label, batch_size, counts, failed_emails)
 
-            # Update sync record
             _record_counts(sync_record, counts)
             sync_record.status = 'error' if problems else 'success'
             sync_record.completed_at = datetime.now(timezone.utc)
@@ -579,7 +446,6 @@ class DMARCImapService:
                        f"{counts['reports_duplicate']} duplicates, "
                        f"{counts['reports_failed']} failed")
 
-            # Clear cache if any reports were created
             if counts['reports_created'] > 0:
                 clear_dmarc_cache(db)
 
@@ -588,7 +454,6 @@ class DMARCImapService:
 
         except Exception as e:
             logger.error(f"DMARC sync failed: {e}")
-            # A failed statement leaves the session unusable until rolled back
             db.rollback()
             try:
                 _record_counts(sync_record, counts)
@@ -605,15 +470,12 @@ class DMARCImapService:
                           'error_message': _plain_text(e), 'failed_emails': list(failed_emails) or None,
                           **counts}
 
-            # Reports stored before the error are new data for the DMARC pages
             if counts['reports_created'] > 0:
                 try:
                     clear_dmarc_cache(db)
                 except Exception as cache_error:
                     logger.error(f"Could not clear the DMARC cache: {cache_error}")
 
-            # Return error result instead of raising exception
-            # This allows the scheduler to handle it gracefully
             if not notified:
                 notified = self._notify_failures(failed_emails, result.get('sync_id'))
             result['notified'] = notified
@@ -625,14 +487,6 @@ class DMARCImapService:
 
     def _sync_folder(self, db, sync_record: DMARCSync, folder: str, batch_size: int,
                      counts: Dict, failed_emails: List[Dict]):
-        """Import the report emails of the selected folder in batches. After
-        each batch the emails are deleted or marked and the search runs again.
-
-        Each email's counts and failure entry are committed before the email
-        is marked or deleted, so a failure is stored before its email leaves
-        the import. A search that only finds emails this run already handled
-        means the server did not keep their flags: the folder stops with an
-        error instead of taking them again."""
         found = len(self.search_dmarc_emails())
         counts['emails_found'] += found
         _record_counts(sync_record, counts)
@@ -648,7 +502,6 @@ class DMARCImapService:
         while True:
             batch_number += 1
 
-            # Re-search to get current unprocessed emails (since we delete/mark after each batch)
             listed = self.search_dmarc_emails()
             email_ids = [uid for uid in listed if uid not in handled]
 
@@ -659,7 +512,6 @@ class DMARCImapService:
                 logger.info(f"Batch {batch_number}: No more emails to process in {folder}")
                 break
 
-            # Take only batch_size emails
             batch_emails = email_ids[:batch_size]
             logger.info(f"Batch {batch_number}: Processing {len(batch_emails)} emails (remaining: {len(email_ids)})")
 
@@ -668,17 +520,14 @@ class DMARCImapService:
                 email_id = raw_id.decode() if isinstance(raw_id, bytes) else raw_id
                 result = self.process_email(email_id, db)
                 counts['emails_processed'] += 1
-                # Committed reports count even when another report of the email failed
                 counts['reports_created'] += result['reports_created']
                 counts['reports_duplicate'] += result['reports_duplicate']
 
                 if result['skipped']:
-                    # Not a report (e.g. a bounce): not a failure, and never deleted
                     logger.info(f"Skipped email {email_id} ({result['skipped']}): {result['subject']}")
                     self._save_progress(db, sync_record, counts, failed_emails)
                     self.mark_as_processed(email_id)
                 elif result['success']:
-                    # Every report of the email is stored: delete or mark as processed
                     self._save_progress(db, sync_record, counts, failed_emails)
                     if self.delete_after and not result.get('keep'):
                         self.delete_email(email_id)
@@ -697,10 +546,8 @@ class DMARCImapService:
                         'error': _plain_text(error_msg)
                     })
                     self._save_progress(db, sync_record, counts, failed_emails, new_failure=True)
-                    # Kept in the mailbox, marked so it is not processed again
                     self.mark_as_processed(email_id)
 
-            # Log batch progress
             logger.info(f"Batch {batch_number} complete: "
                        f"{counts['emails_processed']}/{counts['emails_found']} processed, "
                        f"{counts['reports_created']} created, "
@@ -708,13 +555,7 @@ class DMARCImapService:
 
     def _save_progress(self, db, sync_record: DMARCSync, counts: Dict, failed_emails: List[Dict],
                        new_failure: bool = False):
-        """Commit the counts and failure entries so far. When the failure
-        entry just added cannot be stored for its own values, it is replaced
-        with one that keeps only the email number, so the email can be marked
-        and the import does not stop on it in every run. Any other failure,
-        such as a lost connection, is raised with the entries kept."""
         _record_counts(sync_record, counts)
-        # A new list: the session does not see a change inside a JSON value
         sync_record.failed_emails = list(failed_emails) or None
         try:
             db.commit()
@@ -732,9 +573,6 @@ class DMARCImapService:
             db.commit()
 
     def _notify_failures(self, failed_emails: List[Dict], sync_id) -> bool:
-        """Report the failures; the notification goes to the channels even
-        without SMTP. True when there were failures to report, also when a
-        destination failed: sending again would repeat what did arrive."""
         if not failed_emails:
             return False
         logger.info(f"Sending error notification for {len(failed_emails)} failed emails")
@@ -746,7 +584,6 @@ class DMARCImapService:
         return True
 
     def _build_result(self, sync_record: DMARCSync) -> Dict:
-        """Build result dictionary from sync record"""
         return {
             'sync_id': sync_record.id,
             'sync_type': sync_record.sync_type,
@@ -763,20 +600,14 @@ class DMARCImapService:
         }
 
 
-# One import at a time: the scheduled run, Fetch reports and Status > Run now
-# all start it, and two at once would read the same mailbox. The app runs in
-# one process, so this lock sees every import.
 _sync_lock = threading.Lock()
 
 
 def is_sync_running() -> bool:
-    """True while an IMAP import runs."""
     return _sync_lock.locked()
 
 
 def _fail_interrupted_syncs():
-    """Mark imports still 'running' as failed. Called under the lock, so
-    none of them runs: the app stopped during them. Best effort."""
     try:
         with SessionLocal() as db:
             db.query(DMARCSync).filter(DMARCSync.status == 'running').update({
@@ -789,10 +620,6 @@ def _fail_interrupted_syncs():
 
 
 def sync_dmarc_reports_from_imap(sync_type: str = 'auto') -> Dict:
-    """
-    Convenience function to sync DMARC reports
-    Can be called from scheduler or API endpoint
-    """
     if not settings.dmarc_imap_enabled:
         logger.info("DMARC IMAP sync is disabled")
         return {

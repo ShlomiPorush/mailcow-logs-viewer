@@ -1,6 +1,3 @@
-// Click to copy must always answer with a notice. Browsers offer
-// navigator.clipboard only on HTTPS and localhost, so over plain HTTP the call
-// is missing and must not throw before the user is told.
 const assert = require('node:assert/strict');
 const { randomBytes } = require('node:crypto');
 const fs = require('node:fs');

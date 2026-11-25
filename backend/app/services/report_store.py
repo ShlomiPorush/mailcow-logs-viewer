@@ -1,11 +1,3 @@
-"""
-Store parsed DMARC and TLS-RPT reports.
-
-The IMAP import and the manual upload both store through here, so the same
-report counts as a duplicate on both paths, and only when its whole content
-is the same (services/report_identity.py). A report with a known report_id
-but other content is stored next to the first one.
-"""
 import hashlib
 import logging
 from dataclasses import dataclass
@@ -54,7 +46,6 @@ KINDS = {
 
 @dataclass
 class PreparedReport:
-    """A parsed report with its identity, ready to store."""
     kind: str
     fields: Dict
     children: List[Dict]
@@ -89,8 +80,6 @@ def prepare_report(kind: str, parsed: Dict) -> PreparedReport:
 
 
 def prepare_report_file(kind: str, content: bytes, filename: str) -> Optional[PreparedReport]:
-    """Parse a report file. None when it is not a report; ReportRejectedError
-    (and its ReportLimitError) when it must not be imported, with the reason."""
     if kind == 'dmarc':
         parsed = dmarc_parser.parse_dmarc_file(content, filename)
     else:
@@ -109,7 +98,6 @@ def _same_report(db: Session, spec: _Kind, report_id: str, content_hash: str):
 
 
 def stored_content_hash(db: Session, kind: str, row) -> str:
-    """The content hash of a stored report, computed from its stored rows."""
     spec = KINDS[kind]
     report = {name: getattr(row, name) for name in spec.report_fields}
     children = db.query(*(getattr(spec.child, name) for name in spec.child_fields)).filter(
@@ -118,12 +106,6 @@ def stored_content_hash(db: Session, kind: str, row) -> str:
 
 
 def _hash_unhashed(db: Session, spec: _Kind, kind: str, prepared: PreparedReport):
-    """Give rows with this report_id and no hash their hash; the one equal to the
-    incoming report, if any. A row whose hash another row already has stays
-    without one: it is the same report, stored twice by an older version.
-
-    All of them are checked: only an older version writes such rows, and it
-    stores a report_id once, so there are very few."""
     rows = db.query(spec.report).filter(
         spec.report.report_id == prepared.report_id, spec.report.content_hash.is_(None),
     ).order_by(spec.report.id).all()
@@ -143,15 +125,10 @@ def _hash_unhashed(db: Session, spec: _Kind, kind: str, prepared: PreparedReport
 
 
 class ReportNotStored(Exception):
-    """The database refused this report; its savepoint is rolled back and the
-    session can store other reports. Any other error leaves the transaction
-    unusable: the caller rolls it back as a whole."""
+    pass
 
 
 def store_report(db: Session, prepared: PreparedReport) -> Tuple[str, object]:
-    """('created', row), ('conflict', row) when it was stored next to another
-    report with the same report_id, or ('duplicate', the stored row).
-    Flushes, never commits."""
     spec = KINDS[prepared.kind]
     _lock_report_id(db, prepared)
     existing = _same_report(db, spec, prepared.report_id, prepared.content_hash)
@@ -174,12 +151,6 @@ def store_report(db: Session, prepared: PreparedReport) -> Tuple[str, object]:
                 db.add(spec.child(**row))
             db.flush()
     except SQLAlchemyError as e:
-        # Only this report's savepoint is rolled back; the session stays usable
-        if isinstance(e, IntegrityError) and _constraint(e) == spec.constraint:
-            # The same report stored at the same moment by another import
-            existing = _same_report(db, spec, prepared.report_id, prepared.content_hash)
-            if existing is not None:
-                return 'duplicate', existing
         raise ReportNotStored(str(e)) from e
 
     if db.query(spec.report.id).filter(
@@ -193,14 +164,10 @@ def store_report(db: Session, prepared: PreparedReport) -> Tuple[str, object]:
 
 
 def _printable(value: str) -> str:
-    """A value from the report, on one log line."""
     return str(value).replace('\r', ' ').replace('\n', ' ')
 
 
 def _lock_report_id(db: Session, prepared: PreparedReport):
-    """Two imports of reports with the same report_id (the IMAP import and an
-    upload) decide one after the other: the lock is held until the transaction
-    ends, so the second sees the first report and keeps its email if it conflicts."""
     digest = hashlib.sha256(f"{prepared.kind}\n{prepared.report_id}".encode('utf-8')).digest()
     db.execute(text("SELECT pg_advisory_xact_lock(:key)"),
                {"key": int.from_bytes(digest[:8], 'big', signed=True)})
@@ -211,7 +178,6 @@ def report_sender(report) -> str:
 
 
 def conflicting_report_ids(db: Session, kind: str, report_ids: Iterable[str]) -> Set[str]:
-    """The report IDs among these that more than one stored report of this kind has."""
     report_ids = {report_id for report_id in report_ids if report_id}
     if not report_ids:
         return set()

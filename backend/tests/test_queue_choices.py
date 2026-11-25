@@ -1,9 +1,3 @@
-"""Queue Management choices that delete queued mail without blocking, and
-choices that block acting as their twin while Sync with Rspamd is off.
-
-Deleting queued mail cannot be undone: these tests also pin the checks that
-keep mail in the queue. Fictional addresses only.
-"""
 import asyncio
 import secrets
 import uuid
@@ -12,7 +6,7 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
-import app.models  # noqa: F401  init_db creates the tables of the models imported so far
+import app.models  # noqa: F401
 from app import scheduler
 from app.config import settings
 
@@ -52,8 +46,6 @@ def _set(monkeypatch, **values):
         monkeypatch.setattr(settings._inner, key, value)
 
 
-# ---- What really happens ----
-
 @pytest.mark.parametrize('sync, hard, soft, block, expected', [
     (True, 'suppress', 'count', True, ('suppress', 'count', True)),
     (False, 'suppress', 'count', True, ('delete', 'ignore', False)),
@@ -67,8 +59,6 @@ def test_the_choices_as_they_really_happen(base, sync, hard, soft, block, expect
          queue_cleanup_block=block)
     assert (bounce_policy.hard_action(), bounce_policy.soft_action(), bounce_policy.cleanup_blocks()) == expected
 
-
-# ---- The queue cleanup without blocking ----
 
 def _queue(monkeypatch, items):
     monkeypatch.setattr(scheduler.mailcow_api, 'get_queue', AsyncMock(return_value=items))
@@ -117,7 +107,6 @@ def test_the_cleanup_counts_only_a_confirmed_delete(base, reply):
 @pytest.mark.parametrize('change', [{'suppression_enabled': False}, {'queue_cleanup_enabled': False},
                                     {'suppression_whitelist_domains': 'example.org'}])
 def test_settings_changed_before_the_deletion_keep_the_mail(base, change):
-    """Read again right before the deletion, under the map lock."""
     _set(base, queue_cleanup_block=False)
     real = scheduler._cleanup_deletable
 
@@ -130,8 +119,6 @@ def test_settings_changed_before_the_deletion_keep_the_mail(base, change):
     asyncio.run(scheduler.cleanup_deferred_queue_job())
     scheduler.mailcow_api.delete_queue.assert_not_awaited()
 
-
-# ---- A permanent failure: delete its queued mail, without a block ----
 
 @pytest.fixture
 def db(base):
@@ -150,7 +137,6 @@ def db(base):
 
     wipe()
     with get_db_context() as s:
-        # Only this test's lines are new to the detection
         top = s.query(PostfixLog.id).order_by(PostfixLog.id.desc()).first()
         s.query(SystemSetting).filter(SystemSetting.key == scheduler.BOUNCE_WATERMARK_KEY).delete()
         s.add(SystemSetting(key=scheduler.BOUNCE_WATERMARK_KEY, value=str(top[0] if top else 0), updated_at=datetime.utcnow()))
@@ -217,8 +203,6 @@ def test_a_block_disabled_by_hand_keeps_its_mail_without_a_block_too(base):
     assert scheduler._hard_deletable({'Q': ['go@example.org']}, set(), {'go@example.org'}) == ['Q']
 
 
-# ---- Saving the choices ----
-
 def test_an_unknown_action_is_refused_on_save(base):
     from fastapi import HTTPException
     from app.routers.settings import _validate_bounce_actions
@@ -228,18 +212,15 @@ def test_an_unknown_action_is_refused_on_save(base):
     with pytest.raises(HTTPException) as error:
         _validate_bounce_actions({'suppression_hard_bounce_action': 'explode'})
     assert error.value.status_code == 400
-    # The value in effect sent back as it is never blocks saving the rest
     _set(base, suppression_soft_bounce_action='legacy')
     echoed = {'suppression_soft_bounce_action': 'legacy'}
     _validate_bounce_actions(echoed)
     assert echoed == {}
 
 
-# ---- Result review round 1 ----
-
 def test_a_domain_block_disabled_by_hand_keeps_its_mail(db, base):
     from app.models import SpamSuppression
-    base.setattr(scheduler, '_protected_now', _REAL_PROTECTED)  # the fixture stubs it
+    base.setattr(scheduler, '_protected_now', _REAL_PROTECTED)
     domain = '/.+@' + MARK + r'\.example\.test/i'
     with db() as s:
         s.add(SpamSuppression(email=domain, type='domain', reason='manual', source='rspamd', active=False,
@@ -255,7 +236,6 @@ def test_no_deletion_once_reading_the_logs_is_off(base):
 
 
 def test_a_deletion_that_failed_is_not_tried_again(db, base):
-    """Reported on Status; the mail stays in the queue."""
     _set(base, suppression_hard_bounce_action='delete', queue_cleanup_enabled=False)
     bad = f'gone-{MARK}@example.org'
     _bounce(db, bad, '5.1.1')
@@ -285,7 +265,7 @@ def _drop_patterns(db):
 
 def test_a_disabled_pcre_pattern_is_read_as_rspamd_reads_it(db, base):
     base.setattr(scheduler, '_protected_now', _REAL_PROTECTED)
-    _disabled_pattern(db, '(?|user|admin)@x' + MARK + r'\.test')   # branch reset: PCRE, not Python re
+    _disabled_pattern(db, '(?|user|admin)@x' + MARK + r'\.test')
     try:
         assert scheduler._protected_now({f'admin@x{MARK}.test', f'other@x{MARK}.test'}) == {f'admin@x{MARK}.test'}
     finally:

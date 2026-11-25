@@ -1,7 +1,3 @@
-"""DNSSEC and DANE checks (issue #287): DNSSEC validation of the domain, and
-whether published TLSA records are validated and match the certificate the MX
-presents. DNS and the port 25 probe are injected; no live lookups (the
-repository's rule for network-facing code)."""
 import asyncio
 import datetime
 import hashlib
@@ -73,8 +69,6 @@ def a_record():
 
 
 def _install(monkeypatch, records, certificate=CERT):
-    """records: {(name, rtype) or (name, rtype, 'cd'): DnssecAnswer | Exception}.
-    Missing names answer NXDOMAIN. certificate: DER bytes or an Exception."""
     probes = []
 
     async def resolve(name, rtype='A', timeout=5, checking_disabled=False):
@@ -113,8 +107,6 @@ def dane_check(monkeypatch, records, certificate=CERT):
     return asyncio.run(domains.check_tlsa_record('example.test')), probes
 
 
-# --- DNSSEC -----------------------------------------------------------------
-
 def test_validated_domain_passes(monkeypatch):
     result = dnssec(monkeypatch, {('example.test', 'SOA'): ok([object()], ad=True)})
     assert result['status'] == 'success'
@@ -138,8 +130,6 @@ def test_keys_without_ds_are_named(monkeypatch):
 
 
 def test_broken_signature_is_an_error(monkeypatch):
-    """SERVFAIL that goes away with checking disabled means DNSSEC is bogus:
-    validating resolvers cannot resolve the domain at all."""
     result = dnssec(monkeypatch, {
         ('example.test', 'SOA'): SERVFAIL,
         ('example.test', 'SOA', 'cd'): ok([object()], ad=False),
@@ -162,8 +152,6 @@ def test_resolver_failure_is_unknown_not_unsigned(monkeypatch):
     assert result['validated'] is None
 
 
-# --- DANE -------------------------------------------------------------------
-
 def test_working_dane_passes(monkeypatch):
     result, probes = dane_check(monkeypatch, _signed_zone([tlsa()]))
     assert result['status'] == 'success'
@@ -180,7 +168,6 @@ def test_full_certificate_sha256_record_matches(monkeypatch):
 
 
 def test_mismatch_with_dnssec_is_an_error(monkeypatch):
-    """The dangerous case: DANE senders refuse to deliver."""
     result, _ = dane_check(monkeypatch, _signed_zone([tlsa()]), certificate=OTHER_CERT)
     assert result['status'] == 'error'
     assert 'does not match the certificate of ' + MX in result['message']
@@ -236,7 +223,6 @@ def test_failed_tlsa_lookup_is_not_absent(monkeypatch):
 
 @pytest.mark.parametrize('mx_answer', [SERVFAIL, Exception('timed out')])
 def test_failed_mx_lookup_is_not_reported_as_missing_mx(monkeypatch, mx_answer):
-    """A resolver hiccup must not claim the domain has no MX records."""
     result, _ = dane_check(monkeypatch, {('example.test', 'MX'): mx_answer})
     assert result['status'] == 'unknown'
     assert result['message'] == 'Could not look up MX records - cannot check DANE/TLSA'
@@ -252,8 +238,6 @@ def test_null_mx_is_skipped(monkeypatch):
     assert result['status'] == 'unknown'
     assert 'null MX' in result['message']
 
-
-# --- TLSA matching ------------------------------------------------------------
 
 @pytest.mark.parametrize('selector, mtype, expected', [
     (0, 0, lambda c: c),
@@ -290,8 +274,6 @@ def test_certificate_probe_is_cached(monkeypatch):
     assert calls == [MX, 'down.example.test']
 
 
-# --- change alerts --------------------------------------------------------------
-
 class Prev:
     spf_check = dkim_check = dmarc_check = mta_sts_check = None
     dnssec_check = {'status': 'success', 'message': 'DNSSEC signed and validated', 'record': None}
@@ -320,8 +302,6 @@ def test_new_certificate_mismatch_alerts_once():
         tlsa_check = mismatch
     assert domains.detect_dns_changes(StillBroken(), {'tlsa': mismatch}) == []
 
-
-# --- resolver -----------------------------------------------------------------
 
 def test_resolve_dnssec_reads_ad_flag_and_skips_servfail(monkeypatch):
     sent = []

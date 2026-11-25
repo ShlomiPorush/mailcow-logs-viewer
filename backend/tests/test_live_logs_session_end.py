@@ -1,12 +1,3 @@
-"""A Live Logs stream ends when the session that opened it ends.
-
-The stream's one-time token only proved that a session existed when it was
-issued. After sign-out, session expiry or a change of the sign-in settings,
-the HTTP API refused that session, but an open stream kept delivering mail
-logs until the page was closed. A stream now carries the session and session
-generation it came from and is closed (code 4001) before the next message
-once either is no longer current.
-"""
 import asyncio
 import base64
 import secrets
@@ -20,14 +11,14 @@ from starlette.websockets import WebSocketDisconnect
 _orig_init = sf.StaticFiles.__init__
 sf.StaticFiles.__init__ = lambda s, *a, **k: _orig_init(s, *a, **{**k, "check_dir": False})
 
-from app import session
+from app import session, user_access
 from app.config import settings
 from app.main import app
 from app.routers import raw_logs
+from sign_in_helpers import revoke_all_sessions
 
 USERNAME = "admin"
 PASSWORD = secrets.token_hex(16)
-# The test client always opens WebSockets to ws://testserver
 APP = "http://testserver"
 
 
@@ -56,12 +47,13 @@ def clean_sessions():
 
 
 def _open_session():
-    signed = session.create_session({"email": "operator@example.test"}, generation=session.auth_generation())
+    user_info = {"email": "operator@example.test"}
+    signed = session.create_session(user_info, generation=session.auth_generation(),
+                                    principal=user_access.oauth2_ref(user_info))
     return signed, session.get_serializer().loads(signed)
 
 
 def _stream(authority, between):
-    """Open a stream, deliver one message, run `between`, deliver another."""
     async def run():
         manager = raw_logs.LogStreamManager()
         client = Client()
@@ -87,15 +79,13 @@ def test_sign_out_ends_the_stream():
 
 def test_revoking_all_sessions_ends_the_stream():
     _signed, key = _open_session()
-    _manager, client = _stream((key, session.auth_generation()), session.revoke_all_sessions)
+    _manager, client = _stream((key, session.auth_generation()), revoke_all_sessions)
     assert client.close_code == raw_logs.WS_SESSION_ENDED
     assert _entries(client) == ["before"]
 
 
 def test_a_stream_opened_without_authentication_ends_when_sessions_are_revoked():
-    """Turning authentication on is a sign-in settings change, which revokes
-    every session; a stream opened while it was off must not outlive that."""
-    _manager, client = _stream((None, session.auth_generation()), session.revoke_all_sessions)
+    _manager, client = _stream((None, session.auth_generation()), revoke_all_sessions)
     assert client.close_code == raw_logs.WS_SESSION_ENDED
     assert _entries(client) == ["before"]
 
@@ -151,7 +141,6 @@ def test_signing_out_closes_an_open_stream(basic_auth):
     with client.websocket_connect(f"/ws/raw-logs?token={token}", headers={"Origin": APP}) as ws:
         assert ws.receive_json()["type"] == "connected"
         assert client.post("/api/auth/logout", follow_redirects=False).status_code == 302
-        # A new log line arrives, broadcast on the app's own event loop
         ws.portal.call(raw_logs.log_stream_manager.broadcast, "postfix", [{"message": "after"}])
         with pytest.raises(WebSocketDisconnect) as closed:
             ws.receive_json()

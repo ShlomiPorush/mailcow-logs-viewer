@@ -1,10 +1,3 @@
-"""The list and the app's section of the Rspamd map, kept in step both ways.
-
-mailcow is the source: a block deleted in the app's section leaves the list,
-one added there joins it as From Rspamd. The list's own changes wait for Sync
-to Rspamd while automatic updates are off, and a write applies only them to
-what mailcow has now. Fictional addresses only.
-"""
 import asyncio
 import secrets
 import threading
@@ -15,7 +8,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-import app.models  # noqa: F401  init_db creates the tables of the models imported so far
+import app.models  # noqa: F401
 from app.config import settings
 
 MARK = uuid.uuid4().hex[:6]
@@ -31,7 +24,6 @@ def _postgres_available() -> bool:
 
 
 def _sync_setting(monkeypatch, on: bool):
-    """Sync with Rspamd on or off; automatic handling stays off: the sync does not need it."""
     monkeypatch.setattr(settings._inner, 'suppression_enabled', False)
     monkeypatch.setattr(settings._inner, 'suppression_rspamd_sync', on)
 
@@ -65,9 +57,6 @@ def db(monkeypatch):
 
 @pytest.fixture
 def rspamd(monkeypatch):
-    """A fake map. read_hook(n) may change what the n-th read returns;
-    write_hook(content) runs before a save lands; fail_write makes the save
-    raise (after landing when land_then_fail)."""
     from app.routers import suppressions as sup
     state = {'content': '', 'writes': 0, 'reads': 0, 'read_hook': None, 'write_hook': None,
              'fail_write': False, 'land_then_fail': False}
@@ -96,7 +85,6 @@ def rspamd(monkeypatch):
     monkeypatch.setattr(sup.mailcow_api, 'get_rspamd_map_content', read)
     monkeypatch.setattr(sup.mailcow_api, 'edit_rspamd_map', write)
     monkeypatch.setattr(sup.mailcow_api, 'aclose', AsyncMock())
-    # Without the read-write key an automatic sync only reads; tests that write set it (_rw)
     monkeypatch.setattr(sup.mailcow_api, 'headers_rw', None)
     return state
 
@@ -143,10 +131,7 @@ def _key(db, key):
         return row.value if row else None
 
 
-# ---- What comes in from mailcow ----
-
 def test_a_block_deleted_in_mailcow_leaves_the_list_and_one_added_there_joins_it(db, rspamd):
-    """The case on DEV: one address deleted in mailcow, one added there."""
     kept, gone, new = f'kept-{MARK}@example.test', f'"gone"-{MARK}@example.test', f's.new-{MARK}@example.test'
     _add(db, kept)
     _add(db, gone)
@@ -197,8 +182,6 @@ def test_a_removal_that_landed_is_taken_as_done(db, rspamd):
     assert _rows(db)[off][:2] == (False, True)
 
 
-# ---- What the list writes ----
-
 def test_a_write_applies_only_the_lists_changes_to_what_mailcow_has(db, rspamd):
     keep, add, off = (f'{n}-{MARK}@example.test' for n in ('keep', 'add', 'off'))
     typed = f'typed-{MARK}@example.test'
@@ -230,7 +213,6 @@ def test_with_the_sync_off_nothing_is_read_or_written(db, rspamd, monkeypatch):
         sync_suppressions_worker(False)
     assert error.value.code == 'sync_off'
     assert rspamd['reads'] == 0 and rspamd['writes'] == 0 and _rows(db) == before
-    # On again: what changed in mailcow comes in, then the page's change is written at once
     _sync_setting(monkeypatch, True)
     result = asyncio.run(manual_sync_to_rspamd(after_change=True))
     assert result['written'] is True and (result['list_added'], result['list_removed']) == (1, 1)
@@ -275,8 +257,6 @@ def test_a_tombstone_goes_when_mailcow_no_longer_has_the_line(db, rspamd):
     assert _key(db, TOMBSTONES_KEY) is None
 
 
-# ---- A write whose answer was lost ----
-
 @pytest.mark.parametrize('landed', [True, False])
 def test_a_write_without_an_answer_is_put_right_by_the_next_read(db, rspamd, landed):
     from app.routers.suppressions import MailcowAPIError
@@ -305,12 +285,12 @@ def test_clearing_whose_answer_was_lost_never_empties_the_list(db, rspamd, monke
     _add(db, kept)
     rspamd['content'] = _section(_line(kept))
     rspamd.update(fail_write=True, land_then_fail=True)
-    _sync_setting(monkeypatch, False)  # Remove runs once the sync is off
+    _sync_setting(monkeypatch, False)
     with pytest.raises(MailcowAPIError):
         clear_managed_worker()
     _sync_setting(monkeypatch, True)
     rspamd['fail_write'] = False
-    _rw(monkeypatch, False)  # the next sync only reads
+    _rw(monkeypatch, False)
     _sync(automatic=True)
     assert _rows(db)[kept][:2] == (True, False), 'waits to be added again, not deleted'
 
@@ -332,8 +312,6 @@ def test_a_row_changed_during_the_write_keeps_waiting(db, rspamd):
     assert _rows(db)[changed][:2] == (False, False), 'written while active, disabled since: its removal waits'
 
 
-# ---- Lines as earlier versions wrote them, and lines typed in mailcow ----
-
 def test_a_domain_line_as_version_2_9_wrote_it_is_the_same_block(db, rspamd):
     domain = f'/.+@{MARK}\\.example\\.test/i'
     _add(db, domain)
@@ -351,7 +329,6 @@ def test_a_literal_shaped_like_a_pattern_never_becomes_one(db, rspamd):
     rspamd['content'] = _section(_line(auto, 'auto'))
     _sync(automatic=False)
     assert _managed(rspamd) == [_line(auto, 'auto')] and _line(auto, 'auto').startswith('/^/'), 'kept as written'
-    # The same line added in mailcow for a value no row has cannot be held as written
     stray = _line('/.*|other-' + MARK + '@example.test/i', 'auto')
     rspamd['content'] = _section(_line(auto, 'auto'), stray)
     before = _rows(db)
@@ -373,8 +350,6 @@ def test_an_address_typed_in_the_section_becomes_an_exact_block_and_stays(db, rs
     _sync(automatic=True)
     assert list(_rows(db)) == [f'typed-{MARK}@example.test']
 
-
-# ---- A map that cannot be trusted changes nothing ----
 
 @pytest.mark.parametrize('content', [
     'START\n/^a@example\\.test$/i\nSTART\nEND',
@@ -435,7 +410,6 @@ def test_an_automatic_write_stops_when_updates_go_off_before_the_save(db, rspamd
     plan = sup._section_after
 
     def plan_then_turn_off(*args):
-        # Turned off after the write was planned, before it is saved
         monkeypatch.setattr(settings._inner, 'suppression_rspamd_sync', False)
         return plan(*args)
 
@@ -444,8 +418,6 @@ def test_an_automatic_write_stops_when_updates_go_off_before_the_save(db, rspamd
         _sync(automatic=True)
     assert error.value.code == 'sync_off' and rspamd['writes'] == 0
 
-
-# ---- Another mailcow ----
 
 def test_a_new_connection_never_takes_blocks_for_deleted(db, rspamd, monkeypatch):
     from app.routers import suppressions as sup
@@ -466,8 +438,6 @@ def test_a_new_connection_never_takes_blocks_for_deleted(db, rspamd, monkeypatch
     assert json.loads(_key(db, sup.TARGET_KEY)) == sup._connection_target()
 
 
-# ---- Counts the page shows ----
-
 def test_the_pending_count_has_adds_removals_and_deletions(db, rspamd):
     from app.routers.suppressions import pending_count, delete_suppression
     from app.models import SpamSuppression
@@ -478,11 +448,8 @@ def test_the_pending_count_has_adds_removals_and_deletions(db, rspamd):
     with db() as s:
         delete_suppression(s.query(SpamSuppression).filter(SpamSuppression.email == f'gone-{MARK}@example.test').one().id, s)
     with db() as s:
-        # One to add, one to remove, one deleted address (however many line forms it may stand as)
         assert pending_count(s) == 3
 
-
-# ---- One writer of the rows at a time ----
 
 @pytest.mark.parametrize('writer', ['expiry', 'create', 'store'])
 def test_writers_of_the_rows_wait_for_the_row_lock(db, monkeypatch, writer):
@@ -491,7 +458,7 @@ def test_writers_of_the_rows_wait_for_the_row_lock(db, monkeypatch, writer):
     from app.routers import suppressions as sup
     monkeypatch.setattr(scheduler, 'update_job_status', lambda *a, **k: None)
     monkeypatch.setattr(scheduler, 'record_stuck', lambda s, captured: None)
-    monkeypatch.setattr(settings._inner, 'suppression_enabled', True)  # expiry runs only with it
+    monkeypatch.setattr(settings._inner, 'suppression_enabled', True)
     run = {
         'expiry': lambda: scheduler._expire_suppressions_sync(),
         'create': lambda: sup._create_suppression_worker(sup.SuppressionCreateRequest(email=f'new-{MARK}@example.test')),
@@ -518,7 +485,7 @@ def test_queued_mail_of_a_block_deleted_meanwhile_stays(db):
 
 
 def test_an_address_written_as_a_pattern_without_escaping_is_the_exact_address(db, rspamd):
-    typed = f'/^add-ed-{MARK}@example\.test$/i'   # the hyphens left unescaped, as people type
+    typed = f'/^add-ed-{MARK}@example\.test$/i'
     rspamd['content'] = _section(typed)
     _sync(automatic=True)
     assert list(_rows(db)) == [f'add-ed-{MARK}@example.test']
@@ -533,8 +500,6 @@ def test_a_line_with_pattern_characters_stays_a_pattern(line):
     from app.routers.suppressions import managed_line_entry
     assert managed_line_entry(line)[2] is False
 
-
-# ---- Result review round 1 ----
 
 def test_both_markers_on_one_line_are_not_an_empty_section(db, rspamd):
     from app.routers.suppressions import MANAGED_MARKER_END, MANAGED_MARKER_START, MapUnavailable
@@ -551,8 +516,8 @@ def test_a_connection_changed_during_the_read_deletes_nothing(db, rspamd, monkey
     kept = f'kept-{MARK}@example.test'
     _add(db, kept)
     rspamd['content'] = _section(_line(kept))
-    _sync(automatic=True)  # the connection is known
-    rspamd['content'] = _section()  # the other mailcow has none of it
+    _sync(automatic=True)
+    rspamd['content'] = _section()
     targets = iter(['https://a.example.test|'] + ['https://b.example.test|'] * 10)
     monkeypatch.setattr(sup, '_connection_target', lambda: next(targets))
     with pytest.raises(sup.MapUnavailable) as error:
@@ -603,8 +568,6 @@ def test_deleted_and_added_again_leaves_nothing_waiting(db, rspamd):
     assert _key(db, sup.TOMBSTONES_KEY) is None
 
 
-# ---- Result review round 2 ----
-
 @pytest.mark.parametrize('change', ['connection', 'sync_off'])
 def test_settings_changed_during_the_last_read_stop_the_write(db, rspamd, monkeypatch, change):
     from app.routers import suppressions as sup
@@ -616,7 +579,7 @@ def test_settings_changed_during_the_last_read_stop_the_write(db, rspamd, monkey
     monkeypatch.setattr(settings._inner, 'rspamd_url', '')
 
     def read(n):
-        if n >= 2:  # the read right before the save
+        if n >= 2:
             if change == 'connection':
                 settings._inner.rspamd_url = 'http://rspamd.other.example.test:11334'
             else:
@@ -641,7 +604,6 @@ def test_a_new_deletion_during_a_write_is_kept(db, rspamd, monkeypatch):
     pull = sup._pull_from_rspamd
 
     async def pull_then_add(s, snapshot):
-        # Added again after the read, before the write is planned
         result = await pull(s, snapshot)
         sup._create_suppression_worker(sup.SuppressionCreateRequest(email=again))
         return result
@@ -649,7 +611,6 @@ def test_a_new_deletion_during_a_write_is_kept(db, rspamd, monkeypatch):
     mark = sup._mark_written
 
     def delete_again_then_mark(s, *args):
-        # And deleted again after the write was planned, before it is settled
         with db() as other:
             sup.delete_suppression(other.query(SpamSuppression).filter(SpamSuppression.email == again).one().id, other)
         return mark(s, *args)
@@ -678,12 +639,7 @@ def test_tombstones_of_an_earlier_build_count_per_line(db, rspamd):
         assert sup.pending_count(s) == 2
 
 
-# ---- The single switch, review round 1 ----
-
 def test_a_block_from_before_the_list_was_deleted_comes_back_protected(db, rspamd, monkeypatch):
-    """Spam Filter turned on again while the sync was off: a job made an
-    automatic row for an address still blocked in Rspamd. Turning the sync on
-    loads the block back as it was: permanent, From Rspamd."""
     from app.services.feature_data import SPAM_IMPORT_PENDING_KEY, _set_key
     kept = f'kept-{MARK}@example.test'
     _add(db, kept, source='auto', expires_at=datetime.utcnow() + timedelta(days=3), synced=False)
@@ -710,8 +666,6 @@ def test_the_page_does_not_read_the_map_while_the_sync_is_off(db, rspamd, monkey
 
 
 def test_a_block_the_user_disabled_meanwhile_stays_disabled(db, rspamd, monkeypatch):
-    """Same as above, but the user disabled the job's row before turning the
-    sync on: the removal goes through."""
     from app.routers import suppressions as sup
     from app.models import SpamSuppression
     from app.services.feature_data import SPAM_IMPORT_PENDING_KEY, _set_key

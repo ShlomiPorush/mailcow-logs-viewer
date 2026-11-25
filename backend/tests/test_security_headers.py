@@ -1,9 +1,3 @@
-"""The Content-Security-Policy every page and API response carries.
-
-script-src kept 'unsafe-eval' for a Tailwind runtime in the browser long
-after that runtime was removed. Nothing the app serves needs eval, so the
-policy must not allow it on any response.
-"""
 import base64
 import secrets
 import builtins
@@ -35,7 +29,6 @@ def client(monkeypatch):
     monkeypatch.setattr(inner, "auth_username", USERNAME)
     monkeypatch.setattr(inner, "auth_password", PASSWORD)
 
-    # The pages read /app/frontend, which exists only in the image
     def frontend_open(path, *args, **kwargs):
         if str(path).startswith("/app/frontend/"):
             path = FRONTEND / str(path)[len("/app/frontend/"):]

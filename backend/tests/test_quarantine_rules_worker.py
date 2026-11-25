@@ -1,4 +1,3 @@
-"""Quarantine rules own blocking work and network clients in a worker."""
 import asyncio
 import secrets
 import threading

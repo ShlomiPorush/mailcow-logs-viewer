@@ -1,9 +1,3 @@
-"""What the DMARC & TLS calls return (routers/dmarc.py).
-
-Unix timestamps are seconds. A day (`date`) is YYYY-MM-DD in the app's time
-zone unless a field says otherwise. A pass is aligned SPF or aligned DKIM
-passing (RFC 7489).
-"""
 from typing import Any, Dict, List, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -19,8 +13,6 @@ class StatusMessage(Fixed):
     status: str = Field(description="success")
     message: str
 
-
-# ---------------------------------------------------------------- insights
 
 class Recommendation(Fixed):
     type: str = Field(description="low_pass_rate, already_strict, insufficient_volume, tighten_policy or monitor")
@@ -56,8 +48,6 @@ class AllInsights(Fixed):
     domain_count: int
     insights: List[DomainInsights]
 
-
-# ---------------------------------------------------------------- reports management
 
 class ReportsConfig(Fixed):
     allow_delete: bool = Field(description="From DMARC_ALLOW_REPORT_DELETE")
@@ -119,8 +109,6 @@ class DomainReportsDeleted(Fixed):
     tls_policies: int
 
 
-# ---------------------------------------------------------------- domains list
-
 class RecordState(Fixed):
     checked: bool = Field(description="False when the record could not be read")
     found: bool
@@ -175,8 +163,6 @@ class DomainsList(Fixed):
     daily: List[DailyTotal] = Field(description="Messages per day across every domain in the last 30 days")
 
 
-# ---------------------------------------------------------------- DNS records
-
 class DmarcRecordCheck(BaseModel):
     """The DMARC DNS check as stored by the last DNS check, or a live one. A check stored by an older
     version may lack keys."""
@@ -209,8 +195,6 @@ class TlsRptRecordResponse(Fixed):
     domain: str
     tls_rpt_record: TlsRptRecordCheck
 
-
-# ---------------------------------------------------------------- domain overview and calendar
 
 class PublishedPolicy(Fixed):
     """From the latest report in the period, as the reporter sent it; missing tags get their default."""
@@ -272,8 +256,6 @@ class DomainCalendar(Fixed):
 
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
-
-# ---------------------------------------------------------------- DMARC reports and sources
 
 class DayReport(Fixed):
     report_id: str
@@ -409,8 +391,6 @@ class SourceDetails(_Geo):
     envelope_from_groups: List[EnvelopeGroup] = Field(description="Largest volume first")
 
 
-# ---------------------------------------------------------------- TLS reports
-
 FAILURE_DETAILS = "As the report sent them (RFC 8460 failure-details); null or empty without failures"
 MX_HOST = "As the report sent it, usually a list of host names"
 
@@ -531,8 +511,6 @@ class TlsDetails(Fixed):
     providers: List[TlsProvider]
 
 
-# ---------------------------------------------------------------- IMAP import
-
 class ImapConfiguration(Fixed):
     """All null while the import is off. The password is never returned; host, port, user and folder are
     null for a caller who may not read Settings."""
@@ -598,8 +576,6 @@ class ImapHistory(Fixed):
     pages: int = Field(description=PAGES)
     data: List[ImapHistoryRun]
 
-
-# ---------------------------------------------------------------- upload
 
 class UploadStored(Fixed):
     status: str = Field(description="success")

@@ -1,9 +1,3 @@
-"""The consent page's API and the Settings > Agents management API (/api/agents).
-
-For people only: an agent's own calls never reach these routes (they are
-excluded in scopes.py, and operator() refuses an agent call as well). The
-consent routes also need the browser session that opened the request.
-"""
 import logging
 from typing import List, Optional, Union
 
@@ -32,18 +26,11 @@ DEFAULT_PERIOD_DAYS = 7
 
 
 def operator(request: Request) -> None:
-    """A person using this app, never an agent.
-
-    The middleware already required sign-in when it is on. With sign-in off
-    nobody can approve an agent (the consent routes answer 404), but the list
-    still loads, so Settings can say what is missing.
-    """
     if agent_call(request.scope) is not None:
         raise HTTPException(status_code=403, detail="Agents cannot manage agents.")
 
 
 def periods() -> List[dict]:
-    """The periods a person can pick, up to the configured maximum."""
     out = []
     for days in PERIOD_DAYS:
         if days <= settings.agent_access_max_days:
@@ -71,8 +58,6 @@ def _who(request: Request) -> Optional[str]:
     return None
 
 
-# ── Consent ────────────────────────────────────────────────────────────────
-
 @router.get("/consent/{request_id}", dependencies=[Depends(operator)], responses=documented(m.ConsentRequest, errors={404: None}))
 def get_consent(request_id: str, request: Request):
     if not live.is_live():
@@ -87,7 +72,6 @@ def get_consent(request_id: str, request: Request):
             "publisher": entry.publisher,
             "kind": entry.client_kind,
             "redirect_uri": entry.redirect_uri or None,
-            # An agent that connects with a code: the person compares it with what the agent shows
             "user_code": entry.user_code,
         },
         "areas": [{"id": a.id, "label": a.label, "view": a.view, "act": a.act} for a in AREAS],
@@ -115,7 +99,6 @@ def answer_consent(request_id: str, answer: ConsentAnswer, request: Request, db:
     session_key = session_key_from_request(request)
     scopes = grant_scopes(answer.views, answer.acts)
     if answer.allow and not scopes and pending.get(request_id, session_key) is not None:
-        # Nothing to allow: the request stays open so the page can be fixed
         raise HTTPException(status_code=400, detail="Select View for at least one area, or choose Deny.")
     entry = pending.take(request_id, session_key)
     if entry is None:
@@ -134,7 +117,6 @@ def answer_consent(request_id: str, answer: ConsentAnswer, request: Request, db:
     days = answer.days if answer.days in allowed_days else min(DEFAULT_PERIOD_DAYS, settings.agent_access_max_days)
     name = " ".join(answer.name.split())[:100] or entry.declared_name
     if entry.device_id is not None:
-        # The agent collects its tokens with its device code (store.redeem_device_code)
         approved = store.answer_device_request(db, entry.device_id, approve=True, details={
             "display_name": name,
             "scopes": scopes,
@@ -154,13 +136,10 @@ def answer_consent(request_id: str, answer: ConsentAnswer, request: Request, db:
                                  "scopes": scopes,
                                  "days": days,
                                  "approved_by": _who(request),
-                                 # Sign-in as it was when the agent asked: any change since voids the code
                                  "sign_in": entry.sign_in,
                              })
     return {"redirect": client_redirect(entry.redirect_uri, entry.state, code=code).headers["location"]}
 
-
-# ── Management (Settings > Agents) ─────────────────────────────────────────
 
 def _grant_row(grant) -> dict:
     scopes = parse_scopes(grant.scopes)
@@ -199,7 +178,6 @@ def list_agents(db: Session = Depends(get_db)):
         "enabled": settings.agent_access_enabled,
         "url": settings.agent_access_url,
         "mcp_url": live.resource() if problem is None else None,
-        # The sentence a person pastes to an agent that runs commands (skill.py)
         "skill_sentence": skill_sentence(live.issuer()) if problem is None else None,
         "mcp_sentence": mcp_sentence(live.issuer()) if problem is None else None,
         "max_days": settings.agent_access_max_days,
@@ -212,8 +190,8 @@ def list_agents(db: Session = Depends(get_db)):
 class AgentChange(BaseModel):
     views: List[str] = Field(default_factory=list, max_length=50)
     acts: List[str] = Field(default_factory=list, max_length=50)
-    days: Optional[float] = None        # a new end, counted from now; None keeps the end
-    version: Optional[str] = Field(default=None, max_length=64)   # the copy the edit was made on
+    days: Optional[float] = None
+    version: Optional[str] = Field(default=None, max_length=64)
 
 
 @router.put("/{grant_id}", dependencies=[Depends(operator)], responses=documented(m.AgentChanged, errors={400: None, 404: None, 409: None, 422: Invalid, 500: None}))

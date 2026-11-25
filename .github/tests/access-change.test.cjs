@@ -1,7 +1,3 @@
-// The signed-in person's access as the page follows it (issue #544): a status read
-// while the page is open (the session check, a refused call) that gives other access
-// than the page was drawn with reloads the page once; a refused call (403 for lack of
-// access) is said by the shared message, and words already on screen are not shown twice.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -20,7 +16,6 @@ function stub() {
     return proxy;
 }
 
-// Just enough of an element for showToast
 function element() {
     const classes = new Set();
     return {
@@ -43,7 +38,6 @@ function load({ fetch } = {}) {
         documentElement: element(),
         body: { appendChild: el => { shown.push(el); toasts.push(el.innerHTML.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim()); } },
         createElement: () => element(),
-        // Each id its own element; the toast is the one on screen, while it is there
         getElementById: id => (id.startsWith('toast-')
             ? shown.filter(el => el.isConnected && el.id === id).pop() || null
             : (elements[id] = elements[id] || element())),
@@ -59,19 +53,16 @@ function load({ fetch } = {}) {
     const context = vm.createContext({
         document, window, history: { replaceState() {}, pushState() {} }, localStorage: stub(), navigator: stub(),
         location: win.location, console: { log() {}, error() {}, warn() {} },
-        // Timers wait in a queue; the test runs the ones of a given delay (flush)
         setTimeout: (fn, ms) => { timers.push({ fn, ms }); return timers.length; }, clearTimeout() {}, setInterval() {}, requestAnimationFrame() {},
         MutationObserver: function () { return { observe() {} }; }, appTimezone: 'UTC', fetch,
         getComputedStyle: () => ({ bottom: '18px' }),
     });
     for (const file of ['utils.js', 'router.js', 'app.js']) vm.runInContext(fs.readFileSync(path.join(frontend, file), 'utf8'), context);
-    // Runs the waiting timers of this delay (and what they start, when it has the same delay)
     const flush = ms => {
         for (let i = 0; i < timers.length; i++) {
             if (timers[i].ms === ms && !timers[i].done) { timers[i].done = true; timers[i].fn(); }
         }
     };
-    // What is on screen now, in the order shown, with each toast's id and its place from the bottom
     const visible = () => shown.filter(el => el.isConnected).map(el => ({ id: el.id, bottom: el.style.bottom || '',
         text: el.innerHTML.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim() }));
     return { run: code => vm.runInContext(code, context), toasts, reloads, flush, visible };
@@ -85,12 +76,10 @@ test('the same access, in any order, keeps the page; other access reloads it onc
     assert.equal(p.run(`appAccessCheck(${JSON.stringify({ ...VIEWER, scopes: ['messages:read', 'status:read'] })})`), false);
     assert.equal(p.run(`appAccessCheck(${JSON.stringify({ ...VIEWER, user_name: 'renamed' })})`), false);
     assert.deepEqual(p.reloads, []);
-    // An action granted: the page reloads into it, with a word first
     assert.equal(p.run(`appAccessCheck(${JSON.stringify({ ...VIEWER, scopes: [...VIEWER.scopes, 'status:write'] })})`), true);
     p.flush(1500);
     assert.equal(p.reloads.length, 1);
     assert.ok(p.toasts.some(t => t.includes('Your access changed.')));
-    // Another answer before the reload happens does not reload again
     p.run(`appAccessCheck(${JSON.stringify({ ...VIEWER, is_admin: true })})`);
     assert.equal(p.reloads.length, 1);
 });
@@ -102,12 +91,9 @@ test('a reload the person cancels (unsaved changes) is asked again by the next c
     p.run(`appAccessCheck(${other})`);
     p.flush(1500);
     assert.equal(p.reloads.length, 1);
-    // The browser asked about the unsaved changes and the person stayed: the page runs on.
-    // A check within the next seconds asks nothing more
     p.run(`appAccessCheck(${other})`);
     p.flush(1500);
     assert.equal(p.reloads.length, 1);
-    // A few seconds on (the first toast has faded by then), the next check asks again, once
     p.flush(5000);
     p.run(`document.getElementById('toast-notification').remove()`);
     p.run(`appAccessCheck(${other})`);
@@ -136,7 +122,7 @@ test('the session check and a refused call both compare the access', () => {
     const send = guard.slice(guard.indexOf('async function sessionGuardSend'), guard.indexOf('function sessionGuardHandle'));
     assert.match(send, /appAccessCheck\(body\)/);
     const app = fs.readFileSync(path.join(frontend, 'app.js'), 'utf8');
-    const refresh = app.slice(app.indexOf('async function refreshAppAccess'), app.indexOf('// Hide the tabs of features'));
+    const refresh = app.slice(app.indexOf('async function refreshAppAccess'), app.indexOf('// Hide the tabs of features that are off'));
     assert.match(refresh, /appAccessCheck\(/);
 });
 
@@ -148,7 +134,6 @@ function refusing(detail) {
 
 test('a refused call whose caller repeats the server\'s words shows one message', async () => {
     const p = load({ fetch: refusing('You do not have permission for this.') });
-    // The caller passes the server's detail through (users.js deleteUser)
     await p.run(`(async () => {
         const response = await authenticatedFetch('/api/users/1', { method: 'DELETE' });
         const body = await response.json();
@@ -181,7 +166,6 @@ test('a refusal and an unrelated error show both, also one that names 403', asyn
         '✗ You do not have permission for this.',
         '✗ Could not save the user. Try again.',
     ]);
-    // On screen: the refusal, and the latest error under it
     assert.deepEqual(p.visible().map(t => t.text), ['✗ You do not have permission for this.', '✗ Could not save the user. Try again.']);
 });
 
@@ -191,18 +175,15 @@ test('a caller\'s own words after a refusal show under it, and the refusal stays
         const response = await authenticatedFetch('/api/status/containers/x/ignore', { method: 'PUT' });
         if (!response.ok) showToast('Could not change the container: HTTP ' + response.status, 'error');
     })()`);
-    // Both on screen, the refusal first, lifted above the caller's toast (18 + 50 + 8)
     assert.deepEqual(p.visible(), [
         { id: 'toast-refusal', bottom: '76px', text: '✗ You do not have permission for this.' },
         { id: 'toast-notification', bottom: '', text: '✗ Could not change the container: HTTP 403' },
     ]);
-    // The next toast replaces the caller's one; the refusal still stays, as itself only once
     p.run(`showToast('Could not save the user. Try again.', 'error'); showToast('You do not have permission for this.', 'error')`);
     assert.deepEqual(p.visible().map(t => [t.id, t.text]), [
         ['toast-refusal', '✗ You do not have permission for this.'],
         ['toast-notification', '✗ Could not save the user. Try again.'],
     ]);
-    // Once the refusal is gone, toasts replace each other as before
     p.run(`document.getElementById('toast-refusal').remove(); showToast('Saved', 'success'); showToast('Done', 'success')`);
     assert.deepEqual(p.visible().map(t => t.text), ['✓ Done']);
 });

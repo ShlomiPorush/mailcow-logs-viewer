@@ -1,11 +1,3 @@
-"""BLACKLIST_EMAILS only removes records that involve a listed address.
-
-The Rspamd ingest used the Message-ID of any entry with a blacklisted sender
-or recipient as a deletion key and removed every correlation with that
-Message-ID, plus all Postfix logs of their queues. Message-IDs are chosen by
-the sender, so one message reusing the Message-ID of an earlier message (and
-naming one listed address) erased that earlier message from the viewer.
-"""
 import uuid
 from datetime import datetime, timedelta
 
@@ -56,7 +48,6 @@ def env(monkeypatch):
 
 
 def _seed(msgid, sender, recipient):
-    """A correlated message: its correlation plus two Postfix lines of its queue."""
     from app.database import get_db_context
     from app.models import MessageCorrelation, PostfixLog
     queue = uuid.uuid4().hex[:10].upper()
@@ -88,8 +79,8 @@ def _entry(msgid, sender, rcpts):
 
 
 @pytest.mark.parametrize('sender, rcpts', [
-    (LISTED, [f'user@{DOMAIN}']),           # forged listed envelope sender
-    (f'x@attacker-{DOMAIN}', [LISTED]),     # listed address used as a recipient
+    (LISTED, [f'user@{DOMAIN}']),
+    (f'x@attacker-{DOMAIN}', [LISTED]),
 ])
 def test_reused_message_id_does_not_erase_an_unrelated_message(env, sender, rcpts):
     from app import scheduler

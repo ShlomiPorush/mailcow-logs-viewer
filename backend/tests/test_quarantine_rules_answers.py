@@ -1,8 +1,3 @@
-"""Every answer the quarantine auto-rule calls can give, so the contract check
-(conftest.py, contract.py) holds each one to /openapi.json: rules saved, changed,
-turned off and removed, their history, a dry run, the Read-Write key missing (403),
-a database that fails (500), mailcow not answering (502) and the requests the calls
-refuse (400, 404, 422). mailcow is faked; nothing leaves the test."""
 import secrets
 import uuid
 from contextlib import contextmanager
@@ -65,7 +60,6 @@ def client(monkeypatch):
 
 @pytest.fixture
 def rows(client):
-    """The rules and history entries of this test, removed after it."""
     if not _postgres_available():
         pytest.skip('PostgreSQL not available')
     from app.models import QuarantineRule, QuarantineRuleLog
@@ -90,7 +84,6 @@ def test_rules(client, rows):
     assert c.post(BASE, json={**RULE, 'name': f'{MARK} pattern', 'match_value': r'^promo-\d+@', 'is_regex': True,
                               'notes': 'Promotions'}).status_code == 200
     assert c.get(BASE).status_code == 200
-    # Refused: unknown match type or action, a broken or nested-repetition pattern, a missing field
     for body in ({**RULE, 'match_type': 'header'}, {**RULE, 'action': 'bounce'},
                  {**RULE, 'is_regex': True, 'match_value': '(unclosed'},
                  {**RULE, 'is_regex': True, 'match_value': '(a+)+'}):
@@ -111,7 +104,6 @@ def test_rules(client, rows):
     assert c.get(f'{BASE}/logs?limit=200&rule_id=0').json()['total'] >= 1
     assert c.get(f'{BASE}/logs?limit=201').status_code == 422
     assert c.get(f'{BASE}/logs?offset=-1').status_code == 422
-    # A negative limit is refused before it reaches the database; 0 gives the count alone
     assert c.get(f'{BASE}/logs?limit=-1').status_code == 422
     counted = c.get(f'{BASE}/logs?limit=0&rule_id=0').json()
     assert counted['total'] >= 1 and counted['data'] == []

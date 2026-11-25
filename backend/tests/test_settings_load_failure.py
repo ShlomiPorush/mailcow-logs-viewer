@@ -1,10 +1,3 @@
-"""A failed read of the settings stored in the database must never turn authentication off.
-
-With SETTINGS_EDIT_VIA_UI_ENABLED=true, authentication can live only in the
-database. Reading it used to fall back to the ENV-only defaults when the
-database did not answer, and those defaults have authentication off: a short
-PostgreSQL outage during a reload opened every API route to anyone.
-"""
 import secrets
 from contextlib import contextmanager
 
@@ -28,7 +21,6 @@ def _database_down(*args, **kwargs):
 
 @pytest.fixture
 def db_only_auth(monkeypatch):
-    """Authentication configured only as database overrides, as the Settings UI stores it."""
     monkeypatch.setenv("SETTINGS_EDIT_VIA_UI_ENABLED", "true")
     for key in ("BASIC_AUTH_ENABLED", "AUTH_ENABLED", "AUTH_USERNAME", "AUTH_PASSWORD", "OAUTH2_ENABLED"):
         monkeypatch.delenv(key, raising=False)
@@ -52,15 +44,17 @@ def test_settings_api_reports_the_failure_instead_of_opening_the_api(db_only_aut
     from fastapi.testclient import TestClient
     from app.database import get_db
     from app.session import SESSION_COOKIE_NAME, auth_generation, create_session, _session_store
+    from app.user_access import oauth2_ref
 
     monkeypatch.setattr(settings_store, "get_config_overrides_from_db", _database_down)
     main.app.dependency_overrides[get_db] = lambda: object()
     try:
         client = TestClient(main.app, raise_server_exceptions=False)
-        client.cookies.set(SESSION_COOKIE_NAME, create_session({"username": "admin"}, generation=auth_generation()))
+        user_info = {"username": "admin"}
+        client.cookies.set(SESSION_COOKIE_NAME, create_session(user_info, generation=auth_generation(),
+                                                               principal=oauth2_ref(user_info)))
         assert client.get("/api/settings").status_code == 500
         client.cookies.clear()
-        # Still enforced for everyone else after the failed reload
         assert client.get("/api/settings/info").status_code == 401
     finally:
         main.app.dependency_overrides.pop(get_db, None)
@@ -69,7 +63,6 @@ def test_settings_api_reports_the_failure_instead_of_opening_the_api(db_only_aut
 
 
 def test_startup_aborts_when_stored_settings_cannot_be_read(monkeypatch):
-    """The database check passed, but the override read failed: refuse to start."""
     import asyncio
     from app import database, migrations
 
@@ -79,7 +72,6 @@ def test_startup_aborts_when_stored_settings_cannot_be_read(monkeypatch):
     monkeypatch.setattr(main, "check_db_connection", lambda: True)
     monkeypatch.setattr(main, "run_migrations", lambda: None)
     monkeypatch.setattr(migrations, "run_alembic_upgrade", lambda: None)
-    # Nothing past the settings load may run for real if startup wrongly continues
     from unittest.mock import AsyncMock
     monkeypatch.setattr(main, "is_license_configured", lambda: False)
     monkeypatch.setattr(main.mailcow_api, "test_connection", AsyncMock(return_value=False))

@@ -1,10 +1,4 @@
 #!/bin/sh
-# mailcow-logs for agents on Linux and macOS without Node: plain POSIX sh, curl and awk, nothing else.
-#
-# One of three versions with one contract (see mailcow-logs.mjs): same commands, same JSON output and error codes,
-# same files and the same lock, so they can run side by side. Tokens never appear in the output, and never on a
-# command line (other users can read those): curl reads them from its standard input.
-# R_* fields are read and written through eval (record_read, record_write).
 # shellcheck disable=SC2034
 set -u
 set -f
@@ -41,7 +35,6 @@ rand() { od -An -N"$1" -tx1 /dev/urandom | tr -d ' \n'; }
 host() { uname -n; }
 lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
 nap() { sleep "$1" 2>/dev/null || sleep 1; }
-# A message or path inside a JSON string.
 esc() { printf '%s' "$1" | tr -d '\000-\037' | sed 's/\\/\\\\/g; s/"/\\"/g'; }
 
 cleanup() {
@@ -52,7 +45,6 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 1' INT TERM HUP
 
-# fail CODE MESSAGE [BODYFILE]: prints the error and stops; a body is included when it is JSON.
 fail() {
   body=""
   st=""
@@ -65,7 +57,6 @@ fail() {
   exit 1
 }
 
-# Reading flat JSON: one string or number field; values with escapes do not match and read as empty.
 jstr() { tr -d '\r\n' <"$2" | sed -n 's/.*"'"$1"'"[[:space:]]*:[[:space:]]*"\([^"\\]*\)".*/\1/p'; }
 jnum() {
   v=$(tr -d '\r\n' <"$2" | sed -n 's/.*"'"$1"'"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p')
@@ -74,8 +65,6 @@ jnum() {
 secret_ok() { case "$1" in "" | *[!A-Za-z0-9._~+/=-]*) return 1 ;; esac }
 plain_ok() { case "$1" in *[\"\\]*) return 1 ;; esac }
 
-# json_scan MODE FILE: a small JSON reader. "failed" prints 1 when the top object says "success": false or
-# "status": "error", else 0; "kinds" prints "METHOD PATH KIND" for each object of the top object's "endpoints" list.
 json_scan() {
   tr -d '\000-\010\013\014\016-\037' <"$2" | awk -v mode="$1" '
 function value(k, kind, v) {
@@ -129,7 +118,6 @@ END {
 }'
 }
 
-# json_string FILE: the file as one JSON string.
 json_string() {
   nl=0
   [ -s "$1" ] && [ "$(tail -c1 "$1" | od -An -c | tr -d ' ')" = '\n' ] && nl=1
@@ -172,7 +160,6 @@ sha() {
   else openssl dgst -sha256 -r; fi
 }
 
-# The app's address, this agent's identity (the folder it is installed in) and where its connection is kept.
 setup() {
   command -v curl >/dev/null 2>&1 || fail missing_curl "curl is needed. Install curl, or Node 20 or later."
   raw="${URL_OPTION:-${MAILCOW_LOGS_URL:-}}"
@@ -194,7 +181,6 @@ setup() {
   if [ "$PROTO" = http ]; then
     case "$name" in 127.0.0.1 | localhost | "[::1]") ;; *) fail insecure_url "The address must start with https:// (http only for this computer)." ;; esac
   fi
-  # As a browser writes the origin: lower case, no default port.
   case "$hostpart" in *:443) [ "$PROTO" = https ] && hostpart=${hostpart%:443} ;; *:80) [ "$PROTO" = http ] && hostpart=${hostpart%:80} ;; esac
   ISSUER="$PROTO://$hostpart"
   INSTALL=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd -P) || fail failed "Cannot find the skill's folder."
@@ -228,8 +214,6 @@ setup() {
   fi
 }
 
-# This install's id, kept in the skill's folder (.install-id), so every version agrees on it however each one spells
-# the folder's path. Published in one step: written aside, then linked into place, which fails if one is there.
 install_id() {
   f="$INSTALL/.install-id"
   id=$(head -n1 "$f" 2>/dev/null | tr -d '\r')
@@ -248,11 +232,9 @@ install_id() {
   ID=$id
 }
 
-# Only this user may open the folder and its files; never loosened or fixed silently.
 check_private() {
   [ -L "$1" ] && fail insecure_credentials "$1 must be plain, not a link."
   [ -O "$1" ] || fail insecure_credentials "$1 belongs to another user. Use a folder of your own."
-  # The mode string itself is what is checked; the path is ours.
   # shellcheck disable=SC2012
   mode=$(ls -ld "$1" | cut -c5-11)
   case "$mode" in
@@ -267,7 +249,6 @@ secure_dir() {
   [ -d "$DIR" ] || fail insecure_credentials "$DIR must be a plain folder."
   check_private "$DIR"
   SECURED=1
-  # Temp files of commands that were killed (their own cleanup never ran).
   set +f
   for d in "$DIR"/.tmp.*; do
     [ -d "$d" ] || continue
@@ -278,7 +259,6 @@ secure_dir() {
   set -f
 }
 
-# A private folder for this command's temp files, inside the credentials folder (so a rename stays atomic).
 tmpdir() {
   [ -n "$TMPD" ] && return 0
   secure_dir
@@ -286,7 +266,6 @@ tmpdir() {
   mkdir "$TMPD" 2>/dev/null || fail cannot_save "Cannot write in $DIR. Allow this agent to write there."
 }
 
-# The connection: one shell variable per field, R_<name>.
 record_clear() {
   for f in $FIELDS; do
     k=${f%%:*}
@@ -295,7 +274,6 @@ record_clear() {
   R_v=1 R_issuer="$ISSUER" R_label="$LABEL"
 }
 
-# record_read: 0 when there is a record, 1 when there is none.
 record_read() {
   record_clear
   [ -e "$FILE" ] || return 1
@@ -313,7 +291,6 @@ record_read() {
   return 0
 }
 
-# write_private TARGET TEXTFILE: moves a file written in the temp folder over TARGET, in one step.
 write_private() {
   sync -- "$2" 2>/dev/null || :
   mv -f "$2" "$1" 2>/dev/null || fail cannot_save "Cannot replace $1."
@@ -340,7 +317,6 @@ record_write() {
   done
   tmpdir
   tmp="$TMPD/record.$(rand 6)"
-  # noclobber: created new, private by the umask.
   if ! (
     set -C
     printf '%s}\n' "$out" >"$tmp"
@@ -351,8 +327,6 @@ record_write() {
 }
 
 record_remove() { rm -f "$FILE" "$KINDS"; }
-
-# The lock: a file created exclusively, naming its holder. Never taken from a live holder, however old.
 
 lock_field() { printf '%s' "$1" | sed -n 's/.*"'"$2"'"[[:space:]]*:[[:space:]]*"\{0,1\}\([^",}]*\)"\{0,1\}.*/\1/p'; }
 
@@ -370,7 +344,6 @@ hook() {
 
 alive() { kill -0 "$1" 2>/dev/null; }
 
-# acquire [OWN]: takes the lock; OWN is a lock this process held before, which counts as taken if it is back in place.
 acquire() {
   own=${1:-}
   secure_dir
@@ -391,13 +364,11 @@ acquire() {
     dead=0
     if [ -e "$LOCK" ]; then
       htoken=$(lock_field "$held" token)
-      # Another process moved this one's lock away by mistake and has put it back.
       if [ -n "$own" ] && [ "$htoken" = "$own" ]; then
         LOCKTOKEN=$own
         return 0
       fi
       if [ -z "$htoken" ]; then
-        # A holder that died between creating the lock and writing its name leaves it empty; that takes a moment.
         [ -n "$(find "$LOCK" -mmin +1 2>/dev/null)" ] && dead=1
       elif [ "$(lower "$(lock_field "$held" host)")" = "$(lower "$(host)")" ] && ! alive "$(lock_field "$held" pid)"; then
         dead=1
@@ -419,8 +390,6 @@ acquire() {
   done
 }
 
-# Moving the dead lock away is atomic, so of two that try only one moves it; if what was moved is not the dead lock
-# (another process had just taken a fresh one), it goes back unless a newer one is there (ln never overwrites).
 break_lock() {
   moved="$LOCK.$(rand 6).dead"
   mv "$LOCK" "$moved" 2>/dev/null || return 0
@@ -444,13 +413,11 @@ release() {
 
 assert_mine() { mine || fail busy "Another mailcow-logs command took over this connection. Run it again."; }
 
-# Requests. http METHOD URL [SETTINGS [TIMEOUT]]: SETTINGS are more curl settings, with the secrets; curl reads them
-# from its standard input (printf is built in, so they are on no command line). Sets STATUS, CTYPE, RESP and SENT (no
-# when the name, the connection or TLS failed first, so nothing reached the app).
 http() {
   tmpdir
   RESP="$TMPD/resp.$(rand 6)"
   errf="$TMPD/err.$(rand 6)"
+  # Tokens on curl's command line would be visible to other users.
   out=$(printf 'url = "%s"\nrequest = "%s"\nheader = "Accept: application/json"\n%s\n' "$2" "$1" "${3:-}" |
     curl -q -sS -K - --proto "=$PROTO" --max-time "${4:-15}" --connect-timeout 10 -o "$RESP" -w '%{http_code} %{content_type}' 2>"$errf")
   rc=$?
@@ -465,7 +432,6 @@ http() {
   return 0
 }
 
-# oauth PATH NAME=VALUE...: a form post to the authorization server.
 oauth() {
   p=$1
   shift
@@ -483,7 +449,6 @@ http_fail() {
   fail "http_$STATUS" "$1 failed ($STATUS)." "$RESP"
 }
 
-# Reads the tokens of a 200 answer into the record variables.
 take_tokens() {
   at=$(jstr access_token "$RESP")
   rt=$(jstr refresh_token "$RESP")
@@ -517,8 +482,6 @@ print_pending() {
     "$(esc "$R_link")" "$(esc "$R_userCode")" "$left"
 }
 
-# Commands
-
 cmd_status() {
   if record_read && [ -n "$R_refreshToken" ]; then
     left=$((R_accessExpiresAt - $(now)))
@@ -533,7 +496,6 @@ cmd_status() {
 }
 
 cmd_connect() {
-  # Before any code exists: can it keep a connection here, and is the app there?
   secure_dir
   probe="$DIR/.probe-$(rand 4)"
   if ! (
@@ -552,7 +514,6 @@ cmd_connect() {
     printf '{"status":"already_connected","label":"%s","scope":"%s"}\n' "$(esc "$R_label")" "$(esc "$R_scope")"
     return 0
   fi
-  # The open code again, unless asked for a new one (--replace: the link did not work for the person).
   if [ -n "$R_deviceCode" ] && [ $((R_deviceExpiresAt - $(now))) -gt 30 ] && [ "$REPLACE" != 1 ]; then
     print_pending
     return 0
@@ -610,7 +571,6 @@ cmd_wait() {
       if [ "$STATUS" = 200 ]; then
         old=$R_refreshToken
         take_tokens
-        # Connecting again (--replace): the old connection is ended once the new one is stored.
         if [ -n "$old" ] && [ "$old" != "$R_refreshToken" ]; then R_toRevoke=$(printf '%s %s' "$R_toRevoke" "$old" | sed 's/^ *//'); fi
         clear_pending
         R_generation=$(rand 8) R_refreshStartedAt=0 R_refreshRetried=0
@@ -651,7 +611,6 @@ cmd_wait() {
 
 usable() { [ -n "$R_accessToken" ] && [ $((R_accessExpiresAt - $(now))) -gt 60 ] && [ "$R_refreshStartedAt" = 0 ]; }
 
-# access_token [STALE]: sets TOKEN to a live access token: the stored one while it lasts, else one refresh.
 access_token() {
   stale=${1:-}
   record_read || fail not_connected "Not connected. Run: mailcow-logs connect"
@@ -664,7 +623,6 @@ access_token() {
   record_read || fail not_connected "Not connected. Run: mailcow-logs connect"
   [ -n "$R_refreshToken" ] || fail not_connected "Not connected. Run: mailcow-logs connect"
   revoke_pending
-  # Another command refreshed while this one waited for the lock.
   if usable && [ "$R_accessToken" != "$stale" ]; then
     TOKEN=$R_accessToken
     release
@@ -672,12 +630,10 @@ access_token() {
   fi
   b_started=$R_refreshStartedAt
   b_retried=$R_refreshRetried
-  # A refresh that started moments ago may still be on its way (its holder lost the lock): never send it twice.
   if [ "$R_refreshStartedAt" != 0 ] && [ $(($(now) - R_refreshStartedAt)) -lt "$REFRESH_GRACE" ]; then
     fail busy "Another mailcow-logs command is refreshing this connection. Nothing was sent; run it again."
   fi
   if [ "$R_refreshStartedAt" != 0 ]; then
-    # The last refresh got no answer; trying once more either continues the connection or ends it there.
     [ "$R_refreshRetried" != 0 ] && fail connection_ended "Two refreshes got no answer, so this connection cannot be trusted. Run: mailcow-logs connect --replace"
     R_refreshRetried=1
   fi
@@ -686,7 +642,6 @@ access_token() {
   assert_mine
   hook before-refresh
   if ! oauth /oauth/token "grant_type=refresh_token" "refresh_token=$R_refreshToken" "resource=$ISSUER/api"; then
-    # Nothing left the computer: the token is as good as before.
     if [ "$SENT" = no ]; then
       R_refreshStartedAt=$b_started R_refreshRetried=$b_retried
       record_write
@@ -698,7 +653,6 @@ access_token() {
     R_refreshStartedAt=0 R_refreshRetried=0
     hook before-write
     if ! mine; then
-      # The lock was taken while this one waited for the app: keep the new tokens anyway, under a fresh lock.
       held_before=$LOCKTOKEN
       LOCKTOKEN=""
       acquire "$held_before"
@@ -709,7 +663,6 @@ access_token() {
     return 0
   fi
   if [ "$(jstr error "$RESP")" = invalid_grant ]; then
-    # An old connection still to be ended (after --replace) keeps its place until the app confirms it.
     if [ -n "$R_toRevoke" ]; then
       keep=$R_toRevoke
       name=$R_label
@@ -721,7 +674,6 @@ access_token() {
     fi
     fail connection_ended "This connection has ended (disconnected in Settings, its time ran out, sign-in settings changed, or its token was used twice). Run: mailcow-logs connect"
   fi
-  # The app answered with an error before spending the token (a 4xx); a 5xx may have come after.
   if [ "$STATUS" -lt 500 ]; then
     R_refreshStartedAt=$b_started R_refreshRetried=$b_retried
     record_write
@@ -729,13 +681,12 @@ access_token() {
   http_fail "Refreshing the connection"
 }
 
-# api_url PATH: sets URL (to send to), APATH (the path alone) and HASQ (1 when there is a query).
 api_url() {
   bad="Give a path of the API, for example: messages?limit=20 (percent-encode anything else)"
   p=$1
   case "$p" in /api/*) p=${p#/api} ;; esac
   case "$p" in "" | *://* | //* | *[!A-Za-z0-9._~!\$\&\'\(\)*+,\;=:@/?%-]*) fail bad_path "$bad" ;; esac
-  # Encoded dots too: a server or proxy that decodes them would take the token out of the API.
+  # Allowing %2e lets a server or proxy that decodes it send the token outside the API.
   case "$(lower "$p")" in *%2e*) fail bad_path "$bad" ;; esac
   case "$p" in /*) ;; *) p="/$p" ;; esac
   pathonly=${p%%\?*}
@@ -747,16 +698,12 @@ api_url() {
   case "$p" in *\?*) HASQ=1 ;; esac
 }
 
-# api_call METHOD URL TOKEN [BODYFILE]
 api_call() {
   settings=$(printf 'header = "Authorization: Bearer %s"\nheader = "X-Mailcow-Logs-Skill: %s"' "$3" "$SKILL_VERSION")
   if [ -n "${4:-}" ]; then settings=$(printf '%s\nheader = "Content-Type: application/json"\ndata-binary = "@%s"' "$settings" "$4"); fi
   http "$1" "$2" "$settings" "$API_TIMEOUT"
 }
 
-# api_send METHOD URL BODYFILE KIND: one API call with its retries. A refresh and one retry after a 401 (the server
-# checks the token before the route runs), one retry after a 429 busy (nothing started), and for a read one retry
-# after a network failure. An action is never sent again once it may have reached the app.
 api_send() {
   access_token
   refreshed=0 busied=0 netted=0
@@ -788,9 +735,6 @@ api_send() {
   done
 }
 
-# Kinds: whether a call is a read or an action, from the server's own list of this connection's calls.
-
-# kinds_lookup METHOD PATH: prints read, act, or stale (no usable list).
 kinds_lookup() {
   [ -f "$KINDS" ] || {
     printf 'stale'
@@ -819,7 +763,6 @@ NF == 3 && $1 == m && $2 ~ /^\/api\/[A-Za-z0-9._~{}:\/-]*$/ && ($3 == "read" || 
 END { if (bad || NR == 0) printf "stale"; else if (!hit) printf "act"; else if (act) printf "act"; else printf "read" }' "$KINDS"
 }
 
-# kinds_write ANSWERFILE: keeps the list of an agent/endpoints answer for this connection.
 kinds_write() {
   [ -n "$R_generation" ] || return 0
   tmpdir
@@ -831,7 +774,6 @@ kinds_write() {
   write_private "$KINDS" "$tmp"
 }
 
-# kind_of METHOD PATH: sets KIND. An endpoint the list does not hold, or no list, counts as an action.
 kind_of() {
   KIND=act
   if [ "$1" = GET ]; then
@@ -841,7 +783,7 @@ kind_of() {
   [ -n "$R_refreshToken" ] || return 0
   k=$(kinds_lookup "$1" "$2")
   if [ "$k" = stale ]; then
-    # Fetched in a subshell: a failure there leaves every call counting as an action, and stops nothing here.
+    # Without the subshell, a failed fetch of the list stops every call.
     tmpdir
     got="$TMPD/endpoints.$(rand 6)"
     (
@@ -896,7 +838,6 @@ cmd_api() {
       return 0
       ;;
   esac
-  # The app's own refusals for agents carry a code and a message: passed on as they are.
   code=$(jstr error "$RESP")
   message=$(jstr message "$RESP")
   case "$code" in "" | *[!a-z_]*) ;; *)

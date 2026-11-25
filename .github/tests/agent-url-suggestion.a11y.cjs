@@ -1,7 +1,3 @@
-// Settings > Agents > App address for agents in a real DOM (jsdom): the empty
-// field shows the suggestion, turning agent access on (or opening the form with
-// it on) makes it the value, and a typed or locked address is left alone.
-// Set A11Y_MODULES to jsdom's node_modules to run it locally (see layers.a11y.cjs).
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');

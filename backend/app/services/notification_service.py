@@ -1,9 +1,3 @@
-"""
-Unified notification dispatch - email + every enabled notification channel.
-
-One call fans out to all configured destinations. Synchronous (smtplib +
-requests) - call from a worker thread / executor, never on the event loop.
-"""
 import logging
 from typing import Dict, Optional
 
@@ -20,22 +14,6 @@ def notify(
     email_recipient: Optional[str] = None,
     alert_type: Optional[str] = None,
 ) -> Dict:
-    """
-    Send a notification by email and to every subscribed channel.
-
-    Args:
-        subject: Short title (email subject / notification title)
-        text_content: Plain-text body (used by all channels)
-        html_content: Optional HTML body (email only)
-        email_recipient: Override recipient; defaults to ADMIN_EMAIL
-        alert_type: Topic id (see notification_channels.ALERT_TYPES). Channels
-            only receive it when they subscribe to that topic; channels with no
-            subscription list receive everything.
-
-    Returns:
-        {'email': bool, 'channels_sent': int, 'channels_failed': int,
-         'channels_skipped': int}
-    """
     results = {"email": False, "channels_sent": 0, "channels_failed": 0, "channels_skipped": 0}
 
     recipient = get_notification_email(email_recipient)
@@ -54,6 +32,5 @@ def notify(
 
 
 def any_channel_configured() -> bool:
-    """True if at least one delivery path (email or a channel) is available."""
     from ..config import settings
     return bool(settings.notification_smtp_configured) or has_enabled_channels()

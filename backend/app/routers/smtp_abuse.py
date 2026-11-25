@@ -1,11 +1,3 @@
-"""
-SMTP Abuse Protection API - status, whitelist management, manual controls.
-
-Endpoints that only touch the database are plain ``def`` (FastAPI runs them in
-its threadpool); endpoints that call the mailcow API are ``async`` and keep
-their database work in worker threads. See services/smtp_abuse_service.py for
-the logic.
-"""
 import asyncio
 import logging
 import re
@@ -25,21 +17,14 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/smtp-abuse")
 
-# Bounded quantifiers keep the match linear: the original
-# ^[^@\s]+@[^@\s]+\.[^@\s]+$ let the two + classes overlap on the dot, so a
-# long non-matching local part backtracked quadratically and stalled the event
-# loop. The lengths follow RFC 5321 (64-octet local part, 63-octet labels).
 _EMAIL_RE = re.compile(r"^[^@\s]{1,64}@[^@\s.]{1,63}(?:\.[^@\s.]{1,63})+$")
 
-# RFC 5321 caps a path at 256 octets; reject longer input before matching.
 _MAX_EMAIL_LENGTH = 254
 
-# Upper bound on a bulk whitelist replace, so one request cannot pin a worker.
 _MAX_WHITELIST_ENTRIES = 5000
 
 
 def is_valid_email(value: str) -> bool:
-    """Length-capped email syntax check (single source of truth for the API)."""
     return len(value) <= _MAX_EMAIL_LENGTH and _EMAIL_RE.match(value) is not None
 
 
@@ -61,7 +46,6 @@ class WhitelistBulkRequest(BaseModel):
 
 
 def require_control_access() -> None:
-    """Write operations need the feature on and a Read-Write mailcow key."""
     if not settings.smtp_abuse_enabled:
         raise HTTPException(status_code=403, detail="Outgoing spam is off. Enable it in Security > Settings > Outgoing spam.")
     if not mailcow_api.has_rw_key:
@@ -72,15 +56,12 @@ def require_control_access() -> None:
 async def get_status(limit: int = Query(200, ge=1, le=1000)):
     """Current outbound activity, block states and whitelist."""
     try:
-        # SMTP access state per mailbox (best effort - the panel still works
-        # without it, just without the open/closed column)
         mailbox_access = {}
         try:
             for mailbox in await mailcow_api.get_mailboxes():
                 address = mailbox.get("username")
                 if not address:
                     continue
-                # Some mailcow versions nest the flags under `attributes`
                 attributes = mailbox.get("attributes") or {}
                 access = mailbox.get("smtp_access", attributes.get("smtp_access", 1))
                 mailbox_access[svc.normalize(address)] = not (
@@ -96,8 +77,6 @@ async def get_status(limit: int = Query(200, ge=1, le=1000)):
         latest_actions = await asyncio.to_thread(svc.fetch_latest_actions)
 
         whitelist = {e["email"] for e in whitelist_entries}
-        # Only mailboxes THIS system blocked count as abuse cases - an
-        # incoming-only mailbox (e.g. a DMARC report inbox) also has SMTP off.
         blocked_by_us = {
             email for email, a in latest_actions.items() if a.get("action") == "blocked"
         }
@@ -107,7 +86,6 @@ async def get_status(limit: int = Query(200, ge=1, le=1000)):
         for email in emails:
             count = counts.get(email, 0)
             smtp_open = mailbox_access.get(email, True)
-            # Hide mailboxes that simply have SMTP disabled by configuration
             if not smtp_open and email not in blocked_by_us:
                 continue
             mailboxes.append({

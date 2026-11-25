@@ -1,9 +1,3 @@
-// Unsaved changes (utils.js, router.js): a move that would drop them asks first,
-// Stay keeps the page and the address, Leave goes on; Back and Forward are undone
-// while the question is open, so the history stays as it was. Runs in a real DOM
-// (jsdom), installed by CI outside the repository; set A11Y_MODULES to run it locally:
-//   npm install --no-save --prefix /tmp/a11y jsdom axe-core
-//   A11Y_MODULES=/tmp/a11y/node_modules node --test .github/tests/unsaved.a11y.cjs
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -29,7 +23,6 @@ function app() {
     };
     run(read('utils.js'));
     run(read('router.js'));
-    // The page switch of app.js, reduced to what these tests watch
     run(`var currentTab = 'dashboard'; var switched = [];
         function switchTab(tab, params) { currentTab = tab; switched.push(tab);
             document.querySelectorAll('.ui-page').forEach(p => p.classList.toggle('hidden', p.id !== 'content-' + tab)); }
@@ -85,7 +78,7 @@ test('Back that would drop changes is undone while asking; Stay leaves the histo
     await w.navigateTo('domains');
     const length = w.history.length;
     w.uiUnsavedRegister('form', { count: () => 1, keeps: t => t.route === 'domains' });
-    const backAndUndo = popped(w, 2);   // the Back, then its undo
+    const backAndUndo = popped(w, 2);
     w.history.back();
     await backAndUndo;
     assert.equal(w.location.pathname, '/domains', 'the address is the page the user is on');
@@ -114,7 +107,7 @@ test('Back with Leave takes the same step again and opens the page', async () =>
 
 test('Back to an entry an older version wrote (no place in the history) asks too', async () => {
     const w = app();
-    w.history.replaceState({ route: 'dashboard', params: {} }, '', '/dashboard');   // as the old version wrote it
+    w.history.replaceState({ route: 'dashboard', params: {} }, '', '/dashboard');
     await w.navigateTo('domains');
     w.uiUnsavedRegister('form', { count: () => 1, keeps: t => t.route === 'domains' });
     const back = popped(w);
@@ -126,7 +119,7 @@ test('Back to an entry an older version wrote (no place in the history) asks too
     assert.equal(w.eval('currentTab'), 'domains');
     const again = popped(w);
     w.history.back();
-    await again;   // asked again: the page was written back over the entry
+    await again;
     await answer(w, true);
     await settle(w);
     assert.equal(w.eval('currentTab'), 'dashboard', 'Leave goes where Back pointed');
@@ -136,7 +129,7 @@ test('the page written back over an old entry is the level that was open', async
     const w = app();
     w.history.replaceState({ route: 'dashboard', params: {} }, '', '/dashboard');
     await w.navigateTo('dmarc');
-    w.routerPush({ route: 'dmarc', params: { domain: 'example.com' } }, '/dmarc/example.com');   // a level of the page
+    w.routerPush({ route: 'dmarc', params: { domain: 'example.com' } }, '/dmarc/example.com');
     w.uiUnsavedRegister('form', { count: () => 1, keeps: t => t.route === 'dmarc' });
     const back = popped(w);
     w.history.go(-2);

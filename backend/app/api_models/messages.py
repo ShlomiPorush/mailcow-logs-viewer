@@ -1,4 +1,3 @@
-"""What the Messages routes return (routers/messages.py)."""
 from typing import Any, Dict, List, Optional
 
 from pydantic import Field

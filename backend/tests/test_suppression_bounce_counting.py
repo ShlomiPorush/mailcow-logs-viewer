@@ -1,8 +1,3 @@
-"""Bounce detection counts every bounce once, and Count then suppress waits for
-the Suppression Soft Bounce Threshold.
-
-Detection runs every 5 minutes over the logs imported in the last 10, so each
-log line is in two runs in a row."""
 import asyncio
 from datetime import datetime, timedelta
 
@@ -34,15 +29,11 @@ def env(monkeypatch):
         'suppression_whitelist_domains': '', 'suppression_hard_bounce_action': 'suppress',
         'suppression_soft_bounce_action': 'count', 'suppression_soft_bounce_threshold': 3,
         'suppression_base_expiry_days': 7, 'suppression_max_expiry_days': 90,
-        # Soft bounces are read from the logs only while Queue Cleanup is off
         'queue_cleanup_enabled': False,
-        # The count itself: a connection timeout (4.4.1) is a standard code left
-        # alone by default (see test_bounce_code_exceptions)
         'suppression_soft_bounce_standard_codes': False,
     }.items():
         monkeypatch.setattr(settings._inner, key, value)
-    monkeypatch.setattr(sch.mailcow_api, 'headers_rw', None)   # no queue calls
-    # Spam Filter's earlier Rspamd blocks are loaded (tested in test_feature_off_data.py)
+    monkeypatch.setattr(sch.mailcow_api, 'headers_rw', None)
     from unittest.mock import AsyncMock
     monkeypatch.setattr(sch, '_spam_blocks_loaded', AsyncMock(return_value=True))
 
@@ -66,7 +57,6 @@ def env(monkeypatch):
                 db.commit()
 
         def age_logs(self, email):
-            # Time passes: these lines leave the 10-minute detection window
             with get_db_context() as db:
                 db.query(PostfixLog).filter(PostfixLog.recipient == email).update(
                     {PostfixLog.created_at: datetime.utcnow() - timedelta(minutes=30)})
@@ -90,7 +80,7 @@ def test_hard_bounce_seen_by_two_runs_counts_once(env):
     email = 'hard-once@example.com'
     env.bounce(email, '5.1.1', 1)
     env.detect()
-    env.detect()   # 5 minutes later the same line is still inside the window
+    env.detect()
     row = env.row(email)
     assert row.bounce_count == 1 and row.hard_bounce_count == 1
     assert row.expires_at < datetime.utcnow() + timedelta(days=8)
@@ -135,7 +125,6 @@ def test_a_restart_does_not_count_a_bounce_again(env):
     email = 'soft-restart@example.com'
     env.bounce(email, '4.4.1', 1)
     env.detect()
-    # A new process starts with empty memory; the line is still in the window
     if hasattr(sch, '_counted_bounce_log_ids'):
         sch._counted_bounce_log_ids.clear()
     env.detect()
@@ -153,7 +142,6 @@ def test_two_runs_at_once_count_each_bounce_once(env, monkeypatch):
     real = sch.auto_suppression_address
 
     def slow(address):
-        # Keeps the first run busy while the second one starts
         time.sleep(0.5)
         return real(address)
     monkeypatch.setattr(sch, 'auto_suppression_address', slow)

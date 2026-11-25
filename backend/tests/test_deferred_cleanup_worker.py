@@ -1,4 +1,3 @@
-"""Deferred cleanup keeps database work off the request loop."""
 import asyncio
 import secrets
 import threading
@@ -26,13 +25,10 @@ def state(monkeypatch):
     monkeypatch.setattr(type(settings._inner), "is_rspamd_configured", property(lambda self: True))
     monkeypatch.setattr(scheduler.mailcow_api, "headers_rw", {"X-API-Key": secrets.token_hex(16)})
     monkeypatch.setattr(scheduler, "update_job_status", Mock())
-    # Spam Filter's earlier Rspamd blocks are loaded (tested in test_feature_off_data.py)
     monkeypatch.setattr(scheduler, "_spam_blocks_loaded", AsyncMock(return_value=True))
-    # ...and the list may be written (tested in test_rspamd_sync_off_keeps_no_list.py)
     monkeypatch.setattr(scheduler, "_list_writable", lambda db: True)
     monkeypatch.setattr(scheduler, "record_stuck", lambda db, captured: None)
     monkeypatch.setattr(scheduler, "sync_suppressions_to_rspamd_job", AsyncMock())
-    # Every address is still blocked when its mail is deleted (checked in test_rspamd_two_way.py)
     monkeypatch.setattr(scheduler, "_blocked_now", lambda emails: set(emails))
     monkeypatch.setattr(scheduler, "_protected_now", lambda emails: set())
     old = datetime.now(timezone.utc).timestamp() - 7200
@@ -61,7 +57,6 @@ def test_cleanup_is_responsive_and_closes_before_sync(monkeypatch, state):
 
     @contextmanager
     def session():
-        # The block is stored before anything leaves the queue
         scheduler.mailcow_api.delete_queue.assert_not_awaited()
         threads.append(threading.get_ident())
         started.set()

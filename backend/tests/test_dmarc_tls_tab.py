@@ -1,6 +1,3 @@
-"""The TLS tab of the DMARC & TLS page: each domain's TLS-RPT record status in
-the domains list, and the record of one domain without the DMARC overview.
-DNS is injected; no live lookups."""
 import time
 from datetime import datetime
 
@@ -90,8 +87,6 @@ def test_the_domains_list_carries_each_domains_tls_rpt_status(seeded):
     checked, unchecked = seeded
     rows = {d['domain']: d for d in _client().get('/api/dmarc/domains').json()['domains']}
     assert rows[checked]['tls_rpt_status'] == 'warning'
-    # Not checked yet: no status rather than a guess
     assert rows[unchecked]['tls_rpt_status'] is None
-    # No TLS reports: no TLS period and no sessions
     assert rows[checked]['tls_first_report'] is None and rows[checked]['tls_last_report'] is None
     assert rows[checked]['stats_30d']['tls_sessions'] == 0

@@ -1,6 +1,3 @@
-"""
-API endpoints for system reports and summary
-"""
 import asyncio
 import logging
 from fastapi import APIRouter, HTTPException, BackgroundTasks
@@ -15,7 +12,6 @@ from ..utils import format_datetime_for_api
 from ..api_models import Invalid, documented
 from ..api_models import mailboxes as m
 
-# Import existing API functions
 from .mailbox_stats import get_mailbox_stats_summary, get_all_mailbox_stats
 from .blacklist import get_monitored_hosts
 from .status import get_mailcow_info, get_storage_status
@@ -26,7 +22,6 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 def _get_summary_statistics_worker():
-    """Materialize both database snapshots within a worker-owned session."""
     with get_db_context() as db:
         traffic = get_mailbox_stats_summary(date_range="7days", db=db)
         failures = get_all_mailbox_stats(
@@ -43,26 +38,14 @@ def _get_summary_statistics_worker():
 
 
 async def get_system_summary_data() -> Dict[str, Any]:
-    """
-    Aggregate system summary data using existing API endpoints logic
-    """
-    # 1. Traffic Stats (7 Days)
     traffic_data, top_failures_response = await asyncio.to_thread(_get_summary_statistics_worker)
     
-    # 2. System Status (Domains, Mailboxes, Aliases)
-    # Using get_mailcow_info to get Active/Total counts
     system_data = await get_mailcow_info()
     
-    # 3. Storage Status
     storage_data = await get_storage_status()
     
-    # 4. Blacklist Status
-    # get_monitored_hosts() is a sync function (FastAPI runs it in the
-    # threadpool); awaiting it directly raised TypeError and broke every
-    # weekly summary (#81). Run it off the event loop the same way.
     blacklist_data = await asyncio.to_thread(get_monitored_hosts)
     
-    # Aggregate blacklist status
     hosts = blacklist_data.get('hosts', [])
     listed_hosts = [h for h in hosts if h.get('status') == 'listed']
     blacklist_summary = {
@@ -72,20 +55,14 @@ async def get_system_summary_data() -> Dict[str, Any]:
         "hosts": hosts
     }
 
-    # 5. Top 5 Mailboxes with Failures
-    # /api/mailbox-stats/all?date_range=7days&sort_by=failure_rate&sort_order=desc&page=1&page_size=5&active_only=true&hide_zero=true
-    # Filter to only show mailboxes with combined_failed > 0
     raw_top_failures = top_failures_response.get('mailboxes', [])
     top_failures = [m for m in raw_top_failures if m.get('combined_failed', 0) > 0][:5]
     
-    # 6. DNS Issues
-    # /api/domains/all
     domains_response = await get_all_domains_with_dns()
     all_domains = domains_response.get('domains', [])
     
     issues_list = []
     for d in all_domains:
-        # Filter active domains only
         if not d.get('active'):
             continue
             
@@ -93,19 +70,16 @@ async def get_system_summary_data() -> Dict[str, Any]:
         checks = d.get('dns_checks', {}) or {}
         domain_issues = []
         
-        # SPF
         spf = checks.get('spf', {}) or {}
         if spf.get('status') == 'error' or (spf.get('valid') is False and spf.get('status') != 'warning'):
              msg = spf.get('message') or spf.get('error') or 'Invalid'
              domain_issues.append(f"SPF: {msg}")
 
-        # DKIM
         dkim = checks.get('dkim', {}) or {}
         if dkim.get('status') == 'error' or (dkim.get('match') is False and dkim.get('status') != 'warning'):
              msg = dkim.get('message') or 'Invalid'
              domain_issues.append(f"DKIM: {msg}")
              
-        # DMARC
         dmarc = checks.get('dmarc', {}) or {}
         if dmarc.get('status') == 'error':
              msg = dmarc.get('message') or 'Invalid'
@@ -117,7 +91,6 @@ async def get_system_summary_data() -> Dict[str, Any]:
                 "issues": domain_issues
             })
 
-    # 7. Queue and Quarantine
     try:
         from ..mailcow_api import mailcow_api
         queue_data, quarantine_data = await asyncio.gather(
@@ -161,12 +134,10 @@ def send_summary_report_email(
     if not settings.enable_weekly_summary and not force:
         return {"status": "skipped", "reason": "Weekly summary disabled"}
         
-    # Run in background to not block the request
     background_tasks.add_task(generate_and_send_email)
     return {"status": "queued", "message": "Weekly summary email generation started"}
 
 def _n(value) -> str:
-    """A count with thousands separators; anything else as it is."""
     return f"{value:,}" if isinstance(value, int) and not isinstance(value, bool) else str(value)
 
 
@@ -175,8 +146,6 @@ def _listed_on(host) -> List[str]:
 
 
 def _summary_window(traffic: Dict[str, Any], now: datetime) -> Tuple[datetime, datetime]:
-    """The window the traffic counts cover, as the statistics reported it;
-    the 7 days up to now when they did not."""
     try:
         return tuple(datetime.fromisoformat(traffic[key].replace('Z', '+00:00'))
                      for key in ('start_date', 'end_date'))
@@ -186,7 +155,6 @@ def _summary_window(traffic: Dict[str, Any], now: datetime) -> Tuple[datetime, d
 
 
 def build_summary_email(data: Dict[str, Any], now: datetime = None) -> Tuple[str, str, str]:
-    """Subject, plain text and HTML of the weekly summary."""
     from ..services import email_layout as e
 
     now = now or e.local_now()
@@ -200,8 +168,6 @@ def build_summary_email(data: Dict[str, Any], now: datetime = None) -> Tuple[str
     quarantine = data['quarantine']['count']
 
     start, end = _summary_window(traffic, now)
-    # The exact window the counts cover: a rolling 7 days up to when they were read.
-    # The zone is named once, or at both ends when daylight saving changed in between.
     same_zone = zone_label(start) == zone_label(end)
     period = f"{e.format_date(start, time=True, zone=not same_zone)} to {e.format_date(end, time=True)}"
     listed = [h for h in hosts if h.get('status') == 'listed']
@@ -282,16 +248,12 @@ def build_summary_email(data: Dict[str, Any], now: datetime = None) -> Tuple[str
 
 
 async def generate_and_send_email():
-    """
-    Generate and send the weekly summary email
-    """
     try:
         data = await get_system_summary_data()
         subject, text_content, html_content = build_summary_email(data)
 
         recipient = settings.admin_email
         if recipient:
-            # Send in executor - smtplib blocks the event loop
             await asyncio.get_running_loop().run_in_executor(
                 None,
                 send_notification_email,

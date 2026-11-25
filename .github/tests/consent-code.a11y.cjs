@@ -1,8 +1,3 @@
-// The approval page (authorize.html) in a real DOM (jsdom). For an agent that
-// connects with a code it shows the code to compare and the agent's own name,
-// says no "Browser returns to", and after the answer stays put: the agent
-// collects the answer itself. For an MCP app it shows where the browser goes back to.
-// Set A11Y_MODULES to jsdom's node_modules to run it locally (see layers.a11y.cjs).
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -21,7 +16,6 @@ const AREAS = [
 function page(client, answer) {
     const html = fs.readFileSync(path.join(frontend, 'authorize.html'), 'utf8')
         .replace(/<script src="\/static\/authorize\.js[^"]*"><\/script>/, '');
-    // The page's theme script asks matchMedia before anything else runs
     const beforeParse = win => { win.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} }); };
     const dom = new JSDOM(html, { runScripts: 'dangerously', pretendToBeVisual: true, beforeParse,
         url: 'https://logs.example.com/oauth/consent?request=r1' });

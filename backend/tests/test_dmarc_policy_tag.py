@@ -1,5 +1,3 @@
-"""The DMARC check reads the policy from the p tag: a search of the record for
-"p=" also finds sp=, the subdomain policy, and reported the wrong one."""
 import pytest
 
 from app.routers import domains

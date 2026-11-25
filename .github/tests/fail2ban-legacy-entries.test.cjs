@@ -1,6 +1,3 @@
-// A single IPv6 address an earlier version wrote to a Fail2ban list as /32 covers
-// the whole /32 network. The Lists tab marks such an entry and offers Repair, and
-// the Dashboard's Needs attention says so while one is left.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -9,7 +6,6 @@ const { test } = require('node:test');
 
 const frontend = path.join(__dirname, '../../frontend');
 
-// Any DOM access returns another inert stub, so a file's top-level code runs
 function stub() {
     const fn = function () { return proxy; };
     const proxy = new Proxy(fn, {
@@ -20,7 +16,6 @@ function stub() {
     return proxy;
 }
 
-// The frontend, with one element that keeps what is written into it
 function load(elementId) {
     const context = vm.createContext({
         document: stub(), window: { matchMedia: () => ({ matches: false }), addEventListener() {}, disabledFeatures: [] },
@@ -47,7 +42,6 @@ function lists(rw) {
         fail2banBlacklist = ['2001:db8::/32', '2001:db8::1/32', '2001:db8::5/128'];
         fail2banLegacy = ${JSON.stringify(LEGACY)};`, context);
     context.renderSecurityLists();
-    // One string per row: the entry, its note and its buttons
     return element.innerHTML.split('class="ui-sec-lrow"').slice(1);
 }
 
@@ -62,7 +56,6 @@ test('an entry an earlier version wrote as a /32 network is tagged with what it 
     const allowed = row('2001:db8::2/32');
     assert.match(allowed, /Exempts the whole 2001:db8::\/32 network from Fail2ban\./);
     assert.match(allowed, /securityRepairListEntry\('whitelist', '2001:db8::2\/32', this\)/);
-    // A network written on purpose and single addresses are left as they were
     for (const entry of ['2001:db8::/32', '2001:db8::5/128', '192.0.2.10']) {
         assert.doesNotMatch(row(entry), /Whole network|Repair/, entry);
     }

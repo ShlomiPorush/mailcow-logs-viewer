@@ -1,14 +1,3 @@
-"""Every answer the Suppressions calls can give, so the contract check (conftest.py,
-contract.py) holds each one to /openapi.json: the list, its counts and settings,
-entries made, changed and deleted with their block details, import and export, and
-keeping the list in step with the app's section of the Rspamd map (sync, state,
-load back, clear, start fresh). Also the list not kept (409), the map refused or
-busy (409), mailcow not confirming a save or refusing the key (502), a database
-that fails (500), and the requests the calls refuse (400, 403, 404, 422).
-
-mailcow, its queue and the Rspamd map are faked; nothing leaves the test. The map
-calls work on the whole list, so the list, its events and its spam_filter.*
-settings are put back exactly as they were."""
 import secrets
 import threading
 import types
@@ -42,7 +31,6 @@ START, END = suppressions.MANAGED_MARKER_START, suppressions.MANAGED_MARKER_END
 
 
 class _Broken:
-    """A database session whose every query fails."""
     info = {}
 
     def __enter__(self):
@@ -84,8 +72,6 @@ def _section(*lines):
 
 @pytest.fixture
 def env(monkeypatch):
-    """Suppressions and Sync with Rspamd on, the Rspamd password and Read-Write key
-    set; a fake mail queue and Rspamd map."""
     for key in ('auth_enabled', 'basic_auth_enabled', 'oauth2_enabled'):
         monkeypatch.setattr(settings._inner, key, False)
     state = {'feature': True, 'map': '', 'writes': 0, 'write_error': None, 'deleted': [],
@@ -142,9 +128,6 @@ def _wipe(db):
 
 @pytest.fixture
 def whole_list(env):
-    """The list starts empty and is put back as it was after the test: every entry,
-    its events and the spam_filter.* settings (tombstones, aliases, the Rspamd
-    target, the pending load), with their own ids. Postfix lines this test adds go."""
     if not _postgres_available():
         pytest.skip('PostgreSQL not available')
     from app.models import PostfixLog
@@ -159,7 +142,6 @@ def whole_list(env):
         _wipe(db)
         for (table, _), rows in zip(_tables(), saved):
             for row in rows:
-                # SQL NULL, not JSON null, where a JSON column was empty
                 db.execute(table.insert().values(**{key: null() if value is None else value
                                                     for key, value in row.items()}))
         db.query(PostfixLog).filter(PostfixLog.queue_id == QUEUE_ID).delete(synchronize_session=False)
@@ -167,19 +149,15 @@ def whole_list(env):
 
 
 def _pending_load(value='1'):
-    """Mark the app's Rspamd blocks as waiting to be loaded into the list."""
     from app.services.feature_data import SPAM_IMPORT_PENDING_KEY, _set_key
     with database.get_db_context() as db:
         _set_key(db, SPAM_IMPORT_PENDING_KEY, value)
         db.commit()
 
 
-# ---------------------------------------------------------------- the list
-
 def test_list_counts_and_settings(env, whole_list):
     c, _ = env
     assert c.post('/api/suppressions', json={'email': f'a-{MARK}@example.net'}).status_code == 200
-    # Not permanent: expires after the base expiry, with the time left
     temporary = c.post('/api/suppressions', json={'email': f'b-{MARK}@example.net', 'permanent': False}).json()
     assert temporary['expires_in']['days'] >= 0
     page = c.get(f'/api/suppressions?search={MARK}&active_filter=true&sort_by=email&sort_dir=asc&per_page=1')
@@ -199,7 +177,6 @@ def test_entries_and_block_details(env, whole_list):
                           queue_id=QUEUE_ID, recipient=RCPT, status='deferred', dsn='4.4.1', created_at=now,
                           message=f'to=<{RCPT}>, status=deferred (connect to mx.example.net: timed out)'))
         db.commit()
-    # Made from a queued message: its details stay with the block, and the message leaves the queue
     made = c.post('/api/suppressions', json={'email': RCPT, 'reason': 'hard_bounce', 'notes': 'From the queue',
                                              'queue_id': QUEUE_ID})
     assert made.status_code == 200 and state['deleted'] == [QUEUE_ID]
@@ -220,7 +197,6 @@ def test_entries_and_block_details(env, whole_list):
     assert c.put(f'/api/suppressions/{entry_id}', json={'expires_at': 'soon'}).status_code == 400
     assert c.put('/api/suppressions/0', json={'active': True}).status_code == 404
     assert c.put('/api/suppressions/x', json={}).status_code == 422
-    # Made again: the inactive entry comes back
     assert c.post('/api/suppressions', json={'email': RCPT}).json()['id'] == entry_id
 
     assert c.get(f'/api/suppressions/{entry_id}/events?page=2').json()['events'] == []
@@ -240,7 +216,6 @@ def test_changes_are_refused_while_the_list_is_not_kept(env, whole_list, monkeyp
                c.delete('/api/suppressions/1'),
                c.post('/api/suppressions/import', files={'file': ('list.csv', b'email\nx@example.net\n')})]
     assert [(r.status_code, r.json()['detail']['code']) for r in refused] == [(409, 'sync_off')] * 4
-    # After a change on the page nothing is done; asked for, the sync is refused
     assert c.post('/api/suppressions/sync?after_change=true').json() == {
         'success': True, 'written': False, 'skipped_off': True}
     asked = c.post('/api/suppressions/sync')
@@ -256,7 +231,6 @@ def test_import_and_export(env, whole_list, monkeypatch):
     assert (answer['imported'], answer['skipped'], len(answer['errors'])) == (1, 1, 1)
     assert c.post('/api/suppressions/import', files={'file': ('list.txt', csv)}).status_code == 400
     assert c.post('/api/suppressions/import').status_code == 422
-    # A file that is not UTF-8 is refused before the list is locked
     def no_lock(db):
         raise AssertionError('the list is locked for a file that cannot be read')
     with monkeypatch.context() as patched:
@@ -267,8 +241,6 @@ def test_import_and_export(env, whole_list, monkeypatch):
     assert export.status_code == 200 and export.headers['content-type'].startswith('text/csv')
     assert f'd-{MARK}@example.net' in export.text
 
-
-# ---------------------------------------------------------------- Rspamd
 
 def test_sync_and_state(env, whole_list, monkeypatch):
     c, state = env
@@ -282,7 +254,6 @@ def test_sync_and_state(env, whole_list, monkeypatch):
     assert c.get('/api/suppressions/rspamd/state?check_map=x').status_code == 422
     assert c.post('/api/suppressions/sync?after_change=x').status_code == 422
 
-    # Without the Read-Write key: after a change the map is only read; asked for, refused
     monkeypatch.setattr(mailcow_api, 'headers_rw', None)
     read_only = c.post('/api/suppressions/sync?after_change=true').json()
     assert read_only['skipped_off'] is True and 'pending_count' in read_only
@@ -290,7 +261,6 @@ def test_sync_and_state(env, whole_list, monkeypatch):
     assert c.get('/api/suppressions/rspamd/state').json()['reason'] == 'no_rw_key'
     monkeypatch.setattr(mailcow_api, 'headers_rw', {'X-API-Key': secrets.token_hex(16)})
 
-    # mailcow does not confirm the save, or refuses the key: the read already changed nothing
     c.post('/api/suppressions', json={'email': f'e-{MARK}@example.net'})
     state['write_error'] = MailcowAPIError('mailcow did not save the map')
     lost = c.post('/api/suppressions/sync')
@@ -299,7 +269,6 @@ def test_sync_and_state(env, whole_list, monkeypatch):
     assert c.post('/api/suppressions/sync').json()['detail']['code'] == 'rejected_rw_key'
     state['write_error'] = None
 
-    # Markers that do not make one section: nothing is read in or written
     kept = state['map']
     state['map'] = f'{START}\n/^x@example\\.net$/i\n'
     unclear = c.post('/api/suppressions/sync')
@@ -314,7 +283,6 @@ def test_sync_and_state(env, whole_list, monkeypatch):
 
 def test_clear_and_start_fresh(env, whole_list, monkeypatch):
     c, state = env
-    # Only while the list is not kept
     for path in ('/api/suppressions/rspamd/clear', '/api/suppressions/start-fresh'):
         refused = c.post(path)
         assert refused.status_code == 409 and refused.json()['detail']['code'] == 'sync_on'
@@ -362,7 +330,6 @@ def test_load_back_from_rspamd(env, whole_list, monkeypatch):
     unclear = c.post('/api/suppressions/rspamd/import')
     assert unclear.status_code == 409 and unclear.json()['detail']['code'] == 'section_unclear'
 
-    # Another map write still running
     monkeypatch.setattr(rspamd_map_lock, 'WAIT_SECONDS', 0.05)
     holder_has_it, done = threading.Event(), threading.Event()
 
@@ -383,8 +350,6 @@ def test_load_back_from_rspamd(env, whole_list, monkeypatch):
 
 
 def test_rspamd_answers_a_page_in_place_of_its_map_list(env, whole_list, monkeypatch):
-    """Through mailcow's own lookup of the map: the page is a map that cannot be
-    read (409 read_failed), and nothing is written."""
     c, state = env
     monkeypatch.setattr(mailcow_api, 'find_rspamd_map_id',
                         types.MethodType(type(mailcow_api).find_rspamd_map_id, mailcow_api))
@@ -406,8 +371,6 @@ def test_rspamd_answers_a_page_in_place_of_its_map_list(env, whole_list, monkeyp
     assert state['writes'] == 0
 
 
-# ---------------------------------------------------------------- a database that fails
-
 def test_suppressions_when_the_database_fails(env, monkeypatch):
     c, _ = env
     app.dependency_overrides[get_db] = _broken_session
@@ -416,11 +379,9 @@ def test_suppressions_when_the_database_fails(env, monkeypatch):
         assert c.get(path).status_code == 500, path
     assert c.put('/api/suppressions/1', json={'active': False}).status_code == 500
     assert c.delete('/api/suppressions/1').status_code == 500
-    # Making and importing open sessions of their own
     monkeypatch.setattr(suppressions, 'SessionLocal', _Broken)
     assert c.post('/api/suppressions', json={'email': RCPT}).status_code == 500
     assert c.post('/api/suppressions/import', files={'file': ('list.csv', b'email\nx@example.net\n')}).status_code == 500
-    # The map calls too
     monkeypatch.setattr(suppressions, 'get_db_context', _broken_context)
     assert c.get('/api/suppressions/rspamd/state').status_code == 500
     assert c.post('/api/suppressions/sync').status_code == 500

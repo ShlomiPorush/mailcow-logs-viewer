@@ -1,7 +1,3 @@
-"""Raw log collection is separate from the Logs page: the services other pages
-read from the raw log table (Dovecot for message details and the breach alert,
-Ratelimited for Rate Limits, SOGo for Devices) keep being collected and kept
-when the Logs page is off or the service is unticked there."""
 import asyncio
 import hashlib
 from datetime import datetime
@@ -59,7 +55,6 @@ def test_the_worker_fetches_them_with_the_logs_page_off_and_streams_none(logs_pa
     monkeypatch.setattr(raw_logs_worker, '_collect_service', collect)
     monkeypatch.setattr(raw_logs_worker, '_ws_broadcast_fn', broadcast)
     monkeypatch.setattr(raw_logs_worker, '_ws_broadcast_all_fn', None)
-    monkeypatch.setattr(raw_logs_worker, '_unavailable_services', set())
     asyncio.run(raw_logs_worker.fetch_raw_service_logs())
     assert fetched == ['dovecot', 'ratelimited', 'sogo']
     assert streamed == []

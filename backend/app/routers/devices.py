@@ -1,7 +1,3 @@
-"""
-ActiveSync devices for the Devices page, recorded from SOGo's access log by
-the eas_devices job (services/eas_devices.py).
-"""
 import logging
 import math
 from datetime import datetime, timedelta
@@ -25,8 +21,6 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-# A Ping can hold the connection for up to an hour before SOGo logs it, so
-# "recent" has to be wider than that to mean "this phone is connected"
 RECENT_HOURS = 24
 NEW_DAYS = 7
 STALE_DAYS = 30
@@ -47,8 +41,6 @@ def _like(term: str) -> str:
 
 
 def _location(ip: Optional[str], geoip: bool) -> dict:
-    """Country, city and network of the last IP, looked up when the page is
-    read so a newer GeoIP database applies to every device."""
     geo = geoip_service.lookup_ip(ip) if (geoip and ip) else {}
     return {key: geo.get(key) for key in ('country_code', 'country_name', 'city', 'asn', 'asn_org')}
 

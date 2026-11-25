@@ -1,4 +1,3 @@
-"""Lifecycle-owned reclamation of expired in-memory authentication records."""
 import asyncio
 import logging
 import time
@@ -11,7 +10,6 @@ from ..agent_access import mcp as agent_mcp, oauth as agent_oauth
 
 logger = logging.getLogger(__name__)
 CLEANUP_INTERVAL_SECONDS = 60
-# Agent access rows (old codes, ended grants, old activity) are tidied less often
 AGENT_DB_CLEANUP_SECONDS = 600
 
 

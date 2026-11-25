@@ -1,6 +1,3 @@
-// Settings that do nothing while their feature's switch is off are greyed out and
-// cannot be edited until it is on (settingsShowNeeds): OAuth2 under its switch,
-// SMTP under Enable SMTP, and the Outgoing spam limit and response under its own.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -38,7 +35,6 @@ test('the OAuth2 settings need OAuth2 on', () => {
     for (const label of ['Endpoint discovery', 'Manual endpoints', 'Provider credentials']) {
         assert.equal(needsOf('auth', label), 'oauth2_enabled', label);
     }
-    // The provider name shares a group with the switch itself, so it says so on its own
     assert.equal(vm.runInContext('SETTINGS_FIELD_NEEDS', context).oauth2_provider_name, 'oauth2_enabled');
 });
 

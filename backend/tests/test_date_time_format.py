@@ -1,14 +1,3 @@
-"""How dates and times are written: Settings > Application > Time.
-
-The browser writes the dates on the screen (utils.js); the server writes the
-ones it sends itself: the date in every email, the weekly summary's window and
-the clock-time jobs. "browser" leaves the order to the browser; the server has
-no browser, so it then writes DD/MM/YYYY as emails always did. Times default to
-the 24-hour clock, as every time was written before the setting.
-
-An unknown value never stops the app (it falls back to the default); a new
-unknown value is refused on save.
-"""
 from datetime import datetime, timezone
 
 import pytest
@@ -19,7 +8,7 @@ from app.app_time import (DATE_FORMATS, TIME_FORMATS, display_formats, format_cl
                           normalize_date_format, normalize_time_format)
 from app.config import EDITABLE_SETTING_KEYS, Settings, get_env_locked_keys
 from app.services import email_layout as e
-from test_app_time_zone_settings import _put, jobs, store  # noqa: F401  (fixtures)
+from test_app_time_zone_settings import _put, jobs, store  # noqa: F401
 
 WINTER = datetime(2026, 1, 15, 12, 5, tzinfo=timezone.utc)
 
@@ -96,7 +85,6 @@ def test_the_weekly_summary_window_follows_the_setting(formats):
     data = _summary_data()
     data["traffic"].update(start_date="2026-10-19T07:00:00Z", end_date="2026-10-26T08:00:00Z")
     subject, text, html = build_summary_email(data, now=datetime(2026, 10, 26, 8, 0, tzinfo=timezone.utc))
-    # The window crosses the end of summer time: each end keeps its own zone
     assert subject == "Weekly summary: 2026-10-19 9:00 AM CEST to 2026-10-26 9:00 AM CET"
     assert "2026-10-19 9:00 AM CEST to 2026-10-26 9:00 AM CET." in text
     assert "2026-10-19 9:00 AM CEST to 2026-10-26 9:00 AM CET" in html
@@ -116,8 +104,6 @@ def test_api_info_reports_the_formats(formats):
     formats("DD.MM.YYYY", "12h")
     assert display_formats() == {"date_format": "DD.MM.YYYY", "time_format": "12h"}
 
-
-# Saving, and values from the environment or the database
 
 def test_saving_known_formats_stores_them(store):
     result = _put({"date_format": "yyyy-mm-dd", "time_format": "12H"})
@@ -162,7 +148,6 @@ def test_env_wins_and_locks_the_fields(store, monkeypatch):
     assert {"date_format", "time_format"} <= get_env_locked_keys()
     assert display_formats() == {"date_format": "DD.MM.YYYY", "time_format": "24h"}
 
-    # Without the environment the stored choice is back
     monkeypatch.delenv("DATE_FORMAT")
     monkeypatch.delenv("TIME_FORMAT")
     cfg.reload_settings(object())
@@ -180,8 +165,6 @@ def test_an_empty_env_value_locks_the_fields_at_the_defaults(store, monkeypatch)
 
 
 def test_an_unknown_format_in_env_never_stops_the_app(monkeypatch):
-    """Settings() is built at import and at every reload: an unknown value
-    there must fall back, not raise, or the app would not start."""
     monkeypatch.setenv("DATE_FORMAT", "DD-MM-YY")
     monkeypatch.setenv("TIME_FORMAT", "am/pm")
     monkeypatch.setenv("SETTINGS_EDIT_VIA_UI_ENABLED", "false")
@@ -197,8 +180,6 @@ def test_the_formats_cover_what_the_page_offers():
     assert TIME_FORMATS == ("24h", "12h", "browser")
 
 
-# What the page reads
-
 def test_api_info_sends_the_formats_to_the_page(jobs, monkeypatch):
     from fastapi.testclient import TestClient
     from app.main import app
@@ -210,8 +191,6 @@ def test_api_info_sends_the_formats_to_the_page(jobs, monkeypatch):
     config = TestClient(app).get("/api/settings/info").json()["configuration"]
     assert (config["date_format"], config["time_format"]) == ("DD.MM.YYYY", "12h")
 
-
-# The jobs list
 
 def test_clock_time_jobs_follow_the_time_setting_and_give_their_parts(jobs, monkeypatch):
     monkeypatch.setattr(cfg.settings._inner, "time_format", "12h")
@@ -225,5 +204,4 @@ def test_clock_time_jobs_follow_the_time_setting_and_give_their_parts(jobs, monk
         "hour": 9, "minute": 0, "weekday": "Monday", "zone": "Europe/Berlin"}
     assert body["cleanup_dmarc_reports"]["clock"] == {
         "hour": 2, "minute": 15, "weekday": None, "zone": "Europe/Berlin"}
-    # A job with no clock time has no parts
     assert "clock" not in body["fetch_logs"]

@@ -1,4 +1,3 @@
-"""Migration 0028 (users): safe on a fresh database, after the start's create_all, and on a half-made table."""
 import importlib.util
 import pathlib
 import uuid
@@ -65,25 +64,20 @@ def _assert_complete(engine):
     with engine.begin() as conn:
         conn.execute(text("INSERT INTO users (kind, username, username_norm, password_hash, access, scopes, "
                           "created_at, updated_at) VALUES ('local', 'Alice', 'alice', 'h', 'viewer', '', now(), now())"))
-        # The same name is unique among local users only
         conn.execute(text("INSERT INTO users (kind, email, email_norm, access, scopes, created_at, updated_at) "
                           "VALUES ('oauth2', 'alice', 'alice', 'viewer', '', now(), now())"))
         row = conn.execute(text("SELECT disabled, auth_version, row_version FROM users WHERE kind = 'local'")).one()
         assert tuple(row) == (False, 1, 1)
     for bad in (
-        # A second local user with the same name
         "INSERT INTO users (kind, username, username_norm, password_hash, access, scopes, created_at, updated_at) "
         "VALUES ('local', 'ALICE', 'alice', 'h', 'viewer', '', now(), now())",
-        # A local user without a password, or with an email
         "INSERT INTO users (kind, username_norm, access, scopes, created_at, updated_at) "
         "VALUES ('local', 'bob', 'viewer', '', now(), now())",
         "INSERT INTO users (kind, username_norm, password_hash, email, access, scopes, created_at, updated_at) "
         "VALUES ('local', 'bob', 'h', 'bob@example.com', 'viewer', '', now(), now())",
-        # An OAuth2 entry with a password, or without an email
         "INSERT INTO users (kind, email_norm, password_hash, access, scopes, created_at, updated_at) "
         "VALUES ('oauth2', 'bob@example.com', 'h', 'viewer', '', now(), now())",
         "INSERT INTO users (kind, access, scopes, created_at, updated_at) VALUES ('oauth2', 'viewer', '', now(), now())",
-        # Unknown kind or access
         "INSERT INTO users (kind, email_norm, access, scopes, created_at, updated_at) "
         "VALUES ('ldap', 'x@example.com', 'viewer', '', now(), now())",
         "INSERT INTO users (kind, email_norm, access, scopes, created_at, updated_at) "

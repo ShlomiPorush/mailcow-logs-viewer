@@ -1,10 +1,3 @@
-"""The address settings take several addresses.
-
-ADMIN_EMAIL, BLACKLIST_ALERT_EMAIL and DMARC_ERROR_EMAIL were passed to the
-mail server as one address, so "a@example.com, b@example.com" was refused
-(501 Bad recipient address syntax) and no notification arrived at all,
-while Settings saved the value without a word.
-"""
 import email
 
 import pytest

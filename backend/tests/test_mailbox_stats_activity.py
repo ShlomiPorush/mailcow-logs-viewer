@@ -1,9 +1,3 @@
-"""Each mailbox on the Mailbox Stats page carries its activity over the range.
-
-The small chart beside a mailbox and the window it opens draw the messages it
-sent and received per day (per hour for Today), its aliases included, and
-must add up to the totals shown beside them.
-"""
 import uuid
 from datetime import datetime, timedelta
 
@@ -32,7 +26,6 @@ def _postgres_available() -> bool:
 def _cleanup():
     from app.database import get_db_context
     from app.models import AliasStatistics, MailboxStatistics, MessageCorrelation
-    from app.routers.mailbox_stats import clear_stats_cache
     with get_db_context() as db:
         db.query(MessageCorrelation).filter(
             MessageCorrelation.correlation_key.like(f'%{MARK}')
@@ -42,7 +35,6 @@ def _cleanup():
         db.query(MailboxStatistics).filter(
             MailboxStatistics.domain == DOMAIN).delete(synchronize_session=False)
         db.commit()
-    clear_stats_cache()
 
 
 @pytest.fixture()
@@ -77,8 +69,7 @@ def _leg(sender, recipient, when, direction):
 
 def _page(date_range, start_date=None, end_date=None):
     from app.database import get_db_context
-    from app.routers.mailbox_stats import clear_stats_cache, get_all_mailbox_stats
-    clear_stats_cache()
+    from app.routers.mailbox_stats import get_all_mailbox_stats
     with get_db_context() as db:
         payload = get_all_mailbox_stats(
             domain=DOMAIN, active_only=False, hide_zero=False, search=None,
@@ -124,12 +115,10 @@ def test_today_is_drawn_by_the_hour(env):
 
 
 def test_the_repeated_hour_at_the_end_of_daylight_saving_is_two_slots(env, monkeypatch):
-    """Europe/Berlin goes through 02:00-03:00 twice on 2026-10-25. A message in
-    each pass lands in its own slot, each slot named by the UTC instant it starts at."""
     from app.config import settings
     monkeypatch.setattr(settings._inner, 'tz', 'Europe/Berlin')
-    _leg(USER, REMOTE, datetime(2026, 10, 25, 0, 30), 'outbound')  # 02:30 CEST
-    _leg(USER, REMOTE, datetime(2026, 10, 25, 1, 30), 'outbound')  # 02:30 CET
+    _leg(USER, REMOTE, datetime(2026, 10, 25, 0, 30), 'outbound')
+    _leg(USER, REMOTE, datetime(2026, 10, 25, 1, 30), 'outbound')
     payload = _page('custom', '2026-10-25', '2026-10-25')
     assert payload['activity_unit'] == 'hour'
     buckets = payload['activity_buckets']

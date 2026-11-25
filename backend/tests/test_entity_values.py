@@ -1,19 +1,15 @@
-"""The one reading of an IP address, an email address and a domain that the
-entity card, the watchlist and the search share (services/entity_values.py)."""
 import pytest
 
 from app.services import entity_values as ev
 from app.services.entity_values import InvalidValue
 
 
-# ---------------------------------------------------------------- IP
-
 @pytest.mark.parametrize("given,expected", [
     ("203.0.113.4", "203.0.113.4"),
     ("  203.0.113.4\n", "203.0.113.4"),
     ("2001:DB8:0:0:0:0:0:1", "2001:db8::1"),
     ("2001:0db8:0000:0000:0000:ff00:0042:8329", "2001:db8::ff00:42:8329"),
-    ("::ffff:203.0.113.4", "203.0.113.4"),          # an IPv4 client seen over IPv6 is the IPv4 address
+    ("::ffff:203.0.113.4", "203.0.113.4"),
     ("::1", "::1"),
 ])
 def test_ip_is_written_canonically(given, expected):
@@ -26,7 +22,7 @@ def test_ip_is_written_canonically(given, expected):
     ("203.0.113.4/32", "not a network"),
     ("2001:db8::/64", "not a network"),
     ("203.0.113.256", "one IP address"),
-    ("203.0.113.04", "one IP address"),               # a leading zero is refused by ipaddress
+    ("203.0.113.04", "one IP address"),
     ("example.com", "one IP address"),
     ("203.0.113.4 203.0.113.5", "without spaces"),
     ("203.0.113.4\x00", "without spaces"),
@@ -76,14 +72,12 @@ def test_spellings_of_typed_ip():
     assert ev.spellings_of_typed_ip("not-an-ip ") == ["not-an-ip"]
 
 
-# ---------------------------------------------------------------- address
-
 @pytest.mark.parametrize("given,expected", [
     ("Ann@Example.COM", "ann@example.com"),
     ("ann+news@example.com", "ann+news@example.com"),
     ("a/b@example.com", "a/b@example.com"),
     ('"ann"@example.com', '"ann"@example.com'),
-    ('"a@b"@example.com', '"a@b"@example.com'),          # split on the last @
+    ('"a@b"@example.com', '"a@b"@example.com'),
     ("o'brien@example.com", "o'brien@example.com"),
     ("ann_100%@example.com", "ann_100%@example.com"),
     ("ann@example.com.", "ann@example.com"),
@@ -108,7 +102,7 @@ def test_address_refuses_what_is_not_one_address(given):
 
 def test_address_length_limit_is_254():
     local = "a" * 64
-    domain = ".".join(["b" * 61] * 3) + ".com"      # 189 characters
+    domain = ".".join(["b" * 61] * 3) + ".com"
     assert len(f"{local}@{domain}") == 254
     assert ev.normalize_address(f"{local}@{domain}")[0] == f"{local}@{domain}"
     with pytest.raises(InvalidValue) as e:
@@ -120,8 +114,6 @@ def test_address_forms_hold_both_forms_of_an_idn_domain():
     assert ev.address_forms("ann@xn--bcher-kva.example") == ["ann@xn--bcher-kva.example", "ann@bücher.example"]
     assert ev.address_forms("ann@example.com") == ["ann@example.com"]
 
-
-# ---------------------------------------------------------------- domain
 
 @pytest.mark.parametrize("given,expected", [
     ("Example.COM", "example.com"),
@@ -148,8 +140,6 @@ def test_domain_forms():
     assert ev.domain_forms("xn--bcher-kva.example") == ["xn--bcher-kva.example", "bücher.example"]
 
 
-# ---------------------------------------------------------------- detect_kind
-
 @pytest.mark.parametrize("given,kind", [
     ("203.0.113.4", "ip"), ("2001:db8::1", "ip"), ("ann@example.com", "address"),
     ("example.com", "domain"), ("Bücher.example", "domain"), ("203.0.113.0/24", None),
@@ -158,8 +148,6 @@ def test_domain_forms():
 def test_detect_kind(given, kind):
     assert ev.detect_kind(given) == kind
 
-
-# ---------------------------------------------------------------- Fail2ban list entry
 
 @pytest.mark.parametrize("value", ["203.0.113.4", "203.0.113.4/32", "198.51.100.0/24", "198.51.100.7/24",
                                    "2001:db8::7", "2001:db8::7/128", "2001:db8::/48"])

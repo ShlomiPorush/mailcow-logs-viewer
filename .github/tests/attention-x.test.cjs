@@ -1,8 +1,3 @@
-// Needs attention alerts (app.js attentionAlertRows) are dismissed with an X, the row's
-// last child after its buttons, on the Dashboard and in the bell (a touch swipe
-// does the same, attention-swipe.a11y.cjs). The bell's rows have no buttons under
-// them (alerts and checks); the Dashboard keeps its action buttons. Checks cannot be
-// dismissed and get no X.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -55,9 +50,6 @@ test('each alert has one X, the row\'s last child after its buttons, and no Dism
             assert.match(x[0], /title="Dismiss alert"/);
             assert.match(x[0], /aria-label="Dismiss alert"/);
             assert.match(x[0], /data-acts="alerts \w+"/);
-            // Not in the title line: the row's last child, after the text and the buttons, so on
-            // a wide Dashboard it ends the row after the button and the keyboard meets them in
-            // that order (D16); the row can be swiped
             const title = row.slice(row.indexOf('<div class="ui-alert-title">'), row.indexOf('</div>', row.indexOf('<div class="ui-alert-title">')));
             assert.doesNotMatch(title, /ui-alert-x/, `${where} ${id}`);
             assert.match(row, /<\/div>\s*(?:<div class="ui-alert-acts">[\s\S]*?<\/div>\s*)?<button[^>]*ui-alert-x[^>]*>[\s\S]*?<\/button>\s*<\/div>\s*$/, `${where} ${id}`);
@@ -75,7 +67,6 @@ test('the bell has no buttons under its rows; the Dashboard keeps them', () => {
     const bell = c.attentionAlertRows('bell') + c.attentionCheckRows('bell');
     assert.doesNotMatch(bell, /class="ui-btn/);
     assert.doesNotMatch(bell, /ui-alert-acts/);
-    // A row that opens something on a click still does
     assert.match(bell, /onclick="if \(uiAlertRowClick\(event\)\) \{ attnBellOpen\(\); openAlertActivity\(1\) \}"/);
     assert.match(bell, /onclick="if \(uiAlertRowClick\(event\)\) \{ openStoredAlert\(2, 'bell'\) \}"/);
     assert.match(bell, /onclick="if \(uiAlertRowClick\(event\)\) \{ attnBellOpen\(\); showAppUpdateModal\(\) \}"/);
@@ -85,7 +76,6 @@ test('the bell has no buttons under its rows; the Dashboard keeps them', () => {
     assert.match(dashboard, /<div class="ui-alert-acts"><button[^>]*openStoredAlert\(2, 'page'\)[^>]*>Open domain<\/button><\/div>/);
     assert.match(dashboard, />Read changes<\/button>/);
     assert.match(dashboard, />Check listing<\/button>/);
-    // An alert with no way on has no empty row of actions
     assert.equal(rows(c.attentionAlertRows('dashboard'))[2].includes('ui-alert-acts'), false);
 });
 
@@ -102,10 +92,8 @@ test('the X keeps its icon while busy: Dismiss passes no busy text', () => {
 
 test('the X sits in the row\'s top corner at the small icon button size, also in the grid rows', () => {
     const css = fs.readFileSync(path.join(frontend, 'assets/css/ui.css'), 'utf8');
-    // Two classes, so it wins over .ui-icon-btn (34px) that comes later in the file
     assert.ok(css.includes('.ui-alert > .ui-alert-x { width: 24px; height: 24px; flex: none; align-self: flex-start;'));
     assert.ok(css.includes('.ui-alert > .ui-alert-x svg { width: 14px; height: 14px; }'));
-    // The bell and a phone's Dashboard: the X in a second column, beside the title
     const lists = ':is(#dashboard-attention-panel, .ui-attn-win, #attn-sheet)';
     assert.ok(css.includes(`${lists} .ui-alert:has(> .ui-alert-x) { grid-template-columns: minmax(0, 1fr) auto;`));
     assert.ok(css.includes(`${lists} .ui-alert:has(> .ui-alert-x) > :not(.ui-alert-x) { grid-column: 1; }`));

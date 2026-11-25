@@ -1,8 +1,3 @@
-"""History and Hits only record what mailcow actually did.
-
-mailcow answers HTTP 200 also when it refuses an item, with an entry of type
-"danger" in the reply, and reports each item it handled with its own
-"success" entry naming the item."""
 import asyncio
 import secrets
 from contextlib import contextmanager
@@ -31,7 +26,6 @@ def state(monkeypatch):
     db = MagicMock()
 
     def where(*criteria):
-        # QuarantineRule.id == rule_id: answer with that rule
         query = Mock()
         query.all.return_value = [allow, deny]
         value = getattr(getattr(criteria[0], 'right', None), 'value', None)
@@ -50,7 +44,6 @@ def state(monkeypatch):
     monkeypatch.setattr(scheduler.mailcow_api, "get_quarantine", AsyncMock(return_value=items))
 
     def answer(done):
-        # One success entry per item mailcow handled
         async def call(ids):
             return [{"type": "success", "log": [], "msg": [done, i]} for i in ids]
         return AsyncMock(side_effect=call)
@@ -116,14 +109,12 @@ def test_mixed_batch_records_only_the_items_mailcow_handled(state):
 
 
 def test_success_that_names_no_item_records_the_whole_batch(state):
-    # Without item names, only an all-success reply counts
     _reply(scheduler.mailcow_api.release_quarantine, [{"type": "success", "log": [], "msg": "Released"}])
     asyncio.run(scheduler.process_quarantine_rules_job())
     assert sorted(_logged(state.db)) == [("DEL1", "delete"), ("REL1", "release")]
 
 
 def test_success_that_names_other_things_records_the_whole_batch(state):
-    # Another reply format must not stop History for good
     _reply(scheduler.mailcow_api.release_quarantine, [{"type": "success", "log": [], "msg": ["released", "1 item"]}])
     asyncio.run(scheduler.process_quarantine_rules_job())
     assert sorted(_logged(state.db)) == [("DEL1", "delete"), ("REL1", "release")]
@@ -139,8 +130,6 @@ def test_empty_or_unexpected_reply_is_not_recorded(state):
 
 
 def test_a_release_mailcow_did_not_confirm_fails_the_run(state):
-    """mailcow may still be sending: the run says so instead of success, and the
-    delete that mailcow confirmed is still recorded."""
     from app.mailcow_api import MailcowWriteUnknownError
     scheduler.mailcow_api.release_quarantine.side_effect = MailcowWriteUnknownError("read timeout")
     asyncio.run(scheduler.process_quarantine_rules_job())

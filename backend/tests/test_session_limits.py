@@ -1,11 +1,3 @@
-"""The two limits of a browser session: the longest session, counted from
-sign-in, and sign-out after inactivity, counted from the last interaction the
-page reported. Both apply to Basic Auth and OAuth2 sessions alike; the server
-record alone decides, and a session that ended stays ended.
-
-The real settings save and reload run here (test_session_revocation.py's
-store fixture); the clock is session._now.
-"""
 import threading
 from collections import OrderedDict
 
@@ -21,7 +13,8 @@ from app.main import app
 from app.routers import auth as auth_router
 from app.routers import settings as settings_router
 from app.services import settings_store
-from test_session_revocation import NEW_PASSWORD, basic, signed_in, store  # noqa: F401 (store: autouse fixture)
+from sign_in_helpers import revoke_all_sessions
+from test_session_revocation import NEW_PASSWORD, basic, signed_in, store  # noqa: F401
 
 HOUR = 3600.0
 MINUTE = 60.0
@@ -65,8 +58,6 @@ def _signed_out_plainly(response):
     assert "x-session-end" not in response.headers
 
 
-# ── The longest session ────────────────────────────────────────────────────
-
 def test_the_longest_session_ends_at_its_length_whatever_the_activity(clock):
     client = signed_in()
     clock["t"] += 24 * HOUR - 1
@@ -105,19 +96,14 @@ def test_a_session_ended_under_a_shorter_setting_stays_ended_when_it_is_lengthen
     other, operator = signed_in(), signed_in()
     _save(operator, {"session_expiry_hours": 2})
     clock["t"] += 3 * HOUR
-    # No request came from either session meanwhile; the next settings reload
-    # must not bring them back with the longer setting
     store.update({"session_expiry_hours": 24})
     cfg.reload_settings(object())
     _ended(other.get("/api/auth/verify"), "session_expired")
 
 
 def test_an_existing_long_session_setting_is_kept():
-    """No upper bound: an install with a long session keeps starting and keeps it."""
     assert Settings(session_expiry_hours=1000).session_expiry_hours == 1000
 
-
-# ── Sign-out after inactivity ──────────────────────────────────────────────
 
 def test_inactivity_ends_the_session_at_its_timeout(clock, monkeypatch):
     monkeypatch.setattr(settings._inner, "session_idle_enabled", True)
@@ -165,8 +151,6 @@ def test_turning_inactivity_on_starts_the_idle_time_of_open_sessions_now(clock):
 
 
 def test_turning_inactivity_on_waits_for_the_reset_before_any_check(clock, monkeypatch):
-    """A check running while the new settings are put in force must see them
-    together with the reset, never the new policy against the old idle time."""
     client = signed_in()
     key = _key(client)
     clock["t"] += 2 * HOUR
@@ -205,8 +189,6 @@ def test_the_session_limits_do_not_end_sessions_when_changed(clock):
         assert key not in settings_router._SESSION_BOUND_SETTING_KEYS
 
 
-# ── Why a session ended ────────────────────────────────────────────────────
-
 def test_a_page_request_goes_to_the_login_page_with_the_reason(clock, monkeypatch):
     monkeypatch.setattr(settings._inner, "session_idle_enabled", True)
     client = signed_in()
@@ -214,7 +196,6 @@ def test_a_page_request_goes_to_the_login_page_with_the_reason(clock, monkeypatc
     page = client.get("/messages?filter=x", follow_redirects=False)
     assert page.status_code == 302
     assert page.headers["location"] == "/login?reason=session_idle&next=%2Fmessages%3Ffilter%3Dx"
-    # Every open tab hears the same reason for a while
     _ended(client.get("/api/auth/status"), "session_idle")
 
 
@@ -228,7 +209,6 @@ def test_the_reason_is_forgotten_after_ten_minutes(clock):
 
 
 def test_reasons_are_kept_for_at_most_session_max_entries(clock, monkeypatch):
-    # On the wrapper: an earlier test may have left a value there that hides the inner one
     monkeypatch.setattr(settings, "session_max_entries", 2, raising=False)
     first, second = signed_in(), signed_in()
     clock["t"] += 24 * HOUR
@@ -238,7 +218,6 @@ def test_reasons_are_kept_for_at_most_session_max_entries(clock, monkeypatch):
     third = signed_in()
     clock["t"] += 24 * HOUR
     _ended(third.get("/api/auth/status"), "session_expired")
-    # The oldest reason made room: a plain sign-in answer, nothing revived
     _signed_out_plainly(first.get("/api/auth/status"))
     assert len(session._tombstones) == 2
     assert not session._session_store
@@ -247,7 +226,7 @@ def test_reasons_are_kept_for_at_most_session_max_entries(clock, monkeypatch):
 def test_signing_out_and_revocation_leave_no_reason(clock):
     one, two = signed_in(), signed_in()
     assert one.post("/api/auth/logout", follow_redirects=False).status_code == 302
-    session.revoke_all_sessions()
+    revoke_all_sessions()
     assert not session._tombstones
     _signed_out_plainly(two.get("/api/auth/status"))
 
@@ -256,7 +235,6 @@ def test_basic_credentials_still_work_beside_an_ended_session_cookie(clock):
     client = signed_in()
     clock["t"] += 24 * HOUR
     assert client.get("/api/auth/verify", headers=basic()).status_code == 200
-    # And the login form gets a new session with new clocks
     response = client.post("/api/auth/session", headers=basic())
     assert response.status_code == 200
     record = session._session_store[_key(client)]
@@ -270,8 +248,6 @@ def test_a_signed_cookie_without_a_live_record_is_refused():
     _signed_out_plainly(client.get("/api/auth/status"))
     assert client.post("/api/auth/activity").status_code == 401
 
-
-# ── The activity and status calls ──────────────────────────────────────────
 
 def test_activity_never_brings_an_ended_session_back(clock, monkeypatch):
     monkeypatch.setattr(settings._inner, "session_idle_enabled", True)
@@ -295,8 +271,6 @@ def test_status_reports_no_limits_without_a_session_cookie(monkeypatch):
 
 
 def test_an_agent_token_never_counts_as_activity(clock, monkeypatch):
-    """A bearer token is an agent's call, decided before the cookie: the
-    activity route is for people only and never runs for it."""
     assert scopes.excluded_reason("POST", "/api/auth/activity")
     monkeypatch.setattr(settings._inner, "session_idle_enabled", True)
     client = signed_in()
@@ -310,8 +284,6 @@ def test_an_agent_token_never_counts_as_activity(clock, monkeypatch):
     assert session._session_store[key]["active_at"] == clock["t"] - 10 * MINUTE
 
 
-# ── Re-issuing the operator's session ──────────────────────────────────────
-
 def test_re_issuing_keeps_the_clocks_and_the_cookie_follows_the_issued_length(clock):
     operator = signed_in()
     login_at = clock["t"]
@@ -321,9 +293,7 @@ def test_re_issuing_keeps_the_clocks_and_the_cookie_follows_the_issued_length(cl
     assert _max_age(rotated) == int(23 * HOUR)
     record = session._session_store[_key(operator)]
     assert (record["login_at"], record["issued_hours"]) == (login_at, 24)
-    # Two hours apply while the setting says so ...
     assert operator.get("/api/auth/status").json()["session"]["longest_seconds_left"] == int(HOUR)
-    # ... and back at 24 the server agrees with the cookie
     _save(operator, {"session_expiry_hours": 24})
     assert operator.get("/api/auth/status").json()["session"]["longest_seconds_left"] == int(23 * HOUR)
 
@@ -335,8 +305,6 @@ def test_re_issuing_keeps_the_last_activity(clock):
     _save(operator, {"auth_password": NEW_PASSWORD})
     assert operator.get("/api/auth/status").json()["session"]["idle_seconds_left"] == int(10 * MINUTE)
 
-
-# ── Stored and saved values ────────────────────────────────────────────────
 
 @pytest.mark.parametrize("stored, expected", [
     ({"session_idle_enabled": "false"}, ("session_idle_enabled", False)),
@@ -383,8 +351,6 @@ def test_the_new_settings_change_nothing_by_default(monkeypatch):
 def test_whole_numbers_sent_as_decimals_are_saved_as_whole_numbers(store):
     operator = signed_in()
     _save(operator, {"session_expiry_hours": 2})
-    # 5.0 and 2.0 are whole numbers; stored as they came they would read back as
-    # nothing and fall back to the defaults, 60 minutes and 24 hours
     _save(operator, {**_idle(5.0), "session_expiry_hours": 2.0})
     assert (settings.session_idle_timeout_minutes, settings.session_expiry_hours) == (5, 2)
     assert (str(store["session_idle_timeout_minutes"]), str(store["session_expiry_hours"])) == ("5", "2")
@@ -397,7 +363,6 @@ def test_a_session_that_ends_while_a_save_runs_is_not_re_issued(clock, monkeypat
     reload_settings = settings_router.reload_settings
 
     def late_reload(db):
-        # The save was let in; the session reaches its length before the new settings apply
         clock["t"] += 2
         return reload_settings(db)
 
@@ -417,8 +382,6 @@ def test_a_session_a_shorter_setting_ended_is_not_kept_after_a_longer_one(clock,
     operator = signed_in()
     record, admitted = session._session_store[_key(operator)], session.auth_generation()
     clock["t"] += 2 * HOUR
-    # One save shortens the limit, another lengthens it again before the first
-    # revokes and keeps the operator's session
     store.update({"session_expiry_hours": 1})
     cfg.reload_settings(object())
     store.update({"session_expiry_hours": 24})
@@ -433,7 +396,6 @@ def test_the_kept_session_is_never_out_of_the_store(clock):
     generation, kept = session.revoke_all_sessions_keeping(record, admitted)
     assert generation == admitted + 1 and kept
     assert list(session._session_store.values()) == [record]
-    # A revocation since the request was let in ends it too
     other = signed_in()
     late = session._session_store[_key(other)]
     assert session.revoke_all_sessions_keeping(late, admitted)[1] is None
@@ -446,7 +408,6 @@ def test_a_session_that_reaches_a_shorter_limit_while_the_save_finishes_is_not_k
     clock["t"] += HOUR - 1
 
     def later_change(db):
-        # After this save's revocation the hour passes, and another save lengthens the limit
         clock["t"] += 2
         store.update({"session_expiry_hours": 24})
         cfg.reload_settings(object())

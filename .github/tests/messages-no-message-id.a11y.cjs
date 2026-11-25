@@ -1,12 +1,3 @@
-// Messages without a Message-ID in a real DOM (jsdom) with axe-core: the
-// summary line names how many of the time range shown are not in the list,
-// and switches the list to them and back. There the outcome, direction, the
-// other filters and the export are hidden and dropped, the list asks the other
-// endpoint and does not refresh by itself. The rows and the reading pane are
-// the Messages ones. jsdom is installed by CI outside the repository; set
-// A11Y_MODULES to its node_modules:
-//   npm install --no-save --prefix /tmp/a11y jsdom axe-core
-//   A11Y_MODULES=/tmp/a11y/node_modules node --test .github/tests/messages-no-message-id.a11y.cjs
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -19,7 +10,6 @@ const axeSource = fs.readFileSync(path.join(modules, 'axe-core', 'axe.min.js'), 
 const frontend = path.join(__dirname, '../../frontend');
 const read = name => fs.readFileSync(path.join(frontend, name), 'utf8');
 
-// The real Messages page of index.html
 function messagesPage() {
     const html = read('index.html');
     const start = html.indexOf('<div id="content-messages"');
@@ -80,7 +70,6 @@ test('the summary line counts the messages without a Message-ID of the time rang
     assert.equal(params(count).get('search'), 'scanner');
     assert.equal(params(count).get('start_date'), '2026-10-20T00:00:00Z');
 
-    // None: no link
     p.run('noidTotal = 0');
     await p.w.loadMessages();
     await p.settle(); await p.settle();
@@ -115,22 +104,18 @@ test('the link shows them in the list, with only the filters that apply, and bac
     assert.ok(row, 'the row is drawn by the Messages row');
     assert.match(row.textContent, /No subject/);
     assert.equal(p.$('#messages-noid').textContent, 'Back to main list');
-    // The time presets count this list
     const counts = Object.fromEntries([...p.w.document.querySelectorAll('.ui-facets .messages-date-preset-btn')]
         .map(btn => [btn.dataset.preset, btn.querySelector('small').textContent]));
     assert.equal(JSON.stringify(counts), JSON.stringify({ '': '7', today: '1', '7days': '3', '30days': '', '90days': '' }));
 
-    // A filter the list ignores cannot come back through Apply
     p.$('#messages-filter-ip').value = '192.0.2.1';
     p.w.applyMessagesFilters();
     assert.deepEqual(Object.keys(p.w.eval('currentFilters.messages')).sort(), ['search']);
 
-    // No refresh by itself
     p.asked().length = 0;
     await p.w.smartRefreshMessages();
     assert.equal(p.asked().length, 0);
 
-    // Back to every message
     p.$('#messages-noid').click();
     await p.settle(); await p.settle();
     assert.ok(!page_.classList.contains('is-noid'));
@@ -144,7 +129,6 @@ test('the auto refresh counts them again, and a failed count keeps the last one'
     await p.w.loadMessages();
     await p.settle(); await p.settle();
     assert.ok(p.$('#messages-noid').classList.contains('hidden'));
-    // One arrives while the page is open
     p.run('noidTotal = 1; messagesAtNewEdge = () => false');
     await p.w.smartRefreshMessages();
     await p.settle(); await p.settle();
@@ -172,7 +156,6 @@ test('opening Messages with filters from elsewhere shows the whole list again', 
     p.$('#messages-noid').click();
     await p.settle(); await p.settle();
     assert.ok(p.$('#content-messages').classList.contains('is-noid'));
-    // An entity card's Show messages, from the Messages page or another page
     p.asked().length = 0;
     p.w.navigateToMessagesWithFilter({ address: 'boss@example.com' });
     await new Promise(resolve => p.w.setTimeout(resolve, 150));
@@ -181,7 +164,6 @@ test('opening Messages with filters from elsewhere shows the whole list again', 
     const list = p.asked().filter(url => url.startsWith('/api/messages?'));
     assert.ok(list.length, 'the whole list is asked');
     assert.equal(params(list[list.length - 1]).get('address'), 'boss@example.com');
-    // And a time range opened from the dashboard
     p.$('#messages-noid').click();
     await p.settle(); await p.settle();
     p.w.openMessagesRange({ start: '2026-10-24T10:00:00Z', endInclusive: '2026-10-24T10:59:59Z' });
@@ -189,12 +171,59 @@ test('opening Messages with filters from elsewhere shows the whole list again', 
     assert.ok(!p.$('#content-messages').classList.contains('is-noid'));
 });
 
+test('Stay over unsaved changes leaves the Messages filters as they were; Leave loads the list once, with the new ones', async () => {
+    const p = page();
+    p.$('#messages-filter-search').value = 'invoice';
+    p.w.applyMessagesFilters();
+    await p.settle(); await p.settle();
+    const shown = () => JSON.stringify([
+        ...['search', 'sender', 'recipient', 'user', 'ip', 'direction', 'status'].map(key => p.$(`#messages-filter-${key}`).value),
+        p.$('#messages-start-date').value, p.$('#messages-end-date').value, p.$('#messages-date-range-label').textContent,
+        p.$('#messages-exact').innerHTML, p.w.eval('currentFilters.messages')]);
+    const before = shown();
+    p.w.uiUnsavedRegister('form', { count: () => 1, drop() {} });
+    const lists = () => p.asked().filter(url => url.startsWith('/api/messages?'));
+    const wait = () => new Promise(resolve => p.w.setTimeout(resolve, 150));
+    const opens = [
+        () => p.w.navigateToMessagesWithFilter({ address: 'boss@example.com', datePreset: '7days' }),
+        () => p.w.openMessagesRange({ start: '2026-10-24T10:00:00Z', endInclusive: '2026-10-24T10:59:59.999Z', label: 'Hour picked' }),
+    ];
+    for (const open of opens) {
+        p.asked().length = 0;
+        const moved = open();
+        await p.settle();
+        p.$('#app-confirm-cancel').click();
+        assert.equal(await moved, false);
+        await wait();
+        assert.equal(shown(), before, 'Stay: fields, period, chip and filters as they were');
+        assert.equal(lists().length, 0, 'Stay: nothing loaded');
+    }
+    p.asked().length = 0;
+    let moved = opens[0]();
+    await p.settle();
+    p.$('#app-confirm-ok').click();
+    assert.equal(await moved, true);
+    await wait(); await p.settle();
+    assert.equal(lists().length, 1);
+    assert.equal(params(lists()[0]).get('address'), 'boss@example.com');
+    assert.equal(params(lists()[0]).get('search'), null);
+    p.asked().length = 0;
+    moved = opens[1]();
+    await p.settle();
+    p.$('#app-confirm-ok').click();
+    assert.equal(await moved, true);
+    await wait(); await p.settle();
+    assert.equal(lists().length, 1);
+    assert.equal(params(lists()[0]).get('start_date'), '2026-10-24T10:00:00Z');
+    assert.equal(params(lists()[0]).get('end_date'), '2026-10-24T10:59:59.999Z');
+    assert.equal(p.$('#messages-date-range-label').textContent, 'Hour picked');
+});
+
 test('a redraw of the list by the auto refresh does not drop the count', async () => {
     const p = page();
     p.run('noidTotal = 0');
     await p.w.loadMessages();
     await p.settle(); await p.settle();
-    // New mail redraws the list at its top while the count is on its way
     p.run(`noidTotal = 2; messagesAtNewEdge = () => true; lastDataCache.messages = { stale: true };
         const answer = authenticatedFetch;
         authenticatedFetch = async (url, options) => {
@@ -230,7 +259,6 @@ test('the answer for a message opened before another one is not shown', async ()
     assert.match(header, /second@example\.com/);
     assert.doesNotMatch(header, /first@example\.com/);
 
-    // A late failure of the first one does not replace the second either
     run(`authenticatedFetch = url => new Promise(resolve => { release[url.split('/')[3]] = status => resolve({ ok: status === 200,
         status, statusText: 'Internal Server Error', json: async () => (${JSON.stringify(details('noid-4', 'fourth@example.com'))}) }); });`);
     const third = w.viewMessageDetails('noid-3');
@@ -266,7 +294,6 @@ test('the reading pane shows where the client is and no Spam Analysis tab', asyn
     assert.match(content, /Netherlands, Amsterdam/);
     assert.match(content, /Example Hosting B\.V\./);
     assert.equal(w.document.getElementById('modal-tab-spam').style.display, 'none');
-    // A scanned message keeps its tab
     w.answer = { ...details('k1', null), message_id: '<m1@example.com>', rspamd: { score: 1, required_score: 15, action: 'no action', is_spam: false, symbols: {} } };
     await w.viewMessageDetails('k1');
     assert.equal(w.document.getElementById('modal-tab-spam').style.display, '');

@@ -1,10 +1,3 @@
-"""
-Notification channels API - manage where alerts are delivered.
-
-Multiple channels can be configured (Slack, Telegram, ntfy, ...); every alert
-goes to all enabled ones. Secrets are masked in responses and preserved when
-the UI sends the mask back unchanged.
-"""
 import asyncio
 import logging
 from datetime import datetime
@@ -30,7 +23,7 @@ class ChannelRequest(BaseModel):
     name: str = Field(min_length=1, max_length=100)
     channel_type: str
     config: Dict = Field(default_factory=dict)
-    alert_types: Optional[List[str]] = None   # None/empty = every alert
+    alert_types: Optional[List[str]] = None
     enabled: bool = True
 
 
@@ -41,14 +34,12 @@ class ChannelTestRequest(BaseModel):
 
 
 def _clean_alert_types(alert_types: Optional[List[str]]) -> Optional[List[str]]:
-    """Keep only known topic ids. Empty means "every alert" (stored as NULL)."""
     if not alert_types:
         return None
     cleaned = [t for t in alert_types if t in nc.ALERT_TYPE_IDS]
     unknown = set(alert_types) - nc.ALERT_TYPE_IDS
     if unknown:
         raise HTTPException(status_code=422, detail=f"Unknown alert type(s): {', '.join(sorted(unknown))}")
-    # Subscribing to everything is the same as no filter
     return None if len(cleaned) == len(nc.ALERT_TYPE_IDS) else cleaned
 
 
@@ -94,8 +85,7 @@ def create_channel(request: ChannelRequest, db: Session = Depends(get_db)):
     """Add a channel."""
     if request.channel_type not in nc.CHANNEL_TYPES:
         raise HTTPException(status_code=422, detail=f"Unknown destination service: {request.channel_type}. Select a service from the list.")
-    # On create there is no stored secret behind the mask placeholder - treat
-    # a literal mask as empty so validation rejects it instead of storing it
+    # Storing the literal mask would save it as the secret.
     config = {k: ("" if v == nc.MASK else v) for k, v in (request.config or {}).items()}
     ok, error = nc.validate_config(request.channel_type, config)
     if not ok:
@@ -130,7 +120,6 @@ def update_channel(channel_id: int, request: ChannelRequest, db: Session = Depen
         if not channel:
             raise HTTPException(status_code=404, detail="This destination no longer exists. Reload the destination list.")
 
-        # A different service never inherits the stored secrets of the old one
         stored = (channel.config or {}) if request.channel_type == channel.channel_type else {}
         try:
             merged = nc.merge_config(request.channel_type, stored, request.config)

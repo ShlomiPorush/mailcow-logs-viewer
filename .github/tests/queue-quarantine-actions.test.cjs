@@ -1,7 +1,3 @@
-// Queue and Quarantine: the row actions follow the Read-Write key even when its
-// status arrives after the rows were drawn, Suppress stays without the key and
-// shows only while the app keeps a suppression list, and editing a quarantine
-// rule saves it back unchanged.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -10,7 +6,6 @@ const { test } = require('node:test');
 
 const frontend = path.join(__dirname, '../../frontend');
 
-// Any DOM access returns another inert stub, so a file's top-level code runs
 function stub() {
     const fn = function () { return proxy; };
     const proxy = new Proxy(fn, {
@@ -29,7 +24,6 @@ function decodeEntities(value) {
     });
 }
 
-// app.js with a document whose elements keep what the page writes into them
 function loadApp() {
     const elements = {};
     const inserted = [];
@@ -47,7 +41,6 @@ function loadApp() {
     });
     for (const file of ['utils.js', 'app.js']) vm.runInContext(fs.readFileSync(path.join(frontend, file), 'utf8'), context);
     context.showToast = () => {};
-    // Dialogs come from the shared builder (utils.js, uiDialog): keep what each one shows
     context.uiDialog = options => {
         inserted.push(options.body);
         const shown = element();
@@ -109,7 +102,6 @@ test('a direct load of the Queue waits for the Read-Write status instead of show
 
 test('Suppress stays on queue rows without the Read-Write key', () => {
     const html = drawQueue(loadApp(), false);
-    // With the row's queue id, so the block keeps that message in its Block details
     assert.match(html, /showAddSuppressionModal\('user@example\.org', 'ABC123'\)/);
     assert.doesNotMatch(html, /queue-action-btn|queue-checkbox/);
     assert.match(html, /Actions<\/span>/);
@@ -130,9 +122,9 @@ test('each Queue load reads whether the list is kept, and an older answer is dro
     vm.runInContext(`currentTab = 'outbound'; mailcowRwConfigured = true; rwStatusReady = Promise.resolve();`, app.context);
     const older = app.context.loadQueue();
     const newer = app.context.loadQueue();
-    answers[1](false);   // the newer load: the sync was turned off
+    answers[1](false);
     await newer;
-    answers[0](true);    // the older answer arrives last
+    answers[0](true);
     await older;
     assert.doesNotMatch(app.elements['queue-logs'].innerHTML, /showAddSuppressionModal\(/);
     assert.equal(vm.runInContext('queueSuppressOn', app.context), false);
@@ -158,12 +150,12 @@ test('an older auto refresh never draws over a newer load', async () => {
         ? Promise.resolve({ ok: true, json: async () => ({ list_kept: true }) })
         : new Promise(resolve => queueAnswers.push(rows => resolve({ ok: true, json: async () => ({ data: rows }) })));
     vm.runInContext(`currentTab = 'outbound'; mailcowRwConfigured = true; rwStatusReady = Promise.resolve();`, app.context);
-    const refresh = app.context.smartRefreshQueue();   // started first
+    const refresh = app.context.smartRefreshQueue();
     const load = app.context.loadQueue();
     await new Promise(resolve => setImmediate(resolve));
-    queueAnswers[1](NEWER);   // the load answers first
+    queueAnswers[1](NEWER);
     await load;
-    queueAnswers[0](QUEUE);   // then the older refresh
+    queueAnswers[0](QUEUE);
     await refresh;
     const html = app.elements['queue-logs'].innerHTML;
     assert.match(html, /NEW456/);
@@ -175,12 +167,10 @@ test('with the key, queue rows keep every action', () => {
     for (const action of ['queueRetry', 'queueHold', 'queueDeleteItem', 'showAddSuppressionModal']) assert.match(html, new RegExp(action + '\\('));
 });
 
-// Open the edit dialog for a stored rule, save it as the dialog shows it, and
-// return what the dialog showed and what it sent
 async function editAndSave(rule) {
     const app = loadApp();
     app.context.closeQuarantineRuleModal = () => {};
-    app.context.uiGuardDialog = () => {};   // the discard question has its own test (layers.a11y.cjs)
+    app.context.uiGuardDialog = () => {};
     app.context.loadQuarantineRules = async () => {};
     app.context._showQuarantineRuleModal(rule, null);
     const html = app.inserted.pop();
@@ -226,11 +216,10 @@ test('a regex with a leading ^ and an Exact Match rule save unchanged', async ()
     assert.equal(result.sent.is_regex, false);
 });
 
-// Save the rule dialog with these field values, and return what it sent
 async function saveFields(fields, ruleId) {
     const app = loadApp();
     app.context.closeQuarantineRuleModal = () => {};
-    app.context.uiGuardDialog = () => {};   // the discard question has its own test (layers.a11y.cjs)
+    app.context.uiGuardDialog = () => {};
     app.context.loadQuarantineRules = async () => {};
     for (const [id, value] of Object.entries(fields)) app.elements[id] = { value };
     let sent = null;
@@ -239,9 +228,6 @@ async function saveFields(fields, ruleId) {
     return sent;
 }
 
-// The pattern a Contains rule for example.com got when an earlier version
-// opened it with its stored pattern and saved it again. The upgrade repairs
-// it (backend/alembic/versions/0018_*, tested in test_quarantine_spam_upgrade.py).
 const TWICE_SAVED = 'example\\\\\\.com';
 const REPAIRED = 'example\\.com';
 
@@ -250,7 +236,6 @@ test('a Contains rule saved twice by an earlier version opens as Contains with i
                      'qrule-match-mode': 'contains', 'qrule-action': 'release', 'qrule-notes': '' };
     const created = await saveFields(fields, null);
     assert.equal(created.match_value, REPAIRED);
-    // The earlier edit dialog showed the stored pattern in the Contains field
     const edited = await saveFields({ ...fields, 'qrule-match-value': created.match_value }, 3);
     assert.equal(edited.match_value, TWICE_SAVED);
     const { shownMode, shownValue, sent } = await editAndSave({ ...rule(REPAIRED, true), match_type: 'sender_domain' });
@@ -260,9 +245,6 @@ test('a Contains rule saved twice by an earlier version opens as Contains with i
     assert.equal(sent.is_regex, true);
 });
 
-// Other rules an earlier edit escaped twice are not changed by the upgrade: the
-// Auto-Rules list flags them, and Repair removes one level of escaping. The
-// subject values are also in test_quarantine_spam_upgrade.py.
 const SUBJECT_TWICE = 'Invoice\\\\\\.pdf';
 const SUBJECT_REPAIRED = 'Invoice\\.pdf';
 const listed = (id, match_type, match_value, is_regex) => ({
@@ -270,7 +252,6 @@ const listed = (id, match_type, match_value, is_regex) => ({
     hit_count: 0, last_hit_at: null, notes: 'Kept as it is',
 });
 
-// Draw the Auto-Rules list for these rules; returns the app and each rule's row
 async function drawRules(rules) {
     const app = loadApp();
     app.context.authenticatedFetch = async () => ({ ok: true, json: async () => ({ total: rules.length, data: rules }) });
@@ -284,11 +265,11 @@ const BACKSLASH_NOTE = 'Looks for a backslash. An earlier version may have chang
 test('a Contains rule that looks for a backslash is flagged in the list with a Repair button', async () => {
     const { rows } = await drawRules([
         listed(1, 'subject', SUBJECT_TWICE, true),
-        listed(2, 'sender', 'a\\\\\\.b', true),            // Contains a\.b: flagged, left to the owner
-        listed(3, 'sender', REPAIRED, true),                // Contains example.com
-        listed(4, 'sender', 'a\\\\\\.b|c', true),           // Regex
-        listed(5, 'subject', 'a\\\\\\.b\\*', true),         // Contains a\.b*: no Contains text escaped twice
-        listed(6, 'sender', SUBJECT_TWICE, false),          // Exact Match
+        listed(2, 'sender', 'a\\\\\\.b', true),
+        listed(3, 'sender', REPAIRED, true),
+        listed(4, 'sender', 'a\\\\\\.b|c', true),
+        listed(5, 'subject', 'a\\\\\\.b\\*', true),
+        listed(6, 'sender', SUBJECT_TWICE, false),
     ]);
     for (const id of [1, 2]) {
         assert.match(rows[id], /ui-tag ui-tag-warn">Check</, `rule ${id}`);
@@ -319,14 +300,11 @@ test('Repair saves the rule with one level of escaping removed, and it is no lon
                                      is_regex: true, action: 'release', notes: 'Kept as it is' });
     const row = app.elements['quarantine-rules-list'].innerHTML;
     assert.ok(row.includes('Invoice\\.pdf') && !row.includes('repairQuarantineRule') && !row.includes(BACKSLASH_NOTE));
-    // The edit dialog now opens it as Contains Invoice.pdf
     const { shownMode, shownValue } = await editAndSave({ ...damaged, match_value: SUBJECT_REPAIRED });
     assert.equal(shownMode, 'contains');
     assert.equal(shownValue, 'Invoice.pdf');
 });
 
-// Auto refresh while the Read-Write status is still loading: the rows wait for
-// it, as on the first load, instead of showing the lock for a moment
 async function refreshWhileRwLoads(page, data, refresh) {
     const app = loadApp();
     let answerRw;

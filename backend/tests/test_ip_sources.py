@@ -1,12 +1,3 @@
-"""
-Tests for the per-check IP source model (issues #76 and #23):
-
-- blacklist_source_* / domain_spf_source_* settings, manual-hosts validation
-- SPF source set building per toggle (server IP, transports, relayhosts,
-  manual hosts, DMARC history) including ip6: mechanisms and AAAA lookups
-- blacklist monitoring reconciliation per source toggle
-- IPv6 nibble-reversed DNSBL query format
-"""
 import uuid
 from datetime import datetime, timezone, timedelta
 
@@ -18,13 +9,11 @@ from app.services import blacklist_service
 
 
 class FakeTXT:
-    """Mimics a dnspython TXT rdata (joined byte strings)."""
     def __init__(self, text):
         self.strings = (text.encode(),)
 
 
 class FakeAddr:
-    """Mimics a dnspython A/AAAA rdata (str() yields the address)."""
     def __init__(self, value):
         self._value = value
 
@@ -48,10 +37,6 @@ def _set_blacklist_sources(monkeypatch, server_ip=True, transports=True,
     monkeypatch.setattr(settings._inner, 'blacklist_source_relayhosts', relayhosts)
     monkeypatch.setattr(settings._inner, 'blacklist_source_manual_hosts', manual)
 
-
-# ---------------------------------------------------------------------------
-# Settings: defaults and manual-hosts validation
-# ---------------------------------------------------------------------------
 
 def test_source_setting_defaults_preserve_released_behavior():
     s = Settings()
@@ -99,16 +84,11 @@ def test_manual_hosts_empty_means_no_entries():
 
 
 def test_manual_hosts_list_is_lenient_at_use_time():
-    # model_construct bypasses validation, simulating a bad stored override
     s = Settings.model_construct(blacklist_source_manual_hosts='203.0.113.10,bad host,relay.example.com')
     assert s.blacklist_source_manual_hosts_list == ['203.0.113.10', 'relay.example.com']
     s = Settings.model_construct(domain_spf_source_manual_hosts='2001:db8::10,[broken]')
     assert s.domain_spf_source_manual_hosts_list == ['2001:db8::10']
 
-
-# ---------------------------------------------------------------------------
-# SPF: check_ip_in_spf (ip4/ip6 mechanisms, AAAA lookups)
-# ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
 async def test_ip4_mechanism_matches_ipv4():
@@ -163,7 +143,6 @@ async def test_a_mechanism_uses_aaaa_for_ipv6(monkeypatch):
         return []
 
     monkeypatch.setattr(domains, 'resolve_dns_with_fallback', fake_resolve)
-    # Uppercase input on purpose: comparison must be by parsed address, not string
     ok, method = await domains.check_ip_in_spf(
         'example.com', '2001:DB8::25', 'v=spf1 a -all')
     assert ok is True
@@ -188,10 +167,6 @@ async def test_a_mechanism_still_uses_a_records_for_ipv4(monkeypatch):
     assert method == 'a'
     assert ('example.com', 'A') in queries
 
-
-# ---------------------------------------------------------------------------
-# get_spf_source_ips: source set per toggle combination
-# ---------------------------------------------------------------------------
 
 class FakeMailcowAPI:
     def __init__(self, transports=None, relayhosts=None,
@@ -244,8 +219,6 @@ async def test_spf_sources_server_ip_only(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_spf_sources_transports_resolve_all_public_ips(monkeypatch):
-    # Resolved IPs must be truly public: documentation ranges (TEST-NET)
-    # count as private for ipaddress and are filtered like RFC1918
     _set_spf_sources(monkeypatch, transports=True)
     api = FakeMailcowAPI(transports=[
         {'active': '1', 'nexthop': '[relay.example.com]:587'},
@@ -278,7 +251,6 @@ async def test_spf_sources_relayhosts(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_spf_sources_manual_hosts_literals_and_hostnames(monkeypatch):
-    # Literals are kept as given; hostnames resolve to public IPs only
     _set_spf_sources(monkeypatch, manual='203.0.113.10,2001:db8::10,relay.example.com')
     _dns_a_map(monkeypatch, {'relay.example.com': ['81.169.145.97']})
 
@@ -312,10 +284,6 @@ async def test_spf_sources_mailcow_failure_does_not_abort_other_sources(monkeypa
         {'ip': '203.0.113.5', 'source': 'auto-detected'}
     ]
 
-
-# ---------------------------------------------------------------------------
-# SPF: check_spf_record with the source model
-# ---------------------------------------------------------------------------
 
 def _fake_txt_resolver(spf_text):
     async def fake_resolve(query, record_type='TXT', timeout=5):
@@ -378,7 +346,6 @@ async def test_check_spf_record_resolves_sources_itself_when_not_provided(monkey
 
 @pytest.mark.asyncio
 async def test_checked_ips_empty_when_no_source_yields_an_ip(monkeypatch):
-    # Same behavior as when the WAN IP is unknown: record checked, no IP verdict
     _set_spf_sources(monkeypatch, server_ip=True)
     monkeypatch.setattr(
         domains, 'resolve_dns_with_fallback',
@@ -396,8 +363,6 @@ async def test_checked_ips_empty_when_no_source_yields_an_ip(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_checked_ips_absent_when_no_spf_record(monkeypatch):
-    # Early-error results have no checked_ips key; the frontend must
-    # tolerate absence (old cached rows also lack it)
     _set_spf_sources(monkeypatch)
 
     async def no_txt(query, record_type='TXT', timeout=5):
@@ -408,10 +373,6 @@ async def test_checked_ips_absent_when_no_spf_record(monkeypatch):
     assert result['status'] == 'error'
     assert 'checked_ips' not in result
 
-
-# ---------------------------------------------------------------------------
-# SPF: DMARC-history source
-# ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
 async def test_dmarc_history_ips_get_source_label_and_are_checked(monkeypatch):
@@ -471,7 +432,6 @@ async def test_dmarc_history_no_reports_note_is_additive_only(monkeypatch):
     result = await domains.check_spf_record('example.com', [
         {'ip': '203.0.113.50', 'source': 'configured'},
     ])
-    # Verdict unchanged; the note is purely informational
     assert result['status'] == 'success'
     assert any('no reports are available yet' in w for w in result['warnings'])
 
@@ -489,10 +449,6 @@ def test_dmarc_history_notes_staleness_logic():
         {'ips': ['a'], 'reports_found': True, 'newest_report_age_days': 2.0})
     assert notes == []
 
-
-# ---------------------------------------------------------------------------
-# DMARC-history query against a real PostgreSQL
-# ---------------------------------------------------------------------------
 
 def _postgres_available():
     try:
@@ -543,7 +499,6 @@ def _add_report(db, domain, begin_offset_days, end_offset_days, records):
 def test_dmarc_history_query_filters(dmarc_db):
     from app.database import get_db_context
     with get_db_context() as db:
-        # In-window report: pass and fail records, one IP repeated
         _add_report(db, 'example.com', 2, 1, [
             ('203.0.113.50', 'pass'),
             ('203.0.113.50', 'pass'),
@@ -551,9 +506,7 @@ def test_dmarc_history_query_filters(dmarc_db):
             ('198.51.100.99', 'fail'),
             ('198.51.100.98', None),
         ])
-        # Outside the 30-day window
         _add_report(db, 'example.com', 45, 44, [('192.0.2.77', 'pass')])
-        # Different domain
         _add_report(db, 'other.com', 2, 1, [('192.0.2.88', 'pass')])
 
     result = domains.get_recent_dmarc_passing_source_ips('example.com')
@@ -587,7 +540,7 @@ def test_dmarc_history_query_stale_reports(dmarc_db):
     assert result['ips'] == ['203.0.113.50']
     assert result['reports_found'] is True
     assert result['newest_report_age_days'] == pytest.approx(11.0, abs=0.1)
-    assert domains.dmarc_history_notes(result)  # stale note fires
+    assert domains.dmarc_history_notes(result)
 
 
 def test_dmarc_history_indexes_exist(dmarc_db):
@@ -598,10 +551,6 @@ def test_dmarc_history_indexes_exist(dmarc_db):
     assert 'idx_dmarc_report_domain_date' in report_indexes
     assert 'idx_dmarc_record_report' in record_indexes
 
-
-# ---------------------------------------------------------------------------
-# Blacklist monitoring: per-source toggles and manual hosts
-# ---------------------------------------------------------------------------
 
 def test_auto_monitor_entries_include_manual_hosts_and_wan(monkeypatch):
     _set_blacklist_sources(monkeypatch, manual='2001:db8::10,relay.example.com')
@@ -637,16 +586,11 @@ def test_auto_monitor_entries_dedupe_wan_matching_manual_ip(monkeypatch):
     assert blacklist_service.get_auto_monitor_entries() == [('203.0.113.5', 'config')]
 
 
-# ---------------------------------------------------------------------------
-# DNSBL query format (RBL lookups)
-# ---------------------------------------------------------------------------
-
 def test_reverse_ip_ipv4():
     assert blacklist_service.reverse_ip('1.2.3.4') == '4.3.2.1'
 
 
 def test_reverse_ip_ipv6_nibble_format():
-    # RFC 5782: IPv6 DNSBL queries use the nibble-reversed exploded address
     assert blacklist_service.reverse_ip('2001:db8::1') == (
         '1.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.8.b.d.0.1.0.0.2'
     )
@@ -655,10 +599,6 @@ def test_reverse_ip_ipv6_nibble_format():
 def test_reverse_ip_non_ip_keeps_legacy_behavior():
     assert blacklist_service.reverse_ip('foo.bar') == 'bar.foo'
 
-
-# ---------------------------------------------------------------------------
-# reconcile_monitored_hosts (settings changes reflect immediately on read)
-# ---------------------------------------------------------------------------
 
 class _FakeQuery:
     def __init__(self, rows):
@@ -694,8 +634,6 @@ def _host_row(hostname, source, active=True):
 
 
 def test_reconcile_adds_manual_entries_to_nonempty_table(monkeypatch):
-    """A just-saved manual host must appear even when monitored_hosts
-    already has rows (the WAN entry)."""
     _set_blacklist_sources(monkeypatch, manual='198.51.100.7,relay.example.com')
     monkeypatch.setattr(domains, '_server_ip_cache', '203.0.113.5')
 
@@ -707,7 +645,7 @@ def test_reconcile_adds_manual_entries_to_nonempty_table(monkeypatch):
         ('198.51.100.7', 'config'),
         ('relay.example.com', 'config'),
     ]
-    assert db.rows[0].active is True   # WAN row untouched
+    assert db.rows[0].active is True
 
 
 def test_reconcile_deactivates_wan_when_server_ip_source_disabled(monkeypatch):
@@ -736,10 +674,6 @@ def test_reconcile_deactivates_removed_manual_entry_and_reactivates_returning_on
 
 
 def test_reconcile_handles_sync_resolved_manual_hostname_rows(monkeypatch):
-    """IPs resolved from a manual hostname by the transports sync are stored
-    as 'config:<hostname>' rows; they stay active while the hostname is
-    configured, retire when it is removed, and suppress the bare hostname
-    row."""
     _set_blacklist_sources(monkeypatch, server_ip=False, manual='relay.example.com')
     monkeypatch.setattr(domains, '_server_ip_cache', None)
 
@@ -750,9 +684,8 @@ def test_reconcile_handles_sync_resolved_manual_hostname_rows(monkeypatch):
 
     assert changed is False
     assert resolved_a.active is True and resolved_b.active is True
-    assert not db.added   # no bare hostname row while resolved rows are active
+    assert not db.added
 
-    # Hostname removed from the manual list: resolved rows retire
     _set_blacklist_sources(monkeypatch, server_ip=False, manual='')
     changed = blacklist_service.reconcile_monitored_hosts(db)
     assert changed
@@ -770,8 +703,6 @@ def test_reconcile_no_change_is_a_noop(monkeypatch):
 
 
 def test_reconcile_reactivates_system_row_when_wan_detection_unavailable(monkeypatch):
-    """Server IP source re-enabled while WAN detection is failing: the stored
-    system row is the best known WAN address and must come back."""
     _set_blacklist_sources(monkeypatch)
     monkeypatch.setattr(domains, '_server_ip_cache', None)
 
@@ -781,10 +712,6 @@ def test_reconcile_reactivates_system_row_when_wan_detection_unavailable(monkeyp
 
     assert changed and row.active is True and not db.added
 
-
-# ---------------------------------------------------------------------------
-# IPv6-aware blacklist zone selection
-# ---------------------------------------------------------------------------
 
 def test_applicable_blacklists_ipv4_gets_full_list():
     assert blacklist_service.applicable_blacklists('203.0.113.5') == blacklist_service.BLACKLISTS
@@ -800,24 +727,17 @@ def test_applicable_blacklists_ipv6_only_capable_zones():
     assert all(bl.get('ipv6') for bl in zones)
     names = {bl['name'] for bl in zones}
     assert 'Spamhaus ZEN' in names
-    assert 'Barracuda' not in names        # IPv4-only zone must be skipped
+    assert 'Barracuda' not in names
     assert 'SpamCop' not in names
 
 
 def test_dead_rbls_removed():
-    """SORBS shut down in 2024; CBL was absorbed into Spamhaus XBL."""
     zones = {bl['zone'] for bl in blacklist_service.BLACKLISTS}
     assert not any('sorbs' in z for z in zones)
     assert 'cbl.abuseat.org' not in zones
 
 
-# ---------------------------------------------------------------------------
-# Postfix nexthop parsing (relay host sync)
-# ---------------------------------------------------------------------------
-
 def test_parse_nexthop_bracket_with_port():
-    """Regression: strip('[]') left the inner bracket for '[host]:port',
-    producing an unresolvable 'host]' - the relay was never monitored."""
     from app.scheduler import parse_nexthop_host
     assert parse_nexthop_host('[relay.example.com]:587') == 'relay.example.com'
 
@@ -833,8 +753,6 @@ def test_parse_nexthop_all_forms():
 
 
 def test_reconcile_deactivates_transport_and_relayhost_rows_when_toggled_off(monkeypatch):
-    """Toggling a synced source off must hide its rows on the next page load,
-    not only at the next 6-hour sync."""
     monkeypatch.setattr(settings._inner, 'blacklist_source_server_ip', True)
     monkeypatch.setattr(settings._inner, 'blacklist_source_transports', False)
     monkeypatch.setattr(settings._inner, 'blacklist_source_relayhosts', False)
@@ -853,10 +771,6 @@ def test_reconcile_deactivates_transport_and_relayhost_rows_when_toggled_off(mon
 
 
 def test_reconcile_never_reactivates_sync_deactivated_rows(monkeypatch):
-    """Regression: a relayhost deleted in mailcow is deactivated by the sync,
-    but reconcile used to reactivate it on the next page load (it cannot tell
-    toggle-off from removed-in-mailcow). Re-adding rows is the sync's job -
-    reconcile must leave inactive transport/relayhost rows alone."""
     from datetime import datetime, timedelta
     monkeypatch.setattr(settings._inner, 'blacklist_source_server_ip', False)
     monkeypatch.setattr(settings._inner, 'blacklist_source_transports', True)
@@ -878,8 +792,6 @@ def test_reconcile_never_reactivates_sync_deactivated_rows(monkeypatch):
 
 
 def test_non_dnsbl_answer_is_never_reported_as_listed(monkeypatch):
-    """A resolver that rewrites NXDOMAIN (ISP ad server, captive portal)
-    returns a non-127.x address - that must be 'error', not a listing."""
     import asyncio
 
     class FakeAnswer:
@@ -916,8 +828,6 @@ def test_real_127_answer_still_reported_as_listed(monkeypatch):
 
 
 def test_cleanup_purges_only_long_inactive_monitored_hosts():
-    """Inactive hosts unseen for 30+ days are deleted; fresh-inactive and
-    active-but-old rows survive."""
     if not _postgres_available():
         pytest.skip('PostgreSQL not available')
     import asyncio
@@ -952,11 +862,11 @@ def test_cleanup_purges_only_long_inactive_monitored_hosts():
 
 
 @pytest.mark.parametrize('answer,expected_listed,expected_status', [
-    ('127.0.0.1', False, 'error'),     # DNS blocker answer, never a listing
-    ('127.0.0.2', True, 'listed'),     # documented Spamhaus code
-    ('127.0.0.11', True, 'listed'),    # PBL upper bound
-    ('127.0.0.99', False, 'error'),    # not a documented Spamhaus code
-    ('127.1.2.3', False, 'error'),     # inside 127/8 but not a Spamhaus range
+    ('127.0.0.1', False, 'error'),
+    ('127.0.0.2', True, 'listed'),
+    ('127.0.0.11', True, 'listed'),
+    ('127.0.0.99', False, 'error'),
+    ('127.1.2.3', False, 'error'),
 ])
 def test_spamhaus_answers_validated_against_documented_codes(monkeypatch, answer,
                                                              expected_listed, expected_status):
@@ -978,7 +888,6 @@ def test_spamhaus_answers_validated_against_documented_codes(monkeypatch, answer
 
 
 def test_non_spamhaus_zone_keeps_generic_127_semantics(monkeypatch):
-    """Other RBLs use their own 127.x codes - only 127.0.0.1 is universally bogus."""
     import asyncio
 
     class FakeAnswer:

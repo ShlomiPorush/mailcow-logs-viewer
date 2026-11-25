@@ -1,9 +1,3 @@
-"""What the Mailbox stats, Devices and weekly summary calls return
-(routers/mailbox_stats.py, devices.py, reporting.py).
-
-The mailbox statistics answer 200 when the database read fails: then only
-`error` and empty or zero figures are sent, as the Failed models say.
-"""
 from typing import Any, Dict, List, Optional, Union
 
 from pydantic import Field
@@ -14,8 +8,6 @@ from .security import MonitoredHost
 TIME = "UTC, ISO 8601 with Z"
 FAILED = "The figures could not be read: what to do"
 
-
-# ---------------------------------------------------------------- mailbox statistics
 
 class MessageCounts(Fixed):
     """Messages of one address in the range, one per message (its most successful delivery)."""
@@ -144,8 +136,6 @@ MailboxStatsResponse = Union[MailboxStatsPage, MailboxStatsPageFailed]
 MailboxSummaryResponse = Union[MailboxSummary, MailboxSummaryFailed]
 
 
-# ---------------------------------------------------------------- devices
-
 class Device(Fixed):
     """A phone, tablet or Outlook client that syncs over ActiveSync."""
     country_code: Optional[str] = Field(description="Of the last IP, when GeoIP is on")
@@ -196,9 +186,6 @@ class DevicesResponse(Fixed):
     last_status: Optional[str] = Field(description="Its outcome")
 
 
-# ---------------------------------------------------------------- mailcow's counts and storage
-# Also the answers of GET /api/status/mailcow-info and /api/status/storage
-
 class TotalActive(Fixed):
     total: int
     active: int
@@ -218,8 +205,6 @@ class StorageStatus(Fixed):
     total: Any
     used_percent: Any = Field(description="Such as 12%")
 
-
-# ---------------------------------------------------------------- weekly summary
 
 class SummaryBlocklists(Fixed):
     status: str = Field(description="listed or clean")

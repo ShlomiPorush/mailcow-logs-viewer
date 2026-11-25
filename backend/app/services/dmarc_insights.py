@@ -1,14 +1,3 @@
-"""
-DMARC insights - turn collected aggregate-report data into actionable advice:
-
-- Policy recommendations: when a domain has a healthy, high-volume DMARC pass
-  rate under a lax policy (p=none / p=quarantine), recommend tightening it.
-- New-source detection: source IPs that only recently started sending under a
-  domain AND are failing DMARC - a possible spoofing / abuse signal.
-
-Read-only, synchronous. Safe to call from a threadpooled endpoint (the routers
-that use it are plain `def`).
-"""
 import logging
 from datetime import datetime, timedelta, timezone
 
@@ -19,7 +8,6 @@ from ..models import DMARCReport, DMARCRecord
 
 logger = logging.getLogger(__name__)
 
-# A DMARC-aligned pass = the evaluated (aligned) DKIM OR SPF result passed.
 _PASS = "pass"
 
 
@@ -35,7 +23,6 @@ def _current_policy(report: DMARCReport) -> str:
 
 
 def compute_domain_insights(db, domain: str) -> dict:
-    """Insights for a single domain over the configured window."""
     window_days = settings.dmarc_insights_window_days
     start_epoch, _end_epoch, _now = _window_epoch_bounds(window_days)
 
@@ -50,7 +37,6 @@ def compute_domain_insights(db, domain: str) -> dict:
     latest = max(reports, key=lambda r: r.end_date)
     policy = _current_policy(latest)
 
-    # Aggregate volume + aligned pass/fail across all records in the window
     records = db.query(
         DMARCRecord.count,
         DMARCRecord.dkim_result,
@@ -145,11 +131,9 @@ def _policy_recommendations(domain, policy, pass_rate, total):
 
 
 def _detect_new_failing_sources(db, domain, report_ids, window_days):
-    """Source IPs seen only in the recent quarter of the window that are failing."""
     recent_days = max(window_days // 4, 3)
     recent_start = int((datetime.now(timezone.utc) - timedelta(days=recent_days)).timestamp())
 
-    # Recent report ids (their coverage ends within the recent sub-window)
     recent_report_ids = [
         r.id for r in db.query(DMARCReport.id, DMARCReport.end_date).filter(
             DMARCReport.domain == domain,
@@ -160,7 +144,6 @@ def _detect_new_failing_sources(db, domain, report_ids, window_days):
         return []
     older_report_ids = [rid for rid in report_ids if rid not in set(recent_report_ids)]
 
-    # IPs that failed DMARC in the recent window
     recent_failing = db.query(
         DMARCRecord.source_ip,
         func.sum(DMARCRecord.count).label("cnt"),
@@ -172,7 +155,6 @@ def _detect_new_failing_sources(db, domain, report_ids, window_days):
     if not recent_failing:
         return []
 
-    # IPs known from before the recent window (any result)
     known_ips = set()
     if older_report_ids:
         known_ips = {
@@ -190,13 +172,11 @@ def _detect_new_failing_sources(db, domain, report_ids, window_days):
             "failing_messages": int(cnt or 0),
             "first_seen_window_days": recent_days,
         })
-    # Most active first, cap to keep the response tidy
     new_sources.sort(key=lambda s: s["failing_messages"], reverse=True)
     return new_sources[:20]
 
 
 def compute_all_insights(db) -> dict:
-    """Insights across every domain that has DMARC data in the window."""
     start_epoch, _end, _now = _window_epoch_bounds(settings.dmarc_insights_window_days)
     domains = [
         row[0] for row in db.query(DMARCReport.domain).filter(
@@ -213,7 +193,6 @@ def compute_all_insights(db) -> dict:
         except Exception as e:
             logger.error(f"Failed to compute DMARC insights for {domain}: {e}")
 
-    # Surface actionable domains first (a tighten/low-rate/new-source signal)
     def _priority(i):
         if any(r["type"] == "low_pass_rate" for r in i["recommendations"]):
             return 0

@@ -1,17 +1,3 @@
-"""
-A cap on write requests in the public demo.
-
-Writes in the demo really change state that every visitor sees, and some
-of them start background work (a DNS check, a job run). Bot traffic is
-stopped in front of the demo (Cloudflare); this is the safety net behind it:
-each client gets a small budget of writes per minute, and all clients
-together get a larger one.
-
-The client is identified by the CF-Connecting-IP header that Cloudflare
-sets, falling back to the socket peer. That header is only trustworthy when
-the demo is reachable through Cloudflare alone (a tunnel, no open port);
-otherwise a client can rotate it and only the global budget holds.
-"""
 import json
 import threading
 import time
@@ -19,7 +5,6 @@ import time
 WRITE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 PER_CLIENT_PER_MINUTE = 30
 GLOBAL_PER_MINUTE = 300
-# Bounded memory even when every request claims a new address
 MAX_TRACKED_CLIENTS = 10000
 
 MESSAGE = "The demo allows a limited number of changes per minute. Wait a moment and try again."
@@ -54,17 +39,14 @@ class WriteRateLimiter:
         return False
 
     def allow(self, client):
-        """True if ``client`` may make one more write now."""
         now = self.clock()
         with self._lock:
             bucket = self._clients.get(client)
             if bucket is None:
                 if len(self._clients) >= self.max_clients:
-                    # Drop the least recently used half; full buckets lose nothing
                     for key, _ in sorted(self._clients.items(), key=lambda kv: kv[1].updated)[:self.max_clients // 2]:
                         del self._clients[key]
                 bucket = self._clients[client] = _Bucket(self.per_client, now)
-            # Check the client first so one noisy client cannot drain the shared budget
             if not self._take(bucket, self.per_client, now):
                 return False
             if not self._take(self._global, self.global_limit, now):
@@ -82,8 +64,6 @@ def client_address(scope):
 
 
 class WriteRateLimitMiddleware:
-    """Pure ASGI (like the app's own middleware) so WebSockets pass untouched."""
-
     def __init__(self, app, limiter=None):
         self.app = app
         self.limiter = limiter or WriteRateLimiter()

@@ -1,14 +1,3 @@
-"""The MCP endpoint (/mcp): Streamable HTTP, JSON answers only.
-
-Serves protocol revision 2026-07-28 (every request carries its version in
-params._meta and in headers; no session) and the earlier revisions 2025-11-25
-and 2025-06-18 (an `initialize` first). No session ids are minted and nothing
-is streamed. Every request needs a bearer token from oauth.py; the tools list
-and every call follow the permissions of that token's grant.
-
-Tools: get_access, list_endpoints, read_api (View routes) and perform_action
-(Act routes). The calls themselves run through dispatch.py.
-"""
 import base64
 import json
 import logging
@@ -118,8 +107,6 @@ def _tools(grant: store.GrantInfo):
     return tools
 
 
-# ── Tool bodies ────────────────────────────────────────────────────────────
-
 def _text(value: Any, is_error: bool = False) -> Dict[str, Any]:
     text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False, indent=1)
     return {"content": [{"type": "text", "text": text}], "isError": is_error}
@@ -130,7 +117,6 @@ def _get_access(grant: store.GrantInfo) -> Dict[str, Any]:
 
 
 def access_info(grant: store.GrantInfo) -> Dict[str, Any]:
-    """What this connection may do, for get_access and GET /api/agent/access."""
     areas = policy.areas_of(grant.scopes)
     labels = {a.id: a.label for a in policy.AREAS}
     return {
@@ -179,7 +165,6 @@ def _openapi_body(operation: Dict[str, Any], components: Dict[str, Any]) -> Opti
 
 
 def _schema_type(schema: Dict[str, Any], components: Dict[str, Any]) -> str:
-    """A short type name: a model's name, 'array of X', 'X or null', 'one of X, Y'."""
     ref = schema.get("$ref", "")
     if ref.startswith("#/components/schemas/"):
         return ref.rsplit("/", 1)[-1]
@@ -196,7 +181,6 @@ def _schema_type(schema: Dict[str, Any], components: Dict[str, Any]) -> str:
 
 
 def _openapi_returns(operation: Dict[str, Any], components: Dict[str, Any]) -> Optional[Any]:
-    """What a successful call returns: its top-level fields and their types (api_models/)."""
     responses = operation.get("responses") or {}
     for status in sorted(code for code in responses if code.startswith("2")):
         content = (responses[status].get("content") or {})
@@ -218,7 +202,6 @@ def _list_endpoints(app, grant: store.GrantInfo, area: Optional[str]) -> Dict[st
 
 
 def endpoints_info(app, grant: store.GrantInfo, area: Optional[str]) -> Dict[str, Any]:
-    """The API calls this connection may make, for list_endpoints and GET /api/agent/endpoints."""
     spec = app.openapi()
     paths, components = spec.get("paths", {}), spec.get("components", {}).get("schemas", {})
     out = []
@@ -228,7 +211,6 @@ def endpoints_info(app, grant: store.GrantInfo, area: Optional[str]) -> Dict[str
             continue
         if not policy.allows(grant.scopes, rule):
             continue
-        # A call shared by several areas is listed under each one the grant has it in
         if len(areas) > 1:
             areas = tuple(a for a in areas if f"{a}:{rule.kind}" in grant.scopes)
             if area and area not in areas:
@@ -307,8 +289,6 @@ async def _tools_call(request: Request, grant: store.GrantInfo, params: Dict[str
     return await _call(request, grant, name, args), None
 
 
-# ── JSON-RPC over HTTP ─────────────────────────────────────────────────────
-
 def _error(id_, code: int, message: str, status: int = 200, data: Any = None) -> JSONResponse:
     error = {"code": code, "message": message}
     if data is not None:
@@ -332,7 +312,6 @@ def _unauthorized(description: str) -> Response:
 
 
 def _header_value(value: Optional[str]) -> Optional[str]:
-    """A mirrored header value, with the =?base64?...?= form decoded."""
     if value and value.startswith("=?base64?") and value.endswith("?="):
         try:
             return base64.b64decode(value[9:-2], validate=True).decode("utf-8")

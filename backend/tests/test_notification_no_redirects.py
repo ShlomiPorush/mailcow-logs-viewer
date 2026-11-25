@@ -1,10 +1,3 @@
-"""Notification channels do not follow redirects.
-
-A redirect would send the alert (and for some channels the token in the URL or
-the Authorization header) to wherever the first server points. A 3xx answer is
-now a failed send with a short message saying so, for every channel type and
-for the Test button, which uses the same send_to_config.
-"""
 import secrets
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -49,7 +42,6 @@ def redirecting_server():
         server.server_close()
 
 
-# New for each run: the secret part of each channel
 SECRET = secrets.token_hex(16)
 CONFIGS = {
     "slack": lambda base: {"webhook_url": f"{base}/services/T0/B0/{SECRET}"},
@@ -72,7 +64,6 @@ def test_a_redirect_is_reported_and_not_followed(redirecting_server, channel_typ
 
 
 def test_every_send_disables_redirects(monkeypatch):
-    """Telegram's URL is fixed, so check the request itself for every type."""
     seen, hits = [], []
     real_client = nc.httpx.AsyncClient
 

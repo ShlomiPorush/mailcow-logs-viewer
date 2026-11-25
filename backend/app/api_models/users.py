@@ -1,4 +1,3 @@
-"""What Settings > Users calls return (routers/users.py). For admins only."""
 from typing import Dict, List, Optional
 
 from pydantic import Field

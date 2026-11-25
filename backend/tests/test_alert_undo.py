@@ -1,6 +1,3 @@
-"""Undo for dismissing security alerts: every dismissal answers with a receipt
-of exactly what it changed, Dismiss all changes only the alerts the list had,
-and Undo by receipt re-opens those and nothing a later dismissal changed."""
 import importlib.util
 import pathlib
 import uuid
@@ -71,7 +68,6 @@ def test_a_dismissal_has_a_receipt_and_undo_reopens_it_once(db_ready):
     [alert] = _add()
     first = c.post(f'/api/security-alerts/{alert}/acknowledge').json()
     assert first['acknowledged'] == 1 and first['ids'] == [alert] and first['receipt']
-    # Another tab dismisses it too: nothing changed there, so no receipt to undo
     again = c.post(f'/api/security-alerts/{alert}/acknowledge').json()
     assert again['acknowledged'] == 0 and again['receipt'] is None
     undone = c.post(f"/api/security-alerts/acknowledgements/{first['receipt']}/undo").json()
@@ -96,7 +92,6 @@ def test_dismiss_all_changes_only_the_alerts_the_list_had_even_one_committed_lat
     from app.models import SecurityAlert
     c = _client()
     shown = _add(3)
-    # Transaction A takes an id and waits; B takes a higher one and commits first
     a = Session(engine)
     late = SecurityAlert(alert_type='volume_spike', subject=f'late-{MARK}@alerts.example', title='Late', created_at=datetime.utcnow())
     a.add(late)
@@ -141,7 +136,6 @@ def test_bad_requests_are_refused(db_ready):
     assert c.post('/api/security-alerts/acknowledge-all', json={'ids': []}).status_code == 422
     assert c.post('/api/security-alerts/acknowledge-all', json={'ids': list(range(10001))}).status_code == 422
     assert c.post('/api/security-alerts/acknowledge-all', json={'ids': ['x']}).status_code == 422
-    # An unknown receipt changes nothing
     assert c.post(f'/api/security-alerts/acknowledgements/{uuid.uuid4()}/undo').json()['restored'] == 0
 
 
@@ -165,14 +159,13 @@ def test_the_migration_adds_the_receipt_on_an_existing_install_and_runs_again_sa
             with Operations.context(MigrationContext.configure(conn)):
                 step()
     try:
-        # As 0019 left it: the table without the receipt, with an alert in it
         Base.metadata.create_all(isolated, tables=[SecurityAlert.__table__])
         with isolated.begin() as conn:
             conn.execute(text('DROP INDEX IF EXISTS ix_security_alerts_ack_batch'))
             conn.execute(text('ALTER TABLE security_alerts DROP COLUMN ack_batch'))
             conn.execute(text("INSERT INTO security_alerts (alert_type, title, acknowledged) VALUES ('volume_spike', 'kept', true)"))
         run(revision.upgrade)
-        run(revision.upgrade)   # a restart, or a fresh install whose table already has it
+        run(revision.upgrade)
         columns = {c['name'] for c in inspect(isolated).get_columns('security_alerts')}
         assert 'ack_batch' in columns
         with isolated.connect() as conn:
@@ -188,7 +181,6 @@ def test_the_migration_adds_the_receipt_on_an_existing_install_and_runs_again_sa
 
 
 def test_the_list_and_its_ids_come_from_one_snapshot(db_ready):
-    """An alert committed between the list's two queries is in neither."""
     from sqlalchemy import event
     from app.database import engine
     c = _client()
@@ -196,7 +188,6 @@ def test_the_list_and_its_ids_come_from_one_snapshot(db_ready):
     late, busy = [], []
 
     def between(conn, cursor, statement, parameters, context, executemany):
-        # Right after the list's first read of the alerts, another connection commits a new one
         if busy or late or not statement.lstrip().upper().startswith('SELECT') or 'security_alerts' not in statement:
             return
         busy.append(1)
@@ -211,5 +202,4 @@ def test_the_list_and_its_ids_come_from_one_snapshot(db_ready):
         event.remove(engine, 'after_cursor_execute', between)
     assert late, 'the alert was committed during the request'
     assert late[0] not in listed['unacknowledged_ids'] and late[0] not in [a['id'] for a in listed['alerts']]
-    # The ids Dismiss all sends come from the same snapshot
     assert late[0] not in listed['writable_ids'] and set(listed['writable_ids']) <= set(listed['unacknowledged_ids'])

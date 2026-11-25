@@ -1,10 +1,3 @@
-"""Every answer the Rspamd map calls can give, so the contract check (conftest.py,
-contract.py) holds each one to /openapi.json: the maps with and without the Rspamd
-password, Rspamd refusing or answering something that is not its map list (502, or an
-error in the list), a save refused for its content (400), a missing Read-Write key
-(403), a map changed meanwhile or another save still running (409), and the requests
-the calls refuse (404, 400, 422). Rspamd and mailcow are faked at the HTTP client;
-nothing leaves the test."""
 import json
 import secrets
 
@@ -25,18 +18,12 @@ from app.services import rspamd_map_lock  # noqa: E402
 
 MAP = 'global_rcpt_blacklist.map'
 OTHER = 'global_mime_from_blacklist.map'
-# Lines re.compile refuses with OverflowError and RecursionError, not re.error
 HUGE_REPEAT = '/a{99999999999}/'
 DEEP_NESTING = '/' + '(' * 5000 + 'a' + ')' * 5000 + '/'
 
 
 @pytest.fixture
 def rspamd(monkeypatch):
-    """Rspamd's controller and mailcow's map edit behind a fake HTTP client.
-
-    state['maps'] is Rspamd's /maps answer (a list, an httpx.Response, or an
-    exception), state['content'] the map's content, state['getmap'] an override
-    for /getmap and state['edit'] mailcow's reply to the save."""
     for key in ('auth_enabled', 'basic_auth_enabled', 'oauth2_enabled'):
         monkeypatch.setattr(settings._inner, key, False)
     monkeypatch.setattr(settings._inner, 'rspamd_password', secrets.token_hex(16))
@@ -88,8 +75,6 @@ NOT_JSON = httpx.Response(200, text='<html>Sign in</html>', headers={'content-ty
 REFUSED = httpx.Response(401, text='Unauthorized')
 
 
-# ---------------------------------------------------------------- configuration and list
-
 def test_config(client):
     r = client.get('/api/rspamd/config')
     assert r.status_code == 200
@@ -122,15 +107,11 @@ def test_list_when_rspamd_refuses(client, rspamd):
 @pytest.mark.parametrize('maps', [NOT_JSON, {'maps': []}, [None], [{'map': 7, 'uri': None}], [{'map': 7}]],
                          ids=['a-page', 'an-object', 'a-null-entry', 'a-null-uri', 'no-uri'])
 def test_list_when_rspamd_answers_something_else(client, rspamd, maps):
-    """A proxy's sign-in page, or JSON that is not Rspamd's map list, is reported as
-    an error in the list, not as maps that are not loaded."""
     rspamd['maps'] = maps
     r = client.get('/api/rspamd/maps')
     assert r.status_code == 200
     assert r.json()['error'] and r.json()['configured'] is True
 
-
-# ---------------------------------------------------------------- one map
 
 def test_map_content(client):
     r = client.get(f'/api/rspamd/maps/{MAP}')
@@ -157,8 +138,6 @@ def test_map_errors(client, rspamd, monkeypatch):
     assert client.get(f'/api/rspamd/maps/{MAP}').status_code == 400
 
 
-# ---------------------------------------------------------------- saving a map
-
 def test_save(client, rspamd):
     opened = client.get(f'/api/rspamd/maps/{MAP}').json()
     r = client.put(f'/api/rspamd/maps/{MAP}', json={'content': opened['content'] + 'b@example.org\n',
@@ -177,8 +156,6 @@ def test_save_that_cannot_be_read_back(client, rspamd):
 
 
 def test_a_save_read_back_as_a_page_is_still_saved(client, rspamd):
-    """Without base_hash the map is written first; a page in place of the map list
-    when it is read back does not make the save look failed."""
     rspamd['maps'] = NOT_JSON
     r = client.put(f'/api/rspamd/maps/{MAP}', json={'content': '/^d@example\\.com$/i'})
     assert r.status_code == 200, r.text
@@ -198,13 +175,10 @@ def test_save_errors(client, rspamd, monkeypatch):
 
     rspamd['edit'] = [{'type': 'danger', 'msg': ['map_content_empty']}]
     assert client.put(f'/api/rspamd/maps/{MAP}', json={'content': 'x'}).status_code == 502
-    # mailcow says its reply is JSON, and it is not: the write is sent once, and the page
-    # is told to check the map before saving again
     rspamd['edit'] = httpx.Response(200, text='<html>', headers={'content-type': 'application/json'})
     unconfirmed = client.put(f'/api/rspamd/maps/{MAP}', json={'content': 'x'})
     assert unconfirmed.status_code == 502 and unconfirmed.json()['detail'].startswith('mailcow did not confirm')
 
-    # The map it is checked against cannot be read: nothing is written
     rspamd['maps'] = NOT_JSON
     assert client.put(f'/api/rspamd/maps/{MAP}', json={'content': 'x', 'base_hash': 'h'}).status_code == 502
     for line in (HUGE_REPEAT, DEEP_NESTING):
@@ -228,8 +202,6 @@ def test_save_while_another_save_runs(client, rspamd, monkeypatch):
     assert isinstance(r.json()['detail'], str)
     assert rspamd['writes'] == []
 
-
-# ---------------------------------------------------------------- checking content
 
 def test_validate(client):
     r = client.post('/api/rspamd/validate', json={'content': '# c\n/[unclosed/\nuser@example.com\nexample.org'})

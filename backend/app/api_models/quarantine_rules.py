@@ -1,4 +1,3 @@
-"""What the quarantine auto-rule calls return (routers/quarantine_rules.py)."""
 from typing import Any, List, Optional
 
 from pydantic import Field

@@ -1,11 +1,3 @@
-"""Parsed DMARC / TLS-RPT reports keep only the parsed data.
-
-The original report text was stored next to the parsed rows but never read,
-so it only multiplied memory and disk use for every report (and for a hostile
-one up to the decompression cap). Parsing and both write paths (IMAP sync and
-manual upload) must drop it, the migration must clear existing copies, and the
-decompression cap must reject an oversized report while real ones still parse.
-"""
 import asyncio
 import gzip
 import importlib.util
@@ -51,7 +43,6 @@ _RECORD = """  <record>
 
 
 def dmarc_xml(records: int = 1, report_id: str = "raw-copy-dmarc") -> str:
-    # Distinct sources: identical records are merged into one
     body = "".join(_RECORD.format(ip=f"2001:db8::{i + 1:x}") for i in range(records))
     return f"""<?xml version="1.0"?>
 <feedback>
@@ -79,8 +70,6 @@ def tls_json(report_id: str = "raw-copy-tls") -> str:
     })
 
 
-# -- parsing ----------------------------------------------------------------
-
 def test_parsed_dmarc_report_carries_no_raw_copy():
     parsed = parse_dmarc_file(gzip.compress(dmarc_xml().encode()), "report.xml.gz")
     assert parsed is not None and parsed["report_id"] == "raw-copy-dmarc"
@@ -93,11 +82,8 @@ def test_parsed_tls_report_carries_no_raw_copy():
     assert "raw_json" not in parsed
 
 
-# -- decompression cap --------------------------------------------------------
-
 def test_decompression_cap_is_ten_mib():
     assert MAX_DECOMPRESSED_BYTES == 10 * MIB
-    # The compressed input may never be larger than what it may expand to
     assert MAX_COMPRESSED_BYTES <= MAX_DECOMPRESSED_BYTES
 
 
@@ -106,7 +92,6 @@ def test_gzip_expanding_beyond_ten_mib_is_rejected():
     assert len(bomb) < 100 * 1024
     with pytest.raises(DecompressionLimitError):
         gzip_decompress_limited(bomb)
-    # A limit: the caller rejects the whole email or upload
     with pytest.raises(ReportLimitError):
         parse_dmarc_file(bomb, "report.xml.gz")
     with pytest.raises(ReportLimitError):
@@ -114,14 +99,11 @@ def test_gzip_expanding_beyond_ten_mib_is_rejected():
 
 
 def test_large_realistic_report_still_parses():
-    # Several thousand rows is far above what real senders put in one report
     xml = dmarc_xml(records=8000)
     assert 2 * MIB < len(xml) < MAX_DECOMPRESSED_BYTES
     parsed = parse_dmarc_file(gzip.compress(xml.encode()), "report.xml.gz")
     assert parsed is not None and len(parsed["records"]) == 8000
 
-
-# -- write paths --------------------------------------------------------------
 
 def _recording_db():
     db = Mock()
@@ -201,8 +183,6 @@ def test_imap_sync_stores_no_raw_copy(monkeypatch):
     assert _stored(added, TLSReport).raw_json is None
 
 
-# -- migration ------------------------------------------------------------------
-
 def _load_revision():
     versions = pathlib.Path(__file__).resolve().parent.parent / "alembic" / "versions"
     matches = sorted(versions.glob("*_clear_raw_report_copies.py"))
@@ -255,7 +235,6 @@ def test_migration_clears_existing_raw_copies():
             assert conn.execute(text("SELECT count(*) FROM tls_reports")).scalar() == 3
             assert conn.execute(text("SELECT count(*) FROM dmarc_reports WHERE raw_xml IS NOT NULL")).scalar() == 0
             assert conn.execute(text("SELECT count(*) FROM tls_reports WHERE raw_json IS NOT NULL")).scalar() == 0
-            # The parsed data stays
             assert conn.execute(text(
                 "SELECT count(*) FROM dmarc_reports WHERE domain = 'example.com' AND org_name = 'reporter.example.com'"
             )).scalar() == 4

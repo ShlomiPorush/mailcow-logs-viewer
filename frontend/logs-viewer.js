@@ -1,22 +1,8 @@
-// =============================================================================
-// LIVE LOG VIEWER - raw service logs page, WebSocket stream, filters, controls
-// =============================================================================
-// Split out of app.js (phase 3). Classic script sharing the global scope;
-// loaded after utils.js and app.js in index.html.
-
-// =============================================================================
-// LIVE LOG VIEWER
-// =============================================================================
-
 let logsState = {
     activeService: 'postfix',
     isPaused: false,
     autoScroll: true,
-    // Live entries that came while auto-scroll was off, for the New lines
-    // button (counted against the filter shown at the time)
     newEntries: [],
-    // Display order (issue #69): false = newest at the bottom (classic tail -f),
-    // true = newest at the top. allEntries stays chronological either way.
     newestFirst: localStorage.getItem('logsNewestFirst') === 'true',
     fontSize: 12,
     wordWrap: true,
@@ -29,16 +15,14 @@ let logsState = {
     entryCount: 0,
     lastUpdateTime: null,
     allEntries: [],
-    // Pagination state for infinite scroll
     currentPage: 1,
     totalPages: 1,
     totalEntries: 0,
     isLoadingMore: false,
-    oldestPageLoaded: 1,  // track which page we've loaded up to
-    timeRangeMinutes: '',  // '' = all time, or minutes as string
+    oldestPageLoaded: 1,
+    timeRangeMinutes: '',
 };
 
-// Service icon map (SVG paths for inline icons)
 const LOG_SERVICE_ICONS = {
     mail: 'M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z',
     inbox: 'M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4',
@@ -57,7 +41,6 @@ async function loadLogViewer() {
     console.log('[LOGS] Loading log viewer...');
     
     try {
-        // Fetch service list
         const response = await authenticatedFetch('/api/raw-logs/services');
         if (!response.ok) {
             throw await responseError(response);
@@ -65,14 +48,12 @@ async function loadLogViewer() {
         
         const data = await response.json();
         
-        // Check if raw logs feature is disabled
         if (data.raw_logs_enabled === false) {
             const output = document.getElementById('logs-output');
             if (output) {
                 output.innerHTML = `<div class="ui-logs-locked">${uiLocked('Live Log Viewer is Disabled',
                     'Raw log collection is currently turned off. Enable it in Settings → Logs to start viewing live logs.')}</div>`;
             }
-            // Hide the service sidebar
             const sidebar = document.getElementById('logs-service-list');
             if (sidebar) sidebar.innerHTML = '';
             return;
@@ -80,10 +61,8 @@ async function loadLogViewer() {
         
         logsState.services = data.services || [];
         
-        // Render service sidebar
         renderLogServiceList(logsState.services);
         
-        // Select first service or postfix
         const defaultService = logsState.services.find(s => s.id === 'postfix') || logsState.services[0];
         if (defaultService) {
             await selectLogService(defaultService.id);
@@ -130,7 +109,6 @@ function renderLogServiceList(services) {
     updateLogServiceToggle();
 }
 
-// Narrow screens: the service list folds into one row that names the current service
 function toggleLogServices(open) {
     const side = document.getElementById('logs-side');
     const toggle = document.getElementById('logs-side-toggle');
@@ -153,7 +131,6 @@ async function selectLogService(serviceId) {
     logsState.activeService = serviceId;
     logsState.entryCount = 0;
     
-    // Update sidebar active state
     document.querySelectorAll('.log-service-btn').forEach(btn => {
         if (btn.dataset.service === serviceId) btn.setAttribute('aria-current', 'true');
         else btn.removeAttribute('aria-current');
@@ -161,29 +138,23 @@ async function selectLogService(serviceId) {
     updateLogServiceToggle();
     toggleLogServices(false);
     
-    // Update status bar
     const activeServiceEl = document.getElementById('logs-active-service');
     if (activeServiceEl) activeServiceEl.textContent = serviceId;
     
-    // Clear output
     const output = document.getElementById('logs-output');
     if (output) {
         output.innerHTML = '<span class="text-gray-500">Loading logs...</span>';
     }
     
-    // Reset date range
     logsState.dateRange = null;
     logsState.timeRangeMinutes = '';
     setLogDateInput(document.getElementById('logs-date-from'), null);
     setLogDateInput(document.getElementById('logs-date-to'), null);
     
-    // Load smart filters
     await loadSmartFilters(serviceId);
     
-    // Fetch initial logs
     await fetchInitialLogs(serviceId);
     
-    // Connect WebSocket
     await connectLogWebSocket(serviceId);
 }
 
@@ -218,7 +189,6 @@ async function loadSmartFilters(serviceId) {
     }
 }
 
-// Quick filters fold to a row and a half, so the cut second row shows there is more
 let quickFiltersOpen = false;
 function fitQuickFilters() {
     const chips = document.getElementById('logs-smart-filter-chips');
@@ -235,11 +205,9 @@ function fitQuickFilters() {
     chips.classList.remove('is-folded');
     const first = chips.firstElementChild;
     if (!first) { more.classList.add('hidden'); return; }
-    // Fold only when it saves at least a row; otherwise show them all, no link
     const rowH = first.offsetHeight;
     const foldH = Math.round(rowH * 1.6 + 6);
     const overflows = chips.scrollHeight > foldH + rowH;
-    // An active filter never hides in the folded part
     const activeHidden = [...chips.querySelectorAll('[aria-pressed="true"]')].some(c => c.offsetTop - chips.offsetTop > rowH);
     if (activeHidden) quickFiltersOpen = true;
     more.classList.toggle('hidden', !overflows);
@@ -253,10 +221,8 @@ function toggleQuickFilters() {
     quickFiltersOpen = !quickFiltersOpen;
     fitQuickFilters();
 }
-// Refit when the chips get their size: the page was hidden, or the width changed
 let quickFiltersObserver = null;
 
-// The custom date range opens from its chip; the presets fill it and load
 function toggleLogCustomRange(open) {
     const box = document.getElementById('logs-custom-range');
     const btn = document.getElementById('logs-custom-range-btn');
@@ -275,16 +241,13 @@ async function toggleSmartFilter(filterId) {
         logsState.activeSmartFilters.push(filterId);
     }
     
-    // Update chip visual
     const btn = document.getElementById(`smart-filter-${filterId}`);
     if (btn) btn.setAttribute('aria-pressed', logsState.activeSmartFilters.includes(filterId) ? 'true' : 'false');
 
-    // Client-side filter: show/hide existing log lines
     applyLogFilter();
 }
 
 async function fetchInitialLogs(serviceId) {
-    // Reflect the persisted sort order on the toolbar button
     updateLogSortButton();
     try {
         const limit = 500;
@@ -297,17 +260,14 @@ async function fetchInitialLogs(serviceId) {
         const total = data.total || 0;
         const totalPages = Math.max(1, Math.ceil(total / limit));
         
-        // Store pagination state
         logsState.totalEntries = total;
         logsState.totalPages = totalPages;
         logsState.currentPage = totalPages;
         logsState.oldestPageLoaded = totalPages;
         
         if (totalPages === 1) {
-            // Only one page - use what we already have
             renderLogEntries(data.data || [], serviceId, true);
         } else {
-            // Fetch the last page (newest entries)
             const lastParams = new URLSearchParams({ page: totalPages, limit: limit, order: 'asc' });
             const lastResp = await authenticatedFetch(`/api/raw-logs/${serviceId}?${lastParams}`);
             if (!lastResp.ok) throw await responseError(lastResp);
@@ -332,12 +292,9 @@ async function fetchOlderLogs() {
     if (logsState.isLoadingMore || logsState.oldestPageLoaded <= 1) return;
     
     logsState.isLoadingMore = true;
-    // Clear during the request makes its result stale
     const view = logsState.viewId;
     const pageToLoad = logsState.oldestPageLoaded - 1;
     
-    // Show loading indicator at the history edge (top normally, bottom in
-    // newest-first mode)
     const output = document.getElementById('logs-output');
     let loader = document.getElementById('logs-load-more-indicator');
     if (!loader && output) {
@@ -369,26 +326,19 @@ async function fetchOlderLogs() {
         if (entries.length > 0) {
             logsState.oldestPageLoaded = pageToLoad;
             
-            // Preserve scroll position
             const terminal = document.getElementById('logs-terminal');
             const prevScrollHeight = terminal ? terminal.scrollHeight : 0;
             
-            // Insert older entries (top normally, bottom in newest-first mode)
             renderLogEntries(entries, logsState.activeService, false, true);
 
-            // Restore scroll position (keep user at same visual point).
-            // Only needed when history is inserted at the top - appending at
-            // the bottom (newest-first mode) doesn't move the viewport.
             if (terminal && !logsState.newestFirst) {
                 const newScrollHeight = terminal.scrollHeight;
                 terminal.scrollTop = newScrollHeight - prevScrollHeight;
             }
         }
         
-        // Remove loader
         if (loader) loader.remove();
         
-        // Update status
         updateLogStatusBar();
         
     } catch (error) {
@@ -404,14 +354,10 @@ function setupTerminalScrollHandler() {
     const terminal = document.getElementById('logs-terminal');
     if (!terminal || terminal._scrollHandlerAttached) return;
     
-    // Scrolling by hand (wheel, touch, keys, the scroll bar), as opposed to the
-    // log growing or a filter shrinking it
     let byHandAt = 0;
     const byHand = () => { byHandAt = Date.now(); };
     ['wheel', 'touchmove', 'keydown'].forEach(type => terminal.addEventListener(type, byHand, { passive: true }));
     terminal.addEventListener('scroll', () => {
-        // Reaching the newest lines by hand clears the New lines button (a
-        // press on the terminal itself, not on a line, is on its scroll bar)
         const onBar = uiPress && uiPress.down && uiPress.target === terminal;
         if (logsState.newEntries.length && (onBar || Date.now() - byHandAt < 1000)) {
             const atNewest = logsState.newestFirst
@@ -419,8 +365,6 @@ function setupTerminalScrollHandler() {
                 : terminal.scrollTop + terminal.clientHeight > terminal.scrollHeight - 4;
             if (atNewest) { logsState.newEntries = []; updateLogNewLines(); }
         }
-        // Load older entries when scrolled near the history edge (within
-        // 50px): the top normally, the bottom in newest-first mode
         if (logsState.isLoadingMore || logsState.oldestPageLoaded <= 1) return;
         const nearHistoryEdge = logsState.newestFirst
             ? terminal.scrollTop + terminal.clientHeight > terminal.scrollHeight - 50
@@ -432,24 +376,20 @@ function setupTerminalScrollHandler() {
     terminal._scrollHandlerAttached = true;
 }
 
-/** Check if an entry matches both search query and active smart filters */
 function entryMatchesFilters(entry) {
     const searchText = getEntrySearchText(entry).toLowerCase();
     
-    // Check text search
     if (logsState.searchQuery) {
         if (!searchText.includes(logsState.searchQuery.toLowerCase())) {
             return false;
         }
     }
     
-    // Check smart filters (entry must match at least one active filter)
     if (logsState.activeSmartFilters.length > 0) {
         const matchesAnyFilter = logsState.activeSmartFilters.some(filterId => {
             const filterDef = logsState.smartFilters.find(f => f.id === filterId);
             if (!filterDef) return false;
             
-            // Each filter has a 'pattern' and a 'field' (program or message)
             const pattern = (filterDef.pattern || '').toLowerCase();
             if (!pattern) return false;
             
@@ -463,9 +403,6 @@ function entryMatchesFilters(entry) {
     return true;
 }
 
-// Cap on live-stream entries kept in memory/DOM. Without it the WebSocket
-// stream grows the page unboundedly and a busy server degrades the tab
-// within hours. Oldest lines are dropped; auto-scroll favors the tail anyway.
 const MAX_LIVE_LOG_ENTRIES = 5000;
 
 function renderLogEntries(entries, serviceId, replace = false, prepend = false) {
@@ -478,11 +415,9 @@ function renderLogEntries(entries, serviceId, replace = false, prepend = false) 
         logsState.newEntries = [];
         updateLogNewLines();
     } else if (entries.length) {
-        // New lines after a Clear replace its note
         output.querySelectorAll('.logs-placeholder').forEach(el => el.remove());
     }
     
-    // Store entries
     if (prepend) {
         logsState.allEntries = entries.concat(logsState.allEntries);
     } else {
@@ -494,15 +429,11 @@ function renderLogEntries(entries, serviceId, replace = false, prepend = false) 
         return;
     }
     
-    // While the user selects or has selected text, new lines neither scroll
-    // it away nor trim the lines it is in, and auto-scroll turns off
     const held = !replace && !prepend && uiTextHeld(output);
     if (held && logsState.autoScroll) setLogAutoScroll(false);
     const fragment = document.createDocumentFragment();
     const hasFilters = logsState.searchQuery || logsState.activeSmartFilters.length > 0;
 
-    // In newest-first mode the DOM is the exact reverse of chronological
-    // order, so each batch is built reversed before insertion
     const domEntries = logsState.newestFirst ? entries.slice().reverse() : entries;
 
     domEntries.forEach(entry => {
@@ -510,13 +441,11 @@ function renderLogEntries(entries, serviceId, replace = false, prepend = false) 
         line.className = 'log-line';
         line.style.padding = '1px 0';
 
-        // Store the raw entry as data for search
         line._rawEntry = entry;
 
         const formatted = formatLogLine(entry, serviceId);
         line.innerHTML = formatted;
 
-        // If there are active filters, check if this entry matches
         if (hasFilters && !entryMatchesFilters(entry)) {
             line.style.display = 'none';
             line.classList.add('log-filtered');
@@ -525,8 +454,6 @@ function renderLogEntries(entries, serviceId, replace = false, prepend = false) 
         fragment.appendChild(line);
     });
 
-    // prepend = older history; otherwise newer entries. Where each goes in
-    // the DOM depends on the display order.
     const insertAtTop = logsState.newestFirst ? !prepend : prepend;
     if (insertAtTop && output.firstChild) {
         output.insertBefore(fragment, output.firstChild);
@@ -534,9 +461,6 @@ function renderLogEntries(entries, serviceId, replace = false, prepend = false) 
         output.appendChild(fragment);
     }
 
-    // Trim oldest entries beyond the cap (live stream only - prepend means
-    // the user is deliberately paging back through history). The oldest
-    // lines sit at the top normally, at the bottom in newest-first mode.
     if (!prepend && !held && logsState.allEntries.length > MAX_LIVE_LOG_ENTRIES) {
         const excess = logsState.allEntries.length - MAX_LIVE_LOG_ENTRIES;
         logsState.allEntries.splice(0, excess);
@@ -547,15 +471,12 @@ function renderLogEntries(entries, serviceId, replace = false, prepend = false) 
         }
     }
 
-    // Update filter badge if filters are active
     if (hasFilters) {
         const allLines = output.querySelectorAll('.log-line');
         const visibleCount = output.querySelectorAll('.log-line:not(.log-filtered)').length;
         updateFilterBadge(true, visibleCount, allLines.length);
     }
 
-    // Auto-scroll to the newest entry (only for new entries, not when
-    // loading older) - bottom normally, top in newest-first mode
     if (logsState.autoScroll && !prepend) {
         const terminal = document.getElementById('logs-terminal');
         if (terminal) {
@@ -564,12 +485,10 @@ function renderLogEntries(entries, serviceId, replace = false, prepend = false) 
     }
 }
 
-/** Toggle log display order (issue #69) and re-render from stored entries */
 function toggleLogSortOrder() {
     logsState.newestFirst = !logsState.newestFirst;
     localStorage.setItem('logsNewestFirst', logsState.newestFirst ? 'true' : 'false');
     updateLogSortButton();
-    // Re-render the current buffer in the new order (copy: replace resets allEntries)
     renderLogEntries(logsState.allEntries.slice(), logsState.activeService, true);
 }
 
@@ -578,18 +497,15 @@ function updateLogSortButton() {
     if (label) {
         label.textContent = logsState.newestFirst ? 'Newest first' : 'Newest last';
     }
-    // Arrow points to where the newest entry lives: up = top, down = bottom
     const icon = document.getElementById('logs-sort-icon');
     if (icon) {
         icon.setAttribute('d', logsState.newestFirst
-            ? 'M3 4h13M3 8h9m-9 4h6m4 0l4-4m0 0l4 4m-4-4v12'   // bars + arrow up
-            : 'M3 4h13M3 8h9m-9 4h9m5-4v12m0 0l-4-4m4 4l4-4'); // bars + arrow down
+            ? 'M3 4h13M3 8h9m-9 4h6m4 0l4-4m0 0l4 4m-4-4v12'
+            : 'M3 4h13M3 8h9m-9 4h9m5-4v12m0 0l-4-4m4 4l4-4');
     }
 }
 
-/** Get searchable text from a raw log entry */
 function getEntrySearchText(entry) {
-    // Build a single string from all fields for searching
     const parts = [];
     if (entry.message) parts.push(entry.message);
     if (entry.program) parts.push(entry.program);
@@ -599,7 +515,6 @@ function getEntrySearchText(entry) {
     if (entry.data) parts.push(String(entry.data));
     if (entry.service) parts.push(entry.service);
     if (entry.priority) parts.push(entry.priority);
-    // Rspamd history fields
     if (entry.subject) parts.push(entry.subject);
     if (entry.sender_smtp) parts.push(entry.sender_smtp);
     if (entry.sender_mime) parts.push(entry.sender_mime);
@@ -615,20 +530,17 @@ function formatLogLine(entry, serviceId) {
     const timeVal = entry.time || entry.unix_time;
     const time = timeVal ? escapeHtml(formatLogTimestamp(timeVal)) : '';
     
-    // Build the display message based on service type
     let displayContent = '';
     let lineColor = 'text-gray-300';
     let programStr = '';
     
     switch (serviceId) {
         case 'api':
-            // API: { time, uri, method, remote, data }
             const method = escapeHtml(entry.method || '');
             const uri = escapeHtml(entry.uri || '');
             const remote = escapeHtml(entry.remote || '');
             const data = entry.data ? escapeHtml(String(entry.data).substring(0, 200)) : '';
             
-            // Color by method
             const methodColors = { GET: 'text-green-400', POST: 'text-yellow-400', PUT: 'text-blue-400', DELETE: 'text-red-400' };
             const methodColor = methodColors[entry.method] || 'text-gray-300';
             
@@ -640,14 +552,12 @@ function formatLogLine(entry, serviceId) {
             break;
             
         case 'watchdog':
-            // Watchdog: { time, service, lvl, hpnow, hptotal, hpdiff }
             const wdService = escapeHtml(entry.service || '');
             const lvl = parseInt(entry.lvl || '0');
             const hpnow = escapeHtml(entry.hpnow || '?');
             const hptotal = escapeHtml(entry.hptotal || '?');
             const hpdiff = parseInt(entry.hpdiff || '0');
             
-            // Color by health
             if (hpdiff < 0 || lvl > 200) {
                 lineColor = 'text-red-400';
             } else if (lvl > 100) {
@@ -662,7 +572,6 @@ function formatLogLine(entry, serviceId) {
             break;
             
         case 'rspamd-history': {
-            // Rspamd history: { unix_time, sender_smtp, rcpt_smtp, subject, score, action, ip, symbols, ... }
             const score = parseFloat(entry.score || 0);
             const action = escapeHtml(entry.action || 'unknown');
             const sender = escapeHtml(entry.sender_smtp || entry.sender_mime || '');
@@ -671,7 +580,6 @@ function formatLogLine(entry, serviceId) {
             const subject = escapeHtml((entry.subject || '').substring(0, 80));
             const ip = escapeHtml(entry.ip || '');
             
-            // Score color: green = ham, yellow = greylist zone, red = spam/reject
             const rejectThreshold = entry.thresholds?.reject || 15;
             const addHeaderThreshold = entry.thresholds?.['add header'] || 8;
             let scoreColor = 'text-green-400';
@@ -687,7 +595,6 @@ function formatLogLine(entry, serviceId) {
                 scoreColor = 'text-green-400';
             }
             
-            // Action color
             const actionColors = {
                 'reject': 'text-red-400',
                 'greylist': 'text-yellow-400',
@@ -706,12 +613,9 @@ function formatLogLine(entry, serviceId) {
         }
             
         default:
-            // Standard format: { time, program, priority, message }
-            // Used by: postfix, dovecot, sogo, netfilter, acme, ratelimited
             const message = escapeHtml(entry.message || '');
             programStr = escapeHtml(entry.program || '');
             
-            // Color code based on message content
             const msgLower = (entry.message || '').toLowerCase();
             if (msgLower.includes('reject') || msgLower.includes('error') || msgLower.includes('blocked') || 
                 msgLower.includes('denied') || msgLower.includes('failed') || msgLower.includes('fatal')) {
@@ -729,15 +633,12 @@ function formatLogLine(entry, serviceId) {
             break;
     }
     
-    // Highlight search terms
     if (logsState.searchQuery && displayContent) {
         const regex = new RegExp(`(${escapeRegex(logsState.searchQuery)})`, 'gi');
         displayContent = displayContent.replace(regex, '<mark class="bg-yellow-500/40 text-yellow-200 rounded px-0.5">$1</mark>');
     }
     
-    // Assemble final line
     if (serviceId === 'api' || serviceId === 'watchdog' || serviceId === 'rspamd-history') {
-        // Custom format - content is already fully formatted
         return `<span class="text-blue-400">${time}</span> ${displayContent}`;
     } else if (time && programStr) {
         return `<span class="text-blue-400">${time}</span> <span class="text-cyan-400">${programStr}</span>: <span class="${lineColor}">${displayContent}</span>`;
@@ -760,19 +661,13 @@ function formatLogTimestamp(timeVal) {
         
         if (isNaN(date.getTime())) return String(timeVal);
         
-        // The same format as the Messages page (formatTime), in the app's zone
         return formatTime(date);
     } catch {
         return String(timeVal);
     }
 }
 
-// =============================================================================
-// WEBSOCKET
-// =============================================================================
-
 async function connectLogWebSocket(serviceId) {
-    // Disconnect existing connection
     disconnectLogWebSocket();
     
     if (logsState.isPaused) return;
@@ -781,10 +676,8 @@ async function connectLogWebSocket(serviceId) {
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         let wsUrl = `${protocol}//${window.location.host}/ws/raw-logs?service=${serviceId}`;
         
-        // Fetch a one-time auth token via the authenticated REST API
         try {
             const tokenResp = await authenticatedFetch('/api/raw-logs/ws-token', { ownNotPermitted: true });
-            // No View for Logs (any more): no stream, and no retry
             if (tokenResp.status === 403) {
                 logsNotPermitted();
                 return;
@@ -813,7 +706,6 @@ async function connectLogWebSocket(serviceId) {
                 const data = JSON.parse(event.data);
                 
                 if (data.type === 'new_logs' && data.entries && data.entries.length > 0) {
-                    // A loaded time range shows only its own lines, until Live
                     if (!logsState.isPaused && !logsState.dateRange) {
                         renderLogEntries(data.entries, data.service, false);
                         if (!logsState.autoScroll) {
@@ -826,7 +718,6 @@ async function connectLogWebSocket(serviceId) {
                         updateLogStatusBar();
                     }
                 } else if (data.type === 'service_counts' && data.counts) {
-                    // Update all sidebar badges with fresh DB counts
                     const fmtNum = (n) => n >= 1000 ? (n / 1000).toFixed(1) + 'K' : n.toString();
                     for (const [svcId, count] of Object.entries(data.counts)) {
                         const btn = document.getElementById(`log-svc-${svcId}`);
@@ -835,7 +726,6 @@ async function connectLogWebSocket(serviceId) {
                         if (badge) badge.textContent = fmtNum(count);
                     }
                     updateLogServiceToggle();
-                    // Keep active service's totalEntries in sync (a loaded range keeps its own count)
                     if (logsState.activeService && !logsState.dateRange && data.counts[logsState.activeService] !== undefined) {
                         logsState.totalEntries = data.counts[logsState.activeService];
                         logsState.entryCount = data.counts[logsState.activeService];
@@ -843,10 +733,6 @@ async function connectLogWebSocket(serviceId) {
                     }
                 } else if (data.type === 'error') {
                     console.warn('[LOGS WS] Server error:', data.message);
-                    // Don't reconnect on auth errors
-                    if (data.message && data.message.includes('Authentication')) {
-                        logsState._authFailed = true;
-                    }
                 } else if (data.type === 'connected' || data.type === 'subscribed') {
                     console.log('[LOGS WS]', data.message);
                 }
@@ -860,20 +746,16 @@ async function connectLogWebSocket(serviceId) {
             logsState.isConnected = false;
             updateWsIndicator(false);
             
-            // The person has no View for Logs: say so, and do not reconnect
             if (event.code === 4403) {
                 logsNotPermitted();
                 return;
             }
 
-            // Don't reconnect on authentication failure
-            if (event.code === 4401 || logsState._authFailed) {
+            if (event.code === 4401) {
                 console.warn('[LOGS WS] Authentication failed - not reconnecting');
-                logsState._authFailed = false;
                 return;
             }
             
-            // Auto-reconnect after 3 seconds (only if still on logs tab)
             if (currentTab === 'logs' && !logsState.isPaused) {
                 setTimeout(() => {
                     if (currentTab === 'logs' && !logsState.isPaused) {
@@ -897,7 +779,6 @@ async function connectLogWebSocket(serviceId) {
 
 const LOGS_NOT_PERMITTED = 'You do not have permission to view live logs.';
 
-// The stream stopped for good: the status line and a notice say why
 function logsNotPermitted() {
     updateWsIndicator(false);
     const status = document.getElementById('logs-ws-status');
@@ -911,7 +792,7 @@ function logsNotPermitted() {
 
 function disconnectLogWebSocket() {
     if (logsState.ws) {
-        logsState.ws.onclose = null; // Prevent auto-reconnect
+        logsState.ws.onclose = null;
         logsState.ws.close();
         logsState.ws = null;
     }
@@ -953,10 +834,6 @@ function updateLogStatusBar() {
     }
 }
 
-// =============================================================================
-// CONTROLS
-// =============================================================================
-
 function toggleLogPause() {
     logsState.isPaused = !logsState.isPaused;
     
@@ -965,13 +842,11 @@ function toggleLogPause() {
     const icon = document.getElementById('logs-pause-icon');
     
     if (logsState.isPaused) {
-        // Paused → show Resume
         if (text) text.textContent = 'Resume';
         if (icon) icon.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>';
         if (btn) btn.setAttribute('aria-pressed', 'true');
         disconnectLogWebSocket();
     } else {
-        // Resumed → show Pause
         if (text) text.textContent = 'Pause';
         if (icon) icon.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>';
         if (btn) btn.setAttribute('aria-pressed', 'false');
@@ -985,8 +860,6 @@ function toggleAutoScroll() {
     setLogAutoScroll(!logsState.autoScroll);
 }
 
-// Auto-scroll on goes to the newest line (the bottom, or the top when newest
-// come first) and drops a selection in the log, which would turn it off again
 function setLogAutoScroll(on) {
     logsState.autoScroll = on;
     const btn = document.getElementById('logs-autoscroll-btn');
@@ -1001,16 +874,12 @@ function setLogAutoScroll(on) {
     if (terminal) terminal.scrollTop = logsState.newestFirst ? 0 : terminal.scrollHeight;
 }
 
-// Selecting text in the log (a click on a line, or a drag) stops auto-scroll,
-// and the Auto-scroll button shows it
 document.addEventListener('selectionchange', () => {
     if (!logsState.autoScroll) return;
     const output = document.getElementById('logs-output');
     if (output && output.offsetParent && uiTextHeld(output)) setLogAutoScroll(false);
 });
 
-// The New lines button: shown while auto-scroll is off and live lines came in,
-// at the edge where the newest lines are; a click goes to them
 function updateLogNewLines() {
     const wrap = document.getElementById('logs-new-wrap');
     const terminal = document.getElementById('logs-terminal');
@@ -1060,13 +929,9 @@ function searchLogs() {
     const input = document.getElementById('logs-search-input');
     logsState.searchQuery = input ? input.value.trim() : '';
     
-    // Client-side filter: show/hide existing log lines
     applyLogFilter();
 }
 
-// A date input holding an exact instant: it shows the wall time in the app's
-// zone, and the instant is sent while the field still shows it. A wall time
-// alone cannot tell the two hours apart when the clocks go back.
 function setLogDateInput(input, date) {
     if (!input) return;
     input.value = date ? toZonedInputValue(date) : '';
@@ -1074,8 +939,6 @@ function setLogDateInput(input, date) {
     input.dataset.instant = date ? date.toISOString() : '';
 }
 
-// The instant a date input means: the one a preset put there, else the wall
-// time typed, read in the app's zone ("To" covers its whole minute)
 function readLogDateInput(input, isEnd) {
     if (!input || !input.value) return null;
     if (input.dataset.instant && input.value === input.dataset.shown) return input.dataset.instant;
@@ -1084,47 +947,37 @@ function readLogDateInput(input, isEnd) {
     return (isEnd ? new Date(date.getTime() + (input.value.length > 16 ? 999 : 59999)) : date).toISOString();
 }
 
-/** Fill date inputs with a preset (minutes ago → now) */
 function setLogTimePreset(minutes, now = new Date()) {
     const from = new Date(now.getTime() - minutes * 60 * 1000);
     
-    // The inputs show wall times in the app's zone; the exact instants are sent
     setLogDateInput(document.getElementById('logs-date-from'), from);
     setLogDateInput(document.getElementById('logs-date-to'), now);
     
-    // Auto-load
     return loadDateRangeLogs();
 }
 
-/** Load ALL logs within the selected date range */
 async function loadDateRangeLogs() {
     const fromInput = document.getElementById('logs-date-from');
     const toInput = document.getElementById('logs-date-to');
     const loadingEl = document.getElementById('logs-range-loading');
     
-    // Wall times in the app's zone, or the instants of a preset; "To" covers its whole minute
     const startDate = readLogDateInput(fromInput, false);
     const endDate = readLogDateInput(toInput, true);
     
     if (!startDate) {
-        // No date selected - do nothing
         return;
     }
     
-    // Show loading state
     if (loadingEl) loadingEl.classList.remove('hidden');
     const loadBtn = document.getElementById('logs-load-range-btn');
     if (loadBtn) loadBtn.disabled = true;
     
     try {
-        // Store the date range in state
         logsState.dateRange = { start: startDate, end: endDate };
-        logsState.timeRangeMinutes = '';  // not using minute-based anymore
+        logsState.timeRangeMinutes = '';
         
-        // Mark Live as inactive
         setLiveButtonActive(false);
         
-        // Fetch page 1 to know overall total
         const params = new URLSearchParams({ page: 1, limit: 1000, order: 'asc' });
         params.set('start_date', startDate);
         if (endDate) params.set('end_date', endDate);
@@ -1137,10 +990,8 @@ async function loadDateRangeLogs() {
         const limit = 1000;
         const totalPages = Math.max(1, Math.ceil(total / limit));
         
-        // Render the first page
         renderLogEntries(data.data || [], logsState.activeService, true);
         
-        // Fetch remaining pages
         for (let page = 2; page <= totalPages; page++) {
             if (loadingEl) loadingEl.textContent = `Loading page ${page}/${totalPages}...`;
             
@@ -1155,14 +1006,12 @@ async function loadDateRangeLogs() {
             renderLogEntries(nextData.data || [], logsState.activeService, false);
         }
         
-        // Update state
         logsState.totalEntries = total;
         logsState.entryCount = total;
-        logsState.oldestPageLoaded = 1;  // we loaded everything
+        logsState.oldestPageLoaded = 1;
         logsState.totalPages = 1;
         updateLogStatusBar();
         
-        // Re-apply filters
         if (logsState.searchQuery || logsState.activeSmartFilters.length > 0) {
             applyLogFilter();
         }
@@ -1182,23 +1031,17 @@ async function loadDateRangeLogs() {
     }
 }
 
-/** Reset to live mode - load latest entries + reconnect WS */
 async function resetToLiveLogs() {
-    // Clear date range state
     logsState.dateRange = null;
     logsState.timeRangeMinutes = '';
     
-    // Clear date inputs
     setLogDateInput(document.getElementById('logs-date-from'), null);
     setLogDateInput(document.getElementById('logs-date-to'), null);
     
-    // Mark Live as active
     setLiveButtonActive(true);
     
-    // Re-fetch latest logs
     await fetchInitialLogs(logsState.activeService);
     
-    // Reconnect WebSocket
     await connectLogWebSocket(logsState.activeService);
 }
 
@@ -1214,7 +1057,6 @@ function clearLogSearch() {
     if (input) input.value = '';
     logsState.searchQuery = '';
     
-    // Also clear smart filters
     if (logsState.activeSmartFilters.length > 0) {
         logsState.activeSmartFilters.forEach(filterId => {
             const btn = document.getElementById(`smart-filter-${filterId}`);
@@ -1236,7 +1078,6 @@ function applyLogFilter() {
     
     lines.forEach(line => {
         if (!hasFilters) {
-            // No filters - show all
             line.style.display = '';
             line.classList.remove('log-filtered');
             visibleCount++;
@@ -1247,7 +1088,6 @@ function applyLogFilter() {
                 line.classList.remove('log-filtered');
                 visibleCount++;
             } else if (!entry) {
-                // Fallback for lines without _rawEntry (shouldn't happen but safe)
                 line.style.display = '';
                 line.classList.remove('log-filtered');
                 visibleCount++;
@@ -1258,7 +1098,6 @@ function applyLogFilter() {
         }
     });
     
-    // Update the filter badge, and the New lines count for the new filter
     updateFilterBadge(hasFilters, visibleCount, lines.length);
     updateLogNewLines();
 }
@@ -1270,14 +1109,12 @@ function updateFilterBadge(hasFilters, visible, total) {
         return;
     }
     if (!badge) {
-        // In the status bar, next to the count: inside the terminal it scrolled away with the lines
         badge = document.createElement('span');
         badge.id = 'logs-filter-badge';
         badge.className = 'ui-logs-filter';
         const count = document.getElementById('logs-entry-count');
         if (count) count.after(badge);
     }
-    // Build description of active filters
     const parts = [];
     if (logsState.searchQuery) {
         parts.push(`"${escapeHtml(logsState.searchQuery)}"`);
@@ -1294,7 +1131,6 @@ function updateFilterBadge(hasFilters, visible, total) {
 }
 
 function clearLogDisplay() {
-    // Clear display
     const output = document.getElementById('logs-output');
     if (output) {
         output.innerHTML = '<span class="text-gray-500 logs-placeholder">Display cleared. New logs will appear here.</span>';
@@ -1303,19 +1139,15 @@ function clearLogDisplay() {
     logsState.allEntries = [];
     logsState.newEntries = [];
     updateLogNewLines();
-    // A cleared screen does not refill with history: no older pages, and a
-    // history request already on its way is dropped
     logsState.oldestPageLoaded = 1;
     logsState.viewId = (logsState.viewId || 0) + 1;
     const loader = document.getElementById('logs-load-more-indicator');
     if (loader) loader.remove();
     
-    // Clear search
     const searchInput = document.getElementById('logs-search-input');
     if (searchInput) searchInput.value = '';
     logsState.searchQuery = '';
     
-    // Clear smart filters
     if (logsState.activeSmartFilters.length > 0) {
         logsState.activeSmartFilters.forEach(filterId => {
             const chip = document.querySelector(`[data-filter-id="${filterId}"]`);
@@ -1324,13 +1156,11 @@ function clearLogDisplay() {
         logsState.activeSmartFilters = [];
     }
     
-    // Clear date range
     setLogDateInput(document.getElementById('logs-date-from'), null);
     setLogDateInput(document.getElementById('logs-date-to'), null);
     logsState.dateRange = null;
     logsState.timeRangeMinutes = '';
     
-    // Clear filter badge
     updateFilterBadge(false);
     
     updateLogStatusBar();

@@ -1,12 +1,3 @@
-"""SMTP abuse protection and the outbound volume-spike alert count messages,
-not recipients.
-
-One submission to many recipients is one Postfix queue chain with one
-Rspamd scan, so it becomes one message correlation and counts once. The rows
-are the ones a real submission to 30 recipients produces: the Postfix lines
-are parsed by the real parser and correlated by the scheduler's own jobs, in
-both orders the logs can arrive in.
-"""
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -76,7 +67,6 @@ def env(monkeypatch):
 
 
 def _postfix_lines(queue_id, message_id):
-    """What Postfix logs for one authenticated submission to every recipient."""
     lines = [
         ("postfix/submission/smtpd",
          f"{queue_id}: client=unknown[198.51.100.20], sasl_method=LOGIN, sasl_username={SENDER}"),
@@ -92,7 +82,6 @@ def _postfix_lines(queue_id, message_id):
 
 
 def _ingest_postfix(queue_id, message_id):
-    """Same field mapping as the Postfix import in scheduler.py."""
     from app.correlation import parse_postfix_message
     from app.database import get_db_context
     from app.models import PostfixLog
@@ -110,12 +99,10 @@ def _ingest_postfix(queue_id, message_id):
 
 
 def _ingest_rspamd_and_correlate(queue_id, message_id):
-    """Same field mapping as the Rspamd history import in scheduler.py, then
-    the scheduler's correlation job for that log."""
     from app.correlation import detect_direction
     from app.database import get_db_context
     from app.models import RspamdLog
-    from app.scheduler import correlate_single_message
+    from app.services.correlation_jobs import correlate_single_message
     entry = {
         "unix_time": int(datetime.utcnow().replace(tzinfo=timezone.utc).timestamp()),
         "message-id": message_id, "sender_smtp": SENDER, "rcpt_smtp": RECIPIENTS,
@@ -170,8 +157,6 @@ def test_one_message_to_many_recipients_counts_once(env, postfix_first):
         _complete_incomplete_correlations_sync()
 
     assert _correlations() == [(queue_id, "outbound")]
-    # 30 recipients, threshold 5: one message, so no block
     assert svc.fetch_outbound_counts(60).get(SENDER) == 1
     assert SENDER not in {c["email"] for c in svc.find_candidates()}
-    # The spike alert counts the same rows: 1 is below its minimum of 20
     assert _volume_alerts() == 0

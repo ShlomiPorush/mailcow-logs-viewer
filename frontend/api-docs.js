@@ -1,17 +1,3 @@
-// =============================================================================
-// API REFERENCE - the interactive API page (/docs)
-// =============================================================================
-// Scalar (assets/libs/scalar-api-reference.min.js) draws /openapi.json. Nothing
-// on this page may reach a server other than this one: every Scalar feature
-// that talks to scalar.com is off below (the AI agent, the MCP and developer
-// tools, telemetry, the request proxy, its web fonts), and so is the button
-// that opens the document in Scalar's hosted client. "Test Request" stays: it
-// sends the request from this page, with the session cookie, to this server.
-// After updating the bundle, run the browser pass (UI_SMOKE=1, see
-// .github/scripts/ui_smoke.py check_api_docs): only a browser shows whether
-// the new version still keeps to these options.
-// =============================================================================
-
 const API_DOCS_OPTIONS = Object.freeze({
     url: '/openapi.json',
     telemetry: false,
@@ -24,13 +10,10 @@ const API_DOCS_OPTIONS = Object.freeze({
     persistAuth: false,
 });
 
-// The app's theme, decided as in app.js; the page follows it and has no toggle
 function apiDocsDarkMode() {
     return document.documentElement.classList.contains('dark');
 }
 
-// Scalar's colors and fonts taken from the app's tokens (assets/css/ui.css),
-// which follow the dark class on <html>
 const API_DOCS_CSS = `
 .light-mode, .dark-mode {
     --scalar-font: var(--ui-font);

@@ -1,11 +1,3 @@
-"""Sending to a notification channel is bounded in time and in what it reads.
-
-The send read the channel server's whole answer with only a per-step
-timeout, so a server that answered slowly or without end held the notifying
-worker thread and buffered all of it. The send now has one deadline for all
-of it, including the name lookup, reads at most a small piece of an error
-answer and none of a success or redirect answer, and refuses to decompress.
-"""
 import asyncio
 import contextlib
 import gc
@@ -22,14 +14,11 @@ import pytest
 from app.services import notification_channels as nc
 
 TOO_SLOW = "The destination took too long to respond. Try sending a test again."
-# New for each run: the secret part of the webhook URL
 SECRET_PATH = secrets.token_hex(5)
 
 
 @pytest.fixture(autouse=True)
 def no_proxy(monkeypatch):
-    """The sends here must reach the local servers and the faked lookup, not
-    a proxy from the environment."""
     monkeypatch.setenv("NO_PROXY", "*")
     monkeypatch.setenv("no_proxy", "*")
 
@@ -55,9 +44,6 @@ def _read_request(sock):
 
 @contextlib.contextmanager
 def raw_server(answer):
-    """A local server whose answer() writes raw bytes to the socket. Every
-    answer ends by itself within a few seconds, so a client that waits for
-    all of it (the old code) fails the test instead of hanging the suite."""
     state = {"aborted": False, "done": threading.Event()}
 
     class Handler(socketserver.BaseRequestHandler):
@@ -92,7 +78,7 @@ def _send(base):
 def _endless_body(sock):
     sock.sendall(b"HTTP/1.1 500 Internal Server Error\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\n")
     piece = b"x" * 65536
-    for _ in range(1024):   # 64 MiB at most
+    for _ in range(1024):
         sock.sendall(piece)
 
 
@@ -103,7 +89,6 @@ def test_an_endless_error_answer_is_cut_at_the_cap():
     assert ok is False
     assert error == "HTTP 500: " + "x" * 200
     assert elapsed < 3
-    # The client stopped reading and closed the connection long before the end
     assert state["aborted"]
 
 
@@ -140,7 +125,6 @@ def test_a_silent_server_is_reported_as_too_slow(monkeypatch):
 
 @pytest.fixture(params=["asyncio", "uvloop"])
 def loop_policy(request):
-    """The app runs under uvicorn's default loop policy, which is uvloop."""
     if request.param == "asyncio":
         yield
         return
@@ -159,7 +143,7 @@ def test_a_stuck_name_lookup_stops_at_the_deadline(monkeypatch, loop_policy):
     real = socket.getaddrinfo
 
     def stuck(host, *args, **kwargs):
-        if host in ("slow-dns.test", b"slow-dns.test"):   # anyio passes it encoded
+        if host in ("slow-dns.test", b"slow-dns.test"):
             entered.set()
             release.wait(5)
             raise socket.gaierror(socket.EAI_NONAME, "Name or service not known")
@@ -176,7 +160,6 @@ def test_a_stuck_name_lookup_stops_at_the_deadline(monkeypatch, loop_policy):
 
 
 def test_the_clean_up_after_a_send_is_bounded(monkeypatch):
-    """A generator whose clean-up never ends must not hold the send."""
     kept = []
 
     async def stubborn():
@@ -230,8 +213,6 @@ def test_the_error_text_uses_the_declared_charset_or_utf8(content_type, body, sh
     assert error == f"HTTP 403: {shown}"
 
 
-# ── What is read, through httpx's own transport ─────────────────────────────
-
 class CountingStream(httpx.AsyncByteStream):
     def __init__(self, chunk=b"z" * 512, limit=10_000):
         self.chunk, self.limit = chunk, limit
@@ -248,7 +229,6 @@ class CountingStream(httpx.AsyncByteStream):
 
 @pytest.fixture
 def transport(monkeypatch):
-    """Answer every send with the response the test sets; record requests."""
     state = {"requests": [], "clients": []}
     real_client = httpx.AsyncClient
 
@@ -285,9 +265,6 @@ def test_an_endless_error_answer_is_read_only_to_the_cap(transport):
 
 
 def test_a_cut_answer_leaves_nothing_pending(transport, caplog):
-    """Stopping early leaves httpx's inner stream generators to be closed by
-    tasks of their own; the send's loop must run them, not log them as
-    destroyed while pending."""
     transport["response"] = lambda: httpx.Response(500, stream=CountingStream())
     with caplog.at_level(logging.ERROR, logger="asyncio"):
         nc.send_to_config("slack", {"webhook_url": "https://hooks.example.com/x"}, "S", "M")

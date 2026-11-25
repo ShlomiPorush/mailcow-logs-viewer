@@ -1,4 +1,3 @@
-"""Excluded-address cleanup keeps database work off the event loop and preserves queue scope."""
 import asyncio
 import threading
 import uuid
@@ -12,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from app import scheduler
 from app.config import settings
+from app.services import correlation_jobs
 from app.database import Base, engine
 from app.models import MessageCorrelation, PostfixLog, RspamdLog
 
@@ -81,7 +81,7 @@ def test_correlation_waits_for_cleanup(monkeypatch):
         events.append("correlation session")
         yield db
     monkeypatch.setattr(scheduler, "cleanup_blacklisted_queues", cleanup)
-    monkeypatch.setattr(scheduler, "get_db_context", session)
+    monkeypatch.setattr(correlation_jobs, "get_db_context", session)
     asyncio.run(scheduler.run_correlation())
     assert events == ["cleanup started", "cleanup finished", "correlation session"]
 
@@ -113,14 +113,11 @@ def test_cleanup_preserves_other_queue_chains(monkeypatch):
                                  (None, "bcc@example.com"), ("KEEP2", "BCC@example.com")]]
             db.add_all(rows)
             db.flush()
-            # A listed address matches in any case, and a line without a queue
-            # (NOQUEUE) goes on its own
             expected = {rows[3].id}
             db.commit()
         asyncio.run(scheduler.cleanup_blacklisted_queues())
         with session() as db:
             assert {row.id for row in db.query(PostfixLog).all()} == expected
-        # Running again is harmless when all matched queue chains are gone.
         scheduler.excluded_addresses.request_full_pass()
         asyncio.run(scheduler.cleanup_blacklisted_queues())
         with session() as db:

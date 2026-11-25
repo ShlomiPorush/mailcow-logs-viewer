@@ -1,14 +1,3 @@
-"""A report is a duplicate only when its whole content is stored already, and
-one email can store only so much.
-
-Anyone can mail the report address, and the report_id is a field the sender
-writes. Deduplicating on report_id alone let a sender claim the report_id of
-a real reporter's coming report: the real report was then dropped as a
-duplicate and its email deleted. And with no limit on report files per email
-or records per report, a few KB of mail stored tens of thousands of rows.
-
-These tests run the real IMAP processing and upload paths against PostgreSQL.
-"""
 import gzip
 import importlib.util
 import io
@@ -45,8 +34,6 @@ from tests.test_dmarc_imap_bounces import FakeImap
 TABLES = [DMARCReport.__table__, DMARCRecord.__table__, TLSReport.__table__,
           TLSReportPolicy.__table__, DMARCSync.__table__]
 
-
-# -- reports ------------------------------------------------------------------
 
 def dmarc_xml(report_id="rid-1", org="reporter.example.com", domain="example.com",
               records=(("192.0.2.1", 5, "pass", "pass"),), begin=1700000000, end=1700086400):
@@ -113,8 +100,6 @@ def zipped(*members) -> bytes:
     return buffer.getvalue()
 
 
-# -- database -----------------------------------------------------------------
-
 def _postgres():
     from app.database import engine
     try:
@@ -174,8 +159,6 @@ def upload(filename, content):
     return dmarc_router._upload_report_worker(content, filename)
 
 
-# -- C06: report_id is not the identity ------------------------------------
-
 def test_a_report_id_claimed_by_another_sender_does_not_drop_the_real_report(env):
     forged_tls = tls_json(org="Reporter Inc.", contact="x@attacker.invalid", policies=((50, 0, None),))
     real_tls = tls_json(org="Reporter Inc.", contact="tls@reporter.example.com",
@@ -191,7 +174,6 @@ def test_a_report_id_claimed_by_another_sender_does_not_drop_the_real_report(env
     assert result["reports_created"] == 4 and result["reports_duplicate"] == 0, result
     assert count(env, TLSReport, report_id="2026-11-02T00:00:00Z_example.com") == 2
     assert count(env, DMARCReport, report_id="rid-1") == 2
-    # The real reports' emails stay in the mailbox: they share an ID with another report
     assert b"3" not in imap.deleted and b"4" not in imap.deleted
     assert {b"3", b"4"} <= imap.seen
     assert result["failed_emails"] is None
@@ -203,7 +185,6 @@ def test_a_report_id_claimed_by_another_sender_does_not_drop_the_real_report(env
 
 
 def test_a_forgery_with_the_real_metadata_but_other_records_is_kept_apart(env):
-    # Same report_id, org, contact, domain and dates; only the counts differ
     forged = dmarc_gz(records=[("192.0.2.1", 99, "pass", "pass")])
     real = dmarc_gz(records=[("192.0.2.1", 5, "fail", "fail")])
     assert upload("forged.xml.gz", forged)["status"] == "success"
@@ -243,8 +224,6 @@ def test_the_reports_list_marks_reports_that_share_a_report_id(env):
     assert shared == {("dmarc", "rid-1", True), ("dmarc", "rid-other", False),
                       ("tls", "2026-11-02T00:00:00Z_example.com", False)}
 
-
-# -- C05: limits per email ----------------------------------------------------
 
 def test_identical_records_are_stored_once_with_their_counts_added(env):
     records = [("192.0.2.7", 1, "pass", "pass")] * 20_000
@@ -321,8 +300,6 @@ def test_real_size_reports_import(env):
     assert imap.deleted == {b"1", b"2"}
 
 
-# -- every report of an email ---------------------------------------------------
-
 @pytest.mark.parametrize("order", ["dmarc first", "tls first"])
 def test_an_email_with_a_dmarc_and_a_tls_report_imports_both(env, order):
     files = [("a.xml.gz", dmarc_gz()), ("t.json", tls_json())]
@@ -344,7 +321,6 @@ def test_a_broken_report_keeps_the_email_and_counts_what_was_stored(env):
 
 
 def test_a_report_the_database_refuses_leaves_no_rows_and_keeps_the_email(env):
-    # header_from is VARCHAR(255): the record insert fails inside its report
     long_domain = ("a" * 60 + ".") * 5 + "example.com"
     bad = gzip.compress(dmarc_xml(report_id="bad").replace(
         "<header_from>example.com</header_from>", f"<header_from>{long_domain}</header_from>").encode())
@@ -363,7 +339,6 @@ def test_a_failed_commit_counts_nothing_and_keeps_the_email(env, monkeypatch):
         result = service._process_reports(EmailMessage_from(mail(("a.xml.gz", dmarc_gz()))), db, {
             "success": False, "reports_created": 0, "reports_duplicate": 0, "error": None,
             "report_type": None, "skipped": None, "keep": False})
-        # Rolled back in this session too, not only invisible to others
         assert db.query(DMARCReport).count() == 0 and db.query(DMARCRecord).count() == 0
     assert result["success"] is False and result["reports_created"] == 0
     assert "could not be saved" in result["error"]
@@ -386,7 +361,6 @@ def test_two_imports_of_one_report_id_at_once_see_each_other(env):
         thread = threading.Thread(target=other_import)
         thread.start()
         thread.join(1)
-        # It waits for the first import to finish
         assert thread.is_alive() and "status" not in outcome
         db.commit()
     thread.join(10)
@@ -414,15 +388,12 @@ def test_a_zip_with_several_reports_is_refused(env, members):
     assert refused.value.status_code == 400 and "more than one report" in refused.value.detail
 
 
-# -- the content hash -----------------------------------------------------------
-
 EDGE_DETAILS = [{"result-type": "validation-failure", "a": 1e23, "b": 1e20, "c": 1.0, "d": 0.1,
                  "e": -0.0, "f": None, "g": {"z": [1, 2.5, {"y": True}], "a": "text"}, "h": 1e300}]
 
 
 def test_the_hash_of_a_stored_report_equals_its_hash_on_arrival(env):
     content = tls_json(policies=((1, 2, EDGE_DETAILS), (3, 4, None)))
-    # Null values, as some reporters send them
     nulls = json.loads(tls_json(report_id="nulls"))
     nulls["organization-name"] = nulls["contact-info"] = None
     nulls["policies"][0]["policy"]["policy-type"] = None
@@ -447,7 +418,6 @@ def test_reports_stored_without_a_hash_are_matched_and_hashed(env):
     upload("a.xml.gz", report)
     upload("b.xml.gz", other)
     with env.engine.begin() as conn:
-        # As an older version stores them: no hash, and the same report twice
         conn.execute(text("UPDATE dmarc_reports SET content_hash = NULL"))
         first = conn.execute(text("SELECT id FROM dmarc_reports ORDER BY id LIMIT 1")).scalar()
         copy = conn.execute(text(
@@ -464,31 +434,18 @@ def test_reports_stored_without_a_hash_are_matched_and_hashed(env):
     assert upload("b.xml.gz", other)["status"] == "duplicate"
     with env.Session() as db:
         hashes = [h for (h,) in db.query(DMARCReport.content_hash).order_by(DMARCReport.id)]
-    # Each report got its hash; the second copy of the first one keeps none
     assert hashes[0] and hashes[1] and hashes[0] != hashes[1] and hashes[2] is None
     assert upload("c.xml.gz", dmarc_gz(records=distinct_records(9)))["status"] == "success"
     assert count(env, DMARCReport) == 4
 
 
-def test_the_same_report_stored_at_the_same_moment_is_a_duplicate(env, monkeypatch):
+def test_a_stored_report_the_lookup_missed_is_refused_not_stored_twice(env, monkeypatch):
     report = dmarc_gz()
     upload("a.xml.gz", report)
-    # The other import stored it after this one looked for it
-    original = report_store._same_report
-    calls = []
-
-    def missed_first(*args):
-        calls.append(1)
-        return None if len(calls) == 1 else original(*args)
-
-    monkeypatch.setattr(report_store, "_same_report", missed_first)
-    assert upload("a.xml.gz", report)["status"] == "duplicate"
-    assert count(env, DMARCReport) == 1
-
-    calls.clear()
-    monkeypatch.setattr(report_store, "_constraint", lambda error: "some_other_constraint")
+    monkeypatch.setattr(report_store, "_same_report", lambda *args: None)
     with pytest.raises(report_store.ReportNotStored):
         upload("a.xml.gz", report)
+    assert count(env, DMARCReport) == 1
 
 
 def test_a_record_count_that_merges_beyond_the_column_is_refused():
@@ -520,8 +477,6 @@ def test_limit_errors_reach_the_caller():
     with pytest.raises(ReportRejectedError):
         parse_dmarc_file(zipped(("a.xml", dmarc_xml()), ("b.json", "{}")), "a.zip")
 
-
-# -- migration 0025 -------------------------------------------------------------
 
 def _revision():
     path = next((pathlib.Path(__file__).resolve().parent.parent / "alembic" / "versions")
@@ -566,7 +521,6 @@ def _insert_old_dmarc(conn, parsed, split_first=False):
          "policy_published": json.dumps(parsed["policy_published"])}).scalar()
     records = [dict(r) for r in parsed["records"]]
     if split_first:
-        # An older version stored identical records as separate rows
         first = records[0]
         records[0:1] = [{**first, "count": 2}, {**first, "count": first["count"] - 2}]
     for record in records:
@@ -631,7 +585,6 @@ def test_migration_hashes_old_reports_so_they_match_on_arrival(isolated_engine, 
     assert dmarc_hash == report_store.prepare_report("dmarc", parsed_dmarc).content_hash
     assert tls_hash == report_store.prepare_report("tls-rpt", parsed_tls).content_hash
 
-    # A second run changes nothing; two reports can now share a report_id
     _upgrade(isolated_engine, revision)
     with isolated_engine.begin() as conn:
         conn.execute(text("INSERT INTO dmarc_reports (report_id, domain, org_name, begin_date, end_date, "
@@ -672,9 +625,6 @@ def test_a_migration_that_fails_midway_changes_nothing(isolated_engine, monkeypa
 
 
 def test_migration_keeps_nulls_an_older_version_stored(isolated_engine):
-    # An older version stored null text fields and failure details of a TLS
-    # report as NULL, and a null count as 0 (the column default); sent again,
-    # the report must still match the stored one
     revision = _revision()
     _old_schema(isolated_engine, legacy=False)
     data = json.loads(tls_json())

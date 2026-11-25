@@ -1,4 +1,3 @@
-"""Database persistence and cleanup must not stall unrelated async requests."""
 import asyncio
 import secrets
 import threading

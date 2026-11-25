@@ -1,4 +1,3 @@
-"""The quarantine dry run loads detached rules outside the request loop."""
 import asyncio
 import secrets
 import threading

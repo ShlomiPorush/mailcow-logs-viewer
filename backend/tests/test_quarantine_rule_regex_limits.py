@@ -1,12 +1,3 @@
-"""Quarantine rule regexes are bounded on sender, recipient and subject.
-
-The values come from mail senders, so a long subject made every regex rule
-scan all of it, and a pattern with nested repetition such as (a+)+ can take
-exponential time and stall the single application process. Matching now looks
-at the first 1000 characters only, and such patterns are refused when saved
-(and skipped if one was saved before). The check does not catch every slow
-pattern, so each match also runs with a time limit.
-"""
 from types import SimpleNamespace
 
 import pytest
@@ -72,8 +63,6 @@ def test_create_rule_refuses_a_nested_repetition(monkeypatch):
 
 
 def test_every_regex_match_has_a_time_limit(monkeypatch):
-    """The nested-repetition check misses slow patterns such as (a|a)*, so the
-    match itself must be bounded."""
     calls = []
     real_search = qr.regex.search
 
@@ -102,8 +91,6 @@ def test_a_match_that_runs_out_of_time_counts_as_no_match(monkeypatch):
 
 
 def test_a_stored_nested_repetition_rule_is_skipped():
-    """A rule saved before the check existed must not stall the job."""
-    # The value matches, so evaluating the rule would apply it; skipping it does not
     assert qr._find_matching_rule([_rule("(a+)+$")], "", "", "", "aaaa") is None
     good = _rule("^a+$", action="release")
     assert qr._find_matching_rule([_rule("(a+)+$"), good], "", "", "", "aaaa") is good

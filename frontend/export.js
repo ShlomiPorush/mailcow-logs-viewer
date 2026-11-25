@@ -1,10 +1,5 @@
-// =============================================================================
-// EXPORT CSV
-// =============================================================================
-
 async function exportCSV(type) {
     try {
-        // Messages with a time preset: its period up to now, as the list reads it
         const filters = type === 'messages' && typeof messagesRangeFilters === 'function'
             ? messagesRangeFilters(currentFilters.messages || {}) : currentFilters[type] || {};
         const params = new URLSearchParams();
@@ -12,7 +7,6 @@ async function exportCSV(type) {
             if (value == null || (typeof value === 'string' && !value.trim())) continue;
             params.set(key, value);
         }
-        // Messages in the order the list shows them
         if (type === 'messages' && typeof messagesOrder !== 'undefined' && messagesOrder === 'asc') params.set('order', 'asc');
 
         const response = await authenticatedFetch(`/api/export/${type}/csv?${params}`, { method: 'HEAD' });
@@ -27,8 +21,6 @@ async function exportCSV(type) {
         if (response.headers.get('content-type')?.split(';')[0].trim().toLowerCase() !== 'text/csv') {
             throw new Error('Could not export CSV. Refresh the page and try again.');
         }
-        // The browser streams the file directly to its download manager.
-        // Failures after this preflight are handled by the browser.
         const link = document.createElement('a');
         link.href = `/api/export/${type}/csv?${params}`;
         link.download = '';

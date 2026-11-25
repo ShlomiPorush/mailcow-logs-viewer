@@ -1,9 +1,3 @@
-// The API reference at /docs (frontend/api-docs.html, api-docs.js) draws
-// /openapi.json with the local Scalar bundle. Scalar can talk to scalar.com in
-// several ways: an AI agent that uploads the document, a hosted client the
-// document's address is sent to, a request proxy, developer tools, telemetry
-// and web fonts. The CSP does not stop a link that opens a new tab, so the
-// page must turn each of them off itself.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -12,16 +6,13 @@ const { test } = require('node:test');
 
 const FRONTEND = path.join(__dirname, '..', '..', 'frontend');
 const LIBS = path.join(FRONTEND, 'assets', 'libs');
-// An element the bundle starts a reference of its own on, however the id is written
 const SECOND_REFERENCE_ID = /\bid\s*=\s*["']?api-reference(?=["'\s>/])/i;
 
-// Each comment becomes a space, not nothing, so the pieces around a removed
-// comment cannot join into a new "<!--" that hides real markup
 function withoutComments(html) {
+    // An empty replacement lets two pieces join into a new "<!--" that hides markup (CodeQL alert from #524).
     return html.replace(/<!--[\s\S]*?-->/g, ' ');
 }
 
-// Runs api-docs.js and returns what it passed to Scalar
 function scalarCall(dark) {
     const calls = [];
     const context = vm.createContext({
@@ -60,14 +51,11 @@ test('the page loads its files with a version stamp, so an update is never serve
     const html = fs.readFileSync(path.join(FRONTEND, 'api-docs.html'), 'utf8');
     const refs = [...html.matchAll(/(?:src|href)="(\/static\/[^"]+\.(?:css|js)[^"]*)"/g)].map(m => m[1]);
     assert.deepEqual(refs.sort(), [
-        '/static/api-docs.js?v=1',
-        '/static/assets/css/ui.css?v=11',
-        '/static/assets/libs/scalar-api-reference.min.js?v=1',
-        '/static/session-guard.js?v=3',
+        '/static/api-docs.js?v=',
+        '/static/assets/css/ui.css?v=',
+        '/static/assets/libs/scalar-api-reference.min.js?v=',
+        '/static/session-guard.js?v=',
     ]);
-    // Configured by api-docs.js only. The bundle also starts a reference of its
-    // own, with Scalar's defaults (its fonts, its hosted client, its proxy), on
-    // an element with id="api-reference" or a data-spec/data-spec-url attribute
     const markup = withoutComments(html);
     assert.ok(!SECOND_REFERENCE_ID.test(markup), 'no element may have id="api-reference"');
     assert.ok(!/\bdata-(?:spec|spec-url|url|configuration|proxy-url)\b/i.test(markup));
@@ -81,7 +69,6 @@ test('the check for a second reference catches every way to write the id', () =>
 });
 
 test('removing comments cannot hide an element behind a comment it builds', () => {
-    // A browser ends "<!<!--x-->" at the first ">" and keeps the div
     const html = '<!<!--x-->--<div id="api-reference">-->';
     assert.ok(SECOND_REFERENCE_ID.test(withoutComments(html)));
     assert.ok(!SECOND_REFERENCE_ID.test(withoutComments('<!-- <div id="api-reference"> -->')));

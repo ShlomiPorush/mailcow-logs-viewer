@@ -1,7 +1,3 @@
-// Settings > Agents in a real DOM (jsdom): agent access needs sign-in. With
-// Basic Auth and OAuth2 both off the switch is locked and says where to turn
-// sign-in on; turning the last one off in the form turns agent access off.
-// Set A11Y_MODULES to jsdom's node_modules to run it locally (see layers.a11y.cjs).
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');

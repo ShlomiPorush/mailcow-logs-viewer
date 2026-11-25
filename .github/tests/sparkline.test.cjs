@@ -1,7 +1,3 @@
-// A small trend beside a figure (utils.js uiSparkline): runs of hourly samples
-// broken where an hour is missing, six hours to a point within a run, the latest
-// reading as the line's end and its mark, nothing until the samples span a day,
-// and words that say where it went and when it was read
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -10,7 +6,7 @@ const { test } = require('node:test');
 
 const utils = fs.readFileSync(path.join(__dirname, '../../frontend/utils.js'), 'utf8');
 const zoneHelpers = utils.slice(utils.indexOf('function appTz()'), utils.indexOf('function formatSeconds('));
-const code = utils.slice(utils.indexOf('function uiSparkline('), utils.indexOf('// Overview strip under a zoomable chart:'));
+const code = utils.slice(utils.indexOf('function uiSparkline('), utils.indexOf('// Overview strip under a zoomable chart'));
 const H = 3600000;
 const NOW = Date.parse('2026-10-22T12:00:00Z');
 
@@ -26,7 +22,6 @@ const hours = (from, to, value) => {
     return out;
 };
 const pathOf = svg => svg.match(/<path d="([^"]+)"/)[1];
-// The date as formatDay writes it in this machine's language
 const day = (c, iso) => vm.runInContext(`formatDay(Date.parse('${iso}'))`, c);
 
 test('a week of hourly samples is a line of six-hour points ending at the latest reading, with the words of its ends', () => {
@@ -44,7 +39,6 @@ test('hours with no sample break the line, also inside one six hours: a gap, nev
     const c = load();
     c.__p = [...hours(NOW - 7 * 24 * H, NOW - 4 * 24 * H, () => 50), ...hours(NOW - 3 * 24 * H, NOW, () => 50)];
     assert.equal((pathOf(vm.runInContext(`uiSparkline(__p, { days: 7, now: ${NOW} })`, c)).match(/M/g) || []).length, 2);
-    // A day before, then 00:00, then 05:00 and 06:00: four hours missing in between
     c.__p = ['2026-10-21T00:00:00Z', '2026-10-22T00:00:00Z', '2026-10-22T05:00:00Z', '2026-10-22T06:00:00Z'].map(s => ({ slot: s, value: 5, as_of: s }));
     assert.equal((pathOf(vm.runInContext(`uiSparkline(__p, { days: 7, now: ${NOW} })`, c)).match(/M/g) || []).length, 3);
 });
@@ -55,7 +49,6 @@ test('a sample with no neighbour is a dot: three lone samples are three marks', 
     const svg = vm.runInContext(`uiSparkline(__p, { days: 7, now: ${NOW} })`, c);
     assert.equal((svg.match(/<circle class="is-lone"/g) || []).length, 2, 'the two before the latest');
     assert.equal((svg.match(/<circle /g) || []).length, 3, 'and the mark of the latest reading');
-    // Samples in a run draw a line and get no dot
     c.__p = hours(NOW - 7 * 24 * H, NOW, () => 5);
     assert.doesNotMatch(vm.runInContext(`uiSparkline(__p, { days: 7, now: ${NOW} })`, c), /is-lone/);
 });

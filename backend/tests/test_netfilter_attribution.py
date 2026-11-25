@@ -1,13 +1,3 @@
-"""The address a netfilter line is attributed to comes only from mailcow's own fields.
-
-mailcow netfilter writes '<addr> matched rule id N (<original log line>)'. The
-original line holds text the remote client chose: a non-SMTP command, a
-sasl_username, a Dovecot user=<...>. An IPv4 written there must never become the
-offender of a line that netfilter attributed to an IPv6 client, or the
-protection rules would ban an address the client picked. Lines stored that way
-by an earlier version must not ban either, and the upgrade closes the catches
-and clears the addresses they left behind.
-"""
 import asyncio
 import importlib.util
 import logging
@@ -42,8 +32,6 @@ def dovecot(lead, user):
 def non_smtp(lead, command):
     return f'{lead} matched rule id 4 (warning: non-SMTP command from unknown[{lead}]: {command})'
 
-
-# ---------- parsing ----------
 
 @pytest.mark.parametrize('message', [
     sasl(CLIENT6, f'u0@{VICTIM}'),
@@ -97,8 +85,6 @@ def test_a_line_without_an_address_in_mailcow_fields_has_no_ip(message):
     assert parse_netfilter_message(message, 'warn').get('ip') is None
 
 
-# ---------- the rules ----------
-
 def _cleanup():
     from app.database import get_db_context
     from app.models import NetfilterLog, PostfixLog, ProtectionHit, SystemSetting
@@ -124,7 +110,6 @@ def db():
 
 
 def _read_from_now(session):
-    """Move the rules' reading past every line stored so far."""
     from app.models import NetfilterLog, SystemSetting
     from app.services import protection_rules
     last = session.query(NetfilterLog.id).order_by(NetfilterLog.id.desc()).first()
@@ -137,14 +122,12 @@ def _read_from_now(session):
 
 
 def _ingest(messages):
-    """Store lines the way the netfilter job does."""
     from app.scheduler import _store_netfilter_logs
     now = int(datetime.now(timezone.utc).timestamp())
     _store_netfilter_logs([{'time': now - i, 'priority': MARKER, 'message': m} for i, m in enumerate(messages)])
 
 
 def _stored_before_the_fix(session, ip, message, username=None, minutes_ago=5):
-    """A line an earlier version stored with an address taken from the client's text."""
     from app.models import NetfilterLog
     row = NetfilterLog(time=datetime.utcnow() - timedelta(minutes=minutes_ago), priority=MARKER, ip=ip,
                        username=username, action='warning', message=message,
@@ -228,7 +211,7 @@ def test_lines_stored_before_the_fix_are_not_failed_tries_for_the_breach_alert(d
     from app.models import PostfixLog
     from app.services import protection_rules
     _rules(db, breach={'enabled': True, 'failures': 3, 'window_minutes': 60})
-    protection_rules.evaluate(db, _context())  # starts reading the logins from now
+    protection_rules.evaluate(db, _context())
     for n in range(3):
         _stored_before_the_fix(db, GENUINE, sasl(CLIENT6, f'u{n}@{GENUINE}'), username=f'u{n}@{GENUINE}')
     db.add(PostfixLog(time=datetime.utcnow(), queue_id=MARKER[:20], program='postfix/submission/smtpd',
@@ -252,8 +235,6 @@ def test_ipv4_lines_and_mailcow_bans_still_count(db):
         (GENUINE, 'unknown_accounts', 'banned'), (NET_IPS[0], 'repeat_offender', 'watching')]
     assert api.black() == [f'{GENUINE}/32']
 
-
-# ---------- the upgrade ----------
 
 def _migration():
     path = next((Path(__file__).resolve().parents[1] / 'alembic' / 'versions').glob('*_netfilter_attribution_repair.py'))
@@ -286,7 +267,6 @@ def test_the_upgrade_closes_open_catches_a_stored_line_contradicts(db, caplog):
     genuine = _stored_before_the_fix(db, VICTIM, sasl(VICTIM, 'u4@example.com'), username='u4@example.com')
     net_forged = _stored_before_the_fix(db, NET_IPS[0], dovecot(CLIENT6, f'a@{NET_IPS[0]}'))
     net_genuine = [_stored_before_the_fix(db, ip, sasl(ip, 'root')) for ip in NET_IPS[1:]]
-    # Inside the network, but stored under another address than the one netfilter named
     net_shifted = _stored_before_the_fix(db, NET_IPS[1], sasl(NET_IPS[2], 'root'))
     other = _stored_before_the_fix(db, GENUINE, sasl(GENUINE, 'admin'), username='admin')
     deleted = _stored_before_the_fix(db, VICTIM, sasl(VICTIM, 'admin'), username='admin')
@@ -338,11 +318,9 @@ def test_the_upgrade_keeps_catches_whose_lines_aged_out_or_confirm(db, caplog):
         'empty': _hit(db, GENUINE, 'country', 'watching', []),
         'capped': _hit(db, GENUINE, 'unknown_accounts', 'watching', many),
         'allowlisted and neutral': _hit(db, VICTIM, 'country', 'watching', [allowlisted, neutral]),
-        # A breach alert never bans, so even a contradicted one is left alone
         'alert': _hit(db, VICTIM, 'breach', 'alert', [contradicting]),
     }
     banned = _hit(db, VICTIM, 'repeat_offender', 'banned', deleted[2:], mode='enforce')
-    # Its forged lines aged out before the upgrade, so nothing is left to contradict it
     pending = _hit(db, VICTIM, 'country', 'pending', deleted, mode='enforce')
     db.query(NetfilterLog).filter(NetfilterLog.id.in_([r.id for r in deleted])).delete(synchronize_session=False)
     db.commit()
@@ -380,7 +358,7 @@ def test_the_upgrade_clears_addresses_taken_from_client_text(db):
     assert VICTIM in before
 
     migration = _migration()
-    migration.BATCH = 1  # every line in its own batch
+    migration.BATCH = 1
     _repair(migration)
 
     db.expire_all()

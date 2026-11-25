@@ -1,11 +1,3 @@
-"""
-Fictional DMARC aggregate and SMTP TLS reports, one per reporter per day.
-
-They are written in the formats real receivers send (RFC 7489 XML, RFC 8460
-JSON), gzip-compressed, and imported through the application's own upload
-path, so the DMARC pages parse, enrich and store them exactly as they would
-a report that arrived by mail.
-"""
 import gzip
 import json
 import random
@@ -19,7 +11,6 @@ REPORTERS = [
     ("Partner Mail Services", "dmarc-reports@partner.test", "partner.test"),
     ("University Mail", "postmaster@university.test", "university.test"),
 ]
-# Domains that publish a DMARC record with rua (see fake_internet.ZONES)
 POLICIES = {"example.com": ("reject", "s", "s"), "example.org": ("none", "r", "r")}
 
 FORWARDER_IP = "198.51.100.47"
@@ -96,7 +87,6 @@ def tls_report(rng, org, email, reporter_domain, day_start):
 
 
 def build(now, days=7, seed=None):
-    """All reports for the ``days`` complete UTC days before ``now``."""
     rng = random.Random(seed)
     today = int(now) - int(now) % 86400
     files = []

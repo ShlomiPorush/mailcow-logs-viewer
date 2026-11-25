@@ -1,12 +1,3 @@
-"""Every instant the API returns is ISO 8601 UTC with Z.
-
-The browser reads an ISO string without a zone as its own local time, so a
-naive value (log lines, message details, raw log storage time, connection
-checks, GeoIP file dates) showed shifted by the viewer's offset, and
-'+00:00Z' (blacklist checks) is not a date at all for some parsers. mailcow's
-domain 'created' is a wall time in mailcow's own clock and must be read in the
-app zone before it is sent.
-"""
 import asyncio
 import os
 import re
@@ -37,7 +28,6 @@ def assert_utc_z(value, expected=None):
 
 @pytest.fixture
 def jerusalem(monkeypatch):
-    """The container runs on Jerusalem time (TZ in the process environment)."""
     if not hasattr(time, "tzset"):
         pytest.skip("time.tzset is POSIX only")
     monkeypatch.setenv("TZ", "Asia/Jerusalem")
@@ -46,8 +36,6 @@ def jerusalem(monkeypatch):
     monkeypatch.delenv("TZ")
     time.tzset()
 
-
-# --- Database-backed endpoints ----------------------------------------------
 
 def _postgres_available() -> bool:
     try:
@@ -86,7 +74,7 @@ def client(monkeypatch):
     _cleanup()
 
 
-WHEN = datetime(2026, 1, 15, 12, 30, 5)  # stored: naive UTC
+WHEN = datetime(2026, 1, 15, 12, 30, 5)
 
 
 def _seed_message():
@@ -160,9 +148,9 @@ def test_raw_logs_send_the_storage_time_in_utc_with_z(client):
 
 def test_raw_logs_read_a_date_as_a_day_in_the_app_zone(client, monkeypatch):
     monkeypatch.setattr(settings._inner, "tz", "Europe/Berlin")
-    _seed_raw(datetime(2026, 1, 14, 23, 30), None)   # 00:30 on 15 January in Berlin
-    _seed_raw(datetime(2026, 1, 15, 22, 30), None)   # 23:30 on 15 January in Berlin
-    _seed_raw(datetime(2026, 1, 15, 23, 30), None)   # 00:30 on 16 January in Berlin
+    _seed_raw(datetime(2026, 1, 14, 23, 30), None)
+    _seed_raw(datetime(2026, 1, 15, 22, 30), None)
+    _seed_raw(datetime(2026, 1, 15, 23, 30), None)
 
     rows = client.get("/api/raw-logs/postfix", params={
         "search": MARKER, "start_date": "2026-01-15", "end_date": "2026-01-15", "order": "asc"}).json()["data"]
@@ -171,12 +159,10 @@ def test_raw_logs_read_a_date_as_a_day_in_the_app_zone(client, monkeypatch):
     assert times == [datetime(2026, 1, 14, 23, 30), datetime(2026, 1, 15, 22, 30)]
 
 
-# --- Endpoints fed by mailcow or the file system ----------------------------
-
 def test_quarantine_sorts_epoch_and_iso_items_together(monkeypatch):
     from app.routers import logs
     monkeypatch.setattr(logs.mailcow_api, "get_quarantine", AsyncMock(return_value=[
-        {"id": 1, "created": 1_768_478_400},              # 2026-01-15T12:00:00Z
+        {"id": 1, "created": 1_768_478_400},
         {"id": 2, "created": "2026-01-15T13:00:00Z"},
         {"id": 3},
         {"id": 4, "created": "2026-01-15T11:00:00"},
@@ -225,12 +211,10 @@ def test_blacklist_check_times_are_utc_with_z(monkeypatch):
     from app.services import blacklist_service as service
     from app.services import ignore_lists
 
-    # No server address known
     monkeypatch.setattr(domains, "get_cached_server_ip", lambda: None)
     monkeypatch.setattr(domains, "init_server_ip", AsyncMock(return_value=None))
     assert_utc_z(asyncio.run(service.get_blacklist_check_results())["checked_at"])
 
-    # A fresh check
     monkeypatch.setattr(service, "save_blacklist_check", lambda data: None)
     monkeypatch.setattr(service, "applicable_blacklists", lambda ip: [{"name": "test", "zone": "rbl.test"}])
     monkeypatch.setattr(service, "check_ip_in_blacklist", AsyncMock(return_value={
@@ -240,7 +224,6 @@ def test_blacklist_check_times_are_utc_with_z(monkeypatch):
     monkeypatch.setattr(ignore_lists, "ignored_now", lambda key: set())
     assert_utc_z(asyncio.run(service.check_all_blacklists("192.0.2.10"))["checked_at"])
 
-    # A cached check (stored naive UTC, with microseconds)
     stored = SimpleNamespace(server_ip="192.0.2.10", checked_at=datetime.utcnow().replace(microsecond=123456),
                              total_blacklists=1, listed_count=0, clean_count=1, error_count=0,
                              timeout_count=0, status="clean", results=[])
@@ -255,7 +238,6 @@ def test_blacklist_check_times_are_utc_with_z(monkeypatch):
     assert_utc_z(service.get_cached_blacklist_check("192.0.2.10")["checked_at"],
                  stored.checked_at.replace(microsecond=0))
 
-    # The check failed
     monkeypatch.setattr(router, "get_blacklist_check_results", AsyncMock(side_effect=RuntimeError("dns")))
     assert_utc_z(asyncio.run(router.check_blacklists(host="192.0.2.10", force=False))["checked_at"])
 
@@ -280,8 +262,8 @@ def test_domain_created_is_read_in_the_app_zone(monkeypatch):
 
     created = {d["domain_name"]: d["created"] for d in result["domains"]}
     assert created == {
-        "winter.example": "2026-01-15T12:00:00Z",   # CET, UTC+1
-        "summer.example": "2026-07-15T11:00:00Z",   # CEST, UTC+2
+        "winter.example": "2026-01-15T12:00:00Z",
+        "summer.example": "2026-07-15T11:00:00Z",
         "none.example": None,
     }
 
@@ -301,6 +283,5 @@ def test_geoip_file_dates_are_utc_with_z(jerusalem, tmp_path, monkeypatch):
 
     status = geoip.get_geoip_status()
 
-    # Jerusalem is UTC+2 in January: the old value said 14:00 with no zone
     assert status["City"]["last_modified"] == "2026-01-15T12:00:00Z"
     assert status["ASN"]["last_modified"] == "2026-01-15T12:00:00Z"

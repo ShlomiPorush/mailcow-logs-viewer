@@ -1,10 +1,3 @@
-"""Values placed in a mailcow URL are encoded, so they cannot change the request.
-
-get_dkim put the domain into the path as-is and get_quarantine_details put the
-item ID into the query string as-is: a value with '/', '?' or '&' reached a
-different mailcow endpoint or added query parameters. The DNS-check routes
-also passed any path value on, so they now accept only a domain name.
-"""
 import asyncio
 
 import pytest
@@ -12,7 +5,7 @@ from fastapi import HTTPException
 
 from app import mailcow_api as mod
 from app.routers import domains
-from tests.test_mailcow_api_recovery import server  # noqa: F401  (the fake mailcow)
+from tests.test_mailcow_api_recovery import server  # noqa: F401
 
 
 def _run(coro_factory):
@@ -73,7 +66,6 @@ def test_dns_check_accepts_a_domain(dns_checked):
 
 
 def test_changelog_version_stays_one_path_segment(monkeypatch):
-    """The version from the URL goes into a GitHub API path the same way."""
     from app.routers import status
 
     seen = []

@@ -1,13 +1,3 @@
-"""Third review of the entity card actions:
-
-- A full blocklist check waiting for a single address check waits in the
-  lock's queue, registered: no new single address check starts while it
-  waits (POST /api/blacklist/check answers busy), so a stream of them cannot
-  keep the scan out until it gives up.
-- A manual Run that skipped puts the job's status back only while the status
-  is still its own mark: a full check that ran and wrote its result
-  meanwhile keeps it.
-"""
 import asyncio
 from datetime import datetime
 
@@ -30,11 +20,12 @@ BUSY = {"status": "busy", "message": "A blocklist check is already running. Try 
 def scan(monkeypatch):
     monkeypatch.setattr(settings._inner, 'disabled_features', '')
     monkeypatch.setattr(scheduler, '_blacklist_check_lock', asyncio.Lock())
-    monkeypatch.setattr(scheduler, '_blacklist_full_waiting', 0, raising=False)
+    monkeypatch.setattr(scheduler, '_blacklist_full_scan_pending', False)
     ran = []
 
     async def run(force, send_notification):
-        ran.append(scheduler.blacklist_check_holder())
+        held = scheduler.blacklist_check_lock().locked() and scheduler._blacklist_full_scan_pending
+        ran.append('full' if held else None)
 
     monkeypatch.setattr(scheduler, '_run_check_monitored_hosts', run)
     return ran
@@ -42,12 +33,11 @@ def scan(monkeypatch):
 
 def test_a_waiting_scan_goes_before_a_new_single_address_check(scan):
     async def main():
-        async with scheduler.blacklist_check_hold('host'):
+        async with scheduler.blacklist_check_lock():
             job = asyncio.create_task(scheduler.check_monitored_hosts_job())
             await asyncio.sleep(0.05)
-            assert scheduler.blacklist_full_scan_waiting(), "registered as waiting"
+            assert scheduler._blacklist_full_scan_pending, "registered as waiting"
             assert not scheduler.blacklist_check_admits()
-        # The first address check ended; a new one arrives before the scan runs
         assert not scheduler.blacklist_check_admits(), "a new address check would answer busy"
         result = await asyncio.wait_for(job, 2)
         assert result != scheduler.JOB_SKIPPED
@@ -57,21 +47,54 @@ def test_a_waiting_scan_goes_before_a_new_single_address_check(scan):
 
 
 def test_the_scan_waits_in_the_queue_without_polling(scan):
-    """It is woken when the address check ends, not half a second later."""
     async def main():
-        hold = scheduler.blacklist_check_hold('host')
-        await hold.__aenter__()
+        lock = scheduler.blacklist_check_lock()
+        await lock.acquire()
         job = asyncio.create_task(scheduler.check_monitored_hosts_job())
         await asyncio.sleep(0.05)
-        await hold.__aexit__(None, None, None)
+        lock.release()
         await asyncio.wait_for(job, 0.2)
         assert scan == ['full']
     asyncio.run(main())
 
 
+@pytest.mark.parametrize("end", ["failure", "cancellation"])
+def test_a_scan_that_ends_early_admits_checks_again(scan, monkeypatch, end):
+    async def main():
+        async def broken(force, send_notification):
+            if end == "failure":
+                raise RuntimeError("example failure")
+            await asyncio.sleep(10)
+
+        monkeypatch.setattr(scheduler, '_run_check_monitored_hosts', broken)
+        job = asyncio.create_task(scheduler.check_monitored_hosts_job())
+        await asyncio.sleep(0.05)
+        if end == "cancellation":
+            assert not scheduler.blacklist_check_admits()
+            job.cancel()
+        with pytest.raises((RuntimeError, asyncio.CancelledError)):
+            await job
+        assert scheduler.blacklist_check_admits()
+    asyncio.run(main())
+
+
+def test_a_scan_cancelled_while_it_waits_admits_checks_again(scan):
+    async def main():
+        async with scheduler.blacklist_check_lock():
+            job = asyncio.create_task(scheduler.check_monitored_hosts_job())
+            await asyncio.sleep(0.05)
+            job.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await job
+            assert not scheduler._blacklist_full_scan_pending
+        assert scheduler.blacklist_check_admits()
+        assert scan == []
+    asyncio.run(main())
+
+
 def test_a_second_scan_skips_while_one_waits(scan):
     async def main():
-        async with scheduler.blacklist_check_hold('host'):
+        async with scheduler.blacklist_check_lock():
             first = asyncio.create_task(scheduler.check_monitored_hosts_job())
             await asyncio.sleep(0.05)
             assert await asyncio.wait_for(scheduler.check_monitored_hosts_job(), 1) == scheduler.JOB_SKIPPED
@@ -87,7 +110,7 @@ def test_a_new_address_check_answers_busy_while_a_scan_waits(monkeypatch):
     for key in ('auth_enabled', 'basic_auth_enabled', 'oauth2_enabled'):
         monkeypatch.setattr(settings._inner, key, False)
     monkeypatch.setattr(settings._inner, 'disabled_features', '')
-    monkeypatch.setattr(scheduler, '_blacklist_full_waiting', 1, raising=False)   # the lock itself is free
+    monkeypatch.setattr(scheduler, '_blacklist_full_scan_pending', True)
     started = []
 
     async def results(**kwargs):
@@ -98,7 +121,6 @@ def test_a_new_address_check_answers_busy_while_a_scan_waits(monkeypatch):
     res = TestClient(app).post("/api/blacklist/check", params={"host": "203.0.113.45", "force": "true"})
     assert res.status_code == 200 and res.json() == BUSY
     assert started == []
-    # and a manual Run of the job is refused too
     assert TestClient(app).post("/api/settings/jobs/blacklist_check/run").status_code == 409
 
 
@@ -115,7 +137,6 @@ def test_a_skipped_manual_run_keeps_the_result_a_full_check_wrote_meanwhile(stat
     statuses['blacklist_check'] = {'last_run': datetime(2026, 10, 27, 6, 0), 'status': 'success', 'error': None, 'retryable': False}
 
     async def job(**kwargs):
-        # While the manual run waited, a full check started and ended with its own result
         scheduler.update_job_status('blacklist_check', 'running')
         scheduler.update_job_status('blacklist_check', 'failed', 'mailcow did not answer', retryable=True)
         return scheduler.JOB_SKIPPED
@@ -131,9 +152,6 @@ def test_a_skipped_manual_run_keeps_the_result_a_full_check_wrote_meanwhile(stat
 
 
 def test_the_manual_mark_is_the_entry_it_wrote_not_one_read_back(statuses, monkeypatch):
-    """The Run is accepted in the threadpool; a full check on the event loop can
-    write its own 'running' right after the Run's. The Run's task then skips,
-    and must not undo the running check's status."""
     monkeypatch.setattr(settings._inner, 'disabled_features', '')
     statuses['blacklist_check'] = {'last_run': datetime(2026, 10, 27, 6, 0), 'status': 'success', 'error': None, 'retryable': False}
     real = scheduler.update_job_status
@@ -142,14 +160,13 @@ def test_the_manual_mark_is_the_entry_it_wrote_not_one_read_back(statuses, monke
     def write_then_scan(name, status, *args, **kwargs):
         entry = real(name, status, *args, **kwargs)
         if name == 'blacklist_check' and status == 'running' and not scan:
-            # The full check starts between the Run's write and anything after it
             scan['entry'] = real('blacklist_check', 'running')
         return entry
 
     monkeypatch.setattr(settings_router, 'update_job_status', write_then_scan)
 
     async def job(**kwargs):
-        return scheduler.JOB_SKIPPED   # the running full check holds the job
+        return scheduler.JOB_SKIPPED
 
     monkeypatch.setattr(scheduler, 'check_monitored_hosts_job', job)
     tasks = BackgroundTasks()
@@ -165,28 +182,20 @@ def test_update_job_status_returns_the_entry_it_wrote(statuses):
     assert entry['status'] == 'failed' and entry['error'] == 'example error' and entry['retryable'] is True
 
 
-# ---------------------------------------------------------------- A15: no step of a scan between the Run's check and its mark
-
 def test_trigger_job_runs_on_the_event_loop():
-    """Async: the check that admits the Run, reading its previous status and
-    writing its mark run on the event loop with no await between them, so a
-    scan on the loop cannot interleave (a sync def ran in the threadpool)."""
     assert asyncio.iscoroutinefunction(settings_router.trigger_job)
 
 
 @pytest.mark.parametrize("scan_first", [True, False])
 def test_a_scan_started_beside_a_manual_run_keeps_its_status(statuses, monkeypatch, scan_first):
-    """A scheduled scan and a manual Run, started together on one loop, in
-    either order: whichever comes second finds the other and leaves the status
-    to it; the scan's status is never overwritten or put back while it runs."""
     monkeypatch.setattr(settings._inner, 'disabled_features', '')
     monkeypatch.setattr(scheduler, '_blacklist_check_lock', asyncio.Lock())
-    monkeypatch.setattr(scheduler, '_blacklist_full_waiting', 0)
+    monkeypatch.setattr(scheduler, '_blacklist_full_scan_pending', False)
     statuses['blacklist_check'] = {'last_run': datetime(2026, 10, 27, 6, 0), 'status': 'success', 'error': None, 'retryable': False}
     seen = {}
 
     async def scan_body(force, send_notification):
-        seen['entry'] = scheduler.update_job_status('blacklist_check', 'running')   # as the real scan does
+        seen['entry'] = scheduler.update_job_status('blacklist_check', 'running')
         await asyncio.sleep(0.2)
         seen['during'] = scheduler.job_status['blacklist_check']
 
@@ -196,7 +205,7 @@ def test_a_scan_started_beside_a_manual_run_keeps_its_status(statuses, monkeypat
         tasks = BackgroundTasks()
         if scan_first:
             scan = asyncio.create_task(scheduler.check_monitored_hosts_job())
-            await asyncio.sleep(0)   # the scan holds the lock and wrote its status
+            await asyncio.sleep(0)
             from fastapi import HTTPException
             with pytest.raises(HTTPException) as refused:
                 await settings_router.trigger_job('blacklist_check', tasks)
@@ -204,14 +213,12 @@ def test_a_scan_started_beside_a_manual_run_keeps_its_status(statuses, monkeypat
         else:
             assert (await settings_router.trigger_job('blacklist_check', tasks))['status'] == 'started'
             scan = asyncio.create_task(scheduler.check_monitored_hosts_job())
-            await tasks()   # the manual run's job: it meets the scan
+            await tasks()
         await scan
         return tasks
 
     asyncio.run(main())
-    # The scan's own entry stayed in place while it ran, whatever the order
     if scan_first:
         assert seen['during'] is seen['entry']
     else:
-        # The manual Run took the lock first: it ran, and the scheduled scan skipped
         assert 'entry' in seen and seen['during'] is seen['entry']

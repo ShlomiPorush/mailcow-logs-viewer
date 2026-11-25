@@ -1,4 +1,3 @@
-"""GeoIP license persistence must not block the event loop."""
 import asyncio
 import threading
 from contextlib import contextmanager

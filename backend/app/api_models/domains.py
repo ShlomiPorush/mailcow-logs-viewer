@@ -1,5 +1,3 @@
-"""What the Domains calls return (routers/domains.py): mailcow's domains with
-their stored DNS checks, and a DNS check of one or every domain."""
 from typing import Dict, List, Optional, Union
 
 from pydantic import Field
@@ -11,8 +9,6 @@ STATUS = "success (passed), warning (passed, with a recommendation) or error (fa
 STATUS_UNKNOWN = STATUS + "; unknown when it could not be checked"
 MAILCOW = "As mailcow reports it: a number, or a numeric string"
 
-
-# ---------------------------------------------------------------- SPF
 
 class SpfCheckedIp(Fixed):
     ip: str
@@ -39,8 +35,6 @@ class SpfCheck(Fixed):
                                                               "before this field existed lack it")
 
 
-# ---------------------------------------------------------------- DKIM
-
 class DkimCheck(Fixed):
     """The DKIM record mailcow signs with, compared with the published one."""
     status: str = Field(description=STATUS)
@@ -59,8 +53,6 @@ class DkimCheck(Fixed):
     parameters: Dict[str, str] = Field(description="The published record's tags, such as v, k, t and p; "
                                                    "empty without a record")
 
-
-# ---------------------------------------------------------------- DMARC
 
 class DmarcSettings(Fixed):
     """The tags of the published record; a tag that is not published is missing."""
@@ -86,8 +78,6 @@ class DmarcCheck(Fixed):
     settings: DmarcSettings = Field(None, description="The record's tags; not in a check stored before 2.3.0")
 
 
-# ---------------------------------------------------------------- DNSSEC
-
 class DnssecCheck(Fixed):
     """Whether the domain is DNSSEC signed and validates."""
     status: str = Field(description=STATUS_UNKNOWN)
@@ -98,8 +88,6 @@ class DnssecCheck(Fixed):
     warnings: List[str]
     info: List[str]
 
-
-# ---------------------------------------------------------------- DANE (TLSA)
 
 class TlsaRecord(Fixed):
     """One TLSA record of a mail server."""
@@ -149,8 +137,6 @@ class TlsaCheck(Fixed):
                                               "for each host")
 
 
-# ---------------------------------------------------------------- MTA-STS
-
 class MtaStsCheck(Fixed):
     """MTA-STS (RFC 8461): the record at _mta-sts.<domain>, its policy file, and whether the policy covers
     the domain's MX hosts. It is optional, so without it the status is warning."""
@@ -163,8 +149,6 @@ class MtaStsCheck(Fixed):
                                               "policy file is valid (its mode, id, max age and MX)")
 
 
-# ---------------------------------------------------------------- TLS-RPT
-
 class TlsRptCheck(Fixed):
     """TLS-RPT (RFC 8460): the record at _smtp._tls.<domain> that tells senders where to deliver TLS
     reports. It is optional, so without it the status is warning."""
@@ -176,8 +160,6 @@ class TlsRptCheck(Fixed):
     warnings: List[str] = Field(description="Such as a report address senders do not deliver to")
     info: List[str] = Field(None, description="Only when the record is missing: what to publish")
 
-
-# ---------------------------------------------------------------- one domain's check
 
 class DnsCheck(Fixed):
     """Every DNS check of one domain, run at once."""
@@ -215,8 +197,6 @@ class StoredDnsChecks(Fixed):
 class NoDnsCheck(Fixed):
     """The domain was not checked yet: an empty object."""
 
-
-# ---------------------------------------------------------------- GET /domains/all
 
 class AliasDomain(Fixed):
     domain_name: str
@@ -256,8 +236,6 @@ class DomainsResponse(Fixed):
                                                       "scheduled check or check-all-dns), " + TIME + "; "
                                                       "checking one domain does not change it")
 
-
-# ---------------------------------------------------------------- the checks
 
 class CheckAllResponse(Fixed):
     """Every active domain and alias domain was checked and its result stored."""

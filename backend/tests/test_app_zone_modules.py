@@ -1,11 +1,3 @@
-"""Report, export and email modules ask app_time for every zone question.
-
-A bare datetime.now() is the container's local wall time, fromtimestamp()
-without a zone and .timestamp() on a stored (naive UTC) value read the
-container's zone too, and settings.tz bypasses the fallback for an unknown
-zone. None of them may appear here: windows and comparisons are UTC, days,
-labels, file names and emails are in the app time zone (app/app_time.py).
-"""
 import ast
 import pathlib
 

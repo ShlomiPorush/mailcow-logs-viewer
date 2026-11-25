@@ -1,4 +1,3 @@
-"""Background database and filesystem waits leave the application loop runnable."""
 import asyncio
 import threading
 from contextlib import contextmanager
@@ -58,10 +57,8 @@ def test_raw_database_lifetime_is_owned_by_worker(monkeypatch, job, stage):
     monkeypatch.setattr(type(settings._inner), "is_feature_enabled", lambda self, name: True)
     monkeypatch.setattr(settings._inner, "raw_logs_enabled", True)
     monkeypatch.setattr(settings._inner, "raw_logs_services", "dovecot")
-    # Only the selected service; what other pages need is tested in test_raw_log_collection
     monkeypatch.setattr(type(settings._inner), "raw_logs_required", property(lambda self: {}))
     monkeypatch.setattr(raw, "_catchup_state", {})
-    monkeypatch.setattr(raw, "_unavailable_services", set())
     api = SimpleNamespace(get_raw_logs=AsyncMock(return_value=[{
         "time": 1700000000, "message": "Example log"}]), aclose=AsyncMock())
     monkeypatch.setattr(raw, "mailcow_api", api)
@@ -110,7 +107,6 @@ def test_dmarc_stale_cleanup_is_off_loop_and_best_effort(monkeypatch, fail):
     @contextmanager
     def session():
         yield db
-    # The cleanup runs inside the import, under its one-at-a-time lock
     monkeypatch.setattr(dmarc_imap_service, "SessionLocal", session)
     monkeypatch.setattr(type(settings._inner), "is_feature_enabled", lambda self, name: True)
     monkeypatch.setattr(settings._inner, "dmarc_imap_enabled", True)

@@ -1,7 +1,3 @@
-"""
-Test script for DNS resolver with DoH fallback.
-Run inside the container: python -m app.services.dns_resolver_check
-"""
 import asyncio
 import logging
 from app.services.dns_resolver import (
@@ -14,7 +10,6 @@ logger = logging.getLogger(__name__)
 
 
 async def test_udp_path():
-    """Test 1: Normal UDP resolution (should work on most servers)"""
     print("\n" + "="*60)
     print("TEST 1: UDP Resolution (normal path)")
     print("="*60)
@@ -30,12 +25,10 @@ async def test_udp_path():
 
 
 async def test_doh_path():
-    """Test 2: Force DoH by passing empty UDP server list"""
     print("\n" + "="*60)
     print("TEST 2: DoH Resolution (forced - empty UDP list)")
     print("="*60)
     try:
-        # Pass empty UDP list to force DoH fallback
         answer = await _resolve_with_fallback("google.com", "A", 5, [], DOH_URLS)
         ips = [str(r) for r in answer]
         print(f"  ✅ DoH works! google.com A = {ips}")
@@ -46,7 +39,6 @@ async def test_doh_path():
 
 
 async def test_doh_txt():
-    """Test 3: DoH with TXT record (like SPF/DMARC checks)"""
     print("\n" + "="*60)
     print("TEST 3: DoH TXT Resolution (SPF-style)")
     print("="*60)
@@ -61,7 +53,6 @@ async def test_doh_txt():
 
 
 async def test_nxdomain():
-    """Test 4: NXDOMAIN handling (should raise, not fall through)"""
     print("\n" + "="*60)
     print("TEST 4: NXDOMAIN Handling")
     print("="*60)
@@ -79,12 +70,10 @@ async def test_nxdomain():
 
 
 async def test_blacklist_resolve():
-    """Test 5: Blacklist resolver (uses special DNS servers)"""
     print("\n" + "="*60)
     print("TEST 5: Blacklist Resolution (Quad9/Spamhaus servers)")
     print("="*60)
     try:
-        # 127.0.0.2 is a test address that should return NXDOMAIN (not listed)
         await resolve_for_blacklist("2.0.0.127.zen.spamhaus.org", "A", timeout=10)
         print(f"  ⚠️  Got answer (might be listed or blocked query)")
         return True

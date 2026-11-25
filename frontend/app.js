@@ -1,109 +1,59 @@
-// =============================================================================
-// MAILCOW LOGS VIEWER - COMPLETE FRONTEND
-// Part 1: Core, Global State, Dashboard, Postfix, Rspamd, Netfilter
-// =============================================================================
-
-// Shared helpers (colors, escaping, formatting, clipboard, toasts) live in
-// utils.js, which is loaded before this file.
-
-// =============================================================================
-// NAVIGATION HELPERS
-// =============================================================================
-
-/**
- * Navigate to Messages page with pre-filled filters
- * @param {Object} options - Filter options
- * @param {string} options.email - Email address to filter by
- * @param {string} options.filterType - 'sender' | 'recipient' | 'search'
- * @param {string} options.direction - 'inbound' | 'outbound' | 'internal'
- * @param {string} options.status - 'delivered' | 'bounced' | 'deferred' | 'rejected'
- * @param {string} options.ip - Source IP to filter by
- * @param {string} options.address - From or to this address, matched whole (it has no field of its own)
- * @param {string} options.domain - From or to an address on this domain (the part after the last @)
- * @param {boolean} options.exact - Match the IP whole, not as a part (the entity card); other filters stay a part
- * @param {string} options.datePreset - A time preset ('today', '7days', '30days', '90days'), or
- * @param {string} options.start - with options.end, an exact range (ISO instants, the end inclusive)
- * @returns {Promise<boolean>} whether the Messages page opened
- */
 function navigateToMessagesWithFilter(options) {
-    // The filters asked for apply to the whole list
-    leaveMessagesWithoutId();
-    // Clear existing filters first
-    const filterSearch = document.getElementById('messages-filter-search');
-    const filterSender = document.getElementById('messages-filter-sender');
-    const filterRecipient = document.getElementById('messages-filter-recipient');
-    const filterDirection = document.getElementById('messages-filter-direction');
-    const filterStatus = document.getElementById('messages-filter-status');
-    const filterUser = document.getElementById('messages-filter-user');
-    const filterIp = document.getElementById('messages-filter-ip');
+    return openMessagesWith(() => {
+        const filterSearch = document.getElementById('messages-filter-search');
+        const filterSender = document.getElementById('messages-filter-sender');
+        const filterRecipient = document.getElementById('messages-filter-recipient');
+        const filterDirection = document.getElementById('messages-filter-direction');
+        const filterStatus = document.getElementById('messages-filter-status');
+        const filterUser = document.getElementById('messages-filter-user');
+        const filterIp = document.getElementById('messages-filter-ip');
 
-    // Reset all filters
-    if (filterSearch) filterSearch.value = '';
-    if (filterSender) filterSender.value = '';
-    if (filterRecipient) filterRecipient.value = '';
-    if (filterDirection) filterDirection.value = '';
-    if (filterStatus) filterStatus.value = '';
-    if (filterUser) filterUser.value = '';
-    if (filterIp) filterIp.value = '';
+        if (filterSearch) filterSearch.value = '';
+        if (filterSender) filterSender.value = '';
+        if (filterRecipient) filterRecipient.value = '';
+        if (filterDirection) filterDirection.value = '';
+        if (filterStatus) filterStatus.value = '';
+        if (filterUser) filterUser.value = '';
+        if (filterIp) filterIp.value = '';
 
-    // Set email filter based on type
-    if (options.email) {
-        if (options.filterType === 'sender') {
-            if (filterSender) filterSender.value = options.email;
-        } else if (options.filterType === 'recipient') {
-            if (filterRecipient) filterRecipient.value = options.email;
-        } else if (options.filterType === 'user') {
-            // The mailbox that logged in, whichever address or alias it sent from
-            if (filterUser) filterUser.value = options.email;
-        } else {
-            // Default: use search field
-            if (filterSearch) filterSearch.value = options.email;
+        if (options.email) {
+            if (options.filterType === 'sender') {
+                if (filterSender) filterSender.value = options.email;
+            } else if (options.filterType === 'recipient') {
+                if (filterRecipient) filterRecipient.value = options.email;
+            } else if (options.filterType === 'user') {
+                if (filterUser) filterUser.value = options.email;
+            } else if (filterSearch) {
+                filterSearch.value = options.email;
+            }
         }
-    }
+        if (options.direction && filterDirection) filterDirection.value = options.direction;
+        if (options.status && filterStatus) filterStatus.value = options.status;
+        if (options.ip && filterIp) filterIp.value = options.ip;
 
-    // Set direction filter
-    if (options.direction && filterDirection) {
-        filterDirection.value = options.direction;
-    }
+        const field = el => (el ? el.value : '');
+        messagesExact = (options.exact && field(filterIp)) || options.address || options.domain ? {
+            ip: options.exact ? field(filterIp) : '', address: options.address || '', domain: options.domain || '',
+        } : null;
 
-    // Set status filter
-    if (options.status && filterStatus) {
-        filterStatus.value = options.status;
-    }
+        if (options.datePreset && MESSAGES_ROLLING_PRESETS.includes(options.datePreset)) messagesShowDatePreset(options.datePreset);
+        else if (options.start && options.end) messagesShowRange(options.start, options.end);
+        readMessagesFilters();
+    });
+}
 
-    if (options.ip && filterIp) filterIp.value = options.ip;
-
-    // Whole values (the entity card): the fields set here, and an address or a
-    // domain, which have no field. A filter changed later drops them (applyMessagesFilters)
-    const field = el => (el ? el.value : '');
-    messagesExact = (options.exact && field(filterIp)) || options.address || options.domain ? {
-        ip: options.exact ? field(filterIp) : '', address: options.address || '', domain: options.domain || '',
-    } : null;
-
-    // The period, when one is given: a preset up to now, or an exact range
-    if (options.datePreset && MESSAGES_ROLLING_PRESETS.includes(options.datePreset)) messagesShowDatePreset(options.datePreset);
-    else if (options.start && options.end) messagesShowRange(options.start, options.end);
-
-    // Navigate to Messages tab
+let messagesOpening = null;
+function openMessagesWith(prepare) {
+    messagesOpening = prepare;
     return navigateTo('messages').then(moved => {
-        // Apply filters after navigation
-        if (moved) setTimeout(() => { if (typeof applyMessagesFilters === 'function') applyMessagesFilters(); }, 100);
+        messagesOpening = null;
         return moved;
     });
 }
 
-// =============================================================================
-// AUTHENTICATION SYSTEM
-// =============================================================================
-
-// DMARC imap
 let dmarcImapStatus = null;
 let dmarcConfiguration = null;
 
-// Send the browser to the login page, dropping any client-side state; signing
-// in again returns to the page that was open. reason: why the server ended the
-// session (session_idle, session_expired), which the login page explains; the
-// address is built by session-guard.js (sessionGuardLoginPath)
 function redirectToLogin(reason) {
     if (typeof uiUnsavedClear === 'function') uiUnsavedClear();
     const here = window.location.pathname + window.location.search;
@@ -111,19 +61,10 @@ function redirectToLogin(reason) {
         : here === '/' ? '/login' : `/login?next=${encodeURIComponent(here)}`);
 }
 
-// Why the server ended the session, from a 401 (session-guard.js); '' when it gave no reason
 async function loginReasonOf(response) {
     return typeof sessionGuardReasonOf === 'function' ? sessionGuardReasonOf(response) : '';
 }
 
-// Enhanced fetch with authentication.
-// Both login methods (OAuth2 and Basic Auth) end up with the same HttpOnly
-// session cookie, which the browser attaches automatically. No credential is
-// held in JavaScript, so an XSS in the page has nothing to read.
-// timeout (ms, for the pages' own refreshes): a request that has not answered by
-// then, its body included, is aborted, so it neither holds the next refresh nor
-// answers after it
-// ownNotPermitted: the caller words a refusal (403) itself, so the shared notice stays away
 async function authenticatedFetch(url, options = {}) {
     const { timeout, ownNotPermitted, ...rest } = options;
     const headers = {
@@ -145,22 +86,15 @@ async function authenticatedFetch(url, options = {}) {
         const response = await fetch(url, {
             ...rest,
             headers,
-            credentials: 'include' // Send the session cookie
+            credentials: 'include'
         });
 
-        // Handle 401 Unauthorized - the session ended (a limit, which the login
-        // page explains) or the server restarted
         if (response.status === 401) {
             redirectToLogin(await loginReasonOf(response));
             throw new Error('Authentication required');
         }
-        // A call the person's access does not cover: said once for a burst, and the
-        // menu and controls follow the access the server has now
-        // Awaited, so the shared message comes first; the caller's own words come after it
         if (response.status === 403 && !ownNotPermitted) await noteNotPermitted(response);
 
-        // The timer stays to the end of the body (reading it is part of the request);
-        // after that its abort does nothing
         return response;
     } catch (error) {
         clearTimeout(timer);
@@ -168,7 +102,6 @@ async function authenticatedFetch(url, options = {}) {
     }
 }
 
-// Other 403s (a write from another site's page) keep their own message
 async function noteNotPermitted(response) {
     try {
         const body = await response.clone().json();
@@ -177,36 +110,24 @@ async function noteNotPermitted(response) {
             refreshAppAccess();
         }
     } catch (e) {
-        // Not the access answer
     }
 }
 
-// A failed request as an Error in words (uiHttpErrorText): the reason the server
-// gave, or what its status means
 async function responseError(response) {
     return new Error(uiHttpErrorText(response.status, await uiReadJson(response)));
 }
 
-// Why an action that answers { status, msg } did not succeed: a failed request in
-// words, or the answer's own message when the request went through but the action
-// was refused. result is the body from uiReadJson, null when not JSON.
 function actionErrorText(response, result) {
     if (!response.ok) return uiHttpErrorText(response.status, result);
     const msg = result && result.msg;
     if (mailcowWords(msg)) return msg;
     return msg ? `mailcow refused it (${[].concat(msg)[0]})` : uiApiErrorText(result, 'No reason was given');
 }
-// An action's message when it is a sentence (this app's words); mailcow answers with a
-// message code instead ("item_released", or a list such as ["network_host_invalid", "x"])
 function mailcowWords(msg) {
     return typeof msg === 'string' && /\s/.test(msg.trim()) ? msg : '';
 }
 
-// Handle logout - one path for both login methods, since both are backed by
-// the same server-side session. POST only: a GET that logs out could be
-// triggered by any other site.
 async function handleLogout() {
-    // Changes not saved yet: ask now, while Stay still leaves a working session
     if (typeof uiConfirmLeave === 'function' && !(await uiConfirmLeave(undefined, { keep: true }))) return;
     try {
         const response = await authenticatedFetch('/api/auth/logout', { method: 'POST' });
@@ -215,35 +136,25 @@ async function handleLogout() {
             return;
         }
     } catch (e) {
-        // A 401 means the session is already gone; authenticatedFetch has
-        // sent the browser to the login page. Otherwise nothing changed, and
-        // the changes are still guarded.
         return;
     }
     if (typeof uiUnsavedClear === 'function') uiUnsavedClear();
     window.location.href = '/login';
 }
 
-// Check authentication on page load.
-// OAuth2 and Basic Auth both end up with a session cookie, so one check
-// covers them: no session means the browser goes back to the login page.
 async function checkAuthentication() {
-    // First check if authentication is enabled
     try {
         const infoResponse = await fetch('/api/info', { credentials: 'include' });
         if (infoResponse.ok) {
             const infoData = await infoResponse.json();
-            // If authentication is disabled, allow access
             if (!infoData.auth_enabled) {
                 return true;
             }
         }
     } catch (e) {
-        // If we can't check, assume auth is enabled for safety
         console.warn('Could not check auth status, assuming enabled');
     }
 
-    // A session a limit ended says so, in the header or the body, whatever the status
     let reason = '';
     try {
         const statusResponse = await fetch('/api/auth/status', { credentials: 'include' });
@@ -253,7 +164,6 @@ async function checkAuthentication() {
                 const logoutBtn = document.getElementById('logout-btn');
                 if (logoutBtn) logoutBtn.classList.remove('hidden');
                 document.getElementById('mobile-logout')?.classList.remove('hidden');
-                // What this person may view and do, for the menu and the controls
                 setAppAccess(statusData);
                 return true;
             }
@@ -262,23 +172,15 @@ async function checkAuthentication() {
             reason = await loginReasonOf(statusResponse);
         }
     } catch (e) {
-        // Could not reach the status endpoint - treat as not authenticated
     }
 
     redirectToLogin(reason);
     return false;
 }
 
-// =============================================================================
-// EXISTING CODE CONTINUES...
-// =============================================================================
-
-// Global state
 let currentTab = 'dashboard';
-let appTimezone = 'UTC'; // The app's time zone (utils.js appTz), from /api/info
-// Whether the configured TZ is a known zone, and the name as configured ('' when unset)
+let appTimezone = 'UTC';
 let appTimezoneStatus = { valid: true, configured: '' };
-// How dates and times are written (utils.js appDateFmt, appTimeFmt), from /api/info
 let appDateFormat = 'browser';
 let appTimeFormat = '24h';
 let currentPage = {
@@ -291,15 +193,11 @@ let currentFilters = {
     messages: {}
 };
 
-// Global RW API key status (shared across all features)
 let mailcowRwConfigured = false;
-// The first RW status check; Queue and Quarantine wait for it before drawing their rows
 let rwStatusReady = Promise.resolve();
 
-// Feature toggles - features in this list are disabled (hidden from UI, jobs stopped)
 window.disabledFeatures = [];
 
-// All toggleable feature definitions (for settings UI)
 const TOGGLEABLE_FEATURES = [
     { id: 'netfilter', label: 'Security', description: 'Review login attempts, bans, and protection rules.' },
     { id: 'queue', label: 'Queue', description: 'Outbound > Queue: mail waiting in the Postfix queue' },
@@ -319,8 +217,6 @@ function isFeatureDisabled(featureId) {
     return window.disabledFeatures.includes(featureId);
 }
 
-// Pages whose tabs belong to different features: tab -> feature. A tab whose
-// feature is off is hidden, and the page goes only when all of them are off.
 const TAB_FEATURES = {
     outbound: { queue: 'queue', suppressions: 'suppressions' }
 };
@@ -330,7 +226,6 @@ function tabFeatureOn(page, tab) {
     return !feature || !isFeatureDisabled(feature);
 }
 
-// The tab asked for while its feature is on, otherwise the first one that is on
 function pageTabOn(page, tab) {
     const tabs = Object.keys(TAB_FEATURES[page]);
     return tabs.includes(tab) && tabFeatureOn(page, tab) ? tab : (tabs.find(t => tabFeatureOn(page, t)) || tabs[0]);
@@ -340,20 +235,15 @@ function pageAllOff(page) {
     return !Object.keys(TAB_FEATURES[page]).some(tab => tabFeatureOn(page, tab));
 }
 
-// A page shows "is disabled" while its features are off. The Mailbox Stats
-// page also hosts Rate Limits, so it stays open while that feature is on.
 function pageIsOff(page) {
     if (TAB_FEATURES[page]) return pageAllOff(page);
     if (page === 'mailbox-stats' && !isFeatureDisabled('rate-limits')) return false;
     return isFeatureDisabled(page);
 }
 
-// The area each page shows (backend agent_access/scopes.py): a page the signed-in
-// person cannot view leaves the menu, and its address says so instead of showing it
 const PAGE_AREAS = {
     dashboard: 'status', messages: 'messages', netfilter: 'security', outbound: 'outbound', quarantine: 'quarantine',
     rspamd: 'rspamd', status: 'status', domains: 'domains', dmarc: 'dmarc', 'mailbox-stats': 'mailboxes',
-    // About reads the Status routes (the app's health, its version)
     devices: 'mailboxes', logs: 'logs', settings: 'admin', about: 'status',
 };
 const MENU_ORDER = ['dashboard', 'messages', 'outbound', 'quarantine', 'netfilter', 'rspamd', 'dmarc', 'status',
@@ -364,18 +254,14 @@ function userCanView(page) {
     return !area || userCan(area);
 }
 
-// Where the app opens: the Dashboard, or the first page of the menu the person can view
 function landingPage() {
     return MENU_ORDER.find(page => userCanView(page) && !pageIsOff(page)) || '';
 }
 
-// Whether a menu entry is shown: its feature is on and its page may be viewed
 function navEntryShown(btn) {
     return btn.style.display !== 'none' && !btn.classList.contains('ui-no-view');
 }
 
-// The menu, the phone tab bar and the More sheet keep the pages the person can view;
-// the server card and the sidebar tools that open Status or the app's log follow
 function applyPageAccess() {
     for (const page of Object.keys(PAGE_AREAS)) {
         for (const id of [`tab-${page}`, `mobile-tab-${page}`, `tabbar-${page}`]) {
@@ -398,7 +284,6 @@ function applyPageAccess() {
     if (logout) logout.title = appAccess.name ? `Logout (${appAccess.name})` : 'Logout';
 }
 
-// After a refused call: the access the server has now; other than the page's, the page reloads into it
 let accessRefreshAt = 0;
 async function refreshAppAccess() {
     if (Date.now() - accessRefreshAt < 10000) return;
@@ -408,11 +293,10 @@ async function refreshAppAccess() {
         if (!response.ok) return;
         appAccessCheck(await response.json());
     } catch (e) {
-        // The next refused call tries again
     }
 }
 
-// Hide the tabs of features that are off; a page with one tab left shows no tab bar
+// Hide the tabs of features that are off
 function applyTabFeatures(page) {
     const prefix = `${page}-tab-btn-`;
     let shown = 0;
@@ -427,7 +311,6 @@ function applyTabFeatures(page) {
 }
 
 function applyFeatureToggles() {
-    // Hide the sidebar, sheet and phone tab bar entries of disabled features
     const navIds = feature => [`tab-${feature}`, `mobile-tab-${feature}`, `tabbar-${feature}`];
     for (const feature of window.disabledFeatures) {
         for (const id of navIds(feature)) {
@@ -435,7 +318,6 @@ function applyFeatureToggles() {
             if (el) el.style.display = 'none';
         }
     }
-    // Ensure enabled features are visible (in case of settings change)
     for (const feature of TOGGLEABLE_FEATURES) {
         if (!window.disabledFeatures.includes(feature.id)) {
             for (const id of navIds(feature.id)) {
@@ -444,11 +326,9 @@ function applyFeatureToggles() {
             }
         }
     }
-    // Suppressions can open the map they are written to while the Rspamd page is on
     const openMap = document.getElementById('suppression-open-map');
     if (openMap) openMap.style.display = isFeatureDisabled('rspamd') ? 'none' : '';
 
-    // Outbound stays while one of its features is on
     for (const page of Object.keys(TAB_FEATURES)) {
         for (const id of [`tab-${page}`, `mobile-tab-${page}`, `tabbar-${page}`]) {
             const el = document.getElementById(id);
@@ -456,20 +336,16 @@ function applyFeatureToggles() {
         }
         applyTabFeatures(page);
     }
-    // A tab that just went is not left open: the page shows its first tab that is on
     if (typeof outboundTab !== 'undefined' && outboundTab !== pageTabOn('outbound', outboundTab)) {
         if (currentTab === 'outbound' && !pageAllOff('outbound')) outboundShowTab(outboundTab);
         else outboundTab = pageTabOn('outbound', outboundTab);
     }
 
-    // A navigation group whose pages are all off loses its heading too
     document.querySelectorAll('[data-nav-group]').forEach(group => {
         const visible = [...group.querySelectorAll('button')].some(navEntryShown);
         group.style.display = visible ? '' : 'none';
     });
     
-    // Special handling for blacklist feature - it doesn't have its own tab,
-    // it's a section inside the Domains page
     const blacklistSection = document.getElementById('blacklist-section');
     const dashboardBlacklistCard = document.getElementById('dashboard-blacklist-card');
     const statusBlacklistKpi = document.getElementById('status-kpi-blocklists-cell');
@@ -480,15 +356,12 @@ function applyFeatureToggles() {
         if (el) el.style.display = blacklistOff ? 'none' : '';
     });
 
-    // Same for rate-limits - it is a view inside the Mailbox Stats page,
-    // so the feature toggle hides its switcher button instead of a tab
     const mailboxStatsOff = window.disabledFeatures.includes('mailbox-stats');
     const rateLimitsOff = window.disabledFeatures.includes('rate-limits');
 
     const rateLimitsViewBtn = document.getElementById('mailbox-stats-view-rate-limits');
     if (rateLimitsOff) {
         if (rateLimitsViewBtn) rateLimitsViewBtn.style.display = 'none';
-        // Never leave the user stranded on a view that just disappeared
         if (typeof mailboxStatsView !== 'undefined' && mailboxStatsView === 'rate-limits' && !mailboxStatsOff) {
             mailboxStatsSwitchView('statistics');
         }
@@ -496,12 +369,7 @@ function applyFeatureToggles() {
         if (rateLimitsViewBtn) rateLimitsViewBtn.style.display = '';
     }
 
-    // The mirror case: Rate Limits does not depend on Mailbox Stats. With
-    // Mailbox Stats off and Rate Limits on, the page stays reachable and
-    // becomes the Rate Limits page - Statistics is the view that disappears,
-    // and with one view left the switcher itself has nothing to offer.
     const statsViewBtn = document.getElementById('mailbox-stats-view-statistics');
-    // Not 'mailbox-stats-view-*': that prefix is the switcher's button query
     const viewSwitcher = document.getElementById('mailbox-stats-views');
     if (mailboxStatsOff && !rateLimitsOff) {
         if (statsViewBtn) statsViewBtn.style.display = 'none';
@@ -510,7 +378,6 @@ function applyFeatureToggles() {
             if (currentTab === 'mailbox-stats') {
                 mailboxStatsSwitchView('rate-limits');
             } else {
-                // Only remember it - switching now would fetch for a hidden page
                 mailboxStatsView = 'rate-limits';
             }
         }
@@ -519,8 +386,6 @@ function applyFeatureToggles() {
         if (viewSwitcher) viewSwitcher.style.display = '';
     }
 
-    // The tab is shared by both features, so it only goes when both are off,
-    // and it says what it actually opens
     const mailboxTabLabel = mailboxStatsOff && !rateLimitsOff ? 'Rate Limits' : 'Mailbox Stats';
     for (const tabId of ['tab-mailbox-stats', 'mobile-tab-mailbox-stats']) {
         const tab = document.getElementById(tabId);
@@ -530,8 +395,6 @@ function applyFeatureToggles() {
     }
 }
 
-// A nav tab is an <svg> icon followed by its label, in a .ui-nav-label span
-// (or, in older markup, a bare text node), so only the label text changes.
 function setNavTabLabel(tab, label) {
     const span = tab.querySelector('.ui-nav-label');
     if (span) {
@@ -551,7 +414,6 @@ function setNavTabLabel(tab, label) {
 }
 
 function updateDisabledFeaturesCheckbox(featureId, isChecked, el) {
-    // Update the hidden input value
     const hiddenInput = document.getElementById('setting-disabled_features');
     if (!hiddenInput) return;
 
@@ -560,16 +422,13 @@ function updateDisabledFeaturesCheckbox(featureId, isChecked, el) {
     );
 
     if (isChecked) {
-        // Feature is being enabled (checked) - remove from disabled list
         currentDisabled.delete(featureId);
     } else {
-        // Feature is being disabled (unchecked) - add to disabled list
         currentDisabled.add(featureId);
     }
 
     hiddenInput.value = Array.from(currentDisabled).sort().join(',');
 
-    // Mark the toggle on or off
     const label = el ? el.closest('label') : null;
     if (label) {
         label.classList.toggle('is-on', isChecked);
@@ -590,19 +449,15 @@ async function fetchRwStatus() {
         mailcowRwConfigured = false;
     }
     showQuarantineRulesAccess();
-    // The key decides which actions the Security page offers; the flag may land after it drew
     if (currentTab === 'netfilter') {
         renderSecurityOverview();
         renderSecurityLists();
         renderSecuritySettings();
     }
-    // Same for the Queue and Quarantine rows and their actions
     if (currentTab === 'outbound' && allQueueData.length) applyQueueFilters();
     if (currentTab === 'quarantine' && quarantineLastData) renderQuarantineData(quarantineLastData);
 }
 
-// Auto-Rules release and delete held mail in mailcow, so they need the Read-Write key.
-// The tab is always there; without the key it says what is missing. Returns whether rules can run.
 function showQuarantineRulesAccess() {
     document.getElementById('quarantine-rules-section')?.classList.toggle('hidden', !mailcowRwConfigured);
     const locked = document.getElementById('quarantine-rules-locked');
@@ -614,21 +469,17 @@ function showQuarantineRulesAccess() {
     return mailcowRwConfigured;
 }
 
-// Initialize on page load
 document.addEventListener('DOMContentLoaded', async () => {
     uiInitMenus();
     console.log('=== mailcow Logs Viewer Initializing ===');
 
-    // Check authentication first
     const isAuthenticated = await checkAuthentication();
     if (!isAuthenticated) {
         console.log('Authentication required - showing login modal');
         return;
     }
-    // The menu holds only the pages this person can view
     applyPageAccess();
 
-    // Check if all required elements exist
     const requiredElements = [
         'app-title',
         'content-dashboard',
@@ -652,27 +503,18 @@ document.addEventListener('DOMContentLoaded', async () => {
     loadMailcowVersionStatus();
     rwStatusReady = fetchRwStatus().catch(() => {});
 
-    // Initialize router and get initial route from URL
     const routeInfo = typeof initRouter === 'function' ? initRouter() : { baseRoute: 'dashboard', params: {} };
     const initialTab = routeInfo.baseRoute || routeInfo;
     const initialParams = routeInfo.params || {};
     console.log('Initial tab from URL:', initialTab, 'params:', initialParams);
 
-    // Load the initial tab (use switchTab to ensure proper initialization)
     switchTab(initialTab, initialParams);
 
-    // The open page refreshes itself from now on
     startPageRefresh();
 
     console.log('=== Initialization Complete ===');
 });
 
-// =============================================================================
-// APP INFO & VERSION
-// =============================================================================
-
-// The authentication-off banner can be dismissed for good in this browser: a
-// reverse proxy in front of the app may already sign users in.
 const AUTH_OFF_BANNER_DISMISSED_KEY = 'authOffBannerDismissed';
 
 function authOffBannerDismissed() {
@@ -680,13 +522,11 @@ function authOffBannerDismissed() {
 }
 
 function dismissAuthOffBanner() {
-    try { localStorage.setItem(AUTH_OFF_BANNER_DISMISSED_KEY, '1'); } catch (e) { /* private mode: it just is not remembered */ }
+    try { localStorage.setItem(AUTH_OFF_BANNER_DISMISSED_KEY, '1'); } catch (e) {}
     const banner = document.getElementById('auth-off-banner');
     if (banner) banner.classList.add('hidden');
 }
 
-// The zone every time follows (/api/info `timezone`). The server sends only a
-// known zone; one this browser cannot use would make every time throw, so UTC.
 function setAppTimezone(info) {
     let zone = (info && info.timezone) || 'UTC';
     try {
@@ -700,12 +540,10 @@ function setAppTimezone(info) {
         valid: !info || info.timezone_valid !== false,
         configured: (info && typeof info.timezone_configured === 'string') ? info.timezone_configured : '',
     };
-    // utils.js falls back to the defaults for a value it does not know
     if (info && typeof info.date_format === 'string') appDateFormat = info.date_format;
     if (info && typeof info.time_format === 'string') appTimeFormat = info.time_format;
 }
 
-// The browser tab names the page and its open tab: "Mailbox Stats · Rate Limits · mailcow Logs Viewer"
 let appTitleText = document.title;
 let documentTitleQueued = false;
 function queueDocumentTitle() {
@@ -722,7 +560,6 @@ function queueDocumentTitle() {
 
 async function loadAppInfo() {
     try {
-        // Use regular fetch since this is called after authentication check
         const response = await authenticatedFetch('/api/info');
         const data = await response.json();
 
@@ -730,11 +567,9 @@ async function loadAppInfo() {
             document.getElementById('app-title').textContent = data.app_title;
             appTitleText = data.app_title;
             queueDocumentTitle();
-            // The phone top bar names the app above the page
             const phoneTitle = document.getElementById('mtop-app-title');
             if (phoneTitle) phoneTitle.textContent = data.app_title;
 
-            // Update footer app name
             const footerName = document.getElementById('app-name-footer');
             if (footerName) {
                 footerName.textContent = data.app_title;
@@ -750,13 +585,11 @@ async function loadAppInfo() {
             if (phoneLogo) phoneLogo.src = data.app_logo_url;
         }
 
-        // Update footer version
         const footerVersion = document.getElementById('app-version-footer');
         if (footerVersion && data.version) {
             footerVersion.textContent = `v${data.version}`;
         }
 
-        // Show/hide logout button based on auth status
         const logoutBtn = document.getElementById('logout-btn');
         if (logoutBtn) {
             if (data.auth_enabled) {
@@ -767,48 +600,32 @@ async function loadAppInfo() {
         }
         document.getElementById('mobile-logout')?.classList.toggle('hidden', !data.auth_enabled);
 
-        // Without any sign-in, everyone who reaches the app has full access: say so
-        // on the Dashboard. Only an explicit false shows it, never a missing field.
         const authOffBanner = document.getElementById('auth-off-banner');
         if (authOffBanner) authOffBanner.classList.toggle('hidden', data.auth_enabled !== false || authOffBannerDismissed());
 
         setAppTimezone(data);
 
-        // Load disabled features and apply tab hiding
         if (data.disabled_features && Array.isArray(data.disabled_features)) {
             window.disabledFeatures = data.disabled_features;
             console.log('Disabled features:', window.disabledFeatures);
             applyFeatureToggles();
         }
-        // With editing off the Settings page has no fields for the search to open
         window.settingsEditable = data.settings_edit_via_ui_enabled !== false;
 
-        // The update check asks GitHub and the connection check asks mailcow, which
-        // takes its whole timeout when it cannot be reached: the page the address
-        // names opens without waiting for either
         loadAppVersionStatus();
         const connectionChecked = loadMailcowConnectionStatus();
 
-        // Sidebar counters and server card
         placeShellUtilities();
         window.matchMedia('(max-width: 760px)').addEventListener('change', placeShellUtilities);
         window.matchMedia('(max-width: 760px)').addEventListener('change', () => placeTopbar());
         watchTopbarCrumbs();
-        // The Status counter counts a mailcow that is not connected
         connectionChecked.then(startNavCounters);
-        // Needs attention, for the Dashboard and the bell on every page
         startAttention();
     } catch (error) {
         console.error('Failed to load app info:', error);
     }
 }
 
-// =============================================================================
-// SIDEBAR: SERVER CARD, COUNTERS AND TOOLS
-// =============================================================================
-
-// The theme and logout buttons live in the sidebar foot; on phones, where the
-// sidebar is hidden, the same elements move into the top bar.
 function placeShellUtilities() {
     const tools = document.getElementById('ui-utilities');
     const phoneSlot = document.getElementById('ui-mtop-actions');
@@ -821,16 +638,8 @@ function placeShellUtilities() {
     }
 }
 
-// =============================================================================
-// WIDE SCREENS: THE TOP BAR
-// =============================================================================
-// One bar runs across the top: the app's name with the menu toggle, the page's
-// title and the page's actions. They are the page's own elements, moved up while
-// the page is open and put back when it is left, so every id, button and listener
-// stays as it was. Under the bar the page starts with breadcrumbs, then its
-// description. Messages keeps its own layout and has no bar; phones keep theirs.
 const TOPBAR_SKIP = new Set(['messages']);
-let topbarMoves = [];     // [element, placeholder] pairs, to put back in reverse
+let topbarMoves = [];
 let topbarRoute = null;
 
 function topbarMove(el, target) {
@@ -872,12 +681,10 @@ function placeTopbar(route = topbarRoute) {
     title.before(crumbs);
     topbarMove(title, document.getElementById('ui-topbar-title'));
     [...head.children].filter(el => el !== intro).forEach(el => topbarMove(el, document.getElementById('ui-topbar-actions')));
-    // The DMARC sync note is too tall for the bar: it stays with the description
     if (route === 'dmarc') topbarMove(document.getElementById('dmarc-last-sync-info'), intro);
     updateTopbarCrumbs();
 }
 
-// Phones: the page's main action (Check Now, Fetch reports) sits on the title's line
 function placeHeadPrimary(route, intro, title) {
     if (!title || !window.matchMedia('(max-width: 760px)').matches) return;
     const primary = intro.parentNode.querySelector('.ui-head-primary');
@@ -886,18 +693,15 @@ function placeHeadPrimary(route, intro, title) {
     slot.className = 'ui-head-slot';
     title.after(slot);
     topbarMove(primary, slot);
-    // DMARC: the last fetch and Manage Reports share one line of links under the description
     if (route === 'dmarc') {
         const links = document.createElement('div');
         links.className = 'ui-head-links';
         intro.appendChild(links);
         ['dmarc-last-sync-info', 'dmarc-manage-btn'].forEach(id => topbarMove(document.getElementById(id), links));
-        // Upload Report is an icon beside Fetch reports
         topbarMove(document.getElementById('dmarc-upload-btn'), slot);
     }
 }
 
-// The tab open on the page: Security's Overview, a Status tab, a Settings section
 function topbarSubLabel(route) {
     const page = document.getElementById(`content-${route}`);
     const tab = page && page.querySelector('[role="tab"][aria-selected="true"], [role="tab"].active, .settings-edit-nav [aria-current="true"]');
@@ -907,10 +711,7 @@ function topbarSubLabel(route) {
     return label.textContent.replace(/\s+/g, ' ').trim();
 }
 
-// Something opened inside a tab (a Rspamd map, a DMARC domain or report) joins the
-// crumbs, and the tab's crumb leads back to its list. A level in between that has an
-// action ({ label, action }) leads back to it. It holds only while that tab is open.
-let topbarPageCrumbs = null;   // { route, sub, back, labels: [label or { label, action }] }
+let topbarPageCrumbs = null;
 
 function setPageCrumbs(route, sub, back, labels) {
     topbarPageCrumbs = labels && labels.length ? { route, sub, back, labels } : null;
@@ -930,7 +731,6 @@ function updateTopbarCrumbs() {
     const parts = [];
     if (groupLabel) parts.push(`<span class="ui-crumb-group">${escapeHtml(groupLabel.textContent.trim())}</span>`);
     const inner = topbarPageCrumbs && topbarPageCrumbs.route === route && topbarPageCrumbs.sub === sub ? topbarPageCrumbs : null;
-    // A page without tabs (DMARC & TLS) leads back from a level inside it by its name
     parts.push(sub ? `<button type="button" class="ui-crumb" onclick="topbarOpenPage('${escapeJsArg(route)}')">${escapeHtml(name)}</button>`
         : inner ? `<button type="button" class="ui-crumb" onclick="${inner.back}">${escapeHtml(name)}</button>`
         : `<span class="ui-crumb-current" aria-current="page">${escapeHtml(name)}</span>`);
@@ -950,14 +750,12 @@ function updateTopbarCrumbs() {
     nav.innerHTML = parts.join('<span class="ui-crumb-sep" aria-hidden="true">›</span>');
 }
 
-// The page's name in the crumbs opens the page at its first tab
 function topbarOpenPage(route) {
     if (typeof SUBPAGES !== 'undefined' && SUBPAGES[route]) navigateTo(route, { sub: subpageFirst(route) });
     else if (route === 'dmarc' && typeof dmarcOpenTab === 'function') dmarcOpenTab();
     else navigateTo(route);
 }
 
-// A tab opened on the page, by a click or by Back, changes the last crumb
 function watchTopbarCrumbs() {
     const content = document.querySelector('.ui-content');
     if (!content || typeof MutationObserver === 'undefined') return;
@@ -969,7 +767,6 @@ function watchTopbarCrumbs() {
     }).observe(content, { subtree: true, attributes: true, attributeFilter: ['aria-selected', 'aria-current', 'class'] });
 }
 
-// The sidebar and the phone More sheet show the same counters
 function setNavCount(page, count, isFail, title) {
     for (const el of [document.getElementById(`nav-count-${page}`), document.getElementById(`mobile-nav-count-${page}`)]) {
         if (!el) continue;
@@ -984,19 +781,32 @@ function setNavCount(page, count, isFail, title) {
     }
 }
 
-// Counters next to the pages that can need attention, and the problems shown
-// on the server card, the phone top bar and the Status tab.
-// The counters are read every five minutes; a hidden browser tab reads nothing
-// and catches up when it is shown
+const READ_FAILED = { failed: true };
+
+function serverCheckFound(key, data) {
+    if (data === READ_FAILED) return null;
+    if (!data) return [];
+    if (key === 'connection') return data.connected === false ? [data] : [];
+    if (key === 'blocklist') return data.status === 'error' ? null : data.status === 'listed' ? [data] : [];
+    if (key === 'containers') {
+        if (data.containers_known === false) return null;
+        return data.containers && data.containers.stopped > 0 ? [data.containers] : [];
+    }
+    if (key === 'dmarc') {
+        return (data.insights || []).filter(i =>
+            i.recommendations.some(r => r.type === 'tighten_policy' || r.type === 'low_pass_rate') || (i.new_sources && i.new_sources.length > 0));
+    }
+    return [data];
+}
+
+let mailcowConnection;
+
 const NAV_COUNTERS_EVERY = 5 * 60 * 1000;
 let navCountersAt = 0;
 
 let navCountersPending = false;
 function navCountersTick() {
     if (navCountersPending || document.hidden || Date.now() - navCountersAt < NAV_COUNTERS_EVERY - 2000) return;
-    // The connection is read again first, as at load: an open page shows mailcow
-    // back without a reload, and the Status counter counts it. One read at a
-    // time, however long it takes, so an older answer never lands after a newer one
     navCountersAt = Date.now();
     navCountersPending = true;
     loadMailcowConnectionStatus().finally(() => { navCountersPending = false; }).then(loadNavCounters);
@@ -1010,16 +820,13 @@ function startNavCounters() {
 
 async function loadNavCounters() {
     navCountersAt = Date.now();
-    // A counter of a feature that is off, or of an area the person cannot view, is not read
     const off = (feature, area) => (window.disabledFeatures || []).includes(feature) || !userCan(area);
-    // A read that failed is not a count of 0: its counter stays as it was
-    const FAILED = Symbol('failed');
     const get = async url => {
         try {
             const res = await authenticatedFetch(url);
-            return res.ok ? await res.json() : FAILED;
+            return res.ok ? await res.json() : READ_FAILED;
         } catch (e) {
-            return FAILED;
+            return READ_FAILED;
         }
     };
     const [dashboard, queue, quarantine, insights, summary, blacklist, info] = await Promise.all([
@@ -1032,34 +839,34 @@ async function loadNavCounters() {
         off('', 'status') ? null : get('/api/settings/info'),
     ]);
 
-    if (dashboard !== FAILED) {
+    if (dashboard !== READ_FAILED) {
         const failedLogins = dashboard ? dashboard.failed_logins || 0 : 0;
         setNavCount('netfilter', failedLogins, false, `${failedLogins} failed logins in the last 24 hours`);
     }
-    if (queue !== FAILED) {
+    if (queue !== READ_FAILED) {
         const queued = queue && Array.isArray(queue.data) ? queue.data.length : 0;
         setNavCount('outbound', queued, false, `${queued} messages in the queue`);
     }
-    if (quarantine !== FAILED) {
+    if (quarantine !== READ_FAILED) {
         const held = quarantine ? (quarantine.total || (quarantine.data || []).length) : 0;
         setNavCount('quarantine', held, false, `${held} quarantined messages`);
     }
-    if (insights !== FAILED) {
-        const dmarcActions = insights ? (insights.insights || []).filter(i =>
-            i.recommendations.some(r => r.type === 'tighten_policy' || r.type === 'low_pass_rate') ||
-            (i.new_sources && i.new_sources.length > 0)).length : 0;
+    if (insights !== READ_FAILED) {
+        const dmarcActions = serverCheckFound('dmarc', insights).length;
         setNavCount('dmarc', dmarcActions, false, `${dmarcActions} DMARC insights`);
     }
 
+    const found = {
+        connection: serverCheckFound('connection', off('', 'status') ? null : mailcowConnection),
+        containers: serverCheckFound('containers', summary),
+        blocklist: serverCheckFound('blocklist', blacklist),
+    };
     const problems = [];
-    const indicator = document.getElementById('mailcow-connection-indicator');
-    if (indicator && indicator.title === 'Not connected to mailcow') problems.push('not connected to mailcow');
-    const stopped = summary && summary !== FAILED && summary.containers ? summary.containers.stopped || 0 : 0;
+    if (found.connection && found.connection.length) problems.push('not connected to mailcow');
+    const stopped = found.containers && found.containers.length ? found.containers[0].stopped : 0;
     if (stopped > 0) problems.push(`${stopped} container${stopped === 1 ? '' : 's'} stopped`);
-    if (blacklist && blacklist !== FAILED && blacklist.status === 'listed') problems.push('listed on a blocklist');
-    // A check that could not run is not "No problems"
-    const unchecked = summary === FAILED || blacklist === FAILED
-        || (summary && summary.containers_known === false) || (blacklist && blacklist.status === 'error');
+    if (found.blocklist && found.blocklist.length) problems.push('listed on a blocklist');
+    const unchecked = Object.values(found).includes(null);
     if (problems.length || !unchecked) setNavCount('status', problems.length, true, problems.join(', '));
 
     const label = problems.length ? `${problems.length} problem${problems.length === 1 ? '' : 's'}`
@@ -1070,7 +877,6 @@ async function loadNavCounters() {
         small.title = problems.join(', ');
         small.classList.toggle('has-problems', problems.length > 0);
     }
-    // On a phone the header bell has these too, with the rest of Needs attention
     const pip = document.getElementById('tabbar-pip-status');
     if (pip && (problems.length || !unchecked)) pip.classList.toggle('hidden', problems.length === 0);
 
@@ -1082,23 +888,24 @@ async function loadNavCounters() {
 }
 
 async function loadMailcowConnectionStatus() {
-    // The server card and these checks are part of Status
     if (!userCan('status')) return;
     try {
         const response = await authenticatedFetch('/api/status/mailcow-connection');
-        if (!response.ok) return;
+        if (!response.ok) {
+            if (!mailcowConnection) mailcowConnection = READ_FAILED;
+            return;
+        }
 
         const data = await response.json();
+        mailcowConnection = data;
         const indicator = document.getElementById('mailcow-connection-indicator');
 
         if (indicator) {
             indicator.classList.remove('hidden');
             if (data.connected) {
-                // Read again every few minutes: no tone of an earlier answer stays
                 indicator.classList.remove('text-red-500', 'text-gray-400');
                 indicator.classList.add('text-green-500');
                 indicator.title = 'Connected to mailcow';
-                // Update SVG to checkmark
                 const svg = indicator.querySelector('svg');
                 if (svg) {
                     svg.innerHTML = '<path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path>';
@@ -1107,7 +914,6 @@ async function loadMailcowConnectionStatus() {
                 indicator.classList.remove('text-green-500', 'text-gray-400');
                 indicator.classList.add('text-red-500');
                 indicator.title = 'Not connected to mailcow';
-                // Update SVG to X
                 const svg = indicator.querySelector('svg');
                 if (svg) {
                     svg.innerHTML = '<path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"></path>';
@@ -1116,6 +922,7 @@ async function loadMailcowConnectionStatus() {
         }
     } catch (error) {
         console.error('Failed to load mailcow connection status:', error);
+        if (!mailcowConnection) mailcowConnection = READ_FAILED;
         const indicator = document.getElementById('mailcow-connection-indicator');
         if (indicator) {
             indicator.classList.remove('hidden');
@@ -1143,10 +950,8 @@ async function loadAppVersionStatus() {
         if (updateBadge && data.update_available) {
             updateBadge.classList.remove('hidden');
             updateBadge.title = `Update available: v${data.latest_version}`;
-            // Say which product the update is for (the mailcow line has its own)
             updateBadge.textContent = `v${data.latest_version} available`;
 
-            // Allow clicking badge to view changelog
             appUpdateInfo = data;
             updateBadge.onclick = (e) => {
                 e.preventDefault();
@@ -1161,7 +966,6 @@ async function loadAppVersionStatus() {
     }
 }
 
-// The available app update; the header badge and the dashboard alert open its changelog
 let appUpdateInfo = null;
 
 function showAppUpdateModal() {
@@ -1169,9 +973,8 @@ function showAppUpdateModal() {
     showMarkdownModal(`Update: v${appUpdateInfo.latest_version}`, appUpdateInfo.changelog || 'No changelog available');
 }
 
-// Helper to show markdown content in the changelog modal
 function showMarkdownModal(title, markdownContent) {
-    let htmlContent = escapeHtml(markdownContent); // shown as text if marked is missing or fails
+    let htmlContent = escapeHtml(markdownContent);
     try {
         if (typeof marked !== 'undefined') {
             marked.setOptions({
@@ -1179,7 +982,6 @@ function showMarkdownModal(title, markdownContent) {
                 gfm: true
             });
             htmlContent = renderMarkdown(markdownContent);
-            // A link to another site opens in a new tab, so the app stays where it was
             const tpl = document.createElement('template');
             tpl.innerHTML = htmlContent;
             tpl.content.querySelectorAll('a[href^="http"]').forEach(a => {
@@ -1192,7 +994,6 @@ function showMarkdownModal(title, markdownContent) {
         console.error('Failed to parse markdown:', e);
     }
 
-    // On a phone it opens in a sheet that grows to the full screen as it is read
     if (uiIsPhone()) {
         uiSheetShow('markdown-sheet', {
             label: title,
@@ -1213,7 +1014,6 @@ function showMarkdownModal(title, markdownContent) {
             modalTitle.textContent = title;
         }
 
-        // Add some basic styling for markdown content
         content.innerHTML = `<div class="markdown-body">${htmlContent}</div>`;
         revealChangelogModal(modal);
     }
@@ -1230,34 +1030,28 @@ async function loadMailcowVersionStatus() {
         const footerVersion = document.getElementById('mailcow-version-footer');
         const footerUpdateBadge = document.getElementById('mailcow-update-badge');
 
-        // Update footer version text
         if (footerVersion && data.current_version) {
             footerVersion.textContent = `mailcow: v${data.current_version}`;
         }
 
-        // Handle update indicators (both header icon and footer badge)
         if (data.update_available) {
-            // Update global state for the shared modal function
             window.mailcowUpdateVersion = data.latest_version;
             window.mailcowUpdateName = data.name || '';
             window.mailcowUpdateChangelog = data.changelog || 'No changelog available';
             if (footerUpdateBadge) footerUpdateBadge.textContent = `mailcow ${data.latest_version} available`;
 
-            // Function to handle clicks using the shared logic
             const handleClick = (e) => {
                 e.preventDefault();
                 e.stopPropagation();
                 showMailcowUpdateModal();
             };
 
-            // Header Icon
             if (updateIcon) {
                 updateIcon.classList.remove('hidden');
                 updateIcon.title = `Update available: ${data.latest_version}`;
                 updateIcon.onclick = handleClick;
             }
 
-            // Footer Badge
             if (footerUpdateBadge) {
                 footerUpdateBadge.classList.remove('hidden');
                 footerUpdateBadge.title = `Update available: ${data.latest_version}`;
@@ -1272,11 +1066,6 @@ async function loadMailcowVersionStatus() {
     }
 }
 
-// =============================================================================
-// PAGE REFRESH - the open page reads its data again on its own
-// =============================================================================
-
-// Cache for last fetched data (to compare and detect changes)
 let lastDataCache = {
     messages: null,
     netfilter: null,
@@ -1286,19 +1075,11 @@ let lastDataCache = {
     settings: null
 };
 
-// Cache for version info (separate from settings cache, doesn't update on smart refresh)
 let versionInfoCache = {
     app_version: null,
     version_info: null
 };
 
-// Every page that changes by itself has a refresher: how often it runs (a
-// number, or a function of the page's open tab) and what it reads. A tick every
-// 30 seconds runs the open page's refresher when it is due and not already on
-// its way; an answer that has not come in 20 seconds frees the next one. A
-// hidden browser tab reads nothing and catches up when it is shown. Each
-// refresher draws only what changed, and checks when its answer arrives that
-// nobody is working in what it would redraw.
 const PAGE_REFRESH_TICK = 30000;
 const PAGE_REFRESH_TIMEOUT = 20000;
 const pageRefreshers = {};
@@ -1312,20 +1093,15 @@ function pageRefreshEvery(refresher) {
     return typeof refresher.every === 'function' ? refresher.every() : refresher.every;
 }
 
-// The page was just loaded: its next refresh is a full cadence away
 function pageRefreshLoaded(route) {
     pageRefreshState.route = route;
     pageRefreshState.at = Date.now();
 }
 
-// A load that failed: the next tick tries again, whatever the cadence
 function pageRefreshRetry(route) {
     if (pageRefreshState.route === route) pageRefreshState.at = 0;
 }
 
-// The open page's refresher, now. Nothing for a page that is off or that the person
-// cannot view (it shows the locked note), while a message dialog covers the page, or
-// while the last run is still on its way
 async function pageRefreshNow() {
     const route = currentTab;
     const refresher = pageRefreshers[route];
@@ -1348,7 +1124,6 @@ function pageRefreshTick() {
     if (document.hidden) return;
     const refresher = pageRefreshers[currentTab];
     if (!refresher) return;
-    // A page opened before the first tick counts from when it was opened
     if (pageRefreshState.route !== currentTab) pageRefreshLoaded(currentTab);
     if (Date.now() - pageRefreshState.at >= pageRefreshEvery(refresher) - 2000) pageRefreshNow();
 }
@@ -1367,11 +1142,9 @@ registerPageRefresh('netfilter', 30000, async () => {
     fail2banSettingsLoaded = false;
     loadFail2BanSettings();
     if (typeof refreshProtectionHits === 'function') refreshProtectionHits();
-    // Outgoing spam: its check runs every minute
     if (typeof refreshSmtpAbusePanel === 'function' && Date.now() - smtpAbuseLoadedAt >= 58000) refreshSmtpAbusePanel();
 });
 registerPageRefresh('outbound', 30000, async () => {
-    // The queue feeds the page's summary and the sidebar counter on both tabs
     if (!isFeatureDisabled('queue')) await smartRefreshQueue();
     if (!isFeatureDisabled('suppressions')) {
         if (outboundTab === 'suppressions') await smartRefreshSuppressions();
@@ -1380,7 +1153,6 @@ registerPageRefresh('outbound', 30000, async () => {
 });
 registerPageRefresh('quarantine', 30000, async () => {
     await smartRefreshQuarantine();
-    // The Auto-Rules tab: the rules with their hits, and the history while it is open
     if (quarantineTab !== 'rules' || !showQuarantineRulesAccess()) return;
     await loadQuarantineRules({ quiet: true });
     const history = document.getElementById('quarantine-rules-history');
@@ -1394,46 +1166,32 @@ registerPageRefresh('status', 30000, async () => {
         statusQuiet = false;
     }
 });
-// The maps list (never a map open in the editor)
 registerPageRefresh('rspamd', 60000, () => refreshRspamdMaps());
-// Settings > Users refreshes on its own (users.js): the form keeps the rest still while it is open
 registerPageRefresh('settings', 30000, async () => {
     await smartRefreshSettings();
     if (typeof refreshUsersPanel === 'function') await refreshUsersPanel();
 });
-// DNS is checked every six hours and mailcow is asked for the domains on each read
 registerPageRefresh('domains', 5 * 60 * 1000, () => refreshDomains());
-// The server keeps the DMARC lists for five minutes, and clears them when reports come in or go
 registerPageRefresh('dmarc', 5 * 60 * 1000, () => dmarcReload(true));
 registerPageRefresh('mailbox-stats', () => mailboxStatsRefreshEvery(), () => refreshMailboxStatsPage());
-// The ActiveSync log is read every minute
 registerPageRefresh('devices', 60000, () => loadDevices(devicesPage, { quiet: true }));
 
-// Helper to check if data changed
 function hasDataChanged(newData, cacheKey) {
     const oldData = lastDataCache[cacheKey];
     if (!oldData) return true;
 
-    // Compare JSON strings for simple change detection
     const newJson = JSON.stringify(newData);
     const oldJson = JSON.stringify(oldData);
     return newJson !== oldJson;
 }
 
-// The Messages refresh, with every filter. At the edge where new mail lands (the
-// top, newest first; the end of a whole list, oldest first) the list takes it in
-// by itself. Anywhere else it stays as it is, and the new mail is counted on the
-// server against the list's watermark and offered as "N new messages" at that
-// edge, as the Logs page offers new lines. Nothing happens while the list loads.
 async function smartRefreshMessages() {
     const filters = currentFilters.messages || {};
     const busy = () => messagesFullLoad || messagesPaging.loading;
     if (messagesNoId || messagesRefreshing || busy()) return;
     refreshMessagesNoId();
-    // No list is shown (its load failed): load it again
     if (!lastDataCache.messages) return loadMessages();
 
-    // The list takes new mail in where it lands, not while text in it is selected
     const free = () => messagesAtNewEdge() && !uiTextHeld(document.getElementById('messages-logs'));
     const gen = messagesGen;
     messagesRefreshing = true;
@@ -1442,24 +1200,19 @@ async function smartRefreshMessages() {
             const response = await messagesFetch(`/api/messages?${messagesQueryParams()}`, PAGE_REFRESH_TIMEOUT);
             if (!response.ok) return;
             const data = await response.json();
-            // Meanwhile the list was loaded again or more of it is loading
             if (gen !== messagesGen || busy()) return;
-            // Still free when the answer comes (the user may have scrolled or started selecting)
             if (free()) {
                 if (!messagesSameAsShown(data)) {
-                    // A list drawn again is a new one, and its counts with it; the focus stays on its row
                     const now = messagesNewGeneration();
                     uiKeepFocus(document.getElementById('messages-logs'), 'data-key', () => renderMessagesData(data));
                     loadMessageFacets(filters, now);
                 } else {
-                    // Nothing new matches: the counts may still have moved with other mail
                     if (data.watermark != null) messagesNew.watermark = data.watermark;
                     loadMessageFacets(filters, gen);
                 }
                 return;
             }
         }
-        // Oldest first, a list not loaded to its end gets the new mail by paging to it
         if (messagesOrder === 'asc' && messagesPaging.cursor) {
             loadMessageFacets(filters, gen);
             return;
@@ -1472,8 +1225,6 @@ async function smartRefreshMessages() {
         const data = await response.json();
         if (gen !== messagesGen || busy()) return;
         messagesNew.count = data.count || 0;
-        // At the end of the whole list, oldest first, the list is read again (new mail,
-        // and messages whose status changed) and drawn again when anything changed
         if (messagesOrder === 'asc' && free()) {
             messagesRefreshing = false;
             await messagesShowNew({ quiet: true });
@@ -1488,12 +1239,8 @@ async function smartRefreshMessages() {
     }
 }
 
-// New mail since the list was read: the watermark the list came with (the
-// newest message stored then) and how many messages came after it
 const messagesNew = { watermark: null, count: 0 };
 
-// Whether an answer brings nothing new over the rows shown, row for row as far
-// as it goes (a first page against the top of a longer list)
 function messagesSameAsShown(data) {
     const shown = lastDataCache.messages;
     if (!shown) return false;
@@ -1502,8 +1249,6 @@ function messagesSameAsShown(data) {
     return data.total === shown.total && rows.length <= had.length && JSON.stringify(rows) === JSON.stringify(had.slice(0, rows.length));
 }
 
-// The element the list scrolls in: its own column on wide screens, the page
-// below 1000 px (whichever element of it scrolls)
 function messagesScroller(container) {
     for (let el = container; el && el !== document.body; el = el.parentElement) {
         const overflow = getComputedStyle(el).overflowY;
@@ -1512,15 +1257,12 @@ function messagesScroller(container) {
     return document.scrollingElement || document.documentElement;
 }
 
-// The part of the screen the scroller shows
 function messagesInView(scroller) {
     if (scroller === document.scrollingElement || scroller === document.documentElement) return { top: 0, bottom: window.innerHeight };
     const box = scroller.getBoundingClientRect();
     return { top: box.top, bottom: box.bottom };
 }
 
-// Whether the list shows the edge where new mail lands: its first row, newest
-// first; the last row of the whole list, oldest first. An empty list is all edge
 function messagesAtNewEdge() {
     const container = document.getElementById('messages-logs');
     if (!container || !container.getClientRects().length) return false;
@@ -1533,7 +1275,6 @@ function messagesAtNewEdge() {
     return rows[0].getBoundingClientRect().top >= view.top - 8;
 }
 
-// "N new messages" at the edge where new mail lands, sticky so it stays in view
 function renderMessagesNew() {
     const list = document.querySelector('#messages-logs .ui-msg-list');
     let wrap = document.getElementById('messages-new-wrap');
@@ -1552,7 +1293,6 @@ function renderMessagesNew() {
     }
     const top = messagesOrder !== 'asc';
     wrap.classList.toggle('is-top', top);
-    // Where the page scrolls, the search bar stays on top: the button goes under it
     const bar = document.querySelector('#content-messages .ui-msg-searchbar');
     const sticky = bar && getComputedStyle(bar).position === 'sticky';
     wrap.style.setProperty('--ui-msg-new-top', sticky ? `${bar.offsetHeight}px` : '0px');
@@ -1564,20 +1304,15 @@ function renderMessagesNew() {
     wrap.hidden = false;
 }
 
-// Show the new mail: newest first, the list from its top; oldest first, the list
-// read again as long as it is plus the new messages, at its end
 async function messagesShowNew({ quiet = false } = {}) {
     const container = document.getElementById('messages-logs');
     if (!container) return;
     if (messagesOrder === 'asc') {
-        // As many rows as are shown and the new ones, page by page; taken in quietly
-        // only if the user is still at the end when they have all come
         const shown = container.querySelectorAll('.ui-msg-item').length;
         const stillFree = () => messagesAtNewEdge() && !uiTextHeld(container);
         await loadMessages({ quiet, rows: Math.max(50, shown + messagesNew.count), toEnd: true, applyIf: quiet ? stillFree : null });
         return;
     }
-    // Where the page scrolls, back to the start of the list (its own column starts at the top on loading)
     const scroller = messagesScroller(container);
     await loadMessages();
     if (scroller !== container) scroller.scrollTop = 0;
@@ -1588,15 +1323,6 @@ function messagesScrollToEnd(container) {
     scroller.scrollTop = scroller.scrollHeight;
 }
 
-// Render messages without loading spinner
-// One row of the Messages list (also used by the smart refresh), as in the
-// mockup: sender and time, subject, then the outcome tag and the direction.
-// Queue ID, message ID, score, user and IP are in the reading pane.
-// A click anywhere on the row opens the message (selecting its text does not,
-// uiRowHeld); the keyboard opens it on its time, a real button named after the
-// subject whose click reaches the row. The row itself is no button: the sender
-// and recipient in it are buttons of their own (uiEntity), and the subject stays
-// text that can be selected (a browser selects no text inside a button)
 function renderMessageRow(msg) {
     const tone = messageRowTone(msg);
     return `
@@ -1613,14 +1339,11 @@ function renderMessageRow(msg) {
         </div>`;
 }
 
-// An address in a Messages row opens its card; a long one loses the end of its
-// local part, never its domain (uiFitAddresses)
 function messageRowAddress(value) {
     const html = value ? uiEntity('address', value, { plain: true, fit: true }) : 'Unknown';
     return html.startsWith('<span class="ui-ent') ? html : `<span class="ui-fit-text">${html}</span>`;
 }
 
-// The coloured edge of a row follows its final status.
 function messageRowTone(msg) {
     const tone = UI_STATUS_TONE[msg.final_status];
     if (tone) return tone;
@@ -1634,11 +1357,7 @@ function renderMessagesData(data) {
     if (typeof markSelectedMessageRow === 'function' && window.openMessageKey) markSelectedMessageRow(window.openMessageKey);
 }
 
-// A first page of the list, from a full load or the auto refresh: the rows (or
-// the empty note), the count, where the next page starts, and the answer
-// the refresh compares the next one with
 function showMessagesFirstPage(container, data) {
-    // The watermark moves with any new mail, also mail the filters leave out: not part of the comparison
     lastDataCache.messages = { ...data, watermark: null };
     messagesNew.watermark = data.watermark ?? null;
     messagesNew.count = 0;
@@ -1649,7 +1368,6 @@ function showMessagesFirstPage(container, data) {
     currentPage.messages = 1;
     setMessagesCount(messagesPaging.total);
     if (!rows.length) {
-        // As on Devices: with filters on, the way back is right there
         container.innerHTML = messagesFiltersOn() ? `
             <div class="ui-empty">
                 <p><b>No messages match these filters</b></p>
@@ -1667,16 +1385,10 @@ function setMessagesCount(total) {
         : uiCountLabel(total || 0, 'message', 'messages');
 }
 
-// ---------- Messages list: the next page loads as the end scrolls into view ----------
-// page: pages shown; cursor: where the next page starts (null at the end);
-// failed: the last page could not load, until Try again
 const messagesPaging = { page: 1, pages: 1, total: 0, cursor: null, loading: false, failed: false, observer: null };
-// One list at a time. Every full load, and every redraw by the auto refresh,
-// starts a new generation: the requests of the older one are aborted (so none
-// of them holds up the new list), and their answers and errors are dropped.
 let messagesGen = 0;
-let messagesFullLoad = false;      // a full load is on its way
-let messagesRefreshing = false;    // an auto refresh is on its way
+let messagesFullLoad = false;
+let messagesRefreshing = false;
 const messagesRequests = new Set();
 
 function messagesNewGeneration() {
@@ -1688,14 +1400,11 @@ function messagesNewGeneration() {
     return messagesGen;
 }
 
-// A request of the list's and its answer, read in full while it can still be
-// aborted (a new generation aborts it, also while its body is coming in)
 async function messagesFetch(url, timeout = 0) {
     const control = typeof AbortController === 'function' ? new AbortController() : null;
     if (control) messagesRequests.add(control);
     try {
         const response = await authenticatedFetch(url, { ...(control ? { signal: control.signal } : {}), ...(timeout ? { timeout } : {}) });
-        // A failed answer's body is kept too (null when not JSON): it says what went wrong
         const data = response.ok ? await response.json() : await uiReadJson(response);
         return { ok: response.ok, status: response.status, json: async () => data };
     } finally {
@@ -1703,36 +1412,23 @@ async function messagesFetch(url, timeout = 0) {
     }
 }
 
-// The Messages filters every request sends: the list, its facet counts and the
-// new-mail count (the CSV export sends currentFilters.messages as it is).
-// exact_ip, address and domain come from an entity card (messagesExact); exact
-// (every address and IP filter whole) is the API's, which the page keeps sending
-// when a filter has it
 const MESSAGES_FILTER_KEYS = ['search', 'sender', 'recipient', 'direction', 'user', 'status', 'ip', 'address', 'domain', 'exact_ip', 'exact', 'start_date', 'end_date'];
 
-// The filters an entity card opened Messages with ("Show messages"), matched
-// whole and not as a part, each in a filter of its own: the IP it set (exact_ip),
-// and an address or a domain, which have no field (from or to them). A condition
-// added keeps them and is matched as a part, as on any visit; they go when the
-// IP the card filled is changed or cleared. A chip above the list names them and
-// takes them off (updateMessagesFilterState). Filters set any other way drop
-// them: they hold only while the filters in use are the ones they made (filters).
-let messagesExact = null;   // { ip, address, domain, filters } or null
+let messagesExact = null;
 const MESSAGES_EXACT_FIELDS = ['ip'];
 
-// The fields' filters with the whole-value ones that still hold
+function setMessagesFilters(filters) {
+    messagesExact = null;
+    currentFilters.messages = filters;
+}
+
 function messagesWithExact(fields) {
-    // Filters set since by anything but the card's: its whole values went with them
-    if (messagesExact && messagesExact.filters && currentFilters.messages !== messagesExact.filters) messagesExact = null;
     const x = messagesExact;
     if (x && MESSAGES_EXACT_FIELDS.some(key => x[key] && (fields[key] || '') !== x[key])) messagesExact = null;
     if (!messagesExact) return fields;
-    const filters = { ...fields, ...(x.ip ? { exact_ip: 'true' } : {}), ...(x.address ? { address: x.address } : {}), ...(x.domain ? { domain: x.domain } : {}) };
-    x.filters = filters;
-    return filters;
+    return { ...fields, ...(x.ip ? { exact_ip: 'true' } : {}), ...(x.address ? { address: x.address } : {}), ...(x.domain ? { domain: x.domain } : {}) };
 }
 
-// What the chip says: each whole value, as a person reads the filter
 function messagesExactParts(x) {
     const parts = [];
     if (x.address) parts.push(['From or to', x.address]);
@@ -1741,7 +1437,6 @@ function messagesExactParts(x) {
     return parts;
 }
 
-// The chip's X: the whole values go, with the fields they had set; the period stays
 function clearMessagesExact() {
     if (messagesExact) {
         MESSAGES_EXACT_FIELDS.forEach(key => {
@@ -1753,14 +1448,6 @@ function clearMessagesExact() {
     applyMessagesFilters();
 }
 
-// ---------- Messages without a Message-ID ----------
-// The list joins a message's Postfix lines and its Rspamd scan by the
-// Message-ID, so a message whose header had none usable (a scanner that sends
-// an empty one) is not in it. A link in the summary line counts those of the
-// time range and search shown, and switches the list to them: the same rows
-// and reading pane, from their Postfix lines (GET /api/messages/without-message-id).
-// There the outcome, direction and the other filters do not apply and are
-// hidden, and the list does not refresh by itself.
 let messagesNoId = false;
 let messagesNoIdCount = 0;
 const MESSAGES_NOID_KEYS = ['search', 'start_date', 'end_date'];
@@ -1772,27 +1459,23 @@ function messagesListUrl(params) {
 function showMessagesWithoutId(on) {
     messagesNoId = !!on;
     if (messagesNoId) {
-        // Only the time range and the search stay: no filter the list ignores may look in use
         ['sender', 'recipient', 'user', 'ip', 'direction', 'status'].forEach(name => {
             const field = document.getElementById(`messages-filter-${name}`);
             if (field) field.value = '';
         });
-        messagesExact = null;
         toggleMessagesFilters(false);
         const kept = currentFilters.messages || {};
-        currentFilters.messages = Object.fromEntries(['search', 'date_range', 'start_date', 'end_date']
-            .filter(key => kept[key]).map(key => [key, kept[key]]));
+        setMessagesFilters(Object.fromEntries(['search', 'date_range', 'start_date', 'end_date']
+            .filter(key => kept[key]).map(key => [key, kept[key]])));
     }
     const page = document.getElementById('content-messages');
     if (page) page.classList.toggle('is-noid', messagesNoId);
-    // The open message belongs to the other list: the reading pane starts again with the new one
     const modal = document.getElementById('message-modal');
     if (modal && !modal.classList.contains('hidden') && typeof closeMessageModal === 'function') closeMessageModal();
     currentPage.messages = 1;
     loadMessages();
 }
 
-// Back to the whole list without loading it (the caller loads it with its filters)
 function leaveMessagesWithoutId() {
     if (!messagesNoId) return;
     messagesNoId = false;
@@ -1810,9 +1493,6 @@ function renderMessagesNoId() {
     link.classList.toggle('hidden', !messagesNoId && !n);
 }
 
-// How many there are for the time range and search shown. A failed count keeps the last one.
-// Not one of the list's requests: a redraw of the list does not abort it. Its answer counts
-// only while the filters it was asked for are still the latest asked
 let messagesNoIdAsked = '';
 async function refreshMessagesNoId() {
     if (messagesNoId) return renderMessagesNoId();
@@ -1835,8 +1515,6 @@ async function refreshMessagesNoId() {
     }
 }
 
-// The list's query; with a cursor, the page that starts after it, holding only
-// what the first page's watermark (upto) held
 function messagesQueryParams(cursor = null, limit = 50, upto = null) {
     const filters = messagesRangeFilters(currentFilters.messages || {});
     if (messagesNoId) {
@@ -1858,10 +1536,6 @@ function messagesQueryParams(cursor = null, limit = 50, upto = null) {
     return params;
 }
 
-// The Messages list's order, by the time each message was first seen: newest
-// first (as it arrives) or oldest first. Its Sort button beside the search turns
-// the order around, and its arrow shows which one is in use.
-// An order is not a filter: clearing the filters keeps it.
 let messagesOrder = 'desc';
 const MESSAGES_ORDER_ICONS = {
     desc: '<svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4.5h14M3 9h10M3 13.5h7m7.5-4.5v11m0 0l-3.5-3.5m3.5 3.5l3.5-3.5"></path></svg>',
@@ -1881,7 +1555,6 @@ function renderMessagesSort() {
     button.title = asc ? 'Oldest first. Click for newest first' : 'Newest first. Click for oldest first';
     button.classList.toggle('is-set', asc);
 }
-// Shown with the page, before its list arrives
 document.addEventListener('DOMContentLoaded', renderMessagesSort);
 function setMessagesOrder(order) {
     messagesOrder = order === 'asc' ? 'asc' : 'desc';
@@ -1906,7 +1579,6 @@ function watchMessagesEnd(container) {
     if (messagesPaging.observer) messagesPaging.observer.disconnect();
     const sentinel = document.getElementById('messages-more');
     if (!sentinel || typeof IntersectionObserver === 'undefined') return;
-    // The list scrolls inside its own column; on narrow screens the page scrolls
     const root = container.scrollHeight > container.clientHeight + 1 || getComputedStyle(container).overflowY !== 'visible' ? container : null;
     messagesPaging.observer = new IntersectionObserver(entries => {
         if (entries.some(e => e.isIntersecting)) loadMoreMessages();
@@ -1914,8 +1586,6 @@ function watchMessagesEnd(container) {
     messagesPaging.observer.observe(sentinel);
 }
 
-// The next page, after the last message shown. A page that fails says so with
-// Try again and waits for it; it does not ask again by itself.
 async function loadMoreMessages(retry = false) {
     if (retry) messagesPaging.failed = false;
     if (messagesPaging.loading || messagesPaging.failed || !messagesPaging.cursor) return;
@@ -1927,27 +1597,21 @@ async function loadMoreMessages(retry = false) {
         const response = await messagesFetch(messagesListUrl(messagesQueryParams(messagesPaging.cursor, 50, messagesNew.watermark)));
         if (!response.ok) throw await responseError(response);
         const data = await response.json();
-        // The list was loaded again meanwhile: this page is not part of it
         if (gen !== messagesGen) return;
-        // Never show a message twice: by its row, and by its Message-ID (another of
-        // its deliveries may stand for it now, when the first one was cleaned up)
         const seen = new Set([...list.querySelectorAll('.ui-msg-item[data-key]')].map(row => row.dataset.key));
         const ids = new Set([...list.querySelectorAll('.ui-msg-item[data-mid]')].map(row => row.dataset.mid));
         const added = (data.data || []).filter(msg => !seen.has(msg.correlation_key || '') && !(msg.message_id && ids.has(encodeURIComponent(msg.message_id))));
         list.insertAdjacentHTML('beforeend', added.map(renderMessageRow).join(''));
-        // What the refresh compares with is the whole list shown
         if (lastDataCache.messages) lastDataCache.messages = { ...lastDataCache.messages, data: (lastDataCache.messages.data || []).concat(added), total: data.total ?? lastDataCache.messages.total, next_cursor: data.next_cursor || null };
         messagesPaging.page += 1;
         currentPage.messages = messagesPaging.page;
         messagesPaging.cursor = data.next_cursor || null;
-        // The count as it is now, not as it was when the list was drawn
         messagesPaging.total = data.total ?? messagesPaging.total;
         setMessagesCount(messagesPaging.total);
         const more = document.getElementById('messages-more');
         if (more) more.textContent = messagesMoreText();
         if (typeof markSelectedMessageRow === 'function' && window.openMessageKey) markSelectedMessageRow(window.openMessageKey);
     } catch (error) {
-        // An error for an older list, or its request aborted, says nothing about the one shown
         if (gen !== messagesGen) return;
         messagesPaging.failed = true;
         const more = document.getElementById('messages-more');
@@ -1956,7 +1620,6 @@ async function loadMoreMessages(retry = false) {
         if (gen === messagesGen) messagesPaging.loading = false;
     }
     if (gen !== messagesGen || messagesPaging.failed) return;
-    // A short page may leave the end still in view (only while the list is on the screen)
     const sentinel = document.getElementById('messages-more');
     const container = document.getElementById('messages-logs');
     if (sentinel && container && messagesPaging.cursor && sentinel.getClientRects().length) {
@@ -1966,7 +1629,6 @@ async function loadMoreMessages(retry = false) {
     }
 }
 
-// Deduplicate netfilter logs based on message + time + priority
 function deduplicateNetfilterLogs(logs) {
     if (!logs || logs.length === 0) return [];
 
@@ -1974,7 +1636,6 @@ function deduplicateNetfilterLogs(logs) {
     const uniqueLogs = [];
 
     for (const log of logs) {
-        // Create unique key from message + time + priority
         const key = `${log.message || ''}|${log.time || ''}|${log.priority || ''}`;
 
         if (!seen.has(key)) {
@@ -1986,7 +1647,6 @@ function deduplicateNetfilterLogs(logs) {
     return uniqueLogs;
 }
 
-// Render netfilter without loading spinner (for smart refresh)
 function renderNetfilterData(data) {
     const container = document.getElementById('netfilter-logs');
     if (!container) return;
@@ -2002,22 +1662,18 @@ function renderNetfilterData(data) {
         return;
     }
 
-    // Deduplicate logs
     const uniqueLogs = deduplicateNetfilterLogs(data.data);
 
-    // Update count display with total count from API (like Messages page)
     const countEl = document.getElementById('security-count');
     if (countEl) {
         countEl.textContent = uiCountLabel(data.total || 0, 'event', 'events');
     }
 
-    // Build a set of currently banned IPs for quick lookup
     const activeBannedIPs = new Set();
     if (fail2banActiveBans && fail2banActiveBans.length > 0) {
         fail2banActiveBans.forEach(function(ban) {
             if (ban.ip) activeBannedIPs.add(ban.ip);
             if (ban.network) {
-                // Extract base IP from network notation like "1.2.3.0/24"
                 const baseIp = ban.network.split('/')[0];
                 activeBannedIPs.add(baseIp);
                 activeBannedIPs.add(ban.network);
@@ -2025,7 +1681,6 @@ function renderNetfilterData(data) {
         });
     }
 
-    // Without a Read-Write key the Ban and Unban buttons are not offered; say so to whoever may use them
     const mayBan = mailcowRwConfigured && userCan('security', 'write');
     const lockedNote = mailcowRwConfigured || !userCan('security', 'write') ? '' : `<div class="ui-list-note">${uiLocked('Ban and Unban are locked', `Banning or unbanning an IP from this list ${UI_RW_KEY_TEXT}`)}</div>`;
 
@@ -2042,11 +1697,8 @@ function renderNetfilterData(data) {
             ${uniqueLogs.map((log, index) => {
                 const isBan = log.action === 'ban' || log.action === 'banned';
                 const isWarningOrUnban = log.action === 'warning' || log.action === 'unban';
-                // Check if IP is in the blacklist (with or without /32, or /128)
                 const ipInBlacklist = log.ip && fail2banBlacklist.some(entry => entry === log.ip || entry === fail2banEntry(log.ip));
-                // Show unban if: banned OR already in blacklist
                 const showUnban = mayBan && log.ip && (isBan || ipInBlacklist);
-                // Show ban if: warning/unban AND NOT already in blacklist
                 const showBan = mayBan && log.ip && isWarningOrUnban && !ipInBlacklist;
                 const flagUrl = log.country_code ? getFlagUrl(log.country_code, '16x12') : '';
                 const place = [log.country_name, log.city].filter(Boolean).join(', ');
@@ -2083,13 +1735,10 @@ function toggleEventDetail(btn) {
     btn.setAttribute('aria-expanded', !detail.hidden);
 }
 
-// A single address as a Fail2ban list entry: /32 for IPv4, /128 for IPv6. mailcow
-// reads the prefix as a network, so 2001:db8::1/32 would be all of 2001:db8::/32.
 function fail2banEntry(ip) {
     return ip.includes('/') ? ip : `${ip}/${ip.includes(':') ? 128 : 32}`;
 }
 
-// The address a single-address entry holds; a network entry stays as it is
 function fail2banBare(entry) {
     const value = String(entry || '');
     return value.replace(value.includes(':') ? /\/128$/ : /\/32$/, '');
@@ -2097,7 +1746,6 @@ function fail2banBare(entry) {
 
 async function unbanIP(ip, btnEl) {
     if (!uiMayAct('security')) return;
-    // The button gets its own words back after a failure (Unban, or a card's own)
     const label = btnEl ? btnEl.textContent : '';
     const ipWithMask = fail2banEntry(ip);
     if (!await showConfirmModal({ title: 'Unban IP', message: 'Unban ' + ip + '? If it is part of a network ban, the whole network is unbanned.', confirmText: 'Unban', focusCancel: true })) return;
@@ -2113,11 +1761,8 @@ async function unbanIP(ip, btnEl) {
         });
         const result = await uiReadJson(res);
         if (res.ok && result && result.status === 'success') {
-            // Fail2ban may have banned the whole network around the address: name what was lifted
             const lifted = result.networks || [ipWithMask];
             showToast(lifted.map(fail2banBare).join(', ') + ' queued for unbanning', 'success');
-            // mailcow queues the unban and lifts it a few seconds later: the address
-            // leaves the lists now, and Fail2ban is asked again once it has acted
             if (fail2banActiveBans) fail2banActiveBans = fail2banActiveBans.filter(b => !lifted.includes(b.network) && fail2banBare(b.ip || b.network) !== fail2banBare(ip));
             renderSecurityOverview();
             refreshSecurityAddresses();
@@ -2139,13 +1784,10 @@ async function unbanIP(ip, btnEl) {
     }
 }
 
-// The bans Unban all lifts: Fail2ban's own, not a permanent one (the denylist)
-// and not one already queued for unbanning, as the server picks them
 function fail2banLiftable() {
     if (!fail2banActiveBans) return [];
     const permanent = new Set(fail2banPermBans.map(b => b && (b.network || b.ip)));
     const queued = v => v === true || v === 1 || v === '1';
-    // A plain network as mailcow keys a ban: one with an IPv6 scope (%eth0) is not sent
     const plain = n => typeof n === 'string' && /^[0-9A-Fa-f.:]+\/\d{1,3}$/.test(n);
     return [...new Set(fail2banActiveBans.filter(b => b && plain(b.network) && !permanent.has(b.network) && !queued(b.queued_for_unban)).map(b => b.network))];
 }
@@ -2181,7 +1823,6 @@ async function unbanAllFail2ban(btnEl) {
         btnEl.disabled = false;
         btnEl.textContent = label;
     }
-    // mailcow queues the unbans and netfilter lifts them a few seconds later: Fail2ban is asked again then
     renderSecurityOverview();
     refreshSecurityAddresses();
     setTimeout(() => { fail2banSettingsLoaded = false; loadFail2BanSettings(); }, 5000);
@@ -2190,7 +1831,6 @@ async function unbanAllFail2ban(btnEl) {
 
 async function banIP(ip, btnEl) {
     if (!uiMayAct('security')) return;
-    // The button gets its own words back after a failure (Add, Ban permanently, a card's own)
     const label = btnEl ? btnEl.textContent : '';
     const ipWithMask = fail2banEntry(ip);
     if (!await showConfirmModal({ title: 'Ban IP', message: `Add ${ipWithMask} to the Fail2ban denylist? It stays banned until removed.`, confirmText: 'Ban', isDangerous: true, focusCancel: true })) return;
@@ -2211,7 +1851,6 @@ async function banIP(ip, btnEl) {
 
         if (response.ok && result && result.status === 'success') {
             showToast(result.already ? result.msg : `IP ${ip} added to the denylist`, 'success');
-            // Refresh fail2ban data and netfilter logs
             fail2banSettingsLoaded = false;
             fail2banActiveBans = null;
             loadFail2BanSettings();
@@ -2235,7 +1874,6 @@ async function banIP(ip, btnEl) {
 
 async function allowIP(ip, btnEl) {
     if (!uiMayAct('security')) return;
-    // The button gets its own words back after a failure (Add, Allow, a card's own)
     const label = btnEl ? btnEl.textContent : '';
     const ipWithMask = fail2banEntry(ip);
     if (!await showConfirmModal({ title: 'Allow IP', message: `Add ${ipWithMask} to the Fail2ban allowlist? It is exempt from bans unless also on the denylist.`, confirmText: 'Allow', focusCancel: true })) return;
@@ -2277,10 +1915,8 @@ async function loadNetfilterCountries() {
         
         const countries = await response.json();
         
-        // Preserve current selection
         const currentValue = select.value;
         
-        // Clear existing options except the "All Countries" default
         select.innerHTML = '<option value="" data-short="All">All Countries</option>';
         
         for (const c of countries) {
@@ -2290,7 +1926,6 @@ async function loadNetfilterCountries() {
             select.appendChild(opt);
         }
         
-        // Restore selection
         if (currentValue) select.value = currentValue;
         uiFilterBarSync();
     } catch (err) {
@@ -2298,7 +1933,6 @@ async function loadNetfilterCountries() {
     }
 }
 
-// Smart refresh for Netfilter
 async function smartRefreshNetfilter() {
     const filters = currentFilters.netfilter || {};
     const params = new URLSearchParams({
@@ -2315,13 +1949,11 @@ async function smartRefreshNetfilter() {
     if (hasDataChanged(data, 'netfilter')) {
         console.log('[REFRESH] Netfilter data changed, updating UI');
         lastDataCache.netfilter = data;
-        // Use renderNetfilterData to update content without loading spinner (like Messages page)
         renderNetfilterData(data);
     }
 }
 
 
-// Smart refresh for Queue
 async function smartRefreshQueue() {
     if (queueActing) return;
     const id = ++queueAsked;
@@ -2336,7 +1968,6 @@ async function smartRefreshQueue() {
     const suppressChanged = listKept !== queueSuppressOn;
     queueSuppressOn = listKept;
 
-    // Drawn also when a load still shows Loading: that older load's answer is dropped now
     if (hasDataChanged(data, 'queue') || suppressChanged || queueLoading) {
         queueLoading = false;
         console.log('[REFRESH] Queue data changed, updating UI');
@@ -2347,7 +1978,6 @@ async function smartRefreshQueue() {
     }
 }
 
-// Smart refresh for Quarantine
 async function smartRefreshQuarantine() {
     if (quarantineActing) return;
     const id = ++quarantineAsked;
@@ -2365,8 +1995,6 @@ async function smartRefreshQuarantine() {
     }
 }
 
-// Smart refresh for Dashboard
-// When the Dashboard's blocklist and health figures were last read
 let dashboardKpisAt = 0;
 
 async function smartRefreshDashboard() {
@@ -2374,8 +2002,6 @@ async function smartRefreshDashboard() {
         refreshMailFlowChart();
         loadDashboardStatusSummary();
         loadDashboardSecurity();
-        // Needs attention has its own refresh on every page (attentionRefresh); the trends,
-        // the blocklists and the health figures every five minutes
         if (Date.now() - dashboardTrendsAt >= 300000) loadDashboardTrends();
         if (Date.now() - dashboardKpisAt >= 300000) {
             dashboardKpisAt = Date.now();
@@ -2387,7 +2013,6 @@ async function smartRefreshDashboard() {
     }
 }
 
-// Smart refresh for Settings
 async function smartRefreshSettings() {
     try {
         const response = await authenticatedFetch('/api/settings/info');
@@ -2401,20 +2026,18 @@ async function smartRefreshSettings() {
                     const editableData = await editableRes.json();
                     data.editable_config = editableData.configuration || {};
                 }
-            } catch (e) { /* ignore */ }
+            } catch (e) {}
         }
 
         if (hasDataChanged(data, 'settings')) {
             const content = document.getElementById('settings-content');
             if (content && !content.classList.contains('hidden') && content.querySelector('#settings-edit-form')) {
-                // User is on Settings tab with edit form open - skip auto-refresh to avoid interrupting (e.g. switching tabs)
                 return;
             }
             console.log('[REFRESH] Settings data changed, updating UI');
             lastDataCache.settings = data;
 
             if (content && !content.classList.contains('hidden')) {
-                // Preserve version info from cache (don't reload it on smart refresh)
                 if (versionInfoCache.app_version) {
                     data.app_version = versionInfoCache.app_version;
                 }
@@ -2430,29 +2053,20 @@ async function smartRefreshSettings() {
     }
 }
 
-// =============================================================================
-// TAB SWITCHING
-// =============================================================================
-
 function switchTab(tab, params = {}) {
     console.log('Switching to tab:', tab, 'params:', params);
 
-    // The Dashboard is where the app opens: without it, the first page the person can view
     if (tab === 'dashboard' && !userCanView('dashboard') && landingPage()) {
         tab = landingPage();
         params = {};
         if (typeof buildPath === 'function') routerReplace({ route: tab, params }, buildPath(tab, params));
     }
 
-    // A page the person's access does not cover: said plainly instead of the page
     if (!userCanView(tab)) {
         showNoAccessPage(tab);
         return;
     }
 
-    // Block disabled features - show a "Feature Disabled" page.
-    // Exception: the Mailbox Stats page also hosts Rate Limits, so it stays
-    // open while that feature is on, even with Mailbox Stats itself off.
     if (pageIsOff(tab)) {
         const feature = TOGGLEABLE_FEATURES.find(f => f.id === tab);
         const featureLabel = feature ? feature.label : (TAB_LABELS[tab] || tab);
@@ -2460,10 +2074,8 @@ function switchTab(tab, params = {}) {
 
         currentTab = tab;
 
-        // Hide all tab contents
         document.querySelectorAll('.tab-content').forEach(c => c.classList.add('hidden'));
 
-        // Show current tab with a disabled message
         const tabContent = document.getElementById(`content-${tab}`);
         if (tabContent) {
             tabContent.classList.remove('hidden');
@@ -2474,7 +2086,6 @@ function switchTab(tab, params = {}) {
                 </div>`;
         }
 
-        // Update URL to reflect the disabled page (don't silently change to dashboard)
         const newPath = typeof buildPath === 'function' ? buildPath(tab) : `/${tab}`;
         if (window.location.pathname !== newPath) {
             routerReplace({ route: tab, params: {} }, newPath);
@@ -2483,8 +2094,6 @@ function switchTab(tab, params = {}) {
         return;
     }
 
-    // The page is already open and only its tab changed (Back, Forward, the
-    // sidebar flyout): switch the tab without loading the page again
     const tabPage = typeof SUBPAGES !== 'undefined' ? SUBPAGES[tab] : null;
     const pageEl = document.getElementById(`content-${tab}`);
     if (tabPage && params.sub && currentTab === tab && pageEl && !pageEl.classList.contains('hidden')) {
@@ -2493,11 +2102,8 @@ function switchTab(tab, params = {}) {
     }
 
     currentTab = tab;
-    // The page loads below: its own refresh comes a full cadence later
     pageRefreshLoaded(tab);
 
-    // Mark the current page in the sidebar and in the phone tab bar; "More"
-    // is marked when the page is only reachable through the sheet
     document.querySelectorAll('[id^="tab-"], [id^="tabbar-"]').forEach(btn => btn.removeAttribute('aria-current'));
     for (const id of [`tab-${tab}`, `tabbar-${tab}`]) {
         const btn = document.getElementById(id);
@@ -2506,7 +2112,6 @@ function switchTab(tab, params = {}) {
     const moreBtn = document.getElementById('hamburger-btn');
     if (moreBtn) moreBtn.classList.toggle('ui-more-current', !document.getElementById(`tabbar-${tab}`));
 
-    // Update mobile menu state and label
     if (typeof updateMobileMenuActiveState === 'function') {
         updateMobileMenuActiveState(tab);
     }
@@ -2515,12 +2120,10 @@ function switchTab(tab, params = {}) {
     }
     placeTopbar(tab);
 
-    // Hide all tab contents
     document.querySelectorAll('.tab-content').forEach(content => {
         content.classList.add('hidden');
     });
 
-    // Show current tab content
     const tabContent = document.getElementById(`content-${tab}`);
     if (tabContent) {
         tabContent.classList.remove('hidden');
@@ -2528,16 +2131,13 @@ function switchTab(tab, params = {}) {
         console.error(`Tab content not found: content-${tab}`);
     }
 
-    // Open the tab the address names, and correct an address that named none
     if (tabPage) {
         const sub = params.sub || tabPage.current();
         routerSyncSubpage(tab, sub, true);
         tabPage.select(sub);
     }
 
-    // Load tab data
     console.log('Loading data for tab:', tab);
-    // Disconnect log WebSocket when switching away from logs
     if (tab !== 'logs' && typeof disconnectLogWebSocket === 'function') {
         disconnectLogWebSocket();
     }
@@ -2547,8 +2147,8 @@ function switchTab(tab, params = {}) {
             loadDashboard();
             break;
         case 'messages':
-            // Coming back to the page shows the whole list again
             leaveMessagesWithoutId();
+            if (messagesOpening) messagesOpening();
             loadMessages();
             break;
         case 'netfilter':
@@ -2568,7 +2168,6 @@ function switchTab(tab, params = {}) {
             initQuarantineRules();
             break;
         case 'rspamd':
-            // Not refreshed on the timer: the map editor would drop unsaved changes
             loadRspamdMaps();
             break;
         case 'status':
@@ -2578,7 +2177,6 @@ function switchTab(tab, params = {}) {
             loadDomains();
             break;
         case 'dmarc':
-            // Refresh passes no params: reload what the address shows (the TLS tab stays open)
             handleDmarcRoute(Object.keys(params).length ? params : parseRoute().params);
             break;
         case 'mailbox-stats':
@@ -2602,14 +2200,11 @@ function switchTab(tab, params = {}) {
     queueDocumentTitle();
 }
 
-// A page the person cannot view, opened by its address: the page stays as it is
-// (access can come back with a new sign-in), another container says so
 function showNoAccessPage(tab) {
     currentTab = tab;
     if (typeof disconnectLogWebSocket === 'function') disconnectLogWebSocket();
     document.querySelectorAll('[id^="tab-"], [id^="tabbar-"]').forEach(btn => btn.removeAttribute('aria-current'));
     document.querySelectorAll('.tab-content').forEach(c => c.classList.add('hidden'));
-    // The phone's title and the More sheet name the page asked for
     if (typeof updateMobileMenuActiveState === 'function') updateMobileMenuActiveState(tab);
     if (typeof updateCurrentTabLabel === 'function') updateCurrentTabLabel(tab);
     placeTopbar(null);
@@ -2627,10 +2222,6 @@ function showNoAccessPage(tab) {
     queueDocumentTitle();
 }
 
-// =============================================================================
-// DASHBOARD
-// =============================================================================
-
 async function loadDashboard() {
     try {
         console.log('Loading Dashboard...');
@@ -2638,7 +2229,6 @@ async function loadDashboard() {
         loadDashboardBlacklistSummary();
         loadDashboardHealth();
         dashboardKpisAt = Date.now();
-        // Needs attention as last read, and read again what is due
         renderAttention();
         attentionRefresh();
         loadDashboardSecurity();
@@ -2649,43 +2239,25 @@ async function loadDashboard() {
     }
 }
 
-// =============================================================================
-// Needs attention: the Dashboard panel and the header bell show one state, read
-// by one refresh on every page (alerts every 30 seconds, server checks every
-// five minutes). A load that a newer one replaced is dropped when it answers, so
-// a list read before a Dismiss never brings the dismissed alert back
-// =============================================================================
-
 const ATTENTION_ALERTS_EVERY = 30000;
 const ATTENTION_CHECKS_EVERY = 5 * 60 * 1000;
-// The server checks, each read on its own: one that fails keeps what it showed
 const ATTENTION_CHECKS = ['connection', 'blocklist', 'containers', 'fail2ban', 'dmarc', 'appVersion', 'mailcowVersion'];
-const ATTENTION_FAILED = { failed: true };
 const attention = {
-    ready: false, // the refresh starts once the app's features are known
-    timeout: 20000, // a read without an answer by then has failed
-    // ok: null before the first answer, then whether the last one came
+    ready: false,
+    timeout: 20000,
     alerts: { seq: 0, busy: null, latest: null, at: 0, ok: null, list: [], total: 0, critical: 0 },
-    // ok and items per check
     checks: { seq: 0, busy: null, latest: null, at: 0, ok: {}, items: {} },
 };
 
-// The alerts Needs attention shows (by id, for the words of an Undo), and the open
-// alerts of the last list the person may dismiss (also those past the rows shown):
-// Dismiss all changes those and no alert that came after
 const dashboardAlerts = new Map();
 let dashboardWritableAlertIds = [];
 
-// The area each kind of alert belongs to (stored_alerts.py ALERT_AREAS): who sees it
-// and who may dismiss it. A kind not listed is an admin's only
 const ALERT_TYPE_AREAS = {
     volume_spike: 'security', auth_failure_burst: 'security', smtp_abuse_block: 'security',
     protection_breach: 'security', protection_ban_failed: 'security',
     dns_change: 'domains', dmarc_import_failed: 'dmarc',
 };
-// The kinds whose activity can be shown (Show activity)
 const ALERT_ACTIVITY_TYPES = ['volume_spike', 'auth_failure_burst', 'smtp_abuse_block'];
-// The kinds that open their page instead, with the button's words
 const ALERT_OPEN_LABELS = {
     dns_change: 'Open domain', dmarc_import_failed: 'Open fetch history',
     protection_breach: 'Open Security', protection_ban_failed: 'Open Security',
@@ -2695,8 +2267,6 @@ function alertArea(alert) {
     return (alert && ALERT_TYPE_AREAS[alert.alert_type]) || 'admin';
 }
 
-// One load of a source at a time. With force (after a Dismiss or an Undo, or a
-// Retry) a load on its way is replaced and its answer dropped; without, it is joined
 function attentionLoad(state, force, read) {
     if (state.busy && !force) return state.busy;
     const seq = ++state.seq;
@@ -2711,45 +2281,32 @@ function attentionLoad(state, force, read) {
     return run;
 }
 
-// One read of a source's answer. A read that has not answered in 20 seconds has
-// failed, so a request that hangs never holds the refresh that comes after it
-function attentionRead(url) {
-    return Promise.race([
-        (async () => {
-            try {
-                const res = await authenticatedFetch(url);
-                return res.ok ? await res.json() : ATTENTION_FAILED;
-            } catch (e) {
-                console.warn(`Needs attention could not read ${url}:`, e);
-                return ATTENTION_FAILED;
-            }
-        })(),
-        new Promise(resolve => setTimeout(() => resolve(ATTENTION_FAILED), attention.timeout)),
-    ]);
+async function attentionRead(url) {
+    try {
+        const res = await authenticatedFetch(url, { timeout: attention.timeout });
+        return res.ok ? await res.json() : READ_FAILED;
+    } catch (e) {
+        console.warn(`Needs attention could not read ${url}:`, e);
+        return READ_FAILED;
+    }
 }
 
-// The open alerts (Security, Domains, DMARC & TLS); true when the list was read
 function loadDashboardSecurityAlerts({ force = true } = {}) {
     const s = attention.alerts;
     return attentionLoad(s, force, async () => {
-        // The server answers with the alerts of the areas the person may view: without
-        // View in any of them, none to show
         const read = userCan('alerts') ? await attentionRead('/api/security-alerts?acknowledged=false&limit=20') : { alerts: [] };
-        const data = read === ATTENTION_FAILED ? null : read;
+        const data = read === READ_FAILED ? null : read;
         return () => {
             s.at = Date.now();
-            // A failed read keeps the alerts the last one had
             if (!data) { s.ok = false; renderAttention(); return false; }
             const alerts = data.alerts || [];
             s.ok = true;
             s.list = alerts;
-            // All open alerts, also those past the 20 rows shown
             s.total = Number.isFinite(data.unacknowledged_count) ? data.unacknowledged_count : alerts.length;
             s.critical = Number.isFinite(data.unacknowledged_critical) ? data.unacknowledged_critical
                 : alerts.filter(a => a.severity === 'critical').length;
             dashboardAlerts.clear();
             alerts.forEach(a => dashboardAlerts.set(Number(a.id), a));
-            // Only what the person may dismiss; an alert they may only view stays
             dashboardWritableAlertIds = Array.isArray(data.writable_ids) ? data.writable_ids.map(Number) : [];
             renderAttention();
             return true;
@@ -2757,8 +2314,6 @@ function loadDashboardSecurityAlerts({ force = true } = {}) {
     });
 }
 
-// "Dismiss all 25 alerts"; one alone is "Dismiss 1 alert" (a narrow panel drops the last
-// word). It counts, and is there for, the alerts the person may dismiss
 function renderDismissAll(button) {
     if (!button) return;
     const count = dashboardWritableAlertIds.length, n = count.toLocaleString();
@@ -2768,11 +2323,7 @@ function renderDismissAll(button) {
     button.classList.toggle('is-off', !attention.alerts.list.length || !count);
 }
 
-// The one line an alert shows in Needs attention and the bell: what happened,
-// from its numbers. The stored detail (emails, channels) keeps the long text.
-// The counting window is the one the alert was made with, read from its detail
 function attentionAlertLine(a) {
-    // The alerts without activity keep one short line of their own (stored_alerts.py)
     if (!ALERT_ACTIVITY_TYPES.includes(a.alert_type)) return String(a.detail || '').split('\n')[0];
     const num = v => (v === null || v === undefined || v === '' ? NaN : Number(v));
     const raw = num(a.metric_value);
@@ -2800,11 +2351,6 @@ function attentionAlertLine(a) {
     return '';
 }
 
-// The rows of the alerts. In the bell's window an action that opens another
-// window closes this one first, so the next gives the focus back to the bell;
-// one that opens a page closes it once the move is made (openStoredAlert).
-// An alert with activity shows it; the others open their page. Dismiss is there
-// for the alerts of an area the person may act in
 function attentionAlertRows(where) {
     return attention.alerts.list.map(a => {
         const id = Number(a.id);
@@ -2816,10 +2362,6 @@ function attentionAlertRows(where) {
         const action = label ? `openStoredAlert(${id}, '${place}')` : activity ? `${first} openAlertActivity(${id})` : '';
         const button = label ? `<button type="button" onclick="openStoredAlert(${id}, '${place}')" class="ui-btn ui-btn-sm">${escapeHtml(label)}</button>`
             : activity ? `<button type="button" onclick="${first} openAlertActivity(${id})" class="ui-btn ui-btn-sm" title="What happened before and around this alert">Show activity</button>` : '';
-        // The bell keeps its rows short: no buttons under them (the row click and the
-        // Dashboard still open the alert). The X after the row's button, at the row's end,
-        // dismisses it (in the bell and on a phone, beside the title), and so does a swipe on
-        // a touch screen (data-swipe, utils.js uiSwipeDown)
         return `
             <div class="ui-alert${action ? ' ui-alert-go' : ''} ${critical ? 'ui-alert-fail' : 'ui-alert-warn'}" data-key="alert-${id}" data-swipe${action ? ` onclick="if (uiAlertRowClick(event)) { ${action} }"` : ''}>
                 <div class="ui-alert-text">
@@ -2836,21 +2378,15 @@ function attentionAlertRows(where) {
     }).join('');
 }
 
-// Where an alert that opens a page goes: the domain in Domains, the fetch history
-// on DMARC & TLS, the addresses to review on Security. go makes the move (true
-// once made), then shows what the alert is about on the page
 const ALERT_OPEN = {
     dns_change: { go: () => navigateTo('domains'), then: a => showAlertDomain(a.subject) },
     dmarc_import_failed: { go: () => navigateTo('dmarc'), then: () => {
-        // With DMARC & TLS turned off the page says so, and there is no history to open
         if (!(window.disabledFeatures || []).includes('dmarc')) showDmarcSyncHistory();
     } },
     protection_breach: { go: openAlertSecurityReview },
     protection_ban_failed: { go: openAlertSecurityReview },
 };
 
-// The bell's window closes once the move is made (a move cancelled over unsaved
-// changes leaves it open, as attnBellGo does), before the page shows the alert's place
 async function openStoredAlert(alertId, where) {
     const alert = dashboardAlerts.get(Number(alertId));
     const place = alert && ALERT_OPEN[alert.alert_type];
@@ -2861,9 +2397,6 @@ async function openStoredAlert(alertId, where) {
     if (place.then) await place.then(alert);
 }
 
-// The domain's details opened once the list has loaded, whatever the search or the
-// issues filter showed; a domain no longer on the server says so. A list that could
-// not load says so itself, and says nothing about the domain
 async function showAlertDomain(name) {
     if (!(await domainsLoading) || !name) return;
     if (document.getElementById('domain-search-input')) clearDomainFilters();
@@ -2878,10 +2411,6 @@ async function showAlertDomain(name) {
     (row || details).scrollIntoView({ block: 'start' });
 }
 
-// Security, Overview, To review, with no country or network picked that could hide the
-// address. Nothing changes until the move is made (a move cancelled over unsaved changes
-// keeps the list as it was); then the list is chosen the way its own filter does, which
-// also loads and draws it when the page was already open on another tab
 async function openAlertSecurityReview() {
     if (!(await navigateTo('netfilter', { sub: 'overview' }))) return false;
     securityCountry = null;
@@ -2890,13 +2419,10 @@ async function openAlertSecurityReview() {
     return true;
 }
 
-// A Needs attention row whose action opens a popup opens it from anywhere on
-// the row; its buttons keep their own actions, and selecting text opens nothing
 function uiAlertRowClick(event) {
     return !event.target.closest('button, a') && !uiRowHeld(event);
 }
 
-// How many items, of which tone, and whether every check could run
 function attentionStatus() {
     const a = attention.alerts, c = attention.checks;
     const items = ATTENTION_CHECKS.flatMap(k => c.items[k] || []);
@@ -2908,8 +2434,6 @@ function attentionStatus() {
     return { total, tone, failed, loading };
 }
 
-// Under the items: all clear only when every check ran and found nothing; a check
-// that could not run says so (what it showed before stays) and offers Retry
 function renderAttentionNote(el, status) {
     if (!el) return;
     const html = status.failed
@@ -2927,9 +2451,6 @@ function attentionRetry() {
     if (ATTENTION_CHECKS.some(k => attention.checks.ok[k] === false)) loadDashboardAttention();
 }
 
-// The count, the note and Dismiss all of the Dashboard panel and the bell's window;
-// a list that scrolls fades at its foot while more is below, and on the Dashboard
-// the line under it says how many items there are
 function updateAttentionState() {
     const status = attentionStatus();
     const count = document.getElementById('dashboard-attention-count');
@@ -2947,7 +2468,6 @@ function updateAttentionState() {
         if (scroll.id !== 'dashboard-attention-scroll') return;
         const more = document.getElementById('dashboard-attention-more');
         if (!more) return;
-        // Only while the items pass the cap; otherwise it takes no room
         more.classList.toggle('is-off', !overflows);
         more.textContent = overflows ? `${uiCountLabel(status.total, 'item', 'items')}. Scroll the list for the rest` : ' ';
     });
@@ -2960,9 +2480,6 @@ if (typeof document !== 'undefined' && document.addEventListener) {
     window.addEventListener('resize', () => updateAttentionState());
 }
 
-// The bell: the count of every open item, red for a failing one, amber for a
-// warning, plain for news only; a grey dot when a check could not run and
-// nothing is known to need a look
 function updateAttentionBell(status = attentionStatus()) {
     const label = status.total ? `Needs attention, ${uiCountLabel(status.total, 'item', 'items')}`
         : status.failed ? 'Needs attention, some checks could not run' : 'Needs attention';
@@ -2975,9 +2492,6 @@ function updateAttentionBell(status = attentionStatus()) {
     });
 }
 
-// Replace what a box shows, only when it changed, keeping the focus where it
-// was (the same item and action, else the item next to it, else the box) and
-// the box's scroll; a focus outside the box is left alone
 function uiReplaceKeepingFocus(container, html) {
     if (container.dataset.shown === html) return false;
     const active = document.activeElement;
@@ -3003,9 +2517,6 @@ function uiReplaceKeepingFocus(container, html) {
     return true;
 }
 
-// The DMARC row's line, about the first domain that needs a look and the reason
-// it does: a low pass rate first, then new failing sources, then a stronger
-// policy that looks safe. With several domains the line names the one it is about
 function attentionDmarcLine(insight, domains) {
     const types = (insight.recommendations || []).map(r => r.type);
     const sources = (insight.new_sources || []).length;
@@ -3027,26 +2538,20 @@ function attentionDmarcLine(insight, domains) {
     return named.length <= 60 ? named : fallback;
 }
 
-// Server checks that need a look, each with the place to handle it: go is the
-// page it opens, popup an action that opens a window
 function attentionCheckItems(key, data) {
-    if (!data) return [];
+    const found = serverCheckFound(key, data);
+    if (!found || !found.length) return [];
     if (key === 'connection') {
-        if (data.connected !== false) return [];
         const item = { tone: 'fail', title: 'mailcow is not reachable', detail: 'Logs and server data may be out of date.' };
-        // Only an admin can change the connection; anyone else sees it on Status
         return [userIsAdmin() ? { ...item, action: 'Open settings', onclick: "navigateTo('settings')", go: ['settings'] }
             : { ...item, action: 'Open status', onclick: "navigateTo('status')", go: ['status'] }];
     }
     if (key === 'blocklist') {
-        if (data.status !== 'listed') return [];
-        // Name the host that is actually listed, with its own list count
         const listedHosts = (data.hosts || []).filter(h => h.status === 'listed');
         const first = listedHosts[0];
         const title = listedHosts.length > 1
             ? `${listedHosts.length} of your addresses are on a blocklist`
             : `${first ? first.hostname : (data.server_ip || 'Your server')} is on a blocklist`;
-        // One host: its own counts, when they make sense; the title names the host
         const whole = v => (v === null || v === undefined || v === '' ? NaN : Number(v));
         const listed = whole(first ? first.listed_count : data.listed_count);
         const checked = whole(first && first.total_blacklists ? first.total_blacklists : data.total_blacklists);
@@ -3055,13 +2560,11 @@ function attentionCheckItems(key, data) {
         return [{ tone: 'fail', title, detail, action: 'Check listing', onclick: "navigateTo('status')", go: ['status'] }];
     }
     if (key === 'containers') {
-        const containers = data.containers;
-        if (!containers || !(containers.stopped > 0)) return [];
+        const containers = found[0];
         return [{ tone: 'fail', title: containers.stopped === 1 ? 'A mailcow container is stopped' : `${containers.stopped} mailcow containers are stopped`,
             detail: `${containers.running || 0} of ${containers.total || 0} containers are running.`, action: 'Open status', onclick: "navigateTo('status')", go: ['status'] }];
     }
     if (key === 'fail2ban') {
-        // Single IPv6 addresses an earlier version wrote as /32 networks
         const legacy = data.legacy_entries || [];
         if (!legacy.length) return [];
         const first = legacy[0];
@@ -3071,9 +2574,7 @@ function attentionCheckItems(key, data) {
             action: 'Open lists', onclick: "navigateTo('netfilter', { sub: 'lists' })", go: ['netfilter', { sub: 'lists' }] }];
     }
     if (key === 'dmarc') {
-        const dmarc = (data.insights || []).filter(i =>
-            i.recommendations.some(r => r.type === 'tighten_policy' || r.type === 'low_pass_rate') || (i.new_sources && i.new_sources.length > 0));
-        if (!dmarc.length) return [];
+        const dmarc = found;
         return [{ tone: 'warn', title: dmarc.length === 1 ? `DMARC needs attention for ${dmarc[0].domain}` : `DMARC needs attention for ${dmarc.length} domains`,
             detail: attentionDmarcLine(dmarc[0], dmarc.length), action: 'Open DMARC', onclick: "navigateTo('dmarc')", go: ['dmarc'] }];
     }
@@ -3085,7 +2586,6 @@ function attentionCheckItems(key, data) {
     }
     if (key === 'mailcowVersion') {
         if (!data.update_available) return [];
-        // What its Read changes shows (showMailcowUpdateModal), from this same answer
         window.mailcowUpdateVersion = data.latest_version;
         window.mailcowUpdateName = data.name || '';
         window.mailcowUpdateChangelog = data.changelog || 'No changelog available';
@@ -3095,16 +2595,12 @@ function attentionCheckItems(key, data) {
     return [];
 }
 
-// The server checks; a check whose read fails keeps the items it had and is
-// tried again in a minute. A blocklist check that ended in an error has failed
-// too, and so have container counts read without an answer from mailcow
 function loadDashboardAttention({ force = true } = {}) {
     const s = attention.checks;
     return attentionLoad(s, force, async () => {
-        // A check of a feature that is off, or of an area the person cannot view, is not read
         const off = (feature, area) => (window.disabledFeatures || []).includes(feature) || !userCan(area);
         const get = attentionRead;
-        const [blocklistRead, summary, dmarc, appVersion, mailcowVersion, connection, fail2ban] = await Promise.all([
+        const [blocklist, containers, dmarc, appVersion, mailcowVersion, connection, fail2ban] = await Promise.all([
             off('blacklist', 'status') ? null : get('/api/blacklist/summary'),
             off('', 'status') ? null : get('/api/status/summary'),
             off('dmarc', 'dmarc') ? null : get('/api/dmarc/insights'),
@@ -3113,13 +2609,10 @@ function loadDashboardAttention({ force = true } = {}) {
             off('', 'status') ? null : get('/api/status/mailcow-connection'),
             off('netfilter', 'security') ? null : get('/api/fail2ban'),
         ]);
-        const answered = data => data && data !== ATTENTION_FAILED;
-        const blocklist = answered(blocklistRead) && blocklistRead.status === 'error' ? ATTENTION_FAILED : blocklistRead;
-        const containers = answered(summary) && summary.containers_known === false ? ATTENTION_FAILED : summary;
         const read = { connection, blocklist, containers, fail2ban, dmarc, appVersion, mailcowVersion };
         return () => {
             for (const key of ATTENTION_CHECKS) {
-                if (read[key] === ATTENTION_FAILED) { s.ok[key] = false; continue; }
+                if (!serverCheckFound(key, read[key])) { s.ok[key] = false; continue; }
                 s.ok[key] = true;
                 s.items[key] = attentionCheckItems(key, read[key]);
             }
@@ -3142,7 +2635,6 @@ function attentionCheckRows(where) {
     }).join('');
 }
 
-// Both places from the one state
 function renderAttention() {
     for (const [where, checksId, alertsId] of [['dashboard', 'dashboard-attention', 'dashboard-security-alerts'], ['bell', 'attn-win-checks', 'attn-win-alerts']]) {
         const checks = document.getElementById(checksId);
@@ -3156,8 +2648,6 @@ function renderAttention() {
     updateAttentionState();
 }
 
-// One refresh for every page: what is older than its cadence is read again.
-// A hidden browser tab reads nothing; it catches up when it is shown
 function attentionRefresh({ force = false } = {}) {
     if (!attention.ready) return;
     if (!force && document.hidden) return;
@@ -3166,22 +2656,17 @@ function attentionRefresh({ force = false } = {}) {
     if (force || now - attention.checks.at >= ATTENTION_CHECKS_EVERY - 2000) loadDashboardAttention({ force });
 }
 
-// Once the app's features are known (a feature turned off is not checked)
 function startAttention() {
     if (attention.ready) return;
     attention.ready = true;
     attentionRefresh();
     setInterval(attentionRefresh, ATTENTION_ALERTS_EVERY);
     document.addEventListener('visibilitychange', () => { if (!document.hidden) attentionRefresh(); });
-    // The window belongs to the bell it opened from: past 760px that one is gone
     window.matchMedia('(max-width: 760px)').addEventListener('change', event => {
         if (attnWindow && attnWindow.phone !== event.matches) attnWindowClose();
     });
 }
 
-// The bell's window: under the bell on a wide screen, a sheet on a phone. It is
-// a layer like any dialog (router.js): Escape, Back and a click beside it close
-// it, and the focus goes back to the bell
 let attnWindow = null;
 function attnWindowOpen(bell) {
     if (attnWindow && attnWindow.el.isConnected) { attnWindowClose(); return; }
@@ -3205,7 +2690,6 @@ function attnWindowOpen(bell) {
         el.innerHTML = `<section class="ui-attn-win" role="dialog" aria-labelledby="attn-win-title">
             <div class="ui-attn-win-head">${head}<button type="button" class="ui-icon-btn ui-attn-win-x" onclick="attnWindowClose()" aria-label="Close" title="Close">${UI_CLOSE_ICON}</button></div>
             <div id="attn-win-scroll" class="ui-attn-scroll ui-attn-win-list" data-keep-scroll tabindex="0">${list}</div>${foot}</section>`;
-        // A click beside it; not a press that began inside (a text selection) and ended there
         el.addEventListener('click', event => { if (uiBackdropClick(event)) attnWindowClose(); });
         document.body.appendChild(el);
         const at = bell.getBoundingClientRect();
@@ -3222,7 +2706,6 @@ function attnWindowOpen(bell) {
     attentionRefresh();
 }
 
-// toPage: a move to another page, which takes the focus instead of the bell
 function attnWindowClose({ toPage = false } = {}) {
     const w = attnWindow;
     if (!w) return;
@@ -3236,15 +2719,11 @@ function attnWindowClose({ toPage = false } = {}) {
     });
 }
 
-// An action that opens a page: the window closes once the move is made (a move
-// cancelled over unsaved changes leaves it open)
 async function attnBellGo(go) {
     const moved = await navigateTo(go[0], go[1] || {});
     if (moved && attnWindow) attnWindowClose({ toPage: true });
 }
 
-// An action that opens another window: this one closes, and the next gives the
-// focus back to the bell when it closes
 function attnBellOpen() {
     const w = attnWindow;
     if (!w) return;
@@ -3252,16 +2731,6 @@ function attnBellOpen() {
     uiLayerOpener(w.bell);
 }
 
-// The dashboard's mail flow (/api/stats/flow): a period of 24 hours, 7 days or
-// 30 days in bars cut at the app's own hours, quarters of the day and days;
-// the four figures over the period, with the period before it under them, or
-// those of one bar picked on the chart. The chart zooms in time (uiTimeZoom):
-// a zoomed span asks the server again, in shorter bars as it narrows. A strip
-// under it (uiTimeOverview) shows the whole period with the span shown.
-// Two loaders: the period's own answer (its figures, the strip, the limits)
-// and the zoomed span's. One view revision tells both whether an answer still
-// belongs to what is shown: a change of period or of zoom makes an answer
-// asked before it stale, and it is dropped.
 const DASH_PERIODS = {
     '24h': { name: '24 hours', last: 'last 24 hours', all: 'All 24 hours' },
     '7d': { name: '7 days', last: 'last 7 days', all: 'All 7 days' },
@@ -3269,28 +2738,24 @@ const DASH_PERIODS = {
 };
 const dashFlow = {
     period: '24h',
-    data: null,      // the bars and totals shown
-    full: null,      // the period's own answer (the strip draws it, zoomed or not)
-    prev: null,      // the period before (no zoom)
-    limits: null,    // the period's span: how far the chart zooms out and moves
-    zoom: null,      // { from, to } (ms), a span inside the period
-    pick: null,      // a bar's start (ms)
-    view: 0,         // the view revision: up one at every change of period or zoom
+    data: null,
+    full: null,
+    prev: null,
+    limits: null,
+    zoom: null,
+    pick: null,
+    view: 0,
     periodGen: 0, periodControl: null, zoomGen: 0, zoomControl: null,
     loadedAt: 0, zoomer: null, overview: null, previewing: false,
-    stale: false,    // an answer was set aside under a gesture: ask again when it ends
-    dataView: -1,    // the view revision the chart shows
-    failed: false,   // the last load failed: the next refresh tries again, zoomed or not
+    stale: false,
+    dataView: -1,
+    failed: false,
 };
 
 function mailFlowHour(t) {
     return formatClock(t);
 }
 
-// A span with the dates as the rest of the app writes them: "21/10/2026, 06:00 to 12:00",
-// "14/10/2026 to 16/10/2026", or one whole day: "14/10/2026". `to` is where the span ends
-// (not in it), so a span of whole days ends at the midnight after its last day.
-// day: formatDayMonth leaves the year out
 function mailFlowSpan(from, to, day = formatDay) {
     const end = to - 1;
     const sameDay = zonedDateString(from) === zonedDateString(end);
@@ -3299,7 +2764,6 @@ function mailFlowSpan(from, to, day = formatDay) {
     return `${day(from)}, ${mailFlowHour(from)} to ${day(end)}, ${mailFlowHour(to)}`;
 }
 
-// The bar length for a span: an hour up to two days, six hours up to ten, else a day
 function mailFlowBucketFor(len) {
     return len <= 48 * 3600000 ? 'hour' : len <= 10 * 86400000 ? '6h' : 'day';
 }
@@ -3310,7 +2774,6 @@ function setDashFlowPeriod(period) {
     dashFlow.zoom = null;
     dashFlow.pick = null;
     dashFlow.full = null;
-    // The last period's answer is not this one's: nothing draws it again
     dashFlow.data = null;
     mailFlowFiguresUnknown();
     dashFlow.view++;
@@ -3318,14 +2781,11 @@ function setDashFlowPeriod(period) {
     loadMailFlowChart();
 }
 
-// A click on a bar shows its numbers; the same bar again, or All, goes back
 function pickMailFlowHour(t) {
     dashFlow.pick = t === null || dashFlow.pick === t ? null : t;
     renderMailFlowStats();
 }
 
-// The buttons step by whole bars, so the server shows the span asked for:
-// in keeps the middle half of the bars, earlier and later move by half of them
 function dashFlowStep(step) {
     const l = dashFlow.limits, d = dashFlow.data;
     if (!l || !d) return;
@@ -3353,12 +2813,10 @@ function dashFlowStep(step) {
 
 function dashFlowZoom(span) {
     const l = dashFlow.limits;
-    // Zoomed all the way out is no zoom
     dashFlow.zoom = !span || (l && span.from <= l.from + 1 && span.to >= l.to - 1) ? null : { from: span.from, to: span.to };
     dashFlow.pick = null;
     dashFlow.view++;
     dashFlow.stale = false;
-    // Back to the whole period: its answer is here already
     if (!dashFlow.zoom && dashFlow.full) {
         dashFlow.zoomGen++;
         if (dashFlow.zoomControl) dashFlow.zoomControl.abort();
@@ -3370,12 +2828,10 @@ function dashFlowZoom(span) {
     loadMailFlowChart();
 }
 
-// A gesture on the chart or a drag on the strip is on: nothing is redrawn under it
 function mailFlowBusy() {
     return dashFlow.previewing || !!(dashFlow.overview && dashFlow.overview.busy());
 }
 
-// A gesture or a strip drag ended with no new span: what was set aside under it is asked for now
 function mailFlowSettle() {
     if (dashFlow.stale && !mailFlowBusy()) loadMailFlowChart();
 }
@@ -3392,18 +2848,14 @@ function mailFlowFailed() {
     if (!chart) return;
     dashFlow.failed = true;
     const failed = '<p class="ui-empty ui-text-fail ui-flow-failed">Could not load the mail flow. It tries again on the next refresh.</p>';
-    // In the chart's own frame, so the panel keeps its size; no gesture outlives the chart it was on
     if (dashFlow.zoomer) { dashFlow.zoomer.destroy(); dashFlow.zoomer = null; }
     dashFlow.previewing = false;
     const view = chart.querySelector('.ui-flow-view');
     if (view) view.innerHTML = failed;
     else chart.innerHTML = mailFlowFrame(failed);
-    // A refresh that failed keeps the figures of the answer it had
     if (!dashFlow.data) mailFlowFiguresUnknown();
 }
 
-// No answer for the period shown: its figures are not known, so none is shown
-// (not 0, nor the last period's)
 function mailFlowFiguresUnknown() {
     for (const id of ['stat-messages-24h', 'stat-blocked-24h', 'stat-deferred-24h', 'stat-auth-failures-24h']) {
         const el = document.getElementById(id);
@@ -3422,18 +2874,13 @@ function mailFlowFiguresUnknown() {
 function loadMailFlowChart() {
     const chart = document.getElementById('dashboard-flow-chart');
     if (!chart) return;
-    // A gesture is on: it asks again when it ends
     if (mailFlowBusy()) return;
     dashFlow.stale = false;
-    // Before the first answer: the chart's whole frame, so the panel has its size from the start
     if (!chart.querySelector('.ui-flow-view')) chart.innerHTML = mailFlowFrame('<p class="ui-empty ui-flow-failed" role="status">Loading...</p>');
     if (dashFlow.zoom && dashFlow.full) loadMailFlowZoom();
     else loadMailFlowPeriod();
 }
 
-// The period's own answer and the period before: the figures with no zoom, the
-// strip and the limits. Zoomed, only the strip and the limits follow it: the
-// zoom stays where it is, kept inside the new limits (dropped if nothing is left).
 async function loadMailFlowPeriod() {
     const gen = ++dashFlow.periodGen;
     if (dashFlow.periodControl) dashFlow.periodControl.abort();
@@ -3448,7 +2895,6 @@ async function loadMailFlowPeriod() {
         dashFlow.loadedAt = Date.now();
         dashFlow.limits = { from: Date.parse(data.from), to: Date.parse(data.to), min: 3600000 };
         if (!dashFlow.zoom) {
-            // A gesture is on: the answer waits in full; the gesture's end draws (or asks again)
             if (mailFlowBusy()) { dashFlow.stale = true; return; }
             dashFlow.data = data;
             dashFlow.failed = false;
@@ -3459,26 +2905,20 @@ async function loadMailFlowPeriod() {
         const from = Math.max(z.from, l.from), to = Math.min(z.to, l.to);
         const moved = from !== z.from || to !== z.to;
         if (mailFlowBusy()) {
-            // Under a gesture the zoom still moves inside the new limits; its end asks for it
             if (moved) { dashFlow.zoom = to - from >= l.min ? { from, to } : null; dashFlow.view++; }
             dashFlow.stale = true;
             return;
         }
         if (moved) { dashFlowZoom(to - from >= l.min ? { from, to } : null); return; }
-        // A zoom made before this period's answer came (a period switch, then Zoom in): its own answer now
         if (dashFlow.dataView !== dashFlow.view) { loadMailFlowZoom(); return; }
         renderMailFlowOverview(true);
     } catch (error) {
         if (gen !== dashFlow.periodGen || (error && error.name === 'AbortError')) return;
-        // Under a gesture nothing is drawn: the gesture's end asks again
         if (mailFlowBusy()) { dashFlow.failed = true; dashFlow.stale = true; return; }
-        // Zoomed, the strip keeps its last picture; the next refresh tries again
         if (!dashFlow.zoom) mailFlowFailed();
     }
 }
 
-// The zoomed span, in bars as short as it allows; the zoom becomes what the
-// server shows (it snaps to the nearest bar edges)
 async function loadMailFlowZoom() {
     const z = dashFlow.zoom, view = dashFlow.view;
     const gen = ++dashFlow.zoomGen;
@@ -3495,7 +2935,6 @@ async function loadMailFlowZoom() {
         dashFlow.zoom = { from: Date.parse(data.from), to: Date.parse(data.to) };
         const l = dashFlow.limits;
         if (l) dashFlow.limits = { ...l, to: Math.max(l.to, dashFlow.zoom.to) };
-        // Snapped out to the whole period: that is no zoom (the period before and the refresh come back)
         if (l && dashFlow.zoom.from <= l.from + 1 && dashFlow.zoom.to >= l.to - 1) dashFlow.zoom = null;
         renderMailFlowChart();
     } catch (error) {
@@ -3505,8 +2944,6 @@ async function loadMailFlowZoom() {
     }
 }
 
-// The auto refresh: the period every minute for 24 hours, every five minutes
-// for longer ones; zoomed, it refreshes the strip and leaves the zoom as it is
 function refreshMailFlowChart() {
     if (mailFlowBusy()) return;
     if (dashFlow.failed) { loadMailFlowChart(); return; }
@@ -3514,8 +2951,6 @@ function refreshMailFlowChart() {
     if (Date.now() - dashFlow.loadedAt >= every) loadMailFlowPeriod();
 }
 
-// The strip under the chart: the whole period, a window over the span shown.
-// alone: only the strip is drawn again (the zoomed chart stays), the focus kept
 function renderMailFlowOverview(alone = false) {
     const strip = document.querySelector('#dashboard-flow-chart .ui-ov');
     if (!strip) return;
@@ -3536,7 +2971,6 @@ function renderMailFlowOverview(alone = false) {
             limits: () => dashFlow.limits,
             span: () => dashFlow.zoom || dashFlow.limits,
             snap: uiNearestLocalHour,
-            // One step is one bar of the strip; a big step is six hours on 24 hours, a day on 7 days, a week on 30 days
             step: (t, dir, isBig) => (isBig ? t + dir * big
                 : dir > 0 ? (edges.find(e => e > t + 1) ?? l.to) : ([...edges].reverse().find(e => e < t - 1) ?? l.from)),
             label: t => `${formatDay(t)}, ${mailFlowHour(t)}`,
@@ -3548,11 +2982,8 @@ function renderMailFlowOverview(alone = false) {
     else draw();
 }
 
-// The foot under the chart: the legend, the zoom buttons and the actions, all
-// always there (what is not in use keeps its place), so the panel keeps its size
 function mailFlowFoot(can) {
     const off = on => (on ? '' : ' disabled');
-    // The Messages figure opens the same messages: it is on when View these messages is
     const figure = document.getElementById('dashboard-flow-messages');
     if (figure) figure.disabled = !can.view;
     return `<div class="ui-flow-foot">
@@ -3571,7 +3002,6 @@ function mailFlowFoot(can) {
         </div>`;
 }
 
-// The chart's frame with a line in place of the bars (loading, or a first load that failed)
 function mailFlowFrame(inner) {
     return `<div class="ui-flow-view">${inner}</div><div class="ui-flow-axis" aria-hidden="true"></div><div class="ui-ov" data-zoom></div>${mailFlowFoot({})}`;
 }
@@ -3583,19 +3013,16 @@ function renderMailFlowChart() {
     const bars = d.buckets.map(b => ({ ...b, s: Date.parse(b.start), e: Date.parse(b.end) }));
     const max = Math.max(1, ...bars.map(b => b.clean + b.spam));
     const n = bars.length;
-    // Axis: hours every third (sixth on phones), the start of each day for six-hour bars, every fifth day
     const label = (b, i) => {
         const p = zonedParts(b.s);
         if (i === n - 1 && b.partial) return '<span class="is-major">Now</span>';
         if (d.bucket === 'hour') return p.hour % 6 === 0 ? `<span class="is-major">${formatClock(b.s, { compact: true })}</span>` : p.hour % 3 === 0 ? `<span class="is-minor">${formatClock(b.s, { compact: true })}</span>` : '<span></span>';
         if (d.bucket === '6h') return p.hour < 6 ? `<span class="is-major">${escapeHtml(formatDayMonth(b.s))}</span>` : '<span></span>';
-        // Every fifth day, not near Now
         return (n <= 10 || (i % 5 === 0 && i < n - 5)) ? `<span class="is-major">${escapeHtml(formatDayMonth(b.s))}</span>` : '<span></span>';
     };
     const zoomed = !!dashFlow.zoom;
     dashFlow.dataView = dashFlow.view;
     const shown = { from: Date.parse(d.from), to: Date.parse(d.to) };
-    // The part older than the logs kept (retention): shaded, so empty bars there do not read as quiet
     const kept = d.kept_from ? Date.parse(d.kept_from) : null;
     let gone = 0;
     if (kept !== null && kept > shown.from) {
@@ -3627,7 +3054,6 @@ function renderMailFlowChart() {
         limits: () => dashFlow.limits,
         preview: (span, kind) => {
             if (!dashFlow.previewing) {
-                // The gesture is on: an answer still on its way is set aside
                 dashFlow.previewing = true;
                 if (dashFlow.zoomControl) dashFlow.zoomControl.abort();
                 dashFlow.zoomGen++;
@@ -3639,7 +3065,6 @@ function renderMailFlowChart() {
                 band.style.width = `${span.x2 - span.x1}px`;
                 return;
             }
-            // Pinch, move or wheel: the bars stretch and slide to where the new span will be
             const len = shown.to - shown.from, next = span.to - span.from;
             const k = len / next;
             const x = -(span.from - shown.from) / len * view.clientWidth * k;
@@ -3663,7 +3088,6 @@ function renderMailFlowStats() {
     const period = DASH_PERIODS[dashFlow.period];
     const bar = dashFlow.pick === null ? null : d.buckets.find(b => Date.parse(b.start) === dashFlow.pick);
     if (!bar) dashFlow.pick = null;
-    // A line cut short on a narrow screen shows in full on hover
     const set = (id, text) => { const el = document.getElementById(id); if (el) { el.textContent = text; if (el.tagName === 'SMALL') el.title = text; } };
     const n = v => (v || 0).toLocaleString();
     const src = bar || d.totals;
@@ -3671,15 +3095,12 @@ function renderMailFlowStats() {
     set('stat-blocked-24h', n(src.blocked));
     set('stat-deferred-24h', n(src.deferred));
     set('stat-auth-failures-24h', n(src.auth_failures));
-    // Under each figure: the whole span for a bar, the period before for a period
     const p = dashFlow.prev && dashFlow.prev.totals;
     const before = key => {
         if (bar) return `${dashFlow.zoom ? 'Shown' : period.name}: ${n(d.totals[key])}`;
         if (dashFlow.zoom || !p) return '';
-        // A period before the oldest logs kept may hold only part of its mail (the note under the chart says why)
         return `Previous: ${n(p[key])}${dashFlow.prev.older_may_be_gone ? ' (partial)' : ''}`;
     };
-    // Two lines under Messages, always both: the deliveries, and the span before or shown
     const note = document.getElementById('stat-messages-note');
     if (note) {
         const lines = [`${n(src.deliveries)} deliveries`, before('messages')];
@@ -3689,16 +3110,12 @@ function renderMailFlowStats() {
     set('stat-blocked-note', before('blocked'));
     set('stat-deferred-note', before('deferred'));
     set('stat-auth-failures-note', before('auth_failures'));
-    // The title in two lengths: in a narrow panel (a phone) the picker names the period,
-    // so the short one says only a picked bar's or a zoom's span, its days without the year
     const shown = bar ? [Date.parse(bar.start), Date.parse(bar.end)] : dashFlow.zoom ? [Date.parse(d.from), Date.parse(d.to)] : null;
     const soFar = bar && bar.partial ? ', so far' : '';
     const long = document.querySelector('#dashboard-flow-title .ui-flow-long');
     const short = document.querySelector('#dashboard-flow-title .ui-flow-short');
     if (long) long.textContent = `Mail flow, ${shown ? mailFlowSpan(...shown) : period.last}${soFar}`;
     if (short) short.textContent = shown ? `${mailFlowSpan(...shown, formatDayMonth)}${soFar}` : 'Mail flow';
-    // Clear keeps its place when nothing is picked, so the row does not move; the narrow
-    // panel's Clear beside the title shows only with a bar picked
     document.getElementById('dashboard-flow-reset')?.classList.toggle('is-off', !bar);
     document.getElementById('dashboard-flow-clear')?.classList.toggle('hidden', !bar);
     const bars = document.querySelector('#dashboard-flow-chart .ui-flow-bars');
@@ -3708,8 +3125,6 @@ function renderMailFlowStats() {
     }
 }
 
-// The Messages period set to an exact range, without applying it: the custom
-// range picker shows its days, in the app's zone like its Apply reads
 function messagesShowRange(start, endInclusive, label = '') {
     document.getElementById('messages-date-range').value = 'custom';
     document.getElementById('messages-start-date').value = start;
@@ -3720,30 +3135,22 @@ function messagesShowRange(start, endInclusive, label = '') {
     setMessagesDatePresetActive(null);
 }
 
-// The Messages page over a span of time (and a mailbox): every other filter
-// cleared, the exact start and end kept (its date picker shows their days and
-// keeps them until another range is applied). endInclusive: the last moment
-// in it, as the Messages page's end is inclusive.
 function openMessagesRange({ start, endInclusive, user = '', label = '' }) {
-    leaveMessagesWithoutId();
-    ['search', 'sender', 'recipient', 'user', 'ip', 'direction', 'status'].forEach(key => {
-        const el = document.getElementById(`messages-filter-${key}`);
-        if (el) el.value = '';
+    return openMessagesWith(() => {
+        ['search', 'sender', 'recipient', 'user', 'ip', 'direction', 'status'].forEach(key => {
+            const el = document.getElementById(`messages-filter-${key}`);
+            if (el) el.value = '';
+        });
+        if (user) {
+            const field = document.getElementById('messages-filter-user');
+            if (field) field.value = user;
+        }
+        messagesShowRange(start, endInclusive, label);
+        setMessagesFilters({ start_date: start, end_date: endInclusive, ...(user ? { user } : {}) });
+        currentPage.messages = 1;
     });
-    if (user) {
-        const field = document.getElementById('messages-filter-user');
-        if (field) field.value = user;
-    }
-    messagesExact = null;
-    messagesShowRange(start, endInclusive, label);
-    currentFilters.messages = { start_date: start, end_date: endInclusive, ...(user ? { user } : {}) };
-    currentPage.messages = 1;
-    navigateTo('messages');
 }
 
-// The picked bar's messages, else those of all the bars shown, on the Messages page.
-// It shows the messages with a delivery in that time: a message counted in an
-// earlier bar (its first delivery) shows there too.
 function openMailFlowHourMessages() {
     const d = dashFlow.data;
     if (!d) return;
@@ -3752,20 +3159,14 @@ function openMailFlowHourMessages() {
     else openMessagesRange({ start: d.from, endInclusive: d.to_inclusive });
 }
 
-// Dismissing acts at once; the answer's receipt lets Undo re-open exactly what it
-// changed, for 10 seconds (longer while the pointer or the focus is on the toast)
-// A double click does not dismiss it twice (the second would find it gone)
 function acknowledgeSecurityAlertOnce(alertId, button) {
-    // The X keeps its icon while busy: disabled and aria-busy say it is working
     return uiOnce(`alert-ack:${alertId}`, () => acknowledgeSecurityAlert(alertId), button);
 }
 async function acknowledgeSecurityAlert(alertId) {
     if (!uiMayAct('alerts')) return;
     const alert =dashboardAlerts.get(Number(alertId)) || (typeof alertActivity !== 'undefined' && alertActivity && Number(alertActivity.alert.id) === Number(alertId) ? alertActivity.alert : null);
-    // Each alert in its own area: Take action in another one is not enough
     const area = alert ? alertArea(alert) : null;
     if (area && !uiMayAct(area)) return;
-    // Its title, with the mailbox or username when the title does not already name it
     const name = !alert ? 'the alert' : alert.subject && !String(alert.title).includes(alert.subject) ? `${alert.title}: ${alert.subject}` : alert.title;
     try {
         const res = await authenticatedFetch(`/api/security-alerts/${alertId}/acknowledge`, { method: 'POST' });
@@ -3786,7 +3187,6 @@ async function acknowledgeAllSecurityAlerts() {
     if (!uiMayAct('alerts')) return;
     const ids = dashboardWritableAlertIds.slice();
     if (!ids.length) return;
-    // The areas of what it dismisses: Undo asks again for Take action in one of them
     const areas = ALERT_AREAS.filter(a => userCan(a, 'write'));
     try {
         const res = await authenticatedFetch('/api/security-alerts/acknowledge-all', {
@@ -3809,15 +3209,11 @@ function offerAlertUndo(receipt, message, undoName, areas) {
 
 function offerAlertsRefresh(message) {
     showToast(message, 'warning', { duration: Infinity, action: { label: 'Refresh', ariaLabel: 'Refresh Needs attention', onAction: async () => {
-        // The next message takes the keyboard over from this one, whether it worked or not
         if (!(await loadDashboardSecurityAlerts())) offerAlertsRefresh('Needs attention could not be refreshed. Try again.');
         else showToast('Needs attention is up to date', 'success');
     } } });
 }
 
-// Re-open what a dismissal changed. A failure says so and offers Retry until closed.
-// areas: those of what was dismissed; the access is checked again now, and the
-// server re-opens only the alerts of the areas the person may still act in
 async function undoAlertDismissal(receipt, undoName, areas = ALERT_AREAS) {
     if (!uiMayAct('alerts')) return;
     if (!areas.some(a => userCan(a, 'write'))) { uiNotPermitted(); return; }
@@ -3831,9 +3227,6 @@ async function undoAlertDismissal(receipt, undoName, areas = ALERT_AREAS) {
             offerAlertsRefresh(back ? `${back}, but Needs attention could not be refreshed.` : 'Needs attention could not be refreshed.');
             return;
         }
-        // With the bell's window open the keyboard goes to the first alert back there (its
-        // X), else to its list; on the Dashboard the same in Needs attention; on
-        // another page it stays with the message
         const place = attnWindow ? ['#attn-win-alerts', attnWindow.phone ? '#attn-sheet .ui-sheet-body' : '#attn-win-scroll']
             : typeof currentTab === 'undefined' || currentTab === 'dashboard' ? ['#dashboard-security-alerts', '#dashboard-attention-scroll'] : null;
         if (place) {
@@ -3841,15 +3234,12 @@ async function undoAlertDismissal(receipt, undoName, areas = ALERT_AREAS) {
             const target = row ? row.querySelector('.ui-alert-x') : document.querySelector(place[1]);
             if (target) target.focus({ preventScroll: false });
         }
-        // Nothing back: dismissed again since, or no longer the person's to change
         showToast(back ? `${back} in Needs attention` : 'Nothing to undo: dismissed again, or your access changed', back ? 'success' : 'info');
     } catch (e) {
         showToast(`Could not undo: ${uiSentence(uiErrorText(e))}`, 'error', { duration: Infinity, action: { label: 'Retry', ariaLabel: `Retry: ${undoName}`, onAction: () => undoAlertDismissal(receipt, undoName, areas) } });
     }
 }
 
-// The figures' trends (/api/stats/trends): loaded with the Dashboard and every five minutes, painted
-// into each figure's place, and again whenever a card is drawn anew
 const DASH_TRENDS = {
     storage_used: { label: 'Mail storage used', format: v => `${Math.round(v)}%` },
     security_review: { label: 'Addresses to review', format: v => `${Math.round(v)}`, feature: 'netfilter' },
@@ -3879,14 +3269,12 @@ function paintDashboardTrends() {
     });
 }
 
-// One dashboard health card: the big value, its tone and the line under it
 function setDashKpi(id, value, tone, note) {
     const el = document.getElementById(id);
     if (el) { el.textContent = value; el.className = tone ? `ui-${tone}` : ''; }
     const noteEl = document.getElementById(`${id}-note`);
     if (noteEl && note !== undefined) noteEl.textContent = note;
 }
-// A read that failed: the card keeps what it shows and says it is not current
 function dashKpiFailed(...ids) {
     for (const id of ids) {
         const el = document.getElementById(id);
@@ -3894,20 +3282,15 @@ function dashKpiFailed(...ids) {
         if (noteEl) noteEl.textContent = !el || el.textContent === '-' ? 'Could not load' : 'Could not update';
     }
 }
-// mailcow did not tell it: a reading shown before stays, said to be not current; none yet is Unknown
 function dashKpiUnknown(id) {
     const shown = document.getElementById(id)?.textContent;
     if (shown && shown !== '-' && shown !== 'Unknown') dashKpiFailed(id);
     else setDashKpi(id, 'Unknown', '', 'mailcow did not answer');
 }
 
-// The Security card: whether the protections are on, and the Security page's two
-// lists with the same real counts. Which protections are on is read once; the
-// Security page keeps it current when it is opened.
 async function loadDashboardSecurity() {
     const panel = document.getElementById('dashboard-security-panel');
     if (!panel) return;
-    // Its lists are Security's: without View there the card is not shown
     if (isFeatureDisabled('netfilter') || !userCan('security')) {
         panel.classList.add('hidden');
         return;
@@ -3939,19 +3322,17 @@ async function loadDashboardSecurity() {
 }
 
 let dashboardSecurityPage = null;
-let dashboardProtectionsOpen = false;   // the protection line folds out into every protection
+let dashboardProtectionsOpen = false;
 
 function renderDashboardSecurity(page = dashboardSecurityPage) {
     dashboardSecurityPage = page;
     const box = document.getElementById('dashboard-security');
     if (!box) return;
-    // Without Fail2ban's answer neither list is known (its bans and lists are missing)
     const known = !page || page.fail2ban_known !== false;
     const counts = page && known ? page.all_counts : null;
     const n = key => counts ? Number(counts[key]).toLocaleString() : page ? 'Unknown' : '-';
     const protections = securityProtectionItems();
     const on = protections.filter(securityProtectionOn);
-    // The line's own mark: a tick when anything acts, an eye when everything on only watches
     const lineState = on.some(p => p.state === 'on') ? 'on' : on.length ? 'watch' : 'off';
     box.innerHTML = `
         <div class="ui-stats ui-dash-sec-stats">
@@ -3967,7 +3348,6 @@ function renderDashboardSecurity(page = dashboardSecurityPage) {
     paintDashboardTrends();
 }
 
-// Jobs, message linking and the app version for the dashboard health cards
 async function loadDashboardHealth() {
     try {
         const [infoRes, versionRes] = await Promise.all([authenticatedFetch('/api/settings/info'), authenticatedFetch('/api/status/app-version')]);
@@ -4006,13 +3386,11 @@ async function loadDashboardStatusSummary() {
         const data = await response.json();
         console.log('Status summary data:', data);
 
-        // Containers: red when one is stopped; ignored ones are only mentioned
         const containers = data.containers || {};
         if (data.containers_known === false) dashKpiUnknown('dash-kpi-containers');
         else setDashKpi('dash-kpi-containers', `${containers.running || 0} of ${containers.total || 0} running`, containers.stopped > 0 ? 'fail' : '',
             [containers.stopped ? `${containers.stopped} stopped` : 'All running', containers.ignored ? `${containers.ignored} ignored` : ''].filter(Boolean).join(', '));
 
-        // Storage: amber above 75%, red above 90%
         const storage = data.storage || {};
         const usedPercent = parseInt(storage.used_percent) || 0;
         const storageLevel = usedPercent > 90 ? 'fail' : usedPercent > 75 ? 'warn' : '';
@@ -4021,7 +3399,6 @@ async function loadDashboardStatusSummary() {
 
         const systemDiv = document.getElementById('dashboard-system-summary');
         const system = data.system || {};
-        // mailcow did not answer: counts shown before stay; none shown yet says so, not 0
         if (system.known === false) {
             if (!systemDiv.querySelector('.ui-kv')) systemDiv.innerHTML = '<p class="ui-empty ui-text-fail">Could not load: mailcow did not answer</p>';
             return;
@@ -4034,7 +3411,6 @@ async function loadDashboardStatusSummary() {
     } catch (error) {
         console.error('Failed to load status summary:', error);
         dashKpiFailed('dash-kpi-containers', 'dash-kpi-storage');
-        // Never loaded: say why instead of loading forever; loaded once: what it shows stays
         const systemDiv = document.getElementById('dashboard-system-summary');
         if (systemDiv && systemDiv.querySelector('.ui-loading')) {
             systemDiv.innerHTML = `<p class="ui-empty ui-text-fail">Could not load: ${escapeHtml(uiErrorText(error))}</p>`;
@@ -4042,19 +3418,12 @@ async function loadDashboardStatusSummary() {
     }
 }
 
-// =============================================================================
-// NETFILTER LOGS
-// =============================================================================
+let netfilterExact = null;
 
-// The filters an entity card opened the Events with ("Show security events",
-// openSecurityEventsFor in security.js): an IP or an account matched whole, or
-// the accounts on a domain, over the card's period. They hold until the IP or
-// Username field it filled is changed or cleared (another condition added keeps
-// them); a chip beside the count names them and takes them off. Filters set any
-// other way (the search's address row, an alert, Security's own links) drop
-// them: they hold only while the filters in use are the ones they made
-// (filters). The CSV export sends them too (currentFilters.netfilter).
-let netfilterExact = null;   // { ip, username, domain, start_date, end_date, period, filters } or null
+function setNetfilterFilters(filters) {
+    netfilterExact = null;
+    currentFilters.netfilter = filters;
+}
 
 function netfilterFilterFields() {
     return {
@@ -4065,26 +3434,18 @@ function netfilterFilterFields() {
     };
 }
 
-// The fields' filters with the whole-value ones that still hold
 function netfilterWithExact(fields) {
-    // Filters set since by anything but the card's (an alert, the search): its whole values went with them
-    if (netfilterExact && netfilterExact.filters && currentFilters.netfilter !== netfilterExact.filters) netfilterExact = null;
     const x = netfilterExact;
     if (x && ((x.ip && (fields.ip || '') !== x.ip) || (x.username && (fields.username || '') !== x.username))) netfilterExact = null;
     if (!netfilterExact) return fields;
-    const filters = {
+    return {
         ...fields, ...(x.ip ? { exact_ip: 'true' } : {}), ...(x.username ? { exact_username: 'true' } : {}),
         ...(x.domain ? { username_domain: x.domain } : {}),
         ...(x.start_date ? { start_date: x.start_date } : {}), ...(x.end_date ? { end_date: x.end_date } : {}),
     };
-    x.filters = filters;
-    return filters;
 }
 
-// The chip, as the Security Overview's country and network chips (security.js renderSecurityOverview)
 function renderNetfilterExact() {
-    // Filters set since by anything but the card's: its whole values went with them
-    if (netfilterExact && netfilterExact.filters && currentFilters.netfilter !== netfilterExact.filters) netfilterExact = null;
     const slot = document.getElementById('netfilter-exact');
     if (!slot) return;
     const x = netfilterExact;
@@ -4092,7 +3453,6 @@ function renderNetfilterExact() {
     slot.innerHTML = what ? `<span class="ui-sec-filter" title="Matched whole, not as a part of a longer value"><span>${escapeHtml(what[0])} <bdi>${escapeHtml(what[1])}</bdi>${x.period ? `, ${escapeHtml(x.period)}` : ''}</span><button type="button" onclick="clearNetfilterExact()" aria-label="Remove this filter" title="Remove this filter">&times;</button></span>` : '';
 }
 
-// The chip's X: the whole values go, with the fields they had set, and the period
 function clearNetfilterExact() {
     if (netfilterExact) {
         if (netfilterExact.ip) document.getElementById('netfilter-filter-ip').value = '';
@@ -4113,8 +3473,7 @@ function clearNetfilterFilters() {
     document.getElementById('netfilter-filter-username').value = '';
     document.getElementById('netfilter-filter-action').value = '';
     document.getElementById('netfilter-filter-country').value = '';
-    netfilterExact = null;
-    currentFilters.netfilter = {};
+    setNetfilterFilters({});
     currentPage.netfilter = 1;
     loadNetfilterLogs();
 }
@@ -4144,10 +3503,8 @@ async function loadNetfilterLogs(page = 1) {
         const data = await response.json();
         console.log('Netfilter data:', data);
 
-        // Store in cache for smart refresh comparison
         lastDataCache.netfilter = data;
 
-        // Use shared render function (includes GeoIP info & unban buttons)
         renderNetfilterData(data);
 
         currentPage.netfilter = page;
@@ -4159,20 +3516,14 @@ async function loadNetfilterLogs(page = 1) {
     }
 }
 
-// =============================================================================
-// FAIL2BAN SETTINGS
-// =============================================================================
-
 let fail2banSettingsLoaded = false;
-let fail2banActiveBans = null;   // null until mailcow has answered
+let fail2banActiveBans = null;
 let fail2banBlacklist = [];
 let fail2banWhitelist = [];
 let fail2banPermBans = [];
-let fail2banLegacy = [];         // single IPv6 addresses an earlier version wrote as /32 networks
-let fail2banPolicy = null;       // how Fail2ban bans: times, attempts, window, network size
+let fail2banLegacy = [];
+let fail2banPolicy = null;
 
-// Fail2ban's bans, lists and policy from mailcow. The Security page shows them in
-// the Overview, the Lists and the Fail2ban card; an action resets the flag to reload.
 async function loadFail2BanSettings() {
     if (fail2banSettingsLoaded) return;
     try {
@@ -4195,34 +3546,20 @@ async function loadFail2BanSettings() {
     } catch (error) {
         console.error('Failed to load Fail2Ban settings:', error);
         fail2banLoadError = true;
-        // Not loaded: Try again, or the next refresh, reads it again
         fail2banSettingsLoaded = false;
     }
     renderSecurityOverview();
-    refreshSecurityAddresses();   // a ban, an unban or a list entry moves an address between the lists
+    refreshSecurityAddresses();
     if (!securityListsTyping()) renderSecurityLists();
     if (!securityEditing()) renderSecuritySettings();
-    // The events' Ban and Unban buttons depend on the denylist
     if (lastDataCache.netfilter && mailcowRwConfigured) renderNetfilterData(lastDataCache.netfilter);
 }
 
-// =============================================================================
-// Part 2: Queue, Quarantine, Messages, Status, Postfix Details
-// =============================================================================
-
-// =============================================================================
-// QUEUE
-// =============================================================================
-
 let allQueueData = [];
-// Suppress shows only while the app keeps a suppression list (Sync with Rspamd
-// on), read again with each load; unknown (an error, Suppressions off) shows none
 let queueSuppressOn = false;
-// Loads and auto refreshes share one order: an answer older than the one
-// drawn is dropped, so neither undoes a newer one
 let queueAsked = 0;
 let queueApplied = 0;
-let queueLoading = false;  // the list shows Loading until an answer draws it
+let queueLoading = false;
 
 function queueListKept() {
     return authenticatedFetch('/api/suppressions/config')
@@ -4231,7 +3568,6 @@ function queueListKept() {
         .catch(() => false);
 }
 
-// Whether the answer of request id may be drawn (no newer one was); takes its turn
 function queueTakeTurn(id) {
     if (id < queueApplied) return false;
     queueApplied = id;
@@ -4293,8 +3629,6 @@ function updateQueueSummary() {
     el.textContent = `${allQueueData.length} ${allQueueData.length === 1 ? 'message' : 'messages'}: ${parts.join(', ')}. Postfix retries deferred mail on its own.`;
 }
 
-// A list's checked rows across a redraw: checked again by value, the ones
-// gone (or filtered out) dropped, and its selection bar told
 function keepCheckedRows(selector, draw, update) {
     const checked = new Set([...document.querySelectorAll(`${selector}:checked`)].map(cb => cb.value));
     draw();
@@ -4303,7 +3637,6 @@ function keepCheckedRows(selector, draw, update) {
     update();
 }
 
-// Set while a queue action runs: the refresh leaves the list alone until it is done
 let queueActing = 0;
 
 function applyQueueFilters() {
@@ -4331,7 +3664,6 @@ function drawQueueRows() {
 
     const container = document.getElementById('queue-logs');
 
-    // Update count display
     const countEl = document.getElementById('queue-count');
     if (countEl) {
         countEl.textContent = uiCountLabel(filteredData.length, 'message', 'messages');
@@ -4346,7 +3678,6 @@ function drawQueueRows() {
         return;
     }
 
-    // Actions need the Read-Write key and Take action on Outbound; the key's note is for whoever may act
     const mayAct = userCan('outbound', 'write');
     const canAct = mailcowRwConfigured && mayAct;
 
@@ -4379,7 +3710,6 @@ function drawQueueRows() {
                 const isHold = queueName === 'hold';
                 const queueTone = { hold: '', deferred: 'warn', active: 'ok', incoming: 'info', bounce: 'fail', corrupt: 'fail' }[queueName] || '';
                 const stateText = isHold ? 'On hold' : (item.queue_name || 'unknown').replace(/^./, c => c.toUpperCase());
-                // "user@example.com (connect to ...: Connection timed out)" -> address and response
                 const recipients = item.recipients.map(r => {
                     const email = r.split(' ')[0].replace(/[<>]/g, '').trim();
                     const rest = r.includes(' ') ? r.substring(r.indexOf(' ')).trim().replace(/^\((.*)\)$/, '$1') : '';
@@ -4423,11 +3753,8 @@ function clearQueueFilters() {
     applyQueueFilters();
 }
 
-// --- Queue selection helpers ---
-
 function queueUpdateSelection() {
     const checked = document.querySelectorAll('.queue-checkbox:checked');
-    // With rows selected the actions are about them; Delete All steps aside
     const deleteAll = document.getElementById('queue-delete-all-btn');
     if (deleteAll) deleteAll.classList.toggle('hidden', checked.length > 0);
     const bulkRetry = document.getElementById('queue-bulk-retry-btn');
@@ -4474,8 +3801,6 @@ async function queueBulkDelete() {
     if (!await showConfirmModal({ title: 'Delete messages', message: `Permanently delete ${ids.length} message(s) from the queue? This cannot be undone.`, confirmText: 'Delete', isDangerous: true })) return;
     await queueDeleteRequest(ids);
 }
-
-// --- Queue action helpers ---
 
 async function queueRetry(qid) {
     await queueAction('deliver', [String(qid)]);
@@ -4565,25 +3890,16 @@ async function queueDeleteRequest(itemIds) {
     }
 }
 
-// =============================================================================
-// QUARANTINE
-// =============================================================================
-
-// Client-side sort state for the quarantine list ('newest' matches the backend default order)
-// Last quarantine payload rendered (used to re-sort without re-fetching)
 let quarantineLastData = null;
 
-// Reject is the strong verdict; add header and the softer ones read as a warning
 function quarantineActionTone(action) {
     return ['reject', 'discard'].includes(String(action || '').toLowerCase()) ? 'fail' : 'warn';
 }
 
 
-// Loads, refreshes and the reload after an action share one order: an answer
-// older than the one drawn is dropped, so a handled message never comes back
 let quarantineAsked = 0;
 let quarantineApplied = 0;
-let quarantineActing = 0;   // an action runs: the refresh leaves the list alone
+let quarantineActing = 0;
 
 function quarantineTakeTurn(id) {
     if (id < quarantineApplied) return false;
@@ -4615,14 +3931,12 @@ async function loadQuarantine() {
         renderQuarantineData(data);
     } catch (error) {
         if (!quarantineTakeTurn(id)) return;
-        // Nothing is shown: the next refresh draws what it gets, even an answer like the last one
         lastDataCache.quarantine = null;
         console.error('Failed to load quarantine:', error);
         document.getElementById('quarantine-logs').innerHTML = `<p class="ui-empty ui-text-fail">Failed to load quarantine: ${escapeHtml(uiSentence(uiErrorText(error)))}${uiRetryButton('loadQuarantine()')}</p>`;
     }
 }
 
-// The list, also from the smart refresh and a new sort: checked rows stay checked
 function renderQuarantineData(data) {
     keepCheckedRows('.quarantine-checkbox', () => drawQuarantineRows(data), quarantineUpdateSelection);
 }
@@ -4631,7 +3945,6 @@ function drawQuarantineRows(data) {
     const container = document.getElementById('quarantine-logs');
     if (!container) return;
 
-    // Keep the latest payload so sort changes can re-render without a re-fetch
     quarantineLastData = data;
     const summary = document.getElementById('quarantine-summary');
     const countEl = document.getElementById('quarantine-count');
@@ -4648,7 +3961,6 @@ function drawQuarantineRows(data) {
         return;
     }
 
-    // Actions need the Read-Write key and Take action on Quarantine; the key's note is for whoever may act
     const mayAct = userCan('quarantine', 'write');
     const canAct = mailcowRwConfigured && mayAct;
     const items = data.data;
@@ -4705,10 +4017,6 @@ function drawQuarantineRows(data) {
     `;
 }
 
-// --- Quarantine action helpers ---
-
-// A click on the row opens the message, like the Messages list; its buttons,
-// checkbox and copyable values keep their own click
 function quarantineRowClick(event, itemId) {
     if (event.target.closest('button, a, input, select, label, .copyable, .ui-ent, [role="menu"]') || uiRowHeld(event)) return;
     showQuarantineDetails(itemId);
@@ -4722,7 +4030,6 @@ function quarantineUpdateSelection() {
     const rows = document.querySelectorAll('.quarantine-checkbox').length;
     if (selectAll) selectAll.textContent = rows && checked.length === rows ? 'Deselect All' : 'Select All';
 
-    // With rows selected the actions are about them; Release All and Delete All step aside
     ['quarantine-release-all-btn', 'quarantine-delete-all-btn'].forEach(id => { const el = document.getElementById(id); if (el) el.classList.toggle('hidden', checked.length > 0); });
     if (checked.length > 0) {
         bulkBtns.forEach(id => { const el = document.getElementById(id); if (el) { el.classList.remove('hidden'); el.classList.add('inline-flex'); } });
@@ -4844,8 +4151,6 @@ async function quarantineAction(action, itemIds) {
     }
 }
 
-// --- Quarantine Detail View ---
-
 async function showQuarantineDetails(itemId) {
     const existing = document.getElementById('quarantine-detail-modal');
     if (existing) existing.remove();
@@ -4855,7 +4160,6 @@ async function showQuarantineDetails(itemId) {
         close: closeQuarantineDetails, backdropClose: closeQuarantineDetails,
         bodyId: 'quarantine-detail-content',
         body: '<div class="ui-loading" role="status"><div class="loading"></div><p>Loading details...</p></div>',
-        // Filled with the actions (or why they are locked) once the item has loaded
         footId: 'quarantine-detail-footer', footHidden: true,
     });
     document.body.style.overflow = 'hidden';
@@ -4911,8 +4215,6 @@ function renderQuarantineDetailContent(data, itemId) {
         <th>Symbol</th><th>Group</th><th class="ui-td-end">Score</th><th>Details</th>
     </tr></thead><tbody>${rows}</tbody></table></div>`;
 
-    // mailcow sends a literal '-' as text_plain when the message has no plain-text part;
-    // text_html is already converted to plain text by mailcow, so fall back to it.
     const plainText = (data.text_plain || '').trim();
     const textContent = (plainText && plainText !== '-') ? data.text_plain : (data.text_html || '');
     const mayAct = userCan('quarantine', 'write');
@@ -4953,7 +4255,6 @@ function renderQuarantineDetailContent(data, itemId) {
         </div>
     `;
 
-    // Footer with the actions
     if (footer && canAct) {
         footer.className = 'ui-dialog-foot';
         footer.innerHTML = `
@@ -4967,15 +4268,10 @@ function renderQuarantineDetailContent(data, itemId) {
         footer.className = 'hidden';
         footer.innerHTML = '';
     } else if (footer) {
-        // The list's locked note sits behind the dialog: say it here too
         footer.className = 'ui-dialog-foot ui-dialog-foot-note';
         footer.innerHTML = uiLocked('Quarantine actions are locked', `Release, delete and spam learning ${UI_RW_KEY_TEXT}`);
     }
 }
-
-// =============================================================================
-// QUARANTINE AUTO-RULES
-// =============================================================================
 
 let _quarantineRulesCache = null;
 
@@ -4983,7 +4279,6 @@ async function initQuarantineRules() {
     const section = document.getElementById('quarantine-rules-section');
     if (!section) return;
     
-    // Ensure RW status is loaded (may not be ready on first page load)
     if (!mailcowRwConfigured) {
         await fetchRwStatus();
     }
@@ -4993,7 +4288,6 @@ async function initQuarantineRules() {
     }
 }
 
-// Show one tab of a page with tabs: its button, its panel
 function showPageTab(page, tab) {
     Object.keys(TAB_FEATURES[page]).forEach(name => {
         const btn = document.getElementById(`${page}-tab-btn-${name}`);
@@ -5003,7 +4297,6 @@ function showPageTab(page, tab) {
     });
 }
 
-// Quarantine tabs: the held messages, and the Auto-Rules that handle them
 let quarantineTab = 'messages';
 function quarantineShowTab(tab) {
     quarantineTab = tab;
@@ -5016,8 +4309,6 @@ function quarantineShowTab(tab) {
     });
 }
 
-// Outbound tabs: the mail waiting to leave, and the recipients it is no
-// longer sent to (spam_filter.js). Each has its own feature.
 let outboundTab = 'queue';
 function outboundShowTab(tab, load = true) {
     const asked = tab;
@@ -5026,13 +4317,10 @@ function outboundShowTab(tab, load = true) {
     routerSyncSubpage('outbound', tab, tab !== asked);
     showPageTab('outbound', tab);
     if (!load || currentTab !== 'outbound') return;
-    // An opened tab shows what is there now, as the page did on its own
     if (tab === 'suppressions') loadSuppressionsTab();
     else if (!isFeatureDisabled('queue')) loadQueue();
 }
 
-// The page opened: the queue (also for the summary and the sidebar counter),
-// and the suppressions: their list on their tab, otherwise their count
 function loadOutbound() {
     applyTabFeatures('outbound');
     const queueOn = !isFeatureDisabled('queue'), suppressionsOn = !isFeatureDisabled('suppressions');
@@ -5046,7 +4334,6 @@ function loadOutbound() {
     else if (suppressionsOn) loadSuppressionStats();
 }
 
-// quiet (the refresh): a read that fails leaves the rules shown as they are
 async function loadQuarantineRules({ quiet = false } = {}) {
     const container = document.getElementById('quarantine-rules-list');
     if (!container) return;
@@ -5063,7 +4350,6 @@ async function loadQuarantineRules({ quiet = false } = {}) {
         const tabCount = document.getElementById('quarantine-tab-n-rules');
         if (tabCount) { tabCount.textContent = activeCount || ''; tabCount.classList.toggle('hidden', !activeCount); }
         
-        // Drawn again only when something changed, the focus kept on its row (the refresh calls this too)
         if (!data.data || data.data.length === 0) {
             uiReplaceKeepingFocus(container, '<p class="ui-empty">No rules configured. Click "Add Rule" to create one.</p>');
             return;
@@ -5110,15 +4396,11 @@ function showEditQuarantineRuleModal(ruleId) {
 }
 
 function showAddRuleFromQuarantine(sender, recipient, subject) {
-    // Pre-fill with data from the quarantine email
     const senderDomain = sender.includes('@') ? sender.split('@').pop() : '';
     const prefill = { sender, recipient, subject, senderDomain };
     _showQuarantineRuleModal(null, prefill);
 }
 
-// A Contains rule is saved as a regex that only escapes its text. Read such a
-// rule back as Contains with the plain text, so saving it again does not escape
-// it twice; any other regex is Regex, with or without a leading ^.
 const QRULE_REGEX_SPECIAL = '.*+?^${}()|[]\\';
 function quarantineRuleMatchMode(rule) {
     const value = rule.match_value || '';
@@ -5136,10 +4418,6 @@ function quarantineRuleMatchMode(rule) {
     return { mode: 'contains', value: text };
 }
 
-// Earlier versions escaped a Contains rule's text again when it was edited, so
-// the rule came to look for backslashes. A Contains rule whose text is itself
-// only escaped text may be one of those: its Repair saves that text as the
-// pattern, which removes one level of escaping. Null for any other rule.
 function quarantineRuleRepair(rule) {
     const ruleMode = quarantineRuleMatchMode(rule);
     if (ruleMode.mode !== 'contains' || !ruleMode.value.includes('\\')) return null;
@@ -5152,14 +4430,12 @@ function _showQuarantineRuleModal(rule, prefill) {
     const title = isEdit ? 'Edit Rule' : 'Add Quarantine Rule';
     const ruleMode = isEdit ? quarantineRuleMatchMode(rule) : { mode: 'exact', value: '' };
 
-    // Determine default values: edit mode uses rule data, prefill uses quarantine data
     const defaultName = isEdit ? escapeHtml(rule.name) : (prefill ? escapeHtml(`Rule for ${prefill.sender}`) : '');
     const defaultMatchType = isEdit ? rule.match_type : (prefill ? 'sender' : 'sender');
     const defaultMatchValue = isEdit ? escapeHtml(ruleMode.value) : (prefill ? escapeHtml(prefill.sender) : '');
     const defaultAction = isEdit ? rule.action : 'release';
     const defaultNotes = isEdit && rule.notes ? escapeHtml(rule.notes) : '';
     
-    // For pre-fill mode, provide quick-fill buttons for sender/domain/recipient
     const prefillButtons = prefill ? `
         <div class="ui-qr-prefill">
             <span class="ui-label">Quick fill from email:</span>
@@ -5225,7 +4501,6 @@ function qrulePrefill(matchType, value) {
     const nameEl = document.getElementById('qrule-name');
     if (typeEl) typeEl.value = matchType;
     if (valueEl) valueEl.value = value;
-    // Update rule name if it's still auto-generated
     if (nameEl && nameEl.value.startsWith('Rule for ')) {
         const labels = { sender: 'Sender', sender_domain: 'Domain', recipient: 'Recipient' };
         nameEl.value = `${labels[matchType] || matchType}: ${value}`;
@@ -5244,7 +4519,6 @@ function updateQRuleMatchHelp() {
     helpEl.textContent = hints[mode] || '';
 }
 
-// Close, Cancel, Escape and Back ask before dropping typed changes; a save closes at once
 function closeQuarantineRuleModal(saved = false) {
     const overlay = document.getElementById('quarantine-rule-modal-overlay');
     if (!overlay) return;
@@ -5254,7 +4528,6 @@ function closeQuarantineRuleModal(saved = false) {
     } else uiCloseGuarded(overlay, () => overlay.remove());
 }
 
-// One save at a time: a double click does not create the rule twice
 function saveQuarantineRuleOnce(ruleId, button) {
     return uiOnce(button || 'quarantine-rule', () => saveQuarantineRule(ruleId), button, ruleId === null ? 'Creating...' : 'Saving...');
 }
@@ -5269,10 +4542,8 @@ async function saveQuarantineRule(ruleId) {
     if (!name) { uiFieldProblem(document.getElementById('qrule-name'), 'Enter a name for the rule.'); return; }
     if (!matchValue) { uiFieldProblem(document.getElementById('qrule-match-value'), 'Enter the value to match.'); return; }
     
-    // Convert match mode to is_regex + match_value
     let isRegex = false;
     if (matchMode === 'contains') {
-        // Auto-wrap in regex for "contains" mode (escape special chars)
         const escaped = matchValue.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
         matchValue = escaped;
         isRegex = true;
@@ -5284,7 +4555,6 @@ async function saveQuarantineRule(ruleId) {
     await _submitQuarantineRule(ruleId, body);
 }
 
-// Create (ruleId null) or update a rule, then draw the list again
 async function _submitQuarantineRule(ruleId, body, doneMessage) {
     if (!uiMayAct('quarantine')) return;
     try {
@@ -5333,7 +4603,6 @@ async function deleteQuarantineRule(ruleId, ruleName) {
     }
 }
 
-// A double click does not switch the rule back
 function toggleQuarantineRuleOnce(ruleId, button) {
     return uiOnce(`quarantine-rule-toggle:${ruleId}`, () => toggleQuarantineRule(ruleId), button);
 }
@@ -5368,7 +4637,6 @@ async function testQuarantineRules() {
             return;
         }
         
-        // Group matches by rule
         const byRule = {};
         for (const m of data.matches) {
             const key = m.rule_id;
@@ -5404,7 +4672,6 @@ async function testQuarantineRules() {
 
         document.getElementById('qrule-test-modal')?.remove();
         uiLayerOpener(opener);
-        // Results only, nothing typed: a click outside closes it
         const closeTest = () => document.getElementById('qrule-test-modal')?.remove();
         uiDialog({
             id: 'qrule-test-modal', title: 'Test Results', size: 'sm', close: closeTest, backdropClose: closeTest, bodyClass: 'ui-form',
@@ -5434,7 +4701,6 @@ function toggleQuarantineRuleHistory() {
     }
 }
 
-// quiet (the refresh): no Loading, and drawn again only when something changed
 async function loadQuarantineRuleHistory({ quiet = false } = {}) {
     const container = document.getElementById('quarantine-rules-history-list');
     if (!container) return;
@@ -5459,17 +4725,17 @@ async function loadQuarantineRuleHistory({ quiet = false } = {}) {
             </div>
         `).join('')}</div>`);
     } catch (err) {
-        // A refresh that failed leaves the history as it was
         if (quiet) return;
         uiReplaceKeepingFocus(container, `<p class="ui-empty ui-text-fail">Failed: ${escapeHtml(uiErrorText(err))}</p>`);
     }
 }
 
-// =============================================================================
-// MESSAGES TAB (UNIFIED VIEW)
-// =============================================================================
-
 function applyMessagesFilters() {
+    readMessagesFilters();
+    loadMessages();
+}
+
+function readMessagesFilters() {
     currentFilters.messages = messagesWithExact({
         search: document.getElementById('messages-filter-search').value,
         sender: document.getElementById('messages-filter-sender').value,
@@ -5488,10 +4754,8 @@ function applyMessagesFilters() {
             .filter(key => kept[key]).map(key => [key, kept[key]]));
     }
     currentPage.messages = 1;
-    loadMessages();
 }
 
-// The filters panel next to the search (sender, recipient, user, IP)
 function toggleMessagesFilters(open) {
     const panel = document.getElementById('messages-more-filters');
     const btn = document.getElementById('messages-filters-btn');
@@ -5502,16 +4766,12 @@ function toggleMessagesFilters(open) {
     if (show) { const first = panel.querySelector('input'); if (first) first.focus(); }
 }
 
-// The filters the Filters button counts; with the bar's own, any of them on narrows the list
 const MESSAGES_MORE_FILTERS = ['sender', 'recipient', 'user', 'ip', 'address', 'domain'];
 function messagesFiltersOn(f = currentFilters.messages || {}) {
     return !!(MESSAGES_MORE_FILTERS.some(k => f[k]) || f.search || f.status || f.direction || f.start_date || f.end_date || f.date_range);
 }
 
-// How many filters are on, for the button badge and the Clear filters link
 function updateMessagesFilterState() {
-    // Filters set since by anything but the card's (openMessagesRange, a search): its whole values went with them
-    if (messagesExact && messagesExact.filters && currentFilters.messages !== messagesExact.filters) messagesExact = null;
     const f = currentFilters.messages || {};
     const advanced = MESSAGES_MORE_FILTERS.filter(k => f[k]).length;
     const any = messagesFiltersOn(f);
@@ -5521,10 +4781,9 @@ function updateMessagesFilterState() {
     if (button) button.setAttribute('aria-label', advanced ? `Filters, ${advanced} in use` : 'Filters');
     const clear = document.getElementById('messages-clear-filters');
     if (clear) clear.classList.toggle('hidden', !any);
-    // The whole values an entity card set, as the Security page's filter chip (security.js renderSecurityOverview)
     const chips = document.getElementById('messages-exact');
     if (chips) {
-        const parts = messagesExact && messagesExact.filters === f ? messagesExactParts(messagesExact) : [];
+        const parts = messagesExact ? messagesExactParts(messagesExact) : [];
         chips.innerHTML = parts.length ? `<span class="ui-sec-filter" title="Matched whole, not as a part of a longer value"><span>${parts.map(([label, value]) =>
             `${escapeHtml(label)} <bdi>${escapeHtml(value)}</bdi>`).join(', ')}</span><button type="button" onclick="clearMessagesExact()" aria-label="Remove this filter" title="Remove this filter">&times;</button></span>` : '';
     }
@@ -5538,8 +4797,6 @@ function clearMessagesFilters() {
     document.getElementById('messages-filter-user').value = '';
     document.getElementById('messages-filter-status').value = '';
     document.getElementById('messages-filter-ip').value = '';
-    messagesExact = null;
-    // Reset date range
     document.getElementById('messages-date-range').value = '';
     document.getElementById('messages-start-date').value = '';
     document.getElementById('messages-end-date').value = '';
@@ -5547,26 +4804,19 @@ function clearMessagesFilters() {
     document.getElementById('messages-date-range-end').value = '';
     document.getElementById('messages-date-range-label').textContent = 'All Time';
     setMessagesDatePresetActive('');
-    currentFilters.messages = {};
+    setMessagesFilters({});
     currentPage.messages = 1;
     loadMessages();
 }
 
-// =============================================================================
-// MESSAGES DATE RANGE PICKER
-// =============================================================================
-
-// Marks the chosen preset chip; null marks none (a custom range).
 function setMessagesDatePresetActive(preset) {
     document.querySelectorAll('.messages-date-preset-btn').forEach(btn => {
         btn.setAttribute('aria-pressed', String(preset !== null && btn.getAttribute('data-preset') === preset));
     });
 }
 
-// Where the facets are hidden: outcome, direction and time open their choices in a panel, one at a time
 const MESSAGES_PICKERS = ['status', 'direction', 'time'];
 
-// They are pickers (utils.js, uiPicker): this opens one, or closes them and gives the focus back
 function toggleMessagesPicker(kind, open) {
     if (kind && open !== false) {
         uiPickerOpen(`messages-${kind}`);
@@ -5577,7 +4827,6 @@ function toggleMessagesPicker(kind, open) {
     });
 }
 
-// The custom range in the Time picker starts from the one in use
 function messagesTimePanelOpened() {
     document.getElementById('messages-time-start').value = document.getElementById('messages-date-range-start').value;
     document.getElementById('messages-time-end').value = document.getElementById('messages-date-range-end').value;
@@ -5601,9 +4850,6 @@ function toggleMessagesDateRangePicker() {
     arrow.style.transform = isHidden ? 'rotate(180deg)' : '';
 }
 
-// Where a Messages time preset starts ('' for all time): today is the day in the
-// app's zone, and "Last 7 Days" is the last 7 x 24 hours, the same window as
-// Mailbox Stats and the Dashboard, also across a daylight saving change
 function messagesPresetStart(preset, now = new Date()) {
     if (preset === 'today') return zonedDayStart(zonedDateString(now)).toISOString();
     const days = { '7days': 7, '30days': 30, '90days': 90 }[preset];
@@ -5611,23 +4857,17 @@ function messagesPresetStart(preset, now = new Date()) {
     return new Date(new Date(now).getTime() - days * 86400000).toISOString();
 }
 
-// The filters as a request sends them: a time preset covers its period up to
-// now, so its start is worked out at every request (Today moves to the next day
-// at midnight) and it has no end; a custom range, or one opened from the chart,
-// stays as it was chosen
 const MESSAGES_ROLLING_PRESETS = ['today', '7days', '30days', '90days'];
 function messagesRangeFilters(filters, now = new Date()) {
     if (!MESSAGES_ROLLING_PRESETS.includes(filters.date_range)) return filters;
     return { ...filters, start_date: messagesPresetStart(filters.date_range, now), end_date: '' };
 }
 
-// The Messages period set to a preset, without applying it
 function messagesShowDatePreset(preset, now = new Date()) {
     const labels = { '': 'All Time', 'today': 'Today', '7days': 'Last 7 Days', '30days': 'Last 30 Days', '90days': 'Last 90 Days' };
     document.getElementById('messages-date-range-label').textContent = labels[preset] || 'All Time';
     document.getElementById('messages-date-range').value = preset;
 
-    // The range the API reads; All Time has none
     const startDate = messagesPresetStart(preset, now);
     document.getElementById('messages-start-date').value = startDate;
     document.getElementById('messages-end-date').value = startDate ? new Date(now).toISOString() : '';
@@ -5638,7 +4878,6 @@ function messagesShowDatePreset(preset, now = new Date()) {
 function selectMessagesDatePreset(preset, now = new Date()) {
     messagesShowDatePreset(preset, now);
 
-    // Close dropdown and apply
     document.getElementById('messages-date-range-dropdown').classList.add('hidden');
     document.getElementById('messages-date-range-arrow').style.transform = '';
     toggleMessagesTimePanel(false);
@@ -5654,8 +4893,6 @@ function applyMessagesCustomDateRange() {
         return;
     }
 
-    // The range is whole days in the app's zone: from the first day's start to the
-    // last moment before the day after the last one (23 or 25 hours on a DST change)
     const startDate = zonedDayStart(startInput);
     const endDate = new Date(zonedDayStart(addDaysToDateString(endInput, 1)).getTime() - 1);
 
@@ -5668,20 +4905,17 @@ function applyMessagesCustomDateRange() {
     document.getElementById('messages-start-date').value = startDate.toISOString();
     document.getElementById('messages-end-date').value = endDate.toISOString();
 
-    // The label names the days as picked
     const fmt = day => formatDayKey(day);
     document.getElementById('messages-date-range-label').textContent = `${fmt(startInput)} - ${fmt(endInput)}`;
 
     setMessagesDatePresetActive(null);
 
-    // Close dropdown and apply
     document.getElementById('messages-date-range-dropdown').classList.add('hidden');
     document.getElementById('messages-date-range-arrow').style.transform = '';
     toggleMessagesTimePanel(false);
     applyMessagesFilters();
 }
 
-// Close messages date range picker on outside click
 document.addEventListener('click', function(e) {
     const container = document.getElementById('messages-date-range-picker-container');
     if (container && !container.contains(e.target)) {
@@ -5693,10 +4927,6 @@ document.addEventListener('click', function(e) {
         }
     }
 });
-
-// =============================================================================
-// MESSAGES FACETS (counts per outcome and direction, /api/messages/facets)
-// =============================================================================
 
 const MESSAGE_STATUS_FACETS = [['', 'All messages'], ['delivered', 'Delivered'], ['deferred', 'Deferred'], ['bounced', 'Bounced'],
     ['rejected', 'Rejected'], ['spam', 'Spam'], ['discarded', 'Discarded (Sieve)']];
@@ -5711,7 +4941,6 @@ function messagesFilterParams(filters) {
     return params;
 }
 
-// Choosing a facet sets the outcome or direction filter and reloads the list
 function setMessagesFacet(kind, value) {
     const select = document.getElementById(kind === 'status' ? 'messages-filter-status' : 'messages-filter-direction');
     if (select) select.value = value;
@@ -5719,7 +4948,6 @@ function setMessagesFacet(kind, value) {
     applyMessagesFilters();
 }
 
-// In the facets column the choices are toggle buttons; in a picker they are its options
 function renderFacetList(kind, entries, counts, current, asOptions = false) {
     return entries.map(([value, label]) => {
         const count = counts ? counts[value || 'all'] : undefined;
@@ -5731,7 +4959,6 @@ function renderFacetList(kind, entries, counts, current, asOptions = false) {
     }).join('');
 }
 
-// gen: the list these counts belong to; counts for an older list are dropped
 async function loadMessageFacets(filters, gen = messagesGen) {
     const statusList = document.getElementById('messages-facet-status');
     const directionList = document.getElementById('messages-facet-direction');
@@ -5749,14 +4976,12 @@ async function loadMessageFacets(filters, gen = messagesGen) {
     const direction = filters.direction || '';
     if (statusList) statusList.innerHTML = renderFacetList('status', MESSAGE_STATUS_FACETS, data && data.status, status);
     if (directionList) directionList.innerHTML = renderFacetList('direction', MESSAGE_DIRECTION_FACETS, data && data.direction, direction);
-    // The time presets get their counts like the other facets
     document.querySelectorAll('.messages-date-preset-btn').forEach(btn => {
         const count = data && data.time ? data.time[btn.dataset.preset || 'all'] : undefined;
         let small = btn.querySelector('small');
         if (!small) { small = document.createElement('small'); btn.appendChild(small); }
         small.textContent = count === undefined ? '' : String(count);
     });
-    // Phones and tablets: the same facets behind the Outcome and Direction buttons, which name the choice in use
     const pick = (kind, entries, counts, current, anyLabel) => {
         const options = document.getElementById(`messages-${kind}-options`);
         if (options) options.innerHTML = renderFacetList(kind, entries, counts, current, true);
@@ -5768,13 +4993,11 @@ async function loadMessageFacets(filters, gen = messagesGen) {
     };
     pick('status', MESSAGE_STATUS_FACETS, data && data.status, status, 'All');
     pick('direction', MESSAGE_DIRECTION_FACETS, data && data.direction, direction, 'Any');
-    // Options redrawn while the picker is open keep the focus inside it
     uiPickerRefocus();
     const timeButton = document.getElementById('messages-time-pick');
     if (timeButton) timeButton.classList.toggle('is-set', !!(filters.start_date || filters.end_date));
 }
 
-// Without a Message-ID: no outcome or direction to count; the time presets count this list
 async function messagesNoIdFacets(filters, gen = messagesGen) {
     const presets = document.querySelectorAll('.messages-date-preset-btn');
     const show = time => presets.forEach(btn => {
@@ -5783,7 +5006,6 @@ async function messagesNoIdFacets(filters, gen = messagesGen) {
         if (!small) { small = document.createElement('small'); btn.appendChild(small); }
         small.textContent = count === undefined ? '' : String(count);
     });
-    // The whole list's counts do not stay while these come
     show(null);
     const timeButton = document.getElementById('messages-time-pick');
     if (timeButton) timeButton.classList.toggle('is-set', !!(filters.start_date || filters.end_date));
@@ -5799,8 +5021,6 @@ async function messagesNoIdFacets(filters, gen = messagesGen) {
     }
 }
 
-// After the list renders: keep the open message marked, and on wide screens
-// show the first message in the reading pane, as a mail client does.
 function afterMessagesRendered(data) {
     if (typeof markSelectedMessageRow === 'function' && window.openMessageKey) markSelectedMessageRow(window.openMessageKey);
     const modal = document.getElementById('message-modal');
@@ -5810,14 +5030,9 @@ function afterMessagesRendered(data) {
     }
 }
 
-// A new list. quiet keeps the one shown until the answer replaces it; rows reads
-// that many at once (500 a request, from the first page's watermark); applyIf,
-// asked when everything has come, may still keep the list shown; toEnd scrolls
-// to its end (oldest first, where new mail is)
 async function loadMessages({ quiet = false, rows = 50, toEnd = false, applyIf = null } = {}) {
     const container = document.getElementById('messages-logs');
     renderMessagesSort();
-    // A new list: whatever the older one still has on its way is aborted
     const gen = messagesNewGeneration();
     messagesFullLoad = true;
     if (!quiet) container.innerHTML = '<div class="ui-loading" role="status"><div class="loading"></div><p>Loading...</p></div>';
@@ -5826,7 +5041,6 @@ async function loadMessages({ quiet = false, rows = 50, toEnd = false, applyIf =
     else loadMessageFacets(filters, gen);
     updateMessagesFilterState();
     renderMessagesNoId();
-    // The list grows as it scrolls, so a new load always starts at the top
     if (!quiet) container.scrollTop = 0;
     try {
         const timeout = quiet ? PAGE_REFRESH_TIMEOUT : 0;
@@ -5844,12 +5058,10 @@ async function loadMessages({ quiet = false, rows = 50, toEnd = false, applyIf =
             data.total = page.total ?? data.total;
         }
         if (gen !== messagesGen) return;
-        // The user moved on meanwhile: the list stays, and the new mail is offered
         if (applyIf && !applyIf()) {
             renderMessagesNew();
             return;
         }
-        // A quiet read that brings nothing new leaves the list as it is
         if (quiet && messagesSameAsShown(data) && (data.data || []).length === (lastDataCache.messages.data || []).length) {
             if (data.watermark != null) messagesNew.watermark = data.watermark;
             messagesNew.count = 0;
@@ -5862,14 +5074,11 @@ async function loadMessages({ quiet = false, rows = 50, toEnd = false, applyIf =
         refreshMessagesNoId();
         if (toEnd) messagesScrollToEnd(container);
     } catch (error) {
-        // A newer load is on its way or shown (this one may have been aborted for it)
         if (gen !== messagesGen) return;
-        // A quiet load that failed leaves the list as it was
         if (quiet) return;
         console.error('Failed to load messages:', error);
         container.innerHTML = `<p class="ui-empty ui-text-fail">Failed to load messages: ${escapeHtml(uiSentence(uiErrorText(error)))} <button type="button" class="ui-link-row ui-link" onclick="loadMessages()">Try again</button></p>`;
         setMessagesCount(null);
-        // Nothing is shown: no next page, and the next refresh draws what it gets
         messagesPaging.page = 1;
         messagesPaging.cursor = null;
         messagesPaging.total = 0;
@@ -5880,23 +5089,14 @@ async function loadMessages({ quiet = false, rows = 50, toEnd = false, applyIf =
     }
 }
 
-// =============================================================================
-// STATUS TAB
-// =============================================================================
-
-// ---------- Status page ----------
-// What each loader found, so the attention list and the tab counters can be
-// built from one place once any of them finishes
 const statusState = { containers: null, blocklists: null, jobs: null };
 let statusTab = 'server';
 
-// A dashboard card opens its tab on the Status page
 function openStatusTab(tab) {
     statusShowTab(tab);
     navigateTo('status');
 }
 
-// One summary of the background jobs for Status and the dashboard
 function summarizeJobs(jobs) {
     const all = statusJobCategories(jobs || {}).flatMap(cat => cat.jobs.filter(j => j[2]));
     const isOff = job => job.feature_disabled === true || job.status === 'disabled' || job.enabled === false;
@@ -5946,19 +5146,15 @@ function statusJobFilter(filter) {
             if (show) shown++;
         });
         group.hidden = shown === 0;
-        // Filtered: open what matches. All: back to failures plus what the user opened
         group.open = filter === 'all' ? (group.hasAttribute('data-failed') || statusJobsOpen.has(group.dataset.group)) : shown > 0;
     });
 }
 
-// A clickable link to a provider's own lookup page
 function blocklistLookupLink(r, label) {
     if (!/^https:\/\//.test(r.info_url || '')) return '';
     return `<a href="${escapeHtml(r.info_url)}" target="_blank" rel="noopener noreferrer" class="ui-btn ui-btn-sm" title="Look up on ${escapeHtml(r.name)}">${label}</a>`;
 }
 
-// Needs attention: stopped containers, blocklist listings and failed jobs,
-// each with the action that resolves it
 function renderStatusAttention() {
     const box = document.getElementById('status-attention');
     const count = document.getElementById('status-attention-count');
@@ -5996,12 +5192,7 @@ function renderStatusAttention() {
         </div>`).join('');
 }
 
-// Set while the page's refresh reads Status: a read that fails keeps what is
-// shown, and a section with selected text or the keyboard on one of its
-// controls is drawn on the next refresh (checked when the answer is drawn)
 let statusQuiet = false;
-// A failed read in a quiet refresh keeps what a panel shows; a panel that only shows the
-// spinner (it was loading, or Try again was pressed) shows the failure
 function statusFailed(el, html) {
     if (el && (!statusQuiet || el.querySelector('.ui-loading'))) el.innerHTML = html;
 }
@@ -6035,7 +5226,6 @@ function setStatusKpi(id, value, tone) {
     el.className = tone ? `ui-${tone}` : '';
 }
 
-// The version of this app, and whether an update is out
 async function loadStatusAppVersion() {
     const note = document.getElementById('status-kpi-version-note');
     try {
@@ -6073,33 +5263,20 @@ async function loadStatusContainers() {
     try {
         const response = await authenticatedFetch('/api/status/containers');
         if (!response.ok) throw await responseError(response);
-        let data = await response.json();
+        const data = await response.json();
 
         const container = document.getElementById('status-containers');
 
-        let containersData = data.containers || data;
-
-        if (Array.isArray(containersData) && containersData.length === 1 && typeof containersData[0] === 'object') {
-            containersData = containersData[0];
-        }
-
-        let containersList = [];
-        if (Array.isArray(containersData)) {
-            containersList = containersData;
-        } else if (containersData && typeof containersData === 'object') {
-            containersList = Object.entries(containersData).map(([key, value]) => ({
-                name: (value.name || key).replace('-mailcow', ''),
-                container: key,
-                state: value.state || 'unknown',
-                started_at: value.started_at || null,
-                ignored: !!value.ignored
-            }));
-        }
+        const containersList = Object.entries(data.containers).map(([key, value]) => ({
+            name: (value.name || key).replace('-mailcow', ''),
+            container: key,
+            state: value.state || 'unknown',
+            started_at: value.started_at || null,
+            ignored: !!value.ignored
+        }));
 
         const note = document.getElementById('status-containers-note');
         if (containersList.length > 0) {
-            // Only 'running' is running; paused, exited, restarting, dead and the rest count as stopped
-            // Ignored containers (stopped on purpose) are shown but never counted
             const isRunning = c => (c.state || 'unknown').toString().toLowerCase().trim() === 'running';
             const counted = containersList.filter(c => !c.ignored);
             const running = counted.filter(isRunning).length;
@@ -6113,15 +5290,12 @@ async function loadStatusContainers() {
             setStatusTabCount('server', stopped, true);
             statusState.containers = containersList.map(c => ({ ...c, running: isRunning(c) }));
 
-            // Stopped containers first, so they are seen; ignored ones last
             const rank = c => c.ignored ? 2 : (isRunning(c) ? 1 : 0);
             const ordered = [...containersList].sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
-            // One tile per container: state dot, name, uptime, and Ignore where it applies
             if (!statusHold(container)) container.innerHTML = `<div class="ui-ctrs">${ordered.map(c => {
                 const up = isRunning(c);
                 const since = c.started_at ? formatAgo(c.started_at).replace(' ago', '') : '';
                 const arg = escapeJsArg(c.container);
-                // A stopped container can be ignored; an ignored one can be counted again
                 const action = c.ignored
                     ? `<button type="button" class="ui-btn ui-btn-sm" onclick="setContainerIgnored('${arg}', false)" data-acts="status">Stop ignoring</button>`
                     : (up ? '' : `<button type="button" class="ui-btn ui-btn-sm" onclick="setContainerIgnored('${arg}', true)" title="Stop counting and alerting on ${escapeHtml(c.name)}" data-acts="status">Ignore</button>`);
@@ -6153,7 +5327,6 @@ async function loadStatusSystem() {
     try {
         console.log('Loading System Info...');
 
-        // Fetch both system info and version status
         const [infoResponse, versionResponse] = await Promise.all([
             authenticatedFetch('/api/status/mailcow-info'),
             authenticatedFetch('/api/status/version')
@@ -6170,9 +5343,8 @@ async function loadStatusSystem() {
 
         let versionHtml = '';
         if (versionData && versionData.current_version) {
-            // Store data globally to avoid passing complex strings in HTML
             window.mailcowUpdateVersion = versionData.latest_version;
-            window.mailcowUpdateName = versionData.name || ''; // Store release title
+            window.mailcowUpdateName = versionData.name || '';
             window.mailcowUpdateChangelog = versionData.changelog || 'No changelog available';
 
             const updateBadge = versionData.update_available
@@ -6198,7 +5370,6 @@ async function loadStatusSystem() {
 
 function showMailcowUpdateModal() {
     if (window.mailcowUpdateVersion && window.mailcowUpdateChangelog) {
-        // Use release name as title if available, otherwise fallback to version
         const title = window.mailcowUpdateName
             ? `Update Available: ${window.mailcowUpdateName}`
             : `mailcow Update: ${window.mailcowUpdateVersion}`;
@@ -6220,16 +5391,10 @@ async function loadStatusStorage() {
             throw await responseError(response);
         }
 
-        let rawData = await response.json();
-        console.log('Storage info data:', rawData);
+        const data = await response.json();
+        console.log('Storage info data:', data);
 
-        // Handle mailcow API format: [{ "type": "info", "disk": "/dev/sdb1", ... }]
-        let data = rawData;
-        if (Array.isArray(rawData) && rawData.length > 0) {
-            data = rawData[0]; // Take first element
-        }
         const usedPercent = parseInt(data.used_percent) || 0;
-        // Amber above 75%, red above 90%
         const level = usedPercent > 90 ? 'fail' : usedPercent > 75 ? 'warn' : 'ok';
         setStatusKpi('status-kpi-storage', `${data.used_percent || `${usedPercent}%`} used`, level === 'ok' ? '' : level);
         const storageNote = document.getElementById('status-kpi-storage-note');
@@ -6258,16 +5423,12 @@ async function loadStatusExtended() {
         const data = await response.json();
         console.log('Extended status data loaded:', data);
 
-        // Render Import Status
         renderStatusImport(data.import_status || {});
 
-        // Render Correlation Status
         renderStatusCorrelation(data.correlation_status || {}, data.recent_incomplete_correlations || [], (data.configuration || {}).max_correlation_age_minutes);
 
-        // Render Background Jobs
         renderStatusJobs(data.background_jobs || {});
 
-        // Load Blacklist Status separately (awaited, so the refresh knows when it is drawn)
         await loadBlacklistStatus();
 
     } catch (error) {
@@ -6282,7 +5443,6 @@ function checkHost(hostname) {
     return checkBlacklists(true, hostname);
 }
 
-// The Check all now button as the page has it, put back when a check ends
 let blacklistCheckBtnIdle = null;
 
 async function checkBlacklists(force = false, host = null) {
@@ -6304,9 +5464,7 @@ async function checkBlacklists(force = false, host = null) {
 
     showToast('Starting blacklist check...', 'info');
 
-    // Inject temporary progress bar at the top
     if (container) {
-        // Remove existing temp progress if any
         const existing = document.getElementById('blacklist-temp-progress');
         if (existing) existing.remove();
 
@@ -6328,7 +5486,6 @@ async function checkBlacklists(force = false, host = null) {
         container.insertAdjacentHTML('afterbegin', progressHtml);
     }
 
-    // Start progress polling
     let progressInterval = setInterval(async () => {
         try {
             const progressRes = await authenticatedFetch('/api/blacklist/progress');
@@ -6347,15 +5504,13 @@ async function checkBlacklists(force = false, host = null) {
                 if (!progress.in_progress && progress.current >= progress.total) {
                     clearInterval(progressInterval);
                     showToast('Blacklist check completed', 'success');
-                    // Remove progress bar
                     const temp = document.getElementById('blacklist-temp-progress');
                     if (temp) temp.remove();
 
-                    await loadBlacklistStatus(); // Refresh data!
+                    await loadBlacklistStatus();
                 }
             }
         } catch (e) {
-            // Ignore progress errors
         }
     }, 1000);
 
@@ -6370,9 +5525,6 @@ async function checkBlacklists(force = false, host = null) {
         }
         const body = await response.json().catch(() => null);
         if (body && body.status === 'busy') {
-            // Another check runs (the schedule's, an entity card's): nothing was started.
-            // Checking every host, the progress shown is that check's, and the list
-            // is read again when it ends; one host stops here
             showToast(body.message || 'A blocklist check is already running. Try again when it is done.', 'warning');
             if (host) {
                 clearInterval(progressInterval);
@@ -6382,8 +5534,6 @@ async function checkBlacklists(force = false, host = null) {
             return;
         }
         if (host) {
-            // Single-host checks return the finished result directly - the
-            // all-hosts path returns immediately and the poller finishes up
             clearInterval(progressInterval);
             const temp = document.getElementById('blacklist-temp-progress');
             if (temp) temp.remove();
@@ -6409,12 +5559,8 @@ async function loadBlacklistStatus() {
     const container = document.getElementById('status-blacklist');
     if (!container) return;
 
-    // Skip refresh if details are expanded (to prevent closing)
-    // We check if any sub-details are open
     const detailsElement = container.querySelector('details[open]');
     if (detailsElement) {
-        // console.log('Skipping blacklist refresh: details are expanded');
-        // return;
     }
 
     try {
@@ -6442,13 +5588,11 @@ async function loadDashboardBlacklistSummary() {
             setDashKpi('dash-kpi-blocklists', '-', '', 'No check yet; the first one runs by itself');
             return;
         }
-        // Count addresses, like the Status page, and name the listed ones
         const hosts = data.hosts || [];
         const listedHosts = hosts.filter(h => h.status === 'listed');
         const checked = data.checked_at ? `checked ${formatAgo(data.checked_at)}` : '';
         const fig = data.figure && data.figure.valid ? data.figure : null;
         if (data.status === 'listed') {
-            // The figure its trend samples: listed of all monitored addresses
             setDashKpi('dash-kpi-blocklists', fig ? `${fig.value} of ${fig.of} listed` : `${listedHosts.length || data.hosts_listed || 1} of ${hosts.length || 1} listed`, 'fail',
                 listedHosts.map(h => `${h.hostname} on ${h.listed_count} of ${h.total_blacklists || '?'}`).join(', '));
         } else if (data.status === 'error') {
@@ -6480,14 +5624,12 @@ function renderBlacklistStatus(data) {
         return;
     }
 
-    // Addresses on at least one list, out of the checked addresses (same as the dashboard)
     const withData = data.hosts.filter(host => host.has_data);
     const listed = withData.filter(host => (host.listed_count || 0) > 0).length;
     setStatusKpi('status-kpi-blocklists', withData.length ? `${listed} of ${withData.length} listed` : '-', listed > 0 ? 'fail' : '');
     setStatusTabCount('blocklists', listed, true);
     statusState.blocklists = data.hosts;
 
-    // Every list the admin ignores, once, with the way back
     const ignoredLists = new Map();
     data.hosts.forEach(host => (host.results || []).forEach(r => { if (r.ignored && r.zone) ignoredLists.set(r.zone, r.name); }));
     const blNote = document.getElementById('status-kpi-blocklists-note');
@@ -6495,7 +5637,6 @@ function renderBlacklistStatus(data) {
     const blSummary = document.getElementById('status-blacklist-summary');
     if (blSummary) blSummary.textContent = `${data.hosts.length} address${data.hosts.length === 1 ? '' : 'es'}${listed ? `, ${listed} listed` : ''}`;
 
-    // Preserve which hosts show all their lists, and a scan's progress at the top
     const progress = document.getElementById('blacklist-temp-progress');
     const openStates = {};
     container.querySelectorAll('details').forEach(el => {
@@ -6737,7 +5878,6 @@ function statusJobCategories(jobs) {
 }
 
 function renderStatusJobsTable(container, categories, jobs) {
-    // Failed and switched-off jobs feed the attention list, the card and the filter
     const summary = summarizeJobs(jobs);
     const all = summary.all;
     const isOff = summary.isOff;
@@ -6756,13 +5896,11 @@ function renderStatusJobsTable(container, categories, jobs) {
     const chevron = '<svg class="ui-collapse-chevron" width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>';
     let html = '';
     for (const cat of categories) {
-        // Skip categories where no jobs exist
         const validJobs = cat.jobs.filter(j => j[2]);
         if (validJobs.length === 0) continue;
         const catFailed = validJobs.filter(j => isFailed(j[2])).length;
         const catOff = validJobs.filter(j => isOff(j[2])).length;
         const note = [catFailed ? `<span class="ui-text-fail">${catFailed} failed</span>` : 'all OK', catOff ? `${catOff} off` : ''].filter(Boolean).join(' · ');
-        // A group with a failure opens by itself; the others keep what the user chose
         const open = catFailed > 0 || statusJobsOpen.has(cat.title);
         html += `
             <details class="ui-panel ui-collapse ui-jg" data-group="${escapeHtml(cat.title)}"${catFailed ? ' data-failed' : ''}${open ? ' open' : ''} ontoggle="statusJobGroupToggled(this)">
@@ -6775,42 +5913,31 @@ function renderStatusJobsTable(container, categories, jobs) {
     renderStatusAttention();
 }
 
-// Which job groups the user opened, so a refresh keeps them open
 const statusJobsOpen = new Set();
 function statusJobGroupToggled(el) {
-    // Only an unfiltered view records the choice; a filter opens groups by itself
     if (statusJobFilterValue !== 'all') return;
     if (el.open) statusJobsOpen.add(el.dataset.group); else statusJobsOpen.delete(el.dataset.group);
 }
 
-// The Run button of a job (Status > Jobs, Needs attention): it shows the run starting
 async function triggerBackgroundJob(jobKey, buttonEl, jobName = null) {
     if (!buttonEl) return;
 
-    // Disable button and show loading
     buttonEl.disabled = true;
     const originalContent = buttonEl.innerHTML;
-    // Keep width to prevent layout shift if possible, or just standard loading state
     buttonEl.innerHTML = '<span class="inline-block animate-spin w-3 h-3 border-2 border-current border-t-transparent rounded-full"></span> Running...';
     buttonEl.classList.add('opacity-50', 'cursor-not-allowed');
 
     try {
         await runBackgroundJob(jobKey, jobName);
     } finally {
-        // Re-enable button
         buttonEl.disabled = false;
         buttonEl.innerHTML = originalContent;
         buttonEl.classList.remove('opacity-50', 'cursor-not-allowed');
     }
 }
 
-// Run a job now (POST /api/settings/jobs/{job}/run), from any button or none. The
-// server checks the job can run (409 with the reason when it cannot) and is not
-// running already (409). Says how it went and resolves to 'started', 'running',
-// 'unavailable' or 'failed'
 async function runBackgroundJob(jobKey, jobName = null) {
     if (!uiMayAct('admin')) return;
-    // Use jobName if provided, otherwise fallback to jobKey
     const displayName = jobName || jobKey;
     try {
         const response = await authenticatedFetch(`/api/settings/jobs/${encodeURIComponent(jobKey)}/run`, {
@@ -6833,7 +5960,6 @@ async function runBackgroundJob(jobKey, jobName = null) {
 
         showToast(`Job "${displayName}" started successfully`, 'success');
 
-        // Refresh the status page after a short delay
         setTimeout(() => {
             loadStatusExtended();
         }, 1000);
@@ -6844,10 +5970,6 @@ async function runBackgroundJob(jobKey, jobName = null) {
         return 'failed';
     }
 }
-
-// =============================================================================
-// POSTFIX DETAILS MODAL
-// =============================================================================
 
 function showChangelogModal(changelog) {
     const modal = document.getElementById('changelog-modal');
@@ -6871,12 +5993,9 @@ function showChangelogModal(changelog) {
     }
 }
 
-// The changelog, help and update texts share one dialog: each opens at the top of
-// what it holds, not where the one before was scrolled to
 function revealChangelogModal(modal) {
     modal.classList.remove('hidden');
     document.body.style.overflow = 'hidden';
-    // Only once it is shown: a hidden element cannot be scrolled
     const body = modal.querySelector('.ui-dialog-body');
     if (body) body.scrollTop = 0;
     uiReadProgress(modal.querySelector('.ui-dialog-head'), body);
@@ -6893,10 +6012,6 @@ function closeChangelogModal() {
         }
     }
 }
-
-// =============================================================================
-// GEOIP RENDERING AND FLAGS
-// =============================================================================
 
 function getFlagUrl(countryCode, size = '24x18') {
     if (typeof countryCode !== 'string' || !/^[a-z]{2}$/i.test(countryCode)) {
@@ -6920,11 +6035,9 @@ function renderGeoIPInfo(rspamdData, size = '24x18') {
     const flagUrl = getFlagUrl(rspamdData.country_code, size);
     const [width, height] = size.split('x').map(Number);
 
-    // Use a list to store the parts of the info string
     let parts = [`<strong>${copyableText(ip)}</strong>`];
 
     if (rspamdData.country_name && flagUrl) {
-        // Wrap image and country name in a span to keep them together and aligned
         const countryPart =
             `<br><span style="display: inline-flex; align-items: baseline; gap: 4px; vertical-align: baseline; margin-top: 5px;">` +
             `<img src="${flagUrl}" alt="${escapeHtml(rspamdData.country_name)}" ` +
@@ -6943,7 +6056,6 @@ function renderGeoIPInfo(rspamdData, size = '24x18') {
         parts.push(`(${escapeHtml(rspamdData.asn_org)})`);
     }
 
-    // Use white-space: nowrap on the container if you want to prevent the whole line from breaking
     return `<p style="margin: 0;">Source: ${parts.join(' ')}</p>`;
 }
 
@@ -6959,11 +6071,9 @@ function renderGeoIPForDMARC(record, size = '24x18') {
         return escapeHtml(ip);
     }
 
-    // Build flag URL
     const flagUrl = getFlagUrl(record.country_code, size);
     const [width, height] = size.split('x').map(Number);
 
-    // Build location string
     let parts = [];
 
     if (record.country_name) {
@@ -6980,7 +6090,6 @@ function renderGeoIPForDMARC(record, size = '24x18') {
 
     const locationText = parts.join(', ');
 
-    // Return flag + location inline
     if (flagUrl && locationText) {
         return `<img src="${flagUrl}" alt="${escapeHtml(record.country_name || '')}" style="width:${width}px; height:${height}px; vertical-align:middle; margin-inline-end:4px;" onerror="this.style.display='none'">${locationText}`;
     }
@@ -6988,10 +6097,6 @@ function renderGeoIPForDMARC(record, size = '24x18') {
     return locationText || escapeHtml(ip);
 }
 
-
-// =============================================================================
-// PAGINATION & HELPER FUNCTIONS
-// =============================================================================
 
 function renderPagination(type, currentPage, totalPages) {
     if (totalPages <= 1) return '';
@@ -7021,10 +6126,6 @@ function loadLogs(type, page) {
     }
 }
 
-// =============================================================================
-// DARK MODE
-// =============================================================================
-
 function initDarkMode() {
     const theme = localStorage.getItem('theme');
     const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
@@ -7047,15 +6148,9 @@ function toggleDarkMode() {
     document.getElementById('theme-toggle-light-icon').classList.toggle('hidden');
 }
 
-// Initialize dark mode
 initDarkMode();
 
-// =============================================================================
-// MODAL EVENT LISTENERS
-// =============================================================================
-
 document.addEventListener('DOMContentLoaded', function () {
-    // Changelog modal event listeners
     const changelogModal = document.getElementById('changelog-modal');
     if (changelogModal) {
         changelogModal.addEventListener('click', function (e) {
@@ -7073,18 +6168,9 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 });
 
-// =============================================================================
-// HELP DOCUMENTATION MODAL
-// =============================================================================
-
 const DOCS_SITE_URL = 'https://shlomiporush.github.io/mailcow-logs-viewer/';
 const DOCS_REPO_URL = 'https://github.com/ShlomiPorush/mailcow-logs-viewer/blob/main/';
 
-// A help page is also a page of the documentation site (documentation/HelpDocs).
-// In the app its screenshots are left out, since the page itself is on screen,
-// and its relative links, which work on the site, point to the site instead.
-// A link to a section of the same page goes there too: the window's headings
-// have no anchors. docName is the file's name, such as Mailbox_Stats.
 function helpDocMarkdown(markdown, docName) {
     return markdown
         .replace(/^[ \t]*!\[[^\]]*\]\([^)\s]*\)[ \t]*$/gm, '')
@@ -7109,9 +6195,7 @@ function helpDocMarkdown(markdown, docName) {
         });
 }
 
-// title: the name the page shows, when it is not the document's file name
 async function showHelpModal(docName, title) {
-    // The window opens after the request; the focus goes back to this Help button
     const opener = layerLastAction || document.activeElement;
     try {
         const response = await authenticatedFetch(`/api/docs/${docName}`);
@@ -7122,7 +6206,6 @@ async function showHelpModal(docName, title) {
 
         const markdown = helpDocMarkdown(await response.text(), docName);
         uiLayerOpener(opener);
-        // Else the document's file name, read as words: Mailbox_Stats is Mailbox Stats
         showMarkdownModal(`Help - ${title || docName.replace(/_/g, ' ')}`, markdown);
 
     } catch (error) {
@@ -7147,21 +6230,12 @@ async function showHelpModal(docName, title) {
     }
 }
 
-// =============================================================================
-// CONSOLE LOG
-// =============================================================================
-
 console.log('[OK] mailcow Logs Viewer - Complete Frontend Loaded');
 console.log('Features: Dashboard, Messages, Postfix, Rspamd, Netfilter, Queue, Quarantine, Status, Mailbox Stats, Settings');
 console.log('UI: Dark mode, Modals with tabs, Responsive design');
 
-// =============================================================================
-// CONTAINER LOGS MODAL
-// =============================================================================
-
 let containerLogsInterval = null;
 
-// Whether the log is scrolled to its newest line (a few pixels short counts)
 function containerLogsAtEnd(content) {
     const box = content.parentElement;
     return !box || box.scrollHeight - box.scrollTop - box.clientHeight <= 4;
@@ -7170,8 +6244,6 @@ function containerLogsAtEnd(content) {
 async function fetchContainerLogs(silent = false) {
     const content = document.getElementById('container-logs-content');
 
-    // The refresh leaves the log as it is while the user selects text in it or
-    // reads further up, and while the browser tab is hidden
     if (content && silent && (uiTextHeld(content) || !containerLogsAtEnd(content) || document.hidden)) return;
 
     if (content && !silent) {
@@ -7201,7 +6273,6 @@ async function fetchContainerLogs(silent = false) {
                 }));
             }
 
-            // Auto-scroll to bottom if it was already at bottom or if it's the first load
             if (!silent || isScrolledToBottom) {
                 const container = content.parentElement;
                 if (container) {
@@ -7225,17 +6296,12 @@ function loadContainerLogs() {
         document.body.style.overflow = 'hidden';
     }
 
-    // Clear existing interval just in case
     if (containerLogsInterval) clearInterval(containerLogsInterval);
 
-    // A log opens at its end, so on a phone its sheet fills the screen first: after
-    // this frame, once the dialog watcher (uiDialogSheet) has prepared the sheet,
-    // which would undo it. Then the log loads, goes to its end and keeps following
     requestAnimationFrame(() => {
         if (modal && modal.classList.contains('hidden')) return;
         if (modal) uiDialogSheetFull(modal);
         fetchContainerLogs(false);
-        // Set auto-refresh every 2 seconds
         if (containerLogsInterval) clearInterval(containerLogsInterval);
         containerLogsInterval = setInterval(() => {
             fetchContainerLogs(true);
@@ -7250,18 +6316,11 @@ function closeContainerLogsModal() {
         document.body.style.overflow = '';
     }
 
-    // Stop auto-refresh
     if (containerLogsInterval) {
         clearInterval(containerLogsInterval);
         containerLogsInterval = null;
     }
 }
-
-// =============================================================================
-// Sidebar sub-pages: hovering or focusing a page with tabs shows its tabs next
-// to it. The items come from the page's own tab buttons, so a tab hidden by a
-// switched-off feature is not offered.
-// =============================================================================
 
 const NAV_SUBPAGE_TABS = {
     quarantine: '#quarantine-tabs:not(.hidden)',
@@ -7299,7 +6358,6 @@ function showNavFlyout(item, page) {
             const i = items.indexOf(document.activeElement);
             if (e.key === 'ArrowDown') { e.preventDefault(); items[(i + 1) % items.length].focus(); }
             if (e.key === 'ArrowUp') { e.preventDefault(); items[(i - 1 + items.length) % items.length].focus(); }
-            // Back toward the sidebar: Left, or Right when the page reads right to left
             const back = getComputedStyle(navFlyout).direction === 'rtl' ? 'ArrowRight' : 'ArrowLeft';
             if (e.key === 'Escape' || e.key === back) { e.preventDefault(); hideNavFlyout(); navFlyout.owner && navFlyout.owner.focus(); }
         });
@@ -7319,14 +6377,12 @@ function showNavFlyout(item, page) {
             <span>${copy.innerHTML.trim()}</span>${countText ? `<small class="ui-nav-count${count.classList.contains('is-fail') ? ' is-fail' : ''}">${escapeHtml(countText)}</small>` : ''}</button>`;
     }).join('');
     navFlyout.querySelectorAll('.ui-fly-item').forEach(el => el.addEventListener('click', () => {
-        // The tab first, so the page opens on it; a tab that navigates by itself needs nothing more
         tabs[Number(el.dataset.i)].click();
         hideNavFlyout();
         if (currentTab !== page) navigateTo(page);
     }));
     const rect = item.getBoundingClientRect();
     navFlyout.style.top = `${Math.max(8, Math.min(rect.top - 6, window.innerHeight - navFlyout.offsetHeight - 8))}px`;
-    // Beside the sidebar: to its right, or to its left when the page reads right to left
     const rtl = getComputedStyle(item).direction === 'rtl';
     navFlyout.style.left = `${rtl ? rect.left - navFlyout.offsetWidth - 8 : rect.right + 8}px`;
     navFlyout.classList.add('is-open');
@@ -7356,13 +6412,6 @@ function initNavFlyouts() {
 }
 document.addEventListener('DOMContentLoaded', initNavFlyouts);
 
-// =============================================================================
-// The app frame never scrolls the window. A phone keyboard can pan the window to
-// show a field and leave it panned when it closes, which hid the top bar and left
-// an empty band at the bottom on every page. Once no field is being edited, the
-// window goes back to the top.
-// =============================================================================
-
 function resetWindowPan() {
     const el = document.activeElement;
     const editing = el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName));
@@ -7372,11 +6421,6 @@ function resetWindowPan() {
 window.addEventListener('scroll', resetWindowPan, { passive: true });
 document.addEventListener('focusout', () => setTimeout(resetWindowPan, 300));
 if (window.visualViewport) window.visualViewport.addEventListener('resize', () => setTimeout(resetWindowPan, 100));
-
-// =============================================================================
-// The desktop sidebar folds into the icon rail and stays that way next time.
-// The class is set in the page head before it draws; this only toggles it.
-// =============================================================================
 
 function syncNavToggle() {
     const collapsed = document.documentElement.classList.contains('ui-nav-collapsed');
@@ -7390,7 +6434,7 @@ function syncNavToggle() {
 
 function toggleNavCollapsed() {
     const collapsed = document.documentElement.classList.toggle('ui-nav-collapsed');
-    try { localStorage.setItem('navCollapsed', collapsed ? '1' : '0'); } catch (e) { /* private mode: it just is not remembered */ }
+    try { localStorage.setItem('navCollapsed', collapsed ? '1' : '0'); } catch (e) {}
     if (typeof hideNavFlyout === 'function') hideNavFlyout();
     syncNavToggle();
 }

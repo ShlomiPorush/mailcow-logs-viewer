@@ -1,7 +1,3 @@
-"""The Messages CSV export applies the filters as the Messages list does: the
-search also finds the client IP and the logged-in user, and the Spam outcome
-also takes the messages Rspamd marked as spam. Addresses hidden with Blacklist
-Emails stay hidden, and the rows come newest first as in the list."""
 import csv
 import io
 import uuid
@@ -49,14 +45,12 @@ def client(monkeypatch):
     cleanup()
     now = datetime.utcnow().replace(microsecond=0)
     with get_db_context() as db:
-        # Delivered, but Rspamd scored it as spam; sent by another login from a client IP
         scan = RspamdLog(time=now, sender_smtp=SENDER, is_spam=True, has_auth=True, user=LOGIN, ip=IP, direction='outbound')
         db.add(scan)
         db.flush()
         db.add(MessageCorrelation(correlation_key=uuid.uuid4().hex, sender=SENDER, recipient='rcpt@example.net',
                                   direction='outbound', subject=f'Report {MARK}', final_status='delivered',
                                   first_seen=now, last_seen=now, created_at=now, rspamd_log_id=scan.id))
-        # Older but updated last: the list orders by first seen, so it comes after Newer
         for subject, recipient, first, last in ((f'Older {MARK}', 'a@example.net', 120, 0),
                                                 (f'Newer {MARK}', 'b@example.net', 60, 60),
                                                 (f'Archive {MARK}', ARCHIVE, 30, 30)):

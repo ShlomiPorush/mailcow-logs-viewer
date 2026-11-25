@@ -1,23 +1,11 @@
-// =============================================================================
-// SMTP ABUSE PROTECTION - the mailboxes in the Security page's Outgoing spam card
-// =============================================================================
-// Lists outbound activity per mailbox, shows which mailboxes this system has
-// blocked, and provides the whitelist plus manual block/unblock controls.
-//
-// Classic script sharing the global scope; loaded after utils.js and app.js.
-// =============================================================================
-
 let smtpAbuseStatus = null;
 let smtpAbuseWhitelist = [];
-let smtpAbuseWhitelistDraft = null;  // unsaved whitelist text; survives the panel re-rendering
+let smtpAbuseWhitelistDraft = null;
 let smtpAbusePage = 1;
 const SMTP_ABUSE_PAGE_SIZE = 5;
 
-// When the panel's data was last read (the page's refresh reads it every minute)
 let smtpAbuseLoadedAt = 0;
 
-// The status loads with the Security page: the Overview shows whether it is on, and
-// the Outgoing spam card shows the mailboxes when it is open
 async function loadSmtpAbusePanel() {
     smtpAbuseLoadedAt = Date.now();
     try {
@@ -30,7 +18,7 @@ async function loadSmtpAbusePanel() {
         smtpAbuseStatus = await statusResponse.json();
         smtpAbuseWhitelist = await whitelistResponse.json();
         renderSmtpAbusePanel();
-        renderSecurityOverview();  // whether Outgoing spam is on
+        renderSecurityOverview();
     } catch (error) {
         console.error('SMTP abuse panel error:', error);
         const panel = document.getElementById('smtp-abuse-panel');
@@ -38,9 +26,6 @@ async function loadSmtpAbusePanel() {
     }
 }
 
-// The refresh: read again, and drawn again only when something changed, not
-// while the user works in the panel (its focus or a selection); an unsaved
-// whitelist stays as typed
 async function refreshSmtpAbusePanel() {
     smtpAbuseLoadedAt = Date.now();
     const panel = document.getElementById('smtp-abuse-panel');
@@ -71,7 +56,6 @@ function renderSmtpAbusePanel() {
     if (!smtpAbuseStatus) { panel.innerHTML = '<div class="ui-loading" role="status"><div class="loading"></div><p>Loading...</p></div>'; return; }
 
     const status = smtpAbuseStatus;
-    // Stopping a mailbox and the whitelist are Security actions; without them the panel only reads
     const mayAct = userCan('security', 'write');
     const locked = !status.enabled || !status.rw_key_configured || !mayAct;
     const filter = (document.getElementById('smtp-abuse-whitelist-filter')?.value || '').toLowerCase();
@@ -177,8 +161,6 @@ function renderSmtpAbusePanel() {
     securityUpdateSaveBar();
 
     if (locked && mayAct) {
-        // The locked area says what is missing; the activity below stays readable. The
-        // card's own switch turns the protection on, so only the key leads to Settings.
         const note = !status.rw_key_configured
             ? uiLocked('Outgoing spam controls are unavailable', `Stopping a mailbox and editing the allowlist ${UI_RW_KEY_TEXT}`)
             : uiLocked('Outgoing spam controls are unavailable', 'Turn on Outgoing spam above to block or re-enable sending and edit the allowlist.', '');
@@ -186,7 +168,6 @@ function renderSmtpAbusePanel() {
     }
 }
 
-// One action at a time per mailbox: a double click does not block and unblock it
 function smtpAbuseActionOnce(email, action, button) {
     return uiOnce(`smtp-abuse:${email}`, () => smtpAbuseAction(email, action), button);
 }
@@ -223,13 +204,10 @@ function smtpAbuseWhitelistSavedText() {
     return smtpAbuseWhitelist.map(i => i.email).join('\n');
 }
 
-// One address per line, or several on a line apart by commas, semicolons or spaces
 function smtpAbuseWhitelistLines(text) {
-    // A quoted local part ("a,b"@example.com, escapes such as \" included) keeps its commas and spaces
     return text.match(/(?:"(?:[^"\\]|\\.)*"|[^\s,;"])+/g) || [];
 }
 
-// The whitelist counts as one change, however many lines were edited
 function onSmtpAbuseWhitelistInput(text) {
     const changed = smtpAbuseWhitelistLines(text).join('\n') !== smtpAbuseWhitelistLines(smtpAbuseWhitelistSavedText()).join('\n');
     smtpAbuseWhitelistDraft = changed ? text : null;

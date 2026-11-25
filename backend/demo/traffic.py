@@ -1,17 +1,3 @@
-"""
-Fictional mail traffic for the demo, as mailcow would log it.
-
-Each generated message is a small scenario (inbound, outbound, internal,
-spam, rejected, deferred, bounced) written out as the Postfix, Rspamd and
-Dovecot lines mailcow logs for it, in the exact formats the application's
-parsers read. Around the messages come the rest of a server's day: NOQUEUE
-rejects, brute-force attempts and bans in netfilter, rate-limit hits, and
-the quieter services (SOGo, ACME, watchdog, API, autodiscover).
-
-The generator only produces log entries. The fake mailcow server serves
-them, and the application ingests them with its own jobs, so every page is
-built by the same code as on a real installation.
-"""
 import random
 import time
 from dataclasses import dataclass, field
@@ -21,8 +7,6 @@ from . import world
 
 
 def _local(t):
-    """A unix time as a wall time in the app's time zone (app_time.py), not
-    the container's: working hours and the nightly certificate check follow it."""
     from app.app_time import app_tz
     return datetime.fromtimestamp(t, app_tz())
 
@@ -34,7 +18,6 @@ SUBJECTS_INBOUND = [
     "Your order has shipped", "Meeting notes", "Updated price list", "Re: support ticket 4471",
     "Welcome aboard", "Travel itinerary", "Password reset request", "Weekly newsletter",
     "Re: project timeline", "Delivery confirmation", "Conference invitation", "Budget approval",
-    # Hebrew and Arabic subjects, so right-to-left rendering shows up in the demo
     "\u05e1\u05d9\u05db\u05d5\u05dd \u05e4\u05d2\u05d9\u05e9\u05d4", "\u05d4\u05e6\u05e2\u05ea \u05de\u05d7\u05d9\u05e8 \u05de\u05e2\u05d5\u05d3\u05db\u05e0\u05ea", "\u062a\u0623\u0643\u064a\u062f \u0627\u0644\u0637\u0644\u0628", "\u062c\u062f\u0648\u0644 \u0627\u0644\u0627\u062c\u062a\u0645\u0627\u0639",
 ]
 SUBJECTS_OUTBOUND = [
@@ -51,7 +34,6 @@ REMOTE_PEOPLE = ["jordan", "mia", "sam", "noah", "lena", "omar", "yuki", "ines",
 
 @dataclass
 class Batch:
-    """Entries per mailcow log service, in the order they were written."""
     logs: dict = field(default_factory=lambda: {svc: [] for svc in (
         "postfix", "rspamd-history", "dovecot", "netfilter", "ratelimited",
         "sogo", "acme", "watchdog", "api", "autodiscover")})
@@ -61,15 +43,11 @@ class Batch:
 
 
 class Traffic:
-    """Deterministic for a given seed, so a reset rebuilds the same week."""
-
     def __init__(self, seed=None):
         self.rng = random.Random(seed)
         self._future = {}
         self._qids = set()
         self._order = 1000
-
-    # ---------------------------------------------------------------- helpers
 
     def qid(self):
         while True:
@@ -156,8 +134,6 @@ class Traffic:
         rest = verdict or f"stored mail into mailbox '{folder}'"
         batch.add("dovecot", {"time": str(int(t)), "program": "dovecot", "priority": "info",
                               "message": f"lmtp({rcpt})<{pid}><{session}>: sieve: msgid=<{mid}>: {rest}"})
-
-    # -------------------------------------------------------------- scenarios
 
     def inbound(self, batch, t, kind="ham"):
         sender, sdomain, ip = self._remote()
@@ -304,8 +280,6 @@ class Traffic:
             batch.add("netfilter", {"time": int(ts + 1800), "priority": "info", "message": f"Unbanning {ip}/32"})
 
     def connection_noise(self, batch, t):
-        """A connection that never becomes a message: a scanner or a sender
-        that postscreen lets through and that hangs up."""
         ip = self.rng.choice(world.REMOTE_IPS + world.SPAM_IPS + world.ATTACKER_IPS)
         port = self.rng.randint(30000, 65000)
         self._postfix(batch, t, "postfix/postscreen", f"CONNECT from [{ip}]:{port} to [{world.SERVER_IPV4}]:25")
@@ -319,8 +293,6 @@ class Traffic:
             self._postfix(batch, t + 2, "postfix/postscreen", f"DISCONNECT [{ip}]:{port}")
 
     def credential_attack(self, batch, t):
-        """A distributed password-guessing run against one account, large
-        enough for the anomaly detector's auth-failure burst alert."""
         target = "admin@example.com"
         for i in range(26):
             ip = world.ATTACKER_IPS[i % len(world.ATTACKER_IPS)]
@@ -341,7 +313,6 @@ class Traffic:
         })
 
     def background_services(self, batch, hour_start):
-        """One hour of the quieter services."""
         t = hour_start
         for service in ("Postfix", "Dovecot", "Rspamd", "Unbound"):
             batch.add("watchdog", {"time": str(int(t + self.rng.randint(0, 300))), "service": service,
@@ -361,8 +332,6 @@ class Traffic:
                                "message": f"Certificate {world.MAIL_HOST} is valid for 57 more days, not renewing"})
 
     def activesync(self, batch, hour_start):
-        """SOGo access lines of the phones that synced in this hour, in the
-        shape mailcow returns them, for the Devices page."""
         for user, device_id, device_type, share, ips in world.EAS_DEVICES:
             if self.rng.random() >= share:
                 continue
@@ -377,8 +346,6 @@ class Traffic:
                                           f'"POST /SOGo/Microsoft-Server-ActiveSync?{query} HTTP/1.1" '
                                           f'{status} {self.rng.randint(13, 900)}/{self.rng.randint(0, 400)} {seconds:.3f} - - 0 - 15'})
 
-    # ------------------------------------------------------------------ rates
-
     @staticmethod
     def _hour_weight(t):
         local = _local(t)
@@ -388,18 +355,6 @@ class Traffic:
         return curve[local.hour] * (1.0 if workday else 0.45)
 
     def generate(self, start, end, per_hour=6.0, min_weight=0.0, noise_per_minute=0.0):
-        """Traffic that happens in [start, end).
-
-        Rates are per hour and scaled to the part of each hour inside the
-        window, so a one-minute window of the live trickle gets a minute's
-        worth. Lines a scenario writes after ``end`` (a retry, an unban) are
-        held back and returned by the call whose window reaches them, so no
-        line ever carries a future time. ``per_hour`` is half the busiest
-        weekday hour's message count; a weekday lands near 150 messages.
-        The live trickle raises the quiet
-        hours with ``min_weight`` and adds connection noise every minute, so
-        a visitor from any time zone sees the server working.
-        """
         batch = Batch()
         self._end = end
         hour = int(start) - int(start) % 3600
@@ -425,12 +380,10 @@ class Traffic:
                 self.connection_noise(batch, when())
             hour += 3600
         if end - start > 86400:
-            # History ends with an attack still in progress
             self.credential_attack(batch, end - 480)
         return self._release(batch, end)
 
     def _release(self, batch, end):
-        """Entries before ``end``, oldest first; later ones wait for their time."""
         key = {"rspamd-history": "unix_time"}
         ready = {}
         for svc, entries in batch.logs.items():
@@ -457,14 +410,12 @@ class Traffic:
         elif r < 0.91:
             self.inbound(batch, t, "reject")
         elif r < 0.96:
-            # A recent deferral is still waiting for its retry, as in the mail queue
             recent = t > getattr(self, "_end", t + 1) - 3 * 3600
             self.outbound(batch, t, "deferred_pending" if recent else "deferred")
         else:
             self.outbound(batch, t, "bounced")
 
     def _poisson(self, lam):
-        # Knuth; lam stays small here
         import math
         threshold, k, p = math.exp(-lam), 0, 1.0
         while True:

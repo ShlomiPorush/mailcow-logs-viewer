@@ -1,11 +1,9 @@
-"""Tests for notification channel specs, URL building and validation."""
 import secrets
 
 import pytest
 
 from app.services import notification_channels as nc
 
-# New for each run: a channel token, and the secret part of a webhook URL (10 characters)
 TOKEN = secrets.token_hex(16)
 SECRET_PATH = secrets.token_hex(5)
 
@@ -19,7 +17,6 @@ def test_all_types_have_fields_and_help():
 
 
 def test_each_type_only_asks_for_its_own_fields():
-    """A Slack channel must not ask for a Telegram chat ID, and vice versa."""
     slack = {f["key"] for f in nc.CHANNEL_TYPES["slack"]["fields"]}
     telegram = {f["key"] for f in nc.CHANNEL_TYPES["telegram"]["fields"]}
     assert slack == {"webhook_url"}
@@ -32,7 +29,6 @@ def test_telegram_url_is_built_from_token():
     assert url == f"https://api.telegram.org/bot{TOKEN}/sendMessage"
     assert kwargs["json"]["chat_id"] == "42"
     assert "S" in kwargs["json"]["text"] and "M" in kwargs["json"]["text"]
-    # No topic: the message goes to the chat itself, as before
     assert "message_thread_id" not in kwargs["json"]
 
 
@@ -60,7 +56,6 @@ def test_telegram_topic_must_be_a_whole_number(topic):
 def test_telegram_topic_field_says_where_to_find_it():
     from app.api_models.notifications import NotificationField
     spec = next(f for f in nc.CHANNEL_TYPES["telegram"]["fields"] if f["key"] == "message_thread_id")
-    # The response model keeps the hint and the whole-number flag for the form
     shown = NotificationField(**spec).model_dump(exclude_none=True)
     assert shown["hint"] and shown["integer"] is True and shown["required"] is False
 
@@ -73,7 +68,6 @@ def test_telegram_topic_is_optional():
 def test_ntfy_url_is_server_plus_topic():
     url, kwargs = nc.build_request("ntfy", {"server_url": "https://ntfy.sh/", "topic": "alerts"}, "S", "M")
     assert url == "https://ntfy.sh/alerts"
-    # Title travels as a query param so emoji subjects survive (headers are latin-1)
     assert kwargs["params"]["title"] == "S"
     assert "Title" not in kwargs["headers"]
 
@@ -115,7 +109,7 @@ def test_validate_rejects_unknown_type():
 
 
 def test_optional_fields_are_not_required():
-    ok, _ = nc.validate_config("ntfy", {"topic": "t"})   # server_url + token optional
+    ok, _ = nc.validate_config("ntfy", {"topic": "t"})
     assert ok
 
 
@@ -136,8 +130,6 @@ def test_message_truncation():
 
 
 def test_blacklist_alert_fires_for_channel_only_setups():
-    """Both blacklist alert blocks must dispatch when notification channels
-    exist even if no email is configured (channels-only setups got nothing)."""
     import inspect
     from app import scheduler
     src = inspect.getsource(scheduler._run_check_monitored_hosts)
@@ -145,8 +137,6 @@ def test_blacklist_alert_fires_for_channel_only_setups():
     assert gates == 2, f"expected both alert blocks gated on email OR channels, found {gates}"
     assert "if notification_email:\n" not in src
 
-
-# ---- An address the send cannot use ----
 
 SECRET_HOOK = "http://[hooks.example/T000/B000/SECRETPATH"
 
@@ -199,7 +189,7 @@ def test_the_error_is_masked_before_it_is_cut(monkeypatch):
     path = "/services/T0/B0/" + SECRET_PATH
 
     async def post(url, kwargs):
-        return 404, "x" * 180 + " no hook " + path  # the cut at 200 falls inside the path
+        return 404, "x" * 180 + " no hook " + path
 
     monkeypatch.setattr(nc, "_post", post)
     ok, error = nc.send_to_config("slack", {"webhook_url": "https://hooks.example" + path}, "S", "M")
@@ -268,8 +258,6 @@ def test_a_secret_in_the_query_is_masked_too(quoted):
 
 
 def test_a_query_that_holds_the_path_is_masked_whole():
-    """Each copy is found before any is masked: masking the path first would
-    break up the copy of the query and leave its token."""
     url = f"https://hooks.example/hook?next=/hook&token={TOKEN}"
     error = nc._sanitize_error("slack", {"webhook_url": url}, f"bad query next=/hook&token={TOKEN} here")
     assert error == "bad query " + nc.MASK + " here"

@@ -1,10 +1,3 @@
-"""Turning Mailbox Stats off keeps the mailbox rows while Rate Limits still reads them.
-
-The Settings page deletes a switched-off feature's data through
-/api/settings/purge-feature-data. For Mailbox Stats that emptied
-mailbox_statistics too, where Rate Limits reads each mailbox's configured
-limit, so the Rate Limits page lost its limits until the next mailbox sync.
-"""
 import pytest
 
 import starlette.staticfiles as sf

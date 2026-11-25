@@ -1,9 +1,3 @@
-// Keyboard and screen reader (utils.js): sortable headers are buttons, a phone
-// gets a Sort picker for a list whose header it hides, and a row that opens on
-// click opens on Enter and Space. Runs in a real DOM (jsdom) with axe-core,
-// installed by CI outside the repository; set A11Y_MODULES to run it locally:
-//   npm install --no-save --prefix /tmp/a11y jsdom axe-core
-//   A11Y_MODULES=/tmp/a11y/node_modules node --test .github/tests/keyboard.a11y.cjs
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -19,7 +13,6 @@ function page(body) {
         { runScripts: 'dangerously', pretendToBeVisual: true });
     const w = dom.window;
     w.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} });
-    // jsdom does no layout: an element counts as shown when nothing hides it
     w.Element.prototype.getClientRects = function () { return this.isConnected && !this.closest('.hidden') ? [{}] : []; };
     const script = w.document.createElement('script');
     script.textContent = utils;
@@ -167,7 +160,7 @@ test('a list sorted on the server asks for the column and the order, and a secon
         <div class="ui-tr ui-tr-head"><span data-sort-key="name" data-sort-kind="text" aria-sort="none">Name</span><span data-sort-key="seen" data-sort-kind="date" aria-sort="descending">Seen</span></div>
         <div class="ui-tr"><span>a</span><span>1</span></div></div></section>`);
     const asked = [];
-    w.sortServer = (key, dir) => asked.push(`${key}:${dir}`);   // the answer has not come yet
+    w.sortServer = (key, dir) => asked.push(`${key}:${dir}`);
     w.uiRefreshTableSorts();
     const { radio } = sortParts(w);
     radio('by', '0').click();
@@ -181,7 +174,7 @@ test('the Sort button stays one, keeps its id across redraws, and goes with its 
     w.uiRefreshTableSorts();
     const id = w.document.querySelector('.ui-sort-slot .ui-picker').dataset.picker;
     const table = w.document.querySelector('#list .ui-table');
-    table.outerHTML = table.outerHTML;   // the page draws the list again
+    table.outerHTML = table.outerHTML;
     w.uiRefreshTableSorts();
     w.uiRefreshTableSorts();
     assert.equal(w.document.querySelectorAll('.ui-sort-slot').length, 1);
@@ -219,7 +212,6 @@ test('rows drawn anew in the same list get its remembered order', () => {
     w.uiRefreshTableSorts();
     sortParts(w).radio('by', '0').click();
     const table = w.document.querySelector('#list .ui-table');
-    // A filter draws the rows again inside the same element, in the list's own order
     table.innerHTML = table.innerHTML.replace(/<div class="ui-tr"[\s\S]*$/, '') + '<div class="ui-tr"><span>zeta</span><span>1</span><span></span></div><div class="ui-tr"><span>delta</span><span>4</span><span></span></div>';
     w.uiRefreshTableSorts();
     assert.deepEqual(names(w), ['delta', 'zeta']);
@@ -236,7 +228,7 @@ test('a list sorted on the server gets the focus back on the same header once it
     button.focus();
     button.click();
     await new Promise(resolve => setTimeout(resolve, 40));
-    w.uiRefreshTableSorts();   // what the page's observer does once the new list is there
+    w.uiRefreshTableSorts();
     const active = w.document.activeElement;
     assert.ok(active.matches('.ui-sort-btn'), `focus is on a header button again, not ${active.tagName}.${active.className}`);
     assert.equal(active.closest('[data-sort-key]').dataset.sortKey, 'name');
@@ -287,7 +279,7 @@ test('a list sorted on the server that does not come back shows the order still 
         <div class="ui-tr ui-tr-head"><span data-sort-key="name" data-sort-kind="text" aria-sort="none">Name</span><span data-sort-key="sent" data-sort-kind="number" aria-sort="descending">Sent</span></div>
         <div class="ui-tr"><span>a</span><span>1</span></div></div></section>`);
     w.eval('uiSortWait = 30');
-    w.sortServer = () => {};   // the request fails: no new list
+    w.sortServer = () => {};
     w.uiRefreshTableSorts();
     w.document.querySelector('.ui-sort-slot input[name$="-by"][value="0"]').click();
     w.uiRefreshTableSorts();
@@ -319,7 +311,7 @@ test('a row drawn again on its own keeps its place in the list\'s own order', ()
     w.uiRefreshTableSorts();
     sortParts(w).radio('by', '0').click();
     const beta = w.document.querySelector('[data-sort-id="beta"]');
-    beta.outerHTML = '<div class="ui-tr" data-sort-id="beta"><span>beta</span><span>3</span><span></span></div>';   // checked again
+    beta.outerHTML = '<div class="ui-tr" data-sort-id="beta"><span>beta</span><span>3</span><span></span></div>';
     w.uiRefreshTableSorts();
     sortParts(w).radio('by', '').click();
     assert.deepEqual(names(w), ['beta', 'gamma', 'alpha']);
@@ -330,7 +322,7 @@ test('two server sorts in a row that both fail go back to the order the rows sho
         <div class="ui-tr ui-tr-head"><span data-sort-key="name" data-sort-kind="text" aria-sort="none">Name</span><span data-sort-key="sent" data-sort-kind="number" aria-sort="descending">Sent</span></div>
         <div class="ui-tr"><span>a</span><span>1</span></div></div></section>`);
     w.eval('uiSortWait = 30');
-    w.sortServer = () => {};   // neither request comes back
+    w.sortServer = () => {};
     w.uiRefreshTableSorts();
     w.document.querySelector('.ui-sort-slot input[name$="-by"][value="0"]').click();
     w.uiRefreshTableSorts();
@@ -363,7 +355,6 @@ test('every stacked list with a header row says where its Sort button goes, or t
     for (const f of fs.readdirSync(dir).filter(n => n.endsWith('.js') || n.endsWith('.html'))) {
         const text = fs.readFileSync(path.join(dir, f), 'utf8');
         for (const m of text.matchAll(/<(div|table)\b[^>]*class="[^"]*\b(ui-stack|ui-dm-cards)\b[^"]*"[^>]*>/g)) {
-            // A list with no header row (a rule list, a map) has no columns to sort by
             const after = text.slice(m.index, m.index + 700);
             if (!/ui-tr-head|<thead/.test(after)) continue;
             if (/data-sort-at=|data-nosort|data-sort-icon="off"/.test(m[0])) continue;
@@ -391,8 +382,7 @@ test('selecting text in a row leaves it closed; a plain click, a control inside 
         <div id="msg" class="ui-mrow" role="button" tabindex="0" data-row-open onclick="if (!uiRowHeld(event)) window.shown = (window.shown || 0) + 1"><span id="subject">Subject</span></div>`);
     const d = w.document;
     let pageClicks = 0;
-    d.addEventListener('click', () => { pageClicks++; });   // an outside-click closer, like a picker's
-    // A press at x, then the click at x2 (a drag when they differ); detail 2 is a double click
+    d.addEventListener('click', () => { pageClicks++; });
     const gesture = (el, x, x2 = x, detail = 1) => {
         el.dispatchEvent(new w.MouseEvent('mousedown', { bubbles: true, clientX: x, clientY: 5, detail }));
         el.dispatchEvent(new w.MouseEvent('click', { bubbles: true, cancelable: true, clientX: x2, clientY: 5, detail }));
@@ -433,14 +423,11 @@ test('every element that is not a control and opens on click asks uiRowHeld firs
     const files = fs.readdirSync(dir).filter(f => f.endsWith('.js') || f.endsWith('.html'))
         .map(f => ({ f, text: fs.readFileSync(path.join(dir, f), 'utf8') }));
     const all = files.map(x => x.text).join('\n');
-    // Helpers a row hands its click to must ask too
     const asks = name => {
         const at = all.indexOf(`function ${name}(`);
         return at >= 0 && all.slice(at, all.indexOf('\n}', at)).includes('uiRowHeld(event)');
     };
-    // Handlers that only keep the click inside, or close a backdrop clicked itself, open nothing
     const inert = /^(?:event\.stopPropagation\(\)|if \(uiBackdropClick\(event\)\) \w+\(\)|if \(event\.target\.closest\('button'\)\) this\.hidePopover\(\))$/;
-    // Not rows: a Settings choice card is the control that picks, and a sheet's backdrop holds no text
     const notRows = /^(?:settingsPickCard|uiSheetDismiss)\(/;
     const missing = [];
     for (const { f, text } of files) {
@@ -464,7 +451,6 @@ test('a drag that selects text in a dialog and ends on the backdrop leaves it op
         from.dispatchEvent(new w.MouseEvent('mousedown', { bubbles: true, clientX: x, clientY: 5, detail: 1 }));
         to.dispatchEvent(new w.MouseEvent('click', { bubbles: true, cancelable: true, clientX: x2, clientY: 5, detail: 1 }));
     };
-    // The browser sends the click of a drag to the element that holds both ends
     gesture(d.getElementById('text'), back, 10, 400);
     assert.equal(w.closed, undefined, 'a drag from the text onto the backdrop leaves the dialog open');
     gesture(d.getElementById('text'), d.getElementById('text'), 10, 10);
@@ -519,7 +505,6 @@ test('every dialog that closes on a backdrop click asks uiBackdropClick', () => 
     const found = [];
     for (const f of fs.readdirSync(dir).filter(n => n.endsWith('.js') || n.endsWith('.html'))) {
         fs.readFileSync(path.join(dir, f), 'utf8').split('\n').forEach((line, i) => {
-            // A key handler on a row may compare the target with itself; that is not a backdrop
             if (/\.target(?:\.id)? === (?:this\b|\w*(?:modal|overlay|Modal|Overlay)\b|'[\w-]*-modal')/.test(line) && !/onkeydown|\.key ===/.test(line)) found.push(`${f}:${i + 1}`);
         });
     }

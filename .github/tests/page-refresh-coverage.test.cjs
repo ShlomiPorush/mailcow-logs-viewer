@@ -1,7 +1,3 @@
-// Every page updates by itself: each page the app routes to (TAB_LABELS in
-// router.js) registers a refresh with registerPageRefresh (app.js), or is
-// listed below with the reason it has none. A new page without either fails
-// here, so it cannot ship without a refresh by accident.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -10,13 +6,11 @@ const { test } = require('node:test');
 
 const frontend = path.join(__dirname, '../../frontend');
 
-// Pages with no refresh of their own, and why
 const NO_REFRESH = {
     about: 'shows the app version and links; Check Now asks for updates on demand',
     logs: 'live already: its lines stream over a WebSocket',
 };
 
-// Any DOM access returns another inert stub, so a file's top-level code runs
 function stub() {
     const fn = function () { return proxy; };
     const proxy = new Proxy(fn, {

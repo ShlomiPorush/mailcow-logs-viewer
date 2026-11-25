@@ -1,9 +1,3 @@
-"""A masked channel secret is not restored when the channel points at another server.
-
-The channel API returns secrets masked. Saving with the mask keeps the stored
-token, which is right while the destination is the same; with a changed
-server_url / url it would send the stored token to the new server.
-"""
 import secrets
 import types
 

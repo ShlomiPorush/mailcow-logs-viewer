@@ -1,16 +1,3 @@
-"""The Dovecot verdict comes from the action text after the msgid field.
-
-parse_dovecot_message ended the Message-ID at the first '>' and then looked
-for action words anywhere in the rest of the line. Dovecot keeps a quoted
-id-left verbatim, '>' and spaces included, so a sender using
-Message-ID: <"legit0@partner.test>: discarded message: x"@sender.invalid>
-gets a line that Dovecot itself writes as
-
-    msgid=<legit0@partner.test>: discarded message: x@sender.invalid>: saved mail to INBOX
-
-and the app recorded the earlier, delivered message legit0@partner.test as
-discarded by Sieve.
-"""
 import pytest
 
 from app.services.dovecot_parser import parse_dovecot_message

@@ -1,6 +1,3 @@
-// Settings > Agents > App address for agents: the address offered is the OAuth2
-// callback's, else the page's, and only one the server accepts (https, or http
-// on this computer) with no path.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');

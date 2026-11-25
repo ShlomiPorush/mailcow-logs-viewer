@@ -1,13 +1,3 @@
-"""Messages without a usable Message-ID are listed from their Postfix lines.
-
-A scanner that sends "Message-ID:" with nothing in it, or a message without
-the header when Postfix is not told to add one, is never joined with its
-Rspamd scan, so it has no row in Messages. GET /api/messages/without-message-id
-lists such messages from their stored Postfix lines, and the details endpoint
-opens them by their noid- key. A Postfix queue id comes back once its file is
-gone; a message never takes another message's lines. Dummy data only, against
-the test PostgreSQL; the lines go through the real Postfix import.
-"""
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -25,7 +15,6 @@ LISTED = f'archive-{MARK}@example.test'
 
 
 def _q(n: int) -> str:
-    """A queue id of this run (hex, as Postfix writes it)."""
     return f'D{HEX}{n:X}'
 
 
@@ -72,7 +61,6 @@ NOW = datetime.now(timezone.utc).replace(microsecond=0) - timedelta(hours=1)
 
 
 def _ingest(*lines):
-    """Store lines through the Postfix import: (when, program, message)."""
     from app import scheduler
     scheduler._store_postfix_page([
         {'time': str(int(when.timestamp())), 'program': program, 'priority': 'info', 'message': f'{message} [{MARK}]'}
@@ -80,7 +68,6 @@ def _ingest(*lines):
 
 
 def _message(queue, at, message_id='', sender=SCANNER, to=OFFICE, client=None, status='sent', removed=True):
-    """The lines of one message as Postfix logs them, client line first."""
     client = client or f'unknown[192.0.2.40], sasl_method=LOGIN, sasl_username={sender}'
     lines = [(at, 'postfix/submission/smtpd', f'{queue}: client={client}'),
              (at, 'postfix/cleanup', f'{queue}: message-id={message_id}'),
@@ -141,7 +128,6 @@ def test_inbound_without_login_keeps_the_client_address(api):
 
 
 def test_the_client_address_is_located_with_geoip(api, monkeypatch):
-    """A scanned message has its client's place from Rspamd; this one is looked up when opened."""
     from app.services import geoip_service
     monkeypatch.setattr(geoip_service, 'is_geoip_available', lambda: True)
     monkeypatch.setattr(geoip_service, 'lookup_ip', lambda ip: {
@@ -151,7 +137,6 @@ def test_the_client_address_is_located_with_geoip(api, monkeypatch):
     key = _by_queue(_list(api))[_q(21)]['correlation_key']
     client = api.get(f'/api/message/{key}/details').json()['client']
     assert (client['country_code'], client['city'], client['asn_org']) == ('NL', 'Amsterdam', 'Example Hosting B.V.')
-    # Without GeoIP the place is unknown, not an error
     monkeypatch.setattr(geoip_service, 'is_geoip_available', lambda: False)
     assert api.get(f'/api/message/{key}/details').json()['client']['country_code'] is None
 
@@ -161,14 +146,11 @@ def test_the_time_ranges_are_counted_for_this_list(api):
     since = [f'recent:{(NOW - timedelta(days=1)).isoformat()}', f'week:{(NOW - timedelta(days=7)).isoformat()}', 'bad name:x']
     body = api.get('/api/messages/without-message-id', params={'search': MARK, 'limit': 1, 'since': since,
                                                                 'start_date': NOW.isoformat()}).json()
-    # The search applies to the counts, the chosen range does not
     assert body['time'] == {'all': 2, 'recent': 1, 'week': 2}
     assert 'time' not in _list(api) or _list(api)['time'] is None
 
 
 def test_a_queue_id_used_again_close_by_shows_the_cleanup_line_only(api):
-    """A message delivered and removed 30 seconds before its queue id names a
-    message without a Message-ID: the second shows nothing of the first."""
     earlier = NOW - timedelta(seconds=78)
     _ingest(*_message(_q(7), earlier, message_id=f'<first-{MARK}@example.test>', to=LISTED.replace('archive', 'first')),
             *_message(_q(7), NOW))
@@ -179,14 +161,11 @@ def test_a_queue_id_used_again_close_by_shows_the_cleanup_line_only(api):
     details = api.get(f"/api/message/{row['correlation_key']}/details").json()
     assert [line['message'].split(' [')[0] for line in details['postfix']] == [f'{_q(7)}: message-id=']
     assert details['client'] is None and details['queue_id_reused'] is True
-    # A search does not find it by the other message's addresses
     assert _q(7) not in _by_queue(_list(api, search=f'first-{MARK}'))
     assert _q(7) in _by_queue(_list(api, search=_q(7)))
 
 
 def test_an_older_message_of_the_same_queue_id_stays_out(api):
-    """The other message's cleanup line is more than 6 days old (it was on hold),
-    its delivery 30 seconds before this one: only this message's lines count."""
     old = NOW - timedelta(days=8)
     other = f'other-{MARK}@example.test'
     _ingest((old, 'postfix/cleanup', f'{_q(8)}: message-id=<held-{MARK}@example.test>'),
@@ -231,7 +210,6 @@ def test_an_excluded_address_anywhere_in_the_message_hides_it(api, monkeypatch):
             (NOW + timedelta(days=2), 'postfix/lmtp',
              f'{queue}: to=<{LISTED}>, relay=dovecot, delay=9, delays=0/0/0/9, dsn=2.0.0, status=sent (250 ok)'))
     key = _by_queue(_list(api))[queue]['correlation_key']
-    # The address is listed after the lines were stored
     monkeypatch.setattr(settings._inner, 'blacklist_emails', LISTED)
     assert queue not in _by_queue(_list(api))
     assert api.get(f'/api/message/{key}/details').status_code == 404
@@ -265,8 +243,6 @@ def test_search_reads_wildcards_as_written(api):
 
 
 def test_a_message_stored_after_the_anchors_were_chosen_lends_no_lines(api):
-    """The lines are read after the anchors: they say again whether the queue
-    id was used close by, so a message stored in between is not mixed in."""
     from app.database import get_db_context
     from app.models import PostfixLog
     from app.services import no_message_id
@@ -274,7 +250,6 @@ def test_a_message_stored_after_the_anchors_were_chosen_lends_no_lines(api):
     with get_db_context() as db:
         found, _ = no_message_id.page(db, limit=50, search=_q(20))
         assert [(anchor.queue_id, reused) for anchor, reused in found] == [(_q(20), False)]
-        # Another message with this queue id arrives now
         _ingest(*_message(_q(20), NOW + timedelta(minutes=3), to=f'later-{MARK}@example.test'))
         lines, reused = no_message_id.instance_lines(db, found)[found[0][0].id]
         assert reused is True and [line.id for line in lines] == [found[0][0].id]
@@ -291,13 +266,10 @@ def test_keys_that_are_not_such_a_message_are_not_found(api):
         assert api.get(f'/api/message/{key}/details').status_code == 404, key
 
 
-def test_a_message_without_a_message_id_never_gets_a_correlation(api):
-    """The paths that create correlations skip an empty Message-ID, so a listed
-    message is never also a Messages row (the list does not check for one)."""
+def test_a_message_without_a_message_id_never_gets_a_correlation(api, monkeypatch):
     from app.database import get_db_context
-    from app.models import MessageCorrelation, PostfixLog, RspamdLog
+    from app.models import MessageCorrelation, RspamdLog
     from app.services import correlation_jobs
-    from app.correlation import correlate_postfix_log
     _ingest(*_message(_q(17), NOW))
     picked = []
     with get_db_context() as db:
@@ -305,16 +277,15 @@ def test_a_message_without_a_message_id_never_gets_a_correlation(api):
             db.add(RspamdLog(time=NOW.replace(tzinfo=None), message_id=message_id, sender_smtp=SCANNER,
                              subject=f'scan {MARK}', action='no action', score=0.0, required_score=15.0, symbols={}))
         db.commit()
-        for line in db.query(PostfixLog).filter(PostfixLog.queue_id == _q(17)).all():
-            assert correlate_postfix_log(db, line) is None
-    correlation_jobs.run_correlation(get_db_context=get_db_context, is_blacklisted=lambda _: False,
-                                     correlate=lambda db, scan: picked.append(scan.subject))
+        unnamed = db.query(RspamdLog).filter(RspamdLog.message_id == '', RspamdLog.subject == f'scan {MARK}').one()
+        assert correlation_jobs.correlate_single_message(db, unnamed) is None
+    monkeypatch.setattr(correlation_jobs, "is_listed", lambda _: False)
+    monkeypatch.setattr(correlation_jobs, "correlate_single_message", lambda db, scan: picked.append(scan.subject))
+    correlation_jobs.run_correlation()
     assert not any(MARK in subject for subject in picked)
     with get_db_context() as db:
         assert db.query(MessageCorrelation).filter(MessageCorrelation.sender == SCANNER).count() == 0
 
-
-# -- migration 0026 -------------------------------------------------------------
 
 def _revision():
     import importlib.util
@@ -358,7 +329,6 @@ def _indexes(engine):
 
 
 def test_a_new_install_has_the_index_and_the_migration_passes(isolated_engine):
-    """create_all builds it from the model before the migrations run."""
     from app.database import Base
     from app.models import PostfixLog
     Base.metadata.create_all(isolated_engine, tables=[PostfixLog.__table__])
@@ -392,7 +362,6 @@ def test_an_existing_install_gets_the_index_and_keeps_its_lines(isolated_engine)
 
 @pytest.mark.parametrize('path', ['/api/messages/without-message-id', '/api/messages/facets'])
 def test_time_ranges_named_all_or_out_of_range_are_skipped(api, path):
-    """all is the count of every time; a date the server cannot turn into a time is skipped, not an error."""
     _ingest(*_message(_q(24), NOW))
     since = [f'all:{(NOW + timedelta(days=1)).isoformat()}', 'last:9999-12-31', 'first:0001-01-01T00:00:00+01:00',
              f'recent:{(NOW - timedelta(days=1)).isoformat()}']

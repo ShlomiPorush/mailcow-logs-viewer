@@ -1,4 +1,3 @@
-"""Exercise credential throttling through real routes and Uvicorn proxy handling."""
 import base64
 import secrets
 from unittest.mock import mock_open, patch
@@ -7,12 +6,11 @@ import pytest
 from fastapi.testclient import TestClient
 from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
-from app import auth, session
+from app import auth, session, user_access
 from app.config import settings
 from app.main import app
 
 
-# New for each run; test_auth_capacity and test_auth_failure_keys sign in with it too
 PASSWORD = secrets.token_hex(16)
 
 
@@ -36,8 +34,6 @@ def basic_auth(monkeypatch):
 
 
 def client_at(peer="192.0.2.50", trusted="127.0.0.1"):
-    # Set the transport peer BEFORE Uvicorn processes forwarding headers.
-    # This exercises the installed server implementation, including proxy chains.
     proxied = ProxyHeadersMiddleware(app, trusted_hosts=trusted)
 
     async def transport(scope, receive, send):
@@ -57,7 +53,6 @@ def test_every_password_check_consumes_the_same_failure_budget(path, header):
         assert response.status_code == (200 if path == "/api/info" else 401)
         if path == "/api/info":
             assert "version" not in response.json()
-    # Switching to another endpoint cannot escape the exhausted budget.
     for blocked_path in ["/api/info", "/api/auth/verify"]:
         response = client.get(blocked_path, headers=credentials())
         assert response.status_code == 429
@@ -68,8 +63,8 @@ def test_every_password_check_consumes_the_same_failure_budget(path, header):
 @pytest.mark.parametrize(
     "peer,trusted,chain",
     [
-        ("192.0.2.50", "127.0.0.1", "{spoof}"),  # Direct access.
-        ("192.0.2.10", "127.0.0.1", "{spoof}, 192.0.2.50"),  # Untrusted proxy.
+        ("192.0.2.50", "127.0.0.1", "{spoof}"),
+        ("192.0.2.10", "127.0.0.1", "{spoof}, 192.0.2.50"),
         ("192.0.2.10", "192.0.2.10", "{spoof}, 192.0.2.50"),
         ("192.0.2.10", "192.0.2.10,192.0.2.11", "{spoof}, 192.0.2.50, 192.0.2.11"),
         ("192.0.2.10", "192.0.2.10", "{spoof}, 192.0.2.50, 192.0.2.11"),
@@ -118,14 +113,14 @@ def test_existing_sessions_and_public_login_info_survive_lockout(monkeypatch, oa
     assert client.get("/api/info").status_code == 200
     assert "version" not in client.get("/api/info").json()
     assert client.get("/api/auth/provider-info").status_code == 200
-    # The backend CI job has no /app/frontend/login.html. Only substitute the
-    # file read: the real route and middleware must still allow the login page.
     with patch("app.main.open", mock_open(read_data="<html>Login</html>"), create=True):
         assert client.get("/login").status_code == 200
     if oauth_only:
         monkeypatch.setattr(settings._inner, "basic_auth_enabled", False)
         monkeypatch.setattr(settings._inner, "oauth2_enabled", True)
-    cookie = session.create_session({"username": "admin"}, generation=session.auth_generation())
+    user_info = {"username": "admin"}
+    cookie = session.create_session(user_info, generation=session.auth_generation(),
+                                    principal=user_access.oauth2_ref(user_info))
     client.cookies.set(session.SESSION_COOKIE_NAME, cookie)
     assert client.get("/api/auth/status").json()["authenticated"] is True
     assert "version" in client.get("/api/info").json()

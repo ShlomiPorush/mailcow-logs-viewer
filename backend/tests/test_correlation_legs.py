@@ -1,15 +1,3 @@
-"""One correlation per delivery leg (issue #36).
-
-A SOGo/Sieve forward, or any other re-submission, pushes the same Message-ID
-through a second Postfix queue chain. Correlations used to be keyed by
-Message-ID alone, so the second delivery overwrote the first one and the
-original message vanished from the Messages list. A correlation now describes
-one (Message-ID, queue chain) pair, and both deliveries are kept.
-
-The scenario below is the one reported on a live server: an inbound message
-that Rspamd let through, and the Sieve redirect it triggered a moment later,
-which Rspamd rejected as sender forgery.
-"""
 import asyncio
 import hashlib
 import uuid
@@ -86,8 +74,6 @@ def env():
     _cleanup()
 
 
-# ---------- seeding helpers ----------
-
 def _add_postfix(queue_id, when, program='postfix/smtp', msgid=None, sender=None,
                  recipient=None, status=None, relay=None):
     from app.database import get_db_context
@@ -117,18 +103,16 @@ def _add_rspamd(msgid, when, sender, recipients, action='no action', is_spam=Fal
 
 
 def _correlate(rspamd_id):
-    """Run the correlation the way the scheduler job runs it, per Rspamd log."""
-    from app import scheduler as sched
+    from app.services import correlation_jobs
     from app.database import get_db_context
     from app.models import RspamdLog
     with get_db_context() as db:
         rspamd_log = db.query(RspamdLog).filter(RspamdLog.id == rspamd_id).first()
-        correlation = sched.correlate_single_message(db, rspamd_log)
+        correlation = correlation_jobs.correlate_single_message(db, rspamd_log)
         return correlation.correlation_key if correlation else None
 
 
 def _legs(msgid):
-    """Every correlation of a Message-ID, detached, keyed by queue id."""
     from app.database import get_db_context
     from app.models import MessageCorrelation
     with get_db_context() as db:
@@ -141,22 +125,16 @@ def _legs(msgid):
 
 
 def _seed_forward_scenario():
-    """Inbound delivery, then the Sieve redirect it triggered.
-
-    Returns (msgid, queue_a, queue_b, rspamd_a_id, rspamd_b_id).
-    """
     msgid = _msgid()
     queue_a, queue_b = _queue(), _queue()
     t0 = datetime.utcnow() - timedelta(minutes=5)
 
-    # Leg A: ext@remote -> user@local, accepted and delivered
     _add_postfix(queue_a, t0, program='postfix/cleanup', msgid=msgid)
     _add_postfix(queue_a, t0, program='postfix/qmgr', sender=REMOTE)
     _add_postfix(queue_a, t0 + timedelta(seconds=1), program='postfix/lmtp',
                  recipient=LOCAL_USER, status='sent', relay='dovecot')
     rspamd_a = _add_rspamd(msgid, t0, REMOTE, [LOCAL_USER], action='no action')
 
-    # Leg B: the redirect, user@local -> other@local, rejected by Rspamd
     t1 = t0 + timedelta(seconds=20)
     _add_postfix(queue_b, t1, program='postfix/cleanup', msgid=msgid)
     _add_postfix(queue_b, t1, program='postfix/qmgr', sender=LOCAL_USER)
@@ -168,7 +146,6 @@ def _seed_forward_scenario():
 
 
 def _seed_single_delivery(recipient=None, when=None):
-    """One plain inbound delivery. Returns (msgid, correlation_key)."""
     msgid = _msgid()
     queue = _queue()
     t0 = when or (datetime.utcnow() - timedelta(minutes=2))
@@ -180,7 +157,6 @@ def _seed_single_delivery(recipient=None, when=None):
 
 
 def _list_messages(**overrides):
-    """Call the Messages list endpoint the way FastAPI calls it."""
     from app.database import get_db_context
     from app.routers.messages import get_unified_messages
     params = dict(page=1, limit=50, search=MARKER, sender=None, recipient=None,
@@ -191,10 +167,7 @@ def _list_messages(**overrides):
         return get_unified_messages(db=db, **params)
 
 
-# ---------- the regression ----------
-
 def test_forward_keeps_both_delivery_legs(env):
-    """THE issue: the redirect used to overwrite the message it came from."""
     msgid, queue_a, queue_b, rspamd_a, rspamd_b = _seed_forward_scenario()
 
     _correlate(rspamd_a)
@@ -213,30 +186,25 @@ def test_forward_keeps_both_delivery_legs(env):
     assert leg_b.final_status == 'rejected'
     assert leg_b.rspamd_log_id == rspamd_b
 
-    # The first leg keeps the historical Message-ID-only key, so every link
-    # handed out before this change still resolves; the second is scoped by
-    # its queue chain.
     assert leg_a.correlation_key == _legacy_key(msgid)
     assert leg_b.correlation_key == _leg_key(msgid, queue_b)
     assert leg_a.correlation_key != leg_b.correlation_key
 
 
 def test_late_postfix_line_updates_only_its_own_leg(env):
-    """A line without a Message-ID is placed by its queue chain, not by the
-    Message-ID it happens to share with the other leg."""
-    from app.correlation import correlate_postfix_log
     from app.database import get_db_context
-    from app.models import PostfixLog
+    from app.models import RspamdLog
+    from app.services import correlation_jobs
 
     msgid, queue_a, queue_b, rspamd_a, rspamd_b = _seed_forward_scenario()
     _correlate(rspamd_a)
     _correlate(rspamd_b)
 
-    late_id = _add_postfix(queue_a, datetime.utcnow(), program='postfix/lmtp',
-                           recipient=LOCAL_USER, status='bounced')
+    _add_postfix(queue_a, datetime.utcnow(), program='postfix/lmtp',
+                 recipient=LOCAL_USER, status='bounced')
     with get_db_context() as db:
-        late = db.query(PostfixLog).filter(PostfixLog.id == late_id).first()
-        correlation = correlate_postfix_log(db, late)
+        scan = db.query(RspamdLog).filter(RspamdLog.id == rspamd_a).first()
+        correlation = correlation_jobs.correlate_single_message(db, scan)
         assert correlation is not None
         assert correlation.queue_id == queue_a
 
@@ -246,13 +214,6 @@ def test_late_postfix_line_updates_only_its_own_leg(env):
 
 
 def test_rspamd_stub_adopts_the_first_chain_then_a_second_leg_follows(env):
-    """Rspamd is usually ahead of the Postfix logs. The correlation opened
-    without a queue chain adopts the first one that arrives and keeps its
-    Message-ID-only key; the next chain becomes a leg of its own."""
-    from app.correlation import correlate_postfix_log
-    from app.database import get_db_context
-    from app.models import PostfixLog
-
     msgid = _msgid()
     queue_a, queue_b = _queue(), _queue()
     t0 = datetime.utcnow() - timedelta(minutes=5)
@@ -265,20 +226,16 @@ def test_rspamd_stub_adopts_the_first_chain_then_a_second_leg_follows(env):
     assert stub[0].queue_id is None
     assert key == _legacy_key(msgid)
 
-    # The Postfix chain shows up on a later poll
     _add_postfix(queue_a, t0, program='postfix/cleanup', msgid=msgid, sender=REMOTE)
-    arrival_id = _add_postfix(queue_a, t0 + timedelta(seconds=1), program='postfix/lmtp',
-                              recipient=LOCAL_USER, status='sent', relay='dovecot')
-    with get_db_context() as db:
-        arrival = db.query(PostfixLog).filter(PostfixLog.id == arrival_id).first()
-        correlate_postfix_log(db, arrival)
+    _add_postfix(queue_a, t0 + timedelta(seconds=1), program='postfix/lmtp',
+                 recipient=LOCAL_USER, status='sent', relay='dovecot')
+    _correlate(rspamd_a)
 
     adopted = _legs(msgid)
     assert len(adopted) == 1
     assert adopted[0].queue_id == queue_a
     assert adopted[0].correlation_key == _legacy_key(msgid)
 
-    # A re-submission of the same message opens a second leg
     t1 = t0 + timedelta(seconds=20)
     _add_postfix(queue_b, t1, program='postfix/cleanup', msgid=msgid, sender=LOCAL_USER)
     _add_postfix(queue_b, t1 + timedelta(seconds=1), program='postfix/smtp',
@@ -291,8 +248,6 @@ def test_rspamd_stub_adopts_the_first_chain_then_a_second_leg_follows(env):
     assert legs[queue_a].correlation_key == _legacy_key(msgid)
     assert legs[queue_b].correlation_key == _leg_key(msgid, queue_b)
 
-
-# ---------- Dovecot verdicts are routed per leg ----------
 
 def _lmtp(recipient, rest, session=None):
     return (f'lmtp({recipient})<1234><{session or uuid.uuid4().hex[:12]}>: '
@@ -324,8 +279,6 @@ def _pin_dovecot_watermark():
 
 
 def test_dovecot_verdict_goes_to_the_leg_that_was_delivered(env, monkeypatch):
-    """Each LMTP line names the mailbox it was delivered to, which is what
-    tells the legs of one Message-ID apart."""
     from app import scheduler as sched
 
     msgid, queue_a, queue_b, rspamd_a, rspamd_b = _seed_forward_scenario()
@@ -338,8 +291,6 @@ def test_dovecot_verdict_goes_to_the_leg_that_was_delivered(env, monkeypatch):
 
     _add_raw_dovecot(_lmtp(LOCAL_USER, f"sieve: msgid=<{msgid}>: stored mail into mailbox 'INBOX'"))
     _add_raw_dovecot(_lmtp(OTHER_USER, f'sieve: msgid=<{msgid}>: discarded message'))
-    # Nothing says which leg this one belongs to - it must be skipped, not
-    # guessed onto one of them (it would win over both verdicts above).
     _add_raw_dovecot(_lmtp(UNKNOWN_USER,
                            f'sieve: msgid=<{msgid}>: rejected message from <s@d> (spam content)'))
 
@@ -352,8 +303,6 @@ def test_dovecot_verdict_goes_to_the_leg_that_was_delivered(env, monkeypatch):
     assert legs[queue_a].dovecot_mailbox == 'INBOX'
     assert legs[queue_b].dovecot_status == 'discarded'
 
-
-# ---------- the message dialog links the legs together ----------
 
 def test_details_endpoint_lists_the_other_delivery(env):
     from fastapi.testclient import TestClient
@@ -372,15 +321,12 @@ def test_details_endpoint_lists_the_other_delivery(env):
     assert (related[0]['sender'], related[0]['recipient']) == (LOCAL_USER, OTHER_USER)
     assert related[0]['final_status'] == 'rejected'
 
-    # The link works in both directions
     other = client.get(f'/api/message/{legs[queue_b].correlation_key}/details').json()
     assert [d['correlation_key'] for d in other['related_deliveries']] == [
         legs[queue_a].correlation_key]
 
 
 def test_details_endpoint_takes_the_subject_from_another_delivery(env):
-    """A delivery Rspamd did not scan (a release from quarantine) has no subject
-    of its own; the dialog shows the one another delivery of the message has."""
     from fastapi.testclient import TestClient
     from app.main import app
     from app.database import get_db_context
@@ -397,7 +343,6 @@ def test_details_endpoint_takes_the_subject_from_another_delivery(env):
 
     client = TestClient(app)
     assert client.get(f'/api/message/{legs[queue_b].correlation_key}/details').json()['subject'] == 'Quarterly report'
-    # A delivery with a subject keeps its own
     assert client.get(f'/api/message/{legs[queue_a].correlation_key}/details').json()['subject'] == 'Quarterly report'
 
 
@@ -417,11 +362,7 @@ def test_details_endpoint_has_no_related_deliveries_for_a_single_delivery(env):
     assert payload['related_deliveries'] == []
 
 
-# ---------- the list shows one row per message ----------
-
 def test_list_shows_one_row_per_message(env):
-    """A forwarded message is one email, so it is one row - with a count of
-    how many times it was delivered."""
     msgid, queue_a, queue_b, rspamd_a, rspamd_b = _seed_forward_scenario()
     _correlate(rspamd_a)
     _correlate(rspamd_b)
@@ -446,8 +387,6 @@ def test_list_shows_one_row_per_message(env):
 
 
 def test_list_row_is_the_leg_the_search_matched(env):
-    """Searching for the forward target must not answer with the leg that has
-    nothing to do with the search."""
     msgid, queue_a, queue_b, rspamd_a, rspamd_b = _seed_forward_scenario()
     _correlate(rspamd_a)
     _correlate(rspamd_b)
@@ -460,12 +399,10 @@ def test_list_row_is_the_leg_the_search_matched(env):
     row = payload['data'][0]
     assert row['correlation_key'] == legs[queue_b].correlation_key
     assert (row['sender'], row['recipient']) == (LOCAL_USER, OTHER_USER)
-    # The count still covers every delivery, not only the matching one
     assert row['deliveries'] == 2
 
 
 def test_list_does_not_group_correlations_without_a_message_id(env):
-    """Nothing says two messages without a Message-ID are the same message."""
     from app.database import get_db_context
     from app.models import MessageCorrelation
 
@@ -488,8 +425,6 @@ def test_list_does_not_group_correlations_without_a_message_id(env):
     assert sorted(row['correlation_key'] for row in payload['data']) == sorted(keys)
     assert [row['deliveries'] for row in payload['data']] == [1, 1]
 
-
-# ---------- maintenance jobs must not merge the legs back together ----------
 
 def test_cleanup_duplicate_correlations_keeps_both_legs(env):
     from app.database import get_db_context

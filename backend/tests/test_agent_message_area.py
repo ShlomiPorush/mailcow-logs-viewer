@@ -1,17 +1,10 @@
-"""A grant without View for Messages gets no message's sender, recipient or subject.
-
-GET /api/stats/recent-activity lists messages and belongs to the Messages
-area, and the pending deliveries in GET /api/settings/info (a Dashboard &
-Status route) are left out for an agent without messages:read. Both ways
-an agent calls the app are covered: MCP read_api and REST with a bearer.
-"""
 import json
 import uuid
 from datetime import datetime
 
 import pytest
 
-from test_agent_access import _connect, _signed_in, _tool, live_agents  # noqa: F401  (live_agents is a fixture)
+from test_agent_access import _connect, _signed_in, _tool, live_agents  # noqa: F401
 from test_agent_device_rest import _api, _connect_with_code
 
 MARK = uuid.uuid4().hex[:8]

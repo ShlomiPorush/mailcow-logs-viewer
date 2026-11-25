@@ -1,4 +1,3 @@
-"""An Exact Match rule ignores letter case on every field, the subject included."""
 from types import SimpleNamespace
 
 from app.routers.quarantine_rules import _find_matching_rule
@@ -23,7 +22,6 @@ def test_exact_subject_still_needs_the_whole_value():
 
 
 def test_exact_sender_with_mixed_case_value():
-    # The job lowercases sender and recipient before matching
     rule = _rule("sender", "NoReply@Example.com")
     assert _find_matching_rule([rule], "noreply@example.com", "example.com",
                                "rcpt@example.org", "Hello") is rule

@@ -1,15 +1,3 @@
-"""A Messages row never stands for a delivery its details would hide.
-
-A delivery whose own sender and recipient are allowed can still belong to an
-excluded address through a line of its Postfix queue, such as an alias in
-orig_to; opening it answers 404 (delivery_hidden). Such a delivery only lives
-until the cleanup deletes it (listing an address asks for a pass). The list
-checks the deliveries of the page it shows: the row stands for a visible
-delivery of the message the filters match, or is left off the page. Totals,
-facet counts, the count of new mail and the export check a delivery's own
-addresses only, so they never read the Postfix lines; after the cleanup they
-leave it out too. A guard keeps the Postfix lines out of those queries.
-"""
 import hashlib
 import uuid
 from datetime import datetime, timedelta
@@ -54,7 +42,7 @@ def client(monkeypatch):
     from app.config import settings
     from app.database import init_db
     from app.main import app
-    import app.models as _tables  # noqa: F401 - the tables init_db creates on an empty database
+    import app.models as _tables  # noqa: F401
     init_db()
     monkeypatch.setattr(settings._inner, 'blacklist_emails', '')
     _cleanup()
@@ -63,7 +51,6 @@ def client(monkeypatch):
 
 
 def _leg(msgid, recipient, t0, orig_to=None):
-    """One delivery with one Postfix line; orig_to names the alias it came through."""
     from app.database import get_db_context
     from app.models import MessageCorrelation, PostfixLog
     queue_id = uuid.uuid4().hex[:10].upper()
@@ -91,7 +78,6 @@ def _list(client):
 
 
 def test_a_row_stands_for_the_visible_delivery(client, monkeypatch):
-    """The earlier delivery came through an excluded alias; the later one did not."""
     msgid = f'{uuid.uuid4().hex}@{MARKER}'
     t0 = datetime.utcnow() - timedelta(minutes=10)
     hidden = _leg(msgid, BOX, t0, orig_to=LISTED)
@@ -108,8 +94,6 @@ def test_a_row_stands_for_the_visible_delivery(client, monkeypatch):
 
 
 def test_a_row_is_never_replaced_by_a_delivery_the_filters_do_not_match(client, monkeypatch):
-    """Filtered to the hidden delivery's recipient, the message has no visible
-    delivery that matches: the row is left off, not given the other delivery."""
     msgid = f'{uuid.uuid4().hex}@{MARKER}'
     t0 = datetime.utcnow() - timedelta(minutes=10)
     _leg(msgid, BOX, t0, orig_to=LISTED)
@@ -132,7 +116,6 @@ def test_a_message_whose_only_delivery_is_hidden_is_left_off_and_then_cleaned(cl
     shown = _leg(f'{uuid.uuid4().hex}@{MARKER}', DAVE, t0 + timedelta(minutes=1))
     _exclude(monkeypatch)
 
-    # Left off the page at once; the total counts it until the cleanup runs
     assert [row['correlation_key'] for row in _list(client)['data']] == [shown]
     _cleanup_pass()
     payload = _list(client)
@@ -155,7 +138,6 @@ def test_a_delivery_without_a_message_id_hidden_this_way_is_not_listed(client, m
 
 
 def test_nothing_is_hidden_before_the_alias_is_excluded(client):
-    """The rule only leaves out what an excluded address names."""
     msgid = f'{uuid.uuid4().hex}@{MARKER}'
     t0 = datetime.utcnow() - timedelta(minutes=10)
     first = _leg(msgid, BOX, t0, orig_to=LISTED)
@@ -166,8 +148,6 @@ def test_nothing_is_hidden_before_the_alias_is_excluded(client):
 
 
 def test_an_empty_queue_id_joins_no_lines(client, monkeypatch):
-    """A delivery with an empty queue id is not hidden by another empty-queue line
-    that names an excluded address: delivery_hidden() reads an empty queue id as none."""
     from app.database import get_db_context
     from app.models import MessageCorrelation, PostfixLog
     t0 = datetime.utcnow() - timedelta(minutes=10)
@@ -187,10 +167,6 @@ def test_an_empty_queue_id_joins_no_lines(client, monkeypatch):
 
 
 def test_counts_and_pages_never_read_the_postfix_lines(client, monkeypatch):
-    """Guard: with addresses excluded, the facet counts, the count of new mail
-    and the export run no query on the Postfix lines, and the list reads them
-    only for the deliveries of its page (by queue id or line id), never the
-    whole table: a check per delivery there made every count pay for it."""
     from sqlalchemy import event
     from app.database import engine
     msgid = f'{uuid.uuid4().hex}@{MARKER}'

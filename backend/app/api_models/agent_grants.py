@@ -1,8 +1,3 @@
-"""What the consent page and Settings > Agents calls return (agent_access/consent.py).
-
-For people only: an agent's own calls never reach these routes. Its own calls
-are described in agents.py.
-"""
 from typing import Dict, List, Optional
 
 from pydantic import Field

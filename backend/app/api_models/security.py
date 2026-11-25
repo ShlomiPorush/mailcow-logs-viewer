@@ -1,6 +1,3 @@
-"""What the Security alerts, Protection rules, SMTP abuse, Rate limits and Blacklist
-calls return (routers/security_alerts.py, protection.py, smtp_abuse.py,
-rate_limits.py, blacklist.py)."""
 from typing import Any, Dict, List, Optional, Union
 
 from pydantic import ConfigDict, Field
@@ -10,8 +7,6 @@ from .logs import ProtectionCatch
 
 TIME = "UTC, ISO 8601 with Z"
 
-
-# ---------------------------------------------------------------- security alerts
 
 class SecurityAlert(Fixed):
     id: int
@@ -104,8 +99,6 @@ class AlertActivityResponse(Fixed):
     around: Union[AroundSentMail, AroundLogins] = Field(description="From the check window before the alert to "
                                                                     "an hour after; from and to to the microsecond")
 
-
-# ---------------------------------------------------------------- protection rules
 
 class _Rule(Fixed):
     enabled: bool
@@ -204,8 +197,6 @@ class ProtectionHitsResponse(Fixed):
     counts: Dict[str, int] = Field(description="Catches by status, every one kept")
 
 
-# ---------------------------------------------------------------- SMTP abuse
-
 class AbuseMailbox(Fixed):
     email: str
     message_count: int = Field(description="Sent in the window")
@@ -261,8 +252,6 @@ class AbuseAction(Fixed):
     app_passwords_revoked: Optional[int]
     created_at: Optional[str] = Field(description=TIME)
 
-
-# ---------------------------------------------------------------- rate limits
 
 class RateLimitHit(Fixed):
     time: Optional[str] = Field(description=TIME)
@@ -363,8 +352,6 @@ class CounterReset(Fixed):
     reset: bool
     mailcow_response: Any = Field(description="mailcow's answer, usually empty")
 
-
-# ---------------------------------------------------------------- blacklist
 
 class BlocklistResult(Fixed):
     """One blocklist's answer for an address, as the check stored it."""

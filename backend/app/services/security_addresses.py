@@ -1,15 +1,3 @@
-"""
-The Security page's address lists, built here so the counts are real and a
-country filter covers every address, not only the ones a browser has loaded.
-
-Every address that tried in the chosen period, or that a rule caught, is on
-one of two lists. Banned: a rule's ban, one of Fail2ban's own (not one mailcow
-is about to lift), or the denylist. To review: every other one, whether a rule
-caught it or not, and the ones on the allowlist too, tagged so. The panels
-beside the list (countries and networks) are counted from the same addresses,
-so a number there is the rows a click on it shows. The newest activity comes first; pages follow a cursor, so an address
-that changes list while someone scrolls does not shift the rest.
-"""
 import time
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
@@ -26,7 +14,6 @@ from .netfilter_address import mailcowauth_failure
 LISTS = ("review", "banned")
 CACHE_SECONDS = 10
 
-# What a netfilter "matched rule" line was about, from the log text itself
 _NETFILTER_SERVICES = (
     ('SASL ', 'SMTP auth', True),
     ('non-SMTP command', 'SMTP probe', False),
@@ -40,20 +27,16 @@ _NETFILTER_SERVICES = (
 )
 
 
-# mailcow's own failed-login line (2026-11 and later) names the service; it is
-# read before the text above, which the username in that line could contain
 _MAILCOWAUTH_SERVICES = {'imap': 'IMAP', 'pop3': 'POP3', 'sieve': 'Sieve', 'smtp': 'SMTP auth'}
 _MAILCOWAUTH_OTHER = 'Mail login'
 
 
 def _mailcowauth_pattern(service: str) -> str:
-    """The PostgreSQL pattern of mailcowauth_failure for one service token."""
     return (r'^\S+ matched rule id \d+ \(MAILCOWAUTH: Login failed for user .* '
             rf'with service {service} from IP [0-9a-f.:]+\)$')
 
 
 def netfilter_service(message: Optional[str]):
-    """Return (service, is_login) for a netfilter line, or (None, False)."""
     failure = mailcowauth_failure(message)
     if failure:
         return _MAILCOWAUTH_SERVICES.get(failure[1], _MAILCOWAUTH_OTHER), True
@@ -65,12 +48,6 @@ def netfilter_service(message: Optional[str]):
 
 
 def netfilter_sources(db: Session, hours: int, now: Optional[datetime] = None) -> Tuple[Dict[str, dict], dict]:
-    """Attempts over the last hours by source address, and the totals.
-
-    Only lines where netfilter matched a rule count as an attempt; the
-    "N more attempts ... until banned" lines that follow each one are not
-    counted again. Ban and unban lines give the last Fail2ban action per address.
-    """
     cutoff = (now or datetime.utcnow()) - timedelta(hours=hours)
     rows = db.query(
         NetfilterLog.time, NetfilterLog.ip, NetfilterLog.message, NetfilterLog.username,
@@ -119,11 +96,6 @@ def netfilter_sources(db: Session, hours: int, now: Optional[datetime] = None) -
 
 
 def attempt_sources(db: Session, hours: int, now: Optional[datetime] = None) -> List[dict]:
-    """Attempts over the last hours by source address, counted by the database.
-
-    The same attempts netfilter_sources counts (lines where netfilter matched a
-    rule), but grouped in SQL, so a long period is not cut at a number of lines.
-    """
     cutoff = (now or datetime.utcnow()) - timedelta(hours=hours)
     text = NetfilterLog.message
     mailcowauth = [(text.op('~')(_mailcowauth_pattern(token)), name) for token, name in _MAILCOWAUTH_SERVICES.items()]
@@ -148,23 +120,13 @@ def attempt_sources(db: Session, hours: int, now: Optional[datetime] = None) -> 
     } for ip, attempts, logins, last, services, users, code, name, city, org in rows]
 
 
-# ---------------------------------------------------------------- the lists
-
 def _bare(entry: str) -> str:
-    """The address a single-address entry holds: /32 for IPv4, /128 for IPv6. An
-    IPv6 address with /32 is a network, as mailcow's netfilter reads it."""
     entry = (entry or "").strip()
     suffix = "/128" if ":" in entry else "/32"
     return entry[:-len(suffix)] if entry.endswith(suffix) else entry
 
 
 def legacy_ipv6_entry(entry: str) -> Optional[str]:
-    """The address an earlier version wrote as a /32 network, or None.
-
-    The app used to write a single IPv6 address as 2001:db8::1/32. mailcow stores
-    the entry as sent and its netfilter reads it as all of 2001:db8::/32. A network
-    written on purpose has no host bits set (2001:db8::/32); this one does.
-    """
     entry = (entry or "").strip()
     if ":" not in entry or not entry.endswith("/32"):
         return None
@@ -181,7 +143,6 @@ def legacy_ipv6_entry(entry: str) -> Optional[str]:
 
 
 def legacy_entries(f2b: Optional[dict]) -> List[dict]:
-    """The allowlist and denylist entries an earlier version wrote as a /32 network."""
     found = []
     for list_name in ("whitelist", "blacklist"):
         for entry in protection_rules.split_ip_list((f2b or {}).get(list_name)):
@@ -193,7 +154,6 @@ def legacy_entries(f2b: Optional[dict]) -> List[dict]:
 
 
 def _entry_for(entries: List[str], ip: str) -> Optional[str]:
-    """The list entry that holds the address: the address itself, or a network around it."""
     for entry in entries:
         if _bare(entry) == ip:
             return entry
@@ -216,7 +176,6 @@ def _truthy(value) -> bool:
 
 
 def _ban_network(ban: dict):
-    """The network a Fail2ban ban covers, as mailcow keys it (198.51.96.0/20), or None."""
     try:
         return ipaddress.ip_network((ban.get("network") or ban.get("ip") or "").strip(), strict=False)
     except ValueError:
@@ -224,8 +183,6 @@ def _ban_network(ban: dict):
 
 
 def _state(a: dict, known: bool, whitelist: List[str], blacklist: List[str]) -> str:
-    """Where an address stands; the same order the page used to apply. listed_as
-    is the allowlist or denylist entry that holds it."""
     statuses = {h["status"] for h in a["hits"]}
     allowed = _entry_for(whitelist, a["ip"]) if known else None
     if allowed:
@@ -251,16 +208,10 @@ def _list_of(a: dict) -> Optional[str]:
 
 
 def attempts_of(a: dict) -> int:
-    """An address's attempts as its row shows them: logged ones, or what the rules counted."""
     return a["attempts"] or sum(h.get("attempts") or 0 for h in a["hits"])
 
 
 def panels(addresses: List[dict], countries: int = 10, networks: int = 8) -> Tuple[List[dict], List[dict]]:
-    """The countries and networks the listed addresses come from, most attempts first.
-
-    Counted from the lists themselves: addresses is how many rows a click shows
-    (To review and Banned together), and the attempts are the ones on those rows.
-    """
     by_country: Dict[str, dict] = {}
     by_network: Dict[str, dict] = {}
     for a in addresses:
@@ -282,8 +233,6 @@ def panels(addresses: List[dict], countries: int = 10, networks: int = 8) -> Tup
 
 
 def fail2ban_answered(f2b) -> bool:
-    """mailcow's Fail2ban settings, not an error answer that came with HTTP 200
-    ({"type": "danger", "msg": ...}): only then are its bans and lists known."""
     if not isinstance(f2b, dict):
         return False
     if str(f2b.get('type', '')).lower() in ('danger', 'error'):
@@ -292,12 +241,6 @@ def fail2ban_answered(f2b) -> bool:
 
 
 def collect(db: Session, f2b: Optional[dict], now: Optional[datetime] = None, hours: int = 24) -> List[dict]:
-    """Every address on one of the lists, newest activity first.
-
-    f2b is mailcow's Fail2ban answer, or None when mailcow did not answer: then
-    only the rules' bans count as banned, and the allow and deny lists are unknown.
-    hours is the period the attempts are counted over.
-    """
     now = now or datetime.utcnow()
     addresses: Dict[str, dict] = {}
 
@@ -344,8 +287,6 @@ def collect(db: Session, f2b: Optional[dict], now: Optional[datetime] = None, ho
                 continue
             network = _ban_network(ban)
             if network is not None and network.num_addresses > 1:
-                # Fail2ban's netban blocked the whole network around an attacker:
-                # the row is the network, and its addresses on the lists are banned through it
                 row = get(str(network))
                 row["f2b"], row["network_size"] = ban, network.num_addresses
                 row["network_range"] = [str(network.network_address), str(network[-1])]
@@ -355,7 +296,6 @@ def collect(db: Session, f2b: Optional[dict], now: Optional[datetime] = None, ho
             if ip:
                 get(ip)["f2b"] = ban
         for a in list(addresses.values()):
-            # An address on the denylist stays denylisted: the network's ban ends, its entry does not
             if a["f2b"] or a["network_size"] or _entry_for(blacklist, a["ip"]):
                 continue
             try:
@@ -368,7 +308,6 @@ def collect(db: Session, f2b: Optional[dict], now: Optional[datetime] = None, ho
                     seen(get(str(network)), a["last"])
                     break
 
-    # An address with no line in the last day (a long Fail2ban ban) has its place in its older lines
     missing = [ip for ip, a in addresses.items() if not a["country"]]
     if missing:
         rows = db.query(NetfilterLog.ip, func.max(NetfilterLog.country_name), func.max(NetfilterLog.country_code),
@@ -407,12 +346,6 @@ def _parse_cursor(value: str) -> Optional[tuple]:
 
 def page(addresses: List[dict], list_name: str, country: Optional[str], after: Optional[str], limit: int,
          query: Optional[str] = None, network: Optional[str] = None) -> dict:
-    """One page of a list, its real total, and both lists' counts (for the country, when one is chosen).
-
-    `query` keeps the addresses that contain it, for the global search, and
-    `network` the ones from that network (its ASN organization); the counts then
-    count only those.
-    """
     in_country = [a for a in addresses if (not country or a["country"] == country)
                   and (not network or a["org"] == network)
                   and (not query or query in a["ip"])]
@@ -433,11 +366,6 @@ def page(addresses: List[dict], list_name: str, country: Optional[str], after: O
         "next": cursor_of(items[-1]) if len(rows) > limit else None,
     }
 
-
-# ---------------------------------------------------------------- a short cache
-# Scrolling asks for one page after another; they come from one reading of the
-# logs and of mailcow, so a page never disagrees with the one before it. Each
-# period has its own reading. Any change to Fail2ban or to a catch forgets them.
 
 _cache: Dict[int, Tuple[float, List[dict], bool]] = {}
 

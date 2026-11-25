@@ -21,7 +21,6 @@ function load() {
     return context;
 }
 
-// A domain on p=none: one sender fails, the others pass on 95% or more
 const domain = {
     name: 'example.com',
     record: { record: 'v=DMARC1; p=none; rua=mailto:dmarc@example.com', policy: 'none', settings: { aggregate_report_uris: ['mailto:dmarc@example.com'] } },
@@ -50,13 +49,11 @@ test('the choice is a radio group with the picked policy checked', () => {
     assert.equal((html.match(/role="radio"/g) || []).length, 3);
     assert.match(html, /aria-checked="true" tabindex="0" data-policy="quarantine"/);
     assert.match(html, /data-policy="none"[^>]*>\s*<span class="ui-dm-pol-t"><span>None <span class="tag">Monitoring<\/span><\/span><span class="tag">Now<\/span>/);
-    // Each policy in its colour: None red, Quarantine orange, Reject green
     assert.match(html, /class="ui-dm-fail"[^>]*data-policy="none"/);
     assert.match(html, /class="ui-dm-warn is-on"[^>]*data-policy="quarantine"/);
     assert.match(html, /class="ui-dm-ok"[^>]*data-policy="reject"/);
 });
 
-// A record with every optional tag the picker must keep
 const tagged = {
     name: 'example.com',
     record: {
@@ -85,7 +82,6 @@ test('the forecast counts the messages that failed DMARC, from every sender', ()
         { passPct: 100, total: 700, pass: 700 }, { passPct: 98, total: 300, pass: 294 },
         { passPct: 40, total: 10, pass: 4 }, { passPct: 0, total: 61, pass: 0 },
     ] }, 'reject');
-    // 6 + 6 + 61 failed; the 4 that passed in the weak group are not refused
     assert.match(plan, /would have refused <b>73<\/b> messages/);
 });
 

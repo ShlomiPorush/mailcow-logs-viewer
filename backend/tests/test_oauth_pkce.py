@@ -1,10 +1,3 @@
-"""The OAuth2 login uses PKCE (RFC 7636, S256), bound to the browser that started it.
-
-The code_verifier is derived on the server from the session secret and the
-random nonce in the starting browser's cookie, so the login stays stateless
-and the verifier never appears in the URL the provider or the browser sees.
-An authorization code intercepted on its way back is useless without it.
-"""
 import base64
 import hashlib
 import secrets
@@ -20,6 +13,7 @@ from app.config import settings
 from app.main import app
 from app.routers import auth
 from app.services import oauth2_client as oauth2_module
+from sign_in_helpers import revoke_all_sessions
 
 AUTHORIZE = "https://id.example.com/authorize"
 TOKEN = "https://id.example.com/token"
@@ -32,7 +26,6 @@ def s256(verifier: str) -> str:
 
 @pytest.fixture
 def provider(monkeypatch):
-    """The real OAuth2 client against a fake provider; records every token request."""
     client = auth.oauth2_client
     monkeypatch.setattr(settings._inner, "oauth2_enabled", True)
     monkeypatch.setattr(settings._inner, "basic_auth_enabled", False)
@@ -88,7 +81,6 @@ def test_authorization_url_carries_an_s256_code_challenge(provider):
     query = start(TestClient(app))
     assert query["code_challenge_method"] == "S256"
     challenge = query["code_challenge"]
-    # 32 bytes of SHA-256, base64url without padding
     assert len(challenge) == 43
     assert set(challenge) <= set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_")
 
@@ -105,7 +97,6 @@ def test_token_exchange_sends_the_matching_code_verifier(provider):
     assert response.headers["location"] == "/"
     assert len(provider) == 1
     verifier = provider[0]["code_verifier"]
-    # RFC 7636 section 4.1: 43 to 128 unreserved characters
     assert 43 <= len(verifier) <= 128
     assert s256(verifier) == query["code_challenge"]
 
@@ -138,15 +129,13 @@ def test_callback_with_the_cookie_of_another_flow_is_rejected(provider):
 
 
 def test_a_sign_in_change_during_the_callback_issues_no_session(provider, monkeypatch):
-    """The provider answers while the operator changes sign-in: a session issued
-    after that change would outlive it."""
     client = TestClient(app)
     query = start(client)
     user_info = auth.oauth2_client.get_user_info
 
     async def answer_then_change(access_token):
         info = await user_info(access_token)
-        session.revoke_all_sessions()
+        revoke_all_sessions()
         return info
 
     monkeypatch.setattr(auth.oauth2_client, "get_user_info", answer_then_change)
@@ -157,9 +146,6 @@ def test_a_sign_in_change_during_the_callback_issues_no_session(provider, monkey
 
 
 def test_a_discovery_answer_for_the_old_provider_is_not_applied(monkeypatch):
-    """Discovery at the old provider was still waiting when the settings named
-    a new one: its endpoints must not replace the new provider's, or a login
-    after the change would finish with the provider that was removed."""
     import asyncio
 
     monkeypatch.setattr(settings._inner, "oauth2_issuer_url", "https://old-id.example.test")
@@ -184,7 +170,6 @@ def test_a_discovery_answer_for_the_old_provider_is_not_applied(monkeypatch):
                             lambda *a, **kw: real_async_client(*a, **{**kw, "transport": httpx.MockTransport(handler)}))
         discovery = asyncio.create_task(client.discover_endpoints())
         await asyncio.wait_for(asked.wait(), timeout=5)
-        # The new provider is saved, with its endpoints set by hand
         monkeypatch.setattr(settings._inner, "oauth2_issuer_url", "https://new-id.example.test")
         monkeypatch.setattr(settings._inner, "oauth2_token_url", "https://new-id.example.test/token")
         client.reload_config()
@@ -199,9 +184,6 @@ def test_a_discovery_answer_for_the_old_provider_is_not_applied(monkeypatch):
 
 
 def test_discovery_waits_for_a_settings_reload_on_another_thread(monkeypatch):
-    """A settings save reloads the client on a worker thread while a login runs
-    discovery on the event loop. Discovery that starts while the reload is half
-    done must not ask the old provider and keep its endpoints as the new ones."""
     import asyncio
     import threading
 
@@ -213,7 +195,6 @@ def test_discovery_waits_for_a_settings_reload_on_another_thread(monkeypatch):
     reload_thread = {}
 
     class HalfDoneReload:
-        """The settings as the client reads them; the reload thread stops at the issuer."""
         def __getattr__(self, name):
             if name == "oauth2_issuer_url" and threading.current_thread() is reload_thread.get("thread"):
                 inside.set()
@@ -227,7 +208,6 @@ def test_discovery_waits_for_a_settings_reload_on_another_thread(monkeypatch):
     async def handler(request: httpx.Request) -> httpx.Response:
         asked.append(request.url.host)
         if request.url.host == "old-id.example.test":
-            # The old provider answers after the reload is complete
             for _ in range(500):
                 if reload_done.is_set():
                     break

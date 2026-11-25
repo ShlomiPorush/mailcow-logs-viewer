@@ -1,4 +1,3 @@
-"""Every reason the Add Suppression dialog offers is accepted."""
 import re
 from pathlib import Path
 

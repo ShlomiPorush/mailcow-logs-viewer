@@ -1,41 +1,3 @@
-"""
-Protection rules: act on the failed logins netfilter records.
-
-The rules read the new netfilter lines after every log fetch, decide which
-addresses to catch and record why as a ProtectionHit.
-
-Rules that ban (each starts in watch mode; banning is the admin's choice):
-- trap: names the admin knows have no mailbox. An address that tries one is
-  caught at once. A trap may not be a real mailbox or alias; a trap that later
-  becomes one is skipped.
-- unknown_accounts: an address that tries several accounts which do not exist
-  within a time window. An address with a successful login in the last day is
-  never caught, so a user who mistyped the address is safe.
-- repeat_offender: an address Fail2ban itself banned several times.
-- subnet: several addresses of one IPv4 /24 attacking within a window. The
-  network is caught as a whole, unless it holds an address that may never be.
-- country: failed logins from countries the admin chose (needs GeoIP).
-
-A rule that only alerts:
-- breach: a successful login right after failed tries from the same address,
-  or from a country the account did not log in from in 30 days. It points at a
-  stolen password; banning would lock out the real user, so it never bans.
-
-In watch mode a hit only records what the rule would do. In ban mode the hit
-waits as 'pending' until enforce() writes it to the Fail2ban blacklist in one
-batch, with a fresh read just before the write so a change made in mailcow in
-the meantime is kept. The app records which entries it added (owned) and only
-ever removes those: when the ban ends, or when the admin undoes it. An address
-the admin dismissed or undid is left alone by that rule for a week.
-
-Never caught by any rule: the Fail2ban allowlist (matched as networks),
-internal networks, and the mailcow host with its transports and relay hosts.
-
-The rules are stored in system_settings as JSON like the ignore lists, so they
-can be managed on the Security page even when editing settings from the UI is
-off. Reading moves forward by log id, so a restart never reads a line twice
-and a rule switched on later never reaches back into lines already read.
-"""
 import asyncio
 import copy
 import ipaddress
@@ -68,7 +30,6 @@ RULE_NAMES = BAN_RULES + ("breach",)
 OPEN_STATUSES = ("watching", "pending", "banned", "alert")
 CLOSED_STATUSES = ("dismissed", "expired", "undone")
 LEAVE_ALONE = timedelta(days=7)
-# A watched address not seen for this long leaves To review for the history
 QUIET_AFTER = timedelta(days=7)
 
 DEFAULT_RULES: Dict[str, dict] = {
@@ -80,8 +41,6 @@ DEFAULT_RULES: Dict[str, dict] = {
     "breach": {"enabled": False, "failures": 3, "window_minutes": 60, "new_country": True, "notify": True},
 }
 
-# Internal networks, spelled out: ipaddress' is_private also covers the
-# documentation ranges, which are public-facing test addresses here
 _INTERNAL_NETWORKS = [ipaddress.ip_network(n) for n in (
     "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "127.0.0.0/8", "169.254.0.0/16",
     "::1/128", "fc00::/7", "fe80::/10",
@@ -89,29 +48,21 @@ _INTERNAL_NETWORKS = [ipaddress.ip_network(n) for n in (
 _NAME_RE = re.compile(r"^[a-z0-9._%+\-]+(@[a-z0-9.\-]+)?$")
 _COUNTRY_RE = re.compile(r"^[A-Z]{2}$")
 _SUCCESS_LOGIN_WINDOW = timedelta(hours=24)
-# A successful login only in the shape the server writes it, from the start of
-# the line: elsewhere in a line these words can be text a client sent (a
-# rejected command, a failed login's user name). smtpd writes
-# "QID: client=name[ip](:port), sasl_method=M, sasl_username=U"; Dovecot's
-# login processes write "imap-login: Login: user=<U>, method=M, rip=IP, ...".
 _POSTFIX_LOGIN_RE = re.compile(
     r"[0-9A-Za-z]+: client=[^\s\[\],]*\[(?:IPv6:)?([0-9a-fA-F:.]+)\](?::\d+)?, "
     r"sasl_method=[^\s,]+, sasl_username=([^\s,]+)(?:,|$)")
 _DOVECOT_LOGIN_RE = re.compile(
     r"(?:dovecot:\s*)?[a-z0-9]+-login: Login: user=<([^<>]*)>, (?:[^,<>]*, )*?rip=([0-9a-fA-F:.]+)(?:,|$)")
-_SMTPD_PROGRAM = "%/smtpd"  # postfix/smtpd, postfix/submission/smtpd, postfix/smtps/smtpd
+_SMTPD_PROGRAM = "%/smtpd"
 
 
 @dataclass
 class ProtectionContext:
-    """What the rules need from outside the database, read once per run."""
-    allowlist: List[str] = field(default_factory=list)   # Fail2ban allowlist entries (addresses or networks)
-    protected_ips: Set[str] = field(default_factory=set)  # mailcow host, transports, relay hosts
-    geoip: bool = False                                    # the country rule and new-country alert need it
-    raw_logs: bool = False                                 # IMAP logins for the breach alert come from the raw logs
+    allowlist: List[str] = field(default_factory=list)
+    protected_ips: Set[str] = field(default_factory=set)
+    geoip: bool = False
+    raw_logs: bool = False
 
-
-# ---------------------------------------------------------------- stored state
 
 def _setting(db: Session, key: str) -> Optional[str]:
     row = db.query(SystemSetting).filter(SystemSetting.key == key).first()
@@ -127,7 +78,6 @@ def _store(db: Session, key: str, value: str) -> None:
 
 
 def load_rules(db: Session) -> Dict[str, dict]:
-    """The stored rules over the defaults; an unreadable value falls back to the defaults."""
     rules = copy.deepcopy(DEFAULT_RULES)
     raw = _setting(db, RULES_KEY)
     if raw:
@@ -143,11 +93,6 @@ def load_rules(db: Session) -> Dict[str, dict]:
 
 
 def _known_accounts(db: Session):
-    """Every real mailbox and alias, lower case, with the domains that have a catch-all.
-
-    mailcow alias domains make user@alias.tld the same account as
-    user@target.tld, so every address also counts on each alias of its domain.
-    """
     known = {u.lower() for (u,) in db.query(MailboxStatistics.username).all() if u}
     catch_all = set()
     for address, domain, is_catch_all in db.query(AliasStatistics.alias_address, AliasStatistics.domain, AliasStatistics.is_catch_all).all():
@@ -177,7 +122,6 @@ def _is_existing(name: str, known: Set[str], local_parts: Set[str]) -> bool:
 
 
 def save_rules(db: Session, rules: dict, can_ban: bool = True) -> Dict[str, dict]:
-    """Validate and store the rules. Raises ValueError with a message the admin can act on."""
     current = load_rules(db)
     for name in RULE_NAMES:
         if isinstance(rules.get(name), dict):
@@ -203,7 +147,6 @@ def save_rules(db: Session, rules: dict, can_ban: bool = True) -> Dict[str, dict
             continue
         if len(name) > 255 or not _NAME_RE.match(name):
             raise ValueError(f"{name} is not an account name")
-        # A real account as a trap would ban its own user for one wrong password
         if _is_existing(name, known, local_parts):
             raise ValueError(f"{name} is an existing mailbox or alias, so it cannot be a trap")
         if name not in names:
@@ -233,7 +176,6 @@ def save_rules(db: Session, rules: dict, can_ban: bool = True) -> Dict[str, dict
     br["new_country"] = bool(br["new_country"])
 
     _store(db, RULES_KEY, json.dumps(current))
-    # A rule switched back to watching bans nothing it has not banned yet
     watching = [n for n in BAN_RULES if current[n]["mode"] == "watch" or not current[n]["enabled"]]
     db.query(ProtectionHit).filter(ProtectionHit.status == "pending", ProtectionHit.rule.in_(watching),
                                    ProtectionHit.mode == "enforce").update({"status": "watching", "mode": "watch"}, synchronize_session=False)
@@ -242,8 +184,6 @@ def save_rules(db: Session, rules: dict, can_ban: bool = True) -> Dict[str, dict
         f"{n} {'off' if not current[n]['enabled'] else current[n].get('mode', 'alert')}" for n in RULE_NAMES))
     return current
 
-
-# ---------------------------------------------------------------- never catch
 
 def _networks(entries: Iterable[str]):
     nets = []
@@ -256,18 +196,16 @@ def _networks(entries: Iterable[str]):
 
 
 def never_ban(ip: str, allow_networks, protected_ips: Set[str]) -> bool:
-    """True for addresses no rule may catch."""
     if not ip or ip in protected_ips:
         return True
     try:
         address = ipaddress.ip_address(ip)
     except ValueError:
-        return True  # not an address: nothing to ban
+        return True
     return any(address.version == net.version and address in net for net in list(allow_networks) + _INTERNAL_NETWORKS)
 
 
 def _network_is_protected(net, allow_networks, protected_ips: Set[str]) -> bool:
-    """A network may not be banned when it overlaps anything that may never be."""
     for other in list(allow_networks) + _INTERNAL_NETWORKS:
         if other.version == net.version and net.overlaps(other):
             return True
@@ -281,7 +219,6 @@ def _network_is_protected(net, allow_networks, protected_ips: Set[str]) -> bool:
 
 
 def _postfix_login(program: Optional[str], message: Optional[str]) -> Optional[Tuple[str, str]]:
-    """(address, user) of a successful SMTP login line, or None."""
     if not (program or "").endswith("/smtpd"):
         return None
     match = _POSTFIX_LOGIN_RE.match(message or "")
@@ -289,7 +226,6 @@ def _postfix_login(program: Optional[str], message: Optional[str]) -> Optional[T
 
 
 def _dovecot_login(message: Optional[str]) -> Optional[Tuple[str, str]]:
-    """(address, user) of a successful IMAP or POP3 login line, or None."""
     match = _DOVECOT_LOGIN_RE.match(message or "")
     return (match.group(2), match.group(1).lower()) if match else None
 
@@ -302,7 +238,6 @@ def _same_ip(a: str, b: str) -> bool:
 
 
 def _in_pages(query, id_column, size: int = 1000):
-    """Every row of query (its first column is id_column), read page by page."""
     last = None
     while True:
         page = (query if last is None else query.filter(id_column > last)).order_by(id_column).limit(size).all()
@@ -313,17 +248,11 @@ def _in_pages(query, id_column, size: int = 1000):
 
 
 def _logged_in_recently(db: Session, ip: str, now: datetime) -> bool:
-    """A successful SMTP or IMAP login from this address in the last day.
-
-    The LIKE filters only narrow the rows: each one counts only when it reads
-    as a login line, and every candidate is read, so lines a client wrote to
-    look like logins never hide a real one behind them."""
     since = now - _SUCCESS_LOGIN_WINDOW
     smtp = db.query(PostfixLog.id, PostfixLog.program, PostfixLog.message).filter(
         PostfixLog.time >= since,
         PostfixLog.program.like(_SMTPD_PROGRAM),
         PostfixLog.message.like("%sasl_username=%"),
-        # Postfix writes an IPv6 client as [IPv6:2001:db8::1]
         or_(PostfixLog.message.like(f"%[{ip}]%"), PostfixLog.message.like(f"%[IPv6:{ip}]%")),
     )
     for _, program, message in _in_pages(smtp, PostfixLog.id):
@@ -344,10 +273,7 @@ def _logged_in_recently(db: Session, ip: str, now: datetime) -> bool:
     return False
 
 
-# ---------------------------------------------------------------- recording
-
 def _is_unknown(username: str, known: Set[str], catch_all: Set[str]) -> bool:
-    """mailcow logins are full addresses: a bare name, or an address with no mailbox, does not exist."""
     name = username.lower()
     if "@" not in name:
         return True
@@ -357,7 +283,6 @@ def _is_unknown(username: str, known: Set[str], catch_all: Set[str]) -> bool:
 
 
 def hit_dict(hit: ProtectionHit) -> dict:
-    """A catch as the API and the Security page see it."""
     return {
         "id": hit.id,
         "ip": hit.ip,
@@ -395,13 +320,11 @@ def _trap_reason(names: Iterable[str]) -> str:
 
 
 def _traps_in(reason: Optional[str]) -> Set[str]:
-    """The trap names an earlier run already put in a trap hit's reason."""
     match = re.match(r"^Tried the trap accounts? (.+)$", reason or "")
     return {n.strip() for n in match.group(1).split(",")} if match else set()
 
 
 def _left_alone(db: Session, target: str, rule: str, now: datetime) -> bool:
-    """The admin dismissed or undid this target for this rule less than a week ago."""
     return db.query(ProtectionHit.id).filter(
         ProtectionHit.ip == target, ProtectionHit.rule == rule,
         ProtectionHit.status.in_(("dismissed", "undone")), ProtectionHit.ended_at >= now - LEAVE_ALONE,
@@ -410,7 +333,6 @@ def _left_alone(db: Session, target: str, rule: str, now: datetime) -> bool:
 
 def _upsert(db: Session, target: str, rule: str, reason: str, lines: list, rules: dict,
             now: datetime, times: Optional[List[datetime]] = None) -> Tuple[Optional[ProtectionHit], bool]:
-    """Add the lines to the open hit for this target and rule, or open one. Returns (hit, created)."""
     hit = db.query(ProtectionHit).filter(
         ProtectionHit.ip == target, ProtectionHit.rule == rule, ProtectionHit.status.in_(OPEN_STATUSES)
     ).first()
@@ -440,17 +362,13 @@ def _upsert(db: Session, target: str, rule: str, reason: str, lines: list, rules
         hit.reason = reason
     hit.first_seen = min(hit.first_seen, first)
     hit.last_seen = max(hit.last_seen, last)
-    # Still attacking after its rule was switched to ban: ban it now
     config = rules.get(rule, {})
     if fresh and hit.status == "watching" and rule in BAN_RULES and config.get("mode") == "enforce":
         hit.status, hit.mode, hit.ban_hours = "pending", "enforce", config.get("ban_hours")
     return hit, False
 
 
-# ---------------------------------------------------------------- evaluation
-
 def _read_watermark(db: Session, key: str, model) -> Optional[int]:
-    """The last id read, or None on the first run (which starts from now, never from the history)."""
     stored = _setting(db, key)
     if stored is None:
         last = db.query(model.id).order_by(model.id.desc()).first()
@@ -464,7 +382,6 @@ def _read_watermark(db: Session, key: str, model) -> Optional[int]:
 
 
 def evaluate(db: Session, context: ProtectionContext, now: Optional[datetime] = None) -> List[ProtectionHit]:
-    """Read what was logged since the last run and record what the rules catch. Returns the new hits."""
     now = now or datetime.utcnow()
     rules = load_rules(db)
     created: List[ProtectionHit] = []
@@ -480,18 +397,12 @@ def evaluate(db: Session, context: ProtectionContext, now: Optional[datetime] = 
 
 
 def _close_quiet(db: Session, now: datetime) -> int:
-    """Close the watched catches with no new activity for QUIET_AFTER. Only
-    'watching' ones: a ban ends on its own clock, and an alert waits for the admin.
-    If the address comes back, the rule catches it again as a new catch."""
     return db.query(ProtectionHit).filter(
         ProtectionHit.status == "watching", ProtectionHit.last_seen < now - QUIET_AFTER,
     ).update({"status": "expired", "ended_at": now}, synchronize_session=False)
 
 
 def _attributed(row) -> bool:
-    """The line's address is the one netfilter named. Lines an earlier version
-    stored with an address from the client's text stay in the table until they
-    age out, and never count for a rule."""
     return bool(row.ip) and netfilter_address(row.message) == row.ip
 
 
@@ -511,7 +422,6 @@ def _evaluate_netfilter(db: Session, context: ProtectionContext, rules: dict, no
         tried = [r for r in candidates if r.username]
 
         if rules["trap"]["enabled"] and rules["trap"]["names"]:
-            # A trap saved before its mailbox existed must never ban the real user
             known, _ = _known_accounts(db)
             local_parts = {address.split("@", 1)[0] for address in known}
             traps = set()
@@ -521,7 +431,6 @@ def _evaluate_netfilter(db: Session, context: ProtectionContext, rules: dict, no
                 else:
                     traps.add(name)
             for row in tried:
-                # A full trap address matches exactly; a bare trap name matches the part before the @
                 name = row.username.lower()
                 local = name.split("@", 1)[0]
                 matched = name if name in traps else local if local in traps else None
@@ -546,8 +455,6 @@ def _evaluate_netfilter(db: Session, context: ProtectionContext, rules: dict, no
         ro = rules["repeat_offender"]
         if ro["enabled"]:
             since = now - timedelta(days=ro["window_days"])
-            # Only Fail2ban's own bans count: mailcow also logs a blacklist entry
-            # ("Added host/network ... to denylist") as a ban, including the ones this app adds
             fail2ban_ban = lambda r: (r.action or "") == "ban" and (r.message or "").startswith("Banning ")
             for ip in sorted({r.ip for r in candidates if fail2ban_ban(r)}):
                 bans = db.query(NetfilterLog).filter(
@@ -569,7 +476,7 @@ def _evaluate_netfilter(db: Session, context: ProtectionContext, rules: dict, no
                 except ValueError:
                     continue
                 if address.version != 4:
-                    continue  # IPv6 networks are left to a later version
+                    continue
                 net = ipaddress.ip_network(f"{row.ip}/24", strict=False)
                 if net in seen_nets:
                     continue
@@ -597,15 +504,12 @@ def _evaluate_netfilter(db: Session, context: ProtectionContext, rules: dict, no
         if hit is None:
             continue
         if rule == "trap":
-            # Every trap this address tried, including those from earlier runs
             hit.reason = _trap_reason(entry["traps"] | _traps_in(hit.reason))
         if is_new:
             created.append(hit)
     _store(db, WATERMARK_KEY, str(new_watermark))
     return created
 
-
-# ---------------------------------------------------------------- breach alert
 
 @dataclass
 class _Login:
@@ -616,7 +520,6 @@ class _Login:
 
 
 def _successful_logins(db: Session, context: ProtectionContext) -> List[_Login]:
-    """New successful SMTP logins, and IMAP logins when the raw logs are read."""
     logins: List[_Login] = []
     mark = _read_watermark(db, BREACH_POSTFIX_KEY, PostfixLog)
     if mark is not None:
@@ -691,7 +594,7 @@ def _evaluate_breach(db: Session, context: ProtectionContext, rules: dict, now: 
         if not reason:
             continue
 
-        class _Line:  # the login as evidence, in the shape _upsert reads
+        class _Line:
             pass
         line = _Line()
         line.id, line.time, line.username, line.country_code, line.country_name = login.id, login.time, login.username, None, None
@@ -701,21 +604,14 @@ def _evaluate_breach(db: Session, context: ProtectionContext, rules: dict, now: 
     return created
 
 
-# ---------------------------------------------------------------- enforcement
-
 def split_ip_list(value) -> List[str]:
-    """mailcow returns the Fail2ban lists comma or newline separated."""
     return [e.strip() for e in (value or "").replace("\n", ",").split(",") if e.strip()]
 
 
-# mailcow's Fail2ban edit replaces both lists and every setting, so each change
-# reads them fresh and writes them back holding this lock: two changes at once
-# would otherwise undo each other. Every caller runs on the app's one event loop.
 fail2ban_lock = asyncio.Lock()
 
 
 def fail2ban_attrs(current: dict, blacklist: List[str], whitelist: List[str]) -> dict:
-    """Every Fail2ban setting mailcow expects on an edit, with the given lists."""
     bti = current.get("ban_time_increment", 1)
     return {
         "ban_time": str(current.get("ban_time", "86400")),
@@ -727,14 +623,11 @@ def fail2ban_attrs(current: dict, blacklist: List[str], whitelist: List[str]) ->
         "netban_ipv6": str(current.get("netban_ipv6", "64")),
         "retry_window": str(current.get("retry_window", "600")),
         "whitelist": ",".join(whitelist),
-        # mailcow turns this off on any edit that leaves it out
         "manage_external": "1" if current.get("manage_external") in (True, 1, "1") else "0",
     }
 
 
 def _blacklist_entry(target: str) -> str:
-    """How a ban is written to the blacklist: a single address as /32 (/128), as
-    the Ban button on the page writes it; a network keeps its own prefix."""
     if "/" in target:
         return target
     try:
@@ -744,7 +637,6 @@ def _blacklist_entry(target: str) -> str:
 
 
 def _in_list(target: str, entries: List[str]) -> bool:
-    """mailcow keeps a single address either bare or as /32 (/128)."""
     if target in entries:
         return True
     try:
@@ -770,8 +662,6 @@ def _without(target: str, entries: List[str]) -> List[str]:
 
 
 def _hand_over(db: Session, hit: ProtectionHit) -> bool:
-    """When a hit that added an entry ends while another rule still bans the same target,
-    that hit takes the entry over. Returns True when one did."""
     other = db.query(ProtectionHit).filter(
         ProtectionHit.ip == hit.ip, ProtectionHit.status == "banned", ProtectionHit.id != hit.id
     ).order_by(ProtectionHit.expires_at.is_(None).desc(), ProtectionHit.expires_at.desc()).first()
@@ -782,44 +672,25 @@ def _hand_over(db: Session, hit: ProtectionHit) -> bool:
 
 
 async def enforce(mailcow_api, now: Optional[datetime] = None) -> Dict[str, list]:
-    """Write pending bans to the Fail2ban blacklist and lift the ones that ended, in one edit.
-
-    Returns {'banned': [...], 'lifted': [...], 'failed': [...]} as (target, rule, reason, notify) tuples
-    for the caller to notify about.
-    """
     from ..config import settings
     async with fail2ban_lock:
-        # Security turned off while this run waited: nothing is written, and
-        # release_temporary_bans takes this app's temporary bans out
         if not settings.is_feature_enabled('netfilter'):
             return {"banned": [], "lifted": [], "failed": []}
         return await _enforce(mailcow_api, now)
 
 
 def _confirmed(response) -> bool:
-    """mailcow answers a list of {type, msg}; every entry must say success."""
     entries = response if isinstance(response, list) else [response]
     return bool(entries) and all(isinstance(e, dict) and e.get("type") == "success" for e in entries)
 
 
 async def release_temporary_bans(mailcow_api) -> Optional[int]:
-    """While Security is off: take out of Fail2ban the bans this app wrote that
-    would have ended on their own, since nothing lifts them while it is off.
-
-    An address is taken out only when every ban on it is temporary and one of
-    them wrote the entry: a permanent ban on the same address keeps it, as do
-    entries added outside this app. Permanent bans stay as plain Fail2ban
-    entries. The hits are closed only after mailcow confirmed the change, so
-    the purge of Security's data (services/feature_data.py) waits for that.
-    Returns the addresses taken out, or None while Security is on.
-    """
     from ..config import settings
     from ..database import get_db_context
     async with fail2ban_lock:
         if settings.is_feature_enabled('netfilter'):
             return None
         with get_db_context() as db:
-            # Holding the lock, no enforce run is writing: a ban still pending was never written
             for hit in db.query(ProtectionHit).filter(ProtectionHit.status == "pending").all():
                 hit.status, hit.ended_at = "dismissed", datetime.utcnow()
                 hit.error = "Security was turned off before the ban was written"
@@ -830,7 +701,6 @@ async def release_temporary_bans(mailcow_api) -> Optional[int]:
                 by_target.setdefault(hit.ip, []).append(hit)
             targets = [target for target, hits in by_target.items()
                        if any(h.owned for h in hits) and all(h.expires_at is not None for h in hits)]
-            # Temporary hits on an address a permanent ban keeps are closed without a change
             close_ids = [h.id for h in banned if h.expires_at is not None]
         if targets:
             current = await mailcow_api.get_fail2ban()
@@ -893,7 +763,6 @@ async def _enforce(mailcow_api, now: Optional[datetime]) -> Dict[str, list]:
         new_black = list(blacklist)
         added: Set[str] = set()
         for hit in pending:
-            # Put on the allowlist in the meantime: never ban it
             try:
                 on_allowlist = ("/" in hit.ip and _network_is_protected(ipaddress.ip_network(hit.ip, strict=False), allow, set())) \
                     or ("/" not in hit.ip and never_ban(hit.ip, allow, set()))
@@ -933,7 +802,6 @@ async def _enforce(mailcow_api, now: Optional[datetime]) -> Dict[str, list]:
             hit.expires_at = now + timedelta(hours=hours) if hours else None
             result["banned"].append((hit.ip, hit.rule, hit.reason, rules.get(hit.rule, {}).get("notify", True)))
         if error:
-            # Nothing was written: the ended bans stay until the next run can lift them
             for hit in ending:
                 hit.status, hit.ended_at = "banned", None
         else:
@@ -945,7 +813,6 @@ async def _enforce(mailcow_api, now: Optional[datetime]) -> Dict[str, list]:
 
 
 async def undo(mailcow_api, hit_id: int) -> Optional[ProtectionHit]:
-    """Lift a ban (or cancel a pending one) and leave the address alone for a week."""
     async with fail2ban_lock:
         return await _undo(mailcow_api, hit_id)
 
@@ -986,12 +853,10 @@ async def _undo(mailcow_api, hit_id: int) -> Optional[ProtectionHit]:
 
 
 def request_ban(db: Session, hit_id: int) -> Optional[ProtectionHit]:
-    """Ban a hit the admin reviewed in watch mode; enforce() writes it on its next run."""
     hit = db.query(ProtectionHit).filter(ProtectionHit.id == hit_id).first()
     if hit is None or hit.status != "watching":
         return hit
     rules = load_rules(db)
-    # 'manual': the admin chose this one, so switching the rule back to watching keeps it
     hit.status, hit.mode = "pending", "manual"
     hit.ban_hours = rules.get(hit.rule, {}).get("ban_hours", 0)
     db.commit()

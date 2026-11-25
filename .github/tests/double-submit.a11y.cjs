@@ -1,7 +1,3 @@
-// One press, one action (uiOnce in utils.js), in a real DOM (jsdom): a second press
-// while the first is still on its way (a double click) sends nothing, so a rule or
-// a destination is not created twice and a switch is not flipped back. The button
-// is off and says what it does meanwhile, and has its own words back after.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -17,7 +13,6 @@ PAGE.querySelectorAll('script').forEach(el => el.remove());
 const BODY = PAGE.body.innerHTML;
 const SCRIPTS = [...read('index.html').matchAll(/src="\/static\/([a-z_-]+\.js)/g)].map(m => m[1]).filter(name => name !== 'session-guard.js');
 
-// The server answers when the test lets it (window.answerAll), like a slow network
 const STUBS = `
     window.requests = [];
     window.waiting = [];
@@ -68,7 +63,6 @@ test('a double click on Create Rule creates one rule; the button says so meanwhi
     assert.equal(button.textContent, 'Create Rule');
     assert.equal(button.disabled, false);
     assert.equal(button.hasAttribute('aria-busy'), false);
-    // Once the first is done, the next press acts again
     await w.eval('saveQuarantineRuleOnce(null)');
     assert.equal(posts(w, '/api/quarantine/rules'), 1, 'the dialog closed with the save: nothing left to send');
 });
@@ -80,7 +74,6 @@ test('a double click on a switch flips it once', async () => {
     await settle(w);
     assert.equal(posts(w, '/api/suppressions/7'), 1);
     assert.equal(posts(w, '/api/quarantine/rules/3/toggle'), 1);
-    // Another row is another action
     w.eval('toggleSuppressionOnce(8, false)');
     await settle(w);
     assert.equal(posts(w, '/api/suppressions/8'), 1);
@@ -118,7 +111,6 @@ test('a save that is done does not hold the next dialog while the list reloads',
     };
     create().click();
     await settle(w);
-    // The rule is saved and its dialog closed; the list's reload is still on its way
     w.answerAll();
     await settle(w);
     assert.equal(posts(w, '/api/quarantine/rules'), 1);

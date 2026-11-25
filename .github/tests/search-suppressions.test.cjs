@@ -1,5 +1,3 @@
-// The search in the top bar finds suppressions: in every state, and not at
-// all while Sync with Rspamd is off (the app keeps no list then).
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -72,10 +70,8 @@ test('a domain block opens the list by its domain, and a hidden kind is skipped 
     context.gsOpenSuppressions = text => opened.push(text);
     const result = await context.gsSearchSuppressions('example');
     result.items[0].open();
-    // spam_filter.js is not loaded here, so the title is the stored value; the open uses the shown one
     assert.deepEqual(opened, [result.items[0].title]);
 
-    // Suppressions has nothing to search (sync off): the keyboard steps over it
     vm.runInContext(`gsResults = { suppressions: { hidden: true, count: 0, items: [] } }; gsTab = 'mailboxes'; gsSetTab = id => { gsTab = id; };`, context);
     context.gsStepTab(1);
     assert.equal(vm.runInContext('gsTab', context), 'addresses');

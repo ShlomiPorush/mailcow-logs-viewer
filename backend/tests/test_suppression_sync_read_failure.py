@@ -1,9 +1,3 @@
-"""The suppression sync must not write the Rspamd map when it could not read it.
-
-The map holds the admin's own entries above the managed section. The sync
-used to go on with empty content when the read failed, and its write then
-replaced the whole map with the managed section only.
-"""
 import asyncio
 
 import pytest
@@ -35,7 +29,6 @@ def test_a_map_that_could_not_be_read_is_not_written(monkeypatch, failing):
     monkeypatch.setattr(sup.mailcow_api, "get_rspamd_map_content", fake_get)
     monkeypatch.setattr(sup.mailcow_api, "edit_rspamd_map", fake_edit)
 
-    # Read through the app's map reader, which says the map could not be read
     with pytest.raises(sup.MapUnavailable) as error:
         asyncio.run(sup.sync_suppressions_to_rspamd(db=None))
     assert error.value.code == "read_failed"

@@ -1,6 +1,3 @@
-// Loading (utils.js, ui.css): a load that failed offers Try again where it failed,
-// and trying again shows the spinner, not the last error; the spinner waits a moment
-// before it shows (a quick load does not flash it) and says so when a load takes long.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -11,13 +8,11 @@ const { JSDOM } = require(path.join(modules, 'jsdom'));
 
 const frontend = path.join(__dirname, '../../frontend');
 const read = name => fs.readFileSync(path.join(frontend, name), 'utf8');
-// The page as index.html has it, without its scripts; parsed, not cut with a regex
 const PAGE = new JSDOM(read('index.html')).window.document;
 PAGE.querySelectorAll('script').forEach(el => el.remove());
 const BODY = PAGE.body.innerHTML;
 const SCRIPTS = [...read('index.html').matchAll(/src="\/static\/([a-z_-]+\.js)/g)].map(m => m[1]).filter(name => name !== 'session-guard.js');
 
-// The server: reply(url) answers each request; { __status } makes it fail
 const STUBS = `
     window.reply = () => ({});
     authenticatedFetch = (url, options = {}) => Promise.resolve(window.reply(url, (options.method || 'GET').toUpperCase()))
@@ -54,7 +49,6 @@ test('Try again after a failed load shows the spinner, not the last error', asyn
         const box = w.document.getElementById(id);
         assert.match(box.textContent, /The server did not answer/, `${loader}: the error is shown`);
         assert.ok([...box.querySelectorAll('button')].some(b => /Try again/.test(b.textContent)), `${loader}: it offers Try again`);
-        // Trying again: while the answer is on its way, the spinner is back
         w.reply = () => new Promise(() => {});
         w.eval(`${loader}()`);
         await settle(w);
@@ -66,7 +60,6 @@ test('Try again after a failed load shows the spinner, not the last error', asyn
 test('a failed load offers Try again where it failed', async () => {
     const w = page();
     w.reply = () => FAIL;
-    // The Users panel is drawn by Settings: here it is put in place first
     const users = w.document.createElement('div');
     users.id = 'users-panel';
     w.document.body.appendChild(users);
@@ -80,7 +73,6 @@ test('a failed load offers Try again where it failed', async () => {
         await settle(w);
         const button = box.querySelector(`button[onclick="uiRetrying(this); ${again}"]`);
         assert.ok(button, `${loader}: Try again calls ${again}`);
-        // Pressed, with the answer still on its way: the spinner, not the error
         w.reply = () => new Promise(() => {});
         button.click();
         await settle(w);
@@ -91,7 +83,6 @@ test('a failed load offers Try again where it failed', async () => {
 
 test('the spinner waits before it shows, and says so when a load takes long', () => {
     assert.match(css, /\.ui-loading > p \{ animation: ui-appear [^;]* \.3s both; \}/);
-    // The spinner fades in and keeps turning: its own spin is not replaced
     assert.match(css, /\.ui-loading > \.loading \{ animation: ui-appear [^;,]* \.3s both, spin 1s linear infinite; \}/);
     assert.match(css, /\.ui-loading:has\(> \.loading\)::after \{ content: "This is taking longer than usual\."; animation: ui-appear [^;]* 8s both; \}/);
 });
@@ -107,7 +98,6 @@ test('Try again that fails again shows the failure again, also in a quiet Status
         assert.ok(box, `${id} is on the page`);
         await w.eval(loader);
         await settle(w);
-        // A refresh of Status is on (statusQuiet) while Try again is pressed
         if (id === 'status-system') w.eval('statusQuiet = true');
         box.querySelector('button[onclick^="uiRetrying"]').click();
         await settle(w);
@@ -120,7 +110,6 @@ test('Try again that fails again shows the failure again, also in a quiet Status
 test('a Fail2ban read that fails after another succeeded can be tried again', async () => {
     const w = page();
     let calls = 0;
-    // The first read answers late with a failure, the second at once with the lists
     w.reply = url => url === '/api/fail2ban'
         ? (++calls === 1 ? new Promise(resolve => w.setTimeout(() => resolve(FAIL), 30)) : { active_bans: [], blacklist: '', whitelist: '' }) : {};
     const first = w.eval('loadFail2BanSettings()');

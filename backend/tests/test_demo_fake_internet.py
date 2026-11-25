@@ -1,8 +1,3 @@
-"""
-The demo's fake internet, exercised through the application's own checks:
-the Domains page's DNS checks, the blocklist lookups, the HTTP calls to
-GitHub and MaxMind, mail, webhooks and GeoIP.
-"""
 import asyncio
 
 import httpx
@@ -34,7 +29,6 @@ def internet(monkeypatch):
     fake_mailcow.install(fake_mailcow.FakeMailcow())
     fake_internet.install()
     monkeypatch.setattr(domains, "_server_ip_cache", world.SERVER_IPV4)
-    # check_dkim_record uses the module-level client; give it a fresh one
     monkeypatch.setattr(domains, "mailcow_api", MailcowAPI())
     try:
         yield
@@ -55,14 +49,12 @@ def test_domains_show_good_warning_and_error_states(internet):
     assert statuses(com) == {"spf": "success", "dkim": "success", "dmarc": "success",
                              "dnssec": "success", "tlsa": "success", "mta_sts": "success",
                              "tls_rpt": "success"}
-    # DANE works end to end: validated records that pin the mail host's certificate
     assert com["tlsa"]["dane_active"] is True
     assert com["tlsa"]["hosts"][0]["certificate"] == "match"
     assert statuses(org)["dnssec"] == "warning"
     assert statuses(org)["dmarc"] == "warning"
     assert "~all" in org["spf"]["message"]
     assert statuses(shop)["dmarc"] == "error"
-    # The alias domain has its own DKIM key in mailcow and in DNS
     assert statuses(net)["dkim"] == "success"
 
 

@@ -1,8 +1,3 @@
-"""The app's blocks in Rspamd never stay behind unseen: they can be removed on
-their own (lines above the app's section stay exactly as they are), the list
-is deleted only after mailcow confirmed the blocks are gone, a write mailcow
-did not confirm is a failure, and an automatic sync that waited for the map
-lock does not write after automatic updates were turned off."""
 import asyncio
 import secrets
 import uuid
@@ -77,7 +72,6 @@ def rows():
 
 
 def _off(monkeypatch):
-    """Remove and Start fresh run while the list is not kept (Sync with Rspamd off)."""
     monkeypatch.setattr(settings._inner, "suppression_rspamd_sync", False)
 
 
@@ -145,8 +139,6 @@ def test_a_confirmed_map_write_passes(monkeypatch):
 
 
 def test_the_sync_runs_only_while_it_is_on(monkeypatch):
-    # Sync with Rspamd off: nothing is read or written. It does not need the
-    # automatic handling (test_rspamd_two_way.py covers what it does)
     called = []
     monkeypatch.setattr(suppressions, "_run_on_worker_loop", lambda work: called.append(work) or {"synced": 1})
     monkeypatch.setattr(type(settings._inner), "is_feature_enabled", lambda self, name: True)
@@ -192,14 +184,12 @@ def test_a_request_that_stops_waiting_never_leaves_the_lock_taken():
         await asyncio.sleep(0.2)
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)
-        lock._LOCK.release()   # the other writer finishes; the abandoned waiter takes it and gives it back
+        lock._LOCK.release()
         await asyncio.sleep(0.3)
         return lock._LOCK.locked()
 
     assert asyncio.run(run()) is False
 
-
-# ---- turning the feature off with its data purge ----
 
 @pytest.fixture
 def purge_client(monkeypatch, rows):
@@ -249,15 +239,12 @@ def test_keep_deletes_the_list_and_leaves_rspamd_alone(purge_client, creds):
 
 
 def test_the_old_name_of_the_switch_still_deletes_the_list(purge_client, creds):
-    """spam-filter was the switch's name before the list moved to Outbound."""
     resp = purge_client.post('/api/settings/purge-feature-data', json={'feature': 'spam-filter', 'rspamd': 'keep'})
     assert resp.status_code == 200 and resp.json()['feature'] == 'suppressions'
     assert _mine() == [] and creds == []
 
 
 def test_the_old_name_refuses_a_remove_whose_save_was_switched_again(purge_client, creds):
-    """A Remove carries the token of the save that turned the list off; once
-    another save turned it off again, that token is stale, also under the old name."""
     from app.database import get_db_context
     from app.services.feature_data import _set_key
     from app.models import SystemSetting

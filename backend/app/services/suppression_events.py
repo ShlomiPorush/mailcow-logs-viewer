@@ -1,15 +1,3 @@
-"""Block details: the evidence kept with each blocked address.
-
-Postfix logs and messages are deleted after RETENTION_DAYS, while a block can
-last months. So when the app blocks an address, extends its block, or someone
-changes it by hand, it copies what explains that moment into a
-SuppressionEvent: the server's answer, the message's sender, subject and ids,
-and the Postfix lines of that message for that recipient. Only what is known
-for certain is kept; a field the logs do not prove stays empty.
-
-Every text is cut to a fixed size, and a message keeps at most MAX_LINES
-lines, always including the line that decided the block.
-"""
 import re
 from datetime import datetime, timedelta
 from typing import Dict, Iterable, List, Optional, Tuple
@@ -21,20 +9,15 @@ from ..models import MessageCorrelation, PostfixLog, SuppressionEvent
 from . import excluded_addresses
 
 MAX_LINES = 50
-# Lines read per queue id in one batch, newest first
 LINES_PER_QUEUE = 500
 MAX_LINE_CHARS = 1000
 MAX_TEXT_CHARS = 2000
-# Lines of a queue id that are this far from the event belong to another
-# message: Postfix reuses queue ids
 NEARBY = timedelta(days=1)
 
-# "... status=bounced (host mx.example.net said: 550 5.1.1 <a@b>: unknown user)"
 _REPLY_RE = re.compile(r'status=\w+\s*\((.*)\)\s*$', re.S)
 
 
 def clip(value, limit: int = MAX_TEXT_CHARS) -> Tuple[Optional[str], bool]:
-    """The text cut to limit characters, and whether it was cut."""
     if value is None:
         return None, False
     text = str(value)
@@ -44,7 +27,6 @@ def clip(value, limit: int = MAX_TEXT_CHARS) -> Tuple[Optional[str], bool]:
 
 
 def server_reply(message: Optional[str]) -> Optional[str]:
-    """The receiving server's answer in a Postfix delivery line, when the line has one."""
     if not message:
         return None
     match = _REPLY_RE.search(message)
@@ -57,21 +39,6 @@ def _line(row) -> Tuple[dict, bool]:
 
 
 def postfix_lines(db: Session, wanted: List[tuple]) -> List[Tuple[list, bool]]:
-    """The Postfix lines of each message, for one recipient, in the order asked.
-
-    wanted: (queue_id, recipient, from_time, to_time, deciding_row or None).
-    One query reads the lines of every queue id in the batch, at most
-    LINES_PER_QUEUE of each (the newest), so one busy queue id cannot crowd out
-    the others. A line is kept when it falls in that request's time span and
-    names no recipient or that recipient: a message to several people must not
-    keep the others' lines, and a queue id Postfix reused days later is another
-    message. Nor is a line kept that a "removed" of its queue id separates from
-    the request's start (the deciding row, or the arrival of a stuck message):
-    it is another message on the same queue id (excluded_addresses.separated).
-    The "removed" lines are read on their own, so LINES_PER_QUEUE never hides
-    one. The deciding row always stays, read from the event itself.
-    Returns one (lines, shortened) per request.
-    """
     asked = [w for w in wanted if w[0]]
     by_queue: Dict[str, list] = {}
     ends: Dict[str, list] = {}
@@ -92,7 +59,6 @@ def postfix_lines(db: Session, wanted: List[tuple]) -> List[Tuple[list, bool]]:
                 PostfixLog.queue_id.in_(queue_ids), PostfixLog.time >= lo, PostfixLog.time <= hi,
                 excluded_addresses.removed_line(PostfixLog)).all():
             ends.setdefault(queue_id, []).append(time)
-    # A queue id with more lines than were read: older lines of it may be missing
     capped = {q for q, lines in by_queue.items() if len(lines) >= LINES_PER_QUEUE}
 
     picked_cache: Dict[tuple, list] = {}
@@ -113,8 +79,6 @@ def postfix_lines(db: Session, wanted: List[tuple]) -> List[Tuple[list, bool]]:
             lines.append(deciding)
             lines.sort(key=lambda r: (r.time, r.id))
         if len(lines) > MAX_LINES:
-            # The first lines say where the message came from, the last how it
-            # ended; the deciding line always stays
             keep = lines[:20] + lines[-(MAX_LINES - 21):]
             if deciding is not None and all(r.id != deciding.id for r in keep):
                 keep.append(deciding)
@@ -130,7 +94,6 @@ def postfix_lines(db: Session, wanted: List[tuple]) -> List[Tuple[list, bool]]:
 
 
 def disabled_by_hand(db: Session, ids: Iterable[int]) -> set:
-    """Of the given blocks, those whose last change by hand was Disable."""
     ids = list(ids)
     if not ids:
         return set()
@@ -144,7 +107,6 @@ def disabled_by_hand(db: Session, ids: Iterable[int]) -> set:
 
 
 def add_event(db: Session, suppression, **fields) -> SuppressionEvent:
-    """Keep one event with a block. The block must have an id (flush a new one first)."""
     shortened = bool(fields.pop('logs_shortened', False))
     for key, limit in (('reason', MAX_TEXT_CHARS), ('server_reply', MAX_TEXT_CHARS), ('subject', 998),
                        ('notes', MAX_TEXT_CHARS), ('sender', 255), ('recipient', 255),
@@ -159,8 +121,6 @@ def add_event(db: Session, suppression, **fields) -> SuppressionEvent:
 
 
 def _excluded(sender, recipient) -> bool:
-    """A message of an excluded address: its event keeps why the block
-    changed, not the message's sender, subject, ids or log lines."""
     return excluded_addresses.any_listed(sender, recipient)
 
 
@@ -169,15 +129,9 @@ def bounce_kind(dsn: str) -> str:
 
 
 def record_bounces(db: Session, captured: List[tuple]) -> None:
-    """Events for the bounce lines that changed or counted toward a block.
-
-    captured: (suppression, PostfixLog row, outcome, expires_at at that moment).
-    The sender, subject and Message-ID come from the line, or from its message
-    when the correlation links them; nothing is guessed from a queue id alone.
-    """
     if not captured:
         return
-    db.flush()  # blocks created in this run get their ids
+    db.flush()
     keys = {log.correlation_key for _, log, _, _ in captured if log.correlation_key}
     messages = {m.correlation_key: m for m in db.query(
         MessageCorrelation.correlation_key, MessageCorrelation.sender, MessageCorrelation.subject,
@@ -201,13 +155,6 @@ def record_bounces(db: Session, captured: List[tuple]) -> None:
 
 
 def record_stuck(db: Session, captured: List[tuple]) -> None:
-    """Events for messages deleted from the queue after they were stuck.
-
-    captured: (suppression, queue item fields, outcome, expires_at at that
-    moment); the fields are the queue_id, sender, arrival time and the
-    deferral reason mailcow reported for that recipient, copied before the
-    message was deleted.
-    """
     if not captured:
         return
     db.flush()

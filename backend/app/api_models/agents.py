@@ -1,9 +1,3 @@
-"""What the agents' own calls return (agent_access/rest.py, agent_access/mcp.py).
-
-GET /api/agent/access and GET /api/agent/endpoints are answered by the auth
-middleware for a bearer token, before routing, so they have no route. Their
-entries are added to the OpenAPI document by ``agent_paths`` (main.py).
-"""
 from typing import Any, Dict, List, Union
 
 from pydantic import Field, TypeAdapter
@@ -36,7 +30,6 @@ class AgentAccessResponse(Fixed):
 
 class AgentParameter(Fixed):
     name: str
-    # "in" is a Python keyword
     in_: str = Field(alias="in", description="query or path")
     required: bool
     type: str = Field(None)
@@ -87,7 +80,6 @@ def _operation(model, summary: str, description: str, errors: Dict[int, str], sc
 
 
 def agent_paths(document: Dict[str, Any]) -> None:
-    """Add the two middleware-answered agent calls to a generated OpenAPI document."""
     components = document.setdefault("components", {})
     schemas = components.setdefault("schemas", {})
     components.setdefault("securitySchemes", {})["AgentBearer"] = {

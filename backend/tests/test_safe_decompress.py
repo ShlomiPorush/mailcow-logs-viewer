@@ -1,4 +1,3 @@
-"""Tests for bounded decompression (decompression-bomb protection)."""
 import gzip
 import io
 import zipfile
@@ -28,7 +27,6 @@ def test_small_gzip_roundtrip():
 
 def test_gzip_bomb_rejected():
     bomb = gzip.compress(b"\x00" * (MAX_DECOMPRESSED_BYTES + 1024 * 1024))
-    # the compressed bomb is tiny but expands past the cap
     assert len(bomb) < 1024 * 1024
     with pytest.raises(DecompressionLimitError):
         gzip_decompress_limited(bomb)
@@ -53,7 +51,6 @@ def test_zip_bomb_rejected_by_declared_size():
 
 
 def test_zip_bomb_rejected_while_reading_with_custom_limit():
-    # declared size below default cap, but above a custom limit
     with _zip_with("report.xml", b"\x00" * 4096) as zf:
         with pytest.raises(DecompressionLimitError):
             zip_read_limited(zf, "report.xml", max_bytes=1024)

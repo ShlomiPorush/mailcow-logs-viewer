@@ -1,4 +1,3 @@
-"""The trends of the dashboard figures (services/figures.py): their hourly samples."""
 import logging
 from datetime import datetime, timedelta
 

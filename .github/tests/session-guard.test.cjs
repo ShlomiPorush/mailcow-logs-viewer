@@ -1,6 +1,3 @@
-// The session guard (frontend/session-guard.js): what it decides from the
-// server's answers, without a page. The file is loaded as it is; without a
-// window it starts nothing.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -59,11 +56,9 @@ test('deadlines come from the answer, and an older answer never replaces a newer
     assert.equal(g.sessionGuardApply(st, 2, session({ idle_seconds_left: 300 }), 1000), true);
     assert.equal(st.longestAt, 1000 + 3600 * 1000);
     assert.equal(st.idleAt, 1000 + 300 * 1000);
-    // The answer to an earlier request arrives late: ignored
     assert.equal(g.sessionGuardApply(st, 1, session({ idle_seconds_left: 5 }), 2000), false);
     assert.equal(st.idleAt, 1000 + 300 * 1000);
     assert.equal(st.applied, 2);
-    // Idle off: no idle deadline
     assert.equal(g.sessionGuardApply(st, 3, session({ idle_enabled: false, idle_timeout_seconds: null, idle_seconds_left: null }), 3000), true);
     assert.equal(st.idleEnabled, false);
     assert.equal(st.idleAt, null);
@@ -74,8 +69,6 @@ test('which limit ended, from the server or from the local clock', () => {
     assert.equal(g.sessionGuardEndedBy(session({ longest_seconds_left: 0 })), 'session_expired');
     assert.equal(g.sessionGuardEndedBy(session({ idle_enabled: false, idle_seconds_left: null, longest_seconds_left: 10 })), '');
     assert.equal(g.sessionGuardGuessReason(state({ longestAt: 500 }), 1000), 'session_expired');
-    // Signed out elsewhere, or the server restarted: no reason to give, even
-    // when the idle time has passed here (an idle end comes with its reason)
     assert.equal(g.sessionGuardGuessReason(state({ idleEnabled: true, idleAt: 500, longestAt: 9000 }), 1000), '');
     assert.equal(g.sessionGuardGuessReason(state({ idleEnabled: true, idleAt: 5000, longestAt: 9000 }), 1000), '');
 });
@@ -97,7 +90,6 @@ test('the question shows a minute before, the notice five minutes before', () =>
     assert.equal(view({ idleAt: now + 61000 }).ask, false);
     assert.equal(view({ idleAt: now + 60000 }).ask, true);
     assert.equal(view({ idleAt: now + 60000, idleEnabled: false }).ask, false);
-    // Staying would not help when the longest session ends first
     assert.equal(view({ idleAt: now + 30000, longestAt: now + 20000 }).ask, false);
     assert.equal(view({ idleAt: null, idleEnabled: false, longestAt: now + 301000 }).notice, false);
     assert.equal(view({ idleAt: null, idleEnabled: false, longestAt: now + 300000 }).notice, true);
@@ -108,7 +100,6 @@ test('the next check comes with the regular poll or just after a moment that mat
     const next = fields => g.sessionGuardNextCheck(state(fields), now);
     assert.equal(next({ idleEnabled: true, idleAt: now + 600000, longestAt: now + 3600000 }), 60000);
     assert.equal(next({ idleEnabled: true, idleAt: now + 90000, longestAt: now + 3600000 }), 30000);
-    // Inside the last minute: right after the end, to hear it from the server
     assert.equal(next({ idleEnabled: true, idleAt: now + 30000, longestAt: now + 3600000 }), 31000);
     assert.equal(next({ longestAt: now + 320000 }), 20000);
     assert.equal(next({ longestAt: now - 5000 }), 60000);
@@ -123,11 +114,10 @@ test('failures wait longer each time, never more than a minute', () => {
 test('every page behind the sign-in loads the guard', () => {
     for (const page of ['index.html', 'authorize.html', 'api-docs.html']) {
         const html = fs.readFileSync(path.join(frontend, page), 'utf8');
-        assert.match(html, /<script src="\/static\/session-guard\.js\?v=\d+"><\/script>/, page);
+        assert.match(html, /<script src="\/static\/session-guard\.js\?v="><\/script>/, page);
     }
 });
 
-// The guard talking to a server that answers from a list, with timers that never fire
 function guardWith(answers, left) {
     const response = ({ status, body, header = null }) => ({
         status,
@@ -165,12 +155,10 @@ test('an ended answer is checked again with the cookie the browser holds now', a
     const left = [];
     const alive = { status: 200, body: { authenticated: true, session: session({ idle_enabled: false, idle_seconds_left: null, idle_timeout_seconds: null }) } };
     const { ctx, st } = guardWith([alive], left);
-    // A late answer for a cookie another tab has replaced since
     ctx.sessionGuardHandle({ seq: ++st.seq, kind: 'ended', reason: '' });
     await settle();
     assert.deepEqual(left, []);
     assert.equal(st.leaving, false);
-    // The browser's cookie has ended too: now it leaves, with the reason
     const answers = [{ status: 401, header: 'session_idle', body: { reason: 'session_idle' } }];
     const second = guardWith(answers, left);
     second.ctx.sessionGuardHandle({ seq: ++second.st.seq, kind: 'ended', reason: '' });
@@ -192,12 +180,9 @@ test('a late confirmation never undoes a newer answer', async () => {
     const { ctx, st } = guardWith([], left);
     let release;
     ctx.fetch = () => new Promise(resolve => { release = resolve; });
-    // An ended answer: the confirmation goes out and waits
     ctx.sessionGuardHandle({ seq: ++st.seq, kind: 'ended', reason: '' });
-    // A newer check sees the session alive (the cookie was replaced meanwhile)
     st.seq += 1;
     ctx.sessionGuardHandle({ seq: st.seq, kind: 'ok', session: session({ idle_enabled: false, idle_seconds_left: null, idle_timeout_seconds: null }) });
-    // Then the confirmation, sent with the old cookie, answers 401
     release({ status: 401, ok: false, headers: { get: () => 'session_idle' }, json: async () => ({ reason: 'session_idle' }), clone() { return this; } });
     await settle();
     assert.deepEqual(left, []);

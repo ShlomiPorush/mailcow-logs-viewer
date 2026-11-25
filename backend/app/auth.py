@@ -1,8 +1,3 @@
-"""
-Authentication Middleware for FastAPI
-Supports both OAuth2 (session cookies) and Basic Auth
-Protects ALL endpoints when authentication is enabled
-"""
 import ipaddress
 import re
 import logging
@@ -23,9 +18,6 @@ from .session import auth_generation, get_session_from_request, session_state
 from .agent_access import live as agent_live
 from .agent_access.context import agent_call
 
-# Agent access (agent_access/): reachable without a session because they check
-# their own credentials or are public discovery documents. /oauth/authorize and
-# /oauth/consent are not here: a person must be signed in to approve an agent.
 AGENT_PUBLIC_PATHS = frozenset({
     "/mcp",
     "/oauth/token",
@@ -37,8 +29,6 @@ AGENT_PUBLIC_PATHS = frozenset({
 })
 
 
-# Public by method too: an agent asks for a code and downloads the skill without
-# a session, but the approval page (GET /oauth/device) needs a signed-in person
 AGENT_PUBLIC_REQUESTS = frozenset({("POST", "/oauth/device")})
 SKILL_PREFIX = "/agents/skill"
 MCP_NOTE_PATHS = frozenset({"/agents/mcp", "/agents/mcp/"})
@@ -49,18 +39,12 @@ def _is_agent_path(path: str) -> bool:
 
 
 def _has_bearer(request: Request) -> bool:
-    """Whether any Authorization header names the Bearer scheme anywhere, also mixed
-    with another scheme or without a token. Such a request is an agent's and never a
-    cookie's: rest.py accepts only one plain `Bearer <token>` header and refuses the rest."""
     return any(part.lower() == "bearer"
                for value in request.headers.getlist("authorization")
                for part in re.split(r"[\s,]+", value))
 
 logger = logging.getLogger(__name__)
 
-# ── Brute-force protection (in-memory, per client IP) ──────────────────────
-# After MAX_FAILURES failed Basic Auth attempts within WINDOW_SECONDS the
-# client is rejected with 429 until enough failures age out of the window.
 _AUTH_MAX_FAILURES = 10
 _AUTH_WINDOW_SECONDS = 15 * 60
 _auth_failures: Dict[str, Deque[float]] = {}
@@ -69,14 +53,6 @@ _next_capacity_cleanup = 0.0
 
 
 def _make_room_for_new_client() -> None:
-    """Admit a new client to a full table by dropping the least recent one.
-
-    A full table must never refuse a correct password, and it must keep
-    counting wrong guesses from new clients. Expired counters are reclaimed
-    first; otherwise the client whose last failure is oldest makes room. The
-    table is ordered by last failure, so that is its first entry. Cycling
-    an entry out this way takes as many fresh networks as the table holds.
-    """
     with _auth_lock:
         global _next_capacity_cleanup
         if len(_auth_failures) < settings.auth_max_failure_clients:
@@ -90,15 +66,6 @@ def _make_room_for_new_client() -> None:
 
 
 def _client_ip(request: Request) -> str:
-    """Use the transport peer or the client resolved by Uvicorn's trusted proxies.
-
-    Uvicorn applies FORWARDED_ALLOW_IPS before the request reaches us. Reading
-    X-Forwarded-For again would bypass that trust boundary and let a direct
-    caller (or a forged prefix before a real proxy chain) choose its counter.
-
-    IPv6 clients are counted per /64 network: a single host usually holds a
-    whole /64, so counting addresses would give it unlimited fresh budgets.
-    """
     host = (request.client.host if request.client else None) or "unknown"
     try:
         address = ipaddress.ip_address(host)
@@ -126,7 +93,6 @@ def _is_rate_limited(ip: str) -> bool:
 
 
 def cleanup_expired_auth_failures() -> None:
-    """Reclaim idle client counters, retaining every unexpired failure."""
     with _auth_lock:
         for ip in list(_auth_failures):
             _is_rate_limited(ip)
@@ -134,14 +100,12 @@ def cleanup_expired_auth_failures() -> None:
 
 def _record_auth_failure(ip: str) -> None:
     with _auth_lock:
-        # Re-inserted on every failure, which keeps the table ordered by last failure
         failures = _auth_failures.pop(ip, None)
         if failures is None:
             _make_room_for_new_client()
             failures = deque()
         _auth_failures[ip] = failures
         failures.append(time.time())
-        # Bound each client counter to the lockout threshold
         while len(failures) > _AUTH_MAX_FAILURES:
             failures.popleft()
         if len(failures) == _AUTH_MAX_FAILURES:
@@ -155,10 +119,6 @@ def _clear_auth_failures(ip: str) -> None:
 
 
 def verify_credentials(username: str, password: str) -> bool:
-    """
-    Verify HTTP Basic Auth credentials
-    Returns True if valid, False otherwise
-    """
     if not settings.is_basic_auth_enabled:
         return True
     
@@ -179,13 +139,6 @@ def verify_credentials(username: str, password: str) -> bool:
 
 
 def _authenticate_basic_request(request: Request) -> bool:
-    """Check Basic credentials through the same failure budget on every route.
-
-    Public routes may use the result to select their response fields, so they
-    must count failed guesses too. A blocked attempt must not check credentials
-    or reveal whether they were correct. Requests without Basic credentials do
-    not consume the budget, keeping public login information available.
-    """
     with _auth_lock:
         authorization = request.headers.get("Authorization", "")
         if not authorization.startswith("Basic "):
@@ -215,7 +168,6 @@ def _authenticate_basic_request(request: Request) -> bool:
 
 
 def basic_credentials(request: Request) -> Optional[tuple]:
-    """(username, password) from the Basic header, ("", "") when it cannot be read, None without one."""
     authorization = request.headers.get("Authorization", "")
     if not authorization.startswith("Basic "):
         return None
@@ -227,7 +179,6 @@ def basic_credentials(request: Request) -> Optional[tuple]:
 
 
 def sign_in_budget(request: Request) -> str:
-    """The client's failure counter for a login, or 429 when it is used up (same budget as every route)."""
     with _auth_lock:
         client_ip = _client_ip(request)
         if _is_rate_limited(client_ip):
@@ -248,11 +199,6 @@ def clear_sign_in_failures(client_ip: str) -> None:
 
 
 def is_request_authenticated(request: Request) -> bool:
-    """
-    Check whether a request carries valid credentials (session cookie or
-    Basic Auth header). Used by public endpoints like /api/info to decide
-    how much detail to expose. Returns True when authentication is disabled.
-    """
     if not settings.is_authentication_enabled:
         return True
 
@@ -266,16 +212,10 @@ def is_request_authenticated(request: Request) -> bool:
 
 
 def safe_return_path(value: Optional[str]) -> str:
-    """The local page to return to after signing in, or / for anything else.
-
-    Only a path on this site is accepted, so the login page cannot be used to
-    send someone to another site.
-    """
     if not value or len(value) > 2048 or not value.startswith("/") or value.startswith("//"):
         return "/"
     if "\\" in value or any(ord(c) < 32 or ord(c) == 127 for c in value):
         return "/"
-    # Rebuilt from its parts: a path on this site, never a scheme or a host
     parts = urlsplit(value)
     if parts.scheme or parts.netloc or not parts.path.startswith("/"):
         return "/"
@@ -285,12 +225,6 @@ def safe_return_path(value: Optional[str]) -> str:
 
 
 def _login_redirect(request: Request, reason: Optional[str] = None) -> Response:
-    """Send a signed-out page request to the login page, keeping the page asked for.
-
-    Done here rather than by the page's own script, so the browser never draws
-    the app before finding out there is no session. `reason` says why the
-    session ended (session.SESSION_EXPIRED or SESSION_IDLE).
-    """
     target = request.url.path + (f"?{request.url.query}" if request.url.query else "")
     query = []
     if reason:
@@ -309,8 +243,6 @@ SESSION_ENDED_DETAIL = "Your session ended. Sign in again."
 
 
 def session_ended_response(reason: str) -> JSONResponse:
-    """A call made with a session that a limit ended: 401 with the reason, in
-    the body and in X-Session-End, so the page can say why."""
     return JSONResponse(
         {"detail": SESSION_ENDED_DETAIL, "reason": reason},
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -319,49 +251,25 @@ def session_ended_response(reason: str) -> JSONResponse:
 
 
 class BasicAuthMiddleware(BaseHTTPMiddleware):
-    """
-    Middleware that enforces authentication on ALL requests
-    Supports both OAuth2 (session cookies) and Basic Auth
-    when auth_enabled is True
-    """
-    
     async def dispatch(self, request: Request, call_next):
-        # The sign-in state that admits this request, read before any check
-        # (also while sign-in is off): a login that ends after a sign-in
-        # change gets no session (routers/auth.py)
         request.state.auth_generation = auth_generation()
-        # How the request was let in, for access that outlives it (the Live
-        # Logs token): ("session", key), ("basic", None) or ("open", None).
-        # Not set for an agent's call.
         request.state.auth_admission = None
         path = request.url.path
 
-        # Agent access answers 404 while it is not live, before any sign-in
-        # redirect (agent_access/live.py)
         if _is_agent_path(path) and not agent_live.is_live():
             return Response(content="Not Found", status_code=status.HTTP_404_NOT_FOUND)
 
-        # An agent's call made inside the app by agent_access/dispatch.py: its
-        # bearer token was checked at /mcp or below, and the policy guard checks
-        # the route. Only the app itself can put this marker into the ASGI scope.
         if agent_call(request.scope) is not None:
             return await call_next(request)
 
-        # A bearer token on /api is an agent's request, decided before anything
-        # else: never a session's, and never let through because sign-in is off
-        # (agent_access/rest.py refuses it then)
         if path.startswith("/api/") and _has_bearer(request):
             from .agent_access import rest
             return await rest.handle(request)
 
-        # Skip authentication check if disabled
         if not settings.is_authentication_enabled:
             request.state.auth_admission = ("open", None)
             return await call_next(request)
 
-        # Agent endpoints that check their own credentials (a bearer token at
-        # /mcp, PKCE or a device code at /oauth/token), publish discovery
-        # documents, or serve the skill's files
         if path in AGENT_PUBLIC_PATHS or (request.method, path) in AGENT_PUBLIC_REQUESTS:
             request.state.auth_admission = ("open", None)
             return await call_next(request)
@@ -370,14 +278,6 @@ class BasicAuthMiddleware(BaseHTTPMiddleware):
             request.state.auth_admission = ("open", None)
             return await call_next(request)
 
-        # Allow access to login page, static files, health check, info endpoint, and auth endpoints without authentication
-        # Health check endpoint must be accessible for Docker health monitoring
-        # Info endpoint is used to check if authentication is enabled
-        # Auth endpoints handle their own authentication: POST /api/auth/session
-        # checks the password itself every time, so a session cookie alone never
-        # gets a new session, and POST /api/auth/activity accepts only the
-        # request's own valid session
-        # Exact paths only; /static/ is the one prefix (the frontend files).
         public_paths = {
             "/login",
             "/api/health",
@@ -393,27 +293,18 @@ class BasicAuthMiddleware(BaseHTTPMiddleware):
             request.state.auth_admission = ("open", None)
             return await call_next(request)
         
-        # A valid session cookie is accepted for both authentication methods:
-        # OAuth2 logins get one from the callback, Basic Auth logins from
-        # POST /api/auth/session. The cookie is HttpOnly, so no script in the
-        # page can read it - which is why the password is never stored client
-        # side any more.
         state = session_state(request)
         if state.data is not None:
             request.state.auth_admission = ("session", state.key)
             return await call_next(request)
 
-        # A session that a limit ended says why. A call that also carries
-        # Basic credentials is decided by them below.
         if state.ended:
             if not path.startswith("/api/"):
                 return _login_redirect(request, state.ended)
             if not request.headers.get("Authorization", "").startswith("Basic "):
                 return session_ended_response(state.ended)
         
-        # If OAuth2 is enabled but Basic Auth is not, require OAuth2
         if settings.is_oauth2_enabled and not settings.is_basic_auth_enabled:
-            # OAuth2 only mode - redirect to login or return 401
             if path.startswith("/api/"):
                 return Response(
                     content="Authentication required",
@@ -421,9 +312,7 @@ class BasicAuthMiddleware(BaseHTTPMiddleware):
                 )
             return _login_redirect(request)
         
-        # Fall back to Basic Auth (if enabled)
         if not settings.is_basic_auth_enabled:
-            # No authentication method available
             if path.startswith("/api/"):
                 return Response(
                     content="Authentication required",
@@ -431,7 +320,6 @@ class BasicAuthMiddleware(BaseHTTPMiddleware):
                 )
             return _login_redirect(request)
 
-        # Check if password is configured
         if not settings.auth_password:
             logger.error("Authentication enabled but password not set")
             return Response(
@@ -439,18 +327,13 @@ class BasicAuthMiddleware(BaseHTTPMiddleware):
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
         
-        # Extract credentials from Authorization header
         authorization = request.headers.get("Authorization", "")
         
-        # Pages (clean URLs like /dashboard, /messages, /dmarc) need the session
-        # cookie; without one they go to the login page
         if not path.startswith("/api/"):
             return _login_redirect(request)
         
-        # For all other paths (API endpoints), require authentication
         if not authorization.startswith("Basic "):
-            # Return 401 without WWW-Authenticate header to prevent browser popup
-            # The frontend login form will handle authentication
+            # A WWW-Authenticate header here would make the browser show its own Basic Auth popup over the login form
             return Response(
                 content="Authentication required",
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -459,7 +342,6 @@ class BasicAuthMiddleware(BaseHTTPMiddleware):
         try:
             authenticated = _authenticate_basic_request(request)
         except HTTPException as exc:
-            # Middleware runs outside FastAPI's HTTPException handler.
             return Response(
                 content=exc.detail,
                 status_code=exc.status_code,
@@ -471,6 +353,5 @@ class BasicAuthMiddleware(BaseHTTPMiddleware):
                 status_code=status.HTTP_401_UNAUTHORIZED,
             )
         
-        # Credentials are valid, proceed with request
         request.state.auth_admission = ("basic", None)
         return await call_next(request)

@@ -1,9 +1,3 @@
-// Accessibility of the pickers (utils.js, uiPicker): the shared drop-down that
-// filters lists. Runs in a real DOM (jsdom) with axe-core, both installed by CI
-// outside the repository; set A11Y_MODULES to their node_modules to run it locally:
-//   npm install --no-save --prefix /tmp/a11y jsdom axe-core
-//   A11Y_MODULES=/tmp/a11y/node_modules node --test .github/tests/pickers.a11y.cjs
-// The keyboard and focus behaviour follows the WAI-ARIA listbox and dialog patterns.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -29,7 +23,6 @@ const frame = w => new Promise(resolve => w.requestAnimationFrame(() => resolve(
 const key = (w, el, k) => el.dispatchEvent(new w.KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true }));
 
 async function noViolations(w, what) {
-    // jsdom does not lay out text, so colour contrast is checked in the browser, not here
     const result = await w.axe.run(w.document, { rules: { 'color-contrast': { enabled: false } } });
     const found = [...result.violations].map(v => `${v.id}: ${v.help} (${v.nodes.map(n => n.target.join(' ')).join(', ')})`);
     assert.deepEqual(found, [], `${what} has accessibility violations`);
@@ -149,7 +142,6 @@ test('the Messages pickers in index.html pass the same checks', async () => {
     const w = page(`<main><h1>Messages</h1>${block[0]}</main>`);
     w.setMessagesFacet = () => {};
     w.messagesTimePanelOpened = () => {};
-    // The outcome options are filled in by app.js; give the list the same shape
     w.document.getElementById('messages-status-options').innerHTML =
         '<button type="button" class="ui-fct" role="option" tabindex="-1" aria-selected="true">All messages</button>' +
         '<button type="button" class="ui-fct" role="option" tabindex="-1" aria-selected="false">Delivered</button>';

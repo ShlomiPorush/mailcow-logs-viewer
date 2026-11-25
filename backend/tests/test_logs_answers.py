@@ -1,8 +1,3 @@
-"""Every answer the log, Security, Fail2ban, queue, quarantine and statistics calls can
-give, so the contract check (conftest.py, contract.py) holds each one to /openapi.json:
-the answers with data, the failures that still answer 200 (statistics), a database
-that fails (500), mailcow refusing or not answering (502, 503), and the requests the
-calls refuse (400, 422). mailcow is faked; nothing leaves the test."""
 import pytest
 
 import starlette.staticfiles as sf
@@ -55,7 +50,6 @@ def client(monkeypatch):
 
 @pytest.fixture
 def mailcow(monkeypatch):
-    """A mailcow that answers each call with what state holds, or raises it."""
     state = {'answer': [{'type': 'success', 'msg': ['object_modified', 'x']}], 'f2b': dict(F2B)}
 
     def give(value):
@@ -114,7 +108,6 @@ def test_reads_with_the_database(client, path):
         pytest.skip('PostgreSQL not available')
     response = client.get(path)
     assert response.status_code == 200
-    # Not the answer statistics give when the database fails
     assert not isinstance(response.json(), dict) or 'error' not in response.json()
 
 
@@ -150,7 +143,6 @@ def test_bad_parameters(client, path):
 def test_security_addresses_when_mailcow_fails(client, mailcow):
     if not _postgres_available():
         pytest.skip('PostgreSQL not available')
-    # mailcow not answering: the lists still load, without Fail2ban's
     mailcow['f2b'] = None
     response = client.get('/api/security/addresses')
     assert response.status_code == 200 and response.json()['fail2ban_known'] is False
@@ -175,7 +167,6 @@ def test_simple_reads(client, mailcow, monkeypatch):
 
 
 def test_fail2ban_settings_when_mailcow_fails(client, monkeypatch):
-    # The real client: mailcow failing is no settings (503), anything else a 500
     async def failing(*args, **kwargs):
         raise MailcowAPIError('down')
     monkeypatch.setattr(mailcow_api, '_make_request', failing)
@@ -196,8 +187,6 @@ def test_mailcow_lists_mailcow_does_not_give(client, monkeypatch, path):
 
 
 def test_a_queue_with_odd_entries_still_loads(client, monkeypatch):
-    """Times of several kinds are sorted newest first, one that is not a time
-    goes last without a value, and an entry that is not an object is left out."""
     async def odd(*args, **kwargs):
         return [{'queue_id': 'A', 'arrival_time': 'soon'}, {'queue_id': 'B', 'arrival_time': 5},
                 {'queue_id': 'C', 'arrival_time': '1700000000'}, {'queue_id': 'D', 'arrival_time': float('nan')},
@@ -222,7 +211,6 @@ def test_a_quarantine_entry_that_is_not_an_object_is_left_out(client, monkeypatc
 
 @pytest.mark.parametrize('created', [10 ** 20, -10 ** 20, 1e20, float('nan'), float('inf'), float('-inf')])
 def test_a_quarantine_time_mailcow_cannot_mean_leaves_the_list_readable(client, monkeypatch, created):
-    """The item is shown without a time, after every item with one, also one before 1970."""
     async def quarantine(*args, **kwargs):
         return [{'id': 1, 'created': created}, {'id': 2, 'created': -86400}, {'id': 3, 'created': 1730000000}]
     monkeypatch.setattr(mailcow_api, '_make_request', quarantine)
@@ -232,8 +220,6 @@ def test_a_quarantine_time_mailcow_cannot_mean_leaves_the_list_readable(client, 
 
 
 class _QuarantineView:
-    """mailcow's quarantine view (qitem_details.php) giving a fixed answer"""
-
     def __init__(self, answer):
         self.answer = answer
 
@@ -242,13 +228,11 @@ class _QuarantineView:
         import json
         if isinstance(self.answer, Exception):
             raise self.answer
-        # The body as sent, so null is the JSON null
         return httpx.Response(200, content=json.dumps(self.answer).encode(), request=httpx.Request('GET', url))
 
 
 @pytest.mark.parametrize('answer', [[{'subject': 's', 'score': 3.5}], {'subject': 's'}, [], None])
 def test_quarantine_details_as_mailcow_gives_them(client, monkeypatch, answer):
-    # An object, or mailcow's empty list or null passed on as they are
     monkeypatch.setattr(mailcow_api, '_get_client', lambda: _QuarantineView(answer))
     assert client.get('/api/quarantine/7/details').status_code == 200
 
@@ -276,17 +260,13 @@ def test_item_actions(client, mailcow, path):
 @pytest.mark.parametrize('path, body', LIST_CHANGES)
 def test_fail2ban_changes(client, mailcow, path, body):
     assert client.post(path, json=body).status_code == 200
-    # A body the call cannot use: no address, or for the settings not an object
     assert client.post(path, json=['x'] if path == '/api/fail2ban' else {'list': 'nope'}).status_code == 400
-    # mailcow refusing the change (its Read-Write call fails): 502
     mailcow['answer'] = MailcowAPIError('down')
     assert client.post(path, json=body).status_code == 502
     mailcow['answer'] = [{'type': 'success', 'msg': 'ok'}]
-    # No Fail2ban settings from mailcow (get_fail2ban answers None when mailcow fails): 503
     mailcow['f2b'] = None
     assert client.post(path, json=body).status_code == 503
     mailcow['f2b'] = RuntimeError('broken')
-    # Unban answers every other failure 502, the rest 500
     assert client.post(path, json=body).status_code == (502 if path.endswith('unban') else 500)
 
 

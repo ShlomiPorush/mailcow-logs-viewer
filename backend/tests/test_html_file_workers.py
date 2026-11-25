@@ -1,4 +1,3 @@
-"""Serving a frontend page must not block unrelated API requests."""
 import asyncio
 import threading
 
@@ -15,7 +14,6 @@ def test_slow_html_read_keeps_api_responsive(monkeypatch, path, filename):
     reads = []
     loop_thread = threading.get_ident()
     monkeypatch.setattr(main.settings._inner, "auth_enabled", False)
-    # The login page is shown to a signed-out browser; without authentication it redirects
     monkeypatch.setattr(main.settings._inner, "basic_auth_enabled", path == "/login")
 
     class Page:
@@ -62,7 +60,6 @@ def test_slow_html_read_keeps_api_responsive(monkeypatch, path, filename):
 @pytest.mark.parametrize("path,message", [("/login", "Login page not found"), ("/", "Frontend not found"), ("/dashboard", "Frontend not found")])
 def test_missing_html_keeps_error_response(monkeypatch, path, message):
     monkeypatch.setattr(main.settings._inner, "auth_enabled", False)
-    # The login page is shown to a signed-out browser; without authentication it redirects
     monkeypatch.setattr(main.settings._inner, "basic_auth_enabled", path == "/login")
 
     def missing(*args):

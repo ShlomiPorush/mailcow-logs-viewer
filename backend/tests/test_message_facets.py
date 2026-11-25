@@ -1,5 +1,3 @@
-"""Message facets: the counts next to Outcome and Direction on the Messages
-page must equal what the list shows when that facet is chosen."""
 import uuid
 from datetime import datetime, timedelta
 
@@ -63,7 +61,6 @@ def test_facet_counts_match_the_list(client):
     _add('deferred', 'outbound')
     _add('rejected', 'inbound')
     shared = f'<shared@{MARKER}>'
-    # Two delivery legs of one message count once, as in the list
     _add('delivered', 'internal', message_id=shared, minutes_ago=6)
     _add('delivered', 'internal', message_id=shared, minutes_ago=4)
 
@@ -89,7 +86,6 @@ def test_each_facet_ignores_its_own_filter(client):
     _add('delivered', 'inbound')
     _add('deferred', 'outbound')
     facets = client.get('/api/messages/facets', params={'sender': MARKER, 'status': 'deferred', 'direction': 'inbound'}).json()
-    # Outcome counts keep the direction filter, direction counts keep the outcome filter
     assert facets['status']['all'] == 1 and facets['status']['delivered'] == 1
     assert facets['direction']['all'] == 1 and facets['direction']['outbound'] == 1
 
@@ -102,7 +98,6 @@ def test_time_ranges_are_counted(client):
     since = [f"day:{(now - timedelta(days=1)).isoformat()}Z", f"week:{(now - timedelta(days=7)).isoformat()}Z", 'bad key:x', 'x:not-a-date']
     facets = client.get('/api/messages/facets', params={'sender': MARKER, 'since': since}).json()
     assert facets['time'] == {'all': 3, 'day': 1, 'week': 2}
-    # A chosen date range does not narrow the time counts
     dated = client.get('/api/messages/facets', params={'sender': MARKER, 'since': since,
                                                        'start_date': (now - timedelta(days=1)).isoformat()}).json()
     assert dated['time']['all'] == 3

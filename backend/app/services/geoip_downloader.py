@@ -1,7 +1,3 @@
-"""
-MaxMind GeoIP Auto-Downloader
-Downloads and updates GeoLite2 databases automatically
-"""
 import logging
 import os
 import tarfile
@@ -13,39 +9,25 @@ import requests
 
 logger = logging.getLogger(__name__)
 
-# Import settings (will use DB overrides if SETTINGS_EDIT_VIA_UI_ENABLED is true)
 from ..config import settings
 from ..utils import format_datetime_for_api
 
-# Configuration from settings (supports DB overrides)
 def get_maxmind_license_key() -> str:
-    """Get MaxMind license key from settings (supports DB overrides)"""
     return settings.maxmind_license_key or ''
 
 def get_maxmind_account_id() -> str:
-    """Get MaxMind account ID from settings (supports DB overrides)"""
     return settings.maxmind_account_id or ''
 
-MAXMIND_LICENSE_KEY = get_maxmind_license_key()
-MAXMIND_ACCOUNT_ID = get_maxmind_account_id()
 GEOIP_DB_DIR = os.getenv('GEOIP_DB_DIR', '/app/data')
 
-# Database paths
 GEOIP_CITY_DB_PATH = os.path.join(GEOIP_DB_DIR, 'GeoLite2-City.mmdb')
 GEOIP_ASN_DB_PATH = os.path.join(GEOIP_DB_DIR, 'GeoLite2-ASN.mmdb')
 
-# MaxMind download URL. The account ID and license key travel as HTTP Basic
-# auth, so the key is never part of a URL that an error message could quote.
 MAXMIND_DOWNLOAD_URL = "https://download.maxmind.com/geoip/databases/{edition_id}/download"
-# Older endpoint that takes the license key alone as a query parameter. Used
-# only when MaxMind rejects the account ID and key pair, so an install whose
-# account ID was never checked before keeps updating.
 MAXMIND_LEGACY_DOWNLOAD_URL = "https://download.maxmind.com/app/geoip_download"
 
-# Update frequency (days)
 UPDATE_CHECK_DAYS = 7
 
-# Databases to download
 DATABASES = {
     'City': {
         'edition_id': 'GeoLite2-City',
@@ -61,24 +43,17 @@ DATABASES = {
 
 
 def is_license_configured() -> bool:
-    """Check if MaxMind license key is configured"""
-    # Reload from settings to get latest values (including DB overrides)
     license_key = get_maxmind_license_key()
     account_id = get_maxmind_account_id()
     return bool(license_key and account_id)
 
 
 def get_db_age_days(db_path: str) -> int:
-    """
-    Get age of database in days
-    Returns -1 if database doesn't exist
-    """
     path = Path(db_path)
     
     if not path.exists():
         return -1
     
-    # Get file modification time
     mtime = path.stat().st_mtime
     modified_date = datetime.fromtimestamp(mtime, timezone.utc)
     age_days = (datetime.now(timezone.utc) - modified_date).days
@@ -87,12 +62,6 @@ def get_db_age_days(db_path: str) -> int:
 
 
 def should_update_database(db_name: str) -> bool:
-    """
-    Check if database should be updated
-    Returns True if:
-    - Database doesn't exist
-    - Database is older than UPDATE_CHECK_DAYS days
-    """
     db_path = DATABASES[db_name]['path']
     age_days = get_db_age_days(db_path)
     
@@ -109,7 +78,6 @@ def should_update_database(db_name: str) -> bool:
 
 
 def _redact(text: str, secret: str) -> str:
-    """Mask the license key (plain or URL-encoded) in a message before it is logged."""
     if not secret:
         return text
     for form in {secret, quote(secret, safe=''), quote_plus(secret)}:
@@ -118,15 +86,6 @@ def _redact(text: str, secret: str) -> str:
 
 
 def download_single_database(db_name: str) -> bool:
-    """
-    Download a single GeoIP database from MaxMind
-    
-    Args:
-        db_name: 'City' or 'ASN'
-    
-    Returns:
-        True if successful, False otherwise
-    """
     db_info = DATABASES[db_name]
     license_key = ''
     
@@ -134,7 +93,6 @@ def download_single_database(db_name: str) -> bool:
         logger.info(f"Downloading GeoLite2-{db_name} database from MaxMind...")
         logger.info(f"  ({db_info['description']})")
         
-        # Get latest license key from settings (supports DB overrides)
         license_key = get_maxmind_license_key()
         account_id = get_maxmind_account_id()
         
@@ -142,7 +100,6 @@ def download_single_database(db_name: str) -> bool:
             logger.error("MaxMind license key or account ID not configured")
             return False
         
-        # Download
         response = requests.get(
             MAXMIND_DOWNLOAD_URL.format(edition_id=db_info['edition_id']),
             params={'suffix': 'tar.gz'},
@@ -152,7 +109,6 @@ def download_single_database(db_name: str) -> bool:
         )
         
         if response.status_code == 401:
-            # Before Basic auth the account ID was required but never checked
             response.close()
             response = requests.get(
                 MAXMIND_LEGACY_DOWNLOAD_URL,
@@ -174,11 +130,9 @@ def download_single_database(db_name: str) -> bool:
             logger.error(f"Failed to download {db_name} database: HTTP {response.status_code}")
             return False
         
-        # Create temp file
         with tempfile.NamedTemporaryFile(delete=False, suffix='.tar.gz') as tmp_file:
             tmp_path = tmp_file.name
             
-            # Download with progress
             total_size = int(response.headers.get('content-length', 0))
             downloaded = 0
             
@@ -186,32 +140,19 @@ def download_single_database(db_name: str) -> bool:
                 tmp_file.write(chunk)
                 downloaded += len(chunk)
                 
-                if total_size > 0 and downloaded % (5 * 1024 * 1024) == 0:  # Log every 5MB
+                if total_size > 0 and downloaded % (5 * 1024 * 1024) == 0:
                     progress = (downloaded / total_size) * 100
                     logger.info(f"  Download progress: {progress:.1f}%")
         
         size_mb = downloaded / (1024 * 1024)
         logger.info(f"  Downloaded {size_mb:.1f}MB")
         
-        # Extract tar.gz
         logger.info(f"  Extracting GeoLite2-{db_name} database...")
         
         with tempfile.TemporaryDirectory() as tmp_dir:
             with tarfile.open(tmp_path, 'r:gz') as tar:
-                # Prevent path traversal attacks (defense-in-depth; source is trusted MaxMind)
-                try:
-                    tar.extractall(tmp_dir, filter='data')  # Python 3.12+ safe filter
-                except TypeError:
-                    # Fallback for Python < 3.12: manually filter dangerous members
-                    safe_members = []
-                    for member in tar.getmembers():
-                        if member.name.startswith('/') or '..' in member.name:
-                            logger.warning(f"Skipping suspicious tar member: {member.name}")
-                            continue
-                        safe_members.append(member)
-                    tar.extractall(tmp_dir, members=safe_members)
+                tar.extractall(tmp_dir, filter='data')
             
-            # Find the .mmdb file (it's in a subdirectory)
             mmdb_files = list(Path(tmp_dir).rglob('*.mmdb'))
             
             if not mmdb_files:
@@ -221,19 +162,15 @@ def download_single_database(db_name: str) -> bool:
             
             mmdb_file = mmdb_files[0]
             
-            # Ensure destination directory exists
             os.makedirs(GEOIP_DB_DIR, exist_ok=True)
             
-            # Move to destination
             import shutil
             shutil.copy2(mmdb_file, db_info['path'])
             
             logger.info(f"✓ GeoLite2-{db_name} database installed at {db_info['path']}")
         
-        # Cleanup
         os.unlink(tmp_path)
         
-        # Log database info
         db_size = Path(db_info['path']).stat().st_size / (1024 * 1024)
         logger.info(f"  Database size: {db_size:.1f}MB")
         
@@ -248,12 +185,6 @@ def download_single_database(db_name: str) -> bool:
 
 
 def download_geoip_databases() -> dict:
-    """
-    Download both City and ASN databases from MaxMind
-    
-    Returns:
-        {'City': bool, 'ASN': bool} - success status for each database
-    """
     if not is_license_configured():
         logger.warning("MaxMind license key not configured, skipping download")
         return {'City': False, 'ASN': False}
@@ -265,23 +196,12 @@ def download_geoip_databases() -> dict:
             results[db_name] = download_single_database(db_name)
         else:
             logger.info(f"{db_name} database is up to date, skipping download")
-            results[db_name] = True  # Already exists and up-to-date
+            results[db_name] = True
     
     return results
 
 
 def update_geoip_database_if_needed() -> dict:
-    """
-    Update GeoIP databases if needed
-    Called on startup and periodically
-    
-    Returns:
-        {
-            'City': {'available': bool, 'updated': bool, 'failed': bool},
-            'ASN': {'available': bool, 'updated': bool, 'failed': bool}
-        }
-        failed: an update was needed and its download did not succeed
-    """
     if not is_license_configured():
         logger.info("MaxMind license key not configured, GeoIP features will be disabled")
         return {
@@ -296,15 +216,13 @@ def update_geoip_database_if_needed() -> dict:
         needs_update = should_update_database(db_name)
         
         if not needs_update:
-            # Already up-to-date
             status[db_name] = {
                 'available': True,
-                'updated': False,  # Didn't need update
+                'updated': False,
                 'failed': False
             }
             continue
         
-        # Download
         success = download_single_database(db_name)
         
         if success:
@@ -314,7 +232,6 @@ def update_geoip_database_if_needed() -> dict:
                 'failed': False
             }
         else:
-            # Check if old database exists
             if Path(db_path).exists():
                 logger.info(f"Using existing (outdated) {db_name} database")
                 status[db_name] = {
@@ -334,27 +251,6 @@ def update_geoip_database_if_needed() -> dict:
 
 
 def get_geoip_status() -> dict:
-    """
-    Get current GeoIP databases status
-    
-    Returns:
-        {
-            'configured': bool,
-            'db_valid': bool | None,  # None = not checked yet
-            'City': {
-                'available': bool,
-                'age_days': int,
-                'size_mb': float,
-                'last_modified': str
-            },
-            'ASN': {
-                'available': bool,
-                'age_days': int,
-                'size_mb': float,
-                'last_modified': str
-            }
-        }
-    """
     from .geoip_service import get_geoip_db_valid
     
     status = {

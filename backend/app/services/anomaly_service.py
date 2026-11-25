@@ -1,17 +1,3 @@
-"""
-Anomaly detection - compromised-mailbox and auth-attack alerts.
-
-Two independent detectors, run periodically by the scheduler:
-
-1. Outbound volume spike: a local mailbox sending far above its own recent
-   baseline (the classic account-takeover / outbound-spam signature).
-2. Auth-failure burst: a username accumulating many authentication failures
-   within the check window (credential stuffing / brute force).
-
-Findings are written to the security_alerts table and dispatched through the
-unified notification service (email + webhook). A per-(type, subject) cooldown
-prevents alert storms. Synchronous - call from a worker thread / executor.
-"""
 import logging
 import re
 from datetime import datetime, timedelta, timezone
@@ -34,8 +20,6 @@ logger = logging.getLogger(__name__)
 
 
 def _local_addresses(db) -> set:
-    """Lowercased set of all local mailbox + alias addresses, including their
-    alias-domain variants (user@alias.tld for user@target.tld, issue #92)."""
     from .alias_domains import get_alias_domain_map, expand_address
     mailboxes = [m[0].lower() for m in db.query(MailboxStatistics.username).all() if m[0]]
     aliases = [a[0].lower() for a in db.query(AliasStatistics.alias_address).all() if a[0]]
@@ -48,7 +32,6 @@ def _local_addresses(db) -> set:
 
 
 def _recently_alerted(db, alert_type: str, subject: str, cooldown_hours: int) -> bool:
-    """True if an alert of this type/subject fired within the cooldown window."""
     cutoff = datetime.utcnow() - timedelta(hours=cooldown_hours)
     existing = db.query(SecurityAlert.id).filter(
         SecurityAlert.alert_type == alert_type,
@@ -73,29 +56,20 @@ def _record_and_notify(db, pending, alert_type, severity, subject, title, detail
     db.add(alert)
     db.commit()
 
-    # Notification delivery is slow (HTTP + SMTP with timeouts); queue it and
-    # dispatch after the DB session is closed so a pooled connection is never
-    # pinned while we wait on external services.
     pending.append((title, detail, severity, alert_type, subject, chart))
 
 
-# The alert email shows what the alert counted per hour over the day up to
-# it, so the reader sees at a glance a burst against an ordinary day.
 CHART_HOURS = 24
 
 
 class AlertChart(NamedTuple):
-    counts: List[int]                   # per hour, oldest first; the last hour ends at `end`
-    highlight: List[int]                # indexes of the hours that hold the alert's window
-    end: datetime                       # when the detector counted, naive UTC
-    usual_rate: Optional[float] = None  # a spike's baseline, messages per hour
+    counts: List[int]
+    highlight: List[int]
+    end: datetime
+    usual_rate: Optional[float] = None
 
 
 def hourly_counts(times: Iterable[datetime], end: datetime, hours: int = CHART_HOURS) -> List[int]:
-    """How many of the times fall in each hour of the `hours` before end,
-    oldest first: bucket i holds [end - hours + i h, end - hours + (i + 1) h).
-    A time at or after end counts in the last hour: the detectors count up to
-    now, and the sign-in one also counts a log time ahead of the clock."""
     start = end - timedelta(hours=hours)
     counts = [0] * hours
     for when in times:
@@ -106,17 +80,12 @@ def hourly_counts(times: Iterable[datetime], end: datetime, hours: int = CHART_H
 
 
 def window_hours(window_minutes: int, hours: int = CHART_HOURS) -> List[int]:
-    """The indexes of the hourly buckets that hold the last window_minutes
-    before the end: the last one, or more when the window is longer than an hour."""
     first = (hours * 60 - max(int(window_minutes), 1)) // 60
     return list(range(max(first, 0), hours))
 
 
 def _alert_chart(db, alert_type: str, subject: str, now: datetime, window_minutes: int,
                  usual_rate: Optional[float] = None) -> Optional[AlertChart]:
-    """The counts behind an alert per hour over the last day, with the
-    detector's own filters, so the chart shows what the alert counted. None
-    when they cannot be read: the alert still goes out, without its chart."""
     start = now - timedelta(hours=CHART_HOURS)
     try:
         if alert_type == "volume_spike":
@@ -127,8 +96,6 @@ def _alert_chart(db, alert_type: str, subject: str, now: datetime, window_minute
                 submitting_mailbox() == subject,
             ).all()
         else:
-            # No upper bound, like the detector: a log time ahead of the
-            # clock was counted by the alert, so it is in the last hour here
             rows = db.query(NetfilterLog.time).filter(
                 NetfilterLog.time >= start,
                 NetfilterLog.username == subject,
@@ -142,15 +109,6 @@ def _alert_chart(db, alert_type: str, subject: str, now: datetime, window_minute
 
 def _is_recurring_daily_pattern(db, sender: str, recent_count: int,
                                 now: datetime, window_minutes: int) -> bool:
-    """Did this sender produce similar volume in the same time-of-day slot
-    on at least two past days?
-
-    The slot is the current check window shifted back N whole days, padded
-    by an hour on each side so cron drift and processing time do not break
-    the match. "Similar" = at least half of today's burst - so if the usual
-    daily batch suddenly doubles or more, past slots fall below the bar and
-    the alert still fires.
-    """
     tolerance = timedelta(minutes=60)
     window = timedelta(minutes=window_minutes)
     recurring_days = 0
@@ -171,7 +129,6 @@ def _is_recurring_daily_pattern(db, sender: str, recent_count: int,
 
 
 def detect_volume_spikes(db, pending) -> int:
-    """Alert on mailboxes sending far above their own baseline. Returns count."""
     window_minutes = settings.anomaly_check_interval
     now = datetime.utcnow()
     window_start = now - timedelta(minutes=window_minutes)
@@ -181,8 +138,6 @@ def detect_volume_spikes(db, pending) -> int:
     if not locals_:
         return 0
 
-    # Messages sent per local mailbox in the recent window, counted for the
-    # mailbox that logged in rather than the alias it sent from
     mailbox = submitting_mailbox()
     recent = authenticated_submissions(db.query(
         mailbox.label("sender"),
@@ -200,7 +155,6 @@ def detect_volume_spikes(db, pending) -> int:
         if recent_count < settings.anomaly_volume_min_messages:
             continue
 
-        # Baseline: this sender's average per-window rate over the history period
         baseline_total = authenticated_submissions(db.query(func.count(MessageCorrelation.id))).filter(
             MessageCorrelation.direction == "outbound",
             MessageCorrelation.first_seen >= baseline_start,
@@ -209,11 +163,9 @@ def detect_volume_spikes(db, pending) -> int:
         ).scalar() or 0
 
         baseline_hours = max((window_start - baseline_start).total_seconds() / 3600.0, 1e-6)
-        baseline_rate = baseline_total / baseline_hours          # msgs/hour, historical
-        recent_rate = recent_count / window_hours                # msgs/hour, now
+        baseline_rate = baseline_total / baseline_hours
+        recent_rate = recent_count / window_hours
 
-        # A brand-new sender with no history but a large burst is also suspicious;
-        # treat a zero baseline as "1 msg/hour" so the ratio stays meaningful.
         effective_baseline = max(baseline_rate, 1.0)
         if recent_rate < effective_baseline * settings.anomaly_volume_multiplier:
             continue
@@ -221,12 +173,6 @@ def detect_volume_spikes(db, pending) -> int:
         if _recently_alerted(db, "volume_spike", sender, settings.anomaly_alert_cooldown_hours):
             continue
 
-        # A mailbox that bursts at the same time every day (scheduled
-        # reports, digests) is following its own routine, not compromised.
-        # A whitelist would blind us to off-schedule bursts - instead the
-        # detector compares against the same time-of-day slot on past days:
-        # recurring similar volume there means "scheduled", while a burst at
-        # an unusual hour finds near-empty slots and still alerts.
         if _is_recurring_daily_pattern(db, sender, recent_count, now, window_minutes):
             logger.info(f"[ANOMALY] {sender}: burst matches its daily send pattern - not alerting")
             continue
@@ -253,7 +199,6 @@ def detect_volume_spikes(db, pending) -> int:
 
 
 def detect_auth_failure_bursts(db, pending) -> int:
-    """Alert on usernames with many auth failures in the window. Returns count."""
     now = datetime.utcnow()
     window_start = now - timedelta(minutes=settings.anomaly_check_interval)
 
@@ -273,14 +218,11 @@ def detect_auth_failure_bursts(db, pending) -> int:
         if _recently_alerted(db, "auth_failure_burst", username, settings.anomaly_alert_cooldown_hours):
             continue
 
-        # How many distinct source IPs? (distributed attack vs single host)
         distinct_ips = db.query(func.count(func.distinct(NetfilterLog.ip))).filter(
             NetfilterLog.time >= window_start,
             NetfilterLog.username == username,
         ).scalar() or 0
 
-        # The username is the client's text: the title is the email's subject, on
-        # one line, and fits the column's 255 characters
         shown = re.sub(r'[\x00-\x1f\x7f]', ' ', username)
         title = f"Authentication failure burst: {shown}"[:255]
         detail = (
@@ -313,7 +255,6 @@ _CHART_UNITS = {
 
 
 def _usual_rate(rate: float) -> str:
-    """A spike's baseline in words: none, under 0.1 an hour, 0.6 an hour, 12 an hour."""
     if rate <= 0:
         return "none"
     if rate < 0.1:
@@ -322,7 +263,6 @@ def _usual_rate(rate: float) -> str:
 
 
 def _chart_panel(chart: AlertChart, alert_type: str):
-    """The panel of an alert email with the counts per hour over the last day."""
     from . import email_layout as e
     from .. import app_time
     hours = len(chart.highlight)
@@ -331,11 +271,6 @@ def _chart_panel(chart: AlertChart, alert_type: str):
     if chart.usual_rate is not None:
         summary += f", usually {_usual_rate(chart.usual_rate)}"
     caption = f"{_CHART_UNITS.get(alert_type, 'Per hour')}. {summary}."
-    # The axis names its two ends only. The end is when the alert was raised,
-    # and the header gives the date of the email, so the clock and the zone
-    # say enough there; the start is a day earlier, so it also needs its date,
-    # or both ends would read as the same time. When daylight saving changed
-    # in between, the start names its own zone too.
     start = chart.end - timedelta(hours=len(chart.counts))
     same_day = app_time.to_local(start).date() == app_time.to_local(chart.end).date()
     zone = app_time.zone_label(start) != app_time.zone_label(chart.end)
@@ -345,8 +280,6 @@ def _chart_panel(chart: AlertChart, alert_type: str):
 
 
 def _alert_email_html(title, detail, severity, alert_type, subject, chart: Optional[AlertChart] = None) -> str:
-    """The alert email: the first paragraph of the detail says what happened,
-    the rest what to do. chart adds the counts per hour over the last day."""
     from . import email_layout as e
     heading, label = _ALERT_HEADINGS.get(alert_type, ("{}", "Subject"))
     what, _, advice = detail.partition("\n\n")
@@ -367,7 +300,6 @@ def _alert_email_html(title, detail, severity, alert_type, subject, chart: Optio
 
 
 def run_anomaly_detection() -> dict:
-    """Run all detectors. Returns a summary dict."""
     if not settings.anomaly_detection_enabled:
         return {"status": "disabled"}
 
@@ -377,12 +309,8 @@ def run_anomaly_detection() -> dict:
         with get_db_context() as db:
             spikes = detect_volume_spikes(db, pending)
             bursts = detect_auth_failure_bursts(db, pending)
+    # Outside finally, a detector crash drops the notifications of alerts already stored, and the cooldown blocks a retry.
     finally:
-        # Deliver after the session is closed (notification HTTP/SMTP timeouts
-        # must not pin a pooled DB connection). In finally: alerts are already
-        # committed one by one, so a detector crash must not swallow the
-        # notifications of alerts recorded before it - the cooldown would then
-        # suppress any retry.
         for title, detail, severity, alert_type, subject, chart in pending:
             try:
                 from .notification_service import notify

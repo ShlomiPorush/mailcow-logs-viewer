@@ -1,12 +1,3 @@
-"""The recipient address the sender wrote, when Rspamd recorded it normalized.
-
-Rspamd's alias resolution (ALIAS_RESOLVED) records a Gmail recipient without
-the dots of its local part and any recipient without its +tag; only Postfix
-logs the written address. The Messages list, details, search and export
-showed the normalized form, and the v3 details listed one recipient twice.
-`written_recipients` maps the Rspamd form to the written one, stored when a
-delivery is linked to its Postfix lines (and by revision 0027 for stored mail).
-"""
 import calendar
 import json
 import importlib.util
@@ -34,7 +25,6 @@ def _line(i, to, orig_to=None, seconds=0):
                 f'ABC123: to=<{to}>, {orig}relay=mx.example.com[192.0.2.1]:25, delay=1, dsn=2.0.0, status=sent (250 ok)')
 
 
-# Gmail's domains stand in as .test ones, so no test names a real mailbox
 FAKE_GMAIL = 'gmail.test'
 FAKE_GMAIL_ALIASES = ('gmail.test', 'googlemail.test')
 
@@ -74,33 +64,23 @@ def test_the_dots_rule_is_for_gmail_and_googlemail_only():
 
 
 RULE_CASES = [
-    # (Rspamd recipients, Postfix lines, expected map)
     (['danalee@gmail.test'], [_line(1, 'Dana.Lee@gmail.test')], {'danalee@gmail.test': 'Dana.Lee@gmail.test'}),
     (['danalee@gmail.test'], [_line(1, 'dana.lee@googlemail.test')], {'danalee@gmail.test': 'dana.lee@googlemail.test'}),
     (['dana@example.com'], [_line(1, 'dana+news@example.com')], {'dana@example.com': 'dana+news@example.com'}),
     (['danalee@gmail.test'], [_line(1, 'dana.lee+x@gmail.test')], {'danalee@gmail.test': 'dana.lee+x@gmail.test'}),
-    # Dots only count on Gmail: another domain's dotted address is another person
     (['danalee@example.com'], [_line(1, 'dana.lee@example.com')], {}),
-    # An address with a delivery line of its own is already right
     (['dana@example.com'], [_line(1, 'dana@example.com'), _line(2, 'dana+x@example.com')], {}),
-    # Postfix delivered to the address without the tag and kept the written one in orig_to
     (['dana@example.com'], [_line(1, 'dana@example.com', orig_to='dana+news@example.com')],
      {'dana@example.com': 'dana+news@example.com'}),
-    # Only a delivery line's fixed fields count, never an address in another line's text
     (['dana@example.com'], [Line(1, T0, 'dana+forged@example.com',
                                  'ABC123: from=<"to=<dana+forged@example.com>"@sender.invalid>, size=100, nrcpt=1')], {}),
-    # Among many: each its own
     (['danalee@gmail.test', 'b@example.net'], [_line(1, 'b@example.net'), _line(2, 'dana.lee@gmail.test')],
      {'danalee@gmail.test': 'dana.lee@gmail.test'}),
-    # Two written forms of one mailbox: the earliest delivery line
     (['danalee@gmail.test'], [_line(2, 'd.analee@gmail.test', seconds=5), _line(1, 'dana.lee@gmail.test', seconds=1)],
      {'danalee@gmail.test': 'dana.lee@gmail.test'}),
-    # The same Rspamd address twice, in two cases
     (['danalee@gmail.test', 'DanaLee@gmail.test'], [_line(1, 'Dana.Lee@gmail.test')], {'danalee@gmail.test': 'Dana.Lee@gmail.test'}),
-    # An alias Postfix expanded: the address written is orig_to
     (['teamlead@gmail.test'], [_line(1, 'mailbox@example.com', orig_to='team.lead@gmail.test')],
      {'teamlead@gmail.test': 'team.lead@gmail.test'}),
-    # Odd input is left alone
     (['ab@gmail.test'], [_line(1, '"a.b"@gmail.test')], {}),
     (['ab@gmail.test'], [_line(1, 'a.b@x@gmail.test')], {}),
     (['ab@gmail.test'], [_line(1, 'a.' + 'b' * 300 + '@gmail.test')], {}),
@@ -123,8 +103,6 @@ def test_shown_prefers_the_written_address():
     assert shown('danalee@gmail.test', None) == 'danalee@gmail.test'
     assert shown_list(['danalee@gmail.test', 'b@example.net'], written) == ['Dana.Lee@gmail.test', 'b@example.net']
 
-
-# ---------- with PostgreSQL ----------
 
 def _postgres_available() -> bool:
     try:
@@ -201,11 +179,11 @@ def _rspamd(msgid, when, recipients, resolved=True):
 
 
 def _correlate(rspamd_id):
-    from app import scheduler as sched
+    from app.services import correlation_jobs
     from app.database import get_db_context
     from app.models import RspamdLog
     with get_db_context() as db:
-        correlation = sched.correlate_single_message(db, db.get(RspamdLog, rspamd_id))
+        correlation = correlation_jobs.correlate_single_message(db, db.get(RspamdLog, rspamd_id))
         return correlation.correlation_key if correlation else None
 
 
@@ -229,7 +207,6 @@ def _list(**params):
 
 
 def _delivered(rcpt_rspamd='danalee@gmail.test', rcpt_written='Dana.Lee@gmail.test', resolved=True):
-    """Postfix lines first, then the Rspamd verdict: the correlation job links them."""
     msgid, queue = _msgid(), _queue()
     t0 = datetime.utcnow() - timedelta(minutes=2)
     _postfix(queue, t0, msgid=msgid)
@@ -244,7 +221,7 @@ def test_linking_stores_the_written_address_and_every_reader_shows_it(env):
 
     msgid, queue, key = _delivered()
     row = _row(key)
-    assert row.recipient == 'danalee@gmail.test'  # matching keeps Rspamd's form
+    assert row.recipient == 'danalee@gmail.test'
     assert row.written_recipients == {'danalee@gmail.test': 'Dana.Lee@gmail.test'}
 
     [listed] = _list(search=msgid)
@@ -254,7 +231,6 @@ def test_linking_stores_the_written_address_and_every_reader_shows_it(env):
     assert details['recipient'] == 'Dana.Lee@gmail.test'
     assert details['recipients'] == ['Dana.Lee@gmail.test']
 
-    # Either form finds it, in the search and in the recipient filter
     for term in ('Dana.Lee@gmail.test', 'danalee@gmail.test'):
         assert [m['correlation_key'] for m in _list(search=term) if m['message_id'] == msgid] == [key]
         assert [m['correlation_key'] for m in _list(recipient=term) if m['message_id'] == msgid] == [key]
@@ -276,7 +252,6 @@ def test_without_the_symbol_nothing_is_stored(env):
 
 
 def test_a_queue_less_correlation_gets_it_when_it_adopts_its_lines(env):
-    """Rspamd first (no Postfix line yet), then the lines, then the completion job."""
     from app import scheduler as sched
     msgid, queue = _msgid(), _queue()
     t0 = datetime.utcnow() - timedelta(minutes=2)
@@ -291,7 +266,6 @@ def test_a_queue_less_correlation_gets_it_when_it_adopts_its_lines(env):
 
 
 def _ingest(monkeypatch, *lines):
-    """Store Postfix lines the way the ingest does: lines are (time, message)."""
     from app import scheduler as sched
     monkeypatch.setattr(sched, 'seen_postfix', set())
     sched._store_postfix_page([{'time': str(calendar.timegm(when.timetuple())), 'program': 'postfix/smtp',
@@ -304,7 +278,6 @@ def _delivery(queue, to, status='sent', relay='mx.example.com[192.0.2.1]:25'):
 
 
 def test_a_delivery_line_after_the_outcome_is_final_still_counts(env, monkeypatch):
-    """Delivered to one recipient already; the other recipient's line comes later."""
     msgid, queue = _msgid(), _queue()
     t0 = datetime.utcnow().replace(microsecond=0) - timedelta(minutes=2)
     _postfix(queue, t0, msgid=msgid)
@@ -318,7 +291,6 @@ def test_a_delivery_line_after_the_outcome_is_final_still_counts(env, monkeypatc
 
 
 def test_a_delivery_to_the_spam_folder_counts(env, monkeypatch):
-    """Postfix reports it as status=sent through rspamd-pipe-spam; the app stores 'spam'."""
     msgid, queue = _msgid(), _queue()
     t0 = datetime.utcnow().replace(microsecond=0) - timedelta(minutes=2)
     _postfix(queue, t0, msgid=msgid)
@@ -376,7 +348,6 @@ def test_a_stored_value_never_changes_and_writers_only_add(env):
             db.commit()
 
     with get_db_context() as stale:
-        # This writer read the row before another one stored a value
         row = stale.query(MessageCorrelation).filter(MessageCorrelation.correlation_key == key).one()
         store({'danalee@gmail.test': 'kept@gmail.test'})
         _postfix(queue, t0 + timedelta(seconds=1), to='dana.lee@gmail.test')
@@ -385,7 +356,6 @@ def test_a_stored_value_never_changes_and_writers_only_add(env):
         stale.commit()
     assert _row(key).written_recipients == {'danalee@gmail.test': 'kept@gmail.test', 'otto@example.com': 'otto+x@example.com'}
 
-    # A JSON null left in the column counts as nothing stored
     with get_db_context() as db:
         db.execute(MessageCorrelation.__table__.update().where(MessageCorrelation.correlation_key == key)
                    .values(written_recipients=None))
@@ -429,10 +399,7 @@ def test_an_excluded_written_address_hides_the_message_and_the_cleanup_removes_i
         assert db.query(MessageCorrelation).filter(MessageCorrelation.correlation_key == key).count() == 0
 
 
-# ---------- the upgrade ----------
-
 def _store_old_row(recipients, lines, queue=None, linked=False):
-    """A delivery stored before the upgrade: no written_recipients."""
     from app.database import get_db_context
     from app.models import MessageCorrelation
     msgid, queue = _msgid(), queue or _queue()
@@ -464,7 +431,7 @@ def test_the_upgrade_fills_stored_deliveries(env, monkeypatch):
     assert _row(by_queue).written_recipients == {'danalee@gmail.test': 'Dana.Lee@gmail.test'}
     assert _row(by_id).written_recipients == {'otto@example.com': 'otto+x@example.com'}
     assert _row(untouched).written_recipients is None
-    _upgrade(module)  # again: nothing changes
+    _upgrade(module)
     assert _row(by_queue).written_recipients == {'danalee@gmail.test': 'Dana.Lee@gmail.test'}
 
 
@@ -473,7 +440,6 @@ def test_the_upgrade_skips_a_reused_queue_id_and_lines_of_another_day(env):
     from app.models import MessageCorrelation
     queue = _queue()
     key = _store_old_row(['danalee@gmail.test'], [], queue=queue)
-    # Postfix used the queue id again days later, for another message
     _postfix(queue, datetime.utcnow(), to='dana.lee@gmail.test')
     _upgrade()
     assert _row(key).written_recipients is None
@@ -489,7 +455,6 @@ def test_the_upgrade_skips_a_reused_queue_id_and_lines_of_another_day(env):
 
 
 def test_the_startup_cleanup_runs_before_the_column_exists(env):
-    """The pre-Alembic duplicate cleanup must not read a column a later revision adds."""
     from sqlalchemy import text
     from app.database import engine, get_db_context
     from app.migrations import cleanup_duplicate_correlations
@@ -533,7 +498,6 @@ def test_the_startup_cleanup_keeps_the_written_addresses_of_the_rows_it_merges(e
     with get_db_context() as db:
         assert cleanup_duplicate_correlations(db) >= 1
         [row] = db.query(MessageCorrelation).filter(MessageCorrelation.message_id == msgid).all()
-        # Same first_seen: the older row (lower id) is kept, and its own value wins
         assert row.written_recipients == {'a@example.com': 'a+kept@example.com', 'b@example.com': 'b+x@example.com'}
 
 
@@ -543,8 +507,6 @@ def test_the_upgrade_reads_delivery_lines_as_the_app_does():
 
 
 def test_a_delivery_line_of_the_message_before_on_a_reused_queue_id_is_not_taken(env, monkeypatch):
-    """The earlier message used the queue id 36 hours before and was delivered
-    30 seconds before this one was first seen: its line is not this message's."""
     from app import scheduler as sched
     from app.database import get_db_context
     from app.models import MessageCorrelation
@@ -561,7 +523,6 @@ def test_a_delivery_line_of_the_message_before_on_a_reused_queue_id_is_not_taken
     sched._complete_incomplete_correlations_sync()
     assert _row(key).written_recipients == {'dana@example.com': 'dana+new@example.com'}
 
-    # The upgrade reads the same lines
     _cleanup_written(key)
     _upgrade()
     assert _row(key).written_recipients == {'dana@example.com': 'dana+new@example.com'}
@@ -577,8 +538,6 @@ def _cleanup_written(key):
 
 
 def test_a_delivery_line_stored_while_the_link_is_made_is_not_lost(env, monkeypatch):
-    """The ingest stores the delivery line after the completion job read the
-    queue's lines and before it committed the link: neither may miss it."""
     from contextlib import contextmanager
     from app.database import get_db_context
     from app.services import correlation_jobs
@@ -600,15 +559,16 @@ def test_a_delivery_line_stored_while_the_link_is_made_is_not_lost(env, monkeypa
             db.commit = commit_after_the_ingest
             yield db
 
-    correlation_jobs.complete_incomplete_correlations(
-        get_db_context=racing_session, update_job_status=lambda *a: None, max_age_minutes=60, clock=datetime)
+    monkeypatch.setattr(correlation_jobs, "get_db_context", racing_session)
+    monkeypatch.setattr(correlation_jobs, "update_job_status", lambda *a: None)
+    monkeypatch.setattr(correlation_jobs.settings._inner, "max_correlation_age_minutes", 60)
+    correlation_jobs.complete_incomplete_correlations()
     row = _row(key)
     assert row.queue_id == queue
     assert row.written_recipients == {'danalee@gmail.test': 'dana.lee@gmail.test'}
 
 
 def test_a_delivery_in_the_same_second_as_the_scan_is_taken(env):
-    """Rspamd's time has a fraction; Postfix logs the whole second."""
     from app import scheduler as sched
     msgid, queue = _msgid(), _queue()
     t0 = datetime.utcnow().replace(microsecond=0) - timedelta(minutes=2)

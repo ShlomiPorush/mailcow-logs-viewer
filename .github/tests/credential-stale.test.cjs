@@ -1,5 +1,3 @@
-// Validate: an answer about a key that changed while it was checked is not
-// shown as the state of the new key.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');

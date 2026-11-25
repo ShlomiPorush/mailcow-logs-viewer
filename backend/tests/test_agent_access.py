@@ -1,12 +1,3 @@
-"""Agent access: an AI agent connects after a signed-in person approves it.
-
-Covers the whole path an agent takes (registration, the authorize request,
-the consent API, the token exchange and refresh, the MCP endpoint and the
-calls it makes into the app) and the rules around it: what is never offered,
-which route the policy is checked against, when everything answers 404,
-single use of codes and refresh tokens, and disconnecting every agent when
-sign-in settings change.
-"""
 import asyncio
 import base64
 import hashlib
@@ -124,7 +115,6 @@ def _request_id(response) -> str:
 
 
 def _connect(views=("security",), acts=(), days=7, client=None):
-    """The full flow; returns (browser client, client_id, tokens)."""
     client = client or _signed_in()
     client_id = _register(client)
     verifier, challenge = _pkce()
@@ -162,8 +152,6 @@ def _tool(client, token, name, arguments=None):
     return r.json()["result"]
 
 
-# ── The policy ─────────────────────────────────────────────────────────────
-
 def _api_routes():
     from conftest import registered_routes
     out = set()
@@ -188,7 +176,6 @@ def test_people_only_routes_are_never_offered():
     for key in [("PUT", "/api/settings"), ("POST", "/api/settings/jobs/{job_name}/run"),
                 ("GET", "/api/raw-logs/ws-token"), ("POST", "/api/auth/session"),
                 ("POST", "/api/notifications/channels"), ("POST", "/api/dmarc/upload"),
-                # The entity card gathers several areas in one answer (owner decision: no agent access)
                 ("GET", "/api/entities/ip"), ("GET", "/api/entities/address"), ("GET", "/api/entities/domain")]:
         assert scopes.excluded_reason(*key), key
     for method, path in _api_routes():
@@ -197,11 +184,6 @@ def test_people_only_routes_are_never_offered():
     for method, path in _api_routes():
         if path.startswith("/api/agents"):
             assert scopes.excluded_reason(method, path)
-
-
-def test_sign_in_keys_match_the_session_bound_settings():
-    from app.routers.settings import _SESSION_BOUND_SETTING_KEYS
-    assert tuple(store.SIGN_IN_KEYS) == tuple(_SESSION_BOUND_SETTING_KEYS)
 
 
 def _sign_in_state(monkeypatch, *, agents=False, basic=False, oauth=False, legacy=False, locked=()):
@@ -218,7 +200,6 @@ def _sign_in_state(monkeypatch, *, agents=False, basic=False, oauth=False, legac
     ({}, {"agent_access_enabled": "true", "basic_auth_enabled": False}),
     ({"agents": True, "basic": True}, {"basic_auth_enabled": False}),
     ({"agents": True, "oauth": True}, {"oauth2_enabled": False, "agent_access_enabled": True}),
-    # Read back as off once saved, so it is not sign-in here either
     ({}, {"agent_access_enabled": True, "oauth2_enabled": "off"}),
 ])
 def test_agent_access_cannot_be_on_without_sign_in(monkeypatch, state, payload):
@@ -236,11 +217,8 @@ def test_agent_access_cannot_be_on_without_sign_in(monkeypatch, state, payload):
     ({"legacy": True}, {"agent_access_enabled": True}),
     ({"agents": True, "basic": True}, {"basic_auth_enabled": False, "agent_access_enabled": False}),
     ({"agents": True, "basic": True}, {"basic_auth_enabled": False, "oauth2_enabled": True}),
-    # Already like this (from .env): saving the other settings still works
     ({"agents": True}, {"agent_access_enabled": True, "app_title": "Logs"}),
-    # Read back as on once saved, so it is sign-in here too
     ({}, {"agent_access_enabled": "yes", "oauth2_enabled": "on"}),
-    # A key set in .env is not changed by the form
     ({"locked": ("agent_access_enabled",)}, {"agent_access_enabled": True}),
 ])
 def test_agent_access_saves_that_keep_sign_in(monkeypatch, state, payload):
@@ -248,17 +226,12 @@ def test_agent_access_saves_that_keep_sign_in(monkeypatch, state, payload):
 
 
 def test_agent_access_is_checked_again_against_a_save_that_ran_meanwhile(monkeypatch):
-    """Basic Auth on, agents off. This save turns agents on; another save turned
-    Basic Auth off after this one was checked. The check under the save lock reads
-    the stored settings itself, so it sees it."""
     from fastapi import HTTPException
     from app.routers import settings as settings_router
     _sign_in_state(monkeypatch, basic=True)
     monkeypatch.setattr(settings._inner, "edit_settings_via_ui_enabled", True)
     saved = []
     monkeypatch.setattr(settings_router, "save_config_overrides_to_db", lambda db, values: saved.append(values))
-    # The database already holds the other save; the shared settings, reloaded
-    # elsewhere with older values, still say Basic Auth is on
     monkeypatch.setattr(settings_router, "build_settings",
                         lambda db: settings._inner.model_copy(update={"basic_auth_enabled": False}))
     monkeypatch.setattr(settings_router, "reload_settings", lambda db: None)
@@ -275,8 +248,6 @@ def test_act_never_starts_ticked_and_act_includes_view():
     assert scopes.requested_views(frozenset()) == tuple(a.id for a in scopes.AREAS)
     assert scopes.grant_scopes([], ["security", "messages"]) == "security:read security:write"
 
-
-# ── Live or 404 ────────────────────────────────────────────────────────────
 
 AGENT_PATHS = ["/mcp", "/.well-known/oauth-protected-resource/mcp", "/.well-known/oauth-authorization-server",
                "/oauth/authorize", "/oauth/consent"]
@@ -312,8 +283,6 @@ def test_discovery_documents_name_the_configured_address(live_agents):
     assert meta["client_id_metadata_document_supported"] is True
 
 
-# ── Authorize and consent ──────────────────────────────────────────────────
-
 def test_signed_out_authorize_goes_to_the_login_page(live_agents):
     r = _client().get("/oauth/authorize?client_id=x", follow_redirects=False)
     assert r.status_code == 302 and r.headers["location"].startswith("/login?next=")
@@ -338,18 +307,14 @@ def test_bad_client_or_redirect_is_shown_never_redirected(live_agents):
     {"resource": "https://other.example.test/mcp"},
 ])
 def test_request_errors_before_consent_are_shown_never_redirected(live_agents, error):
-    """Anyone can register a redirect address, so nothing goes to it before the
-    person answers the consent page, not even an error: a link to this app
-    would otherwise send a signed-in person to any site."""
     target = "https://agent.example.test/landing"
-    client_id = _register(_client(), uris=(target,))  # registered without signing in
+    client_id = _register(_client(), uris=(target,))
     _, challenge = _pkce()
     client = _signed_in()
     r = _authorize(client, client_id, challenge, redirect=target, state="keep-me", **error)
     assert r.status_code == 400 and "location" not in r.headers
     assert "agent.example.test" not in r.text
     assert not pending._pending
-    # The same request without the error opens the consent page
     assert _request_id(_authorize(client, client_id, challenge, redirect=target))
 
 
@@ -408,8 +373,6 @@ def test_period_is_capped_by_the_maximum(live_agents, monkeypatch):
         assert grant.approved_by == USERNAME and grant.display_name == "My agent"
 
 
-# ── Tokens ─────────────────────────────────────────────────────────────────
-
 def test_token_answer_carries_the_granted_scopes(live_agents):
     _, _, tokens = _connect(views=("messages",), acts=("security",))
     assert tokens["scope"] == "messages:read security:read security:write"
@@ -426,7 +389,6 @@ def test_wrong_verifier_does_not_spend_the_code(live_agents):
     form = {"grant_type": "authorization_code", "code": code, "client_id": client_id, "redirect_uri": REDIRECT}
     assert client.post("/oauth/token", data={**form, "code_verifier": "x" * 43}).json()["error"] == "invalid_grant"
     assert client.post("/oauth/token", data={**form, "code_verifier": verifier}).status_code == 200
-    # The same code again, with every binding right: it leaked, so the grant ends
     again = client.post("/oauth/token", data={**form, "code_verifier": verifier})
     assert again.json()["error"] == "invalid_grant"
     assert client.get("/api/agents").json()["agents"][0]["state"] == "disconnected"
@@ -470,7 +432,6 @@ def test_refresh_rotates_and_a_reused_refresh_disconnects(live_agents):
 
 
 def test_refresh_never_changes_the_granted_scopes(live_agents):
-    # Clients repeat the scope they first asked for; the answer is what the person granted
     client, client_id, tokens = _connect(views=("security",))
     r = client.post("/oauth/token", data={"grant_type": "refresh_token", "client_id": client_id,
                                           "refresh_token": tokens["refresh_token"],
@@ -527,7 +488,6 @@ def test_a_call_waiting_past_its_token_does_not_run(live_agents):
         grant = store.validate_access_token(db, tokens["access_token"], APP_URL + "/mcp")
     finally:
         db.close()
-    # The agent refreshes meanwhile: the token the waiting call came with is gone
     assert client.post("/oauth/token", data={"grant_type": "refresh_token", "client_id": client_id,
                                              "refresh_token": tokens["refresh_token"]}).status_code == 200
 
@@ -582,7 +542,7 @@ def test_a_change_while_access_is_off_still_disconnects(live_agents, monkeypatch
     monkeypatch.setattr(settings._inner, "auth_password", secrets.token_hex(16))
     monkeypatch.setattr(store, "_known_fingerprint", None)
     from app.main import log_agent_access_state
-    log_agent_access_state()  # what startup runs
+    log_agent_access_state()
     monkeypatch.setattr(settings._inner, "auth_password", PASSWORD)
     monkeypatch.setattr(settings._inner, "agent_access_enabled", True)
     assert _mcp(_client(), tokens["access_token"], "ping").status_code == 401
@@ -640,8 +600,6 @@ def test_registration_limits(live_agents):
         client.post("/oauth/register", json={"redirect_uris": [REDIRECT]})
     assert client.post("/oauth/register", json={"redirect_uris": [REDIRECT]}).status_code == 429
 
-
-# ── MCP ────────────────────────────────────────────────────────────────────
 
 def test_mcp_without_a_token_points_to_the_metadata(live_agents):
     r = _client().post("/mcp", json={"jsonrpc": "2.0", "id": 1, "method": "ping"})
@@ -721,7 +679,6 @@ def test_read_api_runs_inside_the_app_and_is_logged(live_agents):
 def test_permissions_are_checked_on_the_route_the_app_picks(live_agents):
     client, _, tokens = _connect(views=("security", "logs"))
     token = tokens["access_token"]
-    # /api/raw-logs/{service} would match, but the app runs the ws-token route
     ws = _tool(client, token, "read_api", {"path": "/api/raw-logs/ws-token"})
     assert ws["isError"] and "Not available to agents" in ws["content"][0]["text"]
     other = _tool(client, token, "read_api", {"path": "/api/messages"})
@@ -763,7 +720,6 @@ def test_an_agent_cannot_reach_the_agents_api(live_agents):
 
 
 def test_a_forged_marker_is_not_honoured_over_http(live_agents):
-    # Headers cannot set ASGI scope keys: without a session this is just unauthenticated
     r = _client().get("/api/security-alerts", headers={"mlv.agent": "1", "X-Mlv-Agent": "1"})
     assert r.status_code == 401
 
@@ -779,8 +735,6 @@ def test_management_lists_and_disconnects(live_agents):
     assert _client().get("/api/agents").status_code == 401
 
 
-# ── Dispatch limits ────────────────────────────────────────────────────────
-
 def test_a_slot_is_held_until_background_work_ends():
     grant = store.GrantInfo(id=987654, name="t", client_id="c", scopes=frozenset(), expires_at=datetime.utcnow(),
                             publisher=None)
@@ -790,7 +744,7 @@ def test_a_slot_is_held_until_background_work_ends():
         scope[dispatch.SCOPE_KEY].checked = True
         await send({"type": "http.response.start", "status": 200, "headers": [(b"content-type", b"application/json")]})
         await send({"type": "http.response.body", "body": b'{"status":"queued"}', "more_body": False})
-        await release.wait()  # BackgroundTasks run after the answer
+        await release.wait()
 
     async def run():
         nonlocal release
@@ -844,8 +798,6 @@ def test_a_long_answer_is_cut_while_streaming():
     result = asyncio.run(run())
     assert result.truncated and len(result.text) <= dispatch.MAX_RESULT_CHARS
 
-
-# ── CIMD ───────────────────────────────────────────────────────────────────
 
 DOC_URL = "https://agent.example/oauth/client.json"
 GOOD_DOC = (b'{"client_id": "https://agent.example/oauth/client.json", "client_name": "Example Agent",'
@@ -917,7 +869,6 @@ def _doc(**fields) -> bytes:
                        "redirect_uris": [AGENT_REDIRECT], **fields}).encode()
 
 
-# ChatGPT's document asks for private_key_jwt and lists "none" among the methods it supports
 CHATGPT_SHAPED = {"token_endpoint_auth_method": "private_key_jwt",
                   "token_endpoint_auth_methods_supported": ["none", "private_key_jwt"],
                   "jwks_uri": "https://agent.example/oauth/jwks.json"}

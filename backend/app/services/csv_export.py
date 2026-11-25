@@ -1,4 +1,3 @@
-"""Spreadsheet-oriented CSV serialization shared by every download endpoint."""
 import csv
 import io
 import math
@@ -9,13 +8,11 @@ from fastapi.responses import Response, StreamingResponse
 
 from ..database import get_db
 
-# Suppression exports carry the exact escaped field names for lossless re-import.
 CSV_ESCAPE_COLUMN = "_csv_escape_v1"
 CSV_QUERY_BATCH_SIZE = 500
 
 
 def get_csv_db(db=Depends(get_db)):
-    """Close export cursors before the parent dependency closes the session."""
     try:
         yield db
     finally:
@@ -24,11 +21,6 @@ def get_csv_db(db=Depends(get_db)):
 
 
 def csv_query_rows(query, *, allow_empty=False):
-    """Fetch bounded batches; the request-scoped dependency owns the session.
-
-    Peek before sending headers so empty log exports retain their HTTP 404.
-    FastAPI closes the session after the response, including on disconnect.
-    """
     rows = iter(query.yield_per(CSV_QUERY_BATCH_SIZE))
     query.session.info.setdefault("csv_export_iterators", []).append(rows)
     first = next(rows, None)
@@ -40,10 +32,8 @@ def csv_query_rows(query, *, allow_empty=False):
 
 
 def escape_csv_text(value):
-    """Protect text cells without converting numbers or changing stored data."""
     if not isinstance(value, str) or not value:
         return value
-    # Normalize only for detection, preserving the original spelling in output.
     normalized = unicodedata.normalize("NFKC", value)
     first = next((char for char in normalized
                   if not (char.isspace() or ord(char) < 33 or char in "\x7f\ufeff\u200b")), "")
@@ -53,13 +43,11 @@ def escape_csv_text(value):
 
 
 def restore_csv_text(value: str) -> str:
-    """Decode only a cell explicitly marked by our versioned export metadata."""
     if not value.startswith("'") or escape_csv_text(value[1:]) != value:
         raise ValueError("Invalid CSV escape metadata")
     return value[1:]
 
 
-# Limit buffered CSV text to roughly 64K characters plus the largest row.
 CSV_CHUNK_CHARACTERS = 64 * 1024
 
 
@@ -99,8 +87,6 @@ def _iter_csv_chunks(rows, columns, escape_metadata):
 def csv_download(rows, filename: str, columns=None, *, escape_metadata=False, head_only=False):
     headers = {"Content-Disposition": f"attachment; filename={filename}"}
     if head_only:
-        # Routes have already validated filters and checked for an initial row.
-        # No CSV serialization or remaining cursor consumption is needed.
         response = Response(media_type="text/csv", headers=headers)
         del response.headers["content-length"]
         return response

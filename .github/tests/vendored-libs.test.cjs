@@ -1,6 +1,3 @@
-// A vendored library listed in frontend/assets/libs/vendored.json is the file
-// recorded there: the same bytes and the version its licence header names. An
-// update that does not record the new release, or an edit to the file, fails.
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
 const fs = require('node:fs');

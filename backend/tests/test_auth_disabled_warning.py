@@ -1,4 +1,3 @@
-"""Running without any authentication is logged as a warning at startup, not as info."""
 import logging
 import secrets
 

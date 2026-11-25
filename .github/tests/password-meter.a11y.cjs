@@ -1,13 +1,3 @@
-// The password field of Settings > Users in a real DOM (jsdom): the meter follows what is typed,
-// says the strength in a polite live region, and marks each requirement with a check or a cross
-// that a screen reader reads as met or not. Whether the password can be set is the server's
-// answer (POST /api/users/password-check), asked while typing and at once after Generate, shown
-// under the field and read out; only the answer for the latest value counts. Add and Save look
-// disabled (aria-disabled) until the form can be saved, and say why when pressed.
-// Generate fills a readable password of the length chosen, draws a new one when the length
-// moves, shows dots again once typed over, and Copy copies it without showing it. The length
-// alone is not a change the discard question asks about.
-// Set A11Y_MODULES to jsdom's node_modules to run it locally (see layers.a11y.cjs).
 const assert = require('node:assert/strict');
 const { randomBytes } = require('node:crypto');
 const fs = require('node:fs');
@@ -22,7 +12,6 @@ const frontend = path.join(__dirname, '../../frontend');
 const read = name => fs.readFileSync(path.join(frontend, name), 'utf8');
 const SHORT = 'Use at least 8 characters.';
 const COMMON = 'This password is too common. Choose another one.';
-// Strong: every kind of character and 14 or more of them, new for each run
 const GOOD = 'Kp7-' + randomBytes(8).toString('hex');
 
 const DATA = {
@@ -35,13 +24,9 @@ const DATA = {
     you: { kind: 'builtin', user_id: null, via_default: false, email: null },
 };
 
-// The server's rule, as services/passwords.py has it (a short list stands in for the common ones)
 const problemOf = password => [...password].length < 8 ? SHORT : [...password].length > 256 ? 'Use at most 256 characters.'
     : ['password1'].includes(password.trim().toLowerCase()) ? COMMON : null;
 
-// hold: password checks wait until released, so a test can answer them out of order.
-// fail: the first checks fail this way ('throw', '500' or 'malformed'), failCount of them.
-// refuse: the first this many passwords checked are too common, whatever they are
 function page({ hold = false, fail = null, failCount = 1, refuse = 0 } = {}) {
     const dom = new JSDOM('<!doctype html><html lang="en"><head><title>t</title></head><body><div id="users-panel"></div></body></html>',
         { runScripts: 'dangerously', pretendToBeVisual: true, url: 'https://logs.example.com/settings/users',
@@ -70,7 +55,6 @@ function page({ hold = false, fail = null, failCount = 1, refuse = 0 } = {}) {
             const problem = refused ? COMMON : problemOf(body.password);
             const answer = { ok: true, status: 200, json: async () => ({ ok: !problem, problem }) };
             if (!hold) { checks.push({ password: body.password }); return answer; }
-            // release(other): answer with other ({ ok, problem }) instead
             return new Promise(resolve => checks.push({ password: body.password,
                 release: other => resolve(other ? { ok: true, status: 200, json: async () => other } : answer) }));
         }
@@ -78,7 +62,6 @@ function page({ hold = false, fail = null, failCount = 1, refuse = 0 } = {}) {
         if (body.password !== undefined && problemOf(body.password)) return { ok: false, status: 422, json: async () => ({ detail: problemOf(body.password) }) };
         return { ok: true, status: 201, json: async () => ({ username: 'erin' }) };
     };
-    // The real copy, with a clipboard that works, and the notices it shows
     Object.defineProperty(w.navigator, 'clipboard', { value: { writeText: async text => { copied.push(text); } } });
     w.showToast = message => toasts.push(message);
     w.loadUsersPanel = () => {};
@@ -96,7 +79,6 @@ function page({ hold = false, fail = null, failCount = 1, refuse = 0 } = {}) {
     return { w, $, input, type, rules, disabled, problem, sent, checks, copied, toasts };
 }
 
-// The check waits 300 ms after typing stops
 const settle = () => new Promise(r => setTimeout(r, 360));
 const tick = () => new Promise(r => setTimeout(r, 0));
 
@@ -105,7 +87,6 @@ test('typing: a check or a cross per requirement, read out as met or not, and th
     p.w.editUser(null);
     assert.equal(p.$('#user-edit-pass').placeholder, 'At least 8 characters');
     assert.ok(!p.$('#user-edit-pass').hasAttribute('maxlength'));
-    // The strength and the server's answer under it are one live region, which describes the field
     assert.equal(p.$('#user-edit-pw-status').getAttribute('aria-live'), 'polite');
     assert.ok(p.$('#user-edit-pw-status').contains(p.$('#user-edit-pw-label')));
     assert.ok(p.$('#user-edit-pw-status').contains(p.$('#user-edit-pw-problem')));
@@ -145,7 +126,6 @@ test('Add looks disabled until the form can be saved, and says why when pressed'
     assert.equal(p.$('#user-edit-error').textContent, 'Enter a username.');
     p.input('#user-edit-name', 'erin');
     assert.ok(p.disabled(), 'no password yet');
-    // A common password: the server's words under the field, read out, and Add stays disabled
     p.type('Password1');
     assert.ok(p.disabled(), 'while the check is on its way');
     await settle();
@@ -162,7 +142,6 @@ test('Add looks disabled until the form can be saved, and says why when pressed'
     await settle();
     assert.equal(p.problem(), '');
     assert.equal(p.disabled(), false);
-    // Custom with no View anywhere
     p.$('#user-edit-level [data-level="custom"]').click();
     assert.equal(p.disabled(), false, 'Custom starts from what Operator gave');
     const view = p.$('#user-edit-grid input[data-kind="view"]');
@@ -172,7 +151,6 @@ test('Add looks disabled until the form can be saved, and says why when pressed'
     view.checked = true;
     view.dispatchEvent(new p.w.Event('change', { bubbles: true }));
     assert.equal(p.disabled(), false);
-    // A username too long: said once the field is left
     p.input('#user-edit-name', 'x'.repeat(65));
     assert.ok(p.disabled());
     p.$('#user-edit-name').dispatchEvent(new p.w.Event('change', { bubbles: true }));
@@ -199,7 +177,6 @@ test('Generate is checked at once; an older answer that comes late is dropped', 
     p.checks[1].release();
     await tick();
     assert.equal(p.disabled(), false, 'the generated password came back fine');
-    // The first answer arrives last, and says no: it is for a value no longer in the field
     p.checks[0].release({ ok: false, problem: COMMON });
     await tick();
     assert.equal(p.problem(), '');
@@ -245,7 +222,6 @@ test('a password check that fails is not a pass: said, Add stays disabled, and S
         await settle();
         assert.equal(p.problem(), 'Could not check the password. Try again.', fail);
         assert.ok(p.disabled(), fail);
-        // Save asks at once: the server answers now, and its answer counts
         await p.w.saveUser({ preventDefault() {} }, null);
         assert.equal(p.$('#user-edit-error').textContent, COMMON, fail);
         assert.equal(p.problem(), COMMON, fail);
@@ -312,7 +288,6 @@ test('a generated password the server refuses says so, as a typed one does', asy
     assert.equal(p.problem(), COMMON);
     assert.ok(p.disabled());
     assert.ok(p.$('#user-edit-pw-copy').disabled);
-    // Generate again: a new one, accepted
     p.$('#user-edit-pw-generate').click();
     for (let i = 0; i < 5; i++) await tick();
     assert.equal(p.checks.length, 2);
@@ -330,11 +305,9 @@ test('Copy waits for the server to accept the password, so what is copied can be
     copy.click();
     await tick();
     assert.deepEqual(p.copied, []);
-    // Refused: Copy stays off
     p.checks[0].release({ ok: false, problem: COMMON });
     await tick();
     assert.ok(copy.disabled, 'refused');
-    // A new one, pending, then accepted
     p.$('#user-edit-pw-generate').click();
     assert.ok(copy.disabled, 'pending again');
     p.checks[1].release();
@@ -344,7 +317,6 @@ test('Copy waits for the server to accept the password, so what is copied can be
     await tick();
     assert.deepEqual(p.copied, [p.checks[1].password], 'the accepted password');
     assert.equal(p.$('#user-edit-pass').value, p.checks[1].password);
-    // A typed password follows the same rule
     p.type('Tp4-' + randomBytes(8).toString('hex'));
     assert.ok(copy.disabled);
     await settle();
@@ -418,7 +390,6 @@ test('Generate: a readable password of the length chosen, a new one when the len
     assert.ok(!p.toasts.some(t => t.includes(field.value)), 'the notice does not show the password');
     p.type(field.value + 'x');
     assert.equal(field.type, 'password', 'typed over: shown as dots again');
-    // Moving the length now does not replace what was typed
     const typed = field.value;
     length.value = '40';
     length.dispatchEvent(new p.w.Event('input', { bubbles: true }));
@@ -457,6 +428,5 @@ test('the dialog with the meter, the generator and a refused password has no axe
     script.textContent = axeSource;
     p.w.document.head.appendChild(script);
     const result = await p.w.axe.run(p.$('#user-edit-modal'), { rules: { 'color-contrast': { enabled: false }, region: { enabled: false } } });
-    // Plain strings out of the page's realm, so the comparison is by value
     assert.deepEqual(Array.from(result.violations, v => `${v.id}: ${Array.from(v.nodes, n => String(n.target)).join(' ')}`), []);
 });

@@ -1,7 +1,3 @@
-// Stored values that reach inline HTML must stay data. Each case renders a
-// value that tries to leave its context (close an attribute, close a JS
-// string) and checks the markup and the inline handler the way a browser
-// reads them: HTML entities decoded first, then the handler run as JS.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -10,7 +6,6 @@ const { test } = require('node:test');
 
 const frontend = path.join(__dirname, '../../frontend');
 
-// Any DOM access returns another inert stub, so a file's top-level code runs
 function stub() {
     const fn = function () { return proxy; };
     const proxy = new Proxy(fn, {
@@ -39,7 +34,6 @@ function decodeEntities(value) {
     });
 }
 
-// Run every onclick in ``html`` in a sandbox that records the calls it makes
 function runHandlers(html, functions) {
     const calls = [];
     const sandbox = { window: {}, setTimeout() {} };
@@ -47,7 +41,7 @@ function runHandlers(html, functions) {
     vm.createContext(sandbox);
     const handlers = [...html.matchAll(/onclick=(["'])(.*?)\1/g)].map(m => decodeEntities(m[2]));
     for (const handler of handlers) {
-        try { vm.runInContext(handler, sandbox); } catch { /* a broken handler is also contained */ }
+        try { vm.runInContext(handler, sandbox); } catch { }
     }
     return { calls, handlers, injected: sandbox.window.injected || sandbox.injected };
 }
@@ -73,7 +67,6 @@ test('a report URI is only a link when it is a mailto address', () => {
     const src = fs.readFileSync(path.join(frontend, 'dmarc.js'), 'utf8');
     const start = src.indexOf('const formatUriAsEmail');
     assert.ok(start > 0);
-    // The helper is local to a render function; evaluate it on its own
     const body = src.slice(start, src.indexOf('};', start) + 2);
     const context = load(['utils.js']);
     vm.runInContext(body.replace('const formatUriAsEmail', 'globalThis.formatUriAsEmail'), context);

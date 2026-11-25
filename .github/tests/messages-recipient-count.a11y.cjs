@@ -1,10 +1,3 @@
-// A Messages row names its first recipient and, when the message has more,
-// a quiet "+N" beside it, like a mail client; a screen reader hears "and N
-// more recipients". Runs the real row (app.js renderMessageRow) and the global
-// search's message row in a real DOM (jsdom) with axe-core. jsdom is installed
-// by CI outside the repository; set A11Y_MODULES to its node_modules:
-//   npm install --no-save --prefix /tmp/a11y jsdom axe-core
-//   A11Y_MODULES=/tmp/a11y/node_modules node --test .github/tests/messages-recipient-count.a11y.cjs
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -36,7 +29,6 @@ function page() {
     return { w, run, $: s => w.document.querySelector(s) };
 }
 
-// What a screen reader reads out of an element: its text without aria-hidden parts
 function spoken(node) {
     if (node.nodeType === 3) return node.textContent;
     if (node.nodeType !== 1 || node.getAttribute('aria-hidden') === 'true') return '';
@@ -48,7 +40,6 @@ test('one recipient: the row names it, with no count', () => {
     p.$('#messages-logs').innerHTML = p.w.renderMessageRow(message('one', 1));
     assert.equal(p.$('.ui-msg-to').textContent, 'to r@example.net');
     assert.equal(p.$('.ui-rcpt-more'), null);
-    // An answer without the count (an older server) shows the row as before
     p.$('#messages-logs').innerHTML = p.w.renderMessageRow(message('old'));
     assert.equal(p.$('.ui-rcpt-more'), null);
 });
@@ -81,7 +72,6 @@ test('a long address loses the end of its local part, never its domain', () => {
     const p = page();
     const long = { ...message('long', 3), recipient: 'finance-department-notifications@example.net' };
     p.$('#messages-logs').innerHTML = p.w.renderMessageRow(long);
-    // jsdom has no layout: the line is as wide as room characters, its shown text 8px a character
     const line = p.$('.ui-msg-to');
     const shown = () => line.textContent.length - [...line.querySelectorAll('.ui-sr-only')].reduce((n, el) => n + el.textContent.length, 0);
     let room = 34;
@@ -92,23 +82,19 @@ test('a long address loses the end of its local part, never its domain', () => {
     assert.match(btn.textContent, /^finance-[a-z-]*[a-z]…@example\.net$/);
     assert.ok(shown() <= room && shown() >= room - 2, 'as much as fits');
     assert.equal(line.querySelector('.ui-rcpt-more [aria-hidden="true"]').textContent, '+2', 'the count stays whole');
-    // The button opens, copies and is named by the whole address
     assert.equal(btn.dataset.entityValue, long.recipient);
     assert.equal(line.querySelector('.ui-ent-copy').dataset.entityCopy, long.recipient);
     assert.equal(btn.getAttribute('aria-label'), long.recipient);
     assert.equal(btn.title, long.recipient);
-    // Wide enough again: the whole address, and the button's own name and tooltip
     room = 80;
     p.w.uiFitAddresses([line]);
     assert.equal(btn.textContent, long.recipient);
     assert.equal(btn.getAttribute('aria-label'), null);
     assert.equal(btn.title, 'Open the card of this address');
-    // Room for the domain and no more: no letter of the local part, the domain whole
-    room = 16 + 2;   // "to ", the ellipsis and "@example.net", "+2"
+    room = 16 + 2;
     p.w.uiFitAddresses([line]);
     assert.equal(btn.textContent, '…@example.net');
     assert.ok(!line.classList.contains('is-over'));
-    // A domain longer than the line: the domain itself ends in an ellipsis (CSS)
     room = 12;
     p.w.uiFitAddresses([line]);
     assert.ok(line.classList.contains('is-over'));
@@ -117,11 +103,9 @@ test('a long address loses the end of its local part, never its domain', () => {
 
 test('a cut never splits a character', () => {
     const p = page();
-    // A letter outside the Basic Multilingual Plane is two UTF-16 units
     const odd = { ...message('odd', 1), recipient: '\u{10400}\u{10401}\u{10402}\u{10403}\u{10404}\u{10405}@example.net' };
     p.$('#messages-logs').innerHTML = p.w.renderMessageRow(odd);
     const line = p.$('.ui-msg-to');
-    // Each UTF-16 unit is as wide as a letter here, so every length of cut is tried
     const shown = () => line.textContent.length;
     let room = 0;
     Object.defineProperty(line, 'clientWidth', { get: () => room * 8 });

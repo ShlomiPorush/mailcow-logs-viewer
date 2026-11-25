@@ -1,4 +1,3 @@
-"""What the sign-in calls return (routers/auth.py)."""
 from typing import Any, Dict, List, Optional
 
 from pydantic import Field

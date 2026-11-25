@@ -1,8 +1,3 @@
-"""What the dashboard statistics return (routers/stats.py, stats_flow.py, stats_trends.py).
-
-Most of these calls answer 200 even when the database read fails: the
-figures are then zero (or the list empty) and `error` says so.
-"""
 from typing import Dict, List, Optional
 
 from pydantic import ConfigDict, Field
@@ -14,7 +9,6 @@ FAILED = "Only when the figures could not be read: what to do"
 
 
 class _Keyed(Fixed):
-    """Keys such as 24h are not Python names; they are given as aliases."""
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
 
@@ -22,9 +16,6 @@ class DashboardMessages(_Keyed):
     h24: int = Field(alias="24h", description="Deliveries first seen in the last 24 hours")
     d7: int = Field(alias="7d")
     d30: int = Field(alias="30d")
-    unique_24h: int = Field(None, description="Messages, as the Messages page counts them (one per message). "
-                                              "Missing when the figures could not be read")
-    unique_7d: int = Field(None, description="As unique_24h, over 7 days")
 
 
 class DashboardBlocked(_Keyed):
@@ -59,11 +50,6 @@ class TimelineHour(Fixed):
     total: int = Field(description="Rspamd scans")
     spam: int
     clean: int
-    messages: int = Field(description="Deliveries first seen")
-    unique_messages: int = Field(description="Messages, one per message")
-    blocked: int
-    deferred: int
-    auth_failures: int
 
 
 class TimelineResponse(Fixed):

@@ -1,9 +1,3 @@
-"""One IMAP import of DMARC and TLS reports at a time.
-
-Fetch reports, the scheduled run and Status > Run now all start the same
-import. A second start while one runs must not mark the running one as
-failed, nor read the mailbox a second time.
-"""
 import asyncio
 import threading
 from unittest.mock import MagicMock, Mock
@@ -60,7 +54,6 @@ def test_fetch_reports_while_an_import_runs_answers_already_running(imap):
         running.join(5)
     assert response.status_code == 200
     assert response.json()["status"] == "already_running"
-    # The running import is neither marked failed nor joined by a second one
     route_db.query.assert_not_called()
     assert calls == ['auto']
     dmarc.update_job_status.assert_not_called()
@@ -103,5 +96,4 @@ def test_scheduled_run_during_an_import_leaves_it_alone(imap, monkeypatch):
         release.set()
         running.join(5)
     assert calls == ['auto']
-    # The running import reports its own outcome; this run does not call it a success
     assert ('dmarc_imap_sync', 'success') not in [c.args[:2] for c in scheduler.update_job_status.call_args_list]

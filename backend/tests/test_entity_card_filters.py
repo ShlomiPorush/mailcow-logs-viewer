@@ -1,14 +1,3 @@
-"""The filters the entity card's "Show messages" and "Show security events" open
-the Messages and Security pages with, so the page lists what the card counted:
-
-- Messages address=: from or to the address, whole, in any case;
-  domain=: from or to an address on the domain (the part after the last @,
-  so a subdomain is not included). In the list, the facet counts, the
-  new-mail count and the CSV export alike.
-- Security events exact_username=true: the user name as a whole address;
-  username_domain=: user names on the domain. In the list and its CSV export.
-
-Without them the filters match a part, as they always have."""
 import csv
 import io
 import uuid
@@ -30,7 +19,6 @@ OUTSIDE = f"ann@y{MARK}.example"
 AT = datetime(2020, 4, 10, 12, 0, 0)
 RANGE = {"start_date": "2020-04-01", "end_date": "2020-04-20"}
 
-# name: (sender, recipient)
 MESSAGES = {
     "from-ann": (ANN.upper(), OUTSIDE),
     "to-ann": (OUTSIDE, ANN),
@@ -38,7 +26,6 @@ MESSAGES = {
     "sub": (f"bob@{SUB}", OUTSIDE),
     "outside": (OUTSIDE, f"carol@y{MARK}.example"),
 }
-# name: user name a client tried
 EVENTS = {"ev-ann": ANN.upper(), "ev-joann": JOANN, "ev-sub": f"bob@{SUB}", "ev-outside": OUTSIDE}
 
 
@@ -130,14 +117,13 @@ def test_messages_export(client, filters, expected):
 
 
 def test_messages_address_holds_with_the_other_filters(client):
-    """address narrows like any filter: with a sender it is both."""
     res = client.get("/api/messages", params={**RANGE, "address": ANN, "sender": OUTSIDE, "exact": "true"}).json()
     assert _names(m["subject"] for m in res["data"]) == ["to-ann"]
 
 
 EVENT_CASES = [
     ({"username": ANN, "exact_username": "true"}, ["ev-ann"]),
-    ({"username": ANN}, ["ev-ann", "ev-joann"]),                 # a part, as before
+    ({"username": ANN}, ["ev-ann", "ev-joann"]),
     ({"username_domain": DOMAIN}, ["ev-ann", "ev-joann"]),
     ({"username_domain": SUB}, ["ev-sub"]),
     ({"username_domain": "not a domain"}, []),

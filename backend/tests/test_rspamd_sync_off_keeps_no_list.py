@@ -1,11 +1,3 @@
-"""Sync with Rspamd off keeps no suppression list, like a feature that is off.
-
-Turned off, the list is deleted from the app (Rspamd is asked about apart);
-while off, no change to it is accepted and no job adds to it; turned on, it
-loads back from the app's section of the map, a read only. The races here
-are real: a purge, a job or a late request against a switch that changed
-meanwhile. Fictional addresses only.
-"""
 import asyncio
 import threading
 import time
@@ -19,7 +11,7 @@ from fastapi import HTTPException
 from sqlalchemy import text
 
 from app.config import settings
-from test_rspamd_two_way import (  # noqa: F401  db and rspamd are fixtures
+from test_rspamd_two_way import (  # noqa: F401
     MARK, _add, _key, _line, _managed, _rows, _rw, _section, _sync_setting, db, rspamd)
 
 PENDING = 'spam_filter.import_pending'
@@ -48,14 +40,12 @@ def _code(error):
     return detail.get('code') if isinstance(detail, dict) else getattr(error.value, 'code', None)
 
 
-# ---- Off deletes the list ----
-
 def test_the_list_goes_while_the_sync_is_off_and_stays_while_it_is_on(db, monkeypatch):
     blocked = f'blocked-{MARK}@example.test'
     _add(db, blocked)
     assert _purge().get('suppressions') is None and blocked in _rows(db), 'on: nothing is deleted'
     assert _key(db, PENDING) is None
-    _sync_setting(monkeypatch, False)  # as SUPPRESSION_RSPAMD_SYNC=false would set it
+    _sync_setting(monkeypatch, False)
     assert _purge()['suppressions'] is None
     assert _rows(db) == {}
     assert _key(db, PENDING) == '1', 'a block was in Rspamd: it loads back'
@@ -84,9 +74,6 @@ def test_any_sign_of_blocks_in_rspamd_makes_the_load_owed(db, monkeypatch, evide
 
 
 def test_a_purge_that_waited_while_the_sync_came_back_on_deletes_nothing(db, monkeypatch):
-    """The purge checked Off and waits for the row lock; the sync is turned on
-    and a row is added by hand meanwhile. Once it has the lock it checks
-    again: the list stays, and no load is owed."""
     from app.models import SpamSuppression
     from app.services.suppression_rows_lock import lock_suppression_rows
     kept, new = f'kept-{MARK}@example.test', f'new-{MARK}@example.test'
@@ -108,8 +95,6 @@ def test_a_purge_that_waited_while_the_sync_came_back_on_deletes_nothing(db, mon
     assert set(_rows(db)) == {kept, new}
     assert _key(db, PENDING) is None
 
-
-# ---- While off, nothing changes the list ----
 
 def test_every_list_change_is_refused_while_the_sync_is_off(db, monkeypatch):
     from app.routers import suppressions as sup
@@ -135,8 +120,6 @@ def test_every_list_change_is_refused_while_the_sync_is_off(db, monkeypatch):
 
 
 def test_a_block_made_while_the_sync_goes_off_is_refused_under_the_lock(db, monkeypatch):
-    """The sync goes off while the block waits for the queue: the check under
-    the row lock refuses it, and no row is made."""
     from app.routers import suppressions as sup
 
     async def queued(queue_id, email):
@@ -165,9 +148,6 @@ def test_the_stuck_mail_store_adds_nothing_while_off_or_before_the_load(db, monk
 
 
 def test_detection_waits_for_an_owed_load_without_using_up_the_bounce(db, monkeypatch):
-    """On, with this app's blocks still to load: the run reads nothing, so a
-    choice that blocks never turns into delete-only, and the bounce is
-    counted once the blocks are loaded."""
     from app import scheduler
     from app.models import PostfixLog
     bad = f'gone-{MARK}@example.test'
@@ -188,8 +168,6 @@ def test_detection_waits_for_an_owed_load_without_using_up_the_bounce(db, monkey
     new, updated, to_block, to_delete = scheduler._detect_suppressions_worker()
     assert bad in to_block and bad not in to_delete and _rows(db)[bad][0] is True, 'blocked, not delete-only'
 
-
-# ---- On loads the list back, a read only ----
 
 def test_turning_on_loads_the_blocks_without_writing_anything(db, rspamd, monkeypatch):
     from app.routers.suppressions import import_managed_worker
@@ -219,7 +197,6 @@ def test_without_the_password_an_owed_load_waits_and_so_do_the_jobs(db, rspamd, 
     monkeypatch.setattr(scheduler, 'update_job_status', status)
     assert asyncio.run(scheduler._spam_blocks_loaded('detect_suppressions')) is False
     assert 'Rspamd password is not set' in status.call_args.args[2]
-    # The password is back: the block loads as it was kept, permanent
     monkeypatch.setattr(type(settings._inner), 'is_rspamd_configured', property(lambda self: True))
     assert asyncio.run(scheduler._spam_blocks_loaded('detect_suppressions')) is True
     assert _rows(db)[kept] == (True, True, 'rspamd', None) and _key(db, PENDING) is None
@@ -232,8 +209,6 @@ def test_without_the_password_a_load_nothing_points_to_is_dropped(db, rspamd, mo
     assert import_managed_worker() == {'imported': 0, 'pending': False, 'loaded': False}
     assert _key(db, PENDING) is None
 
-
-# ---- Remove and Start fresh belong to their moment ----
 
 def test_a_late_remove_is_refused_once_the_sync_is_on_or_switched_again(db, rspamd, monkeypatch):
     from app.routers.suppressions import MapUnavailable, clear_managed_worker
@@ -248,7 +223,7 @@ def test_a_late_remove_is_refused_once_the_sync_is_on_or_switched_again(db, rspa
         clear_managed_worker(first)
     assert error.value.code == 'sync_on' and rspamd['writes'] == 0
     _sync_setting(monkeypatch, False)
-    second = _transition(db, True, False)  # off again, with Keep
+    second = _transition(db, True, False)
     with pytest.raises(MapUnavailable) as error:
         clear_managed_worker(first)
     assert error.value.code == 'transition_changed' and rspamd['writes'] == 0
@@ -263,7 +238,7 @@ def test_a_remove_whose_sync_comes_on_during_its_read_writes_nothing(db, rspamd,
     _sync_setting(monkeypatch, False)
 
     def read(n):
-        if n == 2:  # the read right before the save
+        if n == 2:
             settings._inner.suppression_rspamd_sync = True
         return content
 
@@ -303,8 +278,6 @@ def test_a_manual_sync_whose_sync_goes_off_before_the_save_writes_nothing(db, rs
     assert error.value.code == 'sync_off' and rspamd['writes'] == 0
 
 
-# ---- The settings save ----
-
 def test_the_save_names_the_transition_and_reports_a_purge_that_failed(monkeypatch):
     import app.services.settings_store as ss
     from app.routers import settings as rs
@@ -339,10 +312,6 @@ def test_the_save_names_the_transition_and_reports_a_purge_that_failed(monkeypat
 
 
 def test_two_saves_at_once_take_turns_from_the_state_to_the_token(monkeypatch):
-    """A save that stops between storing Off and naming its transition must
-    not let another save start from a state it has not finished: otherwise
-    an Off, On, Off (Keep) in three windows could leave the first window's
-    token in place, and its late Remove would take away blocks kept since."""
     import app.services.settings_store as ss
     from app.routers import settings as rs
     from app import config as cfg
@@ -368,7 +337,7 @@ def test_two_saves_at_once_take_turns_from_the_state_to_the_token(monkeypatch):
         order.append(('stored', ov['suppression_rspamd_sync']))
         if not first_stored.is_set():
             first_stored.set()
-            go_on.wait(5)  # the first save stops here, before its token
+            go_on.wait(5)
 
     def record(db, was, now, switched=False):
         order.append(('token', was, now))
@@ -396,9 +365,6 @@ def test_two_saves_at_once_take_turns_from_the_state_to_the_token(monkeypatch):
 
 
 def test_only_a_save_that_turned_a_switch_off_names_a_transition(db):
-    """Off saved again while it already is (another window was first) names
-    none, so that window's Remove is not run; Spam Filter turned off while
-    the sync already was off names one, so its Remove is."""
     assert _transition(db, True, False) is not None, 'the list stopped being kept'
     first = _key(db, 'spam_filter.off_transition')
     assert _transition(db, False, False) is None and _key(db, 'spam_filter.off_transition') == first
@@ -407,8 +373,6 @@ def test_only_a_save_that_turned_a_switch_off_names_a_transition(db):
         assert _record_list_transition(s, False, False, switched=True) not in (None, first)
     assert _transition(db, False, True) is None and _key(db, 'spam_filter.off_transition') is None
 
-
-# ---- The Rspamd page has its own switch since the list moved to Outbound ----
 
 def test_turning_only_the_maps_off_keeps_the_list_and_its_state(db, monkeypatch):
     from app.services.feature_data import _set_key

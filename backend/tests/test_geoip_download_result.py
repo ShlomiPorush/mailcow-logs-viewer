@@ -1,7 +1,3 @@
-"""GeoIP update job: a download that was needed and did not succeed fails the
-run, also when an older file stays in use, and does not mark the MaxMind
-license valid. Setup, Repair and Status read this job's result.
-"""
 import asyncio
 
 import starlette.staticfiles as sf
@@ -19,8 +15,6 @@ def _db(available, updated, failed):
 
 
 def _run(monkeypatch, result):
-    """Run the job with the downloader answering result; returns the job entry
-    and whether the license was marked valid."""
     marked = []
     monkeypatch.setattr(geoip_downloader, 'is_license_configured', lambda: True)
     monkeypatch.setattr(geoip_downloader, 'update_geoip_database_if_needed', lambda: result)
@@ -37,7 +31,6 @@ def test_a_failed_download_with_an_older_file_fails_the_run(monkeypatch):
     assert entry['status'] == 'failed'
     assert 'location database' in entry['error'] and 'network' not in entry['error']
     assert 'Settings > MaxMind' in entry['error']
-    # A refused download proves nothing about the license
     assert marked is False
 
 
@@ -49,8 +42,8 @@ def test_both_downloads_failing_without_files_fail_the_run(monkeypatch):
 
 
 @pytest.mark.parametrize('result', [
-    {'City': _db(True, True, False), 'ASN': _db(True, True, False)},     # downloaded
-    {'City': _db(True, False, False), 'ASN': _db(True, False, False)},   # up to date, nothing needed
+    {'City': _db(True, True, False), 'ASN': _db(True, True, False)},
+    {'City': _db(True, False, False), 'ASN': _db(True, False, False)},
 ])
 def test_a_run_without_a_failed_download_succeeds(monkeypatch, result):
     entry, marked = _run(monkeypatch, result)
@@ -73,7 +66,6 @@ def test_the_downloader_says_which_needed_download_failed(monkeypatch, tmp_path)
 
 
 def test_run_on_the_status_page_keeps_a_failed_download_failed(monkeypatch):
-    # The manual runner marks a job success unless the job says it set its own status
     from fastapi.testclient import TestClient
     from app.main import app
     from app.routers import settings as settings_router
@@ -106,7 +98,6 @@ def test_the_status_tells_two_runs_in_one_second_apart(monkeypatch):
 
 
 def test_a_cancelled_run_is_not_reported_as_finished(monkeypatch):
-    # Cancellation goes on to the runner, which then records no success
     def cancelled():
         raise asyncio.CancelledError()
     monkeypatch.setattr(geoip_downloader, 'is_license_configured', lambda: True)

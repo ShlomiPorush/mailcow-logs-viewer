@@ -1,12 +1,3 @@
-"""Report emails larger than 20 MB are not downloaded.
-
-Anyone can mail the report address. Every selected message was fetched whole
-and read into memory, and its attachments decoded, before any per-report
-limit applied, so one very large message made the import hold all of it.
-The size the server reports is now checked first; a larger message is not
-downloaded and shows as a failed email with its subject, like any other
-email that could not be imported.
-"""
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -20,8 +11,6 @@ MB = 1024 * 1024
 
 
 class SizedImap:
-    """Answers UID FETCH the way imaplib returns it, and records downloads."""
-
     def __init__(self, mails, sizes=None, report_size=True):
         self.mails = {str(uid): raw for uid, raw in mails.items()}
         self.sizes = {str(uid): size for uid, size in (sizes or {}).items()}
@@ -114,7 +103,5 @@ def test_sync_reports_an_oversized_email_as_failed_and_moves_on(monkeypatch):
     assert result['reports_failed'] == 1
     assert [e['email_id'] for e in result['failed_emails']] == ['1']
     assert [[e['email_id'] for e in failed] for failed in notified] == [['1']]
-    # Kept, marked as read so it is not checked again; only the imported one is deleted.
-    # This server cannot remove one email (no UIDPLUS), so that one is also marked as read
     assert imap.seen == {"1", "2"}
     assert imap.deleted == {'2'}

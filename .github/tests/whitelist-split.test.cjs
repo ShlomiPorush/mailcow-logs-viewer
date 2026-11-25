@@ -1,7 +1,3 @@
-// The outgoing spam whitelist (smtp-abuse.js) takes one address per line, or several on
-// a line apart by commas, semicolons or spaces; a quoted local part keeps its own.
-// The Regex Wizard's domain option covers subdomains, so "*.example.com" means the same
-// as example.com there (spam_filter.js).
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -23,7 +19,6 @@ test('the whitelist splits on lines, commas, semicolons and spaces, but not insi
     assert.deepEqual(lines('a@example.com, b@example.com'), ['a@example.com', 'b@example.com']);
     assert.deepEqual(lines('a@example.com\nb@example.com;c@example.com d@example.com'), ['a@example.com', 'b@example.com', 'c@example.com', 'd@example.com']);
     assert.deepEqual(lines('"a,b"@example.com\nc@example.com'), ['"a,b"@example.com', 'c@example.com']);
-    // An escaped quote inside the quoted part does not end it
     assert.deepEqual(lines('"a\\",b"@example.com, c@example.com'), ['"a\\",b"@example.com', 'c@example.com']);
     assert.deepEqual(lines('  \n '), []);
 });

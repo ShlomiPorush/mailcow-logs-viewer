@@ -1,15 +1,3 @@
-"""Two changes to mailcow's Fail2ban settings at the same time both stay.
-
-mailcow's edit replaces both lists and every setting, so each change here reads
-them, changes them and writes them all back. Two changes that overlapped (two
-Repairs, a Repair and a Ban, a protection rule ban and a Remove) both read the
-same lists, and the second write put back what the first one had changed, while
-both answered success. Every write path now waits for the one before it.
-
-The fake mailcow below hands out a copy of its lists and yields to the event
-loop before answering, so two calls that are not serialized both read before
-either writes.
-"""
 import asyncio
 import json
 
@@ -26,18 +14,16 @@ from app.routers import logs  # noqa: E402
 from app.services import protection_rules  # noqa: E402
 
 from test_protection_enforce import _fresh, _trap_hit  # noqa: E402
-from test_protection_rules import TRAP_IP, db  # noqa: E402,F401  (db is a fixture)
+from test_protection_rules import TRAP_IP, db  # noqa: E402,F401
 
 
 @pytest.fixture(autouse=True)
 def fresh_lock(monkeypatch):
-    # An asyncio lock binds to the first loop that waits on it; each test runs its own loop
     monkeypatch.setattr(protection_rules, 'fail2ban_lock', asyncio.Lock(), raising=False)
 
 
 @pytest.fixture()
 def mailcow(monkeypatch):
-    """One shared mailcow: a read answers what was written last, a moment later."""
     state = {'blacklist': '', 'whitelist': '', 'ban_time': 600, 'manage_external': 1}
 
     async def get_fail2ban():
@@ -68,7 +54,6 @@ def _repair(entry, list_name='blacklist'):
 
 def _together(*calls):
     async def run():
-        # A change that waits for itself would hang: fail instead
         return await asyncio.wait_for(asyncio.gather(*calls), 5)
     return asyncio.run(run())
 
