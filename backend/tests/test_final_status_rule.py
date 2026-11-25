@@ -192,7 +192,6 @@ def test_a_spam_line_stays_spam_whatever_arrives_later(env):
     message = Message('spam', final_status='spam')
     message.later('sent')
     _arrived(message)
-    _timer()
     assert message.status() == 'spam'
 
 

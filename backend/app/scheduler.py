@@ -44,10 +44,6 @@ from .services.dmarc_imap_service import sync_dmarc_reports_from_imap
 from .services.dmarc_notifications import send_dmarc_error_notification
 from .services import geoip_service, correlation_jobs, excluded_addresses, written_recipients
 from .services.job_status import job_status, update_job_status
-from .services.correlation_jobs import (
-    TERMINAL_FINAL_STATUSES,
-    LATE_STATUS_MAX_CORRELATION_AGE,
-)
 
 from .services.geoip_downloader import is_license_configured
 from .services.dmarc_cache import clear_dmarc_cache
