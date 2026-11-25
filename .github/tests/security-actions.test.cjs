@@ -150,7 +150,7 @@ test('a rule number goes to the server as typed, so a decimal is refused instead
     const handlers = [...context.securityRuleSentence('unknown_accounts', true).matchAll(/onchange="([^"]+)"/g)].map(m => m[1]);
     const type = (field, value) => {
         const handler = handlers.find(h => h.includes(`'${field}'`));
-        vm.runInContext(`(function () { ${handler} }).call({ value: ${JSON.stringify(value)} })`, context);
+        vm.runInContext(`(function () { ${handler} })`, context).call({ value });
         return vm.runInContext(`protectionRules.unknown_accounts.${field}`, context);
     };
     assert.equal(type('threshold', '3.9'), '3.9');

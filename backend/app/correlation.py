@@ -602,28 +602,10 @@ def create_correlation_with_all_data(
     
     postfix_log_ids = [log.id for log in postfix_logs if log.id]
     
-    final_status = None
-    for plog in postfix_logs:
-        if plog.status:
-            if plog.status in ['bounced', 'rejected']:
-                final_status = plog.status
-                break
-            elif plog.status == 'deferred' and not final_status:
-                final_status = plog.status
-            elif plog.status == 'sent' and final_status in (None, 'deferred'):
-                final_status = 'delivered'
-            elif plog.status == 'spam':
-                final_status = 'spam'
-                if rspamd_log:
-                    rspamd_log.is_spam = True
+    if any(plog.status == 'spam' for plog in postfix_logs):
+        rspamd_log.is_spam = True
+    final_status = derive_final_status(postfix_logs, rspamd_log, None, None)
 
-    
-    if not final_status:
-        if rspamd_log.action == 'reject':
-            final_status = 'rejected'
-        elif rspamd_log.is_spam:
-            final_status = 'spam'
-    
     all_times = [rspamd_log.time] + [log.time for log in postfix_logs]
     first_seen = min(all_times)
     
@@ -780,6 +762,7 @@ def update_correlation_with_postfix_logs(
         
         plog.correlation_key = correlation.correlation_key
     
+    rspamd_log = db.get(RspamdLog, correlation.rspamd_log_id) if correlation.rspamd_log_id else None
     is_internal = False
     
     sender_domain = extract_domain(correlation.sender)
@@ -794,41 +777,16 @@ def update_correlation_with_postfix_logs(
                 is_internal = True
                 break
     
-    if is_internal:
-        rspamd_log = None
-        if correlation.rspamd_log_id:
-            rspamd_log = db.query(RspamdLog).filter(
-                RspamdLog.id == correlation.rspamd_log_id
-            ).first()
-        if origin_is_local(rspamd_log):
-            correlation.direction = 'internal'
-            if rspamd_log:
-                rspamd_log.direction = 'internal'
+    if is_internal and origin_is_local(rspamd_log):
+        correlation.direction = 'internal'
+        if rspamd_log:
+            rspamd_log.direction = 'internal'
     
-    final_status = None
-    for plog in postfix_logs:
-        if plog.status:
-            if plog.status in ['bounced', 'rejected']:
-                final_status = plog.status
-                break
-            elif plog.status == 'deferred' and not final_status:
-                final_status = plog.status
-            elif plog.status == 'sent' and final_status in (None, 'deferred'):
-                final_status = 'delivered'
-            elif plog.status == 'spam':
-                 if final_status not in ['bounced', 'rejected']:
-                    final_status = 'spam'
-                    if correlation.rspamd_log_id:
-                        rspamd_log = db.query(RspamdLog).filter(
-                            RspamdLog.id == correlation.rspamd_log_id
-                        ).first()
-                        if rspamd_log:
-                            rspamd_log.is_spam = True
+    if rspamd_log and any(plog.status == 'spam' for plog in postfix_logs):
+        rspamd_log.is_spam = True
+    correlation.final_status = derive_final_status(
+        postfix_logs, None, correlation.dovecot_status, correlation.final_status) or correlation.final_status
 
-    
-    if final_status:
-        correlation.final_status = final_status
-    
     if correlation.queue_id and correlation.postfix_log_ids:
         correlation.is_complete = True
     

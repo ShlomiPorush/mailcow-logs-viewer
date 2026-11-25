@@ -10,6 +10,7 @@ from ..database import get_db_context
 from ..models import MessageCorrelation, PostfixLog, RspamdLog
 from ..correlation import (
     build_correlation_key,
+    derive_final_status,
     ensure_leg,
     find_legs,
     find_stub_leg,
@@ -180,6 +181,15 @@ def correlate_single_message(db: Session, rspamd_log: RspamdLog) -> Optional[Mes
     return correlation
 
 
+def _update_final_status(correlation: MessageCorrelation, lines) -> None:
+    status = derive_final_status(lines, None, correlation.dovecot_status, correlation.final_status)
+    kept_spam = correlation.final_status == 'spam' and status == 'delivered'
+    kept_discard = (correlation.final_status == correlation.dovecot_status == 'discarded'
+                    and status == 'deferred')
+    if status and not kept_spam and not kept_discard:
+        correlation.final_status = status
+
+
 def complete_incomplete_correlations():
     update_job_status('complete_correlations', 'running')
     try:
@@ -239,15 +249,7 @@ def complete_incomplete_correlations():
                                   or min(times) < naive_utc(correlation.first_seen)):
                         correlation.first_seen = min(times)
 
-                    for plog in all_postfix:
-                        if plog.status:
-                            if plog.status in ['bounced', 'rejected']:
-                                correlation.final_status = plog.status
-                                break
-                            elif plog.status == 'deferred' and correlation.final_status not in ['bounced', 'rejected', 'discarded'] and correlation.dovecot_status != 'discarded':
-                                correlation.final_status = plog.status
-                            elif plog.status == 'sent' and not correlation.final_status and correlation.dovecot_status != 'discarded':
-                                correlation.final_status = 'delivered'
+                    _update_final_status(correlation, all_postfix)
 
                     for plog in all_postfix:
                         plog.correlation_key = correlation.correlation_key
@@ -330,21 +332,8 @@ def recompute_correlation_from_postfix(db: Session, correlation: MessageCorrelat
 
     all_postfix = own.lines
 
-    new_final_status = correlation.final_status
-
-    for plog in all_postfix:
-        if plog.status:
-            if plog.status in ['bounced', 'rejected']:
-                new_final_status = plog.status
-                break
-            elif plog.status == 'sent':
-                if new_final_status not in ['bounced', 'rejected', 'delivered']:
-                    new_final_status = 'delivered'
-            elif plog.status == 'deferred' and new_final_status not in ['bounced', 'rejected', 'delivered']:
-                new_final_status = 'deferred'
-
-    if correlation.dovecot_status == 'discarded' and new_final_status == 'delivered':
-        new_final_status = 'discarded'
+    old_status = correlation.final_status
+    _update_final_status(correlation, all_postfix)
 
     current_ids = list(correlation.postfix_log_ids or [])
     ids_added = 0
@@ -360,13 +349,11 @@ def recompute_correlation_from_postfix(db: Session, correlation: MessageCorrelat
         if not plog.correlation_key or plog.correlation_key != correlation.correlation_key:
             plog.correlation_key = correlation.correlation_key
 
-    if (new_final_status and new_final_status != correlation.final_status) or ids_added > 0:
-        old_status = correlation.final_status
-        correlation.final_status = new_final_status
+    if correlation.final_status != old_status or ids_added > 0:
         correlation.last_seen = datetime.now(timezone.utc)
         logger.debug(
             f"Recomputed correlation {correlation.id} from queue {correlation.queue_id}: "
-            f"{old_status} -> {new_final_status}, {ids_added} log ids added"
+            f"{old_status} -> {correlation.final_status}, {ids_added} log ids added"
         )
         return True
 
