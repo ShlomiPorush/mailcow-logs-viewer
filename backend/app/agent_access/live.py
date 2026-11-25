@@ -4,7 +4,6 @@ from urllib.parse import urlsplit
 
 from ..config import settings
 
-LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
 
 OFF = "off"
 NO_SIGN_IN = "no_sign_in"

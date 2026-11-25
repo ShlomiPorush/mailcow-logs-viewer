@@ -29,8 +29,6 @@ from .services.db_values import add_rows, strip_nul
 from .models import EasDevice, PostfixLog, RspamdLog, NetfilterLog, MessageCorrelation, DMARCSync, DomainDNSCheck, MailboxStatistics, AliasStatistics, MonitoredHost, BlacklistCheck, DMARCReport, DMARCRecord, TLSReport, TLSReportPolicy, SpamSuppression, SuppressionEvent, RawServiceLog, SystemSetting
 from .correlation import (
     detect_direction,
-    ensure_leg,
-    find_legs,
     parse_postfix_message,
     POSTFIX_DELIVERY_AGENTS,
 )

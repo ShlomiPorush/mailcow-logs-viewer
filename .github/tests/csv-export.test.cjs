@@ -9,7 +9,7 @@ const handler = source.match(/async function exportCSV\(type\) \{[\s\S]*?\n\}/)?
 assert.ok(handler, 'The CSV download handler must be present');
 const utils = fs.readFileSync(path.join(__dirname, '../../frontend/utils.js'), 'utf8');
 const errorStart = utils.indexOf('function uiApiErrorText(');
-const errorHelpers = utils.slice(errorStart, utils.indexOf('\n// ====', errorStart));
+const errorHelpers = utils.slice(errorStart, utils.indexOf('\nconst uiUnsavedEntries', errorStart));
 
 function harness(filters, status = 200, contentType = 'text/csv; charset=utf-8') {
     const result = { urls: [], downloads: 0, blobs: 0, notices: [] };

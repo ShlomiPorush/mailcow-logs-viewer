@@ -963,7 +963,7 @@ function renderRateLimitEditForm(kind, name, value, frame) {
     `).join('');
 
     return `
-        <tr data-rl-name="${escapeHtml(name.toLowerCase())}" data-rl-kind="${kind}" data-rl-editrow class="ui-rl-editrow">
+        <tr data-rl-name="${escapeHtml(name.toLowerCase())}" data-rl-kind="${kind}" data-rl-limited="${value ? '1' : '0'}" data-rl-editrow class="ui-rl-editrow">
             <td colspan="4">
                 <div class="ui-rl-form-row">
                     <label for="rate-limit-value" class="ui-muted">Allow</label>

@@ -6,7 +6,7 @@ const { test } = require('node:test');
 
 const source = fs.readFileSync(path.join(__dirname, '../../frontend/dmarc.js'), 'utf8');
 const start = source.indexOf('async function loadDmarcSettings');
-const end = source.indexOf('// All domains', start);
+const end = source.indexOf('async function loadDmarc()', start);
 assert.ok(start > 0 && end > start);
 
 test('the DMARC page reads the upload setting again on each visit', async () => {

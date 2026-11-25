@@ -10,7 +10,7 @@ from pydantic import ValidationError
 from app import auth, session
 from app.config import Settings, build_settings, settings
 from app.routers import auth as auth_router
-from sign_in_helpers import new_oauth_flow
+from sign_in_helpers import database_ready, new_oauth_flow
 from test_auth_request_limits import PASSWORD, client_at, credentials
 
 BUILTIN = {"kind": "builtin"}
@@ -18,6 +18,7 @@ BUILTIN = {"kind": "builtin"}
 
 @pytest.fixture(autouse=True)
 def limited_stores(monkeypatch):
+    database_ready()
     monkeypatch.setattr(settings, "session_max_entries", 2, raising=False)
     monkeypatch.setattr(settings, "auth_max_failure_clients", 2, raising=False)
     monkeypatch.setattr(settings._inner, "basic_auth_enabled", True)

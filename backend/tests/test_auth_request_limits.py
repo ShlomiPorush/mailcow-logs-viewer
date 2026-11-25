@@ -9,6 +9,7 @@ from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 from app import auth, session, user_access
 from app.config import settings
 from app.main import app
+from sign_in_helpers import database_ready
 
 
 PASSWORD = secrets.token_hex(16)
@@ -21,6 +22,7 @@ def credentials(password=PASSWORD):
 
 @pytest.fixture(autouse=True)
 def basic_auth(monkeypatch):
+    database_ready()
     monkeypatch.setattr(settings._inner, "basic_auth_enabled", True)
     monkeypatch.setattr(settings._inner, "auth_enabled", False)
     monkeypatch.setattr(settings._inner, "oauth2_enabled", False)

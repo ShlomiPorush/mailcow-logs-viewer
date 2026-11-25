@@ -6,7 +6,7 @@ const { test } = require('node:test');
 
 const utils = fs.readFileSync(path.join(__dirname, '../../frontend/utils.js'), 'utf8');
 const zoneHelpers = utils.slice(utils.indexOf('function appTz()'), utils.indexOf('function formatSeconds('));
-const code = utils.slice(utils.indexOf('// The span a drag of the window by dt makes'), utils.indexOf('// Phones: every dialog opens like the help sheet'));
+const code = utils.slice(utils.indexOf('function uiOverviewMove('), utils.indexOf('function uiDialogSheet('));
 const H = 3600000, Q = 15 * 60000;
 const plain = o => JSON.parse(JSON.stringify(o));
 

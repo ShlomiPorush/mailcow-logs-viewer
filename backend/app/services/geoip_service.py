@@ -2,10 +2,9 @@ import logging
 from typing import Optional, Dict
 from pathlib import Path
 
-logger = logging.getLogger(__name__)
+from .geoip_downloader import GEOIP_ASN_DB_PATH, GEOIP_CITY_DB_PATH
 
-GEOIP_CITY_DB_PATH = "/app/data/GeoLite2-City.mmdb"
-GEOIP_ASN_DB_PATH = "/app/data/GeoLite2-ASN.mmdb"
+logger = logging.getLogger(__name__)
 
 _city_reader = None
 _asn_reader = None
@@ -58,7 +57,6 @@ def get_city_reader():
         except Exception as e:
             logger.debug(f"GeoIP City database not usable (MaxMind not configured?): {e}")
             _city_reader = None
-            _geoip_available = False
     
     return _city_reader
 

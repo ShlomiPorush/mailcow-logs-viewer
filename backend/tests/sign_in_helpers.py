@@ -1,5 +1,16 @@
+import pytest
+
+import app.models
 from app import session
+from app.database import init_db
 from app.routers import auth as auth_router
+
+
+def database_ready() -> None:
+    try:
+        init_db()
+    except Exception:
+        pytest.skip('PostgreSQL not available')
 
 
 def revoke_all_sessions() -> int:

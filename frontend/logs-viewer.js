@@ -990,9 +990,10 @@ async function loadDateRangeLogs() {
         const limit = 1000;
         const totalPages = Math.max(1, Math.ceil(total / limit));
         
-        renderLogEntries(data.data || [], logsState.activeService, true);
-        
-        for (let page = 2; page <= totalPages; page++) {
+        const firstShown = Math.max(1, Math.floor(Math.max(0, total - MAX_LIVE_LOG_ENTRIES) / limit) + 1);
+        renderLogEntries(firstShown === 1 ? data.data || [] : [], logsState.activeService, true);
+
+        for (let page = Math.max(2, firstShown); page <= totalPages; page++) {
             if (loadingEl) loadingEl.textContent = `Loading page ${page}/${totalPages}...`;
             
             const nextParams = new URLSearchParams({ page, limit, order: 'asc' });

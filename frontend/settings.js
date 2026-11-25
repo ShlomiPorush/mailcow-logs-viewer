@@ -1720,11 +1720,10 @@ function renderSettingsEditField(key, value, sensitiveKeys, description, envLock
         if (isNum) return Number(value) !== Number(defaultValue);
         return String(value || '') !== String(defaultValue || '');
     })();
-    const isSensitiveChanged = false;
 
     let clearBtnHtml = '';
     if (!envLocked) {
-        if (hasDefault && !isUserSpecific && (isChanged || isSensitiveChanged)) {
+        if (hasDefault && !isUserSpecific && isChanged) {
             const defaultLabel = sensitive || String(defaultValue) === '' ? 'empty' : escapeHtml(String(defaultValue));
             clearBtnHtml = '<button type="button" class="settings-clear-btn ui-set-clear is-reset" data-key="' + keyAttr + '" data-default="' + escapeHtml(String(defaultValue)) + '" data-sensitive="' + sensitive + '" data-isbool="' + isBool + '">' +
                 'Reset to default' + (isBool ? ': ' + defaultLabel : ' (' + defaultLabel + ')') + '</button>';
@@ -1745,7 +1744,7 @@ function renderSettingsEditField(key, value, sensitiveKeys, description, envLock
             clearBtnHtml + '</div>';
     }
 
-    const changed = (isChanged || isSensitiveChanged) && !envLocked ? ' is-changed' : '';
+    const changed = isChanged && !envLocked ? ' is-changed' : '';
     const changedPill = changed ? ' <span class="ui-set-pill is-changed" title="Differs from the default">Changed</span>' : '';
 
     const generateHtml = key === 'session_secret_key' && !envLocked

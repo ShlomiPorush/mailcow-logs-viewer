@@ -7,7 +7,7 @@ const { test } = require('node:test');
 const frontend = path.join(__dirname, '../../frontend');
 const utils = fs.readFileSync(path.join(frontend, 'utils.js'), 'utf8');
 const helperStart = utils.indexOf('function uiApiErrorText(');
-const helperEnd = utils.indexOf('\n// ====', helperStart);
+const helperEnd = utils.indexOf('\nconst uiUnsavedEntries', helperStart);
 assert.ok(helperStart > 0 && helperEnd > helperStart, 'the error-text helpers must be in utils.js');
 const context = vm.createContext({});
 vm.runInContext(utils.slice(helperStart, helperEnd), context);

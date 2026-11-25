@@ -135,9 +135,7 @@ def _oauth_redirect(url: str, state: str, request: Request) -> RedirectResponse:
 @router.get("/auth/verify", responses=documented(m.Verified))
 def verify_basic_auth():
     """
-    Verify Basic Auth credentials.
-    Not in public_paths: middleware validates credentials and returns 401 if invalid.
-    Used by the login form to test username/password before redirecting.
+    Whether the request is signed in: 401 when it is not.
     """
     return {"verified": True}
 

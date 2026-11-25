@@ -97,6 +97,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Fail2ban** - A single IPv6 address is banned as /128, not /32, and Unban works when Fail2ban bans networks. An old /32 entry is marked Whole network and still covers it, so use its Repair button on Security > Lists if it was meant as one address.
 - **Security** - IPv6 attackers are listed with their own address, and the Events CSV export follows the filters.
 - **Blacklist alerts** - The alert counts and lists only hosts that need attention, not those listed only on blocklists that never alert, such as UCEPROTECT Level 2 and 3.
+- **Blacklist check of a host name** - A name without an address is an error instead of clean, and a name with only an IPv6 address is checked.
 - **Quarantine rules** - Editing a rule no longer changes it (rules changed earlier are repaired on upgrade or marked for Repair), and Exact Match on Subject ignores case.
 - **Messages and Logs** - Time ranges hold after a refresh, and the CSV export follows every filter.
 - **Pages that went empty with the Logs page off** - The log services other pages need are always collected.
@@ -104,6 +105,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **GeoIP download failures** - Status, Setup and Repair now show a failed MaxMind download, such as one with a wrong license key, and what to check, while the last working database stays in use.
 - **Feature switches** - Turning off Mailbox Stats keeps the Rate Limits data, and a MaxMind license starts GeoIP updates without a restart.
 - **Passwords with letters outside English** - The login page now accepts them.
+- **Empty DMARC IMAP settings** - An empty `DMARC_IMAP_PORT` or `DMARC_IMAP_INTERVAL` uses its default instead of breaking the import.
 - **One notification destination stopping the others** - A webhook URL that is not a valid address is refused when saved and no longer holds up the other destinations.
 - **Clear errors instead of internal server errors** - A proxy page in place of Rspamd's answer, an oversized map line or a suppression file that is not UTF-8 now gives a clear message, and a quarantine item with an impossible time is listed last without a time.
 - **Unknown API addresses** - Answer with a `404` JSON error instead of the web page.

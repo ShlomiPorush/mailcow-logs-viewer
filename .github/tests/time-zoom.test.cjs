@@ -5,7 +5,7 @@ const vm = require('node:vm');
 const { test } = require('node:test');
 
 const utils = fs.readFileSync(path.join(__dirname, '../../frontend/utils.js'), 'utf8');
-const code = utils.slice(utils.indexOf('function uiTimeZoomClamp('), utils.indexOf('// Phones: every dialog opens like the help sheet'));
+const code = utils.slice(utils.indexOf('function uiTimeZoomClamp('), utils.indexOf('function uiDialogSheet('));
 const H = 3600000;
 
 function load() {

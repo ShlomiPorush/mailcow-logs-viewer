@@ -308,7 +308,7 @@ These are read by the container's start script or the GeoIP downloader, not by t
 
 | Variable | Default | Effect |
 | --- | --- | --- |
-| `GEOIP_DB_DIR` | `/app/data` | Where the GeoIP databases are downloaded. Leave it unchanged: the lookups read from `/app/data`. |
+| `GEOIP_DB_DIR` | `/app/data` | Where the GeoIP databases are downloaded and read. |
 | `APP_MODULE` | `app.main:app` | Application the container starts. Leave unchanged; the demo image sets `demo.main:app`. |
 | `UVICORN_LOOP` | `auto` | Event loop. The demo image uses `asyncio`. |
 

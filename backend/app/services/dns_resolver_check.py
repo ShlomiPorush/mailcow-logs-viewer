@@ -74,16 +74,15 @@ async def test_blacklist_resolve():
     print("TEST 5: Blacklist Resolution (Quad9/Spamhaus servers)")
     print("="*60)
     try:
-        await resolve_for_blacklist("2.0.0.127.zen.spamhaus.org", "A", timeout=10)
-        print(f"  ⚠️  Got answer (might be listed or blocked query)")
-        return True
+        answers = [str(a) for a in await resolve_for_blacklist("2.0.0.127.zen.spamhaus.org", "A", timeout=10)]
     except Exception as e:
-        if "NXDOMAIN" in type(e).__name__:
-            print(f"  ✅ NXDOMAIN = IP not listed (correct)")
-            return True
-        else:
-            print(f"  ⚠️  Error: {type(e).__name__}: {e}")
-            return False
+        print(f"  ❌ 127.0.0.2 is always listed (RFC 5782), got {type(e).__name__}: {e}")
+        return False
+    if any(a.startswith("127.255.") for a in answers):
+        print(f"  ❌ Spamhaus refused the query: {answers}")
+        return False
+    print(f"  ✅ 127.0.0.2 is listed: {answers}")
+    return True
 
 
 async def main():

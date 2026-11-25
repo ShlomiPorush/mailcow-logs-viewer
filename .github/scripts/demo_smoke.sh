@@ -157,7 +157,7 @@ for i in $(seq 1 90); do
     [ -z "${running}" ] && break
     sleep 2
 done
-[ -z "${running}" ] || echo "  still running after 180s: ${running}"
+[ -z "${running}" ] || fail "still running after 180s: ${running}"
 [ "$(docker inspect -f '{{.State.Running}}' "${APP}")" = "true" ] || fail "the demo exited while running jobs"
 if docker logs "${APP}" 2>&1 | grep -E "(TypeError|AttributeError|NameError|KeyError|ImportError):"; then
     fail "a job raised a programming error against the fictional server (see above)"

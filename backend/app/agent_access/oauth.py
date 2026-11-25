@@ -11,6 +11,7 @@ from starlette.concurrency import run_in_threadpool
 
 from ..auth import _client_ip
 from ..database import SessionLocal
+from ..frontend_assets import stamp_asset_versions
 from ..session import session_key_from_request
 from . import cimd, live, pending, store
 from .limits import Window, read_body
@@ -264,8 +265,8 @@ def code_page(message: Optional[str] = None, status_code: int = 200, value: str 
 <input id="user-code" name="user_code" class="ui-input ui-consent-code-input" autocomplete="off" autocapitalize="characters"
  spellcheck="false" placeholder="XXXX-XXXX" maxlength="16" required value="{html.escape(value)}" autofocus>
 <div class="ui-consent-actions"><button type="submit" class="ui-btn ui-btn-primary">Continue</button></div>
-</form></main><script src="/static/session-guard.js?v=1"></script></body></html>"""
-    return HTMLResponse(page, status_code=status_code, headers=_NO_STORE)
+</form></main><script src="/static/session-guard.js?v="></script></body></html>"""
+    return HTMLResponse(stamp_asset_versions(page, "/app/frontend"), status_code=status_code, headers=_NO_STORE)
 
 
 @router.get("/oauth/device")

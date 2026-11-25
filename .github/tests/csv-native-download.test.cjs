@@ -35,7 +35,7 @@ function harness(status = 200, contentType = 'text/csv; charset=utf-8') {
     });
     const utils = readFileSync(join(__dirname, '../../frontend/utils.js'), 'utf8');
     const errorStart = utils.indexOf('function uiApiErrorText(');
-    vm.runInContext(utils.slice(errorStart, utils.indexOf('\n// ====', errorStart)), context);
+    vm.runInContext(utils.slice(errorStart, utils.indexOf('\nconst uiUnsavedEntries', errorStart)), context);
     vm.runInContext(readFileSync(join(__dirname, '../../frontend/export.js'), 'utf8'), context);
     return { context, requests, downloads, toasts };
 }

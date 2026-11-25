@@ -137,6 +137,7 @@ class MapValidationRequest(BaseModel):
 
 
 def validate_map_content(content: str) -> List[Dict[str, Any]]:
+    from .suppressions import migrate_manual_map_line
     errors = []
     lines = content.replace('\r\n', '\n').replace('\r', '\n').split('\n')
     
@@ -171,7 +172,7 @@ def validate_map_content(content: str) -> List[Dict[str, Any]]:
                 })
             continue
 
-        if len(stripped) <= 320 and re.match(r'^[^\s/@]+@[^\s/@.]+(?:\.[^\s/@.]+)+$', stripped):
+        if migrate_manual_map_line(stripped) != stripped:
             errors.append({
                 "line": i,
                 "content": stripped,

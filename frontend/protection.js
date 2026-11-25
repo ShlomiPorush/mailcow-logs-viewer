@@ -45,10 +45,6 @@ function refreshProtectionHits() {
     loadProtectionOverview();
 }
 
-function protectionOpenCount(counts) {
-    return (counts.watching || 0) + (counts.pending || 0) + (counts.alert || 0);
-}
-
 function renderProtection() {
     renderSecuritySettings();
     markProtectionDirty();

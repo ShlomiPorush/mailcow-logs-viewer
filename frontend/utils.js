@@ -455,7 +455,6 @@ function uiHelp(name, text) {
         <div id="${id}" popover class="ui-field-help-panel">${paragraphs}</div>`;
 }
 
-// Under the whole field
 function uiHelpPlace(panel, opener) {
     const name = opener.parentElement.getBoundingClientRect();
     const row = (opener.closest('.ui-set-field, .ui-set-bool') || opener).getBoundingClientRect();
@@ -521,7 +520,6 @@ function uiInitHelp() {
     }, true);
 }
 
-// Called once at startup
 function uiInitMenus() {
     uiInitHelp();
     document.addEventListener('toggle', event => {
@@ -1247,7 +1245,6 @@ async function uiReadJson(response) {
     }
 }
 
-// =============================================================================
 const uiUnsavedEntries = new Map();
 function uiUnsavedRegister(key, entry) {
     uiUnsavedEntries.set(key, { keeps: () => false, ...entry });
@@ -1805,7 +1802,6 @@ function uiSortPick(key, group, value) {
     if (current) uiSortSet(table, current.cell, Number(value) > 0 ? 1 : -1);
 }
 
-// Mark the sortable headers
 let uiTableSortQueued = false;
 function uiRefreshTableSorts() {
     uiTableSortQueued = false;
@@ -2474,9 +2470,6 @@ function uiSparkline(points, { days = 7, now = Date.now(), format = v => String(
     return `<svg class="ui-spark-svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="${escapeHtml(words)}"><title>${escapeHtml(words)}</title><path d="${d}"/>${lone}<circle cx="${x(Date.parse(last.slot)).toFixed(1)}" cy="${y(Number(last.value)).toFixed(1)}" r="1.8"/></svg>`;
 }
 
-// Overview strip under a zoomable chart
-
-// The span a drag of the window by dt makes
 function uiOverviewMove(start, dt, limits, snap = t => t) {
     const len = start.to - start.from;
     const sn = x => Math.max(limits.from, Math.min(limits.to, snap(x)));
@@ -2646,7 +2639,6 @@ function uiTimeOverview(box, opts) {
     };
 }
 
-// Phones: every dialog opens like the help sheet
 function uiDialogSheet(backdrop) {
     const dialog = backdrop.querySelector(':scope > .ui-dialog');
     if (!dialog) return;

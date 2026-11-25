@@ -5,7 +5,7 @@ const vm = require('node:vm');
 const { test } = require('node:test');
 
 const source = fs.readFileSync(path.join(__dirname, '../../frontend/dmarc.js'), 'utf8');
-const start = source.indexOf('// The domain shown in the record window');
+const start = source.indexOf('let dmarcRecordDomain');
 const end = source.indexOf('function dmarcDmarcRecord', start);
 assert.ok(start > 0 && end > start);
 
@@ -100,7 +100,7 @@ test('no sender passing on most of its mail is not Ready', () => {
 });
 
 test('the record window spells out the alignment', () => {
-    const recordWindow = source.slice(start, source.indexOf('// SPF or DKIM for the domain'));
+    const recordWindow = source.slice(start, source.indexOf('function dmarcAuthRecord('));
     const context = vm.createContext({
         escapeHtml: value => String(value),
         escapeJsArg: value => String(value),

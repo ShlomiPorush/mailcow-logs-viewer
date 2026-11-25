@@ -192,7 +192,6 @@ function dmarcLoadControls() {
     return Promise.all(loads).then(updateDmarcControls);
 }
 
-// All domains
 async function loadDmarc() {
     dmarcState.currentView = 'domains';
     dmarcState.currentDomain = null;
@@ -664,9 +663,7 @@ function dmarcCopyBlock(text) {
     return `<div class="ui-dm-code"><span>${escapeHtml(text)}</span><button type="button" class="ui-btn ui-btn-sm" onclick="copyToClipboard('${escapeJsArg(text)}', event)">Copy</button></div>`;
 }
 
-// The domain shown in the record window
 let dmarcRecordDomain = null;
-// How much a policy protects
 const DMARC_POLICY_LEVEL = { none: ['fail', 'Monitoring'], quarantine: ['warn', 'Partial'], reject: ['ok', 'Enforced'] };
 
 function dmarcPolicyTag(policy) {
@@ -762,7 +759,6 @@ function dmarcDmarcRecord(x) {
         ${dmarcPolicyChoice(x, next)}`;
 }
 
-// SPF or DKIM for the domain
 function dmarcAuthRecord(x, kind) {
     const label = kind === 'spf' ? 'SPF' : 'DKIM';
     const sent = x.groups.reduce((s, g) => s + g.total, 0);
