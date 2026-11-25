@@ -62,6 +62,22 @@ def test_an_importer_reports_that_mailcow_did_not_answer(monkeypatch, name):
     assert scheduler._log_count_cache == {}
 
 
+def test_a_database_that_refuses_the_netfilter_rows_fails_the_import(monkeypatch):
+    from contextlib import contextmanager
+    from unittest.mock import Mock
+    from sqlalchemy.exc import ProgrammingError
+    db = Mock()
+    db.query.side_effect = ProgrammingError('SELECT', {}, Exception('permission denied'))
+
+    @contextmanager
+    def session():
+        yield db
+    monkeypatch.setattr(scheduler, 'get_db_context', session)
+    scheduler.seen_netfilter.clear()
+    with pytest.raises(ProgrammingError):
+        scheduler._store_netfilter_logs([{'time': 1764000000, 'priority': 'warn', 'message': 'a line'}])
+
+
 def test_an_empty_mailcow_is_no_failure(monkeypatch):
     scheduler._log_count_cache.clear()
     scheduler._resume_offset.update(postfix=0, rspamd=0)

@@ -14,7 +14,7 @@ from apscheduler.triggers.cron import CronTrigger
 from sqlalchemy.orm import Session
 from sqlalchemy import desc, or_, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from .app_time import UTC, app_tz, format_clock
 from .config import settings, set_cached_active_domains, cached_domains_known, local_domains_complete, is_hosted_domain
@@ -982,6 +982,8 @@ def _store_netfilter_logs(logs):
                     new_rows.append(values)
                     batch_seen.add(unique_id)
                     
+                except SQLAlchemyError:
+                    raise
                 except Exception as e:
                     logger.error(f"[NETFILTER] Error processing log entry: {e}")
                     continue
