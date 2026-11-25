@@ -121,6 +121,11 @@ def test_a_second_dkim_value_that_is_not_text_does_not_fail_the_check(monkeypatc
     assert '\x00' not in check['published']
 
 
+def test_a_first_dkim_value_with_nul_can_be_stored(monkeypatch):
+    check = _run(monkeypatch, 'dkim', _txt('\x00' + PUBLISHED['dkim']))
+    assert '\x00' not in str(check) and check['actual_record'] == PUBLISHED['dkim']
+
+
 def test_an_empty_dkim_value_alerts_as_removed(monkeypatch):
     before = _run(monkeypatch, 'dkim', _txt(PUBLISHED['dkim']))
     after = _run(monkeypatch, 'dkim', _txt(''))

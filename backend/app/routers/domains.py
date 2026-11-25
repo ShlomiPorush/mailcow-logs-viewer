@@ -820,7 +820,7 @@ async def check_dkim_record(domain: str) -> Dict[str, Any]:
             
             actual_record = ''
             for rdata in answers:
-                actual_record = b''.join(rdata.strings).decode('utf-8')
+                actual_record = strip_nul(b''.join(rdata.strings).decode('utf-8'))
                 break
             texts = [strip_nul(b''.join(rdata.strings).decode('utf-8', 'replace')) for rdata in answers]
             published = ' | '.join(sorted(text for text in texts if text.strip()))
