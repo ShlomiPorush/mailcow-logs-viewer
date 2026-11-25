@@ -493,7 +493,8 @@ class MailcowAPI:
             data = await self._make_request(endpoint)
             
             if not isinstance(data, list):
-                logger.warning(f"Unexpected Rspamd page response format: {type(data)}")
+                if data:
+                    logger.warning(f"Unexpected Rspamd page response format: {type(data)}")
                 return []
             
             logger.info(f"Retrieved {len(data)} Rspamd logs (offset={offset})")
