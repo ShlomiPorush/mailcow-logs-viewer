@@ -29,7 +29,7 @@ async function loadNotificationChannels() {
         renderNotificationChannels();
     } catch (e) {
         console.error('Notification channels error:', e);
-        panel.innerHTML = `<p class="ui-empty ui-text-fail">Could not load destinations: ${escapeHtml(uiErrorText(e))}</p>`;
+        panel.innerHTML = `<p class="ui-empty ui-text-fail">Could not load destinations: ${escapeHtml(uiErrorText(e))}${uiRetryButton('loadNotificationChannels()')}</p>`;
     }
 }
 
