@@ -198,13 +198,12 @@ def test_saving_settings_while_editing_is_off(client):
     assert client.post('/api/settings/purge-feature-data', json={'feature': 'dmarc'}).status_code == 403
 
 
-def test_saving_settings_while_the_feature_list_is_busy(editing, monkeypatch):
-    monkeypatch.setattr(figures, 'SWITCH_WAIT', '200ms')
+def test_saving_the_feature_list_does_not_wait_for_the_trend_samples(editing):
     with database.engine.connect() as other:
         other.execute(text('SELECT pg_advisory_lock(:key)'), {'key': figures._LOCK_KEY})
         other.commit()
         try:
-            assert editing.put('/api/settings', json={'disabled_features': ''}).status_code == 503
+            assert editing.put('/api/settings', json={'disabled_features': ''}).status_code == 200
         finally:
             other.execute(text('SELECT pg_advisory_unlock(:key)'), {'key': figures._LOCK_KEY})
             other.commit()

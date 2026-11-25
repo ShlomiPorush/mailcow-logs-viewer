@@ -138,7 +138,7 @@ def test_a_feature_that_is_off_is_neither_sampled_nor_served_and_its_samples_go(
 
 def test_a_switch_off_during_a_run_leaves_no_sample_behind(db_ready, monkeypatch):
     figures = _fake_sources(monkeypatch)
-    epochs = {f: figures.feature_epoch(f) for f in set(figures.METRICS.values()) if f}
+    epochs = figures.epochs_outside_a_purge()
     points = asyncio.run(figures.collect_figures())
     from app.database import get_db_context
     from app.services.feature_data import purge_feature
@@ -154,7 +154,7 @@ def test_a_switch_off_during_a_run_leaves_no_sample_behind(db_ready, monkeypatch
 
 def test_a_write_waits_for_a_purge_in_progress_and_then_writes_nothing_of_it(db_ready, monkeypatch):
     figures = _fake_sources(monkeypatch)
-    epochs = {f: figures.feature_epoch(f) for f in set(figures.METRICS.values()) if f}
+    epochs = figures.epochs_outside_a_purge()
     points = asyncio.run(figures.collect_figures())
     from app.database import get_db_context
     with get_db_context() as db:
@@ -240,12 +240,34 @@ def test_an_error_answer_from_fail2ban_is_no_answer(db_ready, monkeypatch):
 
 def test_a_quick_off_and_on_through_settings_drops_a_running_sample(db_ready, monkeypatch):
     figures = _fake_sources(monkeypatch)
-    epochs = {f: figures.feature_epoch(f) for f in set(figures.METRICS.values()) if f}
+    epochs = figures.epochs_outside_a_purge()
     points = asyncio.run(figures.collect_figures())
-    figures.note_feature_switches(set(), {'netfilter'})
-    figures.note_feature_switches({'netfilter'}, set())
+    from app.services.feature_data import purge_disabled_features
+    monkeypatch.setattr(settings._inner, 'disabled_features', 'netfilter')
+    purge_disabled_features()
+    monkeypatch.setattr(settings._inner, 'disabled_features', '')
     figures.write_points(points, epochs, figures.slot_of(datetime.utcnow()))
     assert not _rows('security_review') and _rows('storage_used')
+
+
+def test_a_run_that_starts_during_a_purge_reads_its_sources_after_it(db_ready, monkeypatch):
+    figures = _fake_sources(monkeypatch)
+    from app.database import get_db_context
+    collected = threading.Event()
+    collect = figures.collect_figures
+
+    async def noted():
+        collected.set()
+        return await collect()
+    monkeypatch.setattr(figures, 'collect_figures', noted)
+    with get_db_context() as db:
+        figures.purge_feature_metrics(db, 'netfilter')
+        worker = threading.Thread(target=lambda: asyncio.run(figures.run_trend_samples()))
+        worker.start()
+        assert not collected.wait(0.5), 'the run waits for the purge'
+        db.commit()
+    worker.join(10)
+    assert collected.is_set() and _rows('security_review')
 
 
 def test_a_sources_queries_stop_together_at_its_time_budget(db_ready):
@@ -274,36 +296,3 @@ def test_only_storage_and_the_security_counts_have_a_trend(db_ready, monkeypatch
     from app.main import app
     from fastapi.testclient import TestClient
     assert TestClient(app).get('/api/stats/trends?names=linking_rate').status_code == 422
-
-
-def test_a_save_of_the_feature_list_that_cannot_have_the_samples_lock_changes_nothing(db_ready, monkeypatch):
-    from fastapi import HTTPException
-    from sqlalchemy import text
-    from app.database import engine
-    from app.routers import settings as settings_router
-    from app.services import figures
-    monkeypatch.setattr(settings._inner, 'edit_settings_via_ui_enabled', True)
-    monkeypatch.setattr(figures, 'SWITCH_WAIT', '300ms')
-    saved = []
-    monkeypatch.setattr(settings_router, 'save_config_overrides_to_db', lambda db, values: saved.append(values))
-    monkeypatch.setattr(settings_router, 'reload_settings', lambda db: None)
-    epochs = {f: figures.feature_epoch(f) for f in set(figures.METRICS.values()) if f}
-    holder = engine.connect()
-    try:
-        holder.execute(text('SELECT pg_advisory_lock(:key)'), {'key': figures._LOCK_KEY})
-        holder.commit()
-        with pytest.raises(HTTPException) as refused:
-            settings_router.update_settings({'disabled_features': 'netfilter'}, db=object())
-        assert refused.value.status_code == 503 and 'Nothing was changed' in refused.value.detail
-        assert saved == [] and epochs == {f: figures.feature_epoch(f) for f in epochs}
-    finally:
-        holder.execute(text('SELECT pg_advisory_unlock(:key)'), {'key': figures._LOCK_KEY})
-        holder.commit()
-        holder.close()
-    with figures.feature_switch_guard() as note:
-        note()
-    with engine.connect() as conn:
-        assert conn.execute(text('SELECT pg_try_advisory_lock(:key)'), {'key': figures._LOCK_KEY}).scalar()
-        conn.execute(text('SELECT pg_advisory_unlock(:key)'), {'key': figures._LOCK_KEY})
-        assert conn.execute(text('SHOW lock_timeout')).scalar() == '0'
-        conn.commit()

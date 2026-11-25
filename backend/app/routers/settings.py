@@ -835,7 +835,7 @@ def get_editable_settings(db: Session = Depends(get_db)):
     }
 
 
-@router.put("/settings", responses=documented(m.SettingsSaveResponse, description="Saved; a body without an editable change saves nothing", errors={400: None, 403: None, 409: None, 422: Invalid, 500: None, 503: None}))
+@router.put("/settings", responses=documented(m.SettingsSaveResponse, description="Saved; a body without an editable change saves nothing", errors={400: None, 403: None, 409: None, 422: Invalid, 500: None}))
 def update_settings(body: Dict[str, Any], request: Request = None, response: Response = None,
                     db: Session = Depends(get_db)):
     """
@@ -957,35 +957,25 @@ def update_settings(body: Dict[str, Any], request: Request = None, response: Res
     prev_credentials = {name: check["fingerprint"]() for name, check in _CREDENTIAL_CHECKS.items()}
     operator_session = get_session_from_request(request) if request is not None else None
     from ..services.feature_data import spam_list_kept
-    from ..services.figures import SamplesBusy, feature_switch_guard
-    try:
-        guard = feature_switch_guard(needed="disabled_features" in allowed)
-        note_trend_switches = guard.__enter__()
-    except SamplesBusy:
-        raise HTTPException(status_code=503, detail="The settings could not be saved right now. Nothing was changed. Try again in a moment.")
-    try:
-        with _LIST_TRANSITION_LOCK, settings_reload_lock:
-            before = build_settings(db)
-            _validate_agent_access(allowed, before)
-            locked = get_env_locked_keys()
-            problem = sign_in_problem(before.model_copy(
-                update={k: v for k, v in allowed.items() if k not in locked}))
-            if problem:
-                raise HTTPException(status_code=400, detail=problem)
-            if _changes_admin_sign_in(allowed, before):
-                try:
-                    users_store.check_sign_in_settings(db, before, allowed)
-                except users_store.UserError as e:
-                    raise HTTPException(status_code=e.status, detail=e.detail)
-            prev_sign_in = _session_bound_values(before)
-            list_was_kept, switches_before = spam_list_kept(), _spam_list_switches()
-            save_config_overrides_to_db(db, allowed)
-            saved = reload_settings(db)
-            note_trend_switches()
-            rspamd_off_transition = _record_list_transition(
-                db, list_was_kept, spam_list_kept(), switched=_spam_list_switches() != switches_before)
-    finally:
-        guard.__exit__(None, None, None)
+    with _LIST_TRANSITION_LOCK, settings_reload_lock:
+        before = build_settings(db)
+        _validate_agent_access(allowed, before)
+        locked = get_env_locked_keys()
+        problem = sign_in_problem(before.model_copy(
+            update={k: v for k, v in allowed.items() if k not in locked}))
+        if problem:
+            raise HTTPException(status_code=400, detail=problem)
+        if _changes_admin_sign_in(allowed, before):
+            try:
+                users_store.check_sign_in_settings(db, before, allowed)
+            except users_store.UserError as e:
+                raise HTTPException(status_code=e.status, detail=e.detail)
+        prev_sign_in = _session_bound_values(before)
+        list_was_kept, switches_before = spam_list_kept(), _spam_list_switches()
+        save_config_overrides_to_db(db, allowed)
+        saved = reload_settings(db)
+        rspamd_off_transition = _record_list_transition(
+            db, list_was_kept, spam_list_kept(), switched=_spam_list_switches() != switches_before)
     oauth2_client.reload_config()
     if _session_bound_values(saved) != prev_sign_in:
         admitted = getattr(getattr(request, "state", None), "auth_generation", None)
