@@ -2085,12 +2085,8 @@ function uiSwipeDistance(row) {
     return Math.min(96, row.offsetWidth * 0.35);
 }
 
-function uiSwipeStill() {
-    return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
-}
-
-function uiSwipeBack(row, still) {
-    row.style.transition = still ? 'none' : 'transform .2s ease, opacity .2s ease';
+function uiSwipeBack(row) {
+    row.style.transition = 'transform .2s ease, opacity .2s ease';
     row.style.transform = '';
     row.style.opacity = '';
 }
@@ -2125,13 +2121,12 @@ function uiSwipeEnd(event) {
     uiSwipe = null;
     if (!s.moved) return;
     uiSwipeEndedAt = Date.now();
-    const still = uiSwipeStill();
-    if (event.type !== 'pointerup' || Math.abs(s.dx) < uiSwipeDistance(s.row)) { uiSwipeBack(s.row, still); return; }
-    s.row.style.transition = still ? 'none' : 'transform .2s ease, opacity .2s ease';
+    if (event.type !== 'pointerup' || Math.abs(s.dx) < uiSwipeDistance(s.row)) { uiSwipeBack(s.row); return; }
+    s.row.style.transition = 'transform .2s ease, opacity .2s ease';
     s.row.style.transform = `translateX(${s.dx < 0 ? '-' : ''}100%)`;
     s.row.style.opacity = '0';
     s.x.click();
-    const done = () => { if (s.row.isConnected) uiSwipeBack(s.row, still); };
+    const done = () => { if (s.row.isConnected) uiSwipeBack(s.row); };
     if (!s.x.hasAttribute('aria-busy')) { done(); return; }
     const watch = new MutationObserver(() => {
         if (s.x.hasAttribute('aria-busy')) return;

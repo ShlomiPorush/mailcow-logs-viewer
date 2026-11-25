@@ -139,11 +139,11 @@ test('the click a swipe ends with does not open the row; a later click does', as
     assert.equal(w.opened, 1, 'a click on its own');
 });
 
-test('with reduced motion the row snaps without an animation', () => {
+test('the row slides back with its animation under reduced motion too', () => {
     const w = page({ still: true });
     draw(w, [alert(1)]);
     const r = row(w, 1);
     swipe(w, r, [[-30, 0], [-50, 0]]);
     assert.equal(r.style.transform, '');
-    assert.equal(r.style.transition, 'none');
+    assert.match(r.style.transition, /transform \.2s/);
 });
