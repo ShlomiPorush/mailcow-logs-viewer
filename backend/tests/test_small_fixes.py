@@ -68,7 +68,8 @@ def test_a_host_name_is_checked_by_its_address(client, monkeypatch, answers, add
 def test_a_host_name_without_an_address_is_an_error_and_never_clean(client, monkeypatch):
     checked = _resolving(monkeypatch, {})
     answer = client.post('/api/blacklist/check?host=mx.example.com').json()
-    assert answer['status'] == 'error' and 'mx.example.com' in answer['error']
+    assert answer['status'] == 'error'
+    assert answer['error'] == 'No address could be found for mx.example.com. Check the name and try again.'
     assert checked == []
 
 
