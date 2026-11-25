@@ -144,14 +144,14 @@ def test_late_deferral_does_not_downgrade_a_delivered_correlation(env, monkeypat
     assert _reload(key) == 'delivered'
 
 
-def test_a_spam_verdict_is_not_overwritten_by_a_late_delivery(env, monkeypatch):
+def test_mail_the_scan_called_spam_is_delivered_when_its_delivery_comes_late(env, monkeypatch):
     from app.database import get_db_context
     with get_db_context() as db:
         key = _seed(db, QUEUE, 'deferred', 'spam', age_minutes=45)
 
     _ingest(monkeypatch, [_entry(_sent_line())])
 
-    assert _reload(key) == 'spam'
+    assert _reload(key) == 'delivered'
 
 
 def test_an_ambiguous_queue_id_is_not_attributed(env, monkeypatch):

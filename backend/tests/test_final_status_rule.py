@@ -173,12 +173,25 @@ def test_completing_a_message_does_not_put_deferred_over_a_delivery(env, kinds):
     assert message.status() == 'delivered'
 
 
-def test_a_message_the_scan_called_spam_stays_spam_when_its_delivery_comes_later(env):
+def test_a_message_the_scan_called_spam_is_delivered_when_its_delivery_comes_later(env):
     from app.services import correlation_jobs
     message = Message('sent', final_status='spam', action='add header', is_spam=True, complete=False)
     correlation_jobs.complete_incomplete_correlations()
-    assert message.status() == 'spam'
-    _timer()
+    assert message.status() == 'delivered'
+    assert message.scan_is_spam() is True
+
+
+def test_the_timer_and_a_late_line_also_put_the_delivery_over_the_scan(env):
+    for settle in (lambda message: _timer(), _arrived):
+        message = Message('sent', final_status='spam', action='add header', is_spam=True)
+        settle(message)
+        assert message.status() == 'delivered'
+
+
+def test_a_spam_line_stays_spam_whatever_arrives_later(env):
+    message = Message('spam', final_status='spam')
+    message.later('sent')
+    _arrived(message)
     assert message.status() == 'spam'
 
 
