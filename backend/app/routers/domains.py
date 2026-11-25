@@ -260,6 +260,7 @@ async def check_spf_record(domain: str, spf_source_ips: Optional[List[Dict[str, 
                 'status': 'error',
                 'message': 'SPF record not found',
                 'record': None,
+                'absent': True,
                 'has_strict_all': False,
                 'includes_mx': False,
                 'includes': []
@@ -437,6 +438,7 @@ async def check_spf_record(domain: str, spf_source_ips: Optional[List[Dict[str, 
             'status': 'error',
             'message': 'Domain does not exist',
             'record': None,
+            'absent': True,
             'has_strict_all': False,
             'includes_mx': False,
             'includes': []
@@ -446,6 +448,7 @@ async def check_spf_record(domain: str, spf_source_ips: Optional[List[Dict[str, 
             'status': 'error',
             'message': 'No TXT records found',
             'record': None,
+            'absent': True,
             'has_strict_all': False,
             'includes_mx': False,
             'includes': []
@@ -818,6 +821,8 @@ async def check_dkim_record(domain: str) -> Dict[str, Any]:
             for rdata in answers:
                 actual_record = b''.join(rdata.strings).decode('utf-8')
                 break
+            texts = [b''.join(rdata.strings).decode('utf-8', 'replace') for rdata in answers]
+            published = ' | '.join(sorted(text for text in texts if text.strip()))
             
             comparison = compare_dkim_records(expected_value, actual_record)
             match = not comparison['mismatches']
@@ -865,6 +870,8 @@ async def check_dkim_record(domain: str) -> Dict[str, Any]:
                 'dkim_domain': dkim_domain,
                 'expected_record': expected_value,
                 'actual_record': actual_record,
+                'published': published,
+                'absent': not published,
                 'match': match,
                 'warnings': warnings,
                 'info': info_messages,
@@ -876,6 +883,7 @@ async def check_dkim_record(domain: str) -> Dict[str, Any]:
             return {
                 'status': 'error',
                 'message': f'DKIM record not found at {dkim_domain}',
+                'absent': True,
                 'selector': selector,
                 'dkim_domain': dkim_domain,
                 'expected_record': expected_value,
@@ -891,6 +899,7 @@ async def check_dkim_record(domain: str) -> Dict[str, Any]:
             return {
                 'status': 'error',
                 'message': f'No TXT record at {dkim_domain}',
+                'absent': True,
                 'selector': selector,
                 'dkim_domain': dkim_domain,
                 'expected_record': expected_value,
@@ -985,6 +994,7 @@ async def check_dmarc_record(domain: str) -> Dict[str, Any]:
                 'status': 'error',
                 'message': 'DMARC record not found',
                 'record': None,
+                'absent': True,
                 'policy': None,
                 'is_strong': False,
                 'warnings': ['Add a DMARC record with at least "quarantine" policy'],
@@ -1023,6 +1033,7 @@ async def check_dmarc_record(domain: str) -> Dict[str, Any]:
             'status': 'error',
             'message': 'DMARC record not found',
             'record': None,
+            'absent': True,
             'policy': None,
             'is_strong': False,
             'warnings': ['Add a DMARC record with at least "quarantine" policy'],
@@ -1033,6 +1044,7 @@ async def check_dmarc_record(domain: str) -> Dict[str, Any]:
             'status': 'error',
             'message': 'No DMARC record configured',
             'record': None,
+            'absent': True,
             'policy': None,
             'is_strong': False,
             'warnings': ['Add a DMARC record with at least "quarantine" policy'],
@@ -1274,6 +1286,7 @@ async def check_tlsa_record(domain: str) -> Dict[str, Any]:
                 'status': 'warning',
                 'message': message,
                 'record': None,
+                'absent': not not_checked,
                 'records': [],
                 'mx_hosts': mx_hosts,
                 'not_checked': not_checked,
@@ -1455,6 +1468,7 @@ async def check_mta_sts_record(domain: str) -> Dict[str, Any]:
                 'status': 'warning',
                 'message': 'MTA-STS record not published',
                 'record': None,
+                'absent': True,
                 'warnings': [],
                 'info': ['Publish a TXT record at _mta-sts.' + domain +
                          ' and a policy file to let senders require TLS for this domain'],
@@ -1601,6 +1615,7 @@ async def check_tls_rpt_record(domain: str) -> Dict[str, Any]:
                 'status': 'warning',
                 'message': 'TLS-RPT record not published',
                 'record': None,
+                'absent': True,
                 'report_uris': [],
                 'warnings': [],
                 'info': [f'Publish a TXT record at _smtp._tls.{domain} with a rua address '
@@ -1792,17 +1807,12 @@ def _require_domain_name(domain: str) -> None:
 def _record_value(check: Optional[Dict[str, Any]]) -> Optional[str]:
     if not isinstance(check, dict):
         return None
-    value = check.get('record')
+    value = check.get('record') or check.get('published')
     return value.strip() if isinstance(value, str) and value.strip() else None
 
 
 def _definitely_absent(check: Optional[Dict[str, Any]]) -> bool:
-    if not isinstance(check, dict):
-        return False
-    if _record_value(check) is not None:
-        return False
-    message = (check.get('message') or '').lower()
-    return 'not found' in message or 'no dane' in message or 'not published' in message
+    return isinstance(check, dict) and check.get('absent') is True
 
 
 def detect_dns_changes(previous: Optional[DomainDNSCheck],
