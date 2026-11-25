@@ -115,8 +115,10 @@ def test_the_order_of_two_dkim_values_is_no_change_and_a_change_of_either_is(mon
 
 
 def test_a_second_dkim_value_that_is_not_text_does_not_fail_the_check(monkeypatch):
-    broken = SimpleNamespace(strings=(b'\xff\xfe',))
-    assert _run(monkeypatch, 'dkim', _txt(PUBLISHED['dkim']) + [broken])['match'] is True
+    broken = SimpleNamespace(strings=(b'\xff\x00\xfe',))
+    check = _run(monkeypatch, 'dkim', _txt(PUBLISHED['dkim']) + [broken])
+    assert check['match'] is True
+    assert '\x00' not in check['published']
 
 
 def test_an_empty_dkim_value_alerts_as_removed(monkeypatch):

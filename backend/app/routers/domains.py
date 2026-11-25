@@ -14,6 +14,7 @@ from sqlalchemy import text, func
 from app.database import get_db, get_db_context
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from app.models import DomainDNSCheck, DMARCReport, DMARCRecord, SystemSetting
+from app.services.db_values import strip_nul
 from app.services.alias_domains import get_alias_domain_map, aliases_of_domain
 from app.app_time import local_wall_time_to_utc_naive
 from app.utils import format_datetime_for_api
@@ -821,7 +822,7 @@ async def check_dkim_record(domain: str) -> Dict[str, Any]:
             for rdata in answers:
                 actual_record = b''.join(rdata.strings).decode('utf-8')
                 break
-            texts = [b''.join(rdata.strings).decode('utf-8', 'replace') for rdata in answers]
+            texts = [strip_nul(b''.join(rdata.strings).decode('utf-8', 'replace')) for rdata in answers]
             published = ' | '.join(sorted(text for text in texts if text.strip()))
             
             comparison = compare_dkim_records(expected_value, actual_record)
