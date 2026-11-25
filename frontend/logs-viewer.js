@@ -1001,7 +1001,10 @@ async function loadDateRangeLogs() {
             if (endDate) nextParams.set('end_date', endDate);
             
             const nextResp = await authenticatedFetch(`/api/raw-logs/${logsState.activeService}?${nextParams}`);
-            if (!nextResp.ok) break;
+            if (!nextResp.ok) {
+                if (page === firstShown) throw await responseError(nextResp);
+                break;
+            }
             
             const nextData = await nextResp.json();
             renderLogEntries(nextData.data || [], logsState.activeService, false);

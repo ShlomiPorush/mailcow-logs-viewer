@@ -179,6 +179,21 @@ test('a long Logs range downloads only the pages that hold the lines it shows', 
     }
 });
 
+test('a long Logs range whose first shown page fails says so', async () => {
+    const c = load(['logs-viewer.js']);
+    const element = page(c);
+    c.authenticatedFetch = async url => (Number(new URL(url, 'http://viewer.test').searchParams.get('page')) === 1
+        ? { ok: true, json: async () => ({ data: [0], total: 12345 }) } : { ok: false, status: 500 });
+    c.responseError = async () => new Error('no answer');
+    c.uiErrorText = error => error.message;
+    c.escapeHtml = text => text;
+    for (const name of ['renderLogEntries', 'setLiveButtonActive', 'updateLogStatusBar', 'applyLogFilter', 'showToast']) c[name] = () => {};
+    element('logs-date-from').value = '2026-10-25T02:30';
+    element('logs-date-to').value = '2026-10-25T02:45';
+    await c.loadDateRangeLogs();
+    assert.match(element('logs-output').innerHTML, /Failed to load date range: no answer/);
+});
+
 function logsRange() {
     const c = load(['logs-viewer.js']);
     const element = page(c);

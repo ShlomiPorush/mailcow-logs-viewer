@@ -78,8 +78,8 @@ async def test_blacklist_resolve():
     except Exception as e:
         print(f"  ❌ 127.0.0.2 is always listed (RFC 5782), got {type(e).__name__}: {e}")
         return False
-    if any(a.startswith("127.255.") for a in answers):
-        print(f"  ❌ Spamhaus refused the query: {answers}")
+    if not any(a.startswith("127.0.0.") for a in answers):
+        print(f"  ❌ The query was refused or its answer rewritten: {answers}")
         return False
     print(f"  ✅ 127.0.0.2 is listed: {answers}")
     return True
