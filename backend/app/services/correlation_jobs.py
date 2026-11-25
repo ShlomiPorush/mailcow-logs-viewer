@@ -33,8 +33,6 @@ logger = logging.getLogger(__name__)
 
 TERMINAL_FINAL_STATUSES = ('delivered', 'bounced', 'rejected', 'discarded', 'expired')
 
-PUSH_SKIP_FINAL_STATUSES = TERMINAL_FINAL_STATUSES + ('spam',)
-
 LATE_STATUS_MAX_CORRELATION_AGE = timedelta(days=5)
 
 
@@ -183,10 +181,9 @@ def correlate_single_message(db: Session, rspamd_log: RspamdLog) -> Optional[Mes
 
 def _update_final_status(correlation: MessageCorrelation, lines) -> None:
     status = derive_final_status(lines, None, correlation.dovecot_status, correlation.final_status)
-    kept_spam = correlation.final_status == 'spam' and status == 'delivered'
     kept_discard = (correlation.final_status == correlation.dovecot_status == 'discarded'
                     and status == 'deferred')
-    if status and not kept_spam and not kept_discard:
+    if status and not kept_discard:
         correlation.final_status = status
 
 
@@ -408,7 +405,7 @@ def refresh_correlations_for_queue_ids(db: Session, queue_ids) -> tuple:
                     )
                     continue
 
-                if correlation.final_status in PUSH_SKIP_FINAL_STATUSES:
+                if correlation.final_status in TERMINAL_FINAL_STATUSES:
                     continue
 
                 if not identified and correlation.created_at and correlation.created_at < horizon:

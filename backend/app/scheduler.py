@@ -46,7 +46,6 @@ from .services import geoip_service, correlation_jobs, excluded_addresses, writt
 from .services.job_status import job_status, update_job_status
 from .services.correlation_jobs import (
     TERMINAL_FINAL_STATUSES,
-    PUSH_SKIP_FINAL_STATUSES,
     LATE_STATUS_MAX_CORRELATION_AGE,
 )
 

@@ -84,9 +84,8 @@ def test_arrival_reconciliation_uses_clock_and_leaves_commit_to_caller(monkeypat
     monkeypatch.setattr(correlation_jobs, "recompute_correlation_from_postfix", recompute)
     monkeypatch.setattr(correlation_jobs, "datetime", SimpleNamespace(utcnow=lambda: now, now=lambda tz: now))
     result = correlation_jobs.refresh_correlations_for_queue_ids(db, [row.queue_id for row in rows])
-    assert result == (1, 3)
-    recompute.assert_called_once()
-    assert recompute.call_args.args == (db, rows[0])
+    assert result == (2, 3)
+    assert [call.args for call in recompute.call_args_list] == [(db, rows[0]), (db, rows[2])]
     db.commit.assert_not_called()
 
 
