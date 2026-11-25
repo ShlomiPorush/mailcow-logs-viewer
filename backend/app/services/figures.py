@@ -3,7 +3,6 @@ import logging
 import re
 import threading
 import time
-from contextlib import contextmanager
 from datetime import datetime, timedelta
 from typing import Dict, Optional
 
@@ -35,57 +34,6 @@ def feature_epoch(feature: str) -> int:
 def bump_feature_epoch(feature: str) -> None:
     with _epochs_lock:
         _epochs[feature] = _epochs.get(feature, 0) + 1
-
-
-class SamplesBusy(Exception):
-    pass
-
-
-SWITCH_WAIT = '10s'
-
-
-@contextmanager
-def feature_switch_guard(needed: bool = True):
-    if not needed:
-        yield lambda: None
-        return
-    from ..database import engine
-    conn = engine.connect()
-    try:
-        try:
-            conn.execute(text(f"SET LOCAL lock_timeout = '{SWITCH_WAIT}'"))
-            conn.execute(text('SELECT pg_advisory_lock(:key)'), {'key': _LOCK_KEY})
-            conn.commit()
-        except Exception as e:
-            conn.rollback()
-            raise SamplesBusy(str(e)) from e
-        before = features_off()
-
-        def note():
-            after = features_off()
-            for feature in {f for f in set(METRICS.values()) if f and ((f in before) != (f in after))}:
-                bump_feature_epoch(feature)
-        try:
-            yield note
-        finally:
-            try:
-                conn.execute(text('SELECT pg_advisory_unlock(:key)'), {'key': _LOCK_KEY})
-                conn.commit()
-            except Exception as e:
-                logger.warning(f"Trend samples' lock released by closing its connection ({e})")
-                # Returning this connection to the pool can leave the session lock held.
-                conn.invalidate()
-    finally:
-        conn.close()
-
-
-def note_feature_switches(off_before, off_after) -> None:
-    for feature in {f for f in set(METRICS.values()) if f and ((f in off_before) != (f in off_after))}:
-        bump_feature_epoch(feature)
-
-
-def features_off() -> set:
-    return {f for f in set(METRICS.values()) if f and not settings.is_feature_enabled(f)}
 
 
 def lock_metric_rows(db: Session) -> None:
@@ -240,8 +188,16 @@ def write_points(points: Dict[str, dict], epochs: Dict[str, int], slot: datetime
     return written
 
 
+def epochs_outside_a_purge() -> Dict[str, int]:
+    from ..database import get_db_context
+    with get_db_context() as db:
+        db.execute(text("SET LOCAL lock_timeout = '10s'"))
+        lock_metric_rows(db)
+        return {f: feature_epoch(f) for f in set(METRICS.values()) if f}
+
+
 async def run_trend_samples() -> int:
-    epochs = {f: feature_epoch(f) for f in set(METRICS.values()) if f}
+    epochs = await asyncio.to_thread(epochs_outside_a_purge)
     slot = slot_of(_now())
     points = await collect_figures()
     return await asyncio.to_thread(write_points, points, epochs, slot)
