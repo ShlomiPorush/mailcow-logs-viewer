@@ -5,11 +5,11 @@ const vm = require('node:vm');
 const { test } = require('node:test');
 
 const source = fs.readFileSync(path.join(__dirname, '../../frontend/dmarc.js'), 'utf8');
-const start = source.indexOf('// SPF or DKIM for the domain');
+const start = source.indexOf('function dmarcAuthRecord(');
 const end = source.indexOf('function dmarcTlsRecord', start);
 assert.ok(start > 0 && end > start);
 const records = source.slice(source.indexOf('function dmarcRecordsCard'), source.indexOf('function dmarcSendersCard'));
-const policyTag = source.slice(source.indexOf('// How much a policy protects'), source.indexOf('const DMARC_POLICIES'));
+const policyTag = source.slice(source.indexOf('const DMARC_POLICY_LEVEL'), source.indexOf('const DMARC_POLICIES'));
 
 function load() {
     const context = vm.createContext({

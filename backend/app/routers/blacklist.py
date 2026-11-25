@@ -81,6 +81,34 @@ def get_monitored_hosts() -> Dict[str, Any]:
 BUSY_TEXT = "A blocklist check is already running. Try again when it is done."
 
 
+def _check_error(address: str, total: int, error: str) -> Dict[str, Any]:
+    return {
+        "server_ip": address,
+        "checked_at": format_datetime_for_api(datetime.now(timezone.utc)),
+        "total_blacklists": total,
+        "listed_count": 0,
+        "clean_count": 0,
+        "error_count": 1,
+        "timeout_count": 0,
+        "status": "error",
+        "error": error,
+        "results": []
+    }
+
+
+async def _address_of(host: str) -> Union[str, None]:
+    from app.services.dns_resolver import resolve
+    for record_type in ('A', 'AAAA'):
+        try:
+            answers = await resolve(host, record_type, timeout=5)
+        except Exception as e:
+            logger.info(f"No {record_type} address for {host}: {e}")
+            continue
+        if answers:
+            return str(answers[0])
+    return None
+
+
 @router.post("/check", response_model=None, responses=documented(Union[m.CheckStarted, m.CheckBusy, m.BlocklistCheck], description="Without a host: the check of every monitored address started in the background. With one: its check, from the cache unless force; status error when it could not run. status busy when a check (of any address, from any page or the schedule) is already running: nothing was started", errors={422: Invalid}))
 async def check_blacklists(
     host: str = Query(None, description="Host/IP to check (default: system IP)"),
@@ -105,14 +133,10 @@ async def check_blacklists(
     try:
         ipaddress.ip_address(target_ip)
     except ValueError:
-         try:
-            from app.services.dns_resolver import resolve
-            answers = await resolve(target_ip, 'A', timeout=5)
-            if answers:
-                target_ip = str(answers[0])
-         except Exception:
-              pass
-             
+        target_ip = await _address_of(host)
+        if target_ip is None:
+            return _check_error(host, len(BLACKLISTS), f"No address could be found for {host}. Check the name and try again.")
+
     try:
         if not blacklist_check_admits():
             return {"status": "busy", "message": BUSY_TEXT}
@@ -122,18 +146,7 @@ async def check_blacklists(
     except Exception as e:
         logger.error(f"Error checking blacklists: {type(e).__name__} - {str(e)}")
         from app.services.blacklist_service import applicable_blacklists
-        return {
-            "server_ip": target_ip,
-            "checked_at": format_datetime_for_api(datetime.now(timezone.utc)),
-            "total_blacklists": len(applicable_blacklists(target_ip)) if target_ip else len(BLACKLISTS),
-            "listed_count": 0,
-            "clean_count": 0,
-            "error_count": 1,
-            "timeout_count": 0,
-            "status": "error",
-            "error": "Unable to check blacklists. Check the application logs.",
-            "results": []
-        }
+        return _check_error(target_ip, len(applicable_blacklists(target_ip)), "Unable to check blacklists. Check the application logs.")
 
 @router.get("/progress", response_model=None, responses=documented(m.CheckProgress))
 def get_progress() -> Dict[str, Any]:

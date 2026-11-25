@@ -886,12 +886,17 @@ class Settings(BaseSettings):
         description='Days to keep an ActiveSync device that stopped connecting (0 = keep forever)'
     )
 
-    @field_validator('smtp_port', 'dmarc_imap_port', 'dmarc_imap_interval', mode='before')
+    @field_validator('smtp_port', mode='before')
     @classmethod
     def empty_str_to_none(cls, v):
         if v == '':
             return None
         return v
+
+    @field_validator('dmarc_imap_port', 'dmarc_imap_interval', mode='before')
+    @classmethod
+    def empty_to_default(cls, v, info):
+        return cls.model_fields[info.field_name].default if v in ('', None) else v
 
     @field_validator('smtp_verify_ssl', 'dmarc_imap_verify_ssl', mode='before')
     @classmethod
@@ -1181,6 +1186,9 @@ def build_settings(db: Optional[Any] = None) -> Settings:
                 logger.warning("Ignoring invalid authentication capacity override for %s", key)
                 allowed.pop(key)
     _validate_session_limit_overrides(allowed)
+    for key in ("dmarc_imap_port", "dmarc_imap_interval"):
+        if allowed.get(key, 0) is None:
+            allowed.pop(key)
     for key in SECRET_SETTING_KEYS:
         problem = secret_setting_problem(key, allowed[key]) if key in allowed else None
         if problem:

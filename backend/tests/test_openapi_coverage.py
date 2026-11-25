@@ -10,7 +10,7 @@ from app.main import app  # noqa: E402
 from conftest import registered_routes  # noqa: E402
 from contract import MIDDLEWARE_OPERATIONS, Contract, statuses_in_source, unresolved_refs  # noqa: E402
 from contract_rules import is_documented, says_something  # noqa: E402
-from openapi_pending import HIDDEN  # noqa: E402
+from openapi_hidden import HIDDEN  # noqa: E402
 
 
 def _operations():
@@ -50,7 +50,7 @@ def test_the_hidden_list_holds_only_hidden_operations():
     for method, path in sorted(HIDDEN):
         if operations.get((method, path)) is not False:
             stale.append(f"{method} {path}: listed as hidden, but {'in the document' if (method, path) in operations else 'gone'}")
-    assert stale == [], "tests/openapi_pending.py is out of date:\n  " + "\n  ".join(stale)
+    assert stale == [], "tests/openapi_hidden.py is out of date:\n  " + "\n  ".join(stale)
 
 
 def test_every_documented_answer_has_a_real_schema():

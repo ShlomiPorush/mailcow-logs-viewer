@@ -192,7 +192,7 @@ def list_rules():
     
     with get_db_context() as db:
         rules = db.query(QuarantineRule).order_by(
-            QuarantineRule.action.desc(),
+            QuarantineRule.action,
             QuarantineRule.created_at.desc()
         ).all()
         return {

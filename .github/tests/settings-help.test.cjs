@@ -23,7 +23,7 @@ const texts = value => [].concat(value);
 
 function uiHelp(...args) {
     const start = utils.indexOf('let uiHelpSeq = 0;');
-    const end = utils.indexOf('// Under the whole field');
+    const end = utils.indexOf('function uiHelpPlace(');
     const box = { escapeHtml: s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;') };
     vm.runInNewContext(`${utils.slice(start, end)}\nthis.uiHelp = uiHelp;`, box);
     return box.uiHelp(...args);
@@ -64,5 +64,5 @@ test('a field with help has a name the button can use, and its text in paragraph
 });
 
 test('field help is not the button beside a page title', () => {
-    assert.doesNotMatch(utils.slice(utils.indexOf('let uiHelpSeq = 0;'), utils.indexOf('// Called once at startup')), /\.ui-help-btn|"ui-help-btn"/);
+    assert.doesNotMatch(utils.slice(utils.indexOf('let uiHelpSeq = 0;'), utils.indexOf('function uiInitMenus(')), /\.ui-help-btn|"ui-help-btn"/);
 });

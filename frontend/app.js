@@ -296,7 +296,6 @@ async function refreshAppAccess() {
     }
 }
 
-// Hide the tabs of features that are off
 function applyTabFeatures(page) {
     const prefix = `${page}-tab-btn-`;
     let shown = 0;
@@ -5558,10 +5557,6 @@ async function checkBlacklists(force = false, host = null) {
 async function loadBlacklistStatus() {
     const container = document.getElementById('status-blacklist');
     if (!container) return;
-
-    const detailsElement = container.querySelector('details[open]');
-    if (detailsElement) {
-    }
 
     try {
         const response = await authenticatedFetch('/api/blacklist/monitored');

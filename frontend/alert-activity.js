@@ -352,7 +352,7 @@ function openAlertActivityMessages() {
     openMessagesRange({ start, endInclusive, user: a.subject || '' });
 }
 
-function openAlertSecurityEvents(username) {
+async function openAlertSecurityEvents(username) {
     ['netfilter-filter-ip', 'netfilter-filter-action', 'netfilter-filter-country'].forEach(id => {
         const field = document.getElementById(id);
         if (field) field.value = '';
@@ -361,7 +361,8 @@ function openAlertSecurityEvents(username) {
     if (field) field.value = username;
     setNetfilterFilters({ ip: '', username, action: '', country_code: '' });
     currentPage.netfilter = 1;
-    navigateTo('netfilter', { sub: 'events' }).then(moved => {
-        if (moved) setTimeout(() => { if (typeof applyNetfilterFilters === 'function') applyNetfilterFilters(); }, 100);
-    });
+    const page = document.getElementById('content-netfilter');
+    const already = !!page && !page.classList.contains('hidden');
+    if (!(await navigateTo('netfilter', { sub: 'events' }))) return;
+    if (already) loadNetfilterLogs(1);
 }

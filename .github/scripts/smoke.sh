@@ -118,7 +118,7 @@ for i in $(seq 1 90); do
     [ -z "${running}" ] && break
     sleep 2
 done
-if [ -n "${running}" ]; then echo "still running after 180s: ${running}"; fi
+[ -z "${running}" ] || fail "still running after 180s: ${running}"
 [ "$(docker inspect -f '{{.State.Running}}' "${APP}")" = "true" ] || fail "application exited while running jobs"
 curl -fsS "${BASE}/api/health" | grep -q '"status": *"healthy"' || fail "health degraded after running jobs"
 if docker logs "${APP}" 2>&1 | grep -E "(TypeError|AttributeError|NameError|ImportError):" ; then

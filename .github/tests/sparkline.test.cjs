@@ -6,7 +6,7 @@ const { test } = require('node:test');
 
 const utils = fs.readFileSync(path.join(__dirname, '../../frontend/utils.js'), 'utf8');
 const zoneHelpers = utils.slice(utils.indexOf('function appTz()'), utils.indexOf('function formatSeconds('));
-const code = utils.slice(utils.indexOf('function uiSparkline('), utils.indexOf('// Overview strip under a zoomable chart'));
+const code = utils.slice(utils.indexOf('function uiSparkline('), utils.indexOf('function uiOverviewMove('));
 const H = 3600000;
 const NOW = Date.parse('2026-10-22T12:00:00Z');
 

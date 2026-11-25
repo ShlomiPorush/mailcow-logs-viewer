@@ -155,6 +155,54 @@ test('the Logs range is read in the app zone, and To covers its whole minute', a
     assert.equal(params.get('end_date'), '2026-10-25T00:45:59.999Z');
 });
 
+test('a long Logs range downloads only the pages that hold the lines it shows', async () => {
+    for (const [total, pages] of [[0, [1]], [5000, [1, 2, 3, 4, 5]], [12345, [1, 8, 9, 10, 11, 12, 13]]]) {
+        const c = load(['logs-viewer.js']);
+        const element = page(c);
+        const asked = [];
+        const shown = [];
+        c.authenticatedFetch = async url => {
+            const number = Number(new URL(url, 'http://viewer.test').searchParams.get('page'));
+            asked.push(number);
+            const first = (number - 1) * 1000;
+            const data = Array.from({ length: Math.max(0, Math.min(1000, total - first)) }, (_, i) => first + i);
+            return { ok: true, json: async () => ({ data, total }) };
+        };
+        let replaced = 0;
+        c.renderLogEntries = (entries, service, replace) => {
+            if (replace) {
+                replaced++;
+                shown.length = 0;
+                assert.equal(entries.length > 0, total > 0);
+            }
+            shown.push(...entries);
+        };
+        for (const name of ['setLiveButtonActive', 'updateLogStatusBar', 'applyLogFilter', 'showToast']) c[name] = () => {};
+        element('logs-date-from').value = '2026-10-25T02:30';
+        element('logs-date-to').value = '2026-10-25T02:45';
+        await c.loadDateRangeLogs();
+        assert.deepEqual(asked, pages);
+        assert.equal(replaced, 1);
+        const newest = Array.from({ length: Math.min(5000, total) }, (_, i) => Math.max(0, total - 5000) + i);
+        assert.deepEqual(shown.slice(-5000), newest);
+    }
+});
+
+test('a long Logs range whose first shown page fails says so', async () => {
+    const c = load(['logs-viewer.js']);
+    const element = page(c);
+    c.authenticatedFetch = async url => (Number(new URL(url, 'http://viewer.test').searchParams.get('page')) === 1
+        ? { ok: true, json: async () => ({ data: [0], total: 12345 }) } : { ok: false, status: 500 });
+    c.responseError = async () => new Error('no answer');
+    c.uiErrorText = error => error.message;
+    c.escapeHtml = text => text;
+    for (const name of ['renderLogEntries', 'setLiveButtonActive', 'updateLogStatusBar', 'applyLogFilter', 'showToast']) c[name] = () => {};
+    element('logs-date-from').value = '2026-10-25T02:30';
+    element('logs-date-to').value = '2026-10-25T02:45';
+    await c.loadDateRangeLogs();
+    assert.match(element('logs-output').innerHTML, /Failed to load date range: no answer/);
+});
+
 function logsRange() {
     const c = load(['logs-viewer.js']);
     const element = page(c);

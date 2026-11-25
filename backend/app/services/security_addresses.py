@@ -56,7 +56,7 @@ def netfilter_sources(db: Session, hours: int, now: Optional[datetime] = None) -
     ).filter(
         NetfilterLog.time >= cutoff,
         NetfilterLog.ip.isnot(None)
-    ).order_by(desc(NetfilterLog.time)).limit(50000).all()
+    ).order_by(desc(NetfilterLog.time)).yield_per(5000)
 
     sources: Dict[str, dict] = {}
     totals = {"attempts": 0, "failed_logins": 0, "latest": []}

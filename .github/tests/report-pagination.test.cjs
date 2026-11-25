@@ -11,7 +11,7 @@ assert.ok(start > 0 && end > start);
 const utilsSource = fs.readFileSync(path.join(__dirname, '../../frontend/utils.js'), 'utf8');
 const zoneHelpers = utilsSource.slice(utilsSource.indexOf('function appTz()'), utilsSource.indexOf('function formatSeconds('));
 const errorStart = utilsSource.indexOf('function uiApiErrorText(');
-const errorHelpers = utilsSource.slice(errorStart, utilsSource.indexOf('\n// ====', errorStart));
+const errorHelpers = utilsSource.slice(errorStart, utilsSource.indexOf('\nconst uiUnsavedEntries', errorStart));
 const appSource = fs.readFileSync(path.join(__dirname, '../../frontend/app.js'), 'utf8');
 const responseErrorStart = appSource.indexOf('async function responseError(');
 const responseErrorSource = appSource.slice(responseErrorStart, appSource.indexOf('\n}\n', responseErrorStart) + 3);
@@ -284,7 +284,7 @@ test('reopening the dialog clears the search', async () => {
 });
 
 const utils = fs.readFileSync(path.join(__dirname, '../../frontend/utils.js'), 'utf8');
-const sorterSource = utils.slice(utils.indexOf('const uiTableSorts'), utils.indexOf('// Mark the sortable headers'));
+const sorterSource = utils.slice(utils.indexOf('const uiTableSorts'), utils.indexOf('let uiTableSortQueued'));
 
 function fakeTable(html) {
     const attrs = text => Object.fromEntries([...text.matchAll(/([\w-]+)="([^"]*)"/g)].map(m => [m[1], m[2]]));
