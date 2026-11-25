@@ -104,8 +104,8 @@ async def get_system_summary_data() -> Dict[str, Any]:
         quarantine_count = len(quarantine_data) if isinstance(quarantine_data, list) else 0
     except Exception as e:
         logger.error(f"Failed to fetch queue/quarantine data: {e}")
-        queue_count = 0
-        quarantine_count = 0
+        queue_count = None
+        quarantine_count = None
 
     return {
         "timestamp": format_datetime_for_api(datetime.now(timezone.utc)),
@@ -141,6 +141,8 @@ def send_summary_report_email(
     return {"status": "queued", "message": "Weekly summary email generation started"}
 
 def _n(value) -> str:
+    if value is None:
+        return 'Unknown'
     return f"{value:,}" if isinstance(value, int) and not isinstance(value, bool) else str(value)
 
 

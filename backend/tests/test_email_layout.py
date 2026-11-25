@@ -222,6 +222,15 @@ def _summary_data():
     }
 
 
+def test_weekly_summary_says_unknown_for_what_mailcow_did_not_tell():
+    from app.routers.reporting import build_summary_email
+    data = _summary_data()
+    data['queue'], data['quarantine'] = {'count': None}, {'count': None}
+    subject, text, html = build_summary_email(data, now=datetime(2026, 10, 11))
+    assert 'Queue: Unknown' in text and 'Quarantine: Unknown' in text
+    assert html.count('Unknown') == 2 and 'None' not in html
+
+
 def test_weekly_summary_title_is_the_exact_window_it_counts(monkeypatch):
     from datetime import timezone
     from app.config import settings

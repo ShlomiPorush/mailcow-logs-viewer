@@ -2039,8 +2039,8 @@ The data of the weekly summary email:
 | `blacklist` | `status`, `listed_count`, `total_hosts` and the monitored `hosts`. |
 | `top_failures` | Up to five active mailboxes with failed outgoing messages, picked from the first 20 by failure rate. |
 | `dns_issues` | Active domains with SPF, DKIM or DMARC issues, each with `domain` and `issues`. |
-| `queue` | `{count}` of the mail queue; 0 if mailcow cannot be read. |
-| `quarantine` | `{count}` of the quarantine; 0 if mailcow cannot be read. |
+| `queue` | `{count}` of the mail queue; null if mailcow cannot be read. |
+| `quarantine` | `{count}` of the quarantine; null if mailcow cannot be read. |
 
 ---
 
