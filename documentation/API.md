@@ -691,7 +691,7 @@ One sender's whole collected history of refused messages, newest first, up to 2,
 | `value` | integer | Required | Messages per frame, 0 or more; `0` removes the limits |
 | `frame` | string | Required | `s`, `m`, `h` or `d` |
 
-Sets one limit on many mailboxes and domains (**Apply to filtered** on the page). None, or more than 1,000 in total, returns 400. Unknown names are skipped, not rejected. All mailboxes go to mailcow in one call, then all domains in a second; if the domain call fails, the mailbox change stays. Returns `mailboxes_updated`, `domains_updated`, `skipped`, `value` and `frame`.
+Sets one limit on many mailboxes and domains (**Apply to filtered** on the page). None, or more than 1,000 in total, returns 400. Unknown names, and names mailcow did not confirm, are skipped, not rejected; 502 when mailcow was asked and confirmed none. All mailboxes go to mailcow in one call, then all domains in a second; if the domain call fails, the mailbox change stays. Returns `mailboxes_updated`, `domains_updated`, `skipped`, `value` and `frame`.
 
 ---
 

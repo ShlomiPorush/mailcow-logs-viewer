@@ -8,7 +8,8 @@ from sqlalchemy import func
 from ..config import settings
 from ..correlation import authenticated_submissions, submitting_mailbox
 from ..database import get_db_context
-from ..mailcow_api import mailcow_api, mailcow_reply
+from ..mailcow_api import (MailcowShownError, MailcowWriteUnknownError, mailcow_api, mailcow_handled_items,
+                           mailcow_reply)
 from ..models import (
     MessageCorrelation,
     SecurityAlert,
@@ -238,9 +239,13 @@ async def _notify_user_blocked(email: str, count: int, revoked: int = 0) -> None
 
 
 def _ensure_mailcow_success(email: str, response, action: str) -> None:
-    for item in mailcow_reply(response):
-        if item.get("type") == "danger":
-            raise RuntimeError(f"mailcow rejected {action} for {email}: {item.get('msg')}")
+    if mailcow_handled_items(response, [email]):
+        return
+    refusal = next((item.get("msg") for item in mailcow_reply(response)
+                    if item.get("type") != "success" and item.get("msg")), None)
+    if refusal:
+        raise MailcowShownError(f"mailcow did not {action} for {email}: {refusal}")
+    raise MailcowWriteUnknownError(f"{action} for {email}: {response}")
 
 
 async def _notify_operator_blocked(email: str, count: int, revoked: int) -> None:
@@ -334,11 +339,13 @@ async def run_abuse_protection() -> Dict:
 
     candidates = await asyncio.to_thread(find_candidates)
     blocked = []
+    failed = []
     for candidate in candidates:
         try:
             await block_mailbox(candidate["email"], candidate["count"],
                                 automatic=True, operator="smtp-abuse")
             blocked.append(candidate["email"])
         except Exception as e:
+            failed.append(candidate["email"])
             logger.error("[SMTP ABUSE] Failed to block %s: %s", candidate["email"], e)
-    return {"status": "ok", "blocked": blocked, "checked": len(candidates)}
+    return {"status": "ok", "blocked": blocked, "failed": failed, "checked": len(candidates)}

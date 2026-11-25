@@ -128,6 +128,28 @@ def test_callback_with_the_cookie_of_another_flow_is_rejected(provider):
     assert provider == []
 
 
+def test_a_restart_between_login_and_callback_reads_the_endpoints_again(provider, monkeypatch):
+    client = TestClient(app)
+    query = start(client)
+    monkeypatch.setattr(auth.oauth2_client, "token_url", None)
+    monkeypatch.setattr(auth.oauth2_client, "userinfo_url", None)
+
+    async def discover():
+        auth.oauth2_client.token_url, auth.oauth2_client.userinfo_url = TOKEN, USERINFO
+    monkeypatch.setattr(auth.oauth2_client, "initialize", discover)
+    assert finish(client, query["state"]).headers["location"] == "/"
+    assert len(provider) == 1
+
+
+def test_a_callback_with_a_bad_state_reads_no_endpoints(provider, monkeypatch):
+    client = TestClient(app)
+    start(client)
+    reads = AsyncMock()
+    monkeypatch.setattr(auth.oauth2_client, "initialize", reads)
+    assert "invalid_state" in finish(client, secrets.token_hex(16)).headers["location"]
+    reads.assert_not_awaited()
+
+
 def test_a_sign_in_change_during_the_callback_issues_no_session(provider, monkeypatch):
     client = TestClient(app)
     query = start(client)

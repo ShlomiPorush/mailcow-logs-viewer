@@ -484,8 +484,8 @@ class MailcowAPI:
         if offset == 0:
             endpoint = f"/api/v1/get/logs/rspamd-history/{page_size}"
         else:
-            start = offset + 1
-            end = offset + page_size
+            start = offset
+            end = offset + page_size - 1
             endpoint = f"/api/v1/get/logs/rspamd-history/{start}-{end}"
         
         logger.info(f"Fetching Rspamd logs page (offset={offset}, size={page_size}): {endpoint}")
@@ -493,7 +493,8 @@ class MailcowAPI:
             data = await self._make_request(endpoint)
             
             if not isinstance(data, list):
-                logger.warning(f"Unexpected Rspamd page response format: {type(data)}")
+                if data:
+                    logger.warning(f"Unexpected Rspamd page response format: {type(data)}")
                 return []
             
             logger.info(f"Retrieved {len(data)} Rspamd logs (offset={offset})")

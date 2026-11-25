@@ -340,8 +340,9 @@ async def _discover_total_logs(log_type: str) -> int:
         logger.warning(f"[{log_type.upper()}] Log discovery failed: {e}")
         return 0
 
-    _log_count_cache[log_type] = (position, datetime.now(timezone.utc))
-    return position
+    count = position + 1 if log_type == 'rspamd-history' else position
+    _log_count_cache[log_type] = (count, datetime.now(timezone.utc))
+    return count
 
 
 async def fetch_and_store_postfix():
@@ -2622,11 +2623,12 @@ async def smtp_abuse_job():
     try:
         from .services.smtp_abuse_service import run_abuse_protection
         result = await run_abuse_protection()
-        update_job_status('smtp_abuse', 'success')
-        return result
-    except asyncio.CancelledError:
-        update_job_status('smtp_abuse', 'success')
-        raise
+        failed = result.get('failed')
+        if failed:
+            update_job_status('smtp_abuse', 'failed', f"Could not turn SMTP off for {', '.join(failed)}")
+        else:
+            update_job_status('smtp_abuse', 'success')
+        return JOB_STATUS_SET
     except Exception as e:
         logger.error(f"[SMTP ABUSE] Job failed: {e}", exc_info=True)
         update_job_status('smtp_abuse', 'failed', str(e))
