@@ -2,7 +2,7 @@ import asyncio
 import logging
 from fastapi import APIRouter, HTTPException, BackgroundTasks
 from datetime import datetime, timedelta, timezone
-from typing import Dict, Any, List, Tuple
+from typing import Dict, Any, List, Optional, Tuple
 
 from ..database import get_db_context
 from ..app_time import as_utc, zone_label
@@ -38,6 +38,14 @@ def _get_summary_statistics_worker():
         if failed:
             raise RuntimeError(failed)
         return traffic, failures
+
+
+async def _count(read) -> Optional[int]:
+    try:
+        return len(await read())
+    except Exception as e:
+        logger.error(f"Failed to fetch queue/quarantine data: {e}")
+        return None
 
 
 async def get_system_summary_data() -> Dict[str, Any]:
@@ -94,18 +102,9 @@ async def get_system_summary_data() -> Dict[str, Any]:
                 "issues": domain_issues
             })
 
-    try:
-        from ..mailcow_api import mailcow_api
-        queue_data, quarantine_data = await asyncio.gather(
-            mailcow_api.get_queue(),
-            mailcow_api.get_quarantine()
-        )
-        queue_count = len(queue_data) if isinstance(queue_data, list) else 0
-        quarantine_count = len(quarantine_data) if isinstance(quarantine_data, list) else 0
-    except Exception as e:
-        logger.error(f"Failed to fetch queue/quarantine data: {e}")
-        queue_count = 0
-        quarantine_count = 0
+    from ..mailcow_api import mailcow_api
+    queue_count, quarantine_count = await asyncio.gather(
+        _count(mailcow_api.get_queue), _count(mailcow_api.get_quarantine))
 
     return {
         "timestamp": format_datetime_for_api(datetime.now(timezone.utc)),
@@ -141,6 +140,8 @@ def send_summary_report_email(
     return {"status": "queued", "message": "Weekly summary email generation started"}
 
 def _n(value) -> str:
+    if value is None:
+        return 'Unknown'
     return f"{value:,}" if isinstance(value, int) and not isinstance(value, bool) else str(value)
 
 

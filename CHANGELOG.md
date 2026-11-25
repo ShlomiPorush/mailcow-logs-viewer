@@ -106,7 +106,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Pages that went empty with the Logs page off** - The log services other pages need are always collected.
 - **Status and jobs** - Every job is listed, a manual run no longer stalls the log fetch or hides its failure, a failed log import or weekly summary is shown as failed, and a failed update check no longer reads Up to Date.
 - **GeoIP download failures** - Status, Setup and Repair now show a failed MaxMind download, such as one with a wrong license key, and what to check, while the last working database stays in use.
-- **Zeros after a failed read** - Mailbox Stats and the weekly summary no longer show zeros when the database could not be read.
+- **Zeros after a failed read** - Mailbox Stats and the weekly summary no longer show zeros when the database could not be read, and the summary shows Unknown for a queue or quarantine mailcow did not tell.
 - **Mail server that does not answer** - Sending an email stops when the mail server does not answer for 30 seconds instead of waiting without end.
 - **Feature switches** - Turning off Mailbox Stats keeps the Rate Limits data, and a MaxMind license starts GeoIP updates without a restart.
 - **Passwords with letters outside English** - The login page now accepts them.
