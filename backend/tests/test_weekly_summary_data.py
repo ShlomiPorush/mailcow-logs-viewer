@@ -83,4 +83,8 @@ def test_system_summary_data_builds_with_sync_blacklist_helper(monkeypatch):
         raise mailcow_api_module.MailcowAPIError("no answer")
     monkeypatch.setattr(mailcow_api_module.mailcow_api, "get_queue", no_answer)
     data = asyncio.run(reporting.get_system_summary_data())
-    assert data["queue"] == {"count": None} and data["quarantine"] == {"count": None}
+    assert data["queue"] == {"count": None} and data["quarantine"] == {"count": 0}
+    monkeypatch.setattr(mailcow_api_module.mailcow_api, "get_queue", fake_list)
+    monkeypatch.setattr(mailcow_api_module.mailcow_api, "get_quarantine", no_answer)
+    data = asyncio.run(reporting.get_system_summary_data())
+    assert data["queue"] == {"count": 0} and data["quarantine"] == {"count": None}

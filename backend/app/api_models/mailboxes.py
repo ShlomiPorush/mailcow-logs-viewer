@@ -232,7 +232,7 @@ class SystemSummaryResponse(Fixed):
     top_failures: List[MailboxStats] = Field(description="Up to 5 mailboxes with the most failed mail")
     dns_issues: List[DnsIssue] = Field(description="Active domains with an SPF, DKIM or DMARC problem")
     queue: Count = Field(description="Messages in mailcow's queue; null when mailcow did not answer")
-    quarantine: Count = Field(description="As queue")
+    quarantine: Count
 
 
 class SummaryEmailSkipped(Fixed):
