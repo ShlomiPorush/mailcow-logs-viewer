@@ -991,7 +991,7 @@ async function loadDateRangeLogs() {
         const totalPages = Math.max(1, Math.ceil(total / limit));
         
         const firstShown = Math.max(1, Math.floor(Math.max(0, total - MAX_LIVE_LOG_ENTRIES) / limit) + 1);
-        renderLogEntries(firstShown === 1 ? data.data || [] : [], logsState.activeService, true);
+        if (firstShown === 1) renderLogEntries(data.data || [], logsState.activeService, true);
 
         for (let page = Math.max(2, firstShown); page <= totalPages; page++) {
             if (loadingEl) loadingEl.textContent = `Loading page ${page}/${totalPages}...`;
@@ -1007,7 +1007,7 @@ async function loadDateRangeLogs() {
             }
             
             const nextData = await nextResp.json();
-            renderLogEntries(nextData.data || [], logsState.activeService, false);
+            renderLogEntries(nextData.data || [], logsState.activeService, page === firstShown);
         }
         
         logsState.totalEntries = total;

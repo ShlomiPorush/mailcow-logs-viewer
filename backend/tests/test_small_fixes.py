@@ -156,7 +156,7 @@ def test_the_device_page_stamps_its_script(monkeypatch):
 
 
 @pytest.mark.parametrize('answer,passes', [
-    (['127.0.0.2'], True), (['127.0.0.2', '127.0.0.10'], True), (['127.255.255.254'], False), (['192.0.2.1'], False),
+    (['127.0.0.2'], True), (['127.0.0.2', '127.0.0.10'], True), (['127.255.255.254'], False), (['192.0.2.1'], False), (['127.0.0.1'], False),
     (dns.resolver.NXDOMAIN(), False)])
 def test_the_resolver_check_expects_the_test_address_to_be_listed(monkeypatch, answer, passes):
     ask = AsyncMock(side_effect=answer) if isinstance(answer, Exception) else AsyncMock(return_value=answer)

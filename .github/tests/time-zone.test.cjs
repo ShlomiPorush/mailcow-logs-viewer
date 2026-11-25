@@ -168,12 +168,21 @@ test('a long Logs range downloads only the pages that hold the lines it shows', 
             const data = Array.from({ length: Math.max(0, Math.min(1000, total - first)) }, (_, i) => first + i);
             return { ok: true, json: async () => ({ data, total }) };
         };
-        c.renderLogEntries = (entries, service, replace) => { if (replace) shown.length = 0; shown.push(...entries); };
+        let replaced = 0;
+        c.renderLogEntries = (entries, service, replace) => {
+            if (replace) {
+                replaced++;
+                shown.length = 0;
+                assert.equal(entries.length > 0, total > 0);
+            }
+            shown.push(...entries);
+        };
         for (const name of ['setLiveButtonActive', 'updateLogStatusBar', 'applyLogFilter', 'showToast']) c[name] = () => {};
         element('logs-date-from').value = '2026-10-25T02:30';
         element('logs-date-to').value = '2026-10-25T02:45';
         await c.loadDateRangeLogs();
         assert.deepEqual(asked, pages);
+        assert.equal(replaced, 1);
         const newest = Array.from({ length: Math.min(5000, total) }, (_, i) => Math.max(0, total - 5000) + i);
         assert.deepEqual(shown.slice(-5000), newest);
     }
