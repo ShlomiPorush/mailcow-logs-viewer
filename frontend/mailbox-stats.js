@@ -104,6 +104,8 @@ async function loadMailboxStats() {
 
         const summary = await summaryRes.json();
         const domains = await domainsRes.json();
+        const failed = summary.error || domains.error;
+        if (failed) throw new Error(failed);
 
         mailboxStatsCache.summary = summary;
         mailboxStatsCache.domains = domains.domains || [];
@@ -165,8 +167,10 @@ async function refreshMailboxStats() {
         ]);
         if (!summaryRes.ok || !domainsRes.ok || pageRes.some(r => !r.ok)) return;
         const summary = await summaryRes.json();
-        const domains = (await domainsRes.json()).domains || [];
+        const domainsAnswer = await domainsRes.json();
         const answers = await Promise.all(pageRes.map(r => r.json()));
+        if ([summary, domainsAnswer, ...answers].some(a => a.error)) return;
+        const domains = domainsAnswer.domains || [];
         if (seq !== mailboxStatsSeq) return;
         const seen = new Set();
         const mailboxes = answers.flatMap(a => a.mailboxes || []).filter(m => !seen.has(m.username) && seen.add(m.username));
@@ -308,6 +312,7 @@ async function loadMailboxStatsList(page = 1) {
         if (!response.ok) throw await responseError(response);
 
         const data = await response.json();
+        if (data.error) throw new Error(data.error);
         if (seq !== mailboxStatsSeq) return;
         const loaded = data.mailboxes || [];
         if (page > 1) {

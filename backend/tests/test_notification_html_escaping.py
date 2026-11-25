@@ -45,7 +45,7 @@ def test_weekly_summary_escapes_report_values(monkeypatch):
     sent = {}
     monkeypatch.setattr(reporting, 'get_system_summary_data', fake_data)
     monkeypatch.setattr(reporting, 'send_notification_email',
-                        lambda recipient, subject, text, html: sent.update(html=html))
+                        lambda recipient, subject, text, html: sent.update(html=html) or True)
     monkeypatch.setattr(settings._inner, 'admin_email', 'admin@example.com')
     asyncio.run(reporting.generate_and_send_email())
 

@@ -521,15 +521,8 @@ class MailcowAPI:
 
     async def probe_log_position(self, log_type: str, position: int) -> bool:
         endpoint = f"/api/v1/get/logs/{log_type}/{position}-{position}"
-        try:
-            data = await self._make_request(endpoint)
-            return isinstance(data, list) and len(data) > 0
-        except asyncio.CancelledError:
-            raise
-        except MailcowAPIError:
-            return False
-        except Exception:
-            return False
+        data = await self._make_request(endpoint)
+        return isinstance(data, list) and len(data) > 0
     
     async def get_netfilter_logs(self, count: int = 500) -> List[Dict[str, Any]]:
         logger.info(f"Fetching {count} Netfilter logs")

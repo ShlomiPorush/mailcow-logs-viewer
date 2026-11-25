@@ -1540,7 +1540,8 @@ async def trigger_job(job_name: str, background_tasks: BackgroundTasks):
                 result = await job_func()
             else:
                 result = await run_in_threadpool(job_func)
-            if not self_managing and result not in (JOB_SKIPPED, JOB_STATUS_SET):
+            if (not self_managing and result not in (JOB_SKIPPED, JOB_STATUS_SET)
+                    and get_job_status().get(status_key) is mark):
                 update_job_status(status_key, 'success')
             elif not self_managing and result == JOB_SKIPPED and job_name == 'blacklist_check':
                 _restore_job_status(status_key, previous, mark)

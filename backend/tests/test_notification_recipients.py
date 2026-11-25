@@ -22,6 +22,9 @@ def smtp(monkeypatch):
         def quit(self):
             pass
 
+        def close(self):
+            pass
+
     monkeypatch.setattr(smtp_service.smtplib, 'SMTP', FakeSMTP)
     monkeypatch.setattr(type(smtp_service.settings._inner), 'notification_smtp_configured', property(lambda self: True))
     for key, value in {'smtp_relay_mode': True, 'smtp_use_ssl': False, 'smtp_use_tls': False, 'smtp_port': 25,

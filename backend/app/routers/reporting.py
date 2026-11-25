@@ -34,6 +34,9 @@ def _get_summary_statistics_worker():
             hide_zero=True,
             db=db,
         )
+        failed = traffic.get('error') or failures.get('error')
+        if failed:
+            raise RuntimeError(failed)
         return traffic, failures
 
 
@@ -134,7 +137,7 @@ def send_summary_report_email(
     if not settings.enable_weekly_summary and not force:
         return {"status": "skipped", "reason": "Weekly summary disabled"}
         
-    background_tasks.add_task(generate_and_send_email)
+    background_tasks.add_task(_send_in_background)
     return {"status": "queued", "message": "Weekly summary email generation started"}
 
 def _n(value) -> str:
@@ -248,23 +251,20 @@ def build_summary_email(data: Dict[str, Any], now: datetime = None) -> Tuple[str
 
 
 async def generate_and_send_email():
+    data = await get_system_summary_data()
+    subject, text_content, html_content = build_summary_email(data)
+    if not settings.admin_email:
+        logger.warning("Weekly summary enabled but no ADMIN_EMAIL configured.")
+        return
+    sent = await asyncio.get_running_loop().run_in_executor(
+        None, send_notification_email, settings.admin_email, subject, text_content, html_content)
+    if not sent:
+        raise RuntimeError("The email could not be sent. Check the application logs.")
+    logger.info(f"Weekly summary report sent to {settings.admin_email}")
+
+
+async def _send_in_background():
     try:
-        data = await get_system_summary_data()
-        subject, text_content, html_content = build_summary_email(data)
-
-        recipient = settings.admin_email
-        if recipient:
-            await asyncio.get_running_loop().run_in_executor(
-                None,
-                send_notification_email,
-                recipient,
-                subject,
-                text_content,
-                html_content
-            )
-            logger.info(f"Weekly summary report sent to {recipient}")
-        else:
-             logger.warning("Weekly summary enabled but no ADMIN_EMAIL configured.")
-
+        await generate_and_send_email()
     except Exception as e:
         logger.error(f"Failed to generate/send weekly summary: {e}", exc_info=True)
