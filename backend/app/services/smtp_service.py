@@ -12,6 +12,8 @@ from .mail_tls import mail_tls_context, certificate_error_hint
 
 logger = logging.getLogger(__name__)
 
+SMTP_TIMEOUT = 30
+
 _ADDRESS = re.compile(r'^[^@\s,;<>"]+@[^@\s,;<>"]+\.[^@\s,;<>".]+$')
 
 
@@ -96,21 +98,26 @@ class SmtpService:
             msg = build_message(self.from_address, ", ".join(recipients), subject, text_content, html_content)
             msg['Date'] = datetime.utcnow().strftime('%a, %d %b %Y %H:%M:%S +0000')
 
-            if self.use_ssl or self.port == 465:
+            implicit_tls = self.use_ssl or self.port == 465
+            if implicit_tls:
                 context = mail_tls_context(self.host, settings.smtp_verify_ssl, "SMTP_VERIFY_SSL")
-                server = smtplib.SMTP_SSL(self.host, self.port, context=context)
-            elif self.use_tls:
-                context = mail_tls_context(self.host, settings.smtp_verify_ssl, "SMTP_VERIFY_SSL")
-                server = smtplib.SMTP(self.host, self.port)
-                server.starttls(context=context)
+                server = smtplib.SMTP_SSL(self.host, self.port, timeout=SMTP_TIMEOUT, context=context)
             else:
-                server = smtplib.SMTP(self.host, self.port)
-            
-            if not self.relay_mode:
-                server.login(self.user, self.password)
-            
-            server.sendmail(self.from_address, recipients, msg.as_string())
-            server.quit()
+                server = smtplib.SMTP(self.host, self.port, timeout=SMTP_TIMEOUT)
+            try:
+                if self.use_tls and not implicit_tls:
+                    server.starttls(context=mail_tls_context(self.host, settings.smtp_verify_ssl, "SMTP_VERIFY_SSL"))
+                if not self.relay_mode:
+                    server.login(self.user, self.password)
+                refused = server.sendmail(self.from_address, recipients, msg.as_string())
+                try:
+                    server.quit()
+                except (smtplib.SMTPException, OSError) as e:
+                    logger.debug(f"The mail server accepted the email and did not answer the goodbye: {e}")
+            finally:
+                server.close()
+            if refused:
+                logger.warning("The mail server refused recipient address(es): %s", ", ".join(refused))
 
             logger.info(f"Email sent successfully to {', '.join(recipients)}: {subject}")
             return True

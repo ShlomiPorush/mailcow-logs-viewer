@@ -14,7 +14,7 @@ from apscheduler.triggers.cron import CronTrigger
 from sqlalchemy.orm import Session
 from sqlalchemy import desc, or_, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from .app_time import UTC, app_tz, format_clock
 from .config import settings, set_cached_active_domains, cached_domains_known, local_domains_complete, is_hosted_domain
@@ -336,9 +336,6 @@ async def _discover_total_logs(log_type: str) -> int:
     except asyncio.CancelledError:
         logger.warning(f"[{log_type.upper()}] Log discovery cancelled (task timeout or shutdown)")
         return 0
-    except Exception as e:
-        logger.warning(f"[{log_type.upper()}] Log discovery failed: {e}")
-        return 0
 
     count = position + 1 if log_type == 'rspamd-history' else position
     _log_count_cache[log_type] = (count, datetime.now(timezone.utc))
@@ -423,6 +420,7 @@ async def fetch_and_store_postfix():
     
     except Exception as e:
         logger.error(f"[ERROR] Postfix fetch error: {e}")
+        raise
 
 
 def _geo_values(ip) -> Dict[str, Any]:
@@ -688,6 +686,7 @@ async def fetch_and_store_rspamd():
     
     except Exception as e:
         logger.error(f"[ERROR] Rspamd fetch error: {e}")
+        raise
 
 
 
@@ -930,6 +929,7 @@ async def fetch_and_store_netfilter():
 
     except Exception as e:
         logger.error(f"[ERROR] Netfilter fetch error: {e}", exc_info=True)
+        raise
 
 
 def _store_netfilter_logs(logs):
@@ -983,6 +983,8 @@ def _store_netfilter_logs(logs):
                     new_rows.append(values)
                     batch_seen.add(unique_id)
                     
+                except SQLAlchemyError:
+                    raise
                 except Exception as e:
                     logger.error(f"[NETFILTER] Error processing log entry: {e}")
                     continue
@@ -1006,31 +1008,23 @@ async def fetch_all_logs():
         update_job_status('fetch_logs', 'running')
         logger.debug("[FETCH] Starting fetch_all_logs")
         
-        tasks = [
-            fetch_and_store_postfix(),
-            fetch_and_store_rspamd(),
-        ]
+        importers = {'Postfix': fetch_and_store_postfix, 'Rspamd': fetch_and_store_rspamd}
         if settings.is_feature_enabled('netfilter'):
-            tasks.append(fetch_and_store_netfilter())
+            importers['Netfilter'] = fetch_and_store_netfilter
 
         async with _protection_lock:
-            results = await asyncio.gather(*tasks, return_exceptions=True)
+            results = await asyncio.gather(*(fetch() for fetch in importers.values()), return_exceptions=True)
             protection_due = settings.is_feature_enabled('netfilter')
             if protection_due:
                 await _run_protection_rules_locked()
         
-        log_types = ["Postfix", "Rspamd"]
-        if settings.is_feature_enabled('netfilter'):
-            log_types.append("Netfilter")
-        
-        for i, result in enumerate(results):
-            if isinstance(result, Exception):
-                logger.error(f"[ERROR] {log_types[i]} fetch failed: {result}", exc_info=result)
-        
+        failed = [f"{name}: {result}" for name, result in zip(importers, results) if isinstance(result, Exception)]
         logger.debug("[FETCH] Completed fetch_all_logs")
-        update_job_status('fetch_logs', 'success')
+        if failed:
+            update_job_status('fetch_logs', 'failed', "Could not import " + '; '.join(failed))
+        else:
+            update_job_status('fetch_logs', 'success')
 
-    
     except asyncio.CancelledError:
         logger.info("[FETCH] Log fetch cancelled (application shutting down)")
         return
@@ -2658,6 +2652,10 @@ async def send_weekly_summary_email_job():
         if not settings.enable_weekly_summary:
             update_job_status('send_weekly_summary', 'skipped')
             return
+        if not settings.admin_email or not settings.notification_smtp_configured:
+            update_job_status('send_weekly_summary', 'idle',
+                              'Set an admin email in Settings > Notifications and a mail server in Settings > SMTP.')
+            return
 
         await generate_and_send_email()
         update_job_status('send_weekly_summary', 'success')
@@ -3103,7 +3101,7 @@ async def cleanup_deferred_queue_job():
 
     except asyncio.CancelledError:
         logger.info("[QUEUE CLEANUP] Job cancelled (shutdown)")
-        update_job_status('cleanup_deferred_queue', 'success')
+        raise
     except Exception as e:
         logger.error(f"[QUEUE CLEANUP] Error: {e}", exc_info=True)
         update_job_status('cleanup_deferred_queue', 'failed', str(e))

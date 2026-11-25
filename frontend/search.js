@@ -143,6 +143,7 @@ async function gsSearchDomains(q, signal) {
 
 async function gsSearchMailboxes(q, signal) {
     const data = await gsJson(`/api/mailbox-stats/all?search=${encodeURIComponent(q)}&active_only=false&page=1&page_size=${GS_LIMIT}`, signal);
+    if (data.error) throw new Error(data.error);
     return {
         count: data.total || 0,
         items: (data.mailboxes || []).map(m => gsEntityItem('address', m.username, {
