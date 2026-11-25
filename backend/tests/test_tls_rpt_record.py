@@ -99,7 +99,7 @@ def test_change_detection_fires_on_record_change_and_removal():
     assert hiccup == []
 
     removed = domains.detect_dns_changes(Prev(), {
-        'tls_rpt': {'status': 'warning', 'message': 'TLS-RPT record not published', 'record': None}})
+        'tls_rpt': {'status': 'warning', 'message': 'TLS-RPT record not published', 'record': None, 'absent': True}})
     assert removed == [{'type': 'TLS-RPT', 'old': 'v=TLSRPTv1; rua=mailto:old@example.test', 'new': '(removed)'}]
 
 

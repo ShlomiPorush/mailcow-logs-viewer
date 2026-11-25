@@ -139,7 +139,7 @@ def test_change_detection_fires_on_id_change_only(monkeypatch):
     assert hiccup == []
 
     removed = domains.detect_dns_changes(Prev(), {
-        'mta_sts': {'status': 'warning', 'message': 'MTA-STS record not published', 'record': None}})
+        'mta_sts': {'status': 'warning', 'message': 'MTA-STS record not published', 'record': None, 'absent': True}})
     assert removed == [{'type': 'MTA-STS', 'old': 'v=STSv1; id=OLD;', 'new': '(removed)'}]
 
 

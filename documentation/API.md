@@ -449,7 +449,7 @@ Each domain also has mailcow's other limits and counters (`mboxes_left`, `aliase
 
 **DMARC:** `reject` and `quarantine` are success (`is_strong: true`); `none` is a warning.
 
-SPF also returns `record`, `has_strict_all`, `includes_mx` and `includes`; DKIM returns `selector`, `dkim_domain`, `expected_record` and `actual_record`; DMARC returns `record`, `policy`, `is_strong`, `warnings` and parsed tags in `settings` (including `subdomain_policy` and `percentage` when published).
+SPF also returns `record`, `has_strict_all`, `includes_mx` and `includes`; DKIM returns `selector`, `dkim_domain`, `expected_record`, `actual_record` and `published` (every TXT value at the selector); DMARC returns `record`, `policy`, `is_strong`, `warnings` and parsed tags in `settings` (including `subdomain_policy` and `percentage` when published). `absent` is `true` in a check whose record DNS answered does not exist.
 
 ---
 

@@ -8,6 +8,7 @@ TIME = "UTC, ISO 8601 with Z"
 STATUS = "success (passed), warning (passed, with a recommendation) or error (failed or no record)"
 STATUS_UNKNOWN = STATUS + "; unknown when it could not be checked"
 MAILCOW = "As mailcow reports it: a number, or a numeric string"
+ABSENT = "True when DNS answered that there is no such record"
 
 
 class SpfCheckedIp(Fixed):
@@ -21,6 +22,7 @@ class SpfCheck(Fixed):
     """The SPF record at the domain (RFC 7208)."""
     status: str = Field(description=STATUS)
     message: str
+    absent: bool = Field(None, description=ABSENT)
     record: Optional[str] = Field(description="Null when there is none; every SPF record joined with '; ' "
                                               "when there are several")
     has_strict_all: bool = Field(description="The record has -all")
@@ -39,12 +41,15 @@ class DkimCheck(Fixed):
     """The DKIM record mailcow signs with, compared with the published one."""
     status: str = Field(description=STATUS)
     message: str
+    absent: bool = Field(None, description=ABSENT)
     selector: Optional[str] = Field(description="mailcow's DKIM selector; null when mailcow has no DKIM key or "
                                                 "the check failed")
     dkim_domain: str = Field(None, description="Where the record is looked up: <selector>._domainkey.<domain>. "
                                                "Missing when mailcow has no usable DKIM key or the check failed")
     expected_record: Optional[str] = Field(description="mailcow's DKIM record")
     actual_record: Optional[str] = Field(description="The published record; null when there is none")
+    published: str = Field(None, description="Every TXT value at the selector, sorted and joined with ' | '; empty "
+                                            "when all are; only when DNS answered with a TXT record")
     match: bool = Field(description="The key, version, key type and permitted hashes match mailcow's record; "
                                     "tag order and compatible differences do not count")
     warnings: List[str] = Field(description="Problems (starting with 'Error: ') and differences from "
@@ -70,6 +75,7 @@ class DmarcCheck(Fixed):
     """The DMARC record at _dmarc.<domain>."""
     status: str = Field(description=STATUS)
     message: str
+    absent: bool = Field(None, description=ABSENT)
     record: Optional[str]
     policy: Optional[str] = Field(description="none, quarantine or reject; unknown when the record has none of "
                                               "them; null without a record")
@@ -117,6 +123,7 @@ class TlsaCheck(Fixed):
     match the certificate each one presents. The first 10 MX hosts by preference are checked."""
     status: str = Field(description=STATUS_UNKNOWN + " (such as no MX records or a failed lookup)")
     message: str
+    absent: bool = Field(None, description=ABSENT)
     record: Optional[str] = Field(description="Every TLSA record as 'usage selector matching_type data', sorted "
                                               "and joined with ' | '; null without records")
     records: List[TlsaRecord]
@@ -142,6 +149,7 @@ class MtaStsCheck(Fixed):
     the domain's MX hosts. It is optional, so without it the status is warning."""
     status: str = Field(description=STATUS_UNKNOWN)
     message: str
+    absent: bool = Field(None, description=ABSENT)
     record: Optional[str] = Field(description="Null without a record; every record joined with '; ' when there "
                                               "are several")
     warnings: List[str]
@@ -154,6 +162,7 @@ class TlsRptCheck(Fixed):
     reports. It is optional, so without it the status is warning."""
     status: str = Field(description=STATUS_UNKNOWN)
     message: str
+    absent: bool = Field(None, description=ABSENT)
     record: Optional[str] = Field(description="Null without a record; every record joined with '; ' when there "
                                               "are several")
     report_uris: List[str] = Field(description="Its mailto: and https: report addresses")
