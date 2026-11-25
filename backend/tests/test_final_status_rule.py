@@ -182,6 +182,13 @@ def test_a_message_the_scan_called_spam_stays_spam_when_its_delivery_comes_later
     assert message.status() == 'spam'
 
 
+def test_a_discard_stays_when_another_recipient_is_deferred(env):
+    from app.services import correlation_jobs
+    message = Message('deferred', final_status='discarded', dovecot='discarded', complete=False)
+    correlation_jobs.complete_incomplete_correlations()
+    assert message.status() == 'discarded'
+
+
 def test_a_spam_line_that_arrives_later_counts_and_leaves_the_scan_alone(env):
     message = Message(final_status=None, action='no action')
     message.later('spam')

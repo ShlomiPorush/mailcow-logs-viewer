@@ -183,7 +183,10 @@ def correlate_single_message(db: Session, rspamd_log: RspamdLog) -> Optional[Mes
 
 def _update_final_status(correlation: MessageCorrelation, lines) -> None:
     status = derive_final_status(lines, None, correlation.dovecot_status, correlation.final_status)
-    if status and not (status == 'delivered' and correlation.final_status == 'spam'):
+    kept_spam = correlation.final_status == 'spam' and status == 'delivered'
+    kept_discard = (correlation.final_status == correlation.dovecot_status == 'discarded'
+                    and status == 'deferred')
+    if status and not kept_spam and not kept_discard:
         correlation.final_status = status
 
 
