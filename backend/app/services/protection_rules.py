@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from .alias_domains import aliases_of_domain, expand_addresses, get_alias_domain_map
 from .netfilter_address import netfilter_address
+from ..mailcow_api import mailcow_reply
 from ..models import AliasStatistics, MailboxStatistics, NetfilterLog, PostfixLog, ProtectionHit, RawServiceLog, SystemSetting
 from ..utils import format_datetime_for_api
 
@@ -523,10 +524,10 @@ def _successful_logins(db: Session, context: ProtectionContext) -> List[_Login]:
     logins: List[_Login] = []
     mark = _read_watermark(db, BREACH_POSTFIX_KEY, PostfixLog)
     if mark is not None:
-        rows = db.query(PostfixLog).filter(
-            PostfixLog.id > mark, PostfixLog.program.like(_SMTPD_PROGRAM), PostfixLog.message.like("%sasl_username=%"),
-        ).order_by(PostfixLog.id).limit(BATCH_SIZE).all()
         last = db.query(func.max(PostfixLog.id)).scalar() or mark
+        rows = db.query(PostfixLog).filter(
+            PostfixLog.id > mark, PostfixLog.id <= last, PostfixLog.program.like(_SMTPD_PROGRAM), PostfixLog.message.like("%sasl_username=%"),
+        ).order_by(PostfixLog.id).limit(BATCH_SIZE).all()
         for row in rows:
             login = _postfix_login(row.program, row.message)
             if login:
@@ -535,11 +536,11 @@ def _successful_logins(db: Session, context: ProtectionContext) -> List[_Login]:
     if context.raw_logs:
         mark = _read_watermark(db, BREACH_DOVECOT_KEY, RawServiceLog)
         if mark is not None:
+            last = db.query(func.max(RawServiceLog.id)).filter(RawServiceLog.service == "dovecot").scalar() or mark
             rows = db.query(RawServiceLog).filter(
-                RawServiceLog.id > mark, RawServiceLog.service == "dovecot",
+                RawServiceLog.id > mark, RawServiceLog.id <= last, RawServiceLog.service == "dovecot",
                 RawServiceLog.raw_data["message"].astext.like("%Login: user=<%"),
             ).order_by(RawServiceLog.id).limit(BATCH_SIZE).all()
-            last = db.query(func.max(RawServiceLog.id)).scalar() or mark
             for row in rows:
                 login = _dovecot_login((row.raw_data or {}).get("message"))
                 if login:
@@ -679,6 +680,18 @@ async def enforce(mailcow_api, now: Optional[datetime] = None) -> Dict[str, list
         return await _enforce(mailcow_api, now)
 
 
+def _refused_write(response) -> Optional[str]:
+    entries = mailcow_reply(response)
+    if any(e.get("type") == "success" for e in entries):
+        return None
+    return next((str(e["msg"]) for e in entries if e.get("msg")), "mailcow did not confirm the Fail2ban change")
+
+
+def _invalid_entries(response) -> Set[str]:
+    return {str(e["msg"][1]) for e in mailcow_reply(response)
+            if isinstance(e.get("msg"), list) and len(e["msg"]) > 1 and e["msg"][0] == "network_host_invalid"}
+
+
 def _confirmed(response) -> bool:
     entries = response if isinstance(response, list) else [response]
     return bool(entries) and all(isinstance(e, dict) and e.get("type") == "success" for e in entries)
@@ -780,19 +793,19 @@ async def _enforce(mailcow_api, now: Optional[datetime]) -> Dict[str, list]:
                 new_black = _without(hit.ip, new_black)
         changed = new_black != blacklist
         error = None
+        invalid: Set[str] = set()
         if changed:
             try:
                 response = await mailcow_api.edit_fail2ban(fail2ban_attrs(current, new_black, whitelist))
-                first = response[0] if isinstance(response, list) and response else {}
-                if isinstance(first, dict) and first.get("type") not in (None, "success"):
-                    error = first.get("msg") or "mailcow refused the change"
+                error, invalid = _refused_write(response), _invalid_entries(response)
             except Exception as e:
                 error = str(e) or "The change could not be written to mailcow"
         for hit in pending:
             if hit.status != "pending":
                 continue
-            if error:
-                hit.error = f"Not banned yet: {error}"
+            refusal = error or (f"mailcow refuses to ban {hit.ip}" if _blacklist_entry(hit.ip) in invalid else None)
+            if refusal:
+                hit.error = f"Not banned yet: {refusal}"
                 result["failed"].append((hit.ip, hit.rule, hit.reason, rules.get(hit.rule, {}).get("notify", True)))
                 continue
             hit.status, hit.banned_at, hit.error = "banned", now, None
@@ -837,9 +850,9 @@ async def _undo(mailcow_api, hit_id: int) -> Optional[ProtectionHit]:
         new_black = _without(target, blacklist)
         if new_black != blacklist:
             response = await mailcow_api.edit_fail2ban(fail2ban_attrs(current, new_black, split_ip_list(current.get("whitelist"))))
-            first = response[0] if isinstance(response, list) and response else {}
-            if isinstance(first, dict) and first.get("type") not in (None, "success"):
-                raise RuntimeError(first.get("msg") or "mailcow refused the change")
+            refusal = _refused_write(response)
+            if refusal:
+                raise RuntimeError(refusal)
     with get_db_context() as db:
         hit = db.query(ProtectionHit).filter(ProtectionHit.id == hit_id).first()
         if hit.status in OPEN_STATUSES:

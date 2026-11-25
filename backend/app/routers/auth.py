@@ -318,6 +318,7 @@ async def oauth2_callback(
     
     try:
         code_verifier = _pkce_verifier(browser_value.partition(".")[0])
+        await oauth2_client.initialize()
         token_data = await oauth2_client.exchange_code_for_token(code, code_verifier=code_verifier)
         access_token = token_data.get('access_token')
         

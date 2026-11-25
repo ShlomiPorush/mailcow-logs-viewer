@@ -212,10 +212,11 @@ def test_smtp_abuse(client, rows, monkeypatch):
     assert c.post(f'/api/smtp-abuse/mailboxes/{MAILBOX}/unblock').json()['smtp_access'] is True
     assert c.get('/api/smtp-abuse/history?limit=500').status_code == 200
     assert c.get('/api/smtp-abuse/history?limit=0').status_code == 422
-    for answer, status in ((MailcowAPIError('down'), 502), ([{'type': 'danger', 'msg': 'alias'}], 500)):
+    for answer, status in ((MailcowAPIError('down'), 502), ([{'type': 'danger', 'msg': 'alias'}], 502), ([], 502)):
         state['mailcow'] = answer
         assert c.post(f'/api/smtp-abuse/mailboxes/{MAILBOX}/block').status_code == status
         assert c.post(f'/api/smtp-abuse/mailboxes/{MAILBOX}/unblock').status_code == status
+    assert c.post(f'/api/smtp-abuse/mailboxes/{MAILBOX}/block').json()['detail'].startswith('mailcow did not confirm')
 
 
 WRITES = [('post', '/api/smtp-abuse/whitelist', {'email': f'w@{DOMAIN}'}),

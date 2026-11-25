@@ -12,7 +12,8 @@ from sqlalchemy.orm import Session
 
 from ..config import get_cached_active_domains, settings
 from ..database import SessionLocal, get_db
-from ..mailcow_api import MailcowAPIError, MailcowShownError, mailcow_api
+from ..mailcow_api import (MailcowAPIError, MailcowShownError, MailcowWriteUnknownError, mailcow_api,
+                           mailcow_handled_items, mailcow_reply)
 from ..models import MailboxStatistics, RawServiceLog
 from ..agent_access.scopes import READ
 from ..user_access import caller_may
@@ -26,6 +27,13 @@ logger = logging.getLogger(__name__)
 
 def _write_failed(e: MailcowAPIError, detail: str) -> HTTPException:
     return HTTPException(status_code=502, detail=str(e) if isinstance(e, MailcowShownError) else detail)
+
+
+def _not_applied(response) -> HTTPException:
+    refusal = next((entry.get('msg') for entry in mailcow_reply(response) if entry.get('type') != 'success' and entry.get('msg')), None)
+    logger.error(f"mailcow did not confirm a rate limit change: {response}")
+    return HTTPException(status_code=502, detail=f"mailcow did not apply the change: {refusal}" if refusal else MailcowWriteUnknownError.MESSAGE)
+
 
 router = APIRouter(prefix="/rate-limits")
 
@@ -505,6 +513,8 @@ async def set_mailbox_limit(request: MailboxLimitRequest):
     except MailcowAPIError as e:
         logger.error(f"Failed to set the rate limit of {mailbox}: {e}")
         raise _write_failed(e, "mailcow did not apply the change. Check the application logs.")
+    if not mailcow_handled_items(response, [username]):
+        raise _not_applied(response)
 
     new_value = value or None
     try:
@@ -538,6 +548,8 @@ async def set_domain_limit(request: DomainLimitRequest):
     except MailcowAPIError as e:
         logger.error(f"Failed to set the rate limit of {domain}: {e}")
         raise _write_failed(e, "mailcow did not apply the change. Check the application logs.")
+    if not mailcow_handled_items(response, [domain]):
+        raise _not_applied(response)
 
     _bust_domain_limit_cache()
     return {
@@ -557,8 +569,9 @@ async def set_limits_in_bulk(request: BulkLimitRequest):
     and the type filter currently show, in one request. Each kind is a single
     mailcow call - a selection of 160 mailboxes must not become 160 round trips.
 
-    A name the server does not know (a stale row in an open browser tab) is
-    reported back in `skipped` rather than failing the whole batch.
+    A name the server does not know (a stale row in an open browser tab), and one
+    mailcow did not confirm, is reported back in `skipped` rather than failing the
+    whole batch.
     """
     _require_rw_key()
     value = _validate_value(request.value)
@@ -595,13 +608,19 @@ async def set_limits_in_bulk(request: BulkLimitRequest):
     new_value = value or None
     new_frame = frame if new_value else None
 
+    unconfirmed = []
     mailboxes_updated = 0
     if targets:
         try:
-            await mailcow_api.edit_rl_mboxes(targets, value, frame)
+            response = await mailcow_api.edit_rl_mboxes(targets, value, frame)
         except MailcowAPIError as e:
             logger.error(f"Failed to set the rate limit of {len(targets)} mailboxes: {e}")
             raise _write_failed(e, "mailcow did not apply the change. Check the application logs.")
+        handled = mailcow_handled_items(response, targets)
+        if not handled:
+            unconfirmed.append(response)
+        skipped.extend(name for name in targets if name not in handled)
+        targets = [name for name in targets if name in handled]
         mailboxes_updated = len(targets)
 
         try:
@@ -612,12 +631,19 @@ async def set_limits_in_bulk(request: BulkLimitRequest):
     domains_updated = 0
     if domains:
         try:
-            await mailcow_api.edit_rl_domains(domains, value, frame)
+            response = await mailcow_api.edit_rl_domains(domains, value, frame)
         except MailcowAPIError as e:
             logger.error(f"Failed to set the rate limit of {len(domains)} domains: {e}")
             raise _write_failed(e, "mailcow did not apply the change. Check the application logs.")
-        domains_updated = len(domains)
+        handled = mailcow_handled_items(response, domains)
+        if not handled:
+            unconfirmed.append(response)
+        skipped.extend(name for name in domains if name not in handled)
+        domains_updated = len(handled)
         _bust_domain_limit_cache()
+
+    if unconfirmed and not mailboxes_updated and not domains_updated:
+        raise _not_applied(unconfirmed[0])
 
     return {
         'mailboxes_updated': mailboxes_updated,

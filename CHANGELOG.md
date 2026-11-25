@@ -85,6 +85,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Recipients lost or rewritten** - A delivery whose Postfix line differs from another only after its first 100 characters is kept, and a recipient shows as the sender wrote it, not as Rspamd resolved the alias.
 - **Messages that Postfix gave a used queue ID** - Such a message no longer shows the earlier message's time, lines or status, and stored messages are corrected on upgrade.
 - **One odd line no longer stops an import** - A log line, quarantine item or report email with an unusual character or a value over 255 characters is fixed or skipped on its own instead of dropping the lines fetched with it.
+- **Rspamd history** - An import of several pages no longer skips one entry between two pages.
 - **Quarantined mail with only an HTML part** - The details show the text of the HTML part instead of a dash. [#413](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/413). Thanks to [@kskarlatos](https://github.com/kskarlatos).
 - **Bounces in the DMARC mailbox** - Bounces and other mail without a report are skipped instead of reported as failed. [#417](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/417). Thanks to [@Cisco30](https://github.com/Cisco30).
 - **DMARC & TLS reports** - Plain .xml DMARC reports and TLS-RPT ZIPs with any file name import, report dates keep their day, the import deletes only its own email, and import errors are always kept and also reach the notification channels.
@@ -96,6 +97,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Rspamd maps** - The suppression sync no longer writes the map when it cannot read it, and the map editor refuses a save over a change made meanwhile, keeping your edits.
 - **Fail2ban** - A single IPv6 address is banned as /128, not /32, and Unban works when Fail2ban bans networks. An old /32 entry is marked Whole network and still covers it, so use its Repair button on Security > Lists if it was meant as one address.
 - **Security** - IPv6 attackers are listed with their own address, and the Events CSV export follows the filters.
+- **Changes mailcow refused** - Rate Limits and Outgoing spam protection say that mailcow refused a change, and why, instead of showing it as done or an internal server error.
 - **Blacklist alerts** - The alert counts and lists only hosts that need attention, not those listed only on blocklists that never alert, such as UCEPROTECT Level 2 and 3.
 - **Quarantine rules** - Editing a rule no longer changes it (rules changed earlier are repaired on upgrade or marked for Repair), and Exact Match on Subject ignores case.
 - **Messages and Logs** - Time ranges hold after a refresh, and the CSV export follows every filter.
