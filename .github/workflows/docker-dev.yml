@@ -27,7 +27,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       - name: Mark the in-app version as a dev build
         # PEP 440 local-version form (2.7.1+dev.abc1234): the app's update
