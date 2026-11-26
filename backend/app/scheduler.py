@@ -302,7 +302,8 @@ _resume_offset = StoredResumeOffsets()
 
 def _store_page(store, logs, source: str, next_offset: int):
     counts = store(logs)
-    _resume_offset[source] = next_offset
+    page_new = counts[0]
+    _resume_offset[source] = next_offset if page_new else 0
     return counts
 
 last_fetch_run_time: Dict[str, Optional[datetime]] = {

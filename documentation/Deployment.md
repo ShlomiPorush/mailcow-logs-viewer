@@ -56,7 +56,8 @@ container before it stops.
 
 Every database revision from `0033` on says whether the previous release keeps
 working on the migrated database: `downtime = False` (a new table, a nullable
-column, an index built with `CREATE INDEX CONCURRENTLY`, nothing the previous
+column without a default computed per row, an index built with `CREATE INDEX
+CONCURRENTLY`, nothing that rewrites a table, nothing the previous
 release reads changes) or `downtime = True` (anything else). A test fails on a
 revision without it, and on a `downtime = False` revision that drops, renames
 or alters a column, adds a column that must have a value or a unique constraint,
@@ -213,6 +214,7 @@ Check first that the new release may run beside the running one: its
 ```bash
 NEW=X.Y.Z
 docker pull "ghcr.io/shlomiporush/mailcow-logs-viewer:$NEW"
+echo "running: $(docker compose exec -T app cat /app/VERSION)"
 for image in "$(docker compose images -q app)" "ghcr.io/shlomiporush/mailcow-logs-viewer:$NEW"; do
   docker image inspect --format '{{index .Config.Labels "mailcow-logs-viewer.rollout-from"}} {{index .Config.Labels "mailcow-logs-viewer.compose-sha256"}}' "$image"
 done
@@ -223,7 +225,7 @@ with downtime below. Otherwise:
 
 ```bash
 sed -i "s/^VERSION=.*/VERSION=$NEW/" .env &&
-  docker rollout --wait-after-healthy 3 app
+  VERSION="$NEW" docker rollout --wait-after-healthy 3 app
 ```
 
 ## Update with downtime

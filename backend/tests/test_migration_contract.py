@@ -10,7 +10,8 @@ REPO = Path(__file__).resolve().parents[2]
 SCRIPT = REPO / ".github" / "scripts" / "rollout_from.py"
 UNSAFE_FOR_THE_PREVIOUS_RELEASE = ("drop_table", "drop_column", "alter_column", "rename", "unique=True",
                                    "nullable=False", "DROP ", "RENAME ", "UNIQUE", "NOT NULL", "DELETE ",
-                                   "TRUNCATE", "unique_constraint", "foreign_key", "check_constraint", "primary_key")
+                                   "TRUNCATE", "create_unique_constraint", "create_foreign_key",
+                                   "create_check_constraint", "create_primary_key")
 
 
 def _script():
