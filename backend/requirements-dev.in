@@ -1,0 +1,14 @@
+# Development and test dependencies. Not installed in the Docker image.
+#
+# requirements-dev.txt is generated from this file with the same versions as
+# requirements.txt for every package the two share (the -c line), so CI tests
+# exactly what the image runs. Regenerate both with:
+#
+#     bash .github/scripts/lock-requirements.sh
+-c requirements.txt
+-r requirements.in
+
+pytest==9.2.0
+pytest-asyncio==1.5.0
+# Checks every API answer in the tests against /openapi.json (tests/contract.py)
+jsonschema==4.26.0

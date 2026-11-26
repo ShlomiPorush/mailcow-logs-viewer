@@ -32,7 +32,7 @@ step "Start PostgreSQL"
 docker network create "${NET}" >/dev/null
 docker run -d --name "${DB}" --network "${NET}" \
     -e POSTGRES_USER -e POSTGRES_PASSWORD -e POSTGRES_DB \
-    postgres:16-alpine >/dev/null
+    postgres:16-alpine@sha256:f2f98726820d0342055351c6e9d36e705f5bfffb3dd53ff556325114b08afb6d >/dev/null
 for i in $(seq 1 30); do
     if docker exec "${DB}" pg_isready -h 127.0.0.1 -U ci -q 2>/dev/null; then break; fi
     sleep 1

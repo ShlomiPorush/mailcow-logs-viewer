@@ -1052,8 +1052,10 @@ class Settings(BaseSettings):
 
     @property
     def database_url(self) -> str:
+        # The driver is named explicitly: SQLAlchemy 2.1 maps a bare
+        # postgresql:// to psycopg 3, and this app ships psycopg2.
         return (
-            f"postgresql://{self.postgres_user}:{self.postgres_password}"
+            f"postgresql+psycopg2://{self.postgres_user}:{self.postgres_password}"
             f"@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"
         )
     

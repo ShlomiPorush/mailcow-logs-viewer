@@ -1,0 +1,11 @@
+# Dependencies of the documentation site (website/mkdocs.yml).
+#
+# requirements.txt is generated from this file with every package pinned by
+# SHA-256 hash; docs.yml installs it with pip --require-hashes. Regenerate with:
+#
+#     bash .github/scripts/lock-requirements.sh
+mkdocs==1.6.1
+mkdocs-material==9.8.2
+mkdocs-glightbox==0.5.3
+# selectolax 1.0 makes mkdocs-glightbox drop every image from the page
+selectolax==0.4.13

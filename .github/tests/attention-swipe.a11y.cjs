@@ -75,7 +75,7 @@ test('the row follows the finger, and a shorter swipe slides back', async () => 
     fire('pointermove', 90);
     fire('pointerup', 90);
     assert.equal(r.style.transform, '');
-    assert.match(r.style.transition, /transform \.2s/);
+    assert.match(r.style.transition, /transform 0?\.2s/); // jsdom 31 serializes .2s as 0.2s, as browsers do
     await flush();
     assert.deepEqual(w.dismissed, []);
 });
@@ -145,5 +145,5 @@ test('the row slides back with its animation under reduced motion too', () => {
     const r = row(w, 1);
     swipe(w, r, [[-30, 0], [-50, 0]]);
     assert.equal(r.style.transform, '');
-    assert.match(r.style.transition, /transform \.2s/);
+    assert.match(r.style.transition, /transform 0?\.2s/); // jsdom 31 serializes .2s as 0.2s, as browsers do
 });

@@ -1,0 +1,60 @@
+# Direct runtime dependencies of the application.
+#
+# This file is the one to edit. requirements.txt is generated from it: every
+# package, including transitive ones, pinned with its SHA-256 hashes. The image
+# installs requirements.txt with pip --require-hashes, so a package that is not
+# in the lock file, or whose download does not match a recorded hash, fails the
+# build. After changing this file run, from the repository root:
+#
+#     bash .github/scripts/lock-requirements.sh
+#
+# CI fails when requirements.txt no longer matches this file.
+
+# Packaging tools in the image (the base image ships older ones)
+pip==26.3
+setuptools==84.2.1
+
+# Web Framework
+fastapi==0.165.0
+# Pin the parser/security fixes as well as FastAPI's broad compatible range.
+starlette==1.10.0
+uvicorn[standard]==0.54.0
+python-multipart==0.0.34
+
+# Database
+sqlalchemy==2.1.9
+psycopg2-binary==2.9.13
+alembic==1.20.1
+
+# Background Jobs
+apscheduler==3.11.3
+
+# HTTP Client
+httpx==0.28.1
+
+# Configuration
+python-dotenv==1.2.4
+pydantic==2.14.4
+pydantic-settings==2.16.3
+
+# Utilities
+tenacity==9.2.1
+
+# DNS Queries - Required for domains management
+dnspython[doh]==2.9.2
+# TLSA matching for DANE checks
+cryptography==50.0.2
+
+# Secure XML parsing (DMARC reports are untrusted input)
+defusedxml==0.7.1
+
+# Quarantine rule regexes run with a time limit (the re module has none)
+regex==2026.11.25
+
+# MaxMind
+geoip2==5.4.0
+maxminddb==3.3.0
+requests==2.34.2
+
+# Signed session cookies
+itsdangerous==2.2.0
