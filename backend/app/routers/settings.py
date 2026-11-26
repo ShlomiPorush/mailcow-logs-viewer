@@ -992,7 +992,7 @@ def update_settings(body: Dict[str, Any], request: Request = None, response: Res
             set_session_cookie(response, kept, request)
         elif keep is not None:
             logger.info("The operator who saved signs in again")
-    feature_data_errors = cleanup_disabled_feature_data(db)
+    feature_data_errors = cleanup_disabled_feature_data(db) if leader.is_leader() else {}
     run_feature_data_sweep_soon()
     mailcow_api.reload_config()
     reschedule_interval_jobs()

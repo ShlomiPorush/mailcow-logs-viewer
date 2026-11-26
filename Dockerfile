@@ -40,9 +40,9 @@ EXPOSE 8080
 
 # Before docker rollout stops an old container, the hook turns its health check
 # red, so a proxy that follows Docker health stops sending requests to it first.
-HEALTHCHECK --interval=10s --timeout=10s --start-period=40s --start-interval=2s --retries=2 \
+HEALTHCHECK --interval=5s --timeout=10s --start-period=40s --start-interval=2s --retries=3 \
     CMD test ! -e /tmp/drain && curl -fsS -o /dev/null http://localhost:8080/api/health || exit 1
-LABEL docker-rollout.pre-stop-hook="touch /tmp/drain && sleep 30"
+LABEL docker-rollout.pre-stop-hook="touch /tmp/drain && sleep 40"
 
 ENTRYPOINT ["./entrypoint.sh"]
 

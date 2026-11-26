@@ -9,7 +9,8 @@ import pytest
 REPO = Path(__file__).resolve().parents[2]
 SCRIPT = REPO / ".github" / "scripts" / "rollout_from.py"
 UNSAFE_FOR_THE_PREVIOUS_RELEASE = ("drop_table", "drop_column", "alter_column", "rename", "unique=True",
-                                   "DROP ", "RENAME ", "UNIQUE")
+                                   "nullable=False", "DROP ", "RENAME ", "UNIQUE", "NOT NULL", "DELETE ",
+                                   "TRUNCATE")
 
 
 def _script():

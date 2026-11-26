@@ -19,7 +19,7 @@ from typing import Optional
 
 from .config import settings, reload_settings, sign_in_problem, SettingsLoadError
 from .database import init_db, check_db_connection
-from .scheduler import start_scheduler, stop_scheduler
+from .scheduler import cleanup_disabled_feature_data, start_scheduler, stop_scheduler
 from .raw_logs_worker import start_raw_logs_scheduler, stop_raw_logs_scheduler
 from .mailcow_api import mailcow_api, MailcowAPIError
 from .utils import internal_error
@@ -194,13 +194,14 @@ def start_schedulers() -> None:
 
 
 async def take_over_background_work() -> None:
-    while not leader.try_lead():
-        await asyncio.sleep(leader.RETRY_SECONDS)
-    logger.info("This container now runs the background jobs")
     try:
+        while not leader.try_lead():
+            await asyncio.sleep(leader.RETRY_SECONDS)
+        logger.info("This container now runs the background jobs")
         await asyncio.to_thread(load_stored_settings)
         await asyncio.to_thread(load_geoip)
         await asyncio.to_thread(run_netfilter_geoip_backfill)
+        await asyncio.to_thread(cleanup_disabled_feature_data)
         start_schedulers()
     except Exception:
         logger.exception("Could not start the background jobs; stopping so the container restarts")

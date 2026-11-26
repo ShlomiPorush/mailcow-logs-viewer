@@ -47,7 +47,7 @@ between the running image and the new one.
 The image also has a health check: it passes when the app has finished
 starting and can reach its database. Before `docker rollout` stops the old
 container, the image's `docker-rollout.pre-stop-hook` label turns that health
-check red and waits 30 seconds, so the proxy stops sending requests to the old
+check red and waits 40 seconds, so the proxy stops sending requests to the old
 container before it stops.
 
 ### The rule for `rollout-from`
@@ -57,7 +57,8 @@ working on the migrated database: `downtime = False` (a new table, a nullable
 column, an index built with `CREATE INDEX CONCURRENTLY`, nothing the previous
 release reads changes) or `downtime = True` (anything else). A test fails on a
 revision without it, and on a `downtime = False` revision that drops, renames
-or alters a column or adds a unique constraint.
+or alters a column, adds a column that must have a value or a unique constraint,
+or deletes rows.
 
 `rollout-from` is the first release that contains the newest revision with
 `downtime = True`, where every revision up to `0033` counts as one. So the
@@ -73,7 +74,7 @@ the next try.
 ## Two containers during an update
 
 During a zero-downtime update the new container starts beside the old one,
-and the old one stops about half a minute after the new one is healthy.
+and the old one stops about 45 seconds after the new one is healthy.
 
 - Only one container runs the background jobs: log import, correlation,
   alerts, reports, DMARC mailbox import, GeoIP downloads and everything that

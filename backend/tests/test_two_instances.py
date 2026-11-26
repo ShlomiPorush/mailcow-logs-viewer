@@ -1,3 +1,4 @@
+import asyncio
 import io
 import json
 import mmap
@@ -35,6 +36,8 @@ class Instance:
             env={**os.environ, **env})
         self.answers = queue.Queue()
         threading.Thread(target=self._read, daemon=True).start()
+
+    def wait_until_up(self):
         assert self._next(120) == "up"
 
     def _read(self):
@@ -62,29 +65,30 @@ class Instance:
             time.sleep(0.5)
 
     def stop(self):
-        if self.process.poll() is None:
+        if self.process.poll() is not None:
+            return
+        try:
             self.process.stdin.write("exit\n")
             self.process.stdin.flush()
-            try:
-                self.process.wait(timeout=30)
-            except subprocess.TimeoutExpired:
-                self.process.kill()
+            self.process.wait(timeout=30)
+        except (OSError, subprocess.TimeoutExpired):
+            self.process.kill()
+            self.process.wait(timeout=30)
 
 
-def _system_settings() -> dict:
+def _system_settings() -> list:
     from app.database import get_db_context
     from app.models import SystemSetting
     with get_db_context() as db:
-        return {row.key: row.value for row in db.query(SystemSetting).all()}
+        return [(row.key, row.value, row.updated_at) for row in db.query(SystemSetting).all()]
 
 
-def _restore_system_settings(before: dict) -> None:
+def _restore_system_settings(before: list) -> None:
     from app.database import get_db_context
     from app.models import SystemSetting
     with get_db_context() as db:
-        db.query(SystemSetting).filter(SystemSetting.key.notin_(list(before))).delete(synchronize_session=False)
-        for row in db.query(SystemSetting).filter(SystemSetting.key.in_(list(before))).all():
-            row.value = before[row.key]
+        db.query(SystemSetting).delete(synchronize_session=False)
+        db.add_all(SystemSetting(key=key, value=value, updated_at=updated_at) for key, value, updated_at in before)
 
 
 @pytest.fixture
@@ -95,12 +99,15 @@ def instances(app_schema, tmp_path):
     def start(**env):
         instance = Instance(tmp_path / "shared-data-leader.lock", **env)
         started.append(instance)
+        instance.wait_until_up()
         return instance
 
-    yield start
-    for instance in started:
-        instance.stop()
-    _restore_system_settings(before)
+    try:
+        yield start
+    finally:
+        for instance in started:
+            instance.stop()
+        _restore_system_settings(before)
 
 
 def _leads(status: dict) -> bool:
@@ -176,13 +183,38 @@ def _in_new_process(code: str) -> str:
     return finished.stdout
 
 
-def test_the_next_leader_continues_the_import_where_the_previous_one_stopped(app_schema):
+def test_an_import_cut_off_between_pages_continues_on_the_next_leader(app_schema, monkeypatch):
+    from unittest.mock import AsyncMock
+    from app import scheduler
+    from app.config import settings
+    from app.database import get_db_context
+    from app.models import PostfixLog
+
+    marker = f"cut-{time.time_ns()}"
+    requested = []
+
+    async def page(page_size, offset):
+        requested.append(offset)
+        if len(requested) == 2:
+            raise asyncio.CancelledError
+        now = str(int(time.time()))
+        return [{"time": now, "program": "postfix/smtpd", "priority": "info",
+                 "message": f"line {offset + number} {marker}"} for number in range(page_size)]
+
+    monkeypatch.setattr(type(settings._inner), "is_feature_enabled", lambda self, name: True)
+    monkeypatch.setattr(settings._inner, "fetch_count_postfix", 100)
+    monkeypatch.setattr(scheduler, "_discover_total_logs", AsyncMock(return_value=300))
+    monkeypatch.setattr(scheduler.mailcow_api, "get_postfix_logs_page", page)
+    scheduler._resume_offset['postfix'] = 0
     try:
-        _in_new_process("from app import scheduler; scheduler._resume_offset['postfix'] = 400")
+        with pytest.raises(asyncio.CancelledError):
+            asyncio.run(scheduler.fetch_and_store_postfix())
         answer = _in_new_process("from app import scheduler; print(scheduler._resume_offset['postfix'])")
-        assert answer.strip().splitlines()[-1] == "400"
+        assert answer.strip().splitlines()[-1] == "100"
     finally:
-        _in_new_process("from app import scheduler; scheduler._resume_offset['postfix'] = 0")
+        scheduler._resume_offset['postfix'] = 0
+        with get_db_context() as db:
+            db.query(PostfixLog).filter(PostfixLog.message.like(f"%{marker}")).delete(synchronize_session=False)
 
 
 DOVECOT_RUN = (
@@ -259,3 +291,18 @@ def test_a_geoip_update_leaves_a_reader_of_the_old_file_intact(monkeypatch, tmp_
         assert geoip_downloader.download_single_database("City")
         assert mapped[:3] == b"old"
     assert path.read_bytes()[:3] == b"new"
+
+
+def test_a_database_that_a_newer_release_migrated_does_not_stop_this_release(app_schema):
+    from app.database import engine
+    from app.migrations import run_alembic_upgrade
+
+    run_alembic_upgrade()
+    with engine.begin() as conn:
+        current = conn.execute(text("SELECT version_num FROM alembic_version")).scalar()
+        conn.execute(text("UPDATE alembic_version SET version_num = '9999'"))
+    try:
+        run_alembic_upgrade()
+    finally:
+        with engine.begin() as conn:
+            conn.execute(text("UPDATE alembic_version SET version_num = :current"), {"current": current})

@@ -420,6 +420,7 @@ async def fetch_and_store_postfix():
                 break
             
             offset += len(logs)
+            _resume_offset['postfix'] = offset
         
         else:
             if pages_to_fetch < total_pages_needed:
@@ -686,6 +687,7 @@ async def fetch_and_store_rspamd():
                 break
             
             offset += len(logs)
+            _resume_offset['rspamd'] = offset
         
         else:
             if pages_to_fetch < total_pages_needed:
@@ -1291,7 +1293,6 @@ DOVECOT_PENDING_MAX_AGE = timedelta(minutes=15)
 DOVECOT_PENDING_KEY = 'dovecot_correlation_pending'
 
 _dovecot_pending: Dict[str, Dict[str, Any]] = {}
-_dovecot_pending_loaded = False
 _dovecot_correlation_lock = threading.Lock()
 
 
@@ -1312,7 +1313,7 @@ def _stored_dovecot_pending(db: Session) -> Dict[str, Dict[str, Any]]:
                     'events': [{**event, 'time': _from_iso(event.get('time'))} for event in parked['events']]}
             for msgid, parked in stored.items()
         }
-    except (ValueError, KeyError, TypeError):
+    except (ValueError, KeyError, TypeError, AttributeError):
         logger.warning("[DOVECOT] The stored waiting events could not be read; starting without them")
         return {}
 
@@ -1392,10 +1393,8 @@ def _correlate_dovecot_logs_sync():
             except (TypeError, ValueError):
                 watermark = 0
 
-            global _dovecot_pending_loaded
-            if not _dovecot_pending_loaded:
-                _dovecot_pending.update(_stored_dovecot_pending(db))
-                _dovecot_pending_loaded = True
+            _dovecot_pending.clear()
+            _dovecot_pending.update(_stored_dovecot_pending(db))
 
             now = datetime.utcnow()
             for msgid in [m for m, p in _dovecot_pending.items()
