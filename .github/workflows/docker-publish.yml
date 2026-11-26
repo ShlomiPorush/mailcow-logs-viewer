@@ -50,6 +50,15 @@ jobs:
           username: ${{ secrets.DOCKER_HUB_USERNAME }}
           password: ${{ secrets.DOCKER_HUB_TOKEN }}
 
+      # Rollout labels, see documentation/Deployment.md. rollout-from is the
+      # version being published: two instances of the app cannot run side by
+      # side yet, so every release is updated with a short downtime.
+      - name: Rollout label values
+        id: rollout
+        run: |
+          echo "compose_sha256=$(sha256sum docker-compose.yml | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+          echo "rollout_from=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
       - name: Extract metadata for Docker
         id: meta
         uses: docker/metadata-action@v6
@@ -60,6 +69,9 @@ jobs:
           tags: |
             type=semver,pattern={{version}}
             type=raw,value=latest
+          labels: |
+            mailcow-logs-viewer.compose-sha256=${{ steps.rollout.outputs.compose_sha256 }}
+            mailcow-logs-viewer.rollout-from=${{ steps.rollout.outputs.rollout_from }}
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v7
