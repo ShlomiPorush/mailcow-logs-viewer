@@ -299,6 +299,12 @@ class StoredResumeOffsets(MutableMapping):
 
 _resume_offset = StoredResumeOffsets()
 
+
+def _store_page(store, logs, source: str, next_offset: int):
+    counts = store(logs)
+    _resume_offset[source] = next_offset
+    return counts
+
 last_fetch_run_time: Dict[str, Optional[datetime]] = {
     'postfix': None,
     'rspamd': None,
@@ -403,7 +409,7 @@ async def fetch_and_store_postfix():
                 break
             
             page_new, page_skipped, page_blacklisted = await asyncio.get_running_loop().run_in_executor(
-                get_thread_pool_executor(), _store_postfix_page, logs
+                get_thread_pool_executor(), _store_page, _store_postfix_page, logs, 'postfix', offset + len(logs)
             )
 
             total_new += page_new
@@ -420,12 +426,10 @@ async def fetch_and_store_postfix():
                 break
             
             offset += len(logs)
-            _resume_offset['postfix'] = offset
         
         else:
             if pages_to_fetch < total_pages_needed:
-                _resume_offset['postfix'] = offset
-                logger.info(f"[POSTFIX] Completed {pages_to_fetch}/{total_pages_needed} pages, will resume from offset {_resume_offset['postfix']} next cycle")
+                logger.info(f"[POSTFIX] Completed {pages_to_fetch}/{total_pages_needed} pages, will resume from offset {offset} next cycle")
             else:
                 _resume_offset['postfix'] = 0
         
@@ -670,7 +674,7 @@ async def fetch_and_store_rspamd():
                 break
             
             page_new, page_skipped, page_blacklisted = await asyncio.get_running_loop().run_in_executor(
-                get_thread_pool_executor(), _store_rspamd_page, logs
+                get_thread_pool_executor(), _store_page, _store_rspamd_page, logs, 'rspamd', offset + len(logs)
             )
 
             total_new += page_new
@@ -687,12 +691,10 @@ async def fetch_and_store_rspamd():
                 break
             
             offset += len(logs)
-            _resume_offset['rspamd'] = offset
         
         else:
             if pages_to_fetch < total_pages_needed:
-                _resume_offset['rspamd'] = offset
-                logger.info(f"[RSPAMD] Completed {pages_to_fetch}/{total_pages_needed} pages, will resume from offset {_resume_offset['rspamd']} next cycle")
+                logger.info(f"[RSPAMD] Completed {pages_to_fetch}/{total_pages_needed} pages, will resume from offset {offset} next cycle")
             else:
                 _resume_offset['rspamd'] = 0
         
@@ -3432,8 +3434,6 @@ def _add_scheduled_job(job: ScheduledJob, first_run_at: Optional[datetime] = Non
 
 def start_scheduler():
     try:
-        cleanup_disabled_feature_data()
-
         scheduler.timezone = app_tz()
 
         now = datetime.now(timezone.utc)

@@ -30,8 +30,10 @@ one, for example from GHCR to Docker Hub:
 docker buildx imagetools create -t shlomip/mailcow-logs-viewer:X.Y.Z ghcr.io/shlomiporush/mailcow-logs-viewer:X.Y.Z
 ```
 
-Then publish the GitHub release and close the shipped issues by hand, as the
-last two jobs of the release workflow do. To protect the tags on Docker Hub as
+After a run that failed while pushing, also check that `latest` points to the
+same image on both registries, and copy it when it does not. Then publish the
+GitHub release and close the shipped issues by hand, as the last two jobs of
+the release workflow do. To protect the tags on Docker Hub as
 well, turn on its immutable tags setting for the repository.
 
 ## Image labels
@@ -83,9 +85,10 @@ and the old one stops about 45 seconds after the new one is healthy.
   one has stopped, within 2 seconds. Run now and the other buttons that start a
   job answer "try again in a minute" on a container that is still waiting.
 - Starting a container changes no data and takes no table lock while the other
-  one runs. Database revisions follow the rule above. A revision that cannot get
-  its lock within 15 seconds stops the new container, and the old one keeps
-  serving.
+  one runs. Database revisions follow the rule above. A schema change that
+  cannot get its lock within 3 seconds, for example behind a long export on the
+  old container, stops the new container, and the old one keeps serving; try the
+  update again later. Requests on that table wait at most those 3 seconds.
 - The import position, the Dovecot events that wait for their message and the
   settings are in the database, so the container that takes over continues
   where the old one stopped.
@@ -200,6 +203,29 @@ already runs under another project name, switch it once:
 With `external: true`, Compose refuses to start when a name is wrong instead of
 creating an empty volume.
 
+## Update without downtime
+
+Check first that the new release may run beside the running one: its
+`rollout-from` must not be newer than the running version, and its
+`compose-sha256` must equal the running image's. In the directory of the host's
+`docker-compose.yml`:
+
+```bash
+NEW=X.Y.Z
+docker pull "ghcr.io/shlomiporush/mailcow-logs-viewer:$NEW"
+for image in "$(docker compose images -q app)" "ghcr.io/shlomiporush/mailcow-logs-viewer:$NEW"; do
+  docker image inspect --format '{{index .Config.Labels "mailcow-logs-viewer.rollout-from"}} {{index .Config.Labels "mailcow-logs-viewer.compose-sha256"}}' "$image"
+done
+```
+
+When either check fails, or the running image has no labels, use the update
+with downtime below. Otherwise:
+
+```bash
+sed -i "s/^VERSION=.*/VERSION=$NEW/" .env &&
+  docker rollout --wait-after-healthy 3 app
+```
+
 ## Update with downtime
 
 Run this in the directory of the host's `docker-compose.yml`, with the release
@@ -223,4 +249,7 @@ the database backup from before the update.
 When an update stopped with two app containers, or with one that is not
 healthy, check `docker compose ps app`. Keep the healthy container, remove the
 other with `docker rm -f <container>`, and set `VERSION` in `.env` to the
-release the remaining container runs. Then update again.
+release the remaining container runs. If the update stopped after the old
+container was taken out of the proxy and it still runs, put it back with
+`docker exec <container> rm -f /tmp/drain`; a restart of the container does the
+same. Then update again.

@@ -1,10 +1,7 @@
 import fcntl
-import logging
 from typing import IO, Optional
 
 from fastapi import HTTPException
-
-logger = logging.getLogger(__name__)
 
 LOCK_PATH = "/app/data/leader.lock"
 RETRY_SECONDS = 2

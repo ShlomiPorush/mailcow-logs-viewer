@@ -10,7 +10,7 @@ from .config import settings
 logger = logging.getLogger(__name__)
 
 UTC_SESSION = {"options": "-c timezone=UTC"}
-SCHEMA_LOCK_TIMEOUT = "15s"
+SCHEMA_LOCK_TIMEOUT = "3s"
 
 engine_kwargs = {
     "echo": settings.debug,

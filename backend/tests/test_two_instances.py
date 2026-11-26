@@ -191,24 +191,35 @@ def test_an_import_cut_off_between_pages_continues_on_the_next_leader(app_schema
     from app.models import PostfixLog
 
     marker = f"cut-{time.time_ns()}"
-    requested = []
+    storing = threading.Event()
+    store_page = scheduler._store_postfix_page
 
     async def page(page_size, offset):
-        requested.append(offset)
-        if len(requested) == 2:
-            raise asyncio.CancelledError
         now = str(int(time.time()))
         return [{"time": now, "program": "postfix/smtpd", "priority": "info",
                  "message": f"line {offset + number} {marker}"} for number in range(page_size)]
+
+    def slow_store(logs):
+        storing.set()
+        time.sleep(0.5)
+        return store_page(logs)
+
+    async def stop_while_the_first_page_is_stored():
+        task = asyncio.create_task(scheduler.fetch_and_store_postfix())
+        assert await asyncio.to_thread(storing.wait, 10)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        await asyncio.sleep(2)
 
     monkeypatch.setattr(type(settings._inner), "is_feature_enabled", lambda self, name: True)
     monkeypatch.setattr(settings._inner, "fetch_count_postfix", 100)
     monkeypatch.setattr(scheduler, "_discover_total_logs", AsyncMock(return_value=300))
     monkeypatch.setattr(scheduler.mailcow_api, "get_postfix_logs_page", page)
+    monkeypatch.setattr(scheduler, "_store_postfix_page", slow_store)
     scheduler._resume_offset['postfix'] = 0
     try:
-        with pytest.raises(asyncio.CancelledError):
-            asyncio.run(scheduler.fetch_and_store_postfix())
+        asyncio.run(stop_while_the_first_page_is_stored())
         answer = _in_new_process("from app import scheduler; print(scheduler._resume_offset['postfix'])")
         assert answer.strip().splitlines()[-1] == "100"
     finally:
