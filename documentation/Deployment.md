@@ -45,7 +45,10 @@ between the running image and the new one.
 | `mailcow-logs-viewer.rollout-from` | The oldest running release that this image may run beside during an update. |
 
 The image also has a health check: it passes when the app has finished
-starting and can reach its database.
+starting and can reach its database. Before `docker rollout` stops the old
+container, the image's `docker-rollout.pre-stop-hook` label turns that health
+check red and waits 30 seconds, so the proxy stops sending requests to the old
+container before it stops.
 
 ### The rule for `rollout-from`
 
@@ -70,7 +73,7 @@ the next try.
 ## Two containers during an update
 
 During a zero-downtime update the new container starts beside the old one,
-and the old one stops a few seconds after the new one is healthy.
+and the old one stops about half a minute after the new one is healthy.
 
 - Only one container runs the background jobs: log import, correlation,
   alerts, reports, DMARC mailbox import, GeoIP downloads and everything that
@@ -116,10 +119,12 @@ service:
 
 - `image: ghcr.io/shlomiporush/mailcow-logs-viewer:${VERSION}`
 - no `container_name`, no `build`, and one replica;
+- no `healthcheck:` of its own, so the image's health check, which the update
+  turns red before it stops the old container, stays in effect;
 - no published port (`ports:`). Put a reverse proxy in front of the app on a
   shared Docker network, see [Reverse Proxy](Reverse_Proxy.md). The proxy must
-  route only to healthy containers and find a new container by itself, such as
-  Traefik's Docker provider. nginx looks up the app's address only when it
+  route only to containers that Docker reports healthy and find a new container
+  by itself, such as Traefik's Docker provider. nginx looks up the app's address only when it
   loads its configuration: reload it after every update, or use Docker's
   resolver (`resolver 127.0.0.11`) with a variable in `proxy_pass`;
 - the data volume on `/app/data`, shared by the old and the new container, so
