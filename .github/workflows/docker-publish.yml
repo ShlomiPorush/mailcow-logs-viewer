@@ -2,7 +2,7 @@ name: Build and Publish Docker Image
 
 on:
   push:
-    tags: [ 'v*.*.*' ]
+    tags: [ 'v[0-9]+.[0-9]+.[0-9]+' ]
     paths:
       - 'backend/**'
       - 'frontend/**'
@@ -24,6 +24,10 @@ jobs:
   build-and-push:
     needs: checks
     runs-on: ubuntu-latest
+    # A second run for the same tag waits, then finds the version published.
+    concurrency:
+      group: publish-${{ github.ref_name }}
+      cancel-in-progress: false
     permissions:
       contents: read
       packages: write
@@ -50,6 +54,50 @@ jobs:
           username: ${{ secrets.DOCKER_HUB_USERNAME }}
           password: ${{ secrets.DOCKER_HUB_TOKEN }}
 
+      # A published version tag never moves: a re-run of a release that already
+      # reached a registry stops here. `latest` must answer first, so a failed
+      # lookup can never pass as "not published".
+      - name: Refuse to push a published version again
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          ACCEPT='application/vnd.oci.image.index.v1+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.docker.distribution.manifest.v2+json'
+          manifest_status() {
+            curl -sS -o /dev/null -w '%{http_code}' -I -H "Authorization: Bearer $1" -H "Accept: $ACCEPT" "$2/manifests/$3"
+          }
+          refuse_published_version() {
+            local image=$1 token_url=$2 registry_repo=$3 token
+            if ! token=$(curl -fsS "$token_url" | jq -er .token); then
+              echo "::error::Could not get a read token for $image"
+              exit 1
+            fi
+            if [ "$(manifest_status "$token" "$registry_repo" latest)" != 200 ]; then
+              echo "::error::Could not read $image:latest, so whether $image:$VERSION exists is unknown"
+              exit 1
+            fi
+            case "$(manifest_status "$token" "$registry_repo" "$VERSION")" in
+              404) echo "$image:$VERSION is not published yet" ;;
+              200) echo "::error::$image:$VERSION is already published, and a published version is never pushed again"; exit 1 ;;
+              *) echo "::error::Could not check whether $image:$VERSION exists"; exit 1 ;;
+            esac
+          }
+          GHCR_REPO="${GITHUB_REPOSITORY,,}"
+          refuse_published_version "ghcr.io/$GHCR_REPO" \
+            "https://ghcr.io/token?scope=repository:$GHCR_REPO:pull" \
+            "https://ghcr.io/v2/$GHCR_REPO"
+          refuse_published_version "docker.io/$DOCKER_HUB_REPO" \
+            "https://auth.docker.io/token?service=registry.docker.io&scope=repository:$DOCKER_HUB_REPO:pull" \
+            "https://registry-1.docker.io/v2/$DOCKER_HUB_REPO"
+
+      # Rollout labels, see documentation/Deployment.md. rollout-from is the
+      # version being published: two instances of the app cannot run side by
+      # side yet, so every release is updated with a short downtime.
+      - name: Rollout label values
+        id: rollout
+        run: |
+          echo "compose_sha256=$(sha256sum docker-compose.yml | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+          echo "rollout_from=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
       - name: Extract metadata for Docker
         id: meta
         uses: docker/metadata-action@v6
@@ -60,6 +108,9 @@ jobs:
           tags: |
             type=semver,pattern={{version}}
             type=raw,value=latest
+          labels: |
+            mailcow-logs-viewer.compose-sha256=${{ steps.rollout.outputs.compose_sha256 }}
+            mailcow-logs-viewer.rollout-from=${{ steps.rollout.outputs.rollout_from }}
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v7
