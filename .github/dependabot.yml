@@ -1,0 +1,34 @@
+# Pinned versions only stay safe while something moves them. Dependabot opens
+# weekly, grouped update PRs; CI then checks each one like any other change.
+#
+#   github-actions  actions are pinned to commit SHAs with the version in a
+#                   comment; Dependabot moves the SHA and the comment together.
+#   pip             backend/requirements*.in and the hash-pinned lock files
+#                   generated from them. CI (lock-files job) fails a PR whose
+#                   lock files no longer match their inputs; regenerate with
+#                   bash .github/scripts/lock-requirements.sh
+#   docker          the digest-pinned base image in the Dockerfile.
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+
+  - package-ecosystem: "pip"
+    directory: "/backend"
+    schedule:
+      interval: "weekly"
+    groups:
+      python-dependencies:
+        patterns:
+          - "*"
+
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"

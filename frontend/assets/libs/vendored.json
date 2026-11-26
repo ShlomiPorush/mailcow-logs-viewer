@@ -1,0 +1,48 @@
+{
+  "chart.umd.min.js": {
+    "name": "Chart.js",
+    "version": "4.6.2",
+    "header": "Chart.js v4.6.2",
+    "source": "https://registry.npmjs.org/chart.js/-/chart.js-4.6.2.tgz (package/dist/chart.umd.min.js)",
+    "source_sha256": "3f288f4f26882c26b58931fb586a9b4f30370b5de38d69dc005b0bd05b08e113",
+    "npm_integrity": "sha512-xachB+pPHjp0syJi7llUBA1w3kMYl6NF3o7eVrvjnWCT+IB2zMaF2pX5UYDiwbbfsioFEIRnAjreNOMsGj5TIA==",
+    "change": "Removed the trailing '//# sourceMappingURL=...' comment (the map is not shipped); every other byte is the release file",
+    "sha256": "2c8bf8979f811bda58120aa42780f8539a45e63b5c2dcf826c735e9e41f713a5"
+  },
+  "marked.umd.js": {
+    "name": "marked",
+    "version": "18.3.0",
+    "header": "marked v18.3.0 ",
+    "source": "https://registry.npmjs.org/marked/-/marked-18.3.0.tgz (package/lib/marked.umd.js)",
+    "source_sha256": "f8c7f128939415995e2219e8a84bec42fab27f5980d22e361339e6901da5eadf",
+    "npm_integrity": "sha512-ed8zmPXlBb3UfGXN5iHMQyMhFpdqLgoV5umUXx/Q1R+FW3q8VpqpyoKUwlENL9appo2UMvNLURDVaT3AMOryGA==",
+    "change": "Removed the trailing '//# sourceMappingURL=...' comment (the map is not shipped); every other byte is the release file",
+    "sha256": "683fa5bc767441411e86cbd648be90d03c9670bfbc859a1f1bace36731de6e32"
+  },
+  "purify.min.js": {
+    "name": "DOMPurify",
+    "version": "3.5.0",
+    "header": "DOMPurify 3.5.0 ",
+    "source": "https://registry.npmjs.org/dompurify/-/dompurify-3.5.0.tgz (package/dist/purify.min.js)",
+    "source_sha256": "f69a46022ab1f53e969c8ebbca98172c8995785a9b3be72ea4a12d25b1a1bf67",
+    "npm_integrity": "sha512-LYC0ZkE8P1V42JsRYTwMdme/2ET8SpOc5AA2eOFjP/IadvRd2fwiT4TVz5vkfy0XUx12aS2UaRkTnfVPNOv9vw==",
+    "change": "Removed the trailing '//# sourceMappingURL=...' comment (the map is not shipped); every other byte is the release file",
+    "sha256": "1bb69dcd35ac61a515cd876d9f9024b3117c8b7a1725f9b3097782d8d822e8d3"
+  },
+  "tailwindcss.min.js": {
+    "name": "Tailwind CSS Play CDN",
+    "version": "3.4.17",
+    "source": "https://cdn.tailwindcss.com/3.4.17",
+    "source_sha256": "176e894661aa9cdc9a5cba6c720044cbbf7b8bd80d1c9a142a7c24b1b6c50d15",
+    "change": "Removed the 'cdn.tailwindcss.com should not be used in production' console.warn statement; every other byte is the CDN file",
+    "sha256": "a2c3d9b38e8e3e99fa08e1bb448644191a9795ff3ceba020ba765b846df8f7f4"
+  },
+  "github-markdown.min.css": {
+    "name": "github-markdown-css",
+    "version": "5.5.1",
+    "source": "https://cdnjs.cloudflare.com/ajax/libs/github-markdown-css/5.5.1/github-markdown.min.css",
+    "source_sha256": "a7a15c52ec7512eb6c15c593fb289616c6987dd0e33e8e072d9be3fe79eedb18",
+    "change": "None",
+    "sha256": "a7a15c52ec7512eb6c15c593fb289616c6987dd0e33e8e072d9be3fe79eedb18"
+  }
+}

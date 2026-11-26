@@ -88,4 +88,3 @@ ${e}</tr>
 Please report this to https://github.com/markedjs/marked.`,e){let r="<p>An error occurred:</p><pre>"+y(n.message+"",!0)+"</pre>";return t?Promise.resolve(r):r}if(t)return Promise.reject(n);throw n}}};var j=new K;function b(l,e){return j.parse(l,e)}b.options=b.setOptions=function(l){return j.setOptions(l),b.defaults=j.defaults,he(b.defaults),b};b.getDefaults=H;b.defaults=S;function Ue(...l){return j.use(...l),b.defaults=j.defaults,he(b.defaults),b}b.use=Ue;b.walkTokens=function(l,e){return j.walkTokens(l,e)};b.parseInline=j.parseInline;b.Parser=P;b.parser=P.parse;b.Renderer=L;b.TextRenderer=M;b.Lexer=w;b.lexer=w.lex;b.Tokenizer=$;b.Hooks=I;b.parse=b;var ln=b.options,un=b.setOptions,cn=b.walkTokens,pn=b.parseInline,hn=b,dn=P.parse,gn=w.lex;
 
 if(__exports != exports)module.exports = exports;return module.exports}));
-//# sourceMappingURL=marked.umd.js.map
