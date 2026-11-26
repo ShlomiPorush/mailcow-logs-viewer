@@ -18,6 +18,15 @@ The image is `ghcr.io/shlomiporush/mailcow-logs-viewer`, also published as
 
 Pin a host to `X.Y.Z`, not to `latest`.
 
+The release workflow refuses to push `X.Y.Z` when GitHub Container Registry or
+Docker Hub already has it, so a re-run never replaces a published release. If a
+release reached only one registry, copy it to the other by hand instead of
+re-running, for example from GHCR to Docker Hub:
+
+```bash
+docker buildx imagetools create -t shlomip/mailcow-logs-viewer:X.Y.Z ghcr.io/shlomiporush/mailcow-logs-viewer:X.Y.Z
+```
+
 ## Image labels
 
 Release images published after 2.9.0 carry two labels that a rollout tool
@@ -90,6 +99,10 @@ already runs under another project name, switch it once:
    docker compose down
    ```
 
+   If you started it with `-p` or `COMPOSE_PROJECT_NAME`, give the same name
+   here, and remove `COMPOSE_PROJECT_NAME` from `.env` afterwards, because it
+   overrides `name:`.
+
 2. Find the existing volumes, for example `oldname_postgres_data` and
    `oldname_mailcowlogs_data`:
 
@@ -115,6 +128,8 @@ already runs under another project name, switch it once:
    docker compose up -d --wait --wait-timeout 300
    ```
 
+   Then reload nginx as described in the next section.
+
 With `external: true`, Compose refuses to start when a name is wrong instead of
 creating an empty volume.
 
@@ -131,6 +146,11 @@ docker pull "ghcr.io/shlomiporush/mailcow-logs-viewer:$NEW" &&
   docker compose up -d --wait --wait-timeout 300 app
 ```
 
-The command ends when the new container is healthy. To go back, run it again
+The command ends when the new container is healthy. nginx looks up the app's
+address only when it loads its configuration, and the new container can get
+another address. If nginx is your proxy, reload it now, for mailcow's nginx in
+the mailcow directory with `docker compose exec nginx-mailcow nginx -s reload`.
+
+To go back, run it again
 with the version that ran before. A release that changed the database schema
 may not run on the newer schema, so read the release notes first.
