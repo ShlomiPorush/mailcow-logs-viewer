@@ -62,23 +62,30 @@ compile() {  # <input> <output> [extra uv args]
 pins() { grep -E '^[A-Za-z0-9]' "$1" | sed -E 's/ *\\$//'; }
 
 if [ "${mode}" = "check" ]; then
+    # Regenerate into a temporary directory and compare; the lock files in the
+    # repository are never written, so an interrupted check cannot leave them
+    # changed. Each fresh file starts from a copy of the committed one, which
+    # uv keeps as its preference, exactly as in a normal run.
     work="$(mktemp -d)"
     trap 'rm -rf "${work}"' EXIT
     cp requirements.txt requirements-dev.txt "${work}/"
-    status=0
-    # requirements-dev.in constrains itself with -c requirements.txt, so the
-    # runtime lock is regenerated first and the dev lock against that.
-    compile requirements.in requirements.txt
-    compile requirements-dev.in requirements-dev.txt
-    for f in requirements.txt requirements-dev.txt; do
-        if ! diff -u <(pins "${work}/${f}") <(pins "${f}") > "${work}/${f}.diff"; then
-            echo "::error file=backend/${f}::backend/${f} does not match its .in file. Run: bash .github/scripts/lock-requirements.sh"
-            cat "${work}/${f}.diff"
-            status=1
+    stale() {
+        echo "::error file=backend/$1::backend/$1 does not match its .in file. Run: bash .github/scripts/lock-requirements.sh"
+    }
+    check() {  # <input> <lock file>
+        if ! compile "$1" "${work}/$2" 2> "${work}/$2.err"; then
+            stale "$2"; cat "${work}/$2.err"; exit 1
         fi
-        cp "${work}/${f}" "${f}"
-    done
-    exit "${status}"
+        if ! diff -u <(pins "$2") <(pins "${work}/$2"); then
+            stale "$2"; exit 1
+        fi
+    }
+    # The runtime lock first: requirements-dev.in constrains itself with
+    # -c requirements.txt (the committed file), so a stale runtime lock would
+    # otherwise surface as an unsolvable dev resolution.
+    check requirements.in requirements.txt
+    check requirements-dev.in requirements-dev.txt
+    exit 0
 fi
 
 extra=()
