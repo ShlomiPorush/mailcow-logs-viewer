@@ -1,44 +1,44 @@
 # Web Framework
-fastapi==0.141.1
+fastapi==0.165.0
 # Pin the parser/security fixes as well as FastAPI's broad compatible range.
-starlette==1.6.0
-uvicorn[standard]==0.27.0
-python-multipart==0.0.32
+starlette==1.10.0
+uvicorn[standard]==0.54.0
+python-multipart==0.0.34
 
 # Database
-sqlalchemy==2.0.25
-psycopg2-binary==2.9.9
-alembic==1.13.1
+sqlalchemy==2.1.9
+psycopg2-binary==2.9.13
+alembic==1.20.1
 
 # Background Jobs
-apscheduler==3.10.4
+apscheduler==3.11.3
 
 # HTTP Client
 httpx==0.28.1
 
 # Configuration
-python-dotenv>=1.2.2
-pydantic==2.13.5
-pydantic-settings==2.1.0
+python-dotenv==1.2.4
+pydantic==2.14.4
+pydantic-settings==2.16.3
 
 # Utilities
-tenacity==8.2.3
+tenacity==9.2.1
 
 # DNS Queries - Required for domains management
 dnspython[doh]==2.9.2
 # TLSA matching for DANE checks
-cryptography>=42.0.0
+cryptography==50.0.2
 
 # Secure XML parsing (DMARC reports are untrusted input)
-defusedxml>=0.7.1
+defusedxml==0.7.1
 
 # Quarantine rule regexes run with a time limit (the re module has none)
-regex==2026.9.29
+regex==2026.11.25
 
 # MaxMind
-geoip2>=4.7.0
-maxminddb>=2.4.0
-requests>=2.31.0
+geoip2==5.4.0
+maxminddb==3.3.0
+requests==2.34.2
 
 # Signed session cookies
-itsdangerous>=2.1.0
+itsdangerous==2.2.0

@@ -44,7 +44,7 @@ jobs:
       POSTGRES_USER: ci
       POSTGRES_DB: ci
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       # Started here rather than as a service container: a service cannot take
       # a value generated during the run, and the password is new for each run
@@ -64,7 +64,7 @@ jobs:
           done
           echo "POSTGRES_PASSWORD=${password}" >> "$GITHUB_ENV"
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
           cache: pip
@@ -94,9 +94,9 @@ jobs:
     name: Frontend syntax
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v7
         with:
           node-version: "24"
 
@@ -112,7 +112,7 @@ jobs:
       # no style, so the build must reproduce the committed file exactly.
       - name: Utility CSS matches the markup
         run: |
-          npm install --silent --no-save --prefix /tmp/tw tailwindcss@3.4.17
+          npm install --silent --no-save --prefix /tmp/tw tailwindcss@3.4.19
           printf '@tailwind base;\n@tailwind components;\n@tailwind utilities;\n' > /tmp/in.css
           /tmp/tw/node_modules/.bin/tailwindcss -c .github/tailwind/tailwind.config.cjs -i /tmp/in.css -o /tmp/utilities.css --minify
           if ! cmp -s /tmp/utilities.css frontend/assets/css/utilities.css; then
@@ -125,14 +125,14 @@ jobs:
       # Escape, Back, focus and inert for dialogs and sheets
       - name: Accessibility of the pickers and the layers
         run: |
-          npm install --silent --no-save --prefix /tmp/a11y jsdom@30.1.2 axe-core@4.14.0
+          npm install --silent --no-save --prefix /tmp/a11y jsdom@31.0.1 axe-core@4.14.1
           A11Y_MODULES=/tmp/a11y/node_modules node --test .github/tests/*.a11y.cjs
 
   image-smoke:
     name: Image build and smoke test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
@@ -157,7 +157,7 @@ jobs:
     name: Demo image build and smoke test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4

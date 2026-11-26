@@ -1,5 +1,5 @@
 mkdocs==1.6.1
-mkdocs-material==9.7.7
-mkdocs-glightbox==0.5.2
+mkdocs-material==9.8.2
+mkdocs-glightbox==0.5.3
 # selectolax 1.0 makes mkdocs-glightbox drop every image from the page
-selectolax==0.3.34
+selectolax==0.4.13
