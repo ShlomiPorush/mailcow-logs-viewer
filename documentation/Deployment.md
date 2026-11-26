@@ -20,8 +20,8 @@ Pin a host to `X.Y.Z`, not to `latest`.
 
 ## Image labels
 
-Every release image carries two labels that a rollout tool compares between the
-running image and the new one.
+Release images published after 2.9.0 carry two labels that a rollout tool
+compares between the running image and the new one.
 
 | Label | Value |
 |---|---|
@@ -55,6 +55,21 @@ service:
 - no published port (`ports:`). Put a reverse proxy in front of the app on a
   shared Docker network, see [Reverse Proxy](Reverse_Proxy.md).
 
+Without `container_name`, the proxy recipes no longer find the app as
+`mailcow-logs-app`. Give the app that name as an alias on the network it shares
+with the proxy, for example the `mailcow-network` from the first
+[Reverse Proxy](Reverse_Proxy.md) recipe:
+
+```yaml
+services:
+  app:
+    networks:
+      mailcow-logs-network:
+      mailcow-network:
+        aliases:
+          - mailcow-logs-app
+```
+
 At the top of the file, set the Compose project name:
 
 ```yaml
@@ -63,17 +78,45 @@ name: mailcow-logs-viewer
 
 `.env` holds exactly one line `VERSION=X.Y.Z`, next to the app's other settings.
 
-Compose names volumes after the project. If the stack already runs under
-another project name, check `docker volume ls` before you add `name:`, and keep
-the existing volumes by naming them, for example:
+### Switching an existing installation
 
-```yaml
-volumes:
-  postgres_data:
-    name: oldname_postgres_data
-  mailcowlogs_data:
-    name: oldname_mailcowlogs_data
-```
+Compose names containers, networks and volumes after the project. If the stack
+already runs under another project name, switch it once:
+
+1. Stop the stack with the file it runs from now. This removes its containers
+   and network and keeps its volumes:
+
+   ```bash
+   docker compose down
+   ```
+
+2. Find the existing volumes, for example `oldname_postgres_data` and
+   `oldname_mailcowlogs_data`:
+
+   ```bash
+   docker volume ls
+   ```
+
+3. Change the file as described above, and point it at those volumes:
+
+   ```yaml
+   volumes:
+     postgres_data:
+       external: true
+       name: oldname_postgres_data
+     mailcowlogs_data:
+       external: true
+       name: oldname_mailcowlogs_data
+   ```
+
+4. Start the stack:
+
+   ```bash
+   docker compose up -d --wait --wait-timeout 300
+   ```
+
+With `external: true`, Compose refuses to start when a name is wrong instead of
+creating an empty volume.
 
 ## Update with downtime
 
