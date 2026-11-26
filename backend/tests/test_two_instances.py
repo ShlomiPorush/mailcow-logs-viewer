@@ -281,6 +281,7 @@ def test_a_geoip_update_leaves_a_reader_of_the_old_file_intact(monkeypatch, tmp_
 
     path = tmp_path / "GeoLite2-City.mmdb"
     path.write_bytes(b"old" * 4096)
+    monkeypatch.setattr(geoip_downloader, "GEOIP_DB_DIR", str(tmp_path))
     monkeypatch.setitem(geoip_downloader.DATABASES["City"], "path", str(path))
     monkeypatch.setattr(geoip_downloader, "get_maxmind_license_key", lambda: "key")
     monkeypatch.setattr(geoip_downloader, "get_maxmind_account_id", lambda: "account")
