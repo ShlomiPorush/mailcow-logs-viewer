@@ -77,6 +77,7 @@ nav:
       - Sign-in: OAuth2_Configuration.md
       - AI Agents: AI_Agents.md
       - Reverse Proxy: Reverse_Proxy.md
+      - Deployment: Deployment.md
       - Settings: HelpDocs/Settings.md
       - Notifications: Notifications.md
   # In the order of the app's sidebar

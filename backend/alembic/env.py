@@ -8,6 +8,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.config import settings   # noqa: E402
 from app.models import Base       # noqa: E402
+from app.database import SCHEMA_LOCK_TIMEOUT  # noqa: E402
 
 config = context.config
 
@@ -34,7 +35,8 @@ def run_migrations_offline() -> None:
 
 
 def run_migrations_online() -> None:
-    connectable = create_engine(get_url(), poolclass=pool.NullPool, connect_args={"options": "-c timezone=UTC"})
+    connectable = create_engine(get_url(), poolclass=pool.NullPool,
+                                connect_args={"options": f"-c timezone=UTC -c lock_timeout={SCHEMA_LOCK_TIMEOUT}"})
     with connectable.connect() as connection:
         context.configure(connection=connection, target_metadata=target_metadata)
         with context.begin_transaction():

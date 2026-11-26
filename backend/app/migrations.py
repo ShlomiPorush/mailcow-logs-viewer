@@ -609,11 +609,28 @@ def widen_monitored_hosts_source(db: Session):
         db.rollback()
 
 
-def run_migrations():
-    logger.info("Running database migrations...")
-    
+def _has_alembic_revision(db: Session) -> bool:
+    if not db.execute(text("SELECT to_regclass('alembic_version') IS NOT NULL")).scalar():
+        return False
+    return bool(db.execute(text("SELECT EXISTS (SELECT 1 FROM alembic_version)")).scalar())
+
+
+def run_netfilter_geoip_backfill():
     db = SessionLocal()
     try:
+        backfill_geoip_netfilter(db)
+    finally:
+        db.close()
+
+
+def run_migrations():
+    db = SessionLocal()
+    try:
+        if _has_alembic_revision(db):
+            logger.info("The database is on Alembic revisions; the pre-Alembic upgrade steps are not needed")
+            return
+
+        logger.info("Running database migrations...")
         add_message_id_indexes(db)
         
         add_is_complete_column(db)
@@ -644,8 +661,7 @@ def run_migrations():
 
         add_geoip_fields_to_rspamd(db)
         add_geoip_fields_to_netfilter(db)
-        backfill_geoip_netfilter(db)
-        
+
         if removed > 0:
             logger.info(f"Migration complete: Cleaned up {removed} duplicate correlations")
         else:
@@ -857,6 +873,17 @@ def ensure_spam_suppressions_table(db: Session):
         raise
 
 
+def _revisions_unknown_to_this_release(cfg) -> list:
+    from alembic.runtime.migration import MigrationContext
+    from alembic.script import ScriptDirectory
+    from .database import engine
+
+    known = {script.revision for script in ScriptDirectory.from_config(cfg).walk_revisions()}
+    with engine.connect() as conn:
+        current = MigrationContext.configure(conn).get_current_heads()
+    return [revision for revision in current if revision not in known]
+
+
 def run_alembic_upgrade():
     from alembic import command
     from alembic.config import Config as AlembicConfig
@@ -870,6 +897,14 @@ def run_alembic_upgrade():
     from .config import settings
     # without %% a database password containing % breaks ConfigParser interpolation
     cfg.set_main_option("sqlalchemy.url", settings.database_url.replace("%", "%%"))
+
+    unknown = _revisions_unknown_to_this_release(cfg)
+    if unknown:
+        logger.warning(
+            f"The database is at revision {', '.join(unknown)}, which this release does not know: a newer release "
+            "already migrated it. Starting without migrating."
+        )
+        return
 
     command.upgrade(cfg, "head")
     logger.info("Alembic schema is up to date")

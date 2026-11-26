@@ -1,3 +1,4 @@
+import json
 import logging
 import asyncio
 import hashlib
@@ -5,6 +6,7 @@ import threading
 import re
 import httpx
 import ipaddress
+from collections.abc import MutableMapping
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from typing import Set, Optional, List, Dict, Any, NamedTuple
@@ -265,10 +267,37 @@ seen_netfilter: Set[str] = set()
 _netfilter_ingest_lock = threading.Lock()
 _correlation_link_lock = threading.Lock()
 
-_resume_offset: Dict[str, int] = {
-    'postfix': 0,
-    'rspamd': 0,
-}
+class StoredResumeOffsets(MutableMapping):
+    SOURCES = ('postfix', 'rspamd')
+
+    def __iter__(self):
+        return iter(self.SOURCES)
+
+    def __len__(self) -> int:
+        return len(self.SOURCES)
+
+    def __delitem__(self, source: str) -> None:
+        self[source] = 0
+
+    def _key(self, source: str) -> str:
+        return f'{source}_import_resume_offset'
+
+    def __getitem__(self, source: str) -> int:
+        with get_db_context() as db:
+            row = db.get(SystemSetting, self._key(source))
+            try:
+                return int(row.value) if row and row.value else 0
+            except ValueError:
+                return 0
+
+    def __setitem__(self, source: str, offset: int) -> None:
+        with get_db_context() as db:
+            db.execute(pg_insert(SystemSetting).values(
+                key=self._key(source), value=str(offset), updated_at=datetime.utcnow(),
+            ).on_conflict_do_update(index_elements=['key'], set_={'value': str(offset), 'updated_at': datetime.utcnow()}))
+
+
+_resume_offset = StoredResumeOffsets()
 
 last_fetch_run_time: Dict[str, Optional[datetime]] = {
     'postfix': None,
@@ -1259,8 +1288,44 @@ DOVECOT_WATERMARK_KEY = 'dovecot_correlation_last_id'
 DOVECOT_BATCH_SIZE = 2000
 DOVECOT_PENDING_MAX_AGE = timedelta(minutes=15)
 
+DOVECOT_PENDING_KEY = 'dovecot_correlation_pending'
+
 _dovecot_pending: Dict[str, Dict[str, Any]] = {}
+_dovecot_pending_loaded = False
 _dovecot_correlation_lock = threading.Lock()
+
+
+def _iso(value: Optional[datetime]) -> Optional[str]:
+    return value.isoformat() if value else None
+
+
+def _from_iso(value: Optional[str]) -> Optional[datetime]:
+    return datetime.fromisoformat(value) if value else None
+
+
+def _stored_dovecot_pending(db: Session) -> Dict[str, Dict[str, Any]]:
+    row = db.get(SystemSetting, DOVECOT_PENDING_KEY)
+    try:
+        stored = json.loads(row.value) if row and row.value else {}
+        return {
+            msgid: {'first_seen': _from_iso(parked['first_seen']),
+                    'events': [{**event, 'time': _from_iso(event.get('time'))} for event in parked['events']]}
+            for msgid, parked in stored.items()
+        }
+    except (ValueError, KeyError, TypeError):
+        logger.warning("[DOVECOT] The stored waiting events could not be read; starting without them")
+        return {}
+
+
+def _store_dovecot_pending(db: Session) -> None:
+    value = json.dumps({
+        msgid: {'first_seen': _iso(parked['first_seen']),
+                'events': [{**event, 'time': _iso(event.get('time'))} for event in parked['events']]}
+        for msgid, parked in _dovecot_pending.items()
+    })
+    db.execute(pg_insert(SystemSetting).values(
+        key=DOVECOT_PENDING_KEY, value=value, updated_at=datetime.utcnow(),
+    ).on_conflict_do_update(index_elements=['key'], set_={'value': value, 'updated_at': datetime.utcnow()}))
 
 
 def dovecot_correlation_available() -> bool:
@@ -1326,6 +1391,11 @@ def _correlate_dovecot_logs_sync():
                 watermark = int(watermark_row.value) if watermark_row and watermark_row.value else 0
             except (TypeError, ValueError):
                 watermark = 0
+
+            global _dovecot_pending_loaded
+            if not _dovecot_pending_loaded:
+                _dovecot_pending.update(_stored_dovecot_pending(db))
+                _dovecot_pending_loaded = True
 
             now = datetime.utcnow()
             for msgid in [m for m, p in _dovecot_pending.items()
@@ -1424,6 +1494,7 @@ def _correlate_dovecot_logs_sync():
                 else:
                     db.add(SystemSetting(key=DOVECOT_WATERMARK_KEY, value=str(max_id)))
 
+            _store_dovecot_pending(db)
             db.commit()
 
             if updated_count > 0:

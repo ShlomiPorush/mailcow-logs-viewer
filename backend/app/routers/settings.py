@@ -5,6 +5,7 @@ import threading
 import httpx
 from pydantic import ValidationError
 from fastapi import APIRouter, Depends, BackgroundTasks, HTTPException, Request, Response
+from .. import leader
 from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.orm import Session
 from sqlalchemy import func, desc, text, or_
@@ -997,11 +998,12 @@ def update_settings(body: Dict[str, Any], request: Request = None, response: Res
     reschedule_interval_jobs()
 
     new_sync_sources = (settings.blacklist_source_transports, settings.blacklist_source_relayhosts)
-    if (settings.is_feature_enabled('blacklist')
+    from ..scheduler import scheduler as _scheduler
+    if (settings.is_feature_enabled('blacklist') and _scheduler.running
             and any(new and not old for old, new in zip(prev_sync_sources, new_sync_sources))):
         try:
             from datetime import datetime, timedelta, timezone
-            from ..scheduler import scheduler as _scheduler, sync_transports_job
+            from ..scheduler import sync_transports_job
             _scheduler.add_job(
                 sync_transports_job, 'date',
                 run_date=datetime.now(timezone.utc) + timedelta(seconds=1),
@@ -1270,7 +1272,7 @@ def get_geoip_detailed_status():
     }
 
 
-@router.post("/settings/geoip/download", responses=documented(m.Started, description="The download started in the background; poll GET /api/settings/geoip/status", errors={400: None}))
+@router.post("/settings/geoip/download", dependencies=[Depends(leader.require_leader)], responses=documented(m.Started, description="The download started in the background; poll GET /api/settings/geoip/status", errors={400: None, 503: None}))
 def trigger_geoip_download(background_tasks: BackgroundTasks):
     """
     Trigger GeoIP database download in background.
@@ -1404,7 +1406,7 @@ def _restore_job_status(status_key: str, previous: dict, mark: dict) -> None:
         statuses[status_key] = {'last_run': None, 'status': 'idle', 'error': None}
 
 
-@router.post("/settings/jobs/{job_name}/run", responses=documented(m.JobStarted, description="The job started in the background", errors={404: None, 409: None}))
+@router.post("/settings/jobs/{job_name}/run", dependencies=[Depends(leader.require_leader)], responses=documented(m.JobStarted, description="The job started in the background", errors={404: None, 409: None, 503: None}))
 async def trigger_job(job_name: str, background_tasks: BackgroundTasks):
     """
     Manually trigger a background job.

@@ -1,6 +1,7 @@
 import asyncio
 import logging
-from fastapi import APIRouter, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from .. import leader
 from datetime import datetime, timedelta, timezone
 from typing import Dict, Any, List, Optional, Tuple
 
@@ -125,7 +126,7 @@ async def get_summary_report():
     """
     return await get_system_summary_data()
 
-@router.post("/system/summary/email", responses=documented(m.SummaryEmailResponse, errors={422: Invalid}))
+@router.post("/system/summary/email", dependencies=[Depends(leader.require_leader)], responses=documented(m.SummaryEmailResponse, errors={422: Invalid, 503: None}))
 def send_summary_report_email(
     background_tasks: BackgroundTasks, 
     force: bool = False

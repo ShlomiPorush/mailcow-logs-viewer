@@ -7,6 +7,7 @@ from typing import Dict, List, Optional, Set, Any
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
+from . import leader
 from .app_time import UTC, app_tz
 from .config import settings
 from .database import get_db_context
@@ -473,7 +474,7 @@ def stop_raw_logs_scheduler():
 
 def reschedule_raw_logs_jobs():
     if not raw_logs_scheduler.running:
-        if settings.raw_logs_collected_list:
+        if settings.raw_logs_collected_list and leader.is_leader():
             start_raw_logs_scheduler()
         return
     

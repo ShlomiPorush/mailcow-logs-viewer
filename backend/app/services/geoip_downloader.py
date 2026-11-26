@@ -165,7 +165,9 @@ def download_single_database(db_name: str) -> bool:
             os.makedirs(GEOIP_DB_DIR, exist_ok=True)
             
             import shutil
-            shutil.copy2(mmdb_file, db_info['path'])
+            staged_path = f"{db_info['path']}.new"
+            shutil.copy2(mmdb_file, staged_path)
+            os.replace(staged_path, db_info['path'])
             
             logger.info(f"✓ GeoLite2-{db_name} database installed at {db_info['path']}")
         

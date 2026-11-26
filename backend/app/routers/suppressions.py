@@ -6,6 +6,7 @@ import re
 import logging
 from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, HTTPException, Depends, Query, Request, UploadFile, File
+from .. import leader
 from pydantic import BaseModel, field_validator
 from typing import Optional, List, Union
 from sqlalchemy.orm import Session, load_only
@@ -759,7 +760,7 @@ TARGET_KEY = 'spam_filter.rspamd_target'
 OFF_TRANSITION_KEY = 'spam_filter.off_transition'
 
 
-@router.post("/suppressions/sync", responses=documented(Union[m.SuppressionSyncDone, m.SuppressionSyncReadOnly, m.SuppressionSyncOff, m.SuppressionSyncTurnedOff], description="Read in and written; with after_change, read only (no Read-Write key) or nothing done (the sync is off)", errors={400: None, 403: None, 409: m.RspamdMapError, 422: Invalid, 500: None, 502: m.RspamdMapError}))
+@router.post("/suppressions/sync", dependencies=[Depends(leader.require_leader)], responses=documented(Union[m.SuppressionSyncDone, m.SuppressionSyncReadOnly, m.SuppressionSyncOff, m.SuppressionSyncTurnedOff], description="Read in and written; with after_change, read only (no Read-Write key) or nothing done (the sync is off)", errors={400: None, 403: None, 409: m.RspamdMapError, 422: Invalid, 500: None, 502: m.RspamdMapError, 503: None}))
 async def manual_sync_to_rspamd(after_change: bool = False):
     """Bring the list and the app's section of the Rspamd map in step.
 

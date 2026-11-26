@@ -10,6 +10,7 @@ from .config import settings
 logger = logging.getLogger(__name__)
 
 UTC_SESSION = {"options": "-c timezone=UTC"}
+SCHEMA_LOCK_TIMEOUT = "15s"
 
 engine_kwargs = {
     "echo": settings.debug,
@@ -54,7 +55,9 @@ def get_db_context():
 def init_db():
     logger.info("Initializing database...")
     try:
-        Base.metadata.create_all(bind=engine)
+        with engine.begin() as conn:
+            conn.execute(text(f"SET LOCAL lock_timeout = '{SCHEMA_LOCK_TIMEOUT}'"))
+            Base.metadata.create_all(bind=conn)
         logger.info("Database initialized successfully")
         
         with get_db_context() as db:

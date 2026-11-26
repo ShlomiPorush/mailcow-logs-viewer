@@ -5,6 +5,7 @@ import json
 from typing import Annotated, List, Optional, Union
 from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File, BackgroundTasks, Query
+from .. import leader
 from sqlalchemy.orm import Session, load_only
 from sqlalchemy import func, and_, or_, case, literal, cast, Float
 
@@ -1632,7 +1633,7 @@ def get_imap_status(request: Request = None, db: Session = Depends(get_db)):
         raise internal_error(e)
 
 
-@router.post("/dmarc/imap/sync", response_model=None, responses=documented(m.ImapSyncStarted, description="Queued, or already running", errors={400: None}))
+@router.post("/dmarc/imap/sync", response_model=None, dependencies=[Depends(leader.require_leader)], responses=documented(m.ImapSyncStarted, description="Queued, or already running", errors={400: None, 503: None}))
 def trigger_manual_sync(background_tasks: BackgroundTasks):
     """
     Manually trigger IMAP sync and update global job status for UI visibility
