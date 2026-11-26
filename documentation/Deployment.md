@@ -19,13 +19,18 @@ The image is `ghcr.io/shlomiporush/mailcow-logs-viewer`, also published as
 Pin a host to `X.Y.Z`, not to `latest`.
 
 The release workflow refuses to push `X.Y.Z` when GitHub Container Registry or
-Docker Hub already has it, so a re-run never replaces a published release. If a
-release reached only one registry, copy it to the other by hand instead of
-re-running, for example from GHCR to Docker Hub:
+Docker Hub already has it, so a re-run never replaces a published release. If
+the push stopped half way, a re-run stops too. Finish the release by hand
+instead: copy `X.Y.Z` to the registry that misses it, for example from GHCR to
+Docker Hub, and copy `latest` the same way when `X.Y.Z` is the newest release:
 
 ```bash
 docker buildx imagetools create -t shlomip/mailcow-logs-viewer:X.Y.Z ghcr.io/shlomiporush/mailcow-logs-viewer:X.Y.Z
 ```
+
+The GitHub release and the closing of shipped issues run after the push, so
+they are skipped too. Do them by hand as the last two jobs of the release
+workflow do.
 
 ## Image labels
 
@@ -100,8 +105,8 @@ already runs under another project name, switch it once:
    ```
 
    If you started it with `-p` or `COMPOSE_PROJECT_NAME`, give the same name
-   here, and remove `COMPOSE_PROJECT_NAME` from `.env` afterwards, because it
-   overrides `name:`.
+   here. Then remove that setting wherever it is set, in `.env` or in the
+   shell, because it overrides `name:`.
 
 2. Find the existing volumes, for example `oldname_postgres_data` and
    `oldname_mailcowlogs_data`:

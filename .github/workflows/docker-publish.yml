@@ -2,7 +2,7 @@ name: Build and Publish Docker Image
 
 on:
   push:
-    tags: [ 'v*.*.*' ]
+    tags: [ 'v[0-9]+.[0-9]+.[0-9]+' ]
     paths:
       - 'backend/**'
       - 'frontend/**'
@@ -24,6 +24,10 @@ jobs:
   build-and-push:
     needs: checks
     runs-on: ubuntu-latest
+    # A second run for the same tag waits, then finds the version published.
+    concurrency:
+      group: publish-${{ github.ref_name }}
+      cancel-in-progress: false
     permissions:
       contents: read
       packages: write
