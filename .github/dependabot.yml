@@ -1,6 +1,15 @@
-# Weekly update PRs for the GitHub Actions used in .github/workflows. The
-# docker/* actions are pinned to commit SHAs; Dependabot moves the SHA and the
-# version comment together. All action updates arrive as one grouped PR.
+# Weekly, grouped update PRs for everything that is pinned. Pinned versions
+# only stay safe while something moves them; CI checks each PR like any other.
+#
+#   github-actions  actions are pinned to commit SHAs with the version in a
+#                   comment; Dependabot moves the SHA and the comment together.
+#   pip             backend/ and website/: the requirements*.in files and the
+#                   hash-pinned lock files generated from them. The lock-files
+#                   CI job fails a PR whose lock files no longer match their
+#                   inputs; regenerate with bash .github/scripts/lock-requirements.sh
+#   npm             .github/node-tools: Tailwind, jsdom and axe-core for CI and
+#                   build-utilities-css.sh, with package-lock.json.
+#   docker          the digest-pinned base image in the Dockerfile.
 version: 2
 updates:
   - package-ecosystem: "github-actions"
@@ -11,3 +20,32 @@ updates:
       github-actions:
         patterns:
           - "*"
+
+  - package-ecosystem: "pip"
+    directories:
+      - "/backend"
+      - "/website"
+    schedule:
+      interval: "weekly"
+    groups:
+      python-dependencies:
+        patterns:
+          - "*"
+
+  - package-ecosystem: "npm"
+    directory: "/.github/node-tools"
+    schedule:
+      interval: "weekly"
+    groups:
+      node-tools:
+        patterns:
+          - "*"
+    ignore:
+      # utilities.css is built with Tailwind 3; version 4 is a different tool
+      - dependency-name: "tailwindcss"
+        update-types: ["version-update:semver-major"]
+
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"

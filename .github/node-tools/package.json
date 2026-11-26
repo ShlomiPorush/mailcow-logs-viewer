@@ -1,0 +1,10 @@
+{
+  "name": "mailcow-logs-viewer-ci-tools",
+  "private": true,
+  "description": "Build and test tools for CI and .github/scripts. Installed with npm ci from package-lock.json, which pins every package, transitive ones included, with its integrity hash. Not part of the image.",
+  "devDependencies": {
+    "axe-core": "4.14.1",
+    "jsdom": "31.0.1",
+    "tailwindcss": "3.4.19"
+  }
+}

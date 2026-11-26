@@ -76,6 +76,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **MaxMind license key kept out of the logs** - A failed GeoIP download no longer writes the key to the log.
 - **Hardened image** - The image has no test tools or unused Python packages, the shipped `docker-compose.yml` runs it read-only, the build actions are pinned, and the browser may not run `eval`.
 - **Current libraries** - Every Python package is on its latest release (among them FastAPI 0.165, SQLAlchemy 2.1, uvicorn 0.54 and cryptography 50), and so are the files the pages load: DOMPurify 3.5.0, which cleans the help pages and changelogs before they are shown, Chart.js 4.6.2, marked 18.3.0 and the Scalar API reference 1.84.0.
+- **Every dependency pinned and checked on install** - The image installs its Python packages from a lock file that pins every package, including the ones they pull in, with its SHA-256 hash, so a package that is not in the lock file or whose download does not match fails the build; nothing is built from source. The base image and the other build images are pinned by digest, every GitHub Action by commit, the build tools by an npm lock file, and every library the pages load by its SHA-256 (`frontend/assets/libs/vendored.json`). Dependabot proposes updates for all of them.
 
 ### Fixed
 

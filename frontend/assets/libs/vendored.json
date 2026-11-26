@@ -1,4 +1,35 @@
 {
+  "chart.umd.min.js": {
+    "name": "Chart.js",
+    "version": "4.6.2",
+    "header": "Chart.js v4.6.2",
+    "source": "https://registry.npmjs.org/chart.js/-/chart.js-4.6.2.tgz (package/dist/chart.umd.min.js)",
+    "source_sha256": "3f288f4f26882c26b58931fb586a9b4f30370b5de38d69dc005b0bd05b08e113",
+    "npm_tarball": "https://registry.npmjs.org/chart.js/-/chart.js-4.6.2.tgz",
+    "npm_integrity": "sha512-xachB+pPHjp0syJi7llUBA1w3kMYl6NF3o7eVrvjnWCT+IB2zMaF2pX5UYDiwbbfsioFEIRnAjreNOMsGj5TIA==",
+    "change": "Removed the trailing '//# sourceMappingURL=chart.umd.min.js.map' comment; every other byte is dist/chart.umd.min.js from the npm tarball",
+    "sha256": "2c8bf8979f811bda58120aa42780f8539a45e63b5c2dcf826c735e9e41f713a5"
+  },
+  "github-markdown.min.css": {
+    "name": "github-markdown-css",
+    "version": "5.5.1",
+    "header": null,
+    "source": "https://cdnjs.cloudflare.com/ajax/libs/github-markdown-css/5.5.1/github-markdown.min.css",
+    "source_sha256": "a7a15c52ec7512eb6c15c593fb289616c6987dd0e33e8e072d9be3fe79eedb18",
+    "change": "None",
+    "sha256": "a7a15c52ec7512eb6c15c593fb289616c6987dd0e33e8e072d9be3fe79eedb18"
+  },
+  "marked.umd.js": {
+    "name": "marked",
+    "version": "18.3.0",
+    "header": "marked v18.3.0 ",
+    "source": "https://registry.npmjs.org/marked/-/marked-18.3.0.tgz (package/lib/marked.umd.js)",
+    "source_sha256": "f8c7f128939415995e2219e8a84bec42fab27f5980d22e361339e6901da5eadf",
+    "npm_tarball": "https://registry.npmjs.org/marked/-/marked-18.3.0.tgz",
+    "npm_integrity": "sha512-ed8zmPXlBb3UfGXN5iHMQyMhFpdqLgoV5umUXx/Q1R+FW3q8VpqpyoKUwlENL9appo2UMvNLURDVaT3AMOryGA==",
+    "change": "Removed the trailing '//# sourceMappingURL=marked.umd.js.map' comment; every other byte is lib/marked.umd.js from the npm tarball (marked publishes no minified build since 16.0)",
+    "sha256": "683fa5bc767441411e86cbd648be90d03c9670bfbc859a1f1bace36731de6e32"
+  },
   "purify.min.js": {
     "name": "DOMPurify",
     "version": "3.5.0",
@@ -8,5 +39,17 @@
     "npm_integrity": "sha512-LYC0ZkE8P1V42JsRYTwMdme/2ET8SpOc5AA2eOFjP/IadvRd2fwiT4TVz5vkfy0XUx12aS2UaRkTnfVPNOv9vw==",
     "change": "Removed the trailing '//# sourceMappingURL=purify.min.js.map' comment; every other byte is the release file, which matches dist/purify.min.js in the npm tarball",
     "sha256": "1bb69dcd35ac61a515cd876d9f9024b3117c8b7a1725f9b3097782d8d822e8d3"
+  },
+  "scalar-api-reference.min.js": {
+    "name": "@scalar/api-reference",
+    "version": "1.84.0",
+    "source": "https://registry.npmjs.org/@scalar/api-reference/-/api-reference-1.84.0.tgz (package/dist/browser/standalone.js)",
+    "source_sha256": "60777746799c3901930452302065b9b5758dcaa16e5d179df4ae5b88d6088307",
+    "npm_tarball": "https://registry.npmjs.org/@scalar/api-reference/-/api-reference-1.84.0.tgz",
+    "npm_integrity": "sha512-LWKCEg4aI13tsPrYPfNESZnvN/oSSvwv/g9Gt530/Fx61rjIYGBuk5hqYe/XWfKIIZNageax1NC0NCW1byEk4w==",
+    "license_file": "scalar-api-reference.LICENSE.txt",
+    "license_sha256": "380cd0a6ad700e1f821f2a509f0dd9ff835041cee2d43daf5dedc1adb2bcc620",
+    "change": "Added the one-line licence header comment at the top and removed the trailing '//# sourceMappingURL=standalone.js.map' comment; every other byte is dist/browser/standalone.js from the npm tarball",
+    "sha256": "1dcfcb50be4592eace40dce8d3b91bdd8bb840403db83602bf66f877cf31a8bd"
   }
 }
