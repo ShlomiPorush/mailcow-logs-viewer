@@ -10,12 +10,19 @@
 #   npm             .github/node-tools: Tailwind, jsdom and axe-core for CI and
 #                   build-utilities-css.sh, with package-lock.json.
 #   docker          the digest-pinned base image in the Dockerfile.
+#
+# Every ecosystem has a 7-day cooldown: Dependabot only proposes a release once
+# it has been public for a week, so a version that is withdrawn or found broken
+# in its first days never reaches a PR. Security updates are not delayed; the
+# cooldown applies to version updates only.
 version: 2
 updates:
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
+    cooldown:
+      default-days: 7
     groups:
       github-actions:
         patterns:
@@ -27,6 +34,8 @@ updates:
       - "/website"
     schedule:
       interval: "weekly"
+    cooldown:
+      default-days: 7
     groups:
       python-dependencies:
         patterns:
@@ -36,6 +45,8 @@ updates:
     directory: "/.github/node-tools"
     schedule:
       interval: "weekly"
+    cooldown:
+      default-days: 7
     groups:
       node-tools:
         patterns:
@@ -49,3 +60,5 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    cooldown:
+      default-days: 7
